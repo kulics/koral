@@ -62,13 +62,13 @@ let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
 let parse_public_api(file_path Path) ParsedApi = {
     let api = empty_parsed_api();
 
-    let text = read_text_file(file_path) or else {
-        eprintln("Warning: failed to read \(file_path.to_string()): \(it.message())");
+    let text = read_text_file(file_path) or else as e in {
+        eprintln("Warning: failed to read \(file_path.to_string()): \(e.message())");
         return api;
     };
 
-    let file = parse_source(text) or else {
-        eprintln("Warning: failed to parse \(file_path.to_string()): \(it.message())");
+    let file = parse_source(text) or else as e in {
+        eprintln("Warning: failed to parse \(file_path.to_string()): \(e.message())");
         return api;
     };
 
@@ -300,8 +300,8 @@ let run_self_test() Void = {
     // Non-public fields stay off the page; the public ones do not.
     let mixed = render_all(
         "public type Mixed(public_name String, module_private hidden Int, package_private token Int, file_private cache Int);\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render mixed type: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render mixed type: \(e.message())");
         exit(1);
     };
     t.contains("type keeps public fields", mixed, "public_name");
@@ -313,8 +313,8 @@ let run_self_test() Void = {
     // because a trait's whole body is its interface.
     let given_text = render_all(
         "type mutable Box[R Any](value R);\n" + "given[R Any] Box[R] {\n" + "    public new(value R) Box[R] = Box[R](value);\n" + "    file_private peek(self) R = self.value;\n" + "    get(self) R = self.value;\n" + "};\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render given: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render given: \(e.message())");
         exit(1);
     };
     t.contains("given shows public methods", given_text, "public new(value R) Box[R]");
@@ -323,8 +323,8 @@ let run_self_test() Void = {
 
     let trait_text = render_all(
         "public trait Greet {\n" + "    greet(self) String;\n" + "    help(self) String;\n" + "};\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render trait: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render trait: \(e.message())");
         exit(1);
     };
     t.contains("trait keeps every member", trait_text, "greet(self) String");
@@ -333,8 +333,8 @@ let run_self_test() Void = {
     // Bodies are not part of a signature.
     let function_text = render_all(
         "public let add(a Int, b Int) Int = {\n" + "    return a + b;\n" + "};\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render function: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render function: \(e.message())");
         exit(1);
     };
     t.contains("function signature", function_text, "public let add(a Int, b Int) Int;");
@@ -344,8 +344,8 @@ let run_self_test() Void = {
     // `given` is the exception, since it carries no access modifier at all.
     let private_text = render_all(
         "let hidden() Int = 1;\n" + "type Secret(value Int);\n" + "trait Quiet { q(self) Int; };\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render private decls: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render private decls: \(e.message())");
         exit(1);
     };
     t.not_contains("non-public function is skipped", private_text, "hidden");
@@ -356,8 +356,8 @@ let run_self_test() Void = {
     // mis-reads them, the parser does not.
     let comment_text = render_all(
         "public type Span(\n" + "    // how far it reaches\n" + "    length UInt,\n" + ");\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render commented type: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render commented type: \(e.message())");
         exit(1);
     };
     t.contains("commented field list keeps its fields", comment_text, "length UInt");
@@ -366,8 +366,8 @@ let run_self_test() Void = {
     // of a signature's meaning. Both have been dropped here before.
     let weak_text = render_all(
         "public let intrinsic downgrade[T mutable](val T) ?T;\n" + "public let intrinsic upgrade[T mutable](val ?T) Option[T];\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render weak refs: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render weak refs: \(e.message())");
         exit(1);
     };
     t.contains("weak return type", weak_text, "downgrade[T mutable](val T) ?T;");
@@ -375,8 +375,8 @@ let run_self_test() Void = {
 
     let default_text = render_all(
         "public trait Reader {\n" + "    read(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];\n" + "};\n" + "public type Span(length: UInt = 0, label: String = \"x\");\n",
-    ) or else {
-        eprintln("SELF-TEST FAIL: could not render defaults: \(it.message())");
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render defaults: \(e.message())");
         exit(1);
     };
     t.contains("range default keeps its elision", default_text, "span: Range[UInt] = ...");
@@ -539,8 +539,8 @@ let main() Void = {
         };
     };
 
-    let repo_root = find_repo_root() or else {
-        eprintln("Error: \(it.message())");
+    let repo_root = find_repo_root() or else as e in {
+        eprintln("Error: \(e.message())");
         exit(1);
     };
 
@@ -550,8 +550,8 @@ let main() Void = {
     // `docs/api/README.md` deliberately sits one level above it.
     let docs_root = repo_root.join("docs").join("api").join("std");
 
-    let mutable source_files = collect_koral_sources(std_root) or else {
-        eprintln("Error collecting std sources: \(it.message())");
+    let mutable source_files = collect_koral_sources(std_root) or else as e in {
+        eprintln("Error collecting std sources: \(e.message())");
         exit(1);
     };
 
@@ -579,8 +579,8 @@ let main() Void = {
 
     for module_key in module_keys then {
         let files = grouped.get(module_key).unwrap();
-        let page = render_module_doc(module_key, files) or else {
-            eprintln("Error rendering doc for \(module_key): \(it.message())");
+        let page = render_module_doc(module_key, files) or else as e in {
+            eprintln("Error rendering doc for \(module_key): \(e.message())");
             exit(1);
         };
 
@@ -588,9 +588,9 @@ let main() Void = {
             last_segment(module_key).to_ascii_lowercase() + ".md",
         );
         if check_only then {
-            let existing = read_text_file(output) or else {
+            let existing = read_text_file(output) or else as e in {
                 stale += 1;
-                eprintln("STALE: \(output.to_string()) -- \(it.message())");
+                eprintln("STALE: \(output.to_string()) -- \(e.message())");
                 continue;
             };
             if existing != page then {
@@ -600,8 +600,8 @@ let main() Void = {
                 );
             };
         } else {
-            let _ = write_text_file(output, content: page) or else {
-                eprintln("Error writing \(output.to_string()): \(it.message())");
+            let _ = write_text_file(output, content: page) or else as e in {
+                eprintln("Error writing \(output.to_string()): \(e.message())");
                 exit(1);
             };
         };

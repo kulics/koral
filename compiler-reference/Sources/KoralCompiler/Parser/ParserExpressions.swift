@@ -484,6 +484,65 @@ extension Parser {
     }
   }
 
+  /// The right operand of one `and then` link. Three shapes:
+  ///   `.f(x).g`       -- receiver-elided member chain on the unwrapped value
+  ///   `as v in body`  -- explicit binder, body is a layer operand
+  ///   anything else   -- a plain layer operand (legacy; goes away with `it`)
+  ///
+  /// A leading dot here is the chain, never an implicit member: `and then` does
+  /// not push an expected type into the transform, so the implicit-member
+  /// reading was never reachable in this slot.
+  private func parseAndThenOperand() throws -> ExpressionNode {
+    if currentToken === .dot {
+      let dotSpan = currentSpan
+      // The leading `.` is consumed by the dot-suffix parse, which the postfix
+      // loop runs on the elided receiver.
+      let base = ExpressionNode.flowReceiver(span: dotSpan)
+      let chain = try parsePostfixSuffixes(from: base)
+      return .flowChainExpression(chain: chain,
+                                  span: SourceSpan(start: dotSpan.start, end: chain.span.end))
+    }
+    if currentToken === .asKeyword {
+      return try parseFlowBind()
+    }
+    // No plain-expression form: the unwrapped value has no implicit name.
+    throw ParserError.rejectedConstruct(
+      span: currentSpan,
+      message: "'and then' takes a '.member()' chain or an 'as name in body' binder -- there is no implicit name"
+    )
+  }
+
+  /// The right operand of `or else`. `as e in body` names the error payload
+  /// (Result only -- `None` has no payload); anything else is the fallback
+  /// value itself, where a leading dot stays an implicit member.
+  private func parseOrElseOperand() throws -> ExpressionNode {
+    if currentToken === .asKeyword {
+      return try parseFlowBind()
+    }
+    return try parseLogicalNotExpression()
+  }
+
+  /// `as name in body`. The body stops at a layer operand, so an `or else`
+  /// written after it belongs to the enclosing flow chain and the binder's
+  /// scope stays tight.
+  private func parseFlowBind() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    try match(.asKeyword)
+    guard case .identifier(let name) = currentToken else {
+      throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description,
+                                           context: "flow binding name")
+    }
+    try match(.identifier(name))
+    guard currentToken === .inKeyword else {
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description,
+                                        expected: "'in' after flow binding name")
+    }
+    try match(.inKeyword)
+    let body = try parseLogicalNotExpression()
+    return .flowBindExpression(name: name, body: body,
+                               span: SourceSpan(start: startSpan.start, end: body.span.end))
+  }
+
   /// `and then` binds tightest of the flow operators.
   private func parseAndThenChain(_ operand: ExpressionNode) throws -> ExpressionNode {
     var left = operand
@@ -491,7 +550,7 @@ extension Parser {
     while currentToken === .andKeyword && lexer.peekNextToken() === .thenKeyword {
       try match(.andKeyword)
       try match(.thenKeyword)
-      let transformExpr = try parseLogicalNotExpression()
+      let transformExpr = try parseAndThenOperand()
       left = .andThenExpression(operand: left, transformExpr: transformExpr,
                                 span: SourceSpan(start: left.span.start, end: transformExpr.span.end))
     }
@@ -507,7 +566,7 @@ extension Parser {
       if lexer.peekNextToken() === .elseKeyword {
         try match(.orKeyword)
         try match(.elseKeyword)
-        let rhsOperand = try parseLogicalNotExpression()
+        let rhsOperand = try parseOrElseOperand()
         let defaultExpr = try parseAndThenChain(rhsOperand)
         left = .orElseExpression(operand: left, defaultExpr: defaultExpr,
                                 span: SourceSpan(start: left.span.start, end: defaultExpr.span.end))
@@ -1314,9 +1373,6 @@ extension Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value, span: startSpan)
-    case .itKeyword:
-      try match(.itKeyword)
-      return .identifier("it", span: startSpan)
     case .leftBrace:
       return try blockExpression()
     case .leftParen:

@@ -644,6 +644,69 @@ given Parser {
         };
     };
 
+    // The right operand of one `and then` link. Three shapes:
+    //   `.f(x).g`      -- receiver-elided member chain on the unwrapped value
+    //   `as v in body` -- explicit binder, body is a layer operand
+    //   anything else  -- a plain layer operand (legacy; goes away with `it`)
+    //
+    // A leading dot here is the chain, never an implicit member: `and then` does
+    // not push an expected type into the transform, so the implicit-member
+    // reading was never reachable in this slot.
+    module_private parse_and_then_operand(self) Result[Expr] = {
+        let t = self.current();
+        if t.kind is .Dot() then {
+            // The leading `.` is consumed by `parse_dot_suffix`, which the
+            // postfix loop runs on the elided receiver.
+            let base = Expr.FlowReceiver(self.span_from_start(t));
+            let chain = self.parse_postfix_suffixes(base) or return;
+            return .Ok(Expr.FlowChainExpr(chain, self.span_from_start(t)));
+        };
+        if t.kind is .KwAs() then {
+            return self.parse_flow_bind();
+        };
+        // No plain-expression form: the unwrapped value has no implicit name.
+        return .Error(
+            self.parser_error_at(
+                "'and then' takes a '.member()' chain or an 'as name in body' binder -- there is no implicit name",
+                t,
+            ),
+        );
+    };
+
+    // The right operand of `or else`. `as e in body` names the error payload
+    // (Result only -- `None` has no payload); anything else is the fallback
+    // value itself, where a leading dot stays an implicit member.
+    module_private parse_or_else_operand(self) Result[Expr] = {
+        if self.current().kind is .KwAs() then {
+            return self.parse_flow_bind();
+        };
+        return self.parse_logical_not();
+    };
+
+    // `as name in body`. The body stops at a layer operand, so an `or else`
+    // written after it belongs to the enclosing flow chain and the binder's
+    // scope stays tight.
+    module_private parse_flow_bind(self) Result[Expr] = {
+        let start = self.current();
+        self.advance();
+        let name = self.expect_identifier("flow binding name") or return;
+        when self.current().kind in {
+            .KwIn() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(
+                    self.parser_error_at(
+                        "Unexpected token: \(token_text(self.current())), expected: 'in' after flow binding name",
+                        self.current(),
+                    ),
+                );
+            },
+        };
+        let body = self.parse_logical_not() or return;
+        return .Ok(Expr.FlowBindExpr(name, body, self.span_from_start(start)));
+    };
+
     // `and then` binds tightest of the flow operators.
     module_private parse_and_then_chain(self, operand Expr) Result[Expr] = {
         let mutable expr = operand;
@@ -651,7 +714,7 @@ given Parser {
         while self.current().kind is .KwAnd() and self.next_is_then() then {
             self.advance();
             self.advance();
-            let rhs = self.parse_logical_not() or return;
+            let rhs = self.parse_and_then_operand() or return;
             expr = Expr.AndThenExpr(expr, rhs, self.span_from_expr_start(expr));
         };
 
@@ -668,7 +731,7 @@ given Parser {
             if self.next_is_else() then {
                 self.advance();
                 self.advance();
-                let rhs_operand = self.parse_logical_not() or return;
+                let rhs_operand = self.parse_or_else_operand() or return;
                 let rhs = self.parse_and_then_chain(rhs_operand) or return;
                 expr = Expr.OrElseExpr(expr, rhs, self.span_from_expr_start(expr));
                 continue;
@@ -1576,7 +1639,6 @@ let token_text(token Token) String = {
         .KwNot() then "not",
         .KwTrue() then "true",
         .KwFalse() then "false",
-        .KwIt() then "it",
         .KwUnsafe() then "unsafe",
         .KwWhere() then "where",
         .Plus() then "+",

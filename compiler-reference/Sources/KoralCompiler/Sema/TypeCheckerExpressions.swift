@@ -1847,7 +1847,15 @@ extension TypeChecker {
             "Type '\(name)' cannot be used as an expression: types have no value"
           ), span: nameSpan))
         } else {
-          try handleError(SemanticError.undefinedVariable(name))
+          // `it` names nothing now. Point at the form that does, rather than
+          // leave a reader guessing where the implicit binding went.
+          if name == "it" {
+            try handleError(SemanticError(.generic(
+              "Undefined variable: it (there is no implicit flow binding; name the payload with 'as name in ...')"
+            ), span: nameSpan))
+          } else {
+            try handleError(SemanticError.undefinedVariable(name))
+          }
         }
         return failedExpression()
       }
@@ -2314,6 +2322,34 @@ extension TypeChecker {
 
     case .orReturnExpression(let operand, let span):
       return try lowerOrReturnExpression(operand: operand, span: span)
+
+    // The elided receiver of an `and then .member()` chain. It is only ever the
+    // base of that chain, where the flow payload symbol is in scope under the
+    // reserved name.
+    case .flowReceiver(let span):
+      return try inferTypedExpression(
+        .identifier(TypeChecker.flowPayloadName, span: span),
+        expectedType: expectedType,
+        usage: usage
+      )
+
+    // Unwrapped by `and then` before checking; reaching here means the chain was
+    // written somewhere else.
+    case .flowChainExpression(_, let span):
+      try handleError(SemanticError(
+        .generic("an 'and then .member()' chain can only be the operand of 'and then'"),
+        span: span
+      ))
+      return failedExpression()
+
+    // `as name in body` is an operand of `and then` / `or else`, which unwrap it
+    // and bind the name themselves. Reaching here means it was written elsewhere.
+    case .flowBindExpression(_, _, let span):
+      try handleError(SemanticError(
+        .generic("'as ... in' can only be the operand of 'and then' or 'or else'"),
+        span: span
+      ))
+      return failedExpression()
 
     case .isExpression(let subject, let pattern, _):
       // Type check the subject expression
@@ -9115,33 +9151,57 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let innerType = kind.innerType
 
-    // Type-check defaultExpr, injecting `it` for Result's error value or
-    // Option's unwrapped value. Each `or else` opens its own `it` scope so an
-    // enclosing `and then` / `or else` binding never leaks in.
-    let typedDefault: TypedExpressionNode
-    let underscoreSymbol: Symbol
+    // `as e in body` names the payload; a plain default binds nothing -- the
+    // payload has no implicit name. Only a Result carries an error to name --
+    // `None` has no payload, so the binder form on Option is refused rather
+    // than bound to something meaningless. Each `or else` opens its own payload
+    // scope so an enclosing `and then` / `or else` binding never leaks in.
+    let payloadName: String
+    let defaultBody: ExpressionNode
+    switch defaultExpr {
+    case .flowBindExpression(let name, let body, let bindSpan):
+      payloadName = name
+      defaultBody = body
+      if case .option = kind {
+        // Recorded, not thrown: the body still type-checks so the reader sees
+        // one complaint about the binder rather than a cascade from dropping it.
+        try handleError(SemanticError(
+          .generic("Option's 'None' has no payload to bind; use 'or else' without 'as ... in'"),
+          span: bindSpan
+        ))
+      }
+    default:
+      // A plain default binds NOTHING -- the payload has no implicit name. The
+      // lowered `when` still needs a variable to carry the payload from the
+      // matching arm to the result; it stays unreferenced.
+      payloadName = TypeChecker.flowPayloadName
+      defaultBody = defaultExpr
+    }
+    let hasBind: Bool
+    if case .flowBindExpression = defaultExpr {
+      hasBind = true
+    } else {
+      hasBind = false
+    }
 
+    let boundType: Type
     switch kind {
     case .result(_, let errType):
-      let sym = makeLocalSymbol(name: "it", type: errType, kind: .variable(.Value))
-      underscoreSymbol = sym
-      typedDefault = try withNewScope {
-        currentScope.define("it", defId: sym.defId)
-        return try normalizeBranchExpression(
-          try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .value),
-          expectedType: innerType
-        )
-      }
+      boundType = errType
     case .option:
-      let sym = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
-      underscoreSymbol = sym
-      typedDefault = try withNewScope {
-        currentScope.define("it", defId: sym.defId)
-        return try normalizeBranchExpression(
-          try inferTypedExpression(defaultExpr, expectedType: innerType, usage: .value),
-          expectedType: innerType
-        )
+      boundType = innerType
+    }
+
+    let underscoreSymbol = makeLocalSymbol(
+      name: payloadName, type: boundType, kind: .variable(.Value))
+    let typedDefault: TypedExpressionNode = try withNewScope {
+      if hasBind {
+        currentScope.define(payloadName, defId: underscoreSymbol.defId)
       }
+      return try normalizeBranchExpression(
+        try inferTypedExpression(defaultBody, expectedType: innerType, usage: .value),
+        expectedType: innerType
+      )
     }
 
     let resultType = innerType
@@ -9227,23 +9287,33 @@ extension TypeChecker {
     }
     let kind = try extractOptionResultKind(typedOperand.type, span: span, operation: "or return")
 
-    let returnValue: ExpressionNode
+    // `or return` desugars to `or else` with a fixed fallback. The Result case
+    // names the error through a binder, so the sugar never depends on a magic
+    // identifier.
+    let defaultExpr: ExpressionNode
     switch kind {
     case .option:
-      returnValue = .implicitMemberExpression(memberName: "None", arguments: [], span: span)
-    case .result:
-      returnValue = .implicitMemberExpression(
-        memberName: "Error",
-        arguments: [CallArg(label: nil, expression: .identifier("it", span: span))],
+      let noneReturn = ExpressionNode.implicitMemberExpression(
+        memberName: "None", arguments: [], span: span)
+      defaultExpr = .blockExpression(
+        statements: [.return(value: noneReturn, span: span)],
+        tailExpression: nil,
         span: span
       )
+    case .result:
+      let errName = "err"
+      let errReturn = ExpressionNode.implicitMemberExpression(
+        memberName: "Error",
+        arguments: [CallArg(label: nil, expression: .identifier(errName, span: span))],
+        span: span
+      )
+      let body: ExpressionNode = .blockExpression(
+        statements: [.return(value: errReturn, span: span)],
+        tailExpression: nil,
+        span: span
+      )
+      defaultExpr = .flowBindExpression(name: errName, body: body, span: span)
     }
-
-    let defaultExpr: ExpressionNode = .blockExpression(
-      statements: [.return(value: returnValue, span: span)],
-      tailExpression: nil,
-      span: span
-    )
 
     return try lowerOrElseExpressionCore(
       typedOperand: typedOperand,
@@ -9263,10 +9333,40 @@ extension TypeChecker {
   /// transform that itself returns `Option[V]` yields `Option[Option[V]]` --
   /// because flattening makes the result type depend on the SHAPE of the
   /// transform's type, which a generic transform does not have yet.
+  /// Whether `operand and then transform` adopts the transform's value as the
+  /// result instead of wrapping it.
+  ///
+  /// The transform's DECLARED return type decides, never its shape after
+  /// substitution: a generic parameter is opaque and always wraps. Deciding
+  /// again at instantiation would fold `map[U Any](f (T) -> U) Option[U]` down
+  /// to `Option[V]` for `U = Option[V]` and break its signature.
+  private func andThenCollapses(
+    operandKind: OptionResultKind,
+    transformResultType: Type
+  ) -> Bool {
+    switch operandKind {
+    case .option:
+      return stdOptionInner(transformResultType) != nil
+    case .result:
+      return stdResultInner(transformResultType) != nil
+    }
+  }
+
+  /// Result type of `operand and then transform`.
+  ///
+  /// Always the operand's own flow enum -- `Option` stays `Option`, `Result`
+  /// stays `Result`. The inner type is the transform's own when its DECLARED
+  /// return type is already that same flow enum (`andThenCollapses`), and the
+  /// transform's type wrapped in one level otherwise. So `x and then f(it)` with
+  /// `f: (T) -> U` is `Option[U]` for every `U`, including `U = Option[V]`.
+  /// See `docs/design/flow-operator-forms.md`.
   private func computeAndThenResultType(
     operandKind: OptionResultKind,
     transformResultType: Type
   ) -> Type {
+    if andThenCollapses(operandKind: operandKind, transformResultType: transformResultType) {
+      return transformResultType
+    }
     switch operandKind {
     case .option:
       guard let optionDefId = stdOptionEnumDefId else {
@@ -9297,18 +9397,42 @@ extension TypeChecker {
     // e.g. if expectedType is [U]Option, the transform should produce U or [U]Option.
     let transformExpectedType: Type? = nil
 
-    // Create it symbol, type-check transformExpr in child scope with it injected.
-    let underscoreSymbol = makeLocalSymbol(name: "it", type: innerType, kind: .variable(.Value))
+    // Two operand shapes, two payload names:
+    //   `as v in body` -- the user's own name
+    //   `.f(x)` chain  -- the reserved name `flowReceiver` resolves to
+    //   plain expr     -- not a form; the parser rejects it
+    let payloadName: String
+    let transformBody: ExpressionNode
+    switch transformExpr {
+    case .flowBindExpression(let name, let body, _):
+      payloadName = name
+      transformBody = body
+    case .flowChainExpression(let chain, _):
+      payloadName = TypeChecker.flowPayloadName
+      transformBody = chain
+    default:
+      payloadName = TypeChecker.flowPayloadName
+      transformBody = transformExpr
+    }
+
+    // Create the payload symbol, type-check the body in a child scope with it injected.
+    let underscoreSymbol = makeLocalSymbol(name: payloadName, type: innerType, kind: .variable(.Value))
     let typedTransform = try withNewScope {
-      currentScope.define("it", defId: underscoreSymbol.defId)
+      currentScope.define(payloadName, defId: underscoreSymbol.defId)
       return try normalizeBranchExpression(
-        try inferTypedExpression(transformExpr, expectedType: transformExpectedType, usage: .value),
+        try inferTypedExpression(transformBody, expectedType: transformExpectedType, usage: .value),
         expectedType: transformExpectedType
       )
     }
     let transformType = typedTransform.type
 
     let finalType = computeAndThenResultType(
+      operandKind: kind, transformResultType: transformType)
+
+    // Collapsing adopts the transform's value as the arm body; wrapping builds
+    // `Some(v)` / `Ok(v)` around it. The empty side always re-wraps its own
+    // `None` / `Error`.
+    let collapses = andThenCollapses(
       operandKind: kind, transformResultType: transformType)
 
     // Build the lowered whenExpression.
@@ -9319,7 +9443,7 @@ extension TypeChecker {
                                                 elements: [.variable(symbol: underscoreSymbol)])
       let nonePattern = TypedPattern.enumCase(caseName: "None", tagIndex: 0, elements: [])
 
-      let someBody = TypedExpressionNode.enumConstruction(
+      let someBody = collapses ? typedTransform : TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Some", arguments: [typedTransform])
       let noneBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "None", arguments: [])
@@ -9341,7 +9465,7 @@ extension TypeChecker {
       let errPattern = TypedPattern.enumCase(caseName: "Error", tagIndex: 1,
                                               elements: [.variable(symbol: errSym)])
 
-      let okBody = TypedExpressionNode.enumConstruction(
+      let okBody = collapses ? typedTransform : TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Ok", arguments: [typedTransform])
       let errBody = TypedExpressionNode.enumConstruction(
         type: finalType, caseName: "Error",

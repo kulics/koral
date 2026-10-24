@@ -718,25 +718,25 @@ y >>= 2;     // y = y >> 2
 因此 `a == b or else c` 按 `(a == b) or else c` 分组，绝不是 `a == (b or else c)`；
 `opt or else x == y` 按 `opt or else (x == y)` 分组。
 
-- `f() and then g(it) or else h()` 按 `(f() and then g(it)) or else h()` 分组——流程接流程，合法。
+- `f() and then as v in g(v) or else h()` 按 `(f() and then as v in g(v)) or else h()` 分组——流程接流程，合法。
 - `a or b and c` 按 `a or (b and c)` 分组——逻辑接逻辑，合法。
 - `a and (b or else c)` —— 合法，语义就是它。
 - `(a and b) or else c` —— 合法，语义是另一回事。
 - `a and b or else c` —— **拒绝**。它看起来像 `(a and b) or else c`，实际会按 `a and (b or else c)` 分组；两者都不是这行字面读起来的意思，所以用括号说清楚。
-- `opt and then it == 1 and false` —— **拒绝**，同理。
+- `opt and then as v in v == 1 and false` —— **拒绝**，同理。
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
 let ready Bool = true;
 
 // 流程层内先 `and then`，再 `or else`：
-let inLayer = opt and then it * 2 or else 0;   // 84
+let inLayer = opt and then as v in v * 2 or else 0;   // 84
 
 // 变换体才是 `and` 的预期作用域——显式写出来：
-let good = opt and then (it == 1 and false);   // Some(false)
+let good = opt and then as v in (v == 1 and false);   // Some(false)
 
 // 逻辑 `and` 的右侧要的是流程结果——显式写出来：
-let good2 = ready and (opt and then it > 0 or else false);   // true
+let good2 = ready and (opt and then as v in v > 0 or else false);   // true
 ```
 
 这与有 `??` 的语言里 `??` 的规矩一致：值兜底是一个清晰的中间层，不加括号就不与布尔逻辑拼接。注意 `(ready and opt)` 并不是混用写法的修法：`and` 两侧都要求 `Bool`，流程结果必须先归约成 `Bool`（如 `good2`）才能参与逻辑 `and`。
@@ -1200,10 +1200,29 @@ defer {
 Koral 为 `Option` 和 `Result` 类型提供三个特殊操作符：
 
 - `or else`：值合并。左侧为 `None` 或 `Error` 时返回右侧默认值。
-- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换，并把结果**包装**回同一种 `Option` / `Result`。因此结果类型恒为 `Option[U]` / `Result[U]`，其中 `U` 是变换体的返回类型——**不拍平**：右侧本身返回 `Option[V]` 时结果是 `Option[Option[V]]`。
+- `and then`：可选链 / 值变换。左侧为 `Some` 或 `Ok` 时施加右侧变换。结果恒留在同一种 `Option` / `Result` 里：变换体自身的返回类型已经是那一种时，它的值**就是**结果（折叠掉一次包装）；其余情形包一层。泛型变换的类型参数视为不透明，因此总是包一层——于是 `map[U](f (T) -> U) Option[U]` 对每个 `U`（含 `U = Option[V]`）都给出 `Option[U]`。
 - `or return`：早返回传播语法糖。它解包 `Some` / `Ok`，遇到 `None` / `Error` 则从所在函数返回。
 
-在 `and then` 与 `or else` 表达式中，关键字 `it` 指代被解包的值：对 `and then`，`it` 是内层的 `Some` 或 `Ok` 值；对作用于 `Result` 的 `or else`，`it` 是 `Error` 值。
+#### 给被解包的值命名
+
+没有隐式名字。两种写法让变换体拿到被解包的值，区别只在于需不需要名字：
+
+- **链式** —— `and then .成员(...)`：接收者就是被解包的值，所以
+  `config and then .window.title` 读作 `config?.window.title`。这里的前导点一律是
+  被解包值的成员（不再是 implicit member 构造）。链式是完整后缀链：`.f(x).g`、`.f()[0]`。
+- **绑定** —— `and then as v in 体`：为 `体` 命名被解包的值。`体` 是**单个 layer 操作数**，
+  写在它后面的 `or else` 属于外层链：`x and then as v in v * 2 or else 0` 是
+  `(x and then as v in v * 2) or else 0`。
+
+链式是绑定的语法糖——`x and then .f()` 与 `x and then as v in v.f()` 类型与取值完全相同
+——需要名字时随时可以展开。
+
+`or else` 给的是兜底值，通常不需要名字。要查看错误时再绑定：
+
+- `or else as e in 体` —— `e` 是 `Error` 值。**仅 `Result`**：`None` 没有载荷，
+  所以 `Option` 上写绑定形式是错误。
+- 兜底值的类型是左操作数的**载荷**类型：`x Option[T]` 时 `x or else d` 里的 `d` 是 `T`，
+  不是 `Option[T]`。
 
 其优先级与解析器一致：流程层内 `and then` 比 `or else` / `or return` 更紧。流程层整体不与逻辑 `and` / `or` 隐式混用，跨层必须加括号——见[运算符优先级](#运算符优先级)。
 
@@ -1214,10 +1233,23 @@ let val = opt or else 0;           // 42（因为 opt 是 Some）
 let none = Option[Int].None();
 let val2 = none or else 0;         // 0（因为 none 是 None）
 
-let mapped = opt and then it * 2;  // Some(84)
+let mapped = opt and then as v in v * 2;  // Some(84)
 
-// 不拍平：变换体的结果原样包装。
-let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
+// 变换体返回 Option，它的值就是结果——折叠掉一次包装，而不是再套一层。
+// 变换体返回裸值时才包一层。
+let half(x Int) Option[Int] =
+    if x % 2 == 0 then Option[Int].Some(x / 2) else Option[Int].None();
+let chained = opt and then as v in half(v);  // Some(21) —— 类型是 Option[Int]
+
+// 链式是绑定的语法糖：接收者就是被解包的值。
+type Config(window Window);
+type Window(title String);
+let cfg = Option[Config].Some(Config(Window("untitled")));
+let title = cfg and then .window.title or else "none";   // Some("untitled")
+
+// 为 Result 的错误命名。
+let parsed = Result[String].Error("bad input");
+let shown = parsed or else as e in e.message();          // "bad input"
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
@@ -1227,8 +1259,8 @@ let load_port(path String) Result[Int] = {
 
 `or return` 等价于固定的 `or else` 早返回模式：
 
-- 对 `Result`：`expr or return` 等价于 `expr or else { return .Error(it) }`
-- 对 `Option`：`expr or return` 等价于 `expr or else { return .None() }`
+- 对 `Result`：`expr or return` 等价于 `expr or else as e in { return .Error(e); }`
+- 对 `Option`：`expr or return` 等价于 `expr or else { return .None(); }`
 
 它必须用在返回种类与被传播值匹配的函数内：
 
@@ -1526,7 +1558,7 @@ given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f (T) -> U) Option[U] = self and then f(it);
+    public map[U Any](self, f (T) -> U) Option[U] = self and then as v in f(v);
 };
 ```
 
@@ -2827,7 +2859,7 @@ let tags Set[String] = ["koral", "lang"];
 
 // Option + or else / and then
 let port = Option[Int].Some(8080) or else 80;
-let doubled = Option[Int].Some(21) and then it * 2;
+let doubled = Option[Int].Some(21) and then as v in v * 2;
 
 // or return
 let read_number(path String) Result[Int] = {

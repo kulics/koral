@@ -466,7 +466,7 @@ public class Parser {
       return true
     case .minus, .tilde, .ampersand, .multiply:
       return true
-    case .identifier(_), .selfKeyword, .integer(_), .durationLiteral(_, _), .float(_), .string(_), .rune(_), .interpolatedString(_), .bool(_), .itKeyword:
+    case .identifier(_), .selfKeyword, .integer(_), .durationLiteral(_, _), .float(_), .string(_), .rune(_), .interpolatedString(_), .bool(_):
       return true
     case .leftBrace, .leftParen, .leftBracket, .dot:
       return true

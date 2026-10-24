@@ -131,6 +131,11 @@ struct TraitToolBlock {
 }
 
 public class TypeChecker {
+  /// The reserved name the flow payload symbol is bound under inside an
+  /// `and then .member()` chain. `flowReceiver` resolves to it, so no
+  /// user-visible identifier is involved -- a chain's arguments can still name
+  /// anything else.
+  static let flowPayloadName = "__flow_payload"
   // Store type information for variables and functions
   // Note: internal access for extension methods in TypeCheckerTypeResolution.swift
   var currentScope: UnifiedScope = UnifiedScope()

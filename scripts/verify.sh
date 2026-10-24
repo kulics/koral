@@ -76,7 +76,7 @@ say "1. seed self-check"
 "$RUNNER" \
   --compiler swift \
   --swift-koralc "$SEED" \
-  --timeout 60 -j 4 \
+  --timeout 60 -j 8 \
   --report-file "$WORK/1-seed.log"
 
 # ── 2-3) build bootstrap from the seed, then the main gate ────────────────────
@@ -90,7 +90,7 @@ say "3. main gate"
 "$RUNNER" \
   --compiler bootstrap \
   --bootstrap-koralc "$BOOTSTRAP" \
-  --timeout 60 -j 4 \
+  --timeout 60 -j 8 \
   --report-file "$WORK/3-bootstrap.log"
 
 # ── 4) self-host two rounds + fixed point + dangling scan ─────────────────────
@@ -122,7 +122,7 @@ say "5. stage2 suite"
 "$RUNNER" \
   --compiler bootstrap \
   --bootstrap-koralc "$WORK/s2/koralc$EXE" \
-  --timeout 60 -j 4 \
+  --timeout 60 -j 8 \
   --report-file "$WORK/5-stage2.log"
 
 # ── 6) the differential oracle ────────────────────────────────────────────────
@@ -135,7 +135,7 @@ say "6. differential oracle"
   --compiler differential \
   --swift-koralc "$SEED" \
   --bootstrap-koralc "$BOOTSTRAP" \
-  --timeout 60 -j 4 \
+  --timeout 60 -j 8 \
   --report-file "$WORK/6-differential.log"
 
 # ── samples ───────────────────────────────────────────────────────────────────

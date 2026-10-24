@@ -364,13 +364,31 @@
 // `x or else (y and then z)`.
 <flow-tail> ::= <and-then-link>+ <flow-link>*
               | <flow-link>+
-<and-then-link> ::= "and" "then" <layer-operand>
+<and-then-link> ::= "and" "then" <and-then-operand>
+// The right operand of `and then` is one of two shapes. A leading dot is the
+// RECEIVER-ELIDED CHAIN -- the receiver is the unwrapped value, so
+// `x and then .f(y)` reads as `x?.f(y)` -- never an implicit member: `and then`
+// pushes no expected type into the transform, so that reading is unreachable
+// here. `as v in body` names the unwrapped value for the body. A bare layer
+// operand is NOT a form: the unwrapped value has no implicit name.
+<and-then-operand> ::= <flow-receiver-chain>
+                     | "as" <identifier> "in" <layer-operand>
+<flow-receiver-chain> ::= "." <member-access> <postfix-continuation>*
+// `as name in body`. The body is a LAYER OPERAND, not a full expression: an
+// `or else` written after it belongs to the enclosing flow chain, so
+// `x and then as v in v > 0 or else false` is `(x and then as v in v > 0) or else false`.
 <flow-link> ::= "or" "else" <flow-operand>
+              | "or" "else" "as" <identifier> "in" <layer-operand>
               | "or" "return"
 <flow-operand> ::= <layer-operand> <and-then-link>*
 // "and then" is optional chaining / value transformation for Option/Result types
 // "or else" is value coalescing for Option/Result types
 // "or return" is early-return propagation for Option/Result types
+//
+// `or else as e in body` names the Error payload. It is a Result-only shape:
+// `None` has no payload, so the binder form on Option is a semantic error.
+// The default value of a plain `or else` is the LEFT OPERAND'S PAYLOAD TYPE --
+// `x or else d` where `x: Option[T]` makes `d` a `T`.
 
 // Logical tail. `and` binds tightest: `a or b and c` is `a or (b and c)`.
 <logical-tail> ::= <and-link>+ <or-link>*

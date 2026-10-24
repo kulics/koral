@@ -742,6 +742,25 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
+    case .flowReceiver:
+      print("\(indent)FlowReceiver: <elided>")
+
+    case .flowChainExpression(let chain, _):
+      print("\(indent)FlowChainExpression:")
+      withIndent {
+        withIndent {
+          printExpression(chain)
+        }
+      }
+
+    case .flowBindExpression(let name, let body, _):
+      print("\(indent)FlowBindExpression: as \(name) in")
+      withIndent {
+        withIndent {
+          printExpression(body)
+        }
+      }
+
     case .memberPath(let base, let path, _):
       print("\(indent)MemberPath: .\(path.joined(separator: "."))")
       print("\(indent)  Base:")

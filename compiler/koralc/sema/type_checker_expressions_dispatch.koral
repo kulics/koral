@@ -1,3 +1,8 @@
+// The reserved name the flow payload symbol is bound under inside an
+// `and then .member()` chain. `FlowReceiver` resolves to it, so no user-visible
+// identifier is involved -- a chain's arguments can still name anything else.
+module_private let flow_payload_name String = "__flow_payload";
+
 given TypeChecker {
     module_private dispatches_via_trait_object(self, receiver_type Type) Bool = {
         return when receiver_type in {
@@ -109,49 +114,57 @@ given TypeChecker {
                 let mutable success_type = self.infer_or_else_success_type(
                     typed_op.expr_type,
                 );
-                // The `it` symbol bound by the Error arm must be the SAME symbol the
-                // default expression was checked against, so its references resolve.
-                let mutable it_symbol = Option[Symbol].None();
-                let typed_def = if is_result then {
-                    let mutable err_type = self.infer_or_else_error_binding_type(
-                        typed_op.expr_type,
-                    );
-                    let mutable def_scope = Scope.new_child(scope);
-                    let it_def_id = self.allocate_unindexed_def_id(
-                        "it",
-                        DefKind.Variable(),
-                    );
-                    let it_sym = Symbol(
-                        it_def_id,
-                        err_type,
-                        SymbolKind.Variable(VariableKind.Value()),
-                    );
-                    def_scope.define(self.context(), it_sym);
-                    it_symbol = Option[Symbol].Some(it_sym);
-                    self.check_value_body_expr(
-                        default_expr,
-                        .Some(success_type),
-                        def_scope,
-                    )
-                } else {
-                    let mutable def_scope = Scope.new_child(scope);
-                    let it_def_id = self.allocate_unindexed_def_id(
-                        "it",
-                        DefKind.Variable(),
-                    );
-                    let it_sym = Symbol(
-                        it_def_id,
-                        success_type,
-                        SymbolKind.Variable(VariableKind.Value()),
-                    );
-                    def_scope.define(self.context(), it_sym);
-                    it_symbol = Option[Symbol].Some(it_sym);
-                    self.check_value_body_expr(
-                        default_expr,
-                        .Some(success_type),
-                        def_scope,
-                    )
+                // `as e in body` names the payload. A plain default binds
+                // NOTHING -- the payload has no implicit name. Only a Result
+                // carries an error to name, so the binder form on Option is
+                // refused rather than bound to something meaningless.
+                //
+                // The lowered `when` still needs a variable to carry the payload
+                // from the matching arm to the result; it is internal and stays
+                // unreferenced unless a binder names it.
+                let payload_name = when default_expr in {
+                    .FlowBindExpr(name, _, _) then name,
+                    _ then flow_payload_name,
                 };
+                let default_body = when default_expr in {
+                    .FlowBindExpr(_, body, _) then body,
+                    _ then default_expr,
+                };
+                let has_bind = when default_expr in {
+                    .FlowBindExpr(_, _, _) then true,
+                    _ then false,
+                };
+                when default_expr in {
+                    .FlowBindExpr(_, _, bind_span) then {
+                        if not is_result then {
+                            self.push_diagnostic(
+                                "Option's 'None' has no payload to bind; use 'or else' without 'as ... in'",
+                                bind_span,
+                            );
+                        };
+                    },
+                    _ then {},
+                };
+                let bound_type = if is_result then {
+                    self.infer_or_else_error_binding_type(typed_op.expr_type)
+                } else {
+                    success_type
+                };
+                let it_sym = Symbol(
+                    self.allocate_unindexed_def_id(payload_name, DefKind.Variable()),
+                    bound_type,
+                    SymbolKind.Variable(VariableKind.Value()),
+                );
+                let mutable def_scope = Scope.new_child(scope);
+                if has_bind then {
+                    def_scope.define(self.context(), it_sym);
+                };
+                let it_symbol = Option[Symbol].Some(it_sym);
+                let typed_def = self.check_value_body_expr(
+                    default_body,
+                    .Some(success_type),
+                    def_scope,
+                );
                 // The default stands in for the Option/Result payload, so it
                 // has to have the payload's type: `x or else "string"` against
                 // `Option[Int]` makes the two lowered `when` arms disagree.
@@ -219,7 +232,7 @@ given TypeChecker {
                     err_elems.push(
                         PatternElement(
                             Option[String].None(),
-                            PatternNode.Variable("it", false, result_span),
+                            PatternNode.Variable(payload_name, false, result_span),
                         ),
                     );
                     let err_pattern = PatternNode.EnumCase(
@@ -240,11 +253,14 @@ given TypeChecker {
                         ),
                     );
                 } else {
-                    // `it` is the unwrapped value: bound by the Some pattern so
-                    // references in the default expression resolve to the same
-                    // DefId. Reuse the `it` symbol created above.
+                    // The Some pattern carries the unwrapped value; reuse the
+                    // payload symbol created above so a binder's references
+                    // resolve to the same DefId.
                     let mutable some_sym = Symbol(
-                        self.allocate_unindexed_def_id("it", DefKind.Variable()),
+                        self.allocate_unindexed_def_id(
+                            payload_name,
+                            DefKind.Variable(),
+                        ),
                         result_type,
                         SymbolKind.Variable(VariableKind.Value()),
                     );
@@ -260,7 +276,7 @@ given TypeChecker {
                     some_elems.push(
                         PatternElement(
                             Option[String].None(),
-                            PatternNode.Variable("it", false, result_span),
+                            PatternNode.Variable(payload_name, false, result_span),
                         ),
                     );
                     let some_pattern = PatternNode.EnumCase(
@@ -369,19 +385,37 @@ given TypeChecker {
                         return typed_op;
                     };
 
-                    let return_value = if is_result then {
-                        let mutable args = List[Expr].new();
-                        args.push(Expr.Identifier("it", span));
-                        Expr.ImplicitMemberExpr("Error", args, span)
-                    } else {
-                        Expr.ImplicitMemberExpr("None", List[Expr].new(), span)
-                    };
-
+                    // `or return` desugars to `or else` with a fixed fallback.
+                    // The Result case names the error through a binder, so the
+                    // sugar never depends on `it`.
                     let mutable stmts = List[Statement].new();
-                    stmts.push(
-                        Statement.ReturnStmt(Option[Expr].Some(return_value), span),
-                    );
-                    let default_expr = Expr.Block(stmts, Option[Expr].None(), span);
+                    let default_expr = if is_result then {
+                        let mutable args = List[Expr].new();
+                        args.push(Expr.Identifier("err", span));
+                        stmts.push(
+                            Statement.ReturnStmt(
+                                Option[Expr].Some(
+                                    Expr.ImplicitMemberExpr("Error", args, span),
+                                ),
+                                span,
+                            ),
+                        );
+                        Expr.FlowBindExpr(
+                            "err",
+                            Expr.Block(stmts, Option[Expr].None(), span),
+                            span,
+                        )
+                    } else {
+                        stmts.push(
+                            Statement.ReturnStmt(
+                                Option[Expr].Some(
+                                    Expr.ImplicitMemberExpr("None", List[Expr].new(), span),
+                                ),
+                                span,
+                            ),
+                        );
+                        Expr.Block(stmts, Option[Expr].None(), span)
+                    };
                     let lowered = Expr.OrElseExpr(operand, default_expr, span);
                     self.check_expr_scoped_ref(lowered, expected, scope)
                 }
@@ -391,8 +425,23 @@ given TypeChecker {
                 let mutable inner_type = self.extract_option_result_inner(
                     typed_op.expr_type,
                 );
+                // Two operand shapes, two payload names:
+                //   `as v in body` -- the user's own name
+                //   `.f(x)` chain  -- the reserved name `FlowReceiver` resolves to
+                let payload_name = when transform_expr in {
+                    .FlowBindExpr(name, _, _) then name,
+                    _ then flow_payload_name,
+                };
+                let transform_body = when transform_expr in {
+                    .FlowBindExpr(_, body, _) then body,
+                    .FlowChainExpr(chain, _) then chain,
+                    _ then transform_expr,
+                };
                 let mutable tr_scope = Scope.new_child(scope);
-                let it_def_id = self.allocate_unindexed_def_id("it", DefKind.Variable());
+                let it_def_id = self.allocate_unindexed_def_id(
+                    payload_name,
+                    DefKind.Variable(),
+                );
                 let it_sym = Symbol(
                     it_def_id,
                     inner_type,
@@ -400,7 +449,7 @@ given TypeChecker {
                 );
                 tr_scope.define(self.context(), it_sym);
                 let typed_tr = self.check_value_body_expr(
-                    transform_expr,
+                    transform_body,
                     .None(),
                     tr_scope,
                 );
@@ -412,6 +461,13 @@ given TypeChecker {
                     typed_op.expr_type,
                     typed_tr.expr_type,
                 );
+                // Collapsing adopts the transform's value as the arm body;
+                // wrapping builds `Some(v)` / `Ok(v)` around it. The empty side
+                // always re-wraps its own `None` / `Error`.
+                let collapses = self.and_then_collapses(
+                    typed_op.expr_type,
+                    typed_tr.expr_type,
+                );
 
                 let mutable arms = List[TypedWhenArm].new();
                 let result_span = unknown_span();
@@ -420,14 +476,14 @@ given TypeChecker {
                     ok_elems.push(
                         PatternElement(
                             Option[String].None(),
-                            PatternNode.Variable("it", false, result_span),
+                            PatternNode.Variable(payload_name, false, result_span),
                         ),
                     );
                     let ok_pattern = PatternNode.EnumCase("Ok", ok_elems, result_span);
 
                     let mutable ok_args = List[TypedExpr].new();
                     ok_args.push(typed_tr);
-                    let ok_body = self.lower_enum_constructor_expr(
+                    let ok_body = if collapses then typed_tr else self.lower_enum_constructor_expr(
                         final_type,
                         "Ok",
                         ok_args,
@@ -497,7 +553,7 @@ given TypeChecker {
                     some_elems.push(
                         PatternElement(
                             Option[String].None(),
-                            PatternNode.Variable("it", false, result_span),
+                            PatternNode.Variable(payload_name, false, result_span),
                         ),
                     );
                     let some_pattern = PatternNode.EnumCase(
@@ -507,7 +563,7 @@ given TypeChecker {
                     );
                     let mutable some_args = List[TypedExpr].new();
                     some_args.push(typed_tr);
-                    let some_body = self.lower_enum_constructor_expr(
+                    let some_body = if collapses then typed_tr else self.lower_enum_constructor_expr(
                         final_type,
                         "Some",
                         some_args,
@@ -4128,6 +4184,42 @@ given TypeChecker {
                 expected,
                 scope,
             ),
+            // The elided receiver of an `and then .member()` chain. It is only
+            // ever the base of that chain, where the flow payload symbol is in
+            // scope under the reserved internal name.
+            .FlowReceiver(span) then self.check_identifier_expr_at(
+                flow_payload_name,
+                span,
+                scope,
+                false,
+            ),
+            // Unwrapped by `and then` before checking; reaching here means the
+            // chain was written somewhere else.
+            .FlowChainExpr(_, span) then {
+                self.push_diagnostic_at_span(
+                    "an 'and then .member()' chain can only be the operand of 'and then'",
+                    span,
+                );
+                let fallback_type = when expected in {
+                    .Some(expected_type) then expected_type,
+                    .None() then Type.Unknown(),
+                };
+                self.empty_typed_block(fallback_type)
+            },
+            // `as name in body` is an operand of `and then` / `or else`, which
+            // unwrap it and bind the name themselves. Reaching here means it was
+            // written somewhere else.
+            .FlowBindExpr(_, _, span) then {
+                self.push_diagnostic_at_span(
+                    "'as ... in' can only be the operand of 'and then' or 'or else'",
+                    span,
+                );
+                let fallback_type = when expected in {
+                    .Some(expected_type) then expected_type,
+                    .None() then Type.Unknown(),
+                };
+                self.empty_typed_block(fallback_type)
+            },
             .CollectionLiteral(elements, _) then self.lower_collection_literal_expr(
                 elements,
                 expected,

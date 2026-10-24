@@ -871,17 +871,17 @@ let main() Void = {
     // (guide/grammar.bnf <expression>). Each message is the compiler's own.
     t.test_error_contains(
         "logical `and` after flow rejected",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then it == 1 and false;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 and false;\n    let _ = v;\n    return 0;\n};\n",
         "'and' cannot be mixed with the flow operators",
     );
     t.test_error_contains(
         "logical `or` after flow rejected",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then it == 1 or false;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 or false;\n    let _ = v;\n    return 0;\n};\n",
         "'or' cannot be mixed with the flow operators",
     );
     t.test_error_contains(
         "flow `and then` after logical rejected",
-        "let main() Int = {\n    let v = true or false and then it == 1;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = true or false and then as v in v == 1;\n    let _ = v;\n    return 0;\n};\n",
         "'and then' cannot be mixed with logical",
     );
     t.test_error_contains(
@@ -957,20 +957,52 @@ let main() Void = {
     // rejected mix. Assert the parentheses survive a rewrite.
     t.test_checked(
         "parenthesised flow inside logical keeps its parens",
-        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then it > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
-        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then it > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
     );
     t.test_checked(
         "parenthesised logical inside flow keeps its parens",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then (it == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then (it == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
     );
     // Chains inside one layer are still accepted, and still flatten onto one
     // line when they fit.
     t.test_checked(
         "flow chain inside its own layer accepted",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then it * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then it * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+    );
+    // The chain and binder forms are load-bearing: the leading dot marks the
+    // chain (an implicit member would mean something else) and `as v in` is the
+    // name the body uses. Dropping either would change what the source means.
+    t.test_checked(
+        "and then chain keeps its leading dot",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "and then binder keeps its name",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "or else binder keeps its name",
+        "let main() Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
+    );
+    t.test_checked(
+        "chain and binder compose with or else",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
+        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
+    );
+    // `or else as e in` on Option is a SEMANTIC refusal (None has no payload),
+    // not a parse error: the shape is well-formed and the formatter must keep
+    // it intact rather than reject or rewrite it. The compiler's own complaint
+    // is covered by `tests/compiler-cases/flow_bind_or_else_option_error.koral`.
+    t.test_checked(
+        "or else binder is well-formed syntax even where sema refuses it",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
     );
     t.test_checked(
         "logical chain inside its own layer accepted",
@@ -998,17 +1030,17 @@ let main() Void = {
         "let main() Int = {\n    let n = \"abc\"\n        .count();\n    return n;\n};\n",
         "let main() Int = {\n    let n = \"abc\".count();\n    return n;\n};\n",
     );
-    // `it` is reserved but legal in expression position (the implicit lambda
-    // parameter). `let it ...` is a declaration, so it is rejected.
-    t.test_error_contains(
-        "`it` as declaration name rejected",
-        "let it Int = 0;\n",
-        "expected declaration name",
+    // `it` is an ordinary identifier: it names nothing implicitly and is free
+    // for a declaration like any other name.
+    t.test_checked(
+        "`it` as declaration name accepted",
+        "let main() Int = {\n    let it Int = 0;\n    return it;\n};\n",
+        "let main() Int = {\n    let it Int = 0;\n    return it;\n};\n",
     );
     t.test(
-        "`it` in expression position accepted",
-        "let g(r Result[Int]) Int = {\n    let x = r or else {\n        let _ = it;\n        return 0;\n    };\n    return x;\n};\n",
-        "let g(r Result[Int]) Int = {\n    let x = r or else {\n        let _ = it;\n        return 0;\n    };\n    return x;\n};\n",
+        "`or else as e in` binder round-trips",
+        "let g(r Result[Int]) Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
+        "let g(r Result[Int]) Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
     );
     // `while` and `for` always produce `Void`, so a `Void` binding IS their
     // value position and the language accepts it (document.md: "while and for
@@ -1303,8 +1335,8 @@ let main() Void = {
 let corpus_roots() List[String] = ["std", "compiler", "toolchain", "samples"];
 
 let run_corpus_gate(t TestRunner) Void = {
-    let repo_root = find_repo_root() or else {
-        eprintln("CORPUS GATE: \(it.message())");
+    let repo_root = find_repo_root() or else as e in {
+        eprintln("CORPUS GATE: \(e.message())");
         exit(1);
     };
 
@@ -1317,8 +1349,8 @@ let run_corpus_gate(t TestRunner) Void = {
             continue;
         };
 
-        let mutable walker = walk_dir(root) or else {
-            eprintln("CORPUS GATE: cannot walk \(root.to_string()): \(it.message())");
+        let mutable walker = walk_dir(root) or else as e in {
+            eprintln("CORPUS GATE: cannot walk \(root.to_string()): \(e.message())");
             exit(1);
         };
 
@@ -1339,10 +1371,10 @@ let run_corpus_gate(t TestRunner) Void = {
             };
 
             checked += 1;
-            let source = read_text_file(path) or else {
+            let source = read_text_file(path) or else as e in {
                 failed += 1;
                 eprintln(
-                    "CORPUS GATE FAIL: cannot read \(path.to_string()): \(it.message())",
+                    "CORPUS GATE FAIL: cannot read \(path.to_string()): \(e.message())",
                 );
                 continue;
             };

@@ -38,7 +38,10 @@ extension TypeChecker {
          .implicitMemberExpression,
          .orElseExpression,
          .andThenExpression,
-         .orReturnExpression:
+         .orReturnExpression,
+         .flowReceiver,
+         .flowChainExpression,
+         .flowBindExpression:
       return false
     case .castExpression(_, let inner, _),
          .upgradeExpr(let inner, _),

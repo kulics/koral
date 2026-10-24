@@ -550,6 +550,16 @@ public type Expr {
     OrElseExpr(operand Expr, default_expr Expr, span SourceSpan),
     OrReturnExpr(operand Expr, span SourceSpan),
     AndThenExpr(operand Expr, transform_expr Expr, span SourceSpan),
+    // The elided receiver of an `and then .member()` chain: the unwrapped value.
+    // Only ever the base of a postfix chain inside `and then`, never standalone.
+    FlowReceiver(span SourceSpan),
+    // `and then .f(x).g` -- a postfix chain on the elided receiver. The wrapper
+    // is what tells printer and sema that this is the chain form rather than an
+    // implicit member; `chain`'s base is a `FlowReceiver`.
+    FlowChainExpr(chain Expr, span SourceSpan),
+    // `as name in body` -- an explicit binder for the flow payload. The body is
+    // a layer operand, so an `or else` after it belongs to the outer chain.
+    FlowBindExpr(name String, body Expr, span SourceSpan),
     IsExpr(subject Expr, pattern PatternNode, span SourceSpan),
     IsNotExpr(subject Expr, pattern PatternNode, span SourceSpan),
     CollectionLiteral(elements List[Expr], span SourceSpan),
@@ -638,6 +648,9 @@ public let expr_span(expr Expr) SourceSpan = {
         .OrElseExpr(_, _, span) then span,
         .OrReturnExpr(_, span) then span,
         .AndThenExpr(_, _, span) then span,
+        .FlowReceiver(span) then span,
+        .FlowChainExpr(_, span) then span,
+        .FlowBindExpr(_, _, span) then span,
         .IsExpr(_, _, span) then span,
         .IsNotExpr(_, _, span) then span,
         .CollectionLiteral(_, span) then span,

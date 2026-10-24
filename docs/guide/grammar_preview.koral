@@ -457,23 +457,24 @@ let option_chaining() Void = {
     };
 
     // and then：值变换（Some / Ok 时执行，None / Error 时透传）
-    let doubled = opt and then it * 2; // Some(84)
-    let chained = opt and then it + 1 and then it * 3; // Some(129)
+    let doubled = opt and then as v in v * 2; // Some(84)
+    let chained = opt and then as v in v + 1 and then as v in v * 3; // Some(129)
 
     // 跨层的两种合法写法——括号就是分层
     let ready Bool = true;
-    let wrapped = opt and then (it == 1 and false); // Option[Bool]：Some(false)
-    let combined = ready and (opt and then it > 0 or else false); // Bool：true
+    let wrapped = opt and then as v in (v == 1 and false); // Option[Bool]：Some(false)
+    let combined = ready and (opt and then as v in v > 0 or else false); // Bool：true
 
-    // and then 不拍平：变换体的返回值按原样包回同一种 Option / Result
+    // and then 折叠同族：变换体自身已是同一种 Option / Result 时，它的值就是结果；
+    // 否则包一层
     let safe_div (Int, Int) -> Option[Int] = (x Int, y Int) Option[Int] => if y == 0 then .None(
     ) else .Some(x / y);
-    let result = opt and then safe_div(it, 10); // Option[Option[Int]]
+    let result = opt and then as v in safe_div(v, 10); // Option[Int]：Some(4)
 
-    // Result 同样支持 or else / and then；此处 `it` 是 Error 值
+    // Result 同样支持 or else / and then；`as e in` 绑定 Error 值
     let double_result (Result[Int]) -> Result[Int] = (res Result[Int]) Result[Int] => {
-        let value = res or else {
-            return .Error(it);
+        let value = res or else as e in {
+            return .Error(e);
         };
         return .Ok(value * 2);
     };

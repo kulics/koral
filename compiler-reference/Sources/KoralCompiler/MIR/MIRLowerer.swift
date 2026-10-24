@@ -4327,19 +4327,10 @@ private final class MIRFunctionBuilder {
     if let place = patternPlaceByDefId[symbol.defId.id] {
       return place
     }
-    // The `it` bound by `or else` / `and then` in an arm whose pattern carries
-    // no payload is a local that was never registered. Declare it so the C
-    // backend emits a real local instead of a raw identifier. Everything else
-    // that has no local binding is a global.
-    switch symbol.kind {
-    case .variable where context.getName(symbol.defId) == "it":
-      let local = makeTemporary(type: symbol.type, nameHint: "it")
-      append(.declare(local.id))
-      localByDefId[symbol.defId.id] = local.id
-      return .local(local.id)
-    default:
-      return .global(symbol.defId)
-    }
+    // A flow payload is bound by the pattern of the arm that carries it, so it
+    // is registered like any other pattern variable. Anything with no local
+    // binding is a global.
+    return .global(symbol.defId)
   }
 
   private func isReferenceType(_ type: Type) -> Bool {

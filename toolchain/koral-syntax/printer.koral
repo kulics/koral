@@ -735,6 +735,21 @@ given Printer {
             self.write_space();
             self.write_token(return_kw);
         },
+        // The elided receiver prints as nothing, so a `FieldAccess` on it reads
+        // `.field` -- which is exactly the chain's spelling.
+        .FlowReceiver() then {},
+        .FlowChain(chain) then {
+            self.print_expr(chain);
+        },
+        .FlowBind(as_kw, name, in_kw, body) then {
+            self.write_token(as_kw);
+            self.write_space();
+            self.write_token(name);
+            self.write_space();
+            self.write_token(in_kw);
+            self.write_space();
+            self.print_expr(body);
+        },
         .RangeExpr(left, op, right) then {
             if left is .Some(l) then {
                 self.print_expr(l);
@@ -3044,6 +3059,11 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
     .QualifiedTrait(_, _, _, operand) then validate_expr_usage(operand, false),
     .Paren(_, inner, _) then validate_expr_usage(inner, false),
     .FieldAccess(base, _, _) then validate_expr_usage(base, false),
+    // The elided receiver carries nothing to validate; a chain's arguments and
+    // a binder's body are checked where they are written.
+    .FlowReceiver() then .Ok({}),
+    .FlowChain(chain) then validate_expr_usage(chain, false),
+    .FlowBind(_, _, _, body) then validate_expr_usage(body, false),
     .Call(callee, _, args, _) then {
         validate_expr_usage(callee, false) or return;
         return validate_call_args(args);

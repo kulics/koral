@@ -726,23 +726,50 @@ given TypeChecker {
         };
     };
 
+    /// Whether `operand and then transform` adopts the transform's value as the
+    /// result instead of wrapping it.
+    ///
+    /// The transform's DECLARED return type decides, never its shape after
+    /// substitution: a generic parameter is opaque and always wraps. Deciding
+    /// again at instantiation would fold `map[U Any](f (T) -> U) Option[U]` down
+    /// to `Option[V]` for `U = Option[V]` and break its signature.
+    ///
+    /// Identity is by DECLARATION -- a user type that spells `Option` is not one.
+    module_private and_then_collapses(
+        self,
+        operand_type Type,
+        transform_result_type Type,
+    ) Bool = {
+        return (self.is_std_flow_enum(operand_type, "Result") and self.is_std_flow_enum(
+            transform_result_type,
+            "Result",
+        )) or (self.is_std_flow_enum(operand_type, "Option") and self.is_std_flow_enum(
+            transform_result_type,
+            "Option",
+        ));
+    };
+
     /// Result type of `operand and then transform`.
     ///
-    /// The transform's value is always wrapped in the operand's own flow enum:
-    /// `Option[U]` for an `Option` operand, `Result[U]` for a `Result` one,
-    /// where `U` is whatever the transform returns. There is NO flattening -- a
-    /// transform that itself returns `Option[V]` yields `Option[Option[V]]` --
-    /// because flattening makes the result type depend on the SHAPE of the
-    /// transform's type, which a generic transform does not have yet.
+    /// Always the operand's own flow enum -- `Option` stays `Option`, `Result`
+    /// stays `Result`. The inner type is the transform's own when its DECLARED
+    /// return type is already that same flow enum (`and_then_collapses`), and
+    /// the transform's type wrapped in one level otherwise. So
+    /// `x and then f(it)` with `f: (T) -> U` is `Option[U]` for every `U`,
+    /// including `U = Option[V]`.
     ///
     /// Which of the two flow enums the operand is decides everything, and that
     /// is a question about the operand's DECLARATION identity -- never about
-    /// which case names it happens to declare.
+    /// which case names it happens to declare. See
+    /// `docs/design/flow-operator-forms.md`.
     module_private compute_and_then_result_type(
         self,
         operand_type Type,
         transform_result_type Type,
     ) Type = {
+        if self.and_then_collapses(operand_type, transform_result_type) then {
+            return transform_result_type;
+        };
         if self.is_std_flow_enum(operand_type, "Result") then {
             let mutable args = List[Type].new();
             args.push(transform_result_type);

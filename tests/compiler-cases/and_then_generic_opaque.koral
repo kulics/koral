@@ -1,0 +1,67 @@
+// The fold decision keys on the transform's DECLARED return type, never on its
+// shape after substitution. A generic parameter is opaque and always wraps; a
+// declared `Option[_]` / `Result[_]` return always collapses. Both cases below
+// are generic -- only the declared return type separates them.
+//
+// The type annotations ARE the assertions: if the decision were made after
+// substitution, `map[U Any](f (T) -> U) Option[U]` would fold to `Option[V]`
+// for `U = Option[V]` and the `Option[Option[Int]]` annotation would not
+// type-check. The mirror case would fold the other way and reject `Option[Int]`.
+//
+// EXPECT: map U = Option[Int]: Some(Some(1))
+// EXPECT: map U = Int: Some(2)
+// EXPECT: map U = Option[Int] on None: None
+// EXPECT: declared flow return collapses: Some(3)
+// EXPECT: declared flow return collapses on None: None
+
+// `g` DECLARES a flow return, so `and then` collapses one wrap and the body is
+// `Option[T]` -- not `Option[Option[T]]`.
+let apply_opt[T Any](o Option[T], g (T) -> Option[T]) Option[T] = o and then as v in g(v);
+
+let half_if_even(x Int) Option[Int] = if x % 2 == 0 then {
+    Option[Int].Some(x / 2)
+} else {
+    Option[Int].None()
+};
+
+let print_nested(label String, opt Option[Option[Int]]) Void = {
+    print(label);
+    when opt in {
+        .Some(inner) then when inner in {
+            .Some(v) then println("Some(Some(" + v.to_string() + "))"),
+            .None() then println("Some(None)"),
+        },
+        .None() then println("None"),
+    };
+};
+
+let print_flat(label String, opt Option[Int]) Void = {
+    print(label);
+    when opt in {
+        .Some(v) then println("Some(" + v.to_string() + ")"),
+        .None() then println("None"),
+    };
+};
+
+let main() Int = {
+    // `map` declares `f (T) -> U`; `U` is a type parameter, so it is opaque and
+    // wraps. Instantiating `U` as `Option[Int]` must not change that.
+    let nested Option[Option[Int]] = Option[Int].Some(1).map((x) => Option[Int].Some(x));
+    print_nested("map U = Option[Int]: ", nested);
+
+    let plain Option[Int] = Option[Int].Some(1).map((x) => x + 1);
+    print_flat("map U = Int: ", plain);
+
+    let on_none Option[Option[Int]] = Option[Int].None().map((x) => Option[Int].Some(x));
+    print_nested("map U = Option[Int] on None: ", on_none);
+
+    // Mirror: the transform DECLARES `Option[Int]`, so one wrap is collapsed and
+    // the result is `Option[Int]` -- not `Option[Option[Int]]`.
+    let collapsed Option[Int] = apply_opt(Option[Int].Some(6), half_if_even);
+    print_flat("declared flow return collapses: ", collapsed);
+
+    let collapsed_none Option[Int] = apply_opt(Option[Int].None(), half_if_even);
+    print_flat("declared flow return collapses on None: ", collapsed_none);
+
+    return 0;
+};

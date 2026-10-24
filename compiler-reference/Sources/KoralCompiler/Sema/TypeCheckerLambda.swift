@@ -453,7 +453,15 @@ extension TypeChecker {
 
     case .orReturnExpression(let operand, _):
       try collectCapturedVariables(expr: operand, localNames: localNames, captures: &captures)
-      
+
+    case .flowReceiver:
+      break
+
+    case .flowChainExpression(let chain, _):
+      try collectCapturedVariables(expr: chain, localNames: localNames, captures: &captures)
+
+    case .flowBindExpression(_, let body, _):
+      try collectCapturedVariables(expr: body, localNames: localNames, captures: &captures)
     }
   }
 

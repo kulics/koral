@@ -117,7 +117,6 @@ public enum Token: CustomStringConvertible {
   case usingKeyword // 'using' keyword
   case bang // "!" symbol
   case deferKeyword // 'defer' keyword
-  case itKeyword // 'it' keyword
   case unsafeKeyword // 'unsafe' keyword
   case whereKeyword // 'where' keyword
 
@@ -192,8 +191,6 @@ public enum Token: CustomStringConvertible {
     case (.bang, .bang):
       return true
     case (.deferKeyword, .deferKeyword):
-      return true
-    case (.itKeyword, .itKeyword):
       return true
     case (.unsafeKeyword, .unsafeKeyword):
       return true
@@ -385,8 +382,6 @@ public enum Token: CustomStringConvertible {
       return "!"
     case .deferKeyword:
       return "defer"
-    case .itKeyword:
-      return "it"
     case .unsafeKeyword:
       return "unsafe"
     case .whereKeyword:
@@ -1650,7 +1645,6 @@ public class Lexer {
       case "for": .forKeyword
       // raw is no longer a keyword; use '!' for raw pointers
       case "defer": .deferKeyword
-      case "it": .itKeyword
       case "unsafe": .unsafeKeyword
       case "where": .whereKeyword
       default: .identifier(id)

@@ -1,0 +1,76 @@
+// EXPECT: chain field: hello
+// EXPECT: chain call: 21
+// EXPECT: chain deeper: HELLO
+// EXPECT: chain compose with or else: 21
+// EXPECT: chain on None: none
+// EXPECT: chain cross-kind wraps: Some(Ok(3))
+// EXPECT: chain is sugar for the binder: 21
+//
+// `and then .member()` is optional chaining: the receiver is the unwrapped
+// value, so it reads as `x?.member()`. It is pure sugar for
+// `and then as v in v.member()` -- identical type and value.
+
+type Box(label String);
+
+let print_opt(label String, opt Option[String]) Void = {
+    print(label);
+    when opt in {
+        .Some(v) then println(v),
+        .None() then println("None"),
+    };
+};
+
+let print_opt_result(label String, opt Option[Result[Int]]) Void = {
+    print(label);
+    when opt in {
+        .Some(inner) then when inner in {
+            .Ok(v) then println("Some(Ok(" + v.to_string() + "))"),
+            .Error(e) then println("Some(Error: " + e.message() + ")"),
+        },
+        .None() then println("None"),
+    };
+};
+
+let main() Int = {
+    let boxed Option[Box] = Option[Box].Some(Box("hello"));
+    let n Option[Int] = Option[Int].Some(21);
+
+    // Field access on the elided receiver.
+    print_opt("chain field: ", boxed and then .label);
+
+    // A method call on the elided receiver.
+    print_opt("chain call: ", n and then .to_string());
+
+    // A chain is a general postfix run on the elided receiver, and each
+    // `and then` is one optional step.
+    print_opt("chain deeper: ", boxed and then .label and then .to_ascii_uppercase());
+
+    // The chain composes with `or else` exactly like `x?.f() ?? d`.
+    print("chain compose with or else: ");
+    println(n and then .to_string() or else "none");
+
+    let none Option[Int] = Option[Int].None();
+    print("chain on None: ");
+    println(none and then .to_string() or else "none");
+
+    // Cross-kind: an Option operand and a Result-returning transform is not the
+    // same kind, so the value is wrapped.
+    print_opt_result(
+        "chain cross-kind wraps: ",
+        n and then as v in Result[Int].Ok(v / 7),
+    );
+
+    // Sugar equivalence: the chain and the binder agree on type and value.
+    let via_chain = n and then .to_string();
+    let via_binder = n and then as v in v.to_string();
+    print("chain is sugar for the binder: ");
+    when via_chain in {
+        .Some(a) then when via_binder in {
+            .Some(b) then println(if a == b then a else "differ"),
+            .None() then println("differ"),
+        },
+        .None() then println("differ"),
+    };
+
+    return 0;
+};

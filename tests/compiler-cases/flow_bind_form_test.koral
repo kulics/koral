@@ -1,0 +1,86 @@
+// EXPECT: bind transform: 42
+// EXPECT: bind collapse: None
+// EXPECT: bind shadows outer: ok
+// EXPECT: body boundary keeps or else outside: 42
+// EXPECT: bind names the error: boom
+// EXPECT: or return still propagates: 14
+// EXPECT: nested binder shadowing: inner-99
+//
+// `as v in body` names the flow payload explicitly. The body is a layer
+// operand, so an `or else` written after it belongs to the enclosing chain --
+// the binder's scope is exactly `body`. That boundary is load-bearing:
+// `and then as v in v * 2 or else 10` parses as
+// `(and then as v in v * 2) or else 10`, and the inner reading
+// `as v in (v * 2 or else 10)` would not compile at all (`or else` on an Int).
+
+let half(x Int) Option[Int] = {
+    return if x % 2 == 0 then {
+        Option[Int].Some(x / 2)
+    } else {
+        Option[Int].None()
+    };
+};
+
+let print_opt(label String, opt Option[Int]) Void = {
+    print(label);
+    when opt in {
+        .Some(v) then println(v),
+        .None() then println("None"),
+    };
+};
+
+let doubled(x Int) Result[Int] = {
+    let v = Result[Int].Ok(x) or return;
+    return Result[Int].Ok(v * 2);
+};
+
+let main() Int = {
+    let n Option[Int] = Option[Int].Some(21);
+
+    print_opt("bind transform: ", n and then as v in v * 2);
+
+    // The transform returns Option, so its value is the result -- collapsed,
+    // not doubled.
+    print_opt("bind collapse: ", n and then as v in half(v));
+
+    // The binder shadows an outer binding of the same name inside the body only.
+    let v String = "outer";
+    let shadowed = Option[Int].Some(1) and then as v in v + 1;
+    print("bind shadows outer: ");
+    when shadowed in {
+        .Some(w) then println(if w == 2 and v == "outer" then "ok" else "bad"),
+        .None() then println("bad"),
+    };
+
+    // The `or else` belongs to the outer chain: the fallback is skipped because
+    // the link produced a value.
+    print("body boundary keeps or else outside: ");
+    println(n and then as v in v * 2 or else 10);
+
+    // `or else as e in` names the Error on a Result. The default must still
+    // have the payload's type -- here `String` -- so `e.message()` fits.
+    let r Result[String] = Result[String].Error("boom");
+    print("bind names the error: ");
+    println(r or else as e in e.message());
+
+    // `or return` is the pure-propagation spelling of the same shape.
+    when doubled(7) in {
+        .Ok(w) then {
+            print("or return still propagates: ");
+            println(w);
+        },
+        .Error(e) then println(e.message()),
+    };
+
+    // Nested binders shadow: the inner name wins inside the inner body.
+    let nested = Option[Int].Some(1) and then as v in {
+        Option[Int].Some(99) and then as v in v
+    };
+    print("nested binder shadowing: ");
+    when nested in {
+        .Some(w) then println("inner-" + w.to_string()),
+        .None() then println("bad"),
+    };
+
+    return 0;
+};

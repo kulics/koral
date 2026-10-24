@@ -185,8 +185,8 @@ file_private let find_case_requires_root(manifest_path Path) Option[Path] = {
 
 file_private let find_built_executable(output_dir Path) Result[Path] = {
     let is_windows = is_windows_host();
-    let mutable iter = read_dir(output_dir) or else {
-        return Result[Path].Error(it);
+    let mutable iter = read_dir(output_dir) or else as e in {
+        return Result[Path].Error(e);
     };
 
     let mutable found = List[Path].new();
@@ -322,14 +322,14 @@ file_private let build_captured_command(
 ) Result[Command] = {
     let stdout_path = capture_root.join(capture_prefix + "_stdout.txt");
     let stderr_path = capture_root.join(capture_prefix + "_stderr.txt");
-    let stdout_file = open_file(stdout_path, OpenMode.Write()) or else {
+    let stdout_file = open_file(stdout_path, OpenMode.Write()) or else as e in {
         return Result[Command].Error(
-            "failed to open stdout capture file: " + it.message(),
+            "failed to open stdout capture file: " + e.message(),
         );
     };
-    let stderr_file = open_file(stderr_path, OpenMode.Write()) or else {
+    let stderr_file = open_file(stderr_path, OpenMode.Write()) or else as e in {
         return Result[Command].Error(
-            "failed to open stderr capture file: " + it.message(),
+            "failed to open stderr capture file: " + e.message(),
         );
     };
     return Result[Command].Ok(
@@ -351,14 +351,14 @@ file_private let execute_command_with_timeout(
 ) CommandExecution = {
     let stdout_path = capture_root.join(capture_prefix + "_stdout.txt");
     let stderr_path = capture_root.join(capture_prefix + "_stderr.txt");
-    let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else {
+    let cmd = build_captured_command(config, program, args, capture_root, capture_prefix) or else as e in {
         return CommandExecution.InfrastructureError(
-            spawn_error_prefix + ": " + it.message(),
+            spawn_error_prefix + ": " + e.message(),
         );
     };
-    let proc = cmd.spawn() or else {
+    let proc = cmd.spawn() or else as e in {
         return CommandExecution.InfrastructureError(
-            spawn_error_prefix + ": " + it.message(),
+            spawn_error_prefix + ": " + e.message(),
         );
     };
 
@@ -456,9 +456,9 @@ file_private let execute_built_executable_with_retry(
     timeout_secs Int64,
     stop_requested AtomicInt,
 ) CommandExecution = {
-    let first_program = prepared_run_executable_path(info, output_dir, UInt(0)) or else {
+    let first_program = prepared_run_executable_path(info, output_dir, UInt(0)) or else as e in {
         return CommandExecution.InfrastructureError(
-            "failed to prepare built executable: " + it.message(),
+            "failed to prepare built executable: " + e.message(),
         );
     };
     let first = execute_command_with_timeout(
@@ -474,9 +474,9 @@ file_private let execute_built_executable_with_retry(
     return when first in {
         .InfrastructureError(_) then {
             sleep(100ms);
-            let second_program = prepared_run_executable_path(info, output_dir, UInt(1)) or else {
+            let second_program = prepared_run_executable_path(info, output_dir, UInt(1)) or else as e in {
                 return .InfrastructureError(
-                    "failed to prepare built executable: " + it.message(),
+                    "failed to prepare built executable: " + e.message(),
                 );
             };
             let second = execute_command_with_timeout(
@@ -496,9 +496,9 @@ file_private let execute_built_executable_with_retry(
                         info,
                         output_dir,
                         UInt(2),
-                    ) or else {
+                    ) or else as e in {
                         return .InfrastructureError(
-                            "failed to prepare built executable: " + it.message(),
+                            "failed to prepare built executable: " + e.message(),
                         );
                     };
                     execute_command_with_timeout(
@@ -653,8 +653,8 @@ file_private let observe_case(
     stop_requested AtomicInt,
 ) CaseObservation = {
     let timeout_secs = Int64(config.timeout_secs);
-    let expectations = parse_expectations(info.absolute_path) or else {
-        return .Infra(label + " side: failed to parse expectations: " + it.message());
+    let expectations = parse_expectations(info.absolute_path) or else as e in {
+        return .Infra(label + " side: failed to parse expectations: " + e.message());
     };
 
     // Same split `run_single_case` makes: a case that only asserts a compile
@@ -760,22 +760,22 @@ file_private let run_single_case_differential(
     // Separate output dirs so the two compilers cannot see each other's
     // artifacts -- a leftover binary on one side would be indistinguishable
     // from that side having produced one.
-    let swift_dir = create_case_output_dir(config, info) or else {
+    let swift_dir = create_case_output_dir(config, info) or else as e in {
         return failure_result(
             info,
             "failed",
             "infrastructure_error",
-            "failed to create output dir for swift: " + it.message(),
+            "failed to create output dir for swift: " + e.message(),
             -1,
             duration_ms,
         );
     };
-    let boot_dir = create_case_output_dir(config, info) or else {
+    let boot_dir = create_case_output_dir(config, info) or else as e in {
         return failure_result(
             info,
             "failed",
             "infrastructure_error",
-            "failed to create output dir for bootstrap: " + it.message(),
+            "failed to create output dir for bootstrap: " + e.message(),
             -1,
             duration_ms,
         );
@@ -1002,25 +1002,25 @@ public let run_single_case(
     let start = MonoTime.now();
     let timeout_secs = Int64(config.timeout_secs);
 
-    let expectations = parse_expectations(info.absolute_path) or else {
+    let expectations = parse_expectations(info.absolute_path) or else as e in {
         let duration_ms = start.elapsed().as_milliseconds();
         return failure_result(
             info,
             "failed",
             "infrastructure_error",
-            "failed to parse expectations: \(it.message())",
+            "failed to parse expectations: \(e.message())",
             -1,
             duration_ms,
         );
     };
 
-    let temp_output_dir = create_case_output_dir(config, info) or else {
+    let temp_output_dir = create_case_output_dir(config, info) or else as e in {
         let duration_ms = start.elapsed().as_milliseconds();
         return failure_result(
             info,
             "failed",
             "infrastructure_error",
-            "failed to create temp output dir: \(it.message())",
+            "failed to create temp output dir: \(e.message())",
             -1,
             duration_ms,
         );
@@ -1103,25 +1103,25 @@ public let run_single_case(
 
     if expectations.expect_error.is_empty() and build_exit_code != 0 and build_combined.is_empty(
     ) then {
-        let retry_output_dir = create_case_output_dir(config, info) or else {
+        let retry_output_dir = create_case_output_dir(config, info) or else as e in {
             return failure_result(
                 info,
                 "failed",
                 "infrastructure_error",
-                "failed to create retry temp output dir: \(it.message())",
+                "failed to create retry temp output dir: \(e.message())",
                 build_exit_code,
                 duration_ms,
             );
         };
 
         active_output_dir = retry_output_dir;
-        build_args = build_command_args_for_case(config, info, active_output_dir) or else {
+        build_args = build_command_args_for_case(config, info, active_output_dir) or else as e in {
             let duration_ms = start.elapsed().as_milliseconds();
             return failure_result(
                 info,
                 "failed",
                 "infrastructure_error",
-                "failed to prepare retry compiler arguments: \(it.message())",
+                "failed to prepare retry compiler arguments: \(e.message())",
                 build_exit_code,
                 duration_ms,
             );

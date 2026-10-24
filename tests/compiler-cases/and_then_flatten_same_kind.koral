@@ -1,0 +1,133 @@
+// `and then` keeps the result in the operand's own flow enum. When the
+// transform's DECLARED return type is already that same enum, its value IS the
+// result -- one wrap is collapsed. When it is anything else (a bare type, the
+// other flow enum, a generic parameter) the value is wrapped once.
+//
+// Collapse removes exactly one wrap, it does not descend to the innermost: a
+// transform returning `Option[Option[X]]` yields `Option[Option[X]]`.
+//
+// EXPECT: Option wrap bare Some: Some(20)
+// EXPECT: Option wrap bare None: None
+// EXPECT: Option collapse Some: Some(10)
+// EXPECT: Option collapse inner None: None
+// EXPECT: Option collapse outer None: None
+// EXPECT: Option explicit nest: Some(Some(10))
+// EXPECT: Option cross-kind wraps: Some(Ok(3))
+// EXPECT: Result wrap bare Ok: Ok(99)
+// EXPECT: Result collapse Ok: Ok(50)
+// EXPECT: Result collapse inner Error: Error: div by zero
+// EXPECT: Result collapse outer Error: Error: outer
+// EXPECT: Result explicit nest: Ok(Ok(50))
+
+let safe_div(x Int, y Int) Option[Int] = {
+    return if y == 0 then {
+        Option[Int].None()
+    } else {
+        Option[Int].Some(x / y)
+    };
+};
+
+let safe_result_div(x Int, y Int) Result[Int] = {
+    return if y == 0 then {
+        Result[Int].Error("div by zero")
+    } else {
+        Result[Int].Ok(x / y)
+    };
+};
+
+let print_option(label String, opt Option[Int]) Void = {
+    print(label);
+    when opt in {
+        .Some(v) then println("Some(" + v.to_string() + ")"),
+        .None() then println("None"),
+    };
+};
+
+let print_result(label String, res Result[Int]) Void = {
+    print(label);
+    when res in {
+        .Ok(v) then println("Ok(" + v.to_string() + ")"),
+        .Error(e) then println("Error: " + e.message()),
+    };
+};
+
+// The one-wrap rule is what makes an explicitly nested result reachable at all:
+// the outer `Some(...)` is the wrap `and then` would otherwise add.
+let print_nested_option(label String, opt Option[Option[Int]]) Void = {
+    print(label);
+    when opt in {
+        .Some(inner) then when inner in {
+            .Some(v) then println("Some(Some(" + v.to_string() + "))"),
+            .None() then println("Some(None)"),
+        },
+        .None() then println("None"),
+    };
+};
+
+let print_nested_result(label String, res Result[Result[Int]]) Void = {
+    print(label);
+    when res in {
+        .Ok(inner) then when inner in {
+            .Ok(v) then println("Ok(Ok(" + v.to_string() + "))"),
+            .Error(e) then println("Ok(Error: " + e.message() + ")"),
+        },
+        .Error(e) then println("Error: " + e.message()),
+    };
+};
+
+let print_option_result(label String, opt Option[Result[Int]]) Void = {
+    print(label);
+    when opt in {
+        .Some(inner) then when inner in {
+            .Ok(v) then println("Some(Ok(" + v.to_string() + "))"),
+            .Error(e) then println("Some(Error: " + e.message() + ")"),
+        },
+        .None() then println("None"),
+    };
+};
+
+let main() Int = {
+    let opt_some = Option[Int].Some(100);
+    let opt_none = Option[Int].None();
+
+    // Transform returns a bare U -> wrapped once.
+    print_option("Option wrap bare Some: ", opt_some and then as v in v / 5);
+    print_option("Option wrap bare None: ", opt_none and then as v in v / 5);
+
+    // Transform returns Option[V] of the same kind -> collapsed to Option[V].
+    print_option("Option collapse Some: ", opt_some and then as v in safe_div(v, 10));
+    print_option("Option collapse inner None: ", opt_some and then as v in safe_div(v, 0));
+    print_option("Option collapse outer None: ", opt_none and then as v in safe_div(v, 10));
+
+    // Explicit nesting still collapses exactly one wrap: the transform's own
+    // type is Option[Option[Int]], so the result is Option[Option[Int]].
+    print_nested_option(
+        "Option explicit nest: ",
+        opt_some and then as v in Option[Option[Int]].Some(safe_div(v, 10)),
+    );
+
+    // Cross-kind: an Option operand and a Result-returning transform is not the
+    // same kind, so the value is wrapped -> Option[Result[Int]].
+    print_option_result(
+        "Option cross-kind wraps: ",
+        opt_some and then as v in Result[Int].Ok(v / 100 * 3),
+    );
+
+    let res_ok = Result[Int].Ok(100);
+    let res_err = Result[Int].Error("outer");
+
+    // Same rule on Result.
+    print_result("Result wrap bare Ok: ", res_ok and then as v in v - 1);
+    print_result("Result collapse Ok: ", res_ok and then as v in safe_result_div(v, 2));
+    print_result("Result collapse inner Error: ", res_ok and then as v in safe_result_div(v, 0));
+    print_result("Result collapse outer Error: ", res_err and then as v in safe_result_div(v, 2));
+
+    // Explicit nesting on Result: the outer Ok is the wrap that collapse would
+    // otherwise remove.
+    print_nested_result(
+        "Result explicit nest: ",
+        res_ok and then as v in Result[Result[Int]].Ok(safe_result_div(v, 2)),
+    );
+
+    return 0;
+};

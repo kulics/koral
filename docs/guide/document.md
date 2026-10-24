@@ -732,25 +732,25 @@ layers, the way comparison binds tighter than `??`/flow operators in Swift. So
 `a == b or else c` groups as `(a == b) or else c`, never `a == (b or else c)`,
 and `opt or else x == y` groups as `opt or else (x == y)`.
 
-- `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()` — flow with flow, fine.
+- `f() and then as v in g(v) or else h()` groups as `(f() and then as v in g(v)) or else h()` — flow with flow, fine.
 - `a or b and c` groups as `a or (b and c)` — logical with logical, fine.
 - `a and (b or else c)` — fine, and means that.
 - `(a and b) or else c` — fine, and means something else.
 - `a and b or else c` — **refused**. It looks like `(a and b) or else c` and would have parsed as `a and (b or else c)`; neither is what the line reads as, so say which with parentheses.
-- `opt and then it == 1 and false` — **refused**, for the same reason.
+- `opt and then as v in v == 1 and false` — **refused**, for the same reason.
 
 ```koral
 let opt Option[Int] = Option[Int].Some(1);
 let ready Bool = true;
 
 // `and then` runs first inside the flow layer, then `or else`:
-let inLayer = opt and then it * 2 or else 0;   // 84
+let inLayer = opt and then as v in v * 2 or else 0;   // 84
 
 // The transform is the intended scope of `and` — say so:
-let good = opt and then (it == 1 and false);   // Some(false)
+let good = opt and then as v in (v == 1 and false);   // Some(false)
 
 // The logical `and` wants a flow result on its right — say so:
-let good2 = ready and (opt and then it > 0 or else false);   // true
+let good2 = ready and (opt and then as v in v > 0 or else false);   // true
 ```
 
 This is the same rule `??` follows in languages that have it: a value-coalescing operator is a clear middle layer and does not chain onto boolean logic without a parenthesis. Note that `(ready and opt)` is not a fix for the mixed form: `and` requires `Bool` on both sides, so a flow result has to be reduced to `Bool` first (as in `good2`) before it can take part in a logical `and`.
@@ -1215,10 +1215,22 @@ defer {
 Koral provides three special operators for working with `Option` and `Result` types:
 
 - `or else`: Value coalescing. Returns the right-hand default value when the left side is `None` or `Error`.
-- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`, and **wraps the result** in the same `Option` / `Result` kind. The result type is therefore always `Option[U]` / `Result[U]`, where `U` is the transform's return type — there is no flattening, so a transform that itself returns `Option[V]` produces `Option[Option[V]]`.
+- `and then`: Optional chaining / value transformation. Applies the right-hand transformation when the left side is `Some` or `Ok`. The result always stays in the same `Option` / `Result` kind: when the transformation's own return type is already that kind, its value **is** the result (one wrap is collapsed), and anything else is wrapped once. A generic transform's type parameter is opaque and therefore wrapped — so `map[U](f (T) -> U) Option[U]` keeps `Option[U]` for every `U`, including `U = Option[V]`.
 - `or return`: Early-return propagation sugar. It unwraps `Some` / `Ok`, and on `None` / `Error` returns from the enclosing function.
 
-In `and then` and `or else` expressions, the keyword `it` refers to the unwrapped value: for `and then`, `it` is the inner `Some` or `Ok` value; for `or else` on a `Result`, `it` is the `Error` value.
+#### Naming the unwrapped value
+
+There is no implicit name. Two spellings give the transformation access to the unwrapped value, and they differ only in whether it needs a name:
+
+- **Chain** — `and then .member(...)`: the receiver is the unwrapped value, so `config and then .window.title` reads as `config?.window.title`. A leading dot here is always a member of the unwrapped value (never an implicit member construction). The chain is a full postfix run: `.f(x).g`, `.f()[0]`.
+- **Binder** — `and then as v in body`: names the unwrapped value for `body`. `body` is a single layer operand, so an `or else` written after it belongs to the enclosing chain: `x and then as v in as v in v * 2 or else 0` is `(x and then as v in as v in v * 2) or else 0`.
+
+The chain is sugar for the binder — `x and then as v in .f()` and `x and then as v in as v in v.f()` have the same type and value — so v can always be expanded when a name helps.
+
+`or else` takes a fallback value, which needs no name in the common case. When the fallback must look at the error, bind it:
+
+- `or else as e in body` — `e` is the `Error` value. **`Result` only**: `None` has no payload, so the binder form on `Option` is an error.
+- The fallback's type is the left operand's **payload** type: with `x Option[T]`, `x or else d` makes `d` a `T`, not an `Option[T]`.
 
 Precedence follows the parser: inside the flow layer `and then` binds tighter than `or else` / `or return`. The flow layer as a whole does not mix with logical `and` / `or` without parentheses — see [Operator Precedence](#operator-precedence).
 
@@ -1229,10 +1241,23 @@ let val = opt or else 0;           // 42 (because opt is Some)
 let none = Option[Int].None();
 let val2 = none or else 0;         // 0 (because none is None)
 
-let mapped = opt and then it * 2;  // Some(84)
+let mapped = opt and then as v in v * 2;  // Some(84)
 
-// No flattening: the transform's result is wrapped as-is.
-let nested = opt and then Option[Int].Some(it * 2);  // Some(Some(84))
+// The transform returns Option, so its value is the result — one wrap is
+// collapsed, not doubled. A transform returning a bare value is wrapped once.
+let half(x Int) Option[Int] =
+    if x % 2 == 0 then Option[Int].Some(x / 2) else Option[Int].None();
+let chained = opt and then as v in half(v);  // Some(21) — type Option[Int]
+
+// The chain is sugar over the binder: the receiver is the unwrapped value.
+type Config(window Window);
+type Window(title String);
+let cfg = Option[Config].Some(Config(Window("untitled")));
+let title = cfg and then .window.title or else "none";   // Some("untitled")
+
+// Naming the error on a Result.
+let parsed = Result[String].Error("bad input");
+let shown = parsed or else as e in e.message();          // "bad input"
 
 let load_port(path String) Result[Int] = {
     let text = read_text_file(path) or return;
@@ -1242,8 +1267,8 @@ let load_port(path String) Result[Int] = {
 
 `or return` is equivalent to a fixed `or else` early-return pattern:
 
-- For `Result`: `expr or return` is equivalent to `expr or else { return .Error(it) }`
-- For `Option`: `expr or return` is equivalent to `expr or else { return .None() }`
+- For `Result`: `expr or return` is equivalent to `expr or else as e in { return .Error(e); }`
+- For `Option`: `expr or return` is equivalent to `expr or else { return .None(); }`
 
 It must be used inside a function whose return kind matches the propagated value:
 
@@ -1559,7 +1584,7 @@ become `Int`, so `sum` remains available and is checked again at each call site.
 
 ```koral
 given[T Any] Option[T] {
-    public map[U Any](self, f (T) -> U) Option[U] = self and then f(it);
+    public map[U Any](self, f (T) -> U) Option[U] = self and then as v in f(v);
 };
 ```
 
@@ -2924,7 +2949,7 @@ let tags Set[String] = ["koral", "lang"];
 
 // Option + or else / and then
 let port = Option[Int].Some(8080) or else 80;
-let doubled = Option[Int].Some(21) and then it * 2;
+let doubled = Option[Int].Some(21) and then as v in v * 2;
 
 // or return
 let read_number(path String) Result[Int] = {

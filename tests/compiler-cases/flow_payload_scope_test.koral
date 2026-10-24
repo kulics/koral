@@ -1,0 +1,58 @@
+// EXPECT: or else fallback runs on None: 7
+// EXPECT: and then chain of binders: 8
+// EXPECT: and then then or else: 4
+// EXPECT: nested binder shadow: 42
+// EXPECT: or else names the error: boom
+//
+// Each `and then` / `or else` opens its own payload scope. A binder name never
+// leaks outward, and an enclosing binding never leaks in: every construct
+// shadows whatever the outer one called its payload. There is no implicit name.
+// The binder is the only way to see the payload, so where a construct has none
+// (`None`), the fallback is a plain expression.
+
+let main() Int = {
+    // On None the fallback runs. `or else` on Option has no payload to name.
+    let y Option[Int] = Option[Int].None();
+    let w = y or else 7;
+    print("or else fallback runs on None: ");
+    println(w);
+
+    // `and then` links each bind their own payload. Some(3) -> Some(4) -> Some(8)
+    let a = Option[Int].Some(3) and then as v in v + 1 and then as v in v * 2;
+    when a in {
+        .Some(n) then {
+            print("and then chain of binders: ");
+            println(n);
+        },
+        .None() then {
+            print("and then chain of binders: ");
+            println(0);
+        },
+    };
+
+    // Mixed: unwrapped by `and then`, then `or else` over the result.
+    // Some(2) -> Some(4) -> or else -> 4
+    let b = Option[Int].Some(2) and then as v in v * 2 or else 5;
+    print("and then then or else: ");
+    println(b);
+
+    // Shadowing: the outer `and then` binds its payload as a String; the inner
+    // one binds its own as an Int under the SAME name, and the inner name wins
+    // inside the inner body. The outer transform's body is `Option[Int]` --
+    // the same kind as the operand -- so it collapses to `Option[Int]`, and
+    // `or else 0` (which sits OUTSIDE the binder) unwraps it to `Int`.
+    let outer Option[String] = Option[String].Some("hello");
+    let inner Option[Int] = Option[Int].Some(42);
+    let c = outer and then as v in (inner and then as v in v) or else 0;
+    print("nested binder shadow: ");
+    println(c);
+
+    // `or else as e in` names the error, shadowing any outer `e`. If it did
+    // not, `e.message()` would not type-check against the outer String.
+    let e String = "outer-error";
+    let r Result[String] = Result[String].Error("boom");
+    print("or else names the error: ");
+    println(r or else as e in e.message());
+
+    return 0;
+};

@@ -674,6 +674,29 @@ public indirect enum ExpressionNode {
     operand: ExpressionNode,
     span: SourceSpan
   )
+  /// The elided receiver of an `and then .member()` chain: the unwrapped value.
+  /// Only ever the base of that chain, never standalone.
+  /// - span: Source location
+  case flowReceiver(span: SourceSpan)
+  /// `and then .f(x).g` — a postfix chain on the elided receiver. The wrapper is
+  /// what tells printer and sema that this is the chain form rather than an
+  /// implicit member; `chain`'s base is a `flowReceiver`.
+  /// - chain: The postfix chain built on the elided receiver
+  /// - span: Source location
+  case flowChainExpression(
+    chain: ExpressionNode,
+    span: SourceSpan
+  )
+  /// `as name in body` — an explicit binder for the flow payload. The body is a
+  /// layer operand, so an `or else` after it belongs to the outer chain.
+  /// - name: The bound name
+  /// - body: The expression the name is in scope for
+  /// - span: Source location
+  case flowBindExpression(
+    name: String,
+    body: ExpressionNode,
+    span: SourceSpan
+  )
   /// Pattern matching expression: expr is pattern — returns Bool
   /// - subject: The expression being tested
   /// - pattern: The pattern to match against
@@ -889,6 +912,12 @@ extension ExpressionNode {
     case .andThenExpression(_, _, let span):
       return span
     case .orReturnExpression(_, let span):
+      return span
+    case .flowReceiver(let span):
+      return span
+    case .flowChainExpression(_, let span):
+      return span
+    case .flowBindExpression(_, _, let span):
       return span
     case .isExpression(_, _, let span):
       return span

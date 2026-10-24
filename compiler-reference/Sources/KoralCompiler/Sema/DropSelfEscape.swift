@@ -145,6 +145,17 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     }
     return dropSelfEscapeSpanIn(defaultExpr, inLambda: inLambda)
 
+  // The chain's elided receiver is the flow payload, never `self`; only its
+  // arguments and a binder's body can name one.
+  case .flowReceiver:
+    return nil
+
+  case .flowChainExpression(let chain, _):
+    return dropSelfEscapeSpanIn(chain, inLambda: inLambda)
+
+  case .flowBindExpression(_, let body, _):
+    return dropSelfEscapeSpanIn(body, inLambda: inLambda)
+
   case .arithmeticExpression(let left, _, let right, _),
        .comparisonExpression(let left, _, let right, _),
        .bitwiseExpression(let left, _, let right, _),

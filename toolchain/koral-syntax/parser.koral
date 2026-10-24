@@ -1112,13 +1112,65 @@ given CstParser {
         };
     };
 
+    // The right operand of one `and then` link. Three shapes:
+    //   `.f(x).g`      -- receiver-elided member chain on the unwrapped value
+    //   `as v in body` -- explicit binder, body is a layer operand
+    //   anything else  -- a plain layer operand (legacy; goes away with `it`)
+    //
+    // A leading dot here is the chain, never an implicit member.
+    file_private parse_and_then_operand(self) Result[CstExpr] = {
+        if self.check(.Dot()) then {
+            // The leading `.` is consumed by the dot suffix, which the postfix
+            // loop runs on the elided receiver.
+            let base = CstExpr.FlowReceiver();
+            let chain = self.parse_postfix_suffixes(base) or return;
+            return .Ok(.FlowChain(chain));
+        };
+        if self.check(.KwAs()) then {
+            return self.parse_flow_bind();
+        };
+        // No plain-expression form: the unwrapped value has no implicit name.
+        return .Error(
+            "Parse error: 'and then' takes a '.member()' chain or an 'as name in body' binder -- there is no implicit name",
+        );
+    };
+
+    // The right operand of `or else`. `as e in body` names the error payload
+    // (Result only -- `None` has no payload); anything else is the fallback
+    // value itself, where a leading dot stays an implicit member.
+    file_private parse_or_else_operand(self) Result[CstExpr] = {
+        if self.check(.KwAs()) then {
+            return self.parse_flow_bind();
+        };
+        return self.parse_not();
+    };
+
+    // `as name in body`. The body stops at a layer operand, so an `or else`
+    // written after it belongs to the enclosing flow chain and the binder's
+    // scope stays tight.
+    file_private parse_flow_bind(self) Result[CstExpr] = {
+        let as_kw = self.eat();
+        let name = when self.expect_ident("flow binding name") in {
+            .Ok(t) then t,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        if not self.check(.KwIn()) then {
+            return .Error(self.expected_error("'in' after flow binding name"));
+        };
+        let in_kw = self.eat();
+        let body = self.parse_not() or return;
+        return .Ok(.FlowBind(as_kw, name, in_kw, body));
+    };
+
     // `and then` binds tightest of the flow operators.
     file_private parse_and_then_chain(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = operand;
         while self.check(.KwAnd()) and self.peek_at_skip_nl(1) is .KwThen() then {
             let and_kw = self.eat();
             let then_kw = self.eat();
-            let right = self.parse_not() or return;
+            let right = self.parse_and_then_operand() or return;
             left = .AndThen(left, and_kw, then_kw, right);
         };
         return .Ok(left);
@@ -1134,7 +1186,7 @@ given CstParser {
                 .KwElse() then {
                     let or_kw = self.eat();
                     let else_kw = self.eat();
-                    let rhs_operand = self.parse_not() or return;
+                    let rhs_operand = self.parse_or_else_operand() or return;
                     let right = self.parse_and_then_chain(rhs_operand) or return;
                     left = .OrElse(left, or_kw, else_kw, right);
                 },
@@ -2143,14 +2195,6 @@ given CstParser {
             return .Error(
                 "Parse error: 'Self' is a type and cannot be used as an expression",
             );
-        };
-
-        // `it` is reserved (not a valid declaration name) but legal in
-        // expression position: it names the implicit lambda parameter
-        // (`or else { .Error(it) }`). The compiler parses it as
-        // `Expr.Identifier("it")`; this keeps the spelling verbatim.
-        if self.check(.KwIt()) then {
-            return .Ok(.Ident(self.eat()));
         };
 
         // Invalid primary token
