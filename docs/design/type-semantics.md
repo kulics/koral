@@ -102,9 +102,8 @@ let v = Vec(1, 2);
 ### 弱引用
 
 weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
-用户 API 只有两步：**`?T(x)` 构造**弱句柄，**`?expr` 升级**回 `Option[T]`
-（旧的 `downgrade()` / `upgrade()` 函数是 C 运行时内部 `__koral_downgrade_ref` /
-`__koral_upgrade_ref`，不是用户 API；`?v` 弱绑定模式已删）。弱引用不保活。
+用户 API 只有两步：**`?T(x)` 构造**弱句柄，**`?expr` 升级**回 `Option[T]`。
+弱引用不保活。运行时内部名与表示见 [`thin-pointer-design.md`](thin-pointer-design.md)「弱引用」。
 
 **`?T` 是句柄，不透明。** 在升级之前它不携带被引用对象的字段、分支或
 载荷，所以**一切试探或利用形状的操作都必须在 `?T` 上拒绝**：成员读写、方法调用、
@@ -113,11 +112,8 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 
 这条裁定的落点是**解析后所有读取类型形状的地方**，不是某一处 if：取址可以剥
 （`&x` 得到的 `*T` 是被引用对象的别名），弱句柄不可以（它不是别名，是指向 control block
-的独立句柄，见 [`thin-pointer-design.md`](thin-pointer-design.md) §3.4）。任何
-一处「为方便把 `?T` 剥成 `T`」都会重新打开这个洞——2026-10-10 修过一轮：
-成员访问、`for` 的被迭代者、`let (a,b)` / `for (a,b)` 的被解构者都曾剥过，
-结果是把弱句柄当强对象用，落到 C 里是 `(*(struct T*)weak_local).ptr`，
-clang 直接拒绝。
+的独立句柄，见 [`thin-pointer-design.md`](thin-pointer-design.md)「弱引用」）。任何
+一处「为方便把 `?T` 剥成 `T`」都会重新打开这个洞。
 
 ### `foreign` 是 FFI 边界
 
@@ -137,8 +133,6 @@ clang 直接拒绝。
 用户可以写 `given MyType as Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
 而 Koral `type` 的布局由编译器选，跨边界的裸指针对它没有意义；要跨 FFI 的结构体应当
 写 `type foreign`。
-
-被删掉的形态：`Pod` marker trait 及其 `given ... as Pod {}` 实现。
 
 ### `Drop` 让共享可观察
 

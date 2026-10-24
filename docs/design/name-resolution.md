@@ -56,8 +56,8 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 出处：记录 §28.2。
 
-`[T Eq]` 不写 `using "std" { Eq }` 也能用。这件事过去是靠**未限定索引**顺带做到的——
-而那个索引同时把**任何**模块的 trait 变成了不写 `using` 也能命名的东西。
+`[T Eq]` 不写 `using "std" { Eq }` 也能用。这件事**不能**靠未限定索引顺带做到——
+那个索引会把**任何**模块的 trait 变成不写 `using` 也能命名的东西。
 
 拆开写：
 
@@ -89,9 +89,9 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 - 写裸键等于没修。两个模块可以各导入一个叫 `Trait` 的 trait，未限定索引跨模块
   last-wins，回答不了「这个 bound 里的 `Tag` 指哪个」。
-- **不能用环境里的当前模块路径**。`registerExplicitModuleImports` / `check_loaded_nodes`
-  是一次性走完所有文件的导入边的，环境里的 `currentModulePath` 是最后一条声明留下的，
-  对除那个文件之外的每一个文件都是错的。导入边自己带 `module`，要用它。
+- **不能用环境里的当前模块路径**。一次性走完所有文件的导入边时，环境里的
+  `currentModulePath` 是最后一条声明留下的，对除那个文件之外的每一个文件都是错的。
+  导入边自己带 `module`，要用它。
 - 没改名的导入**不能跳过**。只给 `as` 重命名的边注册，等于 `using { Tag }` 这条最常见的
   写法从来进不了 trait 名表，bound 里的 `Tag` 于是掉到最后的裸名层。
 - 声明身份不变。重命名是拼写，`def_id` 原样，下游分不出两个拼写。
@@ -144,13 +144,8 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 // A type parameter shadows any same-named module-level declaration
 ```
 
-类型参数是**词法 binder**：`define_generic_param` / `define_generic_binding` 把它登记成
-binder 并遮蔽同名模块级类型；`define_type` **不能**遮蔽它。否则用户写的 `type T`
-会劫持 std 里 `[T ...]` 的 `T`。记录 §4.2。
-
-原文出处：`../implementation/developer-guide.md` FAQ（已迁出）。
-
-Use `UnifiedScope.defineGenericParameter()` to register generic parameters. Lookup prioritizes generic parameters over ordinary names.
+类型参数是**词法 binder**：它登记成 binder 并遮蔽同名模块级类型，模块级类型声明
+**不能**遮蔽它。否则用户写的 `type T` 会劫持 std 里 `[T ...]` 的 `T`。记录 §4.2。
 
 ### 可见性默认值
 
@@ -181,10 +176,6 @@ Use `UnifiedScope.defineGenericParameter()` to register generic parameters. Look
 
 ### C 标识符唯一性
 
-出处：`../implementation/developer-guide.md` FAQ（已迁出）。
-
-Use `DefIdMap.uniqueCIdentifier(for:)` or `CIdentifierUtils.generateCIdentifier()` to handle module path, private symbol file isolation, C keyword escaping, and collision resolution.
-
 **四个要素缺一不可**：模块路径、private 符号的文件隔离、C 关键字转义、碰撞消解。
 private 符号的文件作用域不得遮蔽同级（`compiler-reference/.../DefId.swift`）。
 
@@ -204,7 +195,6 @@ private 符号的文件作用域不得遮蔽同级（`compiler-reference/.../Def
 - **`path_segments` 为何仍是名字限定**：`compiler/koralc/module/package_manifest.koral` 的注释
   指向 [`module-design.md`](module-design.md)「风险与未决」第 4 条（codegen 标识符映射），
   那条记录说基准应是 `(source, 子路径)` 而非本地源码名，**且仍是开放项**。
-  （注：旧注释写「§10.4」，指该节第 4 条，不是小节号。）
 - **名字匹配保留处的完整边界**：记录 §7.8 有迁移期的清点表（`lookupGenericStructTemplate`、
   `MethodOwner.Builtin` 封闭集、`stdStringDefId` 等 lang item、`generateCIdentifier` 等），但那是
   **逐处打注释的清点结果**，不是设计上的边界定义——「哪几处可以合法读名字」本身没有正面论证。

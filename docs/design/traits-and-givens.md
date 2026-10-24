@@ -71,50 +71,23 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 `duplicate vtable key`、C 里 `__koral_vtable_Tag_for_Box` 被声明两次。
 `_d<DefId>` 是类型名已经用的同一套消歧（`List_I_d58`）。
 
-回归用例：`tests/compiler-cases/trait_same_name_cross_module_same_type_test/`。
-
 **方法序号也要按声明查。** vtable 里的 `methodIndex` 来自 trait 的方法序
-（父 trait 在前）。按拼写查会取到另一个同名 trait 的序号。Swift 的
-`inferTraitObjectMethodCall` 曾用 `visibleTraitInfo(traitName)?.defId` 从**名字**
-反查 trait，两个 `Tag` 时拿到错的那个，MIR 校验器随即报
-`trait method call receiver type does not match call trait metadata`；
-现在从接收者的 trait-object 类型取 `DefId`。
+（父 trait 在前）。按拼写查会取到另一个同名 trait 的序号——从名字反查 trait 一律
+不可接受，身份要从接收者的 trait-object 类型或匹配到的 bound 取。
 
 与共同前提一致：名字只在解析边界、显示、C 改编三处合法。
 
-**同一批点已一并改掉**（2026-10-10）：Swift 里另有 8 处
-`.traitMethodPlaceholder(traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid, ...)`，
-都在**泛型参数接收者**上——`[T Tag]` 约束里的 `Tag` 是拼写，placeholder 记的
-`traitDefId` 回头按名字查。现在全部改从**约束 / 匹配到的 bound** 取：
-
-| 处 | 身份来源 |
-|---|---|
-| 限定调用、`inferMethodOnType` | `resolveBound(traitConstraint).defId` |
-| `inferGenericMethodCallExpression` | `GenericMethodResolutionResult.traitDefId`（新增字段） |
-| 重建 placeholder | 沿用传入 placeholder 自己的 `traitDefId` |
-| `buildEqualsCall` / `buildCompareCall` / 算术 | 匹配到的 bound；无 bound 才落 std 的 lang item |
-| `buildTraitMethodCall` | `matchedTraitRef.traitDefId`（顺带把 `traits[name]` 换成 `traitDeclsByDefId`） |
-
-回归用例：`tests/compiler-cases/trait_same_name_bound_same_type_test/`——两个模块各声明
-`trait Tag`，同一文件里都当泛型约束用，具体类型也都叫 `Box`。7/40/47。
+回归用例：`tests/compiler-cases/trait_same_name_cross_module_same_type_test/`、
+`tests/compiler-cases/trait_same_name_bound_same_type_test/`。
 
 ### 导入别名必须也能命名 trait
 
 `using "m" { Tag as AlphaTag }` 里的 `AlphaTag` 要能当**约束**和**trait object 类型**用。
-改前它只绑成普通类型（甚至根本没绑：`extractSymbolInfo` 没有 `.traitDeclaration`
-分支，trait 从不进 `publicTypes`），`traits["AlphaTag"]` 查不到。
+**别名只进名字表、不进类型表**：给 trait 再加一条类型绑定，会让
+`Result[T].Error(...)` 里的 `Error` 解析到一个合成的 trait object，`String` 传不进去。
 
-两边都补上了，而且**别名只进名字表、不进类型表**：给 trait 再加一条类型绑定，会让
-`Result[T].Error(...)` 里的 `Error` 解析到一个合成的 trait object，`String` 传不进去
-（76 个用例当场红）。别名注册进 trait 注册表与 mono 的名字表两处——只注册前者，
-泛型约束在单态化阶段仍按名字查 `generic_templates.traits`，实例化不触发，报
-`function operand has unresolved generic type`。
-
-**没改名的 `using` 也是绑定**，键是 **(导入方模块, 本地拼写)**。见
-[`name-resolution.md`](name-resolution.md)「trait 的 `using` 也是绑定」——写裸键、用环境里的
-当前模块路径、或只处理 `as` 重命名的边，都会让 `using "m" { Tag }` 这条最常见写法失效：
-bound 里的 `Tag` 掉到最后的裸名层，报「Import it explicitly」，而文件里明明导入了它。
-两个模块各有一个 `trait Tag` 时，它还会解析成另一个模块的那一个。
+没改名的 `using` 同样是绑定，键是 (导入方模块, 本地拼写)——正本见
+[`name-resolution.md`](name-resolution.md)「trait 的 `using` 也是绑定」。
 
 ### 单态化按声明比，不按拼写
 
@@ -122,34 +95,22 @@ bound 里的 `Tag` 掉到最后的裸名层，报「Import it explicitly」，�
 此后单态化阶段问「这个类型实参满不满足这个约束」，比的是两个 `DefId`
 （`trait_identity_matches`），不是两个字符串。
 
-改前 `type_satisfies_bound_constraint` 丢掉 `Bound` 自带的 `def_id`、取 `bound_base_name`
-发给 `trait_name_matches`，后者把**两边的拼写**各自查一次未限定索引再比结果。两个同名
-trait 时两个拼写落在同一个声明上，判定对任意一对都为真——是过宽匹配，不是解析失败。
-
-同一条线上的 `select_trait_tool_template_cached`、`lookup_given_trait_decls_fuzzy`、
-`infer_trait_args_from_extension_template_binding`、`instantiate_trait_target_static_method`
-一并改掉：缓存键也必须带声明（`d<id>`），否则两个同名 trait 共用一个槽。
-`MethodOwner.Decl(trait_def_id)` 直接用，不再 `trait_owner_by_name` 反查。
-
-**输入端**同理：`instantiate_trait_target_static_method` 收 `Option[DefId]` 而不是
-`Option[String]`。原先两个调用点写着 `def_id_spelling(trait_def_id)` 把身份先拆成拼写再传下去，
-下游又拼回 DefId——正是 §24.3 记为「0」的那一类往返。
+按拼写比的失败模式是**过宽**而不是解析失败：两个同名 trait 的拼写落在同一个声明上，
+判定对任意一对都为真。缓存键同样必须带声明（`d<id>`），否则两个同名 trait 共用一个槽。
+**身份不拆成拼写下传**——`DefId → 名 → DefId` 往返会铸出第二个身份。
 
 ### sema 的满足性链也是身份对身份
 
-`Bound` 的 `def_id` 在注册时解析一次；`satisfies_bound` 往下走
-`satisfies_trait_requirement_with_args` → `trait_conformance_key` → … 一整条链都吃
-`trait_def_id`。原先这条链拆掉 `Bound` 自带的 `def_id`、取拼写在**当前模块**重新解析——
-在另一个模块的上下文里，两个同名 trait 就换人了。
+`Bound` 的 `def_id` 在注册时解析一次；`satisfies_bound` 往下的整条满足性链都吃
+`trait_def_id`，不拆回拼写在**当前模块**重新解析——在另一个模块的上下文里，
+两个同名 trait 会换人。conformance 键只比 `(target_type, trait_def_id, trait_arg_types)`：
+名字即使留在结构体字段里也不参与身份。
 
 名字只留在两个位置：
 
-- **书写处的解析边界**：`lang_trait_def_id("Eq")`（运算符的 lang item 拼写）、
-  `given X as Tag` 的 `trait_def_id_of(trait_name)`。语法不带声明，这里必须读一次名字。
-- **打消息**：`trait_missing_conformance_message` 一类。诊断要拼写，判定不要。
-
-`ExplicitTraitConformanceKey` 的 `equals` / `hash` 本来就只比
-`(target_type, trait_def_id, trait_arg_types)`——名字在字段里但不参与身份。这正是它该有的形状。
+- **书写处的解析边界**：运算符的 lang item 拼写（`lang_trait_def_id("Eq")`）、
+  `given X as Tag` 的 trait 名。语法不带声明，这里必须读一次名字。
+- **打消息**：诊断要拼写，判定不要。
 
 **trait object 的 trait 不必在作用域里。** `make_alpha().value()` 里 `value` 属于
 `alpha.Tag`，而 root 从未 `using` 过 `Tag`。所以 `trait_name_from_type` 是 display-only，

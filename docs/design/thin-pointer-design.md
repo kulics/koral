@@ -151,37 +151,27 @@ static const struct {
 `retain`/`release` 读到 `strong_count == -1` 直接返回。成本是每个静态字面量多 8 B
 常量数据；收益是 `control == NULL` 这个「静态 / 非拥有」双重哨兵消失，表示统一。
 
-⚠️ **当前实现里还没有静态托管值**：字符串字面量每次都 `malloc`。immortal 头已写进
-运行时为将来预留。
+字符串字面量已按此发出（`compiler/koralc/codegen/codegen_expressions_literals.koral`
+的 `generate_string_literal`）。
 
 同一个哨兵也用在**析构期间**：`__koral_release_slow` 在跑析构函数体前后把
 `strong_count` 置 -1 / 恢复 0，让 `drop` 里的 `self.m()`（按值接收者会 retain）不复活
 对象、不重入析构。理由见 [`type-semantics.md`](type-semantics.md)「析构期间对象不可复活」。
 
-### 尺寸与收益
+### 尺寸与设计收益
 
-| | 改造前 | 现在 |
-|---|---|---|
-| `__koral_Control` | 24 B | **8 B** |
-| 托管句柄 / `Ref` | 16 B | **8 B** |
-| `__koral_TraitRef` | 24 B | **16 B** |
-| `String` 堆块 | 40 B | **24 B** |
-| `List` 堆块 | 48 B | **32 B** |
-| `Option[String]` | 24 B | **8 B**（niche） |
-| `Option[Int]` | 24 B | **16 B**（无 niche，保留 tag） |
+| | 现在 |
+|---|---|
+| `__koral_Control` | **8 B** |
+| 托管句柄 / `Ref` | **8 B** |
+| `__koral_TraitRef` | **16 B** |
+| `String` 堆块 | **24 B** |
+| `List` 堆块 | **32 B** |
+| `Option[String]` | **8 B**（niche） |
+| `Option[Int]` | **16 B**（无 niche，保留 tag） |
 
-bootstrap 自举包（`check --package-config compiler/koral.json --target-module koralc`）的分配量：
-
-| | 改造前 | 现在 | Δ |
-|---|---|---|---|
-| 全部分配字节 | 5,473,058,018 | 3,903,581,274 | **−1.57 GB / −28.7%** |
-| 托管块字节 | 3,108,388,760 | 2,339,742,736 | −24.7% |
-| 裸分配字节 | 2,364,669,258 | 1,563,838,538 | −33.9% |
-| 分配次数 | 91,001,559 | 91,001,513 | **不变** |
-
-裸分配字节降 33.9% 是**句柄减半的连锁效应**：`List[Managed]` / `Dict[String, Type]`
-这些容器的底层数组元素从 16 B 变 8 B，整块数组随之减半——「句柄宽度 → 容器元素 →
-结构体字段」的传导链。分配次数不变、只有尺寸变小，与预测一致。
+句柄宽度沿「容器元素 → 结构体字段」传导：`List[Managed]` / `Dict[String, Type]`
+这些容器的底层数组元素跟着句柄走。
 
 设计层收益（比字节更重要）：
 
@@ -208,10 +198,6 @@ bootstrap 自举包（`check --package-config compiler/koral.json --target-modul
    出现 0 次。句柄只存 payload 地址，`Control.ptr` 字段一并删除。
 4. **头砍到 8 B，`dtor` 移出头。** drop glue 改在释放调用点单态化，类型擦除走 vtable
    首成员。随后 `Option[T]` 在 `T` 是单个可空指针字时用 niche（无 tag）。
-
-**途中暴露并修掉的两个潜伏缺陷**：`.traitObject` 曾落到 `PrimitiveHandler`，拷贝不
-retain、析构不 release——`dtor` 变真之后把静默泄漏变成了 use-after-free；`needsDrop`
-没覆盖 `.genericStruct` / `.genericEnum`，泛型实例的左值拷贝被当成 move 降级。
 
 ## 替代方案
 
@@ -261,7 +247,7 @@ value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在*
 | 风险 | 说明 | 对策 |
 |---|---|---|
 | 析构顺序可观察 | 与 move 优化同一敏感区 | 每步单独跑全量，不叠加未验证改动 |
-| 静态字面量体积 | 每个字面量多 8 B 常量（当前尚未实际发生） | 实测字面量数量后评估；必要时按内容去重 |
+| 静态字面量体积 | 每个静态字面量多 8 B 常量数据 | 实测字面量数量后评估；必要时按内容去重 |
 | `-1` refcount 与原子操作 | `atomic_fetch_add` 对 `-1` 的行为要验证 | 运行时单测；或 `retain`/`release` 首行判 `-1` |
 | 借用逃逸 | 靠「借用只是 `void*` 局部量/参数」这条约定 | 保留「不可返回 / 不可存储」的检查，检查目标是传参约定而非类型 |
 
@@ -276,4 +262,4 @@ value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在*
 ## 实施
 
 四步（合并分配、借用瘦化、句柄去胖、头砍到 8 B + niche）均已落地，两个编译器同步。
-实测见「尺寸与收益」。步骤 4c 见「风险与未决」。
+尺寸见「尺寸与设计收益」。步骤 4c 见「风险与未决」。

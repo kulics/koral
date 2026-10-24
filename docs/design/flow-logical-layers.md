@@ -124,8 +124,6 @@ and-then 链       := 操作数 ("and" "then" 操作数)*
 操作数            := <not-expression>
 ```
 
-三个前端同批改（koralc、Swift 编译器、共享的 koral-syntax），诊断文本逐字相同。
-
 **括号现在是载荷**：printer 丢一个就把合法源改成被拒的混用。koralfmt 的
 「parse parity with the compiler」按契约同批加了拒绝与断言，接受断言盯住括号保留。
 
@@ -173,11 +171,10 @@ and-then 链       := 操作数 ("and" "then" 操作数)*
 `compiler-reference/Sources/KoralCompiler/Parser/ParserExpressions.swift`、
 `toolchain/koral-syntax/parser.koral`。
 
-看护两侧：编译器侧 9 个用例（5 个拒绝各一句诊断、2 个括号跨层按括号求值、2 个守层内
-优先级未被误伤），formatter 侧 5 条拒绝断言 + 4 条接受断言。
-其中 `flow_parens_logical_in_flow_test` 断言 `(a and b) or else c` **能过 parser**，
-随后被 sema 以 `'or else' can only be used with Option or Result types` 拒——
-证明拒绝混用的是**括号**，不是类型。
+看护两侧：编译器侧有拒绝诊断、括号跨层求值、层内优先级的回归用例，formatter 侧有
+拒绝与接受断言。其中 `flow_parens_logical_in_flow_test` 断言 `(a and b) or else c`
+**能过 parser**，随后被 sema 以 `'or else' can only be used with Option or Result types`
+拒——证明拒绝混用的是**括号**，不是类型。
 
 ## 参考资料
 

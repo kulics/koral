@@ -32,17 +32,14 @@
 
 ### 声明表与实例表的键不同（铁律）
 
-出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §7.1
-（曾走错两轮，206/557 → 531/557 → 557/557）。
+出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §7.1。
 
 > **铁律**：*声明*表按 `MethodOwner` 键；*实例*表按 `MethodInstanceKey`（owner + owner_args）键。
 > 把实例表按 owner 键，就是把 `List[String]` 与 `List[Rune]` 塌成一个。
 
-当时的第一诊断是「C 名字改编与注册表键分家」——**错**。改编名一直是对的，是派发选错了方法
-（`String` 的 `to_string` 调到 `Rune.to_string`）。所以：**不要碰名字改编；名字在那里是合法用途。**
-
-真正的根因是 `MethodInstanceKey` 只有 `(owner, method_name, method_type_args)` 时，
+根因形状：`MethodInstanceKey` 只有 `(owner, method_name, method_type_args)` 时，
 `List[String].new` 与 `List[Rune].new` 共享同一个键——它们共享模板 `List`，而 `method_type_args` 为空。
+名字改编不在问题面内（改编是共同前提里的合法用途）；缺陷出在派发选错方法。
 
 `MethodInstanceKey` 的定义（`compiler/koralc/typed/types.koral`）：
 

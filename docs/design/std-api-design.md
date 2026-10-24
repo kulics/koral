@@ -134,7 +134,7 @@ For such handle types, `self` provides shared access to the handle, and methods 
 
 This pattern is inherent to `type mutable`. Do not generalize interior-mutation reasoning to `type` types such as containers, strings, or path values, which must remain semantically immutable.
 
-Two follow-on rules, added after a sweep of `std/` found a dozen handles declared `type`:
+Two follow-on rules for handle types:
 
 - **A type implementing `Reader`, `Writer`, `Seeker`, `Iterator`, or `RandomSource`
   must be declared `type mutable`** (or be an explicitly one-shot consuming type).
@@ -210,9 +210,7 @@ container's own meaning. Names like `map`, `filter`, `flat_map`, `to_list` and
 them on a lazy combinator.
 
 A stream, generator, or one-shot parser must not expose observation methods
-that secretly consume its progression state. That was the bug `is_empty` on a
-cursored iterator used to be; the cursor/pipeline split removes the shape that
-made it possible.
+that secretly consume its progression state.
 
 For `type mutable` containers, `iterator(self)` naturally models this: the call passes the shared handle to the container, creates an iterator that snapshots the container's storage and cursor state, and the container itself remains reusable. The `type mutable` declaration ensures the container has shared-object identity, and the iterator is an independent cursor over that shared storage.
 
@@ -242,7 +240,7 @@ Use this distinction:
 
 Apply that rule to API design as follows:
 
-- for small pure value types such as `Duration`, `Date`, `ClockTime`, and `MonoTime`, arithmetic-style methods and nearby derived operations may stay on `self`
+- for the small pure value types listed in「Small Pure Value Types」, arithmetic-style methods and nearby derived operations may stay on `self`
 - for heavier values or handle-adjacent types such as `DateTime`, follow the type's own `type` or `type mutable` semantics when the method is observational or derived
 - for heap-owning containers (typically `type mutable`), set algebra operations such as `union`, `intersection`, `difference`, and `symmetric_difference` follow the container's own semantics even though they are mathematically operator-like
 
@@ -256,13 +254,6 @@ Likewise, predicates such as `is_subset_of` and `is_superset_of` are observation
 For non-receiver operands, stay pragmatic. Ordinary parameters do not get receiver adjustment, so the current language design naturally supports `self + value operand` as the right balance for APIs like set algebra and random generation helpers.
 
 If implementing an observation method requires a local value copy to feed an iterator, that is acceptable when the copied value is just a cheap outer handle or immutable small value. Treat that as an implementation artifact, not as evidence that the method should be consuming.
-
-When migrating existing methods to the new `type` / `type mutable` model, recheck two common implementation leftovers:
-
-- branches that still pass or return the receiver by value when the method should preserve it
-- helper or iterator constructors that still consume the receiver when they only need observation access
-
-In both cases, the fix is often to adjust the implementation to work with the shared handle rather than consuming the value. This is a migration detail, not a reason to change the public API design.
 
 If the implementation would require copying a large value or heap-owning structure solely to satisfy a consuming iterator API, prefer one of these instead:
 
@@ -326,9 +317,3 @@ If the type is `type`, all methods are observation or transformation by nature. 
 
 无单独的实现记录文件。这些约定随 `std/` 的 API 一起落地；新增或修改 `std` API 时按
 「Review Checklist」一节的三问自检。
-
-## 同节内原本重复的两处
-
-原文的「Small Pure Value Types」与「Arithmetic Traits」两节各说了一遍
-Duration / Date / MonoTime 这类紧凑纯值类型的分类。**并成一处是本次的整理**，
-两段原文都逐字保留在上面各自的小节里（未合并、未删改），只是此处记一笔以免后来者以为漏了。

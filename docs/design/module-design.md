@@ -186,7 +186,6 @@ using "std/io" { Reader as IoReader }; // 逐项别名
 6. **`using` 必须位于文件顶部**，在任何其它顶层声明之前。
 
 > **不需要 `*` 通配符**：省略 `{ }` 就是全部，`{ * }` 无从出现。
-> 相对旧写法 `using std::io { .. }`，新写法是 `using "std/io";`。
 
 > 📎 **本节规则在 `../guide/document.md` / `document-zh.md` 的「Using Declarations」里各有一份
 > 用户向镜像**——「Module Import」5 条规则 + 独立的「Name Collisions」小节（撞名矩阵）。
@@ -345,7 +344,7 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 这是刻意的，不是实现走样：
 
 - `println`、`Duration`、`List` 这些是每个程序都要的基座；
-- 要求 445 个文件各写一行 `using "std";` 不增加任何信息；
+- 要求每个文件各写一行 `using "std";` 不增加任何信息；
 - §6.4 的依赖图把主模块画成「基础层」，与 prelude 读法一致。
 
 规则边界：
@@ -358,15 +357,8 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 
 `using "std";` 仍然合法，就是第三行那个用法。
 
-> **证据**（实现时的取证，记录下来免得再走一遍）：`println` 不写 `using` 能用
-> ⇒ `std` 主模块进了作用域；`DateTime` 不写 `using` 报 `Undefined type`，
-> 写了 `using "std/os";` 但没 import `std/time` 时报
-> `'DateTime' is defined in module 'std/time'. Import it explicitly with using "std/time" { DateTime };`
-> （`compiler/koralc/sema/visibility_checker.koral`）
-> ⇒ **载入 ≠ 进作用域**，导入才进作用域。两条合起来只能是 prelude。
-> 注：诊断引用的写法必须是读者**真能写**的现行拼写（`f8ab1cbc` 前曾是
-> `using Std::Time { DateTime }` 的旧路径拼法）；且 `3ae776a2` 之后这条诊断只对
-> **调用方自己写过**的名字发出——经被调方签名传来的名字不再要求导入。
+> **「Import it explicitly」诊断的两条边界**：诊断引用的写法必须是读者**真能写**的
+> 现行拼写；该诊断只对**调用方自己写过**的名字发出——经被调方签名传来的名字不再要求导入。
 
 #### 5.5 `koral.lock`：整棵依赖树
 
@@ -426,9 +418,9 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 
 13. 包名不是合法标识符（含 `/`、大小写、数字开头、是保留字）；
 14. `modules` 的 key 既不是 `.` 也不是合法子路径；
-15. ~~同一模块 key 重复~~ —— **不是可检查的错误条件**，与 17 同因。`modules` 也是 JSON 对象，键天然唯一，解析器根本看不见重复键；而 key 只允许 `.` 与小写标识段 `/` 连接，两个不同的合法 key 必然是两个不同的模块，不存在别名（`io/` 会被 14 当非法 key 拒掉，不是 `io` 的另一种拼写）。真正可查的是 14；
+15. **同一模块 key 重复**不是可检查的错误条件：`modules` 是 JSON 对象，键天然唯一，解析器看不见重复键；key 只允许 `.` 与合法子路径，两个不同的合法 key 必然是两个模块，不存在别名（`io/` 会被 14 当非法 key 拒掉，不是 `io` 的另一种拼写）。真正可查的是 14；
 16. **`entry` 文件被两个模块声明**，或不在包根内、或不存在；
-17. ~~同一源码名被两个依赖声明（key 重复）~~ —— **不是可检查的错误条件**。`dependencies` 是 JSON 对象，键天然唯一；解析器根本看不见重复键。§4 歧义表的「包名 vs 包名 | ❌ | key 在本工程内唯一」说的就是这件事，两条原本重复。真正要防的是 18（一个 `source` 两个 key），那条可查；
+17. **同一源码名被两个依赖声明**不是可检查的错误条件，同 15（JSON 键天然唯一；§4 歧义表「包名 vs 包名」一行即此）。真正要防的是 18（一个 `source` 两个 key），那条可查；
 18. **一个 `source` 被两个 key 声明**（同一模块会有两种拼写）；
 19. **`dependencies` 的 key 等于本包的 `package`**（自引用与依赖撞车）；
 20. **`dependencies` 的 key 或 `package` 占用保留名 `std`**；
@@ -470,7 +462,7 @@ module_deps(M) = { 每条 using "…" { … } / using "…"; 指到的模块 }  
 > Koral 与 Go / npm 同档：**首次生成 lockfile 时不校验，其后每次校验**。
 > 好处是哈希只需在根工程写一次、覆盖全树；代价是新增依赖的第一次抓取无保护。
 
-`dependencies[*].hash` **已删除**——哈希只活在 lockfile 里，一处真相。
+哈希只活在 lockfile 里（manifest 不设 `dependencies[*].hash`），一处真相。
 
 #### 11.3 模块图从 `using` 派生（已定）
 
