@@ -14,6 +14,9 @@
 
 这条贯穿本目录所有文档。**各文档只写「它在本主题上意味着什么」，不要复述前提本身。**
 
+本目录的取舍还受 [`design-axioms.md`](design-axioms.md) 的**复杂度预算与设计公理**约束
+（拒绝清单、冲突时的优先序、新提案的过闸顺序）。同样只写「它在本主题上意味着什么」。
+
 ## 分工边界（防重复的关键）
 
 一条事实只有一个家。要引用就链过去，**不复制**——复制出来的第二份迟早会漂移。
@@ -30,6 +33,7 @@
 | `traits-and-givens.md` | trait 身份是 DefId 且含实参；witness 按实例记；`given` 为何独立；`Any` 两个位的区别 | trait 写法 → `guide/document.md` §5 |
 | `name-resolution.md` | 符号是 `(module, name)`；解析顺序；裸名不是解析；禁止名字兜底；可见性默认值 | 模块/包设计 → `module-design.md` |
 | `std-api-design.md` | `self` 接收者规则；消耗语义；命名契约；登记在案的遗留例外 | std 具体 API → `../api/std/` |
+| `design-axioms.md` | 复杂度预算与拒绝清单；设计公理本身；提案过闸顺序 | 技术前提（身份）→ 本 README「共同前提」；子系统取舍 → 各子系统文档 |
 | `module-design.md` | 模块与导入的命名、语法、manifest | 导入写法 → `guide/document.md` |
 | `thin-pointer-design.md` | 对象/头布局、借用表示、trait object 布局、niche | 语言可见的内存语义 → `type-semantics.md` |
 
@@ -62,6 +66,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §6–§7、§14、§21 | 2026-10 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
+| [`design-axioms.md`](design-axioms.md) —— 设计公理与复杂度预算 | Accepted | 无独立记录（贯穿性规则，由各设计文档的取舍看护） | 2026-10-24 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 
@@ -109,5 +114,6 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 ## 命名
 
 - 一份设计一个文件，按子系统命名：`<subsystem>-design.md`。
+  跨主题的章程类（如 `design-axioms.md`）不按子系统词干命名，但同样「一旦定名就别改」。
 - 它的执行记录叫 `<subsystem>-implementation.md`，放 `../implementation/`，词干保持一致。
 - 一旦定名就别改。名字是 grep 锚点和 `git log --follow` 的抓手。

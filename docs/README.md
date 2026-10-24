@@ -27,6 +27,7 @@ docs/
     std/                       14 页 std 模块 API
   design/                      设计文档（记「为什么这样设计」）
     README.md                        共同前提 / 分工边界 / 状态登记表
+    design-axioms.md                 复杂度预算与设计公理（跨主题判据）
     module-design.md                 模块与导入
     thin-pointer-design.md           薄指针对象表示
     type-semantics.md                type / type mutable / Clone / Drop
