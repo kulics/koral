@@ -719,55 +719,6 @@ given CodeGen {
         );
     };
 
-    module_private vtable_member_signature_matches(
-        self,
-        def_id DefId,
-        receiver_type Type,
-        member MIRTraitVTableMethod,
-    ) Bool = {
-        return when self.context.get_function_type(def_id) in {
-            .Some(raw_function_type) then {
-                let mutable bound_function_type = self.bind_method_function_type(
-                    def_id,
-                    receiver_type,
-                    raw_function_type,
-                );
-                let param_count = self.function_type_param_count(bound_function_type);
-                if param_count != member.parameters.count() then {
-                    return false;
-                };
-
-                let mutable param_index UInt = 0;
-                while param_index < member.parameters.count() then {
-                    let actual_param_type = self.function_type_param_type(
-                        bound_function_type,
-                        param_index,
-                    ) or else Type.Unknown();
-                    let expected_param_type = self.vtable_method_param_type(
-                        member,
-                        param_index,
-                    );
-                    if not self.codegen_types_equal(
-                        self.concretize_codegen_type(actual_param_type),
-                        self.concretize_codegen_type(expected_param_type),
-                    ) then {
-                        return false;
-                    };
-                    param_index += 1;
-                };
-
-                let actual_return_type = self.function_type_return_type(
-                    bound_function_type,
-                );
-                return self.codegen_types_equal(
-                    self.concretize_codegen_type(actual_return_type),
-                    self.concretize_codegen_type(self.vtable_method_return_type(member)),
-                );
-            },
-            .None() then false,
-        };
-    };
-
     module_private lookup_exact_concrete_vtable_method_symbol(
         self,
         concrete_type Type,
@@ -778,43 +729,60 @@ given CodeGen {
             concrete_type,
         );
         let receiver_key = self.receiver_owner(normalized_concrete_type);
+        // Three tiers, most specific first:
+        //   1. (owner, trait, name) -- the implementation registered for this trait
+        //   2. (owner, name) unique -- an INHERITED requirement: `Tag : Parent`
+        //      puts `Parent.values` in `Tag`'s vtable, but the implementation is
+        //      registered under `Parent`, so the trait name alone cannot match.
+        //   3. name unique -- the receiver was re-instantiated and the owner keys
+        //      disagree.
+        // Uniqueness is the discriminator at every tier. Never a candidate sweep.
+        let mutable exact_match = Option[Symbol].None();
+        let mutable owner_name_match = Option[Symbol].None();
+        let mutable owner_name_count = UInt(0);
+        let mutable name_match = Option[Symbol].None();
+        let mutable name_count = UInt(0);
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
             let candidate_def_id = entry.first;
             let concrete = entry.second;
             if concrete.logical_name != member.name then {
                 continue;
             };
-            let owner_type = concrete.owner_type or else {
-                continue;
-            };
-            if self.receiver_owner(owner_type) != receiver_key then {
-                continue;
-            };
             let candidate_trait_name = concrete.trait_conformance or else {
                 continue;
             };
-            if candidate_trait_name != trait_name then {
+            let owner_type = concrete.owner_type or else {
                 continue;
             };
-            if not self.vtable_member_signature_matches(
-                candidate_def_id,
-                concrete_type,
-                member,
-            ) then {
-                continue;
-            };
+            let is_owner_match = self.receiver_owner(owner_type) == receiver_key;
             when self.bound_concrete_method_symbol(
                 candidate_def_id,
                 concrete_type,
                 self.vtable_method_return_type(member),
             ) in {
                 .Some(symbol) then {
-                    return Option[Symbol].Some(symbol);
+                    if is_owner_match and candidate_trait_name == trait_name then {
+                        exact_match = Option[Symbol].Some(symbol);
+                    } else if is_owner_match then {
+                        owner_name_count += UInt(1);
+                        owner_name_match = Option[Symbol].Some(symbol);
+                    } else {
+                        name_count += UInt(1);
+                        name_match = Option[Symbol].Some(symbol);
+                    };
                 },
                 .None() then {},
             };
+            if exact_match is .Some(_) then {
+                break;
+            };
         };
-        return Option[Symbol].None();
+        return when exact_match in {
+            .Some(symbol) then Option[Symbol].Some(symbol),
+            .None() then if owner_name_count == UInt(1) then owner_name_match
+            else if name_count == UInt(1) then name_match
+            else Option[Symbol].None(),
+        };
     };
 
     module_private resolve_vtable_method_symbol(
@@ -824,20 +792,67 @@ given CodeGen {
         member MIRTraitVTableMethod,
         def_id DefId,
     ) Symbol = {
-        when self.bound_concrete_method_symbol(
-            def_id,
+        // The CONCRETE impl's DefId first. `def_id` may be the trait
+        // requirement's (rustc's `trait_item_def_id`); binding that directly
+        // yields a callee named after the declaration (`Box_Param_T_d112_tag`)
+        // while the emitted instance is `Box_I_d112_tag`.
+        when self.lookup_exact_concrete_vtable_method_symbol(
             concrete_type,
-            self.vtable_method_return_type(member),
+            trait_name,
+            member,
         ) in {
             .Some(symbol) then {
                 return symbol;
             },
             .None() then {},
         };
-        return self.lookup_exact_concrete_vtable_method_symbol(
+        // Then the identity table: the INSTANCE's DefId for (receiver, method).
+        // `def_id` may be the trait requirement's, whose C name spells the
+        // declaration (`Box_Param_T_d112_values`) rather than the instance.
+        let mutable lookup_def_ids = List[DefId].new();
+        if def_id.is_valid() then {
+            lookup_def_ids.push(def_id);
+            when self.program.receiver_method_dispatch.get(def_id) in {
+                .Some(info) then {
+                    when info.trait_method_def_id in {
+                        .Some(trait_item_def_id) then {
+                            if trait_item_def_id != def_id
+                                and not lookup_def_ids.contains(trait_item_def_id) then {
+                                lookup_def_ids.push(trait_item_def_id);
+                            };
+                        },
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
+        };
+        for lookup_def_id in lookup_def_ids then {
+            let identity_key = make_receiver_method_identity_key_from_context(
+                self.context,
+                concrete_type,
+                lookup_def_id,
+            );
+            when self.program.static_method_lookup.get(identity_key) in {
+                .Some(instance_def_id) then {
+                    when self.bound_concrete_method_symbol(
+                        instance_def_id,
+                        concrete_type,
+                        self.vtable_method_return_type(member),
+                    ) in {
+                        .Some(symbol) then {
+                            return symbol;
+                        },
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
+        };
+        return self.bound_concrete_method_symbol(
+            def_id,
             concrete_type,
-            trait_name,
-            member,
+            self.vtable_method_return_type(member),
         ) or else panic(
             internal_compiler_error(
                 "CodeGen vtable error: unresolved method implementation for \(trait_name).\(member.name) on \(self.context.type_display_name(concrete_type))",
@@ -932,7 +947,13 @@ given CodeGen {
         let mutable return_c_type = self.c_type_name(
             self.vtable_method_return_type(member),
         );
-        let mutable wrapper_self_type = if self.actual_method_needs_wrapper(member) then actual_self_type
+        // The emitted self type is the method's ABI self -- but only when that
+        // is a CONCRETE type. A declaration-form self (`Box[T]`) is what the
+        // method was written against; `self_ref.ptr` points at the instantiated
+        // receiver (`Box[Int]`), so using the declaration form here emitted
+        // `struct Box_Param_T self_val = ...` against a `Box_I` object.
+        let mutable wrapper_self_type = if self.actual_method_needs_wrapper(member)
+            and not self.context.contains_generic_parameter(actual_self_type) then actual_self_type
         else concrete_type;
         let wrapper_self_c_name = when self.concrete_type_c_name(wrapper_self_type) in {
             .Some(name) then self.sanitize_codegen_identifier(name),

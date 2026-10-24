@@ -69,7 +69,7 @@ file_private let substitution_debug_expr_kind(kind TypedExprKind) String = {
         .Call(_, args) then "Call(args=\(args.count().to_string()))",
         .MethodReference(_, _, method, _, method_type_args, _) then "MethodReference(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
         .StaticMethodCall(_, method_name, method, type_args, method_type_args, args) then "StaticMethodCall(name=\(method_name),def=\(method.def_id.id.to_string()),targs=\(type_args.count().to_string()),margs=\(method_type_args.count().to_string()),args=\(args.count().to_string()))",
-        .TraitMethodPlaceholder(_, _, method, method_type_args, _) then "TraitMethodPlaceholder(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
+        .TraitMethodPlaceholder(_, _, method, _, method_type_args, _) then "TraitMethodPlaceholder(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
         .TraitMethodCall(_, _, method_name, _, args) then "TraitMethodCall(name=\(method_name),args=\(args.count().to_string()))",
         .Block(statements, _) then "Block(stmts=\(statements.count().to_string()))",
         .WhenExpr(_, arms) then "WhenExpr(arms=\(arms.count().to_string()))",
@@ -182,7 +182,7 @@ file_private let recover_unknown_expr_type(
             mono,
             enum_type,
         ),
-        .TraitMethodPlaceholder(_, _, method, _, _) then resolve_parameterized_type(
+        .TraitMethodPlaceholder(_, _, method, _, _, _) then resolve_parameterized_type(
             mono,
             method.symbol_type,
         ),
@@ -1469,7 +1469,7 @@ file_private let substitute_expr_kind(
                 _ then {},
             };
             let _ = when new_callee.expr_kind in {
-                .TraitMethodPlaceholder(base, trait_type, method, method_type_args, dispatch_callsite) then {
+                .TraitMethodPlaceholder(base, trait_type, method, trait_method_def_id, method_type_args, dispatch_callsite) then {
                     let base_trait_object_type = substitution_trait_object_type(
                         base.expr_type,
                     );
@@ -1500,17 +1500,10 @@ file_private let substitute_expr_kind(
                         );
                         // Identity-priority (Swift's
                         // `resolveTraitPlaceholderMethodByIdentity`): the trait
-                        // method's DefId is the identity. Falls back to the old
-                        // name-bridged lookup only when nothing is instantiated
-                        // under this identity yet.
-                        let trait_item_def_id = when trait_method_def_id_for_placeholder(
-                            mono,
-                            trait_type,
-                            method_name,
-                        ) in {
-                            .Some(id) then id,
-                            .None() then method.def_id,
-                        };
+                        // method's DefId is the identity, resolved once at
+                        // definition time and carried on the node.
+                        let trait_item_def_id = if trait_method_def_id.is_valid() then trait_method_def_id
+                        else method.def_id;
                         let mutable rebound_method_opt = resolve_trait_placeholder_method_by_identity(
                             mono,
                             trait_item_def_id,
@@ -1582,7 +1575,7 @@ file_private let substitute_expr_kind(
                 _ then {},
             };
             when new_callee.expr_kind in {
-                .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+                .TraitMethodPlaceholder(base, trait_type, method, _, _, _) then {
                     when substitution_trait_object_type(base.expr_type) in {
                         .Some(trait_object_type) then when trait_object_type in {
                             .TraitObject(...) then {
@@ -2040,9 +2033,9 @@ file_private let substitute_expr_kind(
                         new_base,
                         trait_object_type,
                         new_method,
+                        new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite,
-                    );
+                        dispatch_callsite);
                 },
                 .None() then {},
             };
@@ -2156,7 +2149,7 @@ file_private let substitute_expr_kind(
                 new_args,
             )
         },
-        .TraitMethodPlaceholder(base, trait_type, method, method_type_args, dispatch_callsite) then {
+        .TraitMethodPlaceholder(base, trait_type, method, trait_method_def_id, method_type_args, dispatch_callsite) then {
             let new_base = substitute_types_in_expression(mono, base, substitution);
             let mutable new_trait_type = mono.substitute_type_impl(
                 trait_type,
@@ -2202,9 +2195,9 @@ file_private let substitute_expr_kind(
                         new_base,
                         new_trait_type,
                         new_method,
+                        new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite,
-                    )
+                        dispatch_callsite)
                 },
                 .None() then {
                     if not has_generic_parameter(lookup_base_type) then {
@@ -2286,9 +2279,9 @@ file_private let substitute_expr_kind(
                         new_base,
                         new_trait_type,
                         new_method,
+                        new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite,
-                    )
+                        dispatch_callsite)
                 },
             }
         },
@@ -3129,13 +3122,12 @@ file_private let bind_static_method_symbol(
     let mutable receiver_owners = List[MethodOwner].new();
     collect_receiver_owners(mono, receiver_type, receiver_owners);
     for receiver_owner in receiver_owners then {
-        let lookup_key = make_receiver_method_key(
+        when lookup_extension_method_def_id(
             mono,
             receiver_type,
-            mono.storage.context.symbol_name(method),
+            method.def_id,
             List[Type].new(),
-        );
-        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        ) in {
             .Some(def_id) then {
                 let mutable bound_symbol_type = when mono.storage.context.get_function_type(
                     def_id,
@@ -3160,13 +3152,12 @@ file_private let bind_static_method_symbol(
     let mutable instantiated_owners = List[MethodOwner].new();
     collect_receiver_owners(mono, receiver_type, instantiated_owners);
     for receiver_owner in instantiated_owners then {
-        let lookup_key = make_receiver_method_key(
+        when lookup_extension_method_def_id(
             mono,
             receiver_type,
-            method_name,
+            method.def_id,
             List[Type].new(),
-        );
-        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        ) in {
             .Some(def_id) then {
                 let mutable bound_symbol_type = when mono.storage.context.get_function_type(
                     def_id,
@@ -3365,13 +3356,12 @@ file_private let lookup_direct_receiver_method_symbol(
             },
             .None() then {},
         };
-        let lookup_key = make_receiver_method_key(
+        when lookup_extension_method_def_id(
             mono,
             resolved_receiver_type,
-            method_name,
+            method.def_id,
             List[Type].new(),
-        );
-        when mono.storage.extension_method_def_ids.get(lookup_key) in {
+        ) in {
             .Some(def_id) then {
                 let symbol_type = mono.storage.context.get_function_type(def_id) or else method.symbol_type;
                 when finalize_direct_method_candidate(
@@ -3797,13 +3787,12 @@ file_private let lookup_exact_receiver_method_symbol(
     let method_name = semantic_receiver_method_name(mono, method);
     if strict_wrapper_dispatch then {
         for receiver_owner in strict_wrapper_receiver_owners(resolved_receiver_type) then {
-            let alias_lookup_key = make_receiver_method_key(
+            when lookup_extension_method_def_id(
                 mono,
                 resolved_receiver_type,
-                method_name,
+                method.def_id,
                 List[Type].new(),
-            );
-            when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
+            ) in {
                 .Some(def_id) then {
                     if nested_ref_like_receiver and method.def_id.id > 0 and def_id.id == method.def_id.id then {
                         continue;
@@ -3966,13 +3955,12 @@ file_private let lookup_exact_receiver_method_symbol(
 
     if receiver_uses_strict_wrapper_dispatch(mono, resolved_receiver_type) then {
         for receiver_owner in strict_wrapper_receiver_owners(resolved_receiver_type) then {
-            let alias_lookup_key = make_receiver_method_key(
+            when lookup_extension_method_def_id(
                 mono,
                 resolved_receiver_type,
-                method_name,
+                method.def_id,
                 List[Type].new(),
-            );
-            when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
+            ) in {
                 .Some(def_id) then {
                     if nested_ref_like_receiver and method.def_id.id > 0 and def_id.id == method.def_id.id then {
                         continue;
@@ -4066,14 +4054,26 @@ file_private let lookup_exact_receiver_method_symbol(
         final_receiver_instantiations,
     );
     for instantiation in final_receiver_instantiations then {
-        let alias_lookup_key = make_extension_method_key(
-            mono,
-            instantiation.first,
-            instantiation.second,
-            method_name,
-            List[Type].new(),
-        );
-        when mono.storage.extension_method_def_ids.get(alias_lookup_key) in {
+        let mutable alias_hit = Option[DefId].None();
+        for lookup_def_id in identity_lookup_def_ids(mono, method.def_id) then {
+            let alias_lookup_key = make_extension_method_identity_key(
+                mono,
+                instantiation.first,
+                instantiation.second,
+                lookup_def_id,
+                List[Type].new(),
+            );
+            when mono.storage.extension_method_def_ids_by_identity.get(alias_lookup_key) in {
+                .Some(hit) then {
+                    alias_hit = Option[DefId].Some(hit);
+                },
+                .None() then {},
+            };
+            if alias_hit is .Some(_) then {
+                break;
+            };
+        };
+        when alias_hit in {
             .Some(def_id) then {
                 let candidate_type = mono.storage.context.get_function_type(def_id) or else Type.Unknown(
                 );
@@ -5490,7 +5490,7 @@ public let substitute_pattern(
         .IntegerLiteral(value) then TypedPattern.IntegerLiteral(value),
         .NegativeIntegerLiteral(value) then TypedPattern.NegativeIntegerLiteral(value),
         .FloatLiteral(value) then TypedPattern.FloatLiteral(value),
-        .StringLiteral(value) then TypedPattern.StringLiteral(value),
+        .StringLiteral(value, equals_symbol) then TypedPattern.StringLiteral(value, equals_symbol),
         .RuneLiteral(value) then TypedPattern.RuneLiteral(value),
         .ComparisonPattern(op, value) then TypedPattern.ComparisonPattern(op, value),
         .WeakBinding(symbol) then {

@@ -492,6 +492,7 @@ file_private let patched_extension_template_with_body(
         donor.method,
         template.conformance_trait_name,
         template.conformance_trait_def_id,
+        template.trait_method_def_id,
         template.conformance_target_type,
         template.conformance_trait_args,
         template.uses_trait_type_params,
@@ -2873,24 +2874,6 @@ file_private let builtin_type_for_owner_name(name String) Type = {
     };
 };
 
-/// The trait METHOD's DefId (rustc's `trait_item_def_id`) for a placeholder,
-/// recovered from the trait object type + method name. A placeholder's
-/// `method Symbol.def_id` is not the trait method's DefId; this recovers the
-/// real identity so identity lookup can find the implementation.
-public let trait_method_def_id_for_placeholder(
-    mono Monomorphizer,
-    trait_type Type,
-    method_name String,
-) Option[DefId] = {
-    return when resolve_parameterized_type(mono, trait_type) in {
-        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
-            trait_def_id,
-            method_name,
-        ),
-        _ then Option[DefId].None(),
-    };
-};
-
 /// Resolve a trait-method placeholder to the concrete implementation by the
 /// trait METHOD's DefId (Swift's `resolveTraitPlaceholderMethodByIdentity`).
 /// Pure identity: no name lookup. Returns None when nothing has been
@@ -2962,7 +2945,7 @@ file_private let normalize_borrowed_extension_base_type(
 //   c. Build type substitution map
 //   d. Resolve parameter types and return type
 //   e. Allocate a new DefId for the concrete method
-//   f. Register in extension_method_def_ids with dual keys
+//   f. Register in extension_method_def_ids_by_identity with dual keys
 //   g. Register in extension_methods map for the type
 //   h. Emit the declaration node (FunctionDecl or IntrinsicFunctionDecl)
 //   i. Return the Symbol for the instantiated method
@@ -3363,14 +3346,9 @@ public let instantiate_extension_method_from_entry(
     );
     // rustc's `trait_item_def_id`: the trait METHOD this instance implements,
     // so trait-method references can find it by the trait item's DefId rather
-    // than by name. Also used as the dual identity key below.
-    let trait_method_def_id = when resolved_template.conformance_trait_def_id in {
-        .Some(trait_def_id) then mono.storage.generic_templates.trait_method_def_id(
-            trait_def_id,
-            resolved_template.method.name,
-        ),
-        .None() then Option[DefId].None(),
-    };
+    // than by name. Resolved at registration and carried on the template --
+    // mono reads it and never re-derives it from a method spelling.
+    let trait_method_def_id = resolved_template.trait_method_def_id;
     when effective_owner_type in {
         .Some(owner_type) then {
             let resolved_trait_method_def_id = when trait_method_def_id in {
@@ -3444,10 +3422,6 @@ public let instantiate_extension_method_from_entry(
         };
     };
 
-    // f. Register in extension_method_def_ids under the owner identity. One
-    //    method has one key; the old second "alias" key existed only because the
-    //    key was a mangle string and a type could have two of those.
-    mono.storage.extension_method_def_ids.insert(lookup_key, def_id);
     // The emitted DefId IS the final identity (Swift
     // `instantiatedMethodDefIds.insert`): resolve_method_instance_by_identity's
     // L0 short-circuit.
@@ -5028,27 +5002,6 @@ public let instantiate_trait_placeholder_method(
         return;
     };
     mono.storage.in_progress_trait_placeholder_keys.insert(trait_placeholder_key);
-
-    // One owner identity. This used to be a six-branch sweep collecting every
-    // spelling of the type (`stable_type_key`, `get_name`, `get_template_name`,
-    // the generic template string).
-    let mutable lookup_owners = List[MethodOwner].new();
-    lookup_owners.push(mono.storage.context.method_owner_of(placeholder_base_type));
-    for alias_owner in lookup_owners then {
-        let key = make_receiver_method_key(
-            mono,
-            placeholder_base_type,
-            method_name,
-            List[Type].new(),
-        );
-        if mono.storage.extension_method_def_ids.contains_key(key) then {
-            mono.storage.resolved_trait_placeholder_keys.insert(trait_placeholder_key);
-            mono.storage.in_progress_trait_placeholder_keys.remove(
-                trait_placeholder_key,
-            );
-            return;
-        };
-    };
 
     // b. Determine the template name and resolved base type.
     //    We need both the template name (for registry lookup) and the resolved

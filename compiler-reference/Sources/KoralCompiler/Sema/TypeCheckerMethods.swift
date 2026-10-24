@@ -4,7 +4,7 @@ import Foundation
 // This extension contains methods for resolving methods and handling intrinsic calls.
 
 extension TypeChecker {
-  private func lookupConcreteMethodSymbolDirect(on selfType: Type, name: String) throws -> Symbol? {
+  private func lookupDeclaredMethodDirect(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
     case .reference(let inner):
       // New: look up Ref generic extension methods first
@@ -19,7 +19,7 @@ extension TypeChecker {
         )
       }
       // If not found on Ref, continue auto-deref to inner type
-      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+      return try lookupDeclaredMethodDirect(on: inner, name: name)
 
     case .borrowedReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("Ref")],
@@ -32,7 +32,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+      return try lookupDeclaredMethodDirect(on: inner, name: name)
 
     case .mutableReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("MutRef")],
@@ -55,7 +55,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+      return try lookupDeclaredMethodDirect(on: inner, name: name)
 
     case .mutableBorrowedReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("MutRef")],
@@ -78,7 +78,7 @@ extension TypeChecker {
           methodInfo: ext
         )
       }
-      return try lookupConcreteMethodSymbolDirect(on: inner, name: name)
+      return try lookupDeclaredMethodDirect(on: inner, name: name)
 
     case .weakReference(let inner):
       if let extensions = genericExtensionMethods[.builtin("WeakRef")],
@@ -447,7 +447,7 @@ extension TypeChecker {
     var inferred: [String: Type] = [:]
 
     for (_, sig) in traitMethods {
-      guard let concreteMethod = try lookupConcreteMethodSymbolDirect(on: receiverType, name: sig.name),
+      guard let concreteMethod = try lookupDeclaredMethodDirect(on: receiverType, name: sig.name),
             case .function(let actualParams, let actualReturn) = concreteMethod.type else {
         continue
       }
@@ -522,8 +522,8 @@ extension TypeChecker {
     return nil
   }
 
-  func lookupConcreteMethodSymbol(on selfType: Type, name: String) throws -> Symbol? {
-    if let direct = try lookupConcreteMethodSymbolDirect(on: selfType, name: name) {
+  func lookupDeclaredMethod(on selfType: Type, name: String) throws -> Symbol? {
+    if let direct = try lookupDeclaredMethodDirect(on: selfType, name: name) {
       return direct
     }
 
@@ -1166,7 +1166,7 @@ extension TypeChecker {
     helperName: String
   ) throws -> TypedExpressionNode {
     let lookupType = builtinSubscriptBaseType(base.type)
-    guard let method = try lookupConcreteMethodSymbol(on: lookupType, name: helperName) else {
+    guard let method = try lookupDeclaredMethod(on: lookupType, name: helperName) else {
       throw SemanticError(.generic(
         "Missing builtin subscript helper '\(helperName)' for type '\(lookupType)'"
       ), span: currentSpan)

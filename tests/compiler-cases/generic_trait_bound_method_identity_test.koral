@@ -1,0 +1,42 @@
+// A STATIC method reached through a trait BOUND on a generic parameter must
+// carry the trait requirement's DefId (rustc's `trait_item_def_id`), not a
+// freshly minted one.
+//
+// Minting here is what made `T.make()` carry an identity that existed nowhere
+// else: the call site's DefId matched neither the impl's nor the trait's entry
+// in the instance table, and the call died with
+// `Unresolved static method call before MIR`. A name-keyed table used to paper
+// over it -- the spelling matched even when the identity did not.
+//
+// Two instantiations of the SAME generic call site must land on two DIFFERENT
+// implementations, so a per-call DefId that happens to be reused would also
+// fail this.
+//
+// Note this is a STATIC call on the type parameter (`T.make()`). An instance
+// call (`x.render()`) goes down instance dispatch and does not exercise this.
+// EXPECT: int:7
+// EXPECT: str:hi
+
+trait Make {
+    make() String;
+};
+
+type BoxedInt(v Int);
+type BoxedStr(v String);
+
+given BoxedInt as Make {
+    public make() String = "int:7";
+};
+
+given BoxedStr as Make {
+    public make() String = "str:hi";
+};
+
+// `x` only pins `T`; the method is called on the TYPE.
+let show[T Make](x T) String = T.make();
+
+let main() Int = {
+    println(show(BoxedInt(7)));
+    println(show(BoxedStr("hi")));
+    return 0;
+};

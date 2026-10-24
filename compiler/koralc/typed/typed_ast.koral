@@ -42,6 +42,11 @@ public type TypedGivenMember(
     params List[TypedParam],
     return_type Type,
     body Option[TypedExpr],
+    // The trait METHOD this member implements (rustc's `trait_item_def_id`).
+    // Resolved once at definition time; mono reads it and never re-derives it
+    // from the spelling. None for members of a plain `given` block with no
+    // trait conformance.
+    trait_method_def_id Option[DefId],
 );
 
 public type TypedDecl {
@@ -223,7 +228,7 @@ public type TypedExprKind {
     StaticMethodCall(receiver_type Type, method_name String, method Symbol, type_args List[Type], method_type_args List[Type], args List[TypedExpr]),
     TypeConstruction(identifier Symbol, type_args List[Type], args List[TypedExpr]),
     EnumConstruction(enum_type Type, case_name String, args List[TypedExpr]),
-    TraitMethodPlaceholder(base TypedExpr, trait_type Type, method Symbol, method_type_args List[Type], dispatch_callsite Option[DefId]),
+    TraitMethodPlaceholder(base TypedExpr, trait_type Type, method Symbol, trait_method_def_id DefId, method_type_args List[Type], dispatch_callsite Option[DefId]),
     TraitObjectConversion(inner TypedExpr, trait_type Type, concrete_type Type),
     TraitMethodCall(receiver TypedExpr, trait_type Type, method_name String, method_index Int, args List[TypedExpr]),
     GenericInstantiation(base_type Type, type_args List[Type]),
@@ -240,7 +245,10 @@ public type TypedPattern {
     /// Float literal pattern; the spelling is kept and the value takes the
     /// subject's width (`1.1` against `Float32` is `Float32(1.1)`).
     FloatLiteral(value String),
-    StringLiteral(value String),
+    /// `equals_symbol` is the `equals` method the pattern compares with,
+    /// resolved once at definition time. Pattern lowering needs a callee and
+    /// must not reach for one by name.
+    StringLiteral(value String, equals_symbol Symbol),
     RuneLiteral(value String),
     TraitObjectType(target_type Type),
     TraitObjectTypeBinding(symbol Symbol, target_type Type),

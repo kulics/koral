@@ -1691,7 +1691,11 @@ given TypeChecker {
                 };
                 let method_symbol = when static_sig_opt in {
                     .Some(sig) then sig,
-                    .None() then self.make_method_symbol(method_name, ret_type),
+                    .None() then self.make_method_symbol_for_receiver(
+                        declared_receiver_type,
+                        method_name,
+                        ret_type,
+                    ),
                 };
                 return make_typed_expr(
                     TypedExprKind.StaticMethodCall(
@@ -3175,7 +3179,7 @@ given TypeChecker {
         // empty when the call was built and every argument except the implicit
         // receiver was dropped from the generated C.
         when typed_callee.expr_kind in {
-            .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+            .TraitMethodPlaceholder(base, trait_type, method, _, _, _) then {
                 when self.trait_object_dispatch_type(base.expr_type) in {
                     .Some(dispatch_trait_type) then {
                         let method_name = self.semantic_method_name_for_symbol(method);
@@ -3735,7 +3739,11 @@ given TypeChecker {
                 };
                 let lowered_method_symbol = when direct_method_signature_opt in {
                     .Some(method_symbol) then method_symbol,
-                    .None() then self.make_method_symbol(method_name, method_ret_type),
+                    .None() then self.make_method_symbol_for_receiver(
+                        base_type,
+                        method_name,
+                        method_ret_type,
+                    ),
                 };
                 let mutable structured_call = Option[TypedExpr].None();
                 let should_lower_to_method_call = self.is_unresolved_expr_type(
@@ -3806,9 +3814,9 @@ given TypeChecker {
                                         adapted_base,
                                         trait_type,
                                         lowered_method_symbol,
+                                        self.trait_method_def_id_of(trait_type, method_name),
                                         inferred_method_type_args,
-                                        .None(),
-                                    ),
+                                        .None()),
                                     lowered_method_symbol.symbol_type,
                                 );
                                 Option[TypedExpr].Some(
@@ -3842,9 +3850,9 @@ given TypeChecker {
                                             adapted_base,
                                             trait_type,
                                             lowered_method_symbol,
+                                            self.trait_method_def_id_of(trait_type, method_name),
                                             inferred_method_type_args,
-                                            .None(),
-                                        ),
+                                            .None()),
                                         lowered_method_symbol.symbol_type,
                                     );
                                     Option[TypedExpr].Some(
@@ -3888,9 +3896,9 @@ given TypeChecker {
                                                 adapted_base,
                                                 trait_type,
                                                 lowered_method_symbol,
+                                                self.trait_method_def_id_of(trait_type, method_name),
                                                 inferred_method_type_args,
-                                                .None(),
-                                            ),
+                                                .None()),
                                             lowered_method_symbol.symbol_type,
                                         );
                                         structured_call = Option[TypedExpr].Some(
@@ -4023,7 +4031,8 @@ given TypeChecker {
                     };
                     let lowered_method_symbol = when direct_method_signature_opt in {
                         .Some(method_symbol) then method_symbol,
-                        .None() then self.make_method_symbol(
+                        .None() then self.make_method_symbol_for_receiver(
+                            adapted_base.expr_type,
                             method_name,
                             method_ret_type,
                         ),
@@ -4097,9 +4106,9 @@ given TypeChecker {
                                             adapted_base,
                                             trait_type,
                                             lowered_method_symbol,
+                                            self.trait_method_def_id_of(trait_type, method_name),
                                             inferred_method_type_args,
-                                            .None(),
-                                        ),
+                                            .None()),
                                         lowered_method_symbol.symbol_type,
                                     );
                                     Option[TypedExpr].Some(
@@ -4133,9 +4142,9 @@ given TypeChecker {
                                                 adapted_base,
                                                 trait_type,
                                                 lowered_method_symbol,
+                                                self.trait_method_def_id_of(trait_type, method_name),
                                                 inferred_method_type_args,
-                                                .None(),
-                                            ),
+                                                .None()),
                                             lowered_method_symbol.symbol_type,
                                         );
                                         Option[TypedExpr].Some(
@@ -4179,9 +4188,9 @@ given TypeChecker {
                                                     adapted_base,
                                                     trait_type,
                                                     lowered_method_symbol,
+                                                    self.trait_method_def_id_of(trait_type, method_name),
                                                     inferred_method_type_args,
-                                                    .None(),
-                                                ),
+                                                    .None()),
                                                 lowered_method_symbol.symbol_type,
                                             );
                                             structured_call = Option[TypedExpr].Some(
@@ -4255,7 +4264,7 @@ given TypeChecker {
                 .None() then Option[TypedExpr].None(),
             },
             _ then when typed_callee.expr_kind in {
-                .TraitMethodPlaceholder(receiver, trait_type, method, method_type_args, _) then {
+                .TraitMethodPlaceholder(receiver, trait_type, method, _, method_type_args, _) then {
                     let trait_name = self.trait_name_from_type(trait_type);
                     let method_name = self.semantic_method_name_for_symbol(method);
                     let mutable expected_self_type = self.resolve_trait_method_self_type(
@@ -4282,9 +4291,9 @@ given TypeChecker {
                             adapted_receiver,
                             trait_type,
                             method,
+                            self.trait_method_def_id_of(trait_type, method_name),
                             method_type_args,
-                            .None(),
-                        ),
+                            .None()),
                         method.symbol_type,
                     );
                     let call_expr = make_typed_expr(

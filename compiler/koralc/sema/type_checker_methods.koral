@@ -2414,10 +2414,16 @@ given TypeChecker {
                                 bound_trait_def_id,
                                 receiver_type,
                             );
-                            let candidate = self.make_method_callable_symbol(
+                            // Carry the trait METHOD's DefId (rustc's
+                            // `trait_item_def_id`). Minting a fresh one here is
+                            // what let a name-keyed table paper over the gap:
+                            // the call site's identity then matched nothing in
+                            // the instance table.
+                            let candidate = self.make_method_callable_symbol_with_def_id(
                                 method_name,
                                 typed_params,
                                 bound_return,
+                                member.def_id,
                             );
                             if first_match is .Some(_) then {
                                 if bound_trait_def_id != first_trait_def_id and not self.traits_are_related(
@@ -2728,11 +2734,14 @@ given TypeChecker {
                                 bound_trait_def_id,
                                 receiver_type,
                             );
+                            // Carry the trait METHOD's DefId; see the note in
+                            // resolve_conformance_method_signature.
                             return Option[Symbol].Some(
-                                self.make_method_callable_symbol(
+                                self.make_method_callable_symbol_with_def_id(
                                     method_name,
                                     typed_params,
                                     bound_return,
+                                    member.def_id,
                                 ),
                             );
                         },
@@ -3061,11 +3070,14 @@ given TypeChecker {
                     let mutable resolved_return_type = self.concretize_default_literal_type(
                         self.apply_type_bindings(member.return_type, bindings),
                     );
+                    // Carry the trait METHOD's DefId; see the note in
+                    // resolve_conformance_method_signature.
                     Option[Symbol].Some(
-                        self.make_method_callable_symbol(
+                        self.make_method_callable_symbol_with_def_id(
                             method_name,
                             typed_params,
                             resolved_return_type,
+                            member.def_id,
                         ),
                     )
                 },
@@ -5025,7 +5037,7 @@ given TypeChecker {
                     self.context().symbol_name(method),
                 );
             },
-            .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+            .TraitMethodPlaceholder(base, trait_type, method, _, _, _) then {
                 let method_name = self.context().symbol_name(method);
                 let mutable qualified_return_type = self.resolve_qualified_method_return_type(
                     self.trait_def_id_from_type(trait_type),
@@ -5146,7 +5158,7 @@ given TypeChecker {
                 };
                 return out;
             },
-            .TraitMethodPlaceholder(base, trait_type, method, _, _) then {
+            .TraitMethodPlaceholder(base, trait_type, method, _, _, _) then {
                 let method_name = self.context().symbol_name(method);
                 let trait_params = self.resolve_trait_method_param_types(
                     self.trait_def_id_from_type(trait_type),

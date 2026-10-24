@@ -2800,7 +2800,7 @@ extension TypeChecker {
 
     var seenConstants: Set<String> = []
 
-    guard let methodSym = try lookupConcreteMethodSymbol(on: targetType, name: methodName) else {
+    guard let methodSym = try lookupDeclaredMethod(on: targetType, name: methodName) else {
       throw SemanticError(
         .generic("Missing method '\(methodName)' for type '\(targetType.description)'"),
         span: span
@@ -2857,7 +2857,7 @@ extension TypeChecker {
       .variableDeclaration(identifier: temp, value: initializer, mutable: true)
     ]
 
-    guard let methodSym = try lookupConcreteMethodSymbol(on: targetType, name: "insert") else {
+    guard let methodSym = try lookupDeclaredMethod(on: targetType, name: "insert") else {
       throw SemanticError(
         .generic("Missing method 'insert' for type '\(targetType.description)'"),
         span: span
@@ -6049,7 +6049,7 @@ extension TypeChecker {
       return try makeMethodReference(methodSym)
     }
 
-    if let methodSym = try lookupConcreteMethodSymbol(on: typeToLookup, name: memberName) {
+    if let methodSym = try lookupDeclaredMethod(on: typeToLookup, name: memberName) {
       return try makeMethodReference(methodSym)
     }
 
@@ -6647,7 +6647,7 @@ extension TypeChecker {
     var traitParamBindings: [String: Type] = [:]
 
     for methodSignature in requiredMethods.values {
-      guard let actualMethod = try lookupConcreteMethodSymbol(on: selfType, name: methodSignature.name) else {
+      guard let actualMethod = try lookupDeclaredMethod(on: selfType, name: methodSignature.name) else {
         return nil
       }
 
@@ -7229,7 +7229,7 @@ extension TypeChecker {
       context: "operator 'equals'"
     )
 
-    guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+    guard let methodSym = try lookupDeclaredMethod(on: receiverType, name: methodName) else {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
@@ -7316,7 +7316,7 @@ extension TypeChecker {
       context: "operator 'compare'"
     )
 
-    guard let methodSym = try lookupConcreteMethodSymbol(on: receiverType, name: methodName) else {
+    guard let methodSym = try lookupDeclaredMethod(on: receiverType, name: methodName) else {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
@@ -7475,7 +7475,7 @@ extension TypeChecker {
     }
 
     if allowMissingTrait,
-       let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
+       let methodSym = try lookupDeclaredMethod(on: base.type, name: methodName) {
       return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
     }
 
@@ -7526,7 +7526,7 @@ extension TypeChecker {
       ), span: blame)
     }
 
-    if let methodSym = try lookupConcreteMethodSymbol(on: base.type, name: methodName) {
+    if let methodSym = try lookupDeclaredMethod(on: base.type, name: methodName) {
       return try buildConcreteMethodCall(base: base, method: methodSym, arguments: arguments)
     }
 
@@ -8074,10 +8074,10 @@ extension TypeChecker {
       return symbol
     }
 
-    guard let countMethod = try lookupConcreteMethodSymbol(on: stringType, name: "count") else {
+    guard let countMethod = try lookupDeclaredMethod(on: stringType, name: "count") else {
       throw SemanticError(.generic("Missing method 'count' for type 'String'"), span: span)
     }
-    guard let borrowPtrMethod = try lookupConcreteMethodSymbol(on: stringType, name: "borrow_ptr") else {
+    guard let borrowPtrMethod = try lookupDeclaredMethod(on: stringType, name: "borrow_ptr") else {
       throw SemanticError(.generic("Missing method 'borrow_ptr' for type 'String'"), span: span)
     }
 
@@ -8443,7 +8443,7 @@ extension TypeChecker {
     }
 
     // 3. Look up the iterator() method on the iterable type
-    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: iterableType, name: "iterator") else {
+    guard let iteratorMethod = try lookupDeclaredMethod(on: iterableType, name: "iterator") else {
       throw SemanticError(.generic(
         "Type \(iterableType) is not iterable: missing iterator() method and does not implement Iterator"
       ), span: currentSpan)
@@ -8539,7 +8539,7 @@ extension TypeChecker {
       return nil
     }
     // 计数器需要 succ() 才能前进。
-    guard try lookupConcreteMethodSymbol(on: elementType, name: "succ") != nil else {
+    guard try lookupDeclaredMethod(on: elementType, name: "succ") != nil else {
       return nil
     }
 
@@ -8622,7 +8622,7 @@ extension TypeChecker {
     methodName: String,
     returnType: Type
   ) throws -> TypedExpressionNode {
-    guard let method = try lookupConcreteMethodSymbol(on: base.type, name: methodName) else {
+    guard let method = try lookupDeclaredMethod(on: base.type, name: methodName) else {
       throw SemanticError(.generic("\(methodName)() method not found"), span: currentSpan)
     }
     let methodRef = TypedExpressionNode.methodReference(
@@ -8634,7 +8634,7 @@ extension TypeChecker {
   /// The iterator must have a next(mutable self) -> [T]Option method.
   private func extractIteratorElementType(_ iteratorType: Type) throws -> Type {
     // Look up the next method on the iterator type
-    guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
+    guard let nextMethod = try lookupDeclaredMethod(on: iteratorType, name: "next") else {
       throw SemanticError(.generic(
         "Iterator type \(iteratorType) missing next() method"
       ), span: currentSpan)
@@ -8797,7 +8797,7 @@ extension TypeChecker {
     }
     
     // Look up the iterator method
-    guard let iteratorMethod = try lookupConcreteMethodSymbol(on: actualIterableType, name: "iterator") else {
+    guard let iteratorMethod = try lookupDeclaredMethod(on: actualIterableType, name: "iterator") else {
       throw SemanticError(.generic("iterator() method not found"), span: currentSpan)
     }
     
@@ -8832,7 +8832,7 @@ extension TypeChecker {
     }
     
     // Look up the next method
-    guard let nextMethod = try lookupConcreteMethodSymbol(on: iteratorType, name: "next") else {
+    guard let nextMethod = try lookupDeclaredMethod(on: iteratorType, name: "next") else {
       throw SemanticError(.generic("next() method not found"), span: currentSpan)
     }
     

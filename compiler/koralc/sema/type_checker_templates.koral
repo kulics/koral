@@ -189,6 +189,7 @@ given TypeChecker {
         method MethodDeclaration,
         conformance_trait_name Option[String],
         conformance_trait_def_id Option[DefId],
+        trait_method_def_id Option[DefId],
         conformance_target_type Option[Type],
         conformance_trait_args List[Type],
         uses_trait_type_params Bool,
@@ -205,6 +206,7 @@ given TypeChecker {
             self.copy_method_declaration(method),
             conformance_trait_name,
             conformance_trait_def_id,
+            trait_method_def_id,
             self.copy_optional_type(conformance_target_type),
             self.copy_type_list(conformance_trait_args),
             uses_trait_type_params,
@@ -224,6 +226,7 @@ given TypeChecker {
         method MethodDeclaration,
         conformance_trait_name Option[String],
         conformance_trait_def_id Option[DefId],
+        trait_method_def_id Option[DefId],
         conformance_target_type Option[Type],
         conformance_trait_args List[Type],
         uses_trait_type_params Bool,
@@ -241,6 +244,7 @@ given TypeChecker {
             method,
             conformance_trait_name,
             conformance_trait_def_id,
+            trait_method_def_id,
             conformance_target_type,
             conformance_trait_args,
             uses_trait_type_params,
@@ -537,6 +541,7 @@ given TypeChecker {
                                 ),
                                 template.conformance_trait_name,
                                 template.conformance_trait_def_id,
+                                template.trait_method_def_id,
                                 template.conformance_target_type,
                                 template.conformance_trait_args,
                                 template.uses_trait_type_params,
@@ -668,11 +673,23 @@ given TypeChecker {
             .Some(t) then Option[Type].Some(t),
             .None() then Option[Type].None(),
         };
+        // The trait METHOD this impl member satisfies (rustc's
+        // `trait_item_def_id`). Resolved once here -- at definition time, where a
+        // name lookup inside one trait declaration is how the requirement is
+        // named -- and carried on the template so mono never re-derives it.
+        let trait_method_def_id = when conformance_trait_def_id in {
+            .Some(trait_def_id) then self.storage.generic_templates.trait_method_def_id(
+                trait_def_id,
+                method_name,
+            ),
+            .None() then Option[DefId].None(),
+        };
         let primary_template = self.boxed_extension_method_template(
             self.to_template_type_params(owner_type_params),
             method_decl,
             conformance_trait_name,
             conformance_trait_def_id,
+            trait_method_def_id,
             conformance_target_type,
             conformance_trait_args,
             false,
@@ -724,6 +741,7 @@ given TypeChecker {
                             current_ref.method,
                             current_ref.conformance_trait_name,
                             current_ref.conformance_trait_def_id,
+                            current_ref.trait_method_def_id,
                             current_ref.conformance_target_type,
                             current_ref.conformance_trait_args,
                             current_ref.uses_trait_type_params,
@@ -1222,6 +1240,7 @@ given TypeChecker {
                     template.method,
                     template.conformance_trait_name,
                     template.conformance_trait_def_id,
+                    template.trait_method_def_id,
                     template.conformance_target_type,
                     template.conformance_trait_args,
                     template.uses_trait_type_params,
@@ -1289,6 +1308,7 @@ given TypeChecker {
                         matched_template.method,
                         matched_template.conformance_trait_name,
                         matched_template.conformance_trait_def_id,
+                        matched_template.trait_method_def_id,
                         matched_template.conformance_target_type,
                         matched_template.conformance_trait_args,
                         matched_template.uses_trait_type_params,

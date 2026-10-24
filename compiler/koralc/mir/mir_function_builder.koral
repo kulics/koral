@@ -834,7 +834,7 @@ given MIRFunctionBuilder {
                     )
                 }
             },
-            .TraitMethodPlaceholder(_, _, method, _, _) then {
+            .TraitMethodPlaceholder(_, _, method, _, _, _) then {
                 Option[MIRExprResult].Some(
                     MIRExprResult(
                         expression.expr_type,
@@ -2428,10 +2428,11 @@ given MIRFunctionBuilder {
                 subject_type,
                 target_type,
             ),
-            .StringLiteral(value) then self.pattern_string_compare(
+            .StringLiteral(value, equals_symbol) then self.pattern_string_compare(
                 subject_place,
                 subject_type,
                 value,
+                equals_symbol,
             ),
             .RuneLiteral(_) then self.pattern_bool(false),
             .NotPattern(_) then self.pattern_bool(false),
@@ -2800,19 +2801,6 @@ given MIRFunctionBuilder {
         };
     };
 
-    file_private pattern_string_equals_symbol(self, subject_type Type) Option[Symbol] = {
-        let mutable receiver_type = self.normalized_method_lookup_receiver_type(
-            subject_type,
-        );
-        let mutable param_types = List[Type].new();
-        param_types.push(receiver_type);
-        param_types.push(receiver_type);
-        let mutable expected_type = Type.FunctionType(
-            types_to_param_entries(param_types),
-            Type.BoolType(),
-        );
-        return self.lookup_concrete_method_symbol(receiver_type, "equals", expected_type);
-    };
 
     file_private rune_pattern_value_access(
         self,
@@ -2856,9 +2844,10 @@ given MIRFunctionBuilder {
         subject_place MIRPlace,
         subject_type Type,
         value String,
+        equals_symbol Symbol,
     ) MIROperand = {
         let mutable matched_type = self.receiver_lookup_type(subject_type);
-        return when self.pattern_string_equals_symbol(matched_type) in {
+        return when Option[Symbol].Some(equals_symbol) in {
             .Some(equals_symbol) then {
                 let subject_value = MIRValue.PlaceRead(
                     subject_place,
@@ -4073,26 +4062,12 @@ given MIRFunctionBuilder {
                             result_type,
                         );
                         if not self.context.contains_generic_parameter(concrete_type) then {
-                            // Identity first; the name bridge below only speaks
-                            // when identity cannot resolve yet.
+                            // Identity only. The definition-time DefId names the
+                            // method; a name-bridged fallback here would re-decide
+                            // "which method" from the spelling.
                             when self.resolve_method_symbol_by_dispatch_identity(
                                 symbol,
                                 receiver_type,
-                                concrete_type,
-                            ) in {
-                                .Some(callable_method) then {
-                                    return self.finish_call_from_typed_args(
-                                        MIROperand.Function(callable_method),
-                                        args,
-                                        result_type,
-                                    );
-                                },
-                                .None() then {},
-                            };
-                            let method_name = self.semantic_method_name(symbol);
-                            when self.lookup_concrete_method_symbol(
-                                receiver_type,
-                                method_name,
                                 concrete_type,
                             ) in {
                                 .Some(callable_method) then {
@@ -4505,26 +4480,48 @@ given MIRFunctionBuilder {
             };
         };
 
-        let direct_lookup_key = make_receiver_method_key_from_context(
-            self.context,
-            effective_receiver_type,
-            method_name,
-        );
-        when self.program.static_method_by_key.get(direct_lookup_key) in {
-            .Some(def_id) then {
-                when self.context.get_function_type(def_id) in {
-                    .Some(function_type) then {
-                        if self.static_method_signature_matches_call(
-                            function_type,
-                            concrete_type,
-                        ) then {
-                            return Symbol(def_id, function_type, SymbolKind.Function());
-                        };
-                    },
-                    .None() then {},
-                };
-            },
-            .None() then {},
+        // Dual key: a trait call carries the trait METHOD's DefId (rustc's
+        // `trait_item_def_id`), so the instance answers under that identity too.
+        let mutable direct_lookup_def_ids = List[DefId].new();
+        if method.def_id.is_valid() then {
+            direct_lookup_def_ids.push(method.def_id);
+            when self.program.receiver_method_dispatch.get(method.def_id) in {
+                .Some(dispatch_info) then {
+                    when dispatch_info.trait_method_def_id in {
+                        .Some(trait_item_def_id) then {
+                            if trait_item_def_id != method.def_id
+                                and not direct_lookup_def_ids.contains(trait_item_def_id) then {
+                                direct_lookup_def_ids.push(trait_item_def_id);
+                            };
+                        },
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
+        };
+        for lookup_def_id in direct_lookup_def_ids then {
+            let direct_lookup_key = make_receiver_method_identity_key_from_context(
+                self.context,
+                effective_receiver_type,
+                lookup_def_id,
+            );
+            when self.program.static_method_by_key.get(direct_lookup_key) in {
+                .Some(def_id) then {
+                    when self.context.get_function_type(def_id) in {
+                        .Some(function_type) then {
+                            if self.static_method_signature_matches_call(
+                                function_type,
+                                concrete_type,
+                            ) then {
+                                return Symbol(def_id, function_type, SymbolKind.Function());
+                            };
+                        },
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
         };
 
         when self.context.get_function_type(method.def_id) in {
@@ -4972,205 +4969,7 @@ given MIRFunctionBuilder {
         return Option[Type].None();
     };
 
-    file_private lookup_concrete_method_symbol(
-        self,
-        receiver_type Type,
-        method_name String,
-        expected_type Type,
-    ) Option[Symbol] = {
-        if receiver_type is .Unknown() then {
-            return Option[Symbol].None();
-        };
-        let direct_lookup_key = make_receiver_method_key_from_context(
-            self.context,
-            receiver_type,
-            method_name,
-        );
-        when self.program.static_method_by_key.get(direct_lookup_key) in {
-            .Some(def_id) then {
-                when self.context.get_function_type(def_id) in {
-                    .Some(function_type) then {
-                        if self.method_signature_matches_call(
-                            function_type,
-                            expected_type,
-                        ) then {
-                            return Option[Symbol].Some(
-                                Symbol(def_id, function_type, SymbolKind.Function()),
-                            );
-                        };
-                    },
-                    .None() then {},
-                };
-            },
-            .None() then {},
-        };
-        when receiver_type in {
-            .ReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            .MutableReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            .BorrowedReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            .MutableBorrowedReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            .WeakReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            .MutableWeakReferenceType(inner) then {
-                when self.lookup_concrete_method_symbol(inner, method_name, expected_type) in {
-                    .Some(symbol) then {
-                        return Option[Symbol].Some(symbol);
-                    },
-                    .None() then {},
-                };
-            },
-            _ then {},
-        };
-        for entry in self.program.concrete_callables_by_def_id.iterator() then {
-            let def_id = entry.first;
-            let info = entry.second;
-            let logical_name = info.logical_name;
-            if logical_name != method_name then {
-                continue;
-            };
-            when info.owner_type in {
-                .Some(owner_type) then {
-                    when self.context.get_function_type(def_id) in {
-                        .Some(function_type) then {
-                            if not self.method_signature_matches_call(
-                                function_type,
-                                expected_type,
-                            ) then {
-                                continue;
-                            };
-                            if self.method_owner_matches_receiver(
-                                owner_type,
-                                receiver_type,
-                            ) then {
-                                return Option[Symbol].Some(
-                                    Symbol(def_id, function_type, SymbolKind.Function()),
-                                );
-                            };
-                            if self.full_method_signature_matches_call(
-                                function_type,
-                                expected_type,
-                            ) then {
-                                return Option[Symbol].Some(
-                                    Symbol(def_id, function_type, SymbolKind.Function()),
-                                );
-                            };
-                        },
-                        .None() then {},
-                    };
-                },
-                .None() then when self.context.get_function_type(def_id) in {
-                    .Some(function_type) then {
-                        if self.full_method_signature_matches_call(
-                            function_type,
-                            expected_type,
-                        ) then {
-                            return Option[Symbol].Some(
-                                Symbol(def_id, function_type, SymbolKind.Function()),
-                            );
-                        };
-                    },
-                    .None() then {},
-                },
-            }
-        };
-        return Option[Symbol].None();
-    };
 
-    file_private lookup_concrete_method_symbol_by_shape(
-        self,
-        receiver_type Type,
-        expected_type Type,
-    ) Option[Symbol] = {
-        if receiver_type is .Unknown() then {
-            return Option[Symbol].None();
-        };
-        let mutable candidate = Option[Symbol].None();
-        let mutable candidate_count UInt = 0;
-        let mutable seen_def_ids = Set[UInt].new();
-        for entry in self.program.static_method_by_key.iterator() then {
-            let def_id = entry.second;
-            if seen_def_ids.contains(def_id.id) then {
-                continue;
-            };
-            when self.context.get_function_type(def_id) in {
-                .Some(function_type) then {
-                    if self.full_method_signature_matches_call(
-                        function_type,
-                        expected_type,
-                    ) then {
-                        seen_def_ids.insert(def_id.id);
-                        candidate = Option[Symbol].Some(
-                            Symbol(def_id, function_type, SymbolKind.Function()),
-                        );
-                        candidate_count += UInt(1);
-                        if candidate_count > UInt(1) then {
-                            return Option[Symbol].None();
-                        };
-                    };
-                },
-                .None() then {},
-            };
-        };
-        for entry in self.program.concrete_callables_by_def_id.iterator() then {
-            let def_id = entry.first;
-            if seen_def_ids.contains(def_id.id) then {
-                continue;
-            };
-            when self.context.get_function_type(def_id) in {
-                .Some(function_type) then {
-                    if self.full_method_signature_matches_call(
-                        function_type,
-                        expected_type,
-                    ) then {
-                        seen_def_ids.insert(def_id.id);
-                        candidate = Option[Symbol].Some(
-                            Symbol(def_id, function_type, SymbolKind.Function()),
-                        );
-                        candidate_count += UInt(1);
-                        if candidate_count > UInt(1) then {
-                            return Option[Symbol].None();
-                        };
-                    };
-                },
-                .None() then {},
-            };
-        };
-        return if candidate_count == UInt(1) then candidate else Option[Symbol].None();
-    };
 
     file_private ref_like_base_layout_key(self, t Type) Option[String] = {
         return when t in {
@@ -7230,7 +7029,7 @@ given MIRFunctionBuilder {
                 param_names,
                 out,
             ),
-            .TraitMethodPlaceholder(base, _, _, _, _) then self.collect_captures_expr(
+            .TraitMethodPlaceholder(base, _, _, _, _, _) then self.collect_captures_expr(
                 base,
                 param_names,
                 out,

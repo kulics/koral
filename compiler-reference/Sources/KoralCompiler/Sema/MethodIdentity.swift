@@ -58,7 +58,7 @@ public struct MethodInstanceKey: Hashable, Equatable {
 }
 
 /// Legacy name-based key for the `extensionMethods` map used by
-/// `lookupConcreteMethodSymbol`. This is the ONLY remaining name-keyed method
+/// `lookupDeclaredMethod`. This is the ONLY remaining name-keyed method
 /// table — it serves `traitMethodPlaceholder` resolution (which carries a name
 /// but no DefId). Phase C adds `traitMethodDefId` to `traitMethodPlaceholder`,
 /// after which this key and its map are deleted.
@@ -292,7 +292,7 @@ extension CompilerContext {
       owner: pair.owner, ownerArgs: pair.args, methodDefId: methodDefId, methodTypeArgs: methodTypeArgs)
   }
 
-  /// Legacy name-based key for `extensionMethods` (used by `lookupConcreteMethodSymbol`).
+  /// Legacy name-based key for `extensionMethods` (used by `lookupDeclaredMethod`).
   public func receiverMethodLookupKey(_ receiverType: Type, _ methodName: String, methodTypeArgs: [Type] = [])
     -> MethodLookupKey
   {

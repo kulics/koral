@@ -1,0 +1,43 @@
+// A trait that inherits another puts the parent's requirements in its own
+// vtable. The implementation of `base` is registered under the PARENT trait,
+// while the wrapper is generated for the CHILD's vtable -- so resolving the
+// callee by (trait name, method name) alone discards it.
+//
+// The receiver must be a GENERIC instantiation for the bug to show: then the
+// declaration form (`Item_Param_T_..._base`) and the instance form
+// (`Item_I_..._base`) have different C names. With a plain nominal both spell
+// the same and the bug is invisible.
+//
+// Guards three things at once:
+//   * inherited-requirement resolution (implementation lives under the parent)
+//   * callee C name follows the INSTANCE, not the declaration
+//   * `wrapper_self_type` is the instantiated receiver, not the declaration
+//     form the method was written against
+// EXPECT: 3
+// EXPECT: extra
+
+trait Base[T Any] {
+    base(self) T;
+};
+
+trait Extra[T Any] Base[T] {
+    extra(self) String;
+};
+
+type Item[T Any](v T);
+
+given[T Any] Item[T] as Base[T] {
+    public base(self) T = self.v;
+};
+
+given[T Any] Item[T] as Extra[T] {
+    public extra(self) String = "extra";
+};
+
+let main() Int = {
+    let i = Item[Int](3);
+    let e Extra[Int] = i;
+    println(e.base().to_string());
+    println(e.extra());
+    return 0;
+};

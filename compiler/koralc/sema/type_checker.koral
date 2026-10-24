@@ -11,6 +11,12 @@ module_private type mutable TypeCheckerStorage(
     mutable global_scope Scope,
     mutable context CompilerContext,
     mutable method_table MethodTable,
+    // One DefId per `given` member, assigned once and reused by every later
+    // pass. The parser cannot allocate, so `GivenMember.def_id` arrives invalid;
+    // if each pass minted its own the typed member and the AST member would
+    // disagree and a call site bound to one could not find a table keyed by the
+    // other.
+    mutable given_member_def_ids Dict[String, DefId],
     mutable diagnostics DiagnosticCollector,
     mutable file_path String,
     mutable module_path List[String],
@@ -239,6 +245,7 @@ given TypeChecker {
             global_scope,
             context,
             MethodTable.new(),
+            Dict[String, DefId].new(),
             DiagnosticCollector.new(),
             file_path,
             List[String].new(),
@@ -1385,7 +1392,7 @@ given TypeChecker {
                 let first_arg = (args[UInt(0)]);
                 self.typed_expr_span(first_arg)
             },
-            .TraitMethodPlaceholder(base, _, method, _, _) then {
+            .TraitMethodPlaceholder(base, _, method, _, _, _) then {
                 let base_span = self.typed_expr_span(base);
                 if is_known_span(base_span) then base_span
                 else self.context().get_span(method.def_id) or else unknown_span()
@@ -2154,6 +2161,7 @@ given TypeChecker {
             List[TypedParam].new(),
             Type.Unknown(),
             Option[TypedExpr].None(),
+            member.trait_method_def_id,
         );
     };
 
@@ -3989,6 +3997,70 @@ given TypeChecker {
         };
     };
 
+    /// Assign each `given` member its DECLARATION identity exactly once,
+    /// stably across passes.
+    ///
+    /// The parser cannot allocate DefIds, so `GivenMember.def_id` arrives
+    /// invalid. `type_checker` and `type_checker_decls` each walk the same
+    /// block; if each minted its own the two would disagree and a call site
+    /// bound to one could not find a table keyed by the other. The map keys on
+    /// (owner, member name) -- one given block, one name per member -- and is
+    /// read before allocating, so the second pass reuses the first's answer.
+    module_private members_with_def_ids(
+        self,
+        members List[GivenMember],
+        target_type Type,
+        conformance_trait_name Option[String],
+    ) List[GivenMember] = {
+        // Two traits may declare the same method name on one type
+        // (`Greet.greet` and `Farewell.greet`). Keying on (owner, name) alone
+        // collapses them into one DefId, and the method table can then no
+        // longer tell two declarations apart -- which is exactly what
+        // `trait_same_name_method_conflict` has to report.
+        let trait_part = when conformance_trait_name in {
+            .Some(trait_name) then trait_name,
+            .None() then "",
+        };
+        let mutable out = List[GivenMember].with_capacity(members.count());
+        for member in members then {
+            let map_key = "\(self.context().method_owner_of(target_type).display())#\(trait_part)#\(member.name)";
+            let member_id = when member.def_id.is_valid() in {
+                true then member.def_id,
+                false then when self.storage.given_member_def_ids.get(map_key) in {
+                    .Some(existing) then existing,
+                    .None() then {
+                        let allocated = self.allocate_unindexed_def_id(
+                            member.name,
+                            DefKind.Function(),
+                        );
+                        self.storage.given_member_def_ids.insert(map_key, allocated);
+                        // A call site that does not name the trait still needs a
+                        // declaration identity. The first writer wins this
+                        // alias; two same-named trait methods colliding here is
+                        // already an error reported at registration.
+                        let alias_key = "\(self.context().method_owner_of(target_type).display())#\(member.name)";
+                        if not self.storage.given_member_def_ids.contains_key(alias_key) then {
+                            self.storage.given_member_def_ids.insert(alias_key, allocated);
+                        };
+                        allocated
+                    },
+                },
+            };
+            out.push(
+                GivenMember(
+                    member.name,
+                    member.type_params,
+                    member.access,
+                    member.params,
+                    member.return_type,
+                    member.body,
+                    member_id,
+                ),
+            );
+        };
+        return out;
+    };
+
     module_private collect_given_signatures(
         self,
         members List[GivenMember],
@@ -4009,7 +4081,14 @@ given TypeChecker {
         self.storage.current_scope = sig_scope;
         let type_key = self.extension_template_key(target_type);
         let mutable seen_names = List[String].new();
-        for m in members then {
+        // Same member list the body-checking pass will see, with each member's
+        // DECLARATION identity already assigned and stable.
+        let id_members = self.members_with_def_ids(
+            members,
+            target_type,
+            conformance_trait_name,
+        );
+        for m in id_members then {
             if self.sema_progress_debug_enabled() then {
                 println(
                     "[sema-pass2-given] target=\(self.context().type_display_name(target_type)) member=\(m.name)",

@@ -128,53 +128,6 @@ given TypeChecker {
         return method_symbol;
     };
 
-    module_private make_method_callable_symbol(
-        self,
-        method_name String,
-        params List[TypedParam],
-        return_type Type,
-    ) Symbol = {
-        let mutable param_types = List[Type].new();
-        for param in params then {
-            param_types.push(param.param_type);
-        };
-        let method_symbol = Symbol(
-            self.allocate_unindexed_def_id(method_name, DefKind.Function()),
-            make_function_type(param_types, return_type),
-            SymbolKind.Function(),
-        );
-        self.register_function_symbol_metadata(
-            method_symbol,
-            self.function_param_specs_from_typed_params(params),
-        );
-        return method_symbol;
-    };
-
-    module_private make_method_callable_symbol_with_visibility(
-        self,
-        method_name String,
-        params List[TypedParam],
-        return_type Type,
-        access AccessModifier,
-        module_path List[String],
-        source_file String,
-        package_id String,
-    ) Symbol = {
-        let method_symbol = self.make_method_callable_symbol(
-            method_name,
-            params,
-            return_type,
-        );
-        self.stamp_method_symbol_visibility_metadata(
-            method_symbol,
-            access,
-            module_path,
-            source_file,
-            package_id,
-        );
-        return method_symbol;
-    };
-
     /// Remember a method's OWN type parameters so a call site can enforce their
     /// bounds. The symbol a lookup hands out may be rebuilt per call; the bound
     /// list lives on the declaration. This is the bridge: registered under the
@@ -243,13 +196,107 @@ given TypeChecker {
         return message.to_string();
     };
 
+    /// The declaration identity of `method_name` on `receiver_type`, when one
+    /// has already been assigned. Mirrors Swift's `methodDefIdsByOwner` /
+    /// `methodSymbolDefId(ownerKey:name:)`: the SAME (owner, name) always yields
+    /// the same DefId, so a call site's symbol and the registered instance table
+    /// agree. Minting a fresh DefId per call is how the two drifted apart.
+    module_private declared_method_def_id(
+        self,
+        receiver_type Type,
+        method_name String,
+    ) DefId = {
+        let map_key = "\(self.context().method_owner_of(receiver_type).display())#\(method_name)";
+        return when self.storage.given_member_def_ids.get(map_key) in {
+            .Some(existing) then existing,
+            .None() then def_id_invalid(),
+        };
+    };
+
     module_private make_method_symbol(self, method_name String, return_type Type) Symbol = {
-        let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function());
+        return self.make_method_symbol_for_receiver(
+            Type.Unknown(),
+            method_name,
+            return_type,
+        );
+    };
+
+    /// The trait requirement's DefId for `method_name` when `receiver_type` is
+    /// a generic parameter bounded by a trait that declares it. That IS the
+    /// definition-time identity (rustc's `trait_item_def_id`); instantiation
+    /// maps it to the concrete impl. Minting here instead is what left a generic
+    /// call carrying an identity no instance table could answer for.
+    module_private trait_bound_method_def_id(
+        self,
+        receiver_type Type,
+        method_name String,
+    ) DefId = {
+        return when receiver_type in {
+            .GenericParameter(name) then {
+                when self.storage.generic_param_constraints.get(name) in {
+                    .Some(bounds) then {
+                        let mutable found = def_id_invalid();
+                        for bound in bounds then {
+                            if found.is_valid() then {
+                                continue;
+                            };
+                            when self.storage.generic_templates.trait_method_def_id(
+                                bound.trait_def_id,
+                                method_name,
+                            ) in {
+                                .Some(id) then {
+                                    found = id;
+                                },
+                                .None() then {},
+                            };
+                        };
+                        found
+                    },
+                    .None() then def_id_invalid(),
+                }
+            },
+            _ then def_id_invalid(),
+        };
+    };
+
+    module_private make_method_symbol_for_receiver(
+        self,
+        receiver_type Type,
+        method_name String,
+        return_type Type,
+    ) Symbol = {
+        let declared = self.declared_method_def_id(receiver_type, method_name);
+        let from_bound = if declared.is_valid() then declared
+        else self.trait_bound_method_def_id(receiver_type, method_name);
+        let def_id = if from_bound.is_valid() then from_bound
+        else self.allocate_unindexed_def_id(method_name, DefKind.Function());
         return Symbol(
             def_id,
             Type.FunctionType(List[FunctionParamEntry].new(), return_type),
             SymbolKind.Function(),
         );
+    };
+
+    /// The trait METHOD's declaration identity for `method_name` inside the
+    /// trait `trait_type` names (rustc's `trait_item_def_id`). This is
+    /// definition-time resolution: a name is how a trait declaration lists its
+    /// requirements, and this runs once when the call is checked. The result is
+    /// carried on the node so the monomorphizer never re-derives it.
+    module_private trait_method_def_id_of(
+        self,
+        trait_type Type,
+        method_name String,
+    ) DefId = {
+        return when trait_type in {
+            .TraitObject(trait_def_id, _) then when self.storage.generic_templates.trait_method_def_id(
+                trait_def_id,
+                method_name,
+            ) in {
+                .Some(id) then id,
+                .None() then def_id_invalid(),
+            },
+            _ then def_id_invalid(),
+        };
     };
 
     module_private reused_given_member_signature(
@@ -1058,7 +1105,14 @@ given TypeChecker {
                 },
             };
         };
-        for m in members then {
+        // Same member list `collect_given_signatures` saw, with each member's
+        // DECLARATION identity already assigned and stable across passes.
+        let id_members = self.members_with_def_ids(
+            members,
+            target_type,
+            conformance_trait_name,
+        );
+        for m in id_members then {
             let method_constraint_snapshot = self.snapshot_generic_constraints(
                 m.type_params,
             );
@@ -1185,6 +1239,17 @@ given TypeChecker {
                 .Some(name) then self.trait_def_id_of(name),
                 .None() then Option[DefId].None(),
             };
+            // The trait METHOD this member satisfies (rustc's
+            // `trait_item_def_id`). Resolved once here, at definition time, and
+            // carried on the member so mono never re-derives it from the
+            // spelling.
+            let member_trait_method_def_id = when member_trait_def_id in {
+                .Some(trait_def_id) then self.storage.generic_templates.trait_method_def_id(
+                    trait_def_id,
+                    method_name,
+                ),
+                .None() then Option[DefId].None(),
+            };
             if should_retain_template_body then {
                 self.update_extension_method_checked_template(
                     target_type,
@@ -1283,6 +1348,7 @@ given TypeChecker {
                         typed_params,
                         ret,
                         Option[TypedExpr].None(),
+                        member_trait_method_def_id,
                     ),
                 );
                 continue;
@@ -1384,6 +1450,7 @@ given TypeChecker {
                     typed_params,
                     ret,
                     Option[TypedExpr].None(),
+                    member_trait_method_def_id,
                 ),
             );
         };

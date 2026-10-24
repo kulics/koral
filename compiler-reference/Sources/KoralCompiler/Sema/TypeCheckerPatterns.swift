@@ -640,8 +640,8 @@ extension TypeChecker {
       // The length and element reads are ordinary std method calls, resolved
       // here the way `xs.count()` / `xs[i]` resolve them. MIR only knows how to
       // call a Symbol, so the pattern carries them down.
-      guard let countSymbol = try lookupConcreteMethodSymbol(on: subjectType, name: "count"),
-            let indexSymbol = try lookupConcreteMethodSymbol(on: subjectType, name: "__index_get") else {
+      guard let countSymbol = try lookupDeclaredMethod(on: subjectType, name: "count"),
+            let indexSymbol = try lookupDeclaredMethod(on: subjectType, name: "__index_get") else {
         throw SemanticError(.generic(
           "List pattern requires 'count' and '__index_get' on '\(subjectType.description)'"
         ), span: span)
