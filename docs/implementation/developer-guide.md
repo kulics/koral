@@ -224,6 +224,48 @@ Windows notes:
 - `CreateProcessW` gets a real UTF-16 environment block when the caller passes
   one, and only then sets `CREATE_UNICODE_ENVIRONMENT`.
 
+### Verification Discipline
+
+规则三条，都是踩出来的。
+
+**1. `scripts/verify.sh` 是固定顺序，step 1 挂了会让后面全暗。**
+
+step 0 编 seed → step 1 seed 自检 → step 2 seed→stage1 → **step 3 bootstrap 闸门** →
+step 4 自举不动点 → step 5 stage2 → step 6 differential → samples → toolchain。
+`set -euo pipefail`，任何一步非零就停。所以「跑完 verify.sh」和「跑到了第几步」是两件事——
+看绿结果先确认日志里跑到第几步，别把 step 1 的绿当成全绿。
+
+改 `compiler/koralc/` 时的**权威闸门是 step 3**，可以单独跑（省掉 seed 与 differential）：
+
+```bash
+compiler-reference/.build/release/koralc build --package-config compiler/koral.json   --target-module koralc -o bin/compiler
+bin/compiler-test-runner/compiler_runner --compiler bootstrap   --bootstrap-koralc bin/compiler/koralc --timeout 60 -j 4 --report-file .verify-work/gate.log
+```
+
+`--filter <substring>` 用于快速回环。最终仍要过一次全链。
+
+**2. 回归测试必须做负向对照。**
+
+新测试要证明**摘掉修复时它会红**，否则它只是带注释的期望输出。做法：临时把修复摘掉、
+重编、跑该用例、确认失败，再还原。
+
+反面教材（两个「回归测试」第一版都守不住）：
+
+| 测试 | 为什么第一版是假的 |
+|---|---|
+| 泛型界限上的方法身份 | 写成了实例调用 `x.render()`；实际走的是另一条路，要写**静态**调用 `T.make()` |
+| 继承需求的 vtable | receiver 写成了非泛型名义类型；声明形与实例形同名，bug 不显形，**必须是泛型实例** |
+
+负向对照的症状要记进测试注释——它是「这条测试在守什么」的可验证陈述。
+
+**3. Swift 与 Koral 必须镜像，两侧同时改。**
+
+不能把任一侧当长期临时兼容层。改一侧时先看参照侧对应实现是什么形状；
+照抄参照的机制（键形状、双 key、守卫位置）比自己发明一套更不容易偏。
+
+配套：**一次一个子步骤，独立过验证再进下一步。** 想「在旧路径上再加 fallback」时先停下，
+读 [`identity-matching-tracking.md`](identity-matching-tracking.md) §2 的硬性约束。
+
 ### Compile Koral Programs
 
 Use the primary implementation (`bin/compiler/koralc`) unless you are specifically exercising the
@@ -336,29 +378,6 @@ the `Drop` contract live in [`../design/type-semantics.md`](../design/type-seman
 canonical text; this guide does not restate it.
 
 ## Bootstrap Self-Hosting Repair Notes
-
-The current bootstrap compiler has been repaired back to a stable self-hosting chain. This section records the root causes that mattered, the Swift-architecture alignments that fixed them, and the validation flow that should be reused when similar regressions return.
-
-### Root Causes That Actually Mattered
-
-- Several bootstrap hot paths were relying on mutable local values that the current bootstrap compiler lowered as temporary boxed copies when passed through `&mutable`-style method calls. The symptom was not immediate type failure; it showed up later as use-after-free, malformed generated C, or corrupted codegen state.
-- The most important instances were:
-    - `CodeGen` lifecycle in `generate_c_from_mir`: separate phase calls were mutating different effective `CodeGen` objects instead of one stable instance.
-    - `MIRFunctionCodeEmitter` nested-definition flow: body emission could mutate emitter-owned strings and then later read from a moved-from local emitter value.
-    - `RecursiveTypeChecker.detect_cycles`: local `Dict` / `List` working state passed into DFS was lowered through transient boxed copies and then reused after release.
-- Generic struct/enum instantiation in bootstrap mono resolved template type nodes, but did not consistently re-run nested parameterized type concretization the way Swift does. This showed up as wrong concrete type layers in generated C for cases such as `Option[List[*T]]`.
-- Pattern variable lowering in bootstrap MIR builder was over-eagerly materializing copied locals for enum payload matches. For `Option[*T]` payloads this regressed ref-like semantics and produced value/ref mismatches.
-
-### Swift Alignments That Fixed The Bugs
-
-- Treat the codegen driver as operating on one stable mutable object. In bootstrap, `generate_c_from_mir` should keep a single boxed `CodeGen` and mutate that one instance through prelude, body emission, finalization, and string extraction.
-- Avoid by-value `CodeGen` receivers on codegen hot paths. Swift effectively has reference semantics here; bootstrap needed the same practical behavior to stop copying internal state such as caches and output buffers.
-- When bootstrap MIR/codegen needs mutable helper state that survives across multiple calls, prefer one stable boxed object over repeatedly passing stack locals through method calls.
-- Align generic type instantiation with Swift's two-step approach:
-    1. substitute template parameters
-    2. immediately resolve nested parameterized types to concrete instantiated types
-- Align MIR pattern-variable binding with Swift's place-based binding strategy. Do not always materialize a copied local for a variable pattern; preserve the matched place when the binding is semantically a reference-like payload.
-- Align local-name lookup in MIR codegen with Swift's `localNameByID` model instead of assuming `MIRLocalID.raw_value == locals` array index everywhere.
 
 ### Bounded Self-Host Validation Flow
 

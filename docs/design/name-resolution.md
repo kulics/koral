@@ -33,14 +33,14 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 ### 作用域符号是 `(module, name)`
 
-出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §3.1。
+出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §4。
 
 模块级符号的键是 **`(module, name)`**，不是裸名。否则两个模块里的同名 `type Plain`
 会塌进一个符号槽。
 
 ### 解析顺序四层，裸名不是解析
 
-出处：记录 §17.2、§17.3、§18.2。
+出处：记录 §15、§15.1、§16。
 
 > 解析顺序 = **本模块声明 → 符号导入 → 批量/模块导入 → 裸名**。
 
@@ -213,4 +213,4 @@ private 符号的文件作用域不得遮蔽同级（`compiler-reference/.../Def
 
 无单独的实现记录文件。名字键改身份键、清掉名字兜底的**迁移过程**记在
 [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md)
-§15–§24（带日期的记录，只追加不改写）。
+§13–§23（带日期的记录，只追加不改写）。

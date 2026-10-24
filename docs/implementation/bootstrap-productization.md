@@ -19,7 +19,7 @@
 | **不选最容易通过的办法** | 不得选省事的做法让问题恶化 |
 | **一处处手工改** | 禁止盲改正则，逐处手工改 |
 
-（其余仓库级规则见 [`identity-matching-tracking.md`](identity-matching-tracking.md) §1。）
+（其余仓库级规则见 [`identity-matching-tracking.md`](identity-matching-tracking.md) §2。）
 
 ## 信任边界
 

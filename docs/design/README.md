@@ -10,7 +10,7 @@
 
 > **身份是声明的 `DefId`。名字只在三个地方合法：解析边界、显示、C 改编（mangling）。**
 > 解析完成后只比身份，不比名字。
-> 出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §0 / §5.4 / §7.8
+> 出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §1 / §7.2 / §9.2
 
 这条贯穿本目录所有文档。**各文档只写「它在本主题上意味着什么」，不要复述前提本身。**
 
@@ -58,8 +58,8 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`type-semantics.md`](type-semantics.md) —— type / type mutable / Clone / Drop | Implemented | 无单独记录（随 std 与两编译器同批） | 2026-10 |
 | [`control-flow.md`](control-flow.md) —— 控制流 | Implemented（**材料不足**） | 无单独记录（回归用例看住） | 2026-10 |
 | [`flow-logical-layers.md`](flow-logical-layers.md) —— 流程层与逻辑层 | Implemented | 文内 `## 实现与看护` 一节（未单独拆出） | 2026-10-11 |
-| [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §4–§5 | 2026-10 |
-| [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §4–§5、§16.3、§22.4 | 2026-10 |
+| [`generics-and-monomorphization.md`](generics-and-monomorphization.md) —— 泛型与单态化 | Implemented | [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §6–§7 | 2026-10 |
+| [`traits-and-givens.md`](traits-and-givens.md) —— trait / given / trait object | Implemented | 同上 §6–§7、§14、§21 | 2026-10 |
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
 

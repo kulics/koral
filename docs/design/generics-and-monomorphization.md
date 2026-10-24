@@ -32,7 +32,7 @@
 
 ### 声明表与实例表的键不同（铁律）
 
-出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §5.2
+出处：[`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md) §7.1
 （曾走错两轮，206/557 → 531/557 → 557/557）。
 
 > **铁律**：*声明*表按 `MethodOwner` 键；*实例*表按 `MethodInstanceKey`（owner + owner_args）键。
@@ -148,4 +148,4 @@ public type MethodInstanceKey(
 
 无单独的实现记录文件。实例表重键的**迁移过程**记在
 [`../implementation/identity-matching-tracking.md`](../implementation/identity-matching-tracking.md)
-§4–§5（那是带日期的记录，只追加不改写）。
+§6–§7（那是带日期的记录，只追加不改写）。

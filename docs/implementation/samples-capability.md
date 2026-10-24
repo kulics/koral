@@ -85,4 +85,4 @@
 
 类型显示拼法表里有三套**基名**策略，它们语义不同，**有意不合并**——
 合了会让两个不同的东西显示成一个。见
-[`identity-matching-tracking.md`](identity-matching-tracking.md) §24.3。
+[`identity-matching-tracking.md`](identity-matching-tracking.md) §23.2。
