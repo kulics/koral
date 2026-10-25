@@ -11,10 +11,10 @@
 层内优先级不变（`and then` > `or else` / `or return`；`and` > `or`）。
 
 ```
-a and (b or else c)              合法，语义就是它
-(a and b) or else c              合法，语义是另一回事
-a and b or else c                拒绝
-opt and then it == 1 and false   拒绝
+a and (b or else c)                        合法，语义就是它
+(a and b) or else c                        合法，语义是另一回事
+a and b or else c                          拒绝
+opt and then as v in v == 1 and false      拒绝
 ```
 
 ## 背景
@@ -45,26 +45,26 @@ opt and then it == 1 and false   拒绝
 层内优先级保持不变：
 
 - **流程层**：`and then` 比 `or else` / `or return` 更紧。
-  `f() and then g(it) or else h()` 是 `(f() and then g(it)) or else h()`。
+  `f() and then as v in g(v) or else h()` 是 `(f() and then as v in g(v)) or else h()`。
 - **逻辑层**：`and` 比 `or` 更紧。`a or b and c` 是 `a or (b and c)`。
 
 ### 允许
 
 | 写法 | 分组 |
 |---|---|
-| `f() and then g(it) or else h()` | 流程接流程 |
+| `f() and then as v in g(v) or else h()` | 流程接流程 |
 | `a or b and c` | 逻辑接逻辑 |
 | `a and (b or else c)` | 逻辑，右操作数是括起来的流程 |
 | `(a and b) or else c` | 流程，左操作数是括起来的逻辑 |
-| `opt and then (it == 1 and false)` | 流程，变换体是括起来的逻辑 |
-| `ready and (opt and then it > 0 or else false)` | 逻辑，右操作数是括起来的流程 |
+| `opt and then as v in (v == 1 and false)` | 流程，变换体是括起来的逻辑 |
+| `ready and (opt and then as v in v > 0 or else false)` | 逻辑，右操作数是括起来的流程 |
 
 ### 拒绝
 
 | 写法 | 为什么 |
 |---|---|
 | `a and b or else c` | 字面读作 `(a and b) or else c`，实际会是 `a and (b or else c)` |
-| `opt and then it == 1 and false` | 同理，两个方向都猜不得 |
+| `opt and then as v in v == 1 and false` | 同理，两个方向都猜不得 |
 | `a or b or else c` | 同上 |
 
 「禁止混用」不等于取消优先级——优先级是语法规则，禁止隐式跨层混用是**阅读体验**规则。

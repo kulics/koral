@@ -1223,9 +1223,9 @@ Koral provides three special operators for working with `Option` and `Result` ty
 There is no implicit name. Two spellings give the transformation access to the unwrapped value, and they differ only in whether it needs a name:
 
 - **Chain** — `and then .member(...)`: the receiver is the unwrapped value, so `config and then .window.title` reads as `config?.window.title`. A leading dot here is always a member of the unwrapped value (never an implicit member construction). The chain is a full postfix run: `.f(x).g`, `.f()[0]`.
-- **Binder** — `and then as v in body`: names the unwrapped value for `body`. `body` is a single layer operand, so an `or else` written after it belongs to the enclosing chain: `x and then as v in as v in v * 2 or else 0` is `(x and then as v in as v in v * 2) or else 0`.
+- **Binder** — `and then as v in body`: names the unwrapped value for `body`. `body` is a single layer operand, so an `or else` written after it belongs to the enclosing chain: `x and then as v in v * 2 or else 0` is `(x and then as v in v * 2) or else 0`.
 
-The chain is sugar for the binder — `x and then as v in .f()` and `x and then as v in as v in v.f()` have the same type and value — so v can always be expanded when a name helps.
+The chain is sugar for the binder — `x and then .f()` and `x and then as v in v.f()` have the same type and value — so the chain can always be expanded when a name helps.
 
 `or else` takes a fallback value, which needs no name in the common case. When the fallback must look at the error, bind it:
 

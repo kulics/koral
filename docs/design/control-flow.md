@@ -75,8 +75,8 @@ values; `while` and `for` always produce `Void`.
 [`flow-logical-layers.md`](flow-logical-layers.md)「其它语言怎么做的」。
 
 实现上 `and then` 脱糖成对左操作数的 `when`：只有命中的分支体执行，变换体因此天然
-不在空值路径上求值。`or return` 是 `or else { return .Error(it) }` /
-`or else { return .None() }` 的语法糖。
+不在空值路径上求值。`or return` 是 `or else as e in { return .Error(e); }` /
+`or else { return .None(); }` 的语法糖（脱糖用编译器内部的绑定名）。
 
 > **设计动机**（项目目标：生成友好 / 审阅友好，2026-10 补记）：错误与缺席的流动**写在
 > 表达式里**——语言没有 `throw` / `try` / `catch`（文法里不存在这些词），传播点 `or return`

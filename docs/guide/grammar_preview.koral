@@ -442,7 +442,7 @@ let option_chaining() Void = {
     //         逻辑层内 `and` > `or`。
     // 两层不隐式混用，跨层必须加括号：`a and (b or else c)` 与
     // `(a and b) or else c` 都合法，`a and b or else c` 与
-    // `opt and then it == 1 and false` 都被拒绝。
+    // `opt and then as v in v == 1 and false` 都被拒绝。
 
     // or else：值合并；左侧为 None / Error 时使用默认值
     let value = opt or else 0; // 42
@@ -480,9 +480,9 @@ let option_chaining() Void = {
     };
 };
 
-// or return 是 or else + 提前返回的简写形式：
-//   对 Result：expr or return  等价于  expr or else { return .Error(it) }
-//   对 Option：expr or return  等价于  expr or else { return .None() }
+// or return 是 or else + 提前返回的简写形式（脱糖时绑定用编译器内部名）：
+//   对 Result：expr or return  等价于  expr or else as e in { return .Error(e); }
+//   对 Option：expr or return  等价于  expr or else { return .None(); }
 //
 // 约束：
 //   - Result 传播只能用在返回 Result 的函数中
@@ -502,7 +502,7 @@ let find_user(id Int) Option[User] = {
 
 // or return + and then 组合
 let doubled_value(res Result[Int]) Result[Int] = {
-    let value = (res and then it * 2) or return; // 先 transform，再传播
+    let value = (res and then as v in v * 2) or return; // 先 transform，再传播
     return .Ok(value + 1);
 };
 
@@ -514,20 +514,20 @@ let format_file_with_or_return(path String) Result[Void] = {
 };
 
 let format_file_with_or_else(path String) Result[Void] = {
-    let source = read_text_file(path) or else {
-        return Result[Void].Error(it);
+    let source = read_text_file(path) or else as e in {
+        return Result[Void].Error(e);
     };
-    let formatted = format_source(source) or else {
-        return Result[Void].Error(it);
+    let formatted = format_source(source) or else as e in {
+        return Result[Void].Error(e);
     };
     return write_text_file(path, formatted);
 };
 
 // or else 仍然用于需要自定义处理的场景
 let with_custom_handling(path String) Result[String] = {
-    let source = read_text_file(path) or else {
+    let source = read_text_file(path) or else as e in {
         eprintln("Warning: failed to read \(path)");
-        return .Error(it);
+        return .Error(e);
     };
     return .Ok(source);
 };

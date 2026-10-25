@@ -442,10 +442,10 @@ extension Parser {
   // Crossing from one layer to the other takes parentheses, the way `??`
   // refuses to sit beside `||` in the languages that have it:
   //
-  //   `a and (b or else c)`            -- fine, and means that
-  //   `(a and b) or else c`            -- fine, and means something else
-  //   `a and b or else c`              -- refused: it means neither
-  //   `opt and then it == 1 and false` -- refused
+  //   `a and (b or else c)`                   -- fine, and means that
+  //   `(a and b) or else c`                   -- fine, and means something else
+  //   `a and b or else c`                     -- refused: it means neither
+  //   `opt and then as v in v == 1 and false` -- refused
   //
   // So the operand is parsed first, and the operator that follows it decides
   // which chain continues. Both chains stop at the other layer's operators and
@@ -583,7 +583,7 @@ extension Parser {
   }
 
   /// `or else` / `or return` sit between `and then` and the end of the layer:
-  /// `f() and then g(it) or else h()` groups as `(f() and then g(it)) or else h()`.
+  /// `f() and then as v in g(v) or else h()` groups as `(f() and then as v in g(v)) or else h()`.
   private func parseFlowTail(_ operand: ExpressionNode) throws -> ExpressionNode {
     var left = try parseAndThenChain(operand)
 

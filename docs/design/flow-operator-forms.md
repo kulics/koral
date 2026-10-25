@@ -146,7 +146,7 @@ config and then as v in v.title   // 展开
 
 ### `or return` 不受影响
 
-`or return` 是 `or else { return .Error(e); }` / `or else { return .None(); }` 的语法糖
+`or return` 是 `or else as e in { return .Error(e); }` / `or else { return .None(); }` 的语法糖
 （脱糖用编译器内部的绑定名）。它与 `or else` 同为出口：结果是内层 `T`，不折叠。
 
 ## 演进
