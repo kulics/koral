@@ -484,6 +484,22 @@ extension Parser {
     }
   }
 
+  /// Binary operators that cannot follow a `and then .member()` chain -- the
+  /// chain is postfix-only, and one of these means the reader tried to compute
+  /// on the value through the sugar.
+  private static func isChainBinaryContinuation(_ token: Token) -> Bool {
+    switch token {
+    case .plus, .minus, .multiply, .divide, .remainder,
+         .ampersand, .pipe, .caret, .leftShift, .rightShift,
+         .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual,
+         .range, .rangeLess, .lessRange, .lessRangeLess, .ellipsisLess, .lessEllipsis,
+         .isKeyword:
+      return true
+    default:
+      return false
+    }
+  }
+
   /// The right operand of one `and then` link. Three shapes:
   ///   `.f(x).g`       -- receiver-elided member chain on the unwrapped value
   ///   `as v in body`  -- explicit binder, body is a layer operand
@@ -499,6 +515,15 @@ extension Parser {
       // loop runs on the elided receiver.
       let base = ExpressionNode.flowReceiver(span: dotSpan)
       let chain = try parsePostfixSuffixes(from: base)
+      // The chain is postfix-only. A binary continuation here means the
+      // reader tried to compute on the value through the sugar -- point at
+      // the binder instead of leaving a bare "expected ';'".
+      if Self.isChainBinaryContinuation(currentToken) {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "'and then' chain is postfix-only -- compute on the value with 'as name in ...'"
+        )
+      }
       return .flowChainExpression(chain: chain,
                                   span: SourceSpan(start: dotSpan.start, end: chain.span.end))
     }

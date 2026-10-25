@@ -659,6 +659,27 @@ given Parser {
             // postfix loop runs on the elided receiver.
             let base = Expr.FlowReceiver(self.span_from_start(t));
             let chain = self.parse_postfix_suffixes(base) or return;
+            // The chain is postfix-only. A binary continuation here means the
+            // reader tried to compute on the value through the sugar -- point
+            // at the binder instead of leaving a bare "expected ';'".
+            let after = self.current().kind;
+            let extends_chain = when after in {
+                .Plus() or .Minus() or .Star() or .Slash() or .Percent()
+                or .Ampersand() or .Pipe() or .Caret() or .LeftShift() or .RightShift()
+                or .EqualEqual() or .NotEqual() or .Greater() or .Less()
+                or .GreaterEqual() or .LessEqual()
+                or .Range() or .RangeLess() or .LessRange() or .LessRangeLess()
+                or .EllipsisLt() or .LtEllipsis() or .KwIs() then true,
+                _ then false,
+            };
+            if extends_chain then {
+                return .Error(
+                    self.parser_error_at(
+                        "'and then' chain is postfix-only -- compute on the value with 'as name in ...'",
+                        self.current(),
+                    ),
+                );
+            };
             return .Ok(Expr.FlowChainExpr(chain, self.span_from_start(t)));
         };
         if t.kind is .KwAs() then {
