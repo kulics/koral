@@ -1,7 +1,7 @@
 public struct GenericStructTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
+  public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]
   public let isMutable: Bool
 
   public func name(in map: DefIdMap) -> String? {
@@ -26,7 +26,7 @@ public struct GenericEnumTemplate {
 public struct GenericFunctionTemplate {
   public let defId: DefId
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
   public let body: ExpressionNode
 

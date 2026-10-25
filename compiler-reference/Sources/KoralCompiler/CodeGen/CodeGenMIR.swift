@@ -241,7 +241,7 @@ final class MIRFunctionCodeEmitter {
         }
       case .ref(let place, _, _):
         walkPlace(place)
-      case .cast(let operand, _):
+      case .cast(let operand, _, checked: _):
         walkOperand(operand)
       case .intrinsic(let intrinsic):
         walkIntrinsic(intrinsic)
@@ -498,7 +498,7 @@ final class MIRFunctionCodeEmitter {
         if case .local(let localID) = place {
           markUnsafe(localID)
         }
-      case .cast(let operand, _):
+      case .cast(let operand, _, checked: _):
         walkOperand(operand)
       case .intrinsic:
         break
@@ -518,7 +518,7 @@ final class MIRFunctionCodeEmitter {
         return localID
       case .placeRead(.local(let localID), _):
         return localID
-      case .cast(.local(let localID), _):
+      case .cast(.local(let localID), _, checked: _):
         return localID
       default:
         return nil
@@ -1143,8 +1143,8 @@ final class MIRFunctionCodeEmitter {
       return emitReference(place: place, kind: kind, allocation: allocation)
     case .pointer(let place):
       return emitPointer(place)
-    case .cast(let operand, let type):
-      return emitCastOperand(operand, targetType: type)
+    case .cast(let operand, let type, let checked):
+      return emitCastOperand(operand, targetType: type, checked: checked)
     case .intrinsic(let intrinsic):
       return emitIntrinsic(intrinsic)
     case .lambda(let lambda):
@@ -1986,7 +1986,7 @@ final class MIRFunctionCodeEmitter {
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: type))
   }
 
-  private func emitCastOperand(_ operand: MIROperand, targetType: Type) -> MIRValueEmission {
+  private func emitCastOperand(_ operand: MIROperand, targetType: Type, checked: Bool) -> MIRValueEmission {
     let sourceEmission = emitOperandValue(operand)
     let sourceType = resolver.type(of: operand) ?? targetType
 
@@ -1994,7 +1994,7 @@ final class MIRFunctionCodeEmitter {
       return sourceEmission
     }
 
-    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType)
+    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType, checked: checked)
     emitCleanups(sourceEmission.cleanups)
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: targetType))
   }
@@ -2429,7 +2429,7 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
-  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type) -> String {
+  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type, checked: Bool) -> String {
     if sourceType == targetType {
       return expression
     }
@@ -2478,17 +2478,74 @@ final class MIRFunctionCodeEmitter {
     }
 
     let targetCType = codeGen.cTypeName(targetType)
+    // An unchecked cast is a pure C cast: truncate or sign/zero-extend the
+    // two's-complement representation to the target width and never panic.
+    // That is Rust's `as` and a C cast between integers, and it is exactly
+    // what `wrapping_cast` asks for.
+    if !checked {
+      return codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(expression)")
+    }
     if isFloat(sourceType) && (isSignedInt(targetType) || isUnsignedInt(targetType)), let (minMacro, maxMacro) = minMaxMacros(for: targetType) {
       let floatValue = codeGen.nextTempWithInit(cType: "double", initExpr: "(double)\(expression)")
       codeGen.addIndent()
       codeGen.appendToBuffer("if (!(\(floatValue) >= (double)\(minMacro) && \(floatValue) <= (double)\(maxMacro))) {\n")
       codeGen.withIndent {
         codeGen.addIndent()
-        codeGen.appendToBuffer("__koral_panic_float_cast_overflow();\n")
+        codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
       }
       codeGen.addIndent()
       codeGen.appendToBuffer("}\n")
       return codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(floatValue)")
+    }
+
+    // A width-changing numeric conversion is checked and does not wrap; a
+    // same-width one reinterprets the bit pattern and never panics. The width
+    // test is left to the C compiler (`sizeof` is a constant expression), so
+    // the guards disappear entirely for same-width pairs and the rule holds on
+    // every target regardless of how wide `Int` is there.
+    //
+    // Two guards are needed inside the width-changing case, because the round
+    // trip alone is blind across signedness: `(int)(unsigned)(-1) == -1`, so a
+    // value the target cannot hold can come back unchanged.
+    if (isSignedInt(sourceType) || isUnsignedInt(sourceType)) && (isSignedInt(targetType) || isUnsignedInt(targetType)) {
+      let sourceCType = codeGen.cTypeName(sourceType)
+      let sourceValue = codeGen.nextTempWithInit(cType: sourceCType, initExpr: expression)
+      let converted = codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(sourceValue)")
+      codeGen.addIndent()
+      codeGen.appendToBuffer("if (sizeof(\(sourceCType)) != sizeof(\(targetCType))) {\n")
+      codeGen.withIndent {
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if (((\(sourceCType))\(converted)) != (\(sourceCType))\(sourceValue)) {\n")
+        codeGen.withIndent {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+        }
+        codeGen.addIndent()
+        codeGen.appendToBuffer("}\n")
+        if isSignedInt(sourceType) && isUnsignedInt(targetType) {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("if (\(sourceValue) < 0) {\n")
+          codeGen.withIndent {
+            codeGen.addIndent()
+            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+          }
+          codeGen.addIndent()
+          codeGen.appendToBuffer("}\n")
+        }
+        if isUnsignedInt(sourceType) && isSignedInt(targetType), let (_, maxMacro) = minMaxMacros(for: targetType) {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("if ((unsigned long long)\(sourceValue) > (unsigned long long)\(maxMacro)) {\n")
+          codeGen.withIndent {
+            codeGen.addIndent()
+            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+          }
+          codeGen.addIndent()
+          codeGen.appendToBuffer("}\n")
+        }
+      }
+      codeGen.addIndent()
+      codeGen.appendToBuffer("}\n")
+      return converted
     }
 
     let targetIsPointer: Bool = {
@@ -2639,7 +2696,7 @@ final class MIRFunctionCodeEmitter {
       if ownership == .move {
         consumeMovedPlace(place)
       }
-    case .cast(let operand, let targetType):
+    case .cast(let operand, let targetType, _):
       let sourceType = resolver.type(of: operand) ?? targetType
       guard isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) else {
         break

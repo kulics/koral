@@ -91,7 +91,7 @@ extension TypeChecker {
      case .methodReference(let base, _, _, _, _),
         .traitMethodPlaceholder(_, _, _, _, let base, _, _):
       return typedExpressionHasObservableStatementEffect(base)
-    case .castExpression(let inner, _),
+    case .castExpression(let inner, _, _),
          .notExpression(let inner, _),
          .bitwiseNotExpression(let inner, _),
          .derefExpression(let inner, _),

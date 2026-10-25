@@ -199,7 +199,7 @@ extension TypeChecker {
       typeName: name,
       defId: template.defId,
       members: template.parameters.map { param in
-        (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
+        (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named, defaultValue: param.defaultValue)
       },
       span: span
     )
@@ -208,6 +208,7 @@ extension TypeChecker {
       callArgs,
       fieldNames: template.parameters.map { $0.name },
       fieldIsNamed: template.parameters.map { $0.named },
+      fieldDefaults: template.parameters.map { $0.defaultValue },
       constructorDescription: name,
       parentName: name
     )
@@ -330,7 +331,7 @@ extension TypeChecker {
     
     let finalTypedArguments = try typeCheckConstructorArguments(
       plan: plan,
-      members: memberTypes.map { (name: $0.name, type: $0.type, named: false) },
+      members: memberTypes.map { (name: $0.name, type: $0.type, named: false, defaultValue: nil) },
       constructorDescription: name
     )
     

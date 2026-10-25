@@ -308,7 +308,7 @@ extension Parser {
       let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
       var seenNamedParam = false
 
       if currentToken === .mutableKeyword {
@@ -320,7 +320,7 @@ extension Parser {
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false, defaultValue: nil))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -350,16 +350,16 @@ extension Parser {
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
+        var defaultExpr: ExpressionNode? = nil
         if currentToken === .equal {
           guard isNamed else {
             throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
-          let defaultExpr = try parseDefaultValueLiteral()
-          parsedParameterDefaults["\(methodName).\(pname)"] = defaultExpr
+          defaultExpr = try parseDefaultValueLiteral()
           traitDeclaredParameterDefaults.insert("\(name)#\(methodName)#\(pname)")
         }
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed, defaultValue: defaultExpr))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -431,7 +431,7 @@ extension Parser {
       let methodTypeParams = try parseTypeParameters()
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
       var seenNamedParam = false
 
       if currentToken === .mutableKeyword {
@@ -443,7 +443,7 @@ extension Parser {
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false, defaultValue: nil))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -473,17 +473,16 @@ extension Parser {
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
+        var defaultExpr: ExpressionNode? = nil
         if currentToken === .equal {
           guard isNamed else {
             throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
-          let defaultExpr = try parseDefaultValueLiteral()
-          parsedParameterDefaults["\(type.description).\(name).\(pname)"] = defaultExpr
-          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+          defaultExpr = try parseDefaultValueLiteral()
           implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed, defaultValue: defaultExpr))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -545,7 +544,7 @@ extension Parser {
       let typeParams = try parseTypeParameters()
 
       try match(.leftParen)
-      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+      var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
       var seenNamedParam = false
 
       if currentToken === .mutableKeyword {
@@ -557,7 +556,7 @@ extension Parser {
 
       if currentToken === .selfKeyword || currentToken === .multiply {
         let selfType = try parseSelfReceiverType()
-        parameters.append((name: "self", mutable: false, type: selfType, named: false))
+        parameters.append((name: "self", mutable: false, type: selfType, named: false, defaultValue: nil))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -587,17 +586,16 @@ extension Parser {
         }
         let paramType = try parseType()
         // Parse optional default value for named parameters
+        var defaultExpr: ExpressionNode? = nil
         if currentToken === .equal {
           guard isNamed else {
             throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
           }
           try match(.equal)
-          let defaultExpr = try parseDefaultValueLiteral()
-          parsedParameterDefaults["\(type.description).\(name).\(pname)"] = defaultExpr
-          parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+          defaultExpr = try parseDefaultValueLiteral()
           implDeclaredParameterDefaults.insert("\(name)#\(pname)")
         }
-        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+        parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed, defaultValue: defaultExpr))
         if currentToken === .comma {
           try match(.comma)
         }
@@ -847,7 +845,7 @@ extension Parser {
     isIntrinsic: Bool, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
-    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
     var seenNamedParam = false
     while currentToken !== .rightParen {
       // 仅支持可选的前缀 mutable；不再支持 own/ref
@@ -873,15 +871,15 @@ extension Parser {
       }
       let paramType = try parseType()
       // Parse optional default value for named parameters
+      var defaultExpr: ExpressionNode? = nil
       if currentToken === .equal {
         guard isNamed else {
           throw ParserError.defaultValuesRequireNamedParameter(span: currentSpan)
         }
         try match(.equal)
-        let defaultExpr = try parseDefaultValueLiteral()
-        parsedParameterDefaults["\(name).\(pname)"] = defaultExpr
+        defaultExpr = try parseDefaultValueLiteral()
       }
-      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: isNamed, defaultValue: defaultExpr))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -929,7 +927,7 @@ extension Parser {
     name: String, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
-    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)] = []
+    var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
     var seenNamedParam = false
     while currentToken !== .rightParen {
       var isMut = false
@@ -960,7 +958,7 @@ extension Parser {
         throw ParserError.rejectedConstruct(span: nameSpan, message: "Named parameters are not supported in foreign declarations")
       }
       let paramType = try parseType()
-      parameters.append((name: pname, mutable: isMut, type: paramType, named: false))
+      parameters.append((name: pname, mutable: isMut, type: paramType, named: false, defaultValue: nil))
       if currentToken === .comma {
         try match(.comma)
       }
@@ -1062,7 +1060,7 @@ extension Parser {
     }
 
     try match(.leftParen)
-    var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)] = []
+    var parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
     var seenNamedField = false
 
     while currentToken !== .rightParen {
@@ -1092,17 +1090,17 @@ extension Parser {
       }
       let paramType = try parseType()
       // Parse optional default value for named fields
+      var defaultExpr: ExpressionNode? = nil
       if currentToken === .equal {
         guard isNamed else {
           throw ParserError.unexpectedToken(span: currentSpan, got: "Only named fields can have default values")
         }
         try match(.equal)
-        let defaultExpr = try parseDefaultValueLiteral()
-        parsedParameterDefaults["\(name).\(paramName)"] = defaultExpr
+        defaultExpr = try parseDefaultValueLiteral()
       }
 
       parameters.append(
-        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: isNamed))
+        (name: paramName, type: paramType, mutable: fieldMutable, access: fieldAccess, named: isNamed, defaultValue: defaultExpr))
 
       if currentToken === .comma {
         try match(.comma)
@@ -1140,7 +1138,7 @@ extension Parser {
       }
       try match(.identifier(caseName))
 
-      var parameters: [(name: String, type: TypeNode, named: Bool)] = []
+      var parameters: [(name: String, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
       try match(.leftParen)
 
       var seenNamedParam = false
@@ -1163,15 +1161,15 @@ extension Parser {
         }
         let paramType = try parseType()
         // Parse optional default value for named fields
+        var defaultExpr: ExpressionNode? = nil
         if currentToken === .equal {
           guard isNamed else {
             throw ParserError.unexpectedToken(span: currentSpan, got: "Only named fields can have default values")
           }
           try match(.equal)
-          let defaultExpr = try parseDefaultValueLiteral()
-          parsedParameterDefaults["\(caseName).\(paramName)"] = defaultExpr
+          defaultExpr = try parseDefaultValueLiteral()
         }
-        parameters.append((name: paramName, type: paramType, named: isNamed))
+        parameters.append((name: paramName, type: paramType, named: isNamed, defaultValue: defaultExpr))
 
         if currentToken === .comma {
           try match(.comma)

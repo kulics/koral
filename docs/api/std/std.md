@@ -292,6 +292,7 @@ intrinsic given Int {
     public wrapping_neg(self) Int;
     public wrapping_shl(self, other UInt32) Int;
     public wrapping_shr(self, other UInt32) Int;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given Int8 {
@@ -303,6 +304,7 @@ intrinsic given Int8 {
     public wrapping_neg(self) Int8;
     public wrapping_shl(self, other UInt32) Int8;
     public wrapping_shr(self, other UInt32) Int8;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given Int16 {
@@ -314,6 +316,7 @@ intrinsic given Int16 {
     public wrapping_neg(self) Int16;
     public wrapping_shl(self, other UInt32) Int16;
     public wrapping_shr(self, other UInt32) Int16;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given Int32 {
@@ -325,6 +328,7 @@ intrinsic given Int32 {
     public wrapping_neg(self) Int32;
     public wrapping_shl(self, other UInt32) Int32;
     public wrapping_shr(self, other UInt32) Int32;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given Int64 {
@@ -336,6 +340,7 @@ intrinsic given Int64 {
     public wrapping_neg(self) Int64;
     public wrapping_shl(self, other UInt32) Int64;
     public wrapping_shr(self, other UInt32) Int64;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given UInt {
@@ -346,6 +351,7 @@ intrinsic given UInt {
     public wrapping_rem(self, other UInt) UInt;
     public wrapping_shl(self, other UInt32) UInt;
     public wrapping_shr(self, other UInt32) UInt;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given UInt8 {
@@ -356,6 +362,7 @@ intrinsic given UInt8 {
     public wrapping_rem(self, other UInt8) UInt8;
     public wrapping_shl(self, other UInt32) UInt8;
     public wrapping_shr(self, other UInt32) UInt8;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given UInt16 {
@@ -366,6 +373,7 @@ intrinsic given UInt16 {
     public wrapping_rem(self, other UInt16) UInt16;
     public wrapping_shl(self, other UInt32) UInt16;
     public wrapping_shr(self, other UInt32) UInt16;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given UInt32 {
@@ -376,6 +384,7 @@ intrinsic given UInt32 {
     public wrapping_rem(self, other UInt32) UInt32;
     public wrapping_shl(self, other UInt32) UInt32;
     public wrapping_shr(self, other UInt32) UInt32;
+    public wrapping_cast[T Any](self) T;
 };
 
 intrinsic given UInt64 {
@@ -386,6 +395,7 @@ intrinsic given UInt64 {
     public wrapping_rem(self, other UInt64) UInt64;
     public wrapping_shl(self, other UInt32) UInt64;
     public wrapping_shr(self, other UInt32) UInt64;
+    public wrapping_cast[T Any](self) T;
 };
 
 given Int as Zero {

@@ -77,6 +77,16 @@ module_private type mutable TypeCheckerStorage(
     /// the way out. The innermost construct wins, which is what keeps a
     /// statement from swallowing an expression's location.
     mutable current_span SourceSpan,
+    /// Global `let` initializers run in declaration order; a later one may read
+    /// an earlier one, never the reverse. `initialized_globals` holds the names
+    /// whose initializer has already been checked, so a forward reference -- and
+    /// therefore every cycle -- is visible at the point of use instead of
+    /// quietly reading the zero the runtime has not written yet.
+    mutable initialized_globals Set[String],
+    /// True while a global `let` initializer is being checked. The order rule
+    /// applies there and nowhere else: a function body may freely call forward
+    /// to any global.
+    mutable in_global_init Bool,
 );
 
 public type mutable TypeChecker(module_private mutable storage TypeCheckerStorage);
@@ -272,6 +282,8 @@ given TypeChecker {
             Dict[String, ConformanceWitness].new(),
             global_scope,
             unknown_span(),
+            Set[String].new(),
+            false,
         );
         return TypeChecker(s);
     };
@@ -1321,7 +1333,7 @@ given TypeChecker {
         return when expr.expr_kind in {
             .Variable(symbol) then self.context().get_span(symbol.def_id) or else unknown_span(
             ),
-            .CastExpr(_, inner) then self.typed_expr_span(inner),
+            .CastExpr(_, inner, _) then self.typed_expr_span(inner),
             .Unary(_, inner) then self.typed_expr_span(inner),
             .RefExpr(inner) then self.typed_expr_span(inner),
             .PtrExpr(inner) then self.typed_expr_span(inner),
@@ -2296,7 +2308,6 @@ given TypeChecker {
         program Program,
         retain_checked_template_bodies Bool,
     ) TypedProgram = {
-        self.storage.context.parsed_default_values = program.parsed_defaults;
         self.collect_signatures(program);
         let mutable typed_decls = List[TypedDecl].new();
         let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled();
@@ -3129,7 +3140,7 @@ given TypeChecker {
                                     field.name,
                                     field.is_mutable,
                                     self.copy_type_node(field.type_name),
-                                    field.named,
+                                    field.named, field.default_value
                                 ),
                             );
                         };
@@ -3186,6 +3197,7 @@ given TypeChecker {
                                     f.is_mutable,
                                     f.access,
                                     f.named,
+                                    f.default_value,
                                 ),
                             );
                         };
@@ -3202,6 +3214,7 @@ given TypeChecker {
                                     f.is_mutable,
                                     f.access,
                                     f.named,
+                                    f.default_value,
                                 ),
                             );
                         };
@@ -3260,7 +3273,7 @@ given TypeChecker {
                                         field.name,
                                         false,
                                         self.copy_type_node(field.type_name),
-                                        field.named,
+                                        field.named, field.default_value
                                     ),
                                 );
                             };
@@ -3316,7 +3329,7 @@ given TypeChecker {
                                     EnumCaseParam(
                                         f.name,
                                         self.resolve_type(f.type_name),
-                                        f.named,
+                                        f.named, f.default_value
                                     ),
                                 );
                             };
@@ -3334,7 +3347,7 @@ given TypeChecker {
                                             f.type_name,
                                             bindings,
                                         ),
-                                        f.named,
+                                        f.named, f.default_value
                                     ),
                                 );
                             };
@@ -3554,7 +3567,7 @@ given TypeChecker {
                                 self.resolve_type(f.type_name),
                                 true,
                                 f.access,
-                                f.named,
+                                f.named, f.default_value
                             ),
                         );
                     };
@@ -4152,7 +4165,11 @@ given TypeChecker {
             if self.sema_progress_debug_enabled() then {
                 println("[sema-pass2-given-step] member=\(m.name) step=make-symbol");
             };
-            let param_specs = self.function_param_specs_from_params(m.params);
+            let param_specs = self.merge_trait_param_defaults(
+                self.function_param_specs_from_params(m.params),
+                conformance_trait_name,
+                m.name,
+            );
             let method_symbol = self.make_method_callable_symbol_with_param_types(
                 m.def_id,
                 m.name,
@@ -4239,7 +4256,7 @@ given TypeChecker {
                     p.name,
                     p.is_mutable,
                     self.copy_type_node(p.type_name),
-                    p.named,
+                    p.named, p.default_value
                 ),
             );
         };

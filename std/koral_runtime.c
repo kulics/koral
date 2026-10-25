@@ -168,8 +168,8 @@ CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
-void __koral_panic_float_cast_overflow(void) {
-    fprintf(stderr, "Panic: float-to-int cast overflow\n");
+void __koral_panic_numeric_conversion_overflow(void) {
+    fprintf(stderr, "Panic: numeric conversion overflow\n");
     abort();
 }
 

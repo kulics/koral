@@ -16,7 +16,6 @@ public type mutable Parser(
     tokens List[Token],
     file_path String,
     mutable index UInt,
-    mutable parsed_defaults Dict[String, String],
     mutable pending_statements List[Statement],
 );
 
@@ -262,7 +261,7 @@ given Parser {
     };
 
     public new(tokens List[Token]) Parser = {
-        return Parser(tokens, "", 0, Dict[String, String].new(), List[Statement].new());
+        return Parser(tokens, "", 0, List[Statement].new());
     };
 
     public new_in_file(tokens List[Token], file_path String) Parser = {
@@ -270,7 +269,6 @@ given Parser {
             tokens,
             file_path,
             0,
-            Dict[String, String].new(),
             List[Statement].new(),
         );
     };
@@ -1408,6 +1406,100 @@ given Parser {
     /// `reject_named_params` rejects `name: Type` parameters at the NAME, which
     /// is the token that makes the parameter named. Checking after the list is
     /// parsed reports at whatever follows the last parameter instead.
+    /// Parse a default value literal for a named parameter or field.
+    ///
+    /// Mirrors the seed's `parseDefaultValueLiteral` exactly: the expressions it
+    /// produces and the errors it raises.
+    /// Supported literals: integer, float, bool, string, rune, empty collection
+    /// (`[]`), full-range (`...`). A leading `-` is accepted for numeric
+    /// literals (`x: Int = -1`).
+    module_private parse_default_value_literal(self) Result[Expr] = {
+        let start_token = self.current();
+        let start_span = self.token_span(start_token);
+        if start_token.kind is .Minus() then {
+            self.advance();
+            when self.current().kind in {
+                .IntegerLiteral(v) then {
+                    self.advance();
+                    return .Ok(Expr.IntegerLiteral("-\(v)", start_span));
+                },
+                .FloatLiteral(v) then {
+                    self.advance();
+                    return .Ok(Expr.FloatLiteral("-\(v)", start_span));
+                },
+                _ then {
+                    return .Error(
+                        self.unexpected_token_error_at(
+                            "-",
+                            "a literal default value (number, bool, string, rune, [], or range)",
+                            start_token,
+                        ),
+                    );
+                },
+            };
+        };
+        when start_token.kind in {
+            .IntegerLiteral(v) then {
+                self.advance();
+                return .Ok(Expr.IntegerLiteral(v, start_span));
+            },
+            .FloatLiteral(v) then {
+                self.advance();
+                return .Ok(Expr.FloatLiteral(v, start_span));
+            },
+            .StringLiteral(v) then {
+                self.advance();
+                return .Ok(Expr.StringLiteral(v, start_span));
+            },
+            .RuneLiteral(v) then {
+                self.advance();
+                return .Ok(Expr.RuneLiteral(v, start_span));
+            },
+            .KwTrue() then {
+                self.advance();
+                return .Ok(Expr.BoolLiteral(true, start_span));
+            },
+            .KwFalse() then {
+                self.advance();
+                return .Ok(Expr.BoolLiteral(false, start_span));
+            },
+            .LBracket() then {
+                self.advance();
+                if self.current().kind is .RBracket() then {
+                    self.advance();
+                    return .Ok(Expr.EmptyLiteral(start_span));
+                };
+                return .Error(
+                    self.unexpected_token_error_at(
+                        token_kind_description(self.current()),
+                        "empty default value '[]'",
+                        start_token,
+                    ),
+                );
+            },
+            .Range() then {
+                return .Error(
+                    self.parser_error_at_current(
+                        "open ranges are spelled with '...': write '...b', '...<b', or '...'",
+                    ),
+                );
+            },
+            .Ellipsis() then {
+                self.advance();
+                return .Ok(Expr.EmptyLiteral(start_span));
+            },
+            _ then {
+                return .Error(
+                    self.unexpected_token_error_at(
+                        token_kind_description(start_token),
+                        "a literal default value (number, bool, string, rune, [], or range)",
+                        start_token,
+                    ),
+                );
+            },
+        };
+    };
+
     module_private parse_param_list(
         self,
         func_name String,
@@ -1456,7 +1548,7 @@ given Parser {
                         ),
                     );
                 };
-                params.push(Param("self", false, self_type, false));
+                params.push(Param("self", false, self_type, false, Option[Expr].None()));
             } else {
                 let name_token = self.current();
                 let name = self.expect_identifier("parameter") or return;
@@ -1501,6 +1593,7 @@ given Parser {
                 let mutable param_type = self.parse_type() or return;
 
                 // Only named parameters can have default values
+                let mutable default_value = Option[Expr].None();
                 if self.current().kind is .Assign() then {
                     if not is_named then {
                         return .Error(
@@ -1510,104 +1603,11 @@ given Parser {
                         );
                     };
                     self.advance();
-                    let mutable default_val = StringBuilder.new();
-                    when self.current().kind in {
-                        .Minus() then {
-                            self.advance();
-                            when self.current().kind in {
-                                .IntegerLiteral(v) then {
-                                    self.advance();
-                                    default_val = StringBuilder.new();
-                                    default_val.push_string("-\(v)");
-                                },
-                                .FloatLiteral(v) then {
-                                    self.advance();
-                                    default_val = StringBuilder.new();
-                                    default_val.push_string("-\(v)");
-                                },
-                                _ then {
-                                    return .Error(
-                                        self.parser_error_at_current(
-                                            "Expected literal default value after '='",
-                                        ),
-                                    );
-                                },
-                            };
-                        },
-                        .IntegerLiteral(v) then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string(v.to_string());
-                        },
-                        .FloatLiteral(v) then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string(v.to_string());
-                        },
-                        .StringLiteral(v) then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("\"\(v)\"");
-                        },
-                        .RuneLiteral(v) then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("'\(v)'");
-                        },
-                        .KwTrue() then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("true");
-                        },
-                        .KwFalse() then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("false");
-                        },
-                        .LBracket() then {
-                            self.advance();
-                            when self.current().kind in {
-                                .RBracket() then {
-                                    self.advance();
-                                    default_val = StringBuilder.new();
-                                    default_val.push_string("[]");
-                                },
-                                _ then {
-                                    return .Error(
-                                        self.parser_error_at_current(
-                                            "Expected ']' for empty collection default value",
-                                        ),
-                                    );
-                                },
-                            };
-                        },
-                        .Range() then {
-                            return .Error(
-                                self.parser_error_at_current(
-                                    "open ranges are spelled with '...': write '...b', '...<b', or '...'",
-                                ),
-                            );
-                        },
-                        .Ellipsis() then {
-                            self.advance();
-                            default_val = StringBuilder.new();
-                            default_val.push_string("...");
-                        },
-                        _ then {
-                            return .Error(
-                                self.parser_error_at_current(
-                                    "Expected literal default value after '='",
-                                ),
-                            );
-                        },
-                    };
-                    self.parsed_defaults.insert(
-                        "\(func_name).\(name)",
-                        default_val.to_string(),
-                    );
+                    let default_expr = self.parse_default_value_literal() or return;
+                    default_value = Option[Expr].Some(default_expr);
                 };
 
-                params.push(Param(name, is_mut, param_type, is_named));
+                params.push(Param(name, is_mut, param_type, is_named, default_value));
             };
 
             when self.current().kind in {
@@ -1951,6 +1951,7 @@ given Parser {
                             let mutable field_type = self.parse_type() or return;
 
                             // Only named fields can have default values
+                            let mutable field_default_value = Option[Expr].None();
                             if self.current().kind is .Assign() then {
                                 if not field_named then {
                                     return .Error(
@@ -1960,102 +1961,8 @@ given Parser {
                                     );
                                 };
                                 self.advance();
-                                let mutable field_default_val = StringBuilder.new();
-                                field_default_val.push_string("");
-                                when self.current().kind in {
-                                    .Minus() then {
-                                        self.advance();
-                                        when self.current().kind in {
-                                            .IntegerLiteral(v) then {
-                                                self.advance();
-                                                field_default_val = StringBuilder.new();
-                                                field_default_val.push_string("-\(v)");
-                                            },
-                                            .FloatLiteral(v) then {
-                                                self.advance();
-                                                field_default_val = StringBuilder.new();
-                                                field_default_val.push_string("-\(v)");
-                                            },
-                                            _ then {
-                                                return .Error(
-                                                    self.parser_error_at_current(
-                                                        "Expected literal default value after '='",
-                                                    ),
-                                                );
-                                            },
-                                        };
-                                    },
-                                    .IntegerLiteral(v) then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string(v);
-                                    },
-                                    .FloatLiteral(v) then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string(v.to_string());
-                                    },
-                                    .StringLiteral(v) then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string("\"\(v)\"");
-                                    },
-                                    .RuneLiteral(v) then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string("'\(v)'");
-                                    },
-                                    .KwTrue() then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string("true");
-                                    },
-                                    .KwFalse() then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string("false");
-                                    },
-                                    .LBracket() then {
-                                        self.advance();
-                                        when self.current().kind in {
-                                            .RBracket() then {
-                                                self.advance();
-                                                field_default_val = StringBuilder.new();
-                                                field_default_val.push_string("[]");
-                                            },
-                                            _ then {
-                                                return .Error(
-                                                    self.parser_error_at_current(
-                                                        "Expected ']' for empty collection default value",
-                                                    ),
-                                                );
-                                            },
-                                        };
-                                    },
-                                    .Range() then {
-                                        return .Error(
-                                            self.parser_error_at_current(
-                                                "open ranges are spelled with '...': write '...b', '...<b', or '...'",
-                                            ),
-                                        );
-                                    },
-                                    .Ellipsis() then {
-                                        self.advance();
-                                        field_default_val = StringBuilder.new();
-                                        field_default_val.push_string("...");
-                                    },
-                                    _ then {
-                                        return .Error(
-                                            self.parser_error_at_current(
-                                                "Expected literal default value after '='",
-                                            ),
-                                        );
-                                    },
-                                };
-                                self.parsed_defaults.insert(
-                                    "\(name).\(field_name)",
-                                    field_default_val.to_string(),
-                                );
+                                let field_default_expr = self.parse_default_value_literal() or return;
+                                field_default_value = Option[Expr].Some(field_default_expr);
                             };
 
                             fields.push(
@@ -2065,6 +1972,7 @@ given Parser {
                                     field_mut,
                                     field_type,
                                     field_named,
+                                    field_default_value,
                                 ),
                             );
                             if self.current().kind is .Comma() then {
@@ -2211,6 +2119,7 @@ given Parser {
                                         };
                                         let mutable payload_type = self.parse_type() or return;
                                         // Parse optional default value for named fields
+                                        let mutable payload_default_value = Option[Expr].None();
                                         if self.current().kind is .Assign() then {
                                             if not payload_named then {
                                                 return .Error(
@@ -2220,130 +2129,9 @@ given Parser {
                                                 );
                                             };
                                             self.advance();
-                                            let mutable field_default_val = StringBuilder.new(
-                                            );
-                                            field_default_val.push_string("");
-                                            when self.current().kind in {
-                                                .Minus() then {
-                                                    self.advance();
-                                                    when self.current().kind in {
-                                                        .IntegerLiteral(v) then {
-                                                            self.advance();
-                                                            field_default_val = StringBuilder.new(
-                                                            );
-                                                            field_default_val.push_string(
-                                                                "-\(v)",
-                                                            );
-                                                        },
-                                                        .FloatLiteral(v) then {
-                                                            self.advance();
-                                                            field_default_val = StringBuilder.new(
-                                                            );
-                                                            field_default_val.push_string(
-                                                                "-\(v)",
-                                                            );
-                                                        },
-                                                        _ then {
-                                                            return .Error(
-                                                                self.parser_error_at_current(
-                                                                    "Expected literal default value after '='",
-                                                                ),
-                                                            );
-                                                        },
-                                                    };
-                                                },
-                                                .IntegerLiteral(v) then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        v.to_string(),
-                                                    );
-                                                },
-                                                .FloatLiteral(v) then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        v.to_string(),
-                                                    );
-                                                },
-                                                .StringLiteral(v) then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        "\"\(v)\"",
-                                                    );
-                                                },
-                                                .RuneLiteral(v) then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        "'\(v)'",
-                                                    );
-                                                },
-                                                .KwTrue() then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        "true",
-                                                    );
-                                                },
-                                                .KwFalse() then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string(
-                                                        "false",
-                                                    );
-                                                },
-                                                .LBracket() then {
-                                                    self.advance();
-                                                    when self.current().kind in {
-                                                        .RBracket() then {
-                                                            self.advance();
-                                                            field_default_val = StringBuilder.new(
-                                                            );
-                                                            field_default_val.push_string(
-                                                                "[]",
-                                                            );
-                                                        },
-                                                        _ then {
-                                                            return .Error(
-                                                                self.parser_error_at_current(
-                                                                    "Expected ']' for empty collection default value",
-                                                                ),
-                                                            );
-                                                        },
-                                                    };
-                                                },
-                                                .Range() then {
-                                                    return .Error(
-                                                        self.parser_error_at_current(
-                                                            "open ranges are spelled with '...': write '...b', '...<b', or '...'",
-                                                        ),
-                                                    );
-                                                },
-                                                .Ellipsis() then {
-                                                    self.advance();
-                                                    field_default_val = StringBuilder.new(
-                                                    );
-                                                    field_default_val.push_string("...");
-                                                },
-                                                _ then {
-                                                    return .Error(
-                                                        self.parser_error_at_current(
-                                                            "Expected literal default value after '='",
-                                                        ),
-                                                    );
-                                                },
-                                            };
-                                            self.parsed_defaults.insert(
-                                                "\(case_name).\(payload_name)",
-                                                field_default_val.to_string(),
+                                            let payload_default_expr = self.parse_default_value_literal() or return;
+                                            payload_default_value = Option[Expr].Some(
+                                                payload_default_expr,
                                             );
                                         };
                                         case_fields.push(
@@ -2351,6 +2139,7 @@ given Parser {
                                                 payload_name,
                                                 payload_type,
                                                 payload_named,
+                                                payload_default_value,
                                             ),
                                         );
                                         when self.current().kind in {

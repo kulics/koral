@@ -468,7 +468,7 @@ file_private let resolve_def_id_backed_type(
                             resolved_field_type,
                             field.is_mutable,
                             field.access,
-                            field.named,
+                            field.named, field.default_value
                         ),
                     );
                 };
@@ -498,7 +498,7 @@ file_private let resolve_def_id_backed_type(
                             changed = true;
                         };
                         resolved_params.push(
-                            EnumCaseParam(param.name, resolved_param_type, param.named),
+                            EnumCaseParam(param.name, resolved_param_type, param.named, param.default_value),
                         );
                     };
                     resolved_cases.push(EnumCaseInfo(enum_case.name, resolved_params));
@@ -3641,7 +3641,7 @@ file_private let resolve_concrete_qualified_trait_member(
                             param.name,
                             param.is_mutable,
                             resolved_param_type,
-                            param.named,
+                            param.named, param.default_value
                         ),
                     );
                 };
@@ -4279,7 +4279,7 @@ file_private let make_zero_integer_literal_expr(t Type) TypedExpr = {
 };
 
 file_private let is_wrapping_method_name(name String) Bool = {
-    return name == "wrapping_add" or name == "wrapping_sub" or name == "wrapping_mul" or name == "wrapping_div" or name == "wrapping_rem" or name == "wrapping_neg" or name == "wrapping_shl" or name == "wrapping_shr";
+    return name == "wrapping_add" or name == "wrapping_sub" or name == "wrapping_mul" or name == "wrapping_div" or name == "wrapping_rem" or name == "wrapping_neg" or name == "wrapping_shl" or name == "wrapping_shr" or name == "wrapping_cast";
 };
 
 public let push_receiver_owner(owners List[MethodOwner], candidate MethodOwner) Void = {
@@ -4621,6 +4621,22 @@ file_private let try_lower_wrapping_method_name_call(
                     ArithmeticOperator.Subtract(),
                     base,
                 ),
+                result_type,
+                base.span,
+            ),
+        );
+    };
+
+    // `wrapping_cast` is the unchecked integer-to-integer conversion: take the
+    // two's-complement representation and truncate or sign/zero-extend it to the
+    // target width. It never panics -- that is Rust's `as`, spelled out loud,
+    // because Koral's `Type(x)` is checked by default.
+    if method_name == "wrapping_cast" and args.count() == 0 and is_concrete_integer_type(
+        result_type,
+    ) then {
+        return Option[TypedExpr].Some(
+            TypedExpr(
+                TypedExprKind.CastExpr(result_type, base, false),
                 result_type,
                 base.span,
             ),
@@ -7329,7 +7345,7 @@ file_private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String
         .WrappingShiftExpr(_, _, _) then "wrapping-shift",
         .BitwiseExpr(_, _, _) then "bitwise",
         .Unary(_, _) then "unary",
-        .CastExpr(target_type, inner) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
+        .CastExpr(target_type, inner, _) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
         .RefExpr(inner) then "ref:\(mono.storage.context.get_layout_key(inner.expr_type))",
         .PtrExpr(inner) then "ptr:\(mono.storage.context.get_layout_key(inner.expr_type))",
         .DerefExpr(inner) then "deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
@@ -8034,7 +8050,7 @@ file_private let mono_register_pattern_binding_types_in_expr(
             symbol,
             bindings,
         ),
-        .CastExpr(_, inner) then mono_register_pattern_binding_types_in_expr(
+        .CastExpr(_, inner, _) then mono_register_pattern_binding_types_in_expr(
             mono,
             inner,
             bindings,
@@ -9805,10 +9821,10 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
         .FloatLiteral(value) then TypedExprKind.FloatLiteral(value),
         .StringLiteral(value) then TypedExprKind.StringLiteral(value),
         .BoolLiteral(value) then TypedExprKind.BoolLiteral(value),
-        .CastExpr(target_type, inner) then {
+        .CastExpr(target_type, inner, checked) then {
             let new_target = resolve_parameterized_type(mono, target_type);
             let resolved_inner = resolve_types_in_expression(mono, inner);
-            TypedExprKind.CastExpr(new_target, resolved_inner)
+            TypedExprKind.CastExpr(new_target, resolved_inner, checked)
         },
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -10320,7 +10336,7 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
             let mutable new_params = List[TypedParam].new();
             for p in params then {
                 let mutable new_type = resolve_parameterized_type(mono, p.param_type);
-                new_params.push(TypedParam(p.name, p.is_mutable, new_type, p.named));
+                new_params.push(TypedParam(p.name, p.is_mutable, new_type, p.named, p.default_value));
             };
             let new_return = resolve_parameterized_type(mono, return_type);
             TypedExprKind.LambdaExpr(
@@ -11447,6 +11463,31 @@ file_private let resolve_static_method_call_to_call(
             new_method_type_args,
             new_args,
         );
+    };
+
+    // `Type.wrapping_*(...)` is the static spelling of the instance form: the
+    // first explicit argument is the receiver (`Type.method(args)` is
+    // `args[0].method(args[1..])`). Lower it to the same scalar op the instance
+    // form gets -- a body-less intrinsic would be emitted as a call otherwise.
+    if is_wrapping_method_name(static_method_name) and not new_args.is_empty() then {
+        let mutable extra_args = List[TypedExpr].new();
+        let mutable extra_idx UInt = 1;
+        while extra_idx < new_args.count() then {
+            extra_args.push(new_args[extra_idx]);
+            extra_idx += 1;
+        };
+        when try_lower_wrapping_method_name_call(
+            mono,
+            new_args[UInt(0)],
+            static_method_name,
+            extra_args,
+            resolve_parameterized_type(mono, expr.expr_type),
+        ) in {
+            .Some(lowered) then {
+                return lowered.expr_kind;
+            },
+            .None() then {},
+        };
     };
 
     let rebound_static_method = bind_static_method_symbol_for_type_resolution(
@@ -12947,13 +12988,13 @@ file_private let resolve_global_node_source_params(
                 let mutable index UInt = 0;
                 for entry in param_entries then {
                     let spec = if index < param_specs.count() then param_specs[index]
-                    else FunctionParamSpec("", false, false, false);
+                    else FunctionParamSpec("", false, false, false, Option[Expr].None());
                     params.push(
                         TypedParam(
                             spec.name,
                             spec.is_mutable,
                             entry.param_type,
-                            spec.named,
+                            spec.named, spec.default_value
                         ),
                     );
                     index += 1;
@@ -13016,7 +13057,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                     p.param_type,
                 );
                 resolved_params.push(
-                    TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                    TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                 );
             };
             let resolved_return = resolve_parameterized_type(
@@ -13055,7 +13096,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                     p.param_type,
                 );
                 resolved_params.push(
-                    TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                    TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                 );
             };
             let resolved_return = resolve_parameterized_type(
@@ -13081,7 +13122,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                     p.param_type,
                 );
                 resolved_params.push(
-                    TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                    TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                 );
             };
             let resolved_return = resolve_parameterized_type(
@@ -13109,7 +13150,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                                 field.name,
                                 field.is_mutable,
                                 field.field_type,
-                                field.named,
+                                field.named, field.default_value
                             ),
                         );
                     };
@@ -13124,7 +13165,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                     f.field_type,
                 );
                 resolved_fields.push(
-                    TypedField(f.access, f.name, f.is_mutable, resolved_type, f.named),
+                    TypedField(f.access, f.name, f.is_mutable, resolved_type, f.named, f.default_value),
                 );
             };
             TypedDecl.TypeStructDecl(access, name, resolved_fields, span, id)
@@ -13141,7 +13182,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                                 TypedEnumCaseField(
                                     param.name,
                                     param.param_type,
-                                    param.named,
+                                    param.named, param.default_value
                                 ),
                             );
                         };
@@ -13160,7 +13201,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                         f.field_type,
                     );
                     resolved_fields.push(
-                        TypedEnumCaseField(f.name, resolved_type, f.named),
+                        TypedEnumCaseField(f.name, resolved_type, f.named, f.default_value),
                     );
                 };
                 resolved_cases.push(TypedEnumCase(c.name, resolved_fields));
@@ -13187,7 +13228,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                         p.param_type,
                     );
                     resolved_params.push(
-                        TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                        TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                     );
                 };
                 let resolved_return = resolve_parameterized_type(
@@ -13281,7 +13322,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                         p.param_type,
                     );
                     resolved_params.push(
-                        TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                        TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                     );
                 };
                 let resolved_return = resolve_parameterized_type(
@@ -13370,7 +13411,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                         p.param_type,
                     );
                     resolved_params.push(
-                        TypedParam(p.name, p.is_mutable, resolved_type, p.named),
+                        TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
                     );
                 };
                 let resolved_return = resolve_parameterized_type(
@@ -13507,7 +13548,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                                 field.name,
                                 field.is_mutable,
                                 resolved_type,
-                                field.named,
+                                field.named, field.default_value
                             ),
                         );
                     };
@@ -13534,7 +13575,7 @@ public let resolve_types_in_global_node(mono Monomorphizer, node TypedDecl) Type
                             param.name,
                             param.is_mutable,
                             resolved_type,
-                            param.named,
+                            param.named, param.default_value
                         ),
                     );
                 };

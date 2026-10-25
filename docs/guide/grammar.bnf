@@ -522,6 +522,7 @@
 <postfix-suffix> ::= <call-suffix>
                    | <subscript-suffix>
                    | <member-suffix>
+                   | <static-call-suffix>
                    | <qualified-call-suffix>
 
 // `(` 是两个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
@@ -639,20 +640,30 @@
 // constructor (`Pair[Int, String](1, "a")`) like any other type.
 
 // 语义规则：**类型不能单独作为表达式**。Type 本身没有可行的值，因此
-// `let x = Point;`、`foo(Point)`、`Point;` 都是错误。类型名只允许出现在
-// 这些位置：
-//   Type(...)            -- 类型应用（转型 / 构造）
-//   Type.method(...)     -- 静态方法调用
-//   Type[T]              -- 泛型实例化（其后可继续 .method / (...)）
-//   Type(Trait).method(...)  -- 类型限定调用
-//   以及所有类型位置（标注、实参、泛型实参等）。
+// `let x = Point;`、`foo(Point)`、`Point;` 都是错误。
+//
+// 这条**文法表达不了**：`<identifier>` 在值位与类型位同形，而「首字母大写的
+// 标识符是类型」是词法/语义的判据，不是上下文无关文法的判据。所以文法把
+// 四种类型名位置各写成**显式产生式**，其余位置里出现的类型名由上文的
+// 「类型形状 + 有界前看」分类决定，不靠文法。
+//
+//   <type-application>        Type(...)            转型 / 构造
+//   <static-call-suffix>      Type.method(...)     静态方法调用
+//   <generic-instance-suffix> Type[T]              泛型实例化
+//   <qualified-call-suffix>   Type(Trait).method(...)  类型限定调用
+//
+// 四者都由 <postfix-expression> 组合出来（见 <postfix-suffix>），而不是从
+// <primary-expression> 单独生成 `Type`：裸 `Point` 不是产生式，它是
+// <identifier> 与类型名同形之后由语义拒绝的那一种写法。
 
-// Generic instantiation is handled by postfix composition:
-//   TypeName[T]  → <identifier> <subscript-suffix>  (GenericInstantiation)
-//   TypeName[T].method(args)  → <identifier> <subscript-suffix> <member-suffix> <call-suffix>  (StaticMethodCall)
-//   TypeName.method(args)  → <identifier> <member-suffix> <call-suffix>  (StaticMethodCall)
-//   make[T](1)  → <identifier> <subscript-suffix> <call-suffix>  (GenericInstantiation + Call)
-//   TypeName[T](args)  → 类型应用（构造）；TypeName(expr) → 类型应用（转型 / 构造）
+<static-call-suffix> ::= "." <identifier> <call-suffix>
+<generic-instance-suffix> ::= "[" <type-list> "]"
+// 组合规则（与实现一一对应）：
+//   TypeName[T]  → <identifier> <generic-instance-suffix>
+//   TypeName[T].method(args)  → <identifier> <generic-instance-suffix> <member-suffix> <call-suffix>
+//   TypeName.method(args)  → <identifier> <static-call-suffix>
+//   make[T](1)  → <identifier> <generic-instance-suffix> <call-suffix>
+//   TypeName[T](args)  → <type-application>（构造）；TypeName(expr) → <type-application>（转型 / 构造）
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"

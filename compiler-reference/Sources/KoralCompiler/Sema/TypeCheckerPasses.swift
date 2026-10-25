@@ -8,7 +8,7 @@ extension TypeChecker {
   private func validateValueTypeFieldMutability(
     typeName: String,
     isMutableType: Bool,
-    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
     span: SourceSpan
   ) throws {
     guard !isMutableType else {
@@ -1826,7 +1826,9 @@ extension TypeChecker {
             methodSymbol,
             parameters: registeredMethod.parameters,
             declaredName: registeredMethod.name,
-            owner: .extensionTemplate(ownerDefId: context.ownerDefId(of: type) ?? .invalid)
+            owner: .extensionTemplate(ownerDefId: context.ownerDefId(of: type) ?? .invalid),
+            traitMethodParameters: providingTrait.flatMap { traitDeclsByDefId[$0] }?
+              .methods.first(where: { $0.name == registeredMethod.name })?.parameters
           )
 
           if registeredMethod.typeParameters.isEmpty {
@@ -2137,7 +2139,14 @@ extension TypeChecker {
         for method in methods {
           let methodType = try withNewScope {
             try currentScope.defineType("Self", type: type)
-            
+            // Method-level type parameters are binders for the signature
+            // itself: `wrapping_cast[T Any](self) T` spells its return type
+            // through one. They shadow anything named alike (genericParameters
+            // is consulted before typeNames in lookupTypeInternal).
+            for typeParam in method.typeParameters {
+              currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+
             let returnType = try resolveTypeNode(method.returnType)
             let params = try method.parameters.map { param -> Parameter in
               let paramType = try resolveTypeNode(param.type)
@@ -2161,15 +2170,52 @@ extension TypeChecker {
             declaredName: method.name,
             owner: .concreteType(ownerType: type)
           )
-          
-          // Check for duplicate method name on this type
-          if extensionMethods[methodOwnerKey]![method.name] != nil {
-            throw SemanticError.duplicateDefinition(method.name, span: span)
-          }
 
-          extensionMethods[methodOwnerKey]![method.name] = methodSymbol
-          // `given intrinsic X { … }` is inherent: no face gate (§3.4).
-          markInherentMethod(owner: methodOwnerKey, name: method.name)
+          // A method-generic method is a template, not a face-visible name: it
+          // lands in `genericExtensionMethods`, the table
+          // `resolveGenericMethodWithExplicitTypeArgs` consults. Same split the
+          // ordinary `given` path makes.
+          if method.typeParameters.isEmpty {
+            // Check for duplicate method name on this type
+            if extensionMethods[methodOwnerKey]![method.name] != nil {
+              throw SemanticError.duplicateDefinition(method.name, span: span)
+            }
+
+            extensionMethods[methodOwnerKey]![method.name] = methodSymbol
+            // `given intrinsic X { … }` is inherent: no face gate (§3.4).
+            markInherentMethod(owner: methodOwnerKey, name: method.name)
+          } else {
+            if genericExtensionMethods[methodOwnerKey] == nil {
+              genericExtensionMethods[methodOwnerKey] = []
+            }
+            let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == method.name })
+            let existsInIntrinsic = (genericIntrinsicExtensionMethods[methodOwnerKey] ?? []).contains(where: { $0.method.name == method.name })
+            if existsInGeneric || existsInIntrinsic {
+              throw SemanticError.duplicateDefinition(method.name, span: span)
+            }
+            // An intrinsic method has no body; the placeholder never runs
+            // because the call lowers to a scalar op before codegen.
+            let tmplMethod = MethodDeclaration(
+              name: method.name,
+              typeParameters: method.typeParameters,
+              parameters: method.parameters,
+              returnType: method.returnType,
+              body: .integerLiteral("0", span: .unknown),
+              access: method.access,
+              defId: methodSymbol.defId
+            )
+            genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
+              typeParams: [],
+              method: tmplMethod,
+              conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
+              checkedBody: nil,
+              checkedParameters: nil,
+              checkedReturnType: nil
+            ))
+          }
         }
       }
 
@@ -2198,7 +2244,7 @@ extension TypeChecker {
         if case .structure(let defId) = placeholder {
           let members = zip(params, parameters).map { (sym, param) in
             let fieldAccess = param.access
-            return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess, named: param.named)
+            return (name: context.getName(sym.defId) ?? "<unknown>", type: sym.type, mutable: sym.isMutable(), access: fieldAccess, named: param.named, defaultValue: param.defaultValue)
           }
           context.updateStructInfo(
             defId: defId,
@@ -2243,7 +2289,7 @@ extension TypeChecker {
       }
 
       if case .structure(let defId) = placeholder {
-        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public, named: false) }
+        let members = resolvedFields.map { (name: $0.name, type: $0.type, mutable: true, access: AccessModifier.public, named: false, defaultValue: nil as ExpressionNode?) }
         context.updateStructInfo(
           defId: defId,
           members: members,
@@ -2271,14 +2317,14 @@ extension TypeChecker {
         
         var enumCases: [EnumCase] = []
         for c in cases {
-          var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+          var params: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
             try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             try assertNoNeverType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             // Allow direct recursion in enums — the compiler will automatically
             // insert hidden indirect layers for recursive types per the simplified type system RFC.
-            params.append((name: p.name, type: resolved, access: .public, named: p.named))
+            params.append((name: p.name, type: resolved, access: .public, named: p.named, defaultValue: p.defaultValue))
           }
           enumCases.append(EnumCase(name: c.name, parameters: params))
         }
@@ -2321,7 +2367,7 @@ extension TypeChecker {
         let functionType = Type.function(parameters: params, returns: returnType)
         
         // Store named parameter info for call-site validation
-        let namedParamInfo = parameters.map { (name: $0.name, named: $0.named) }
+        let namedParamInfo = parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }
         
         // For private functions, use file-isolated registration
         let isPrivate = (access == .file_private)
@@ -2360,7 +2406,7 @@ extension TypeChecker {
         currentScope.defineGenericFunctionTemplate(name, template: template)
         
         // Store named parameter info for call-site validation
-        functionNamedParams[defId] = parameters.map { (name: $0.name, named: $0.named) }
+        functionNamedParams[defId] = parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }
       }
       // Generic functions are fully checked in pass 3
 
@@ -4076,6 +4122,12 @@ extension TypeChecker {
       for method in methods {
         let (methodType, typedBody, params, returnType) = try withNewScope {
           try currentScope.defineType("Self", type: type)
+          // Method-level type parameters are binders for the signature
+          // itself: `wrapping_cast[T Any](self) T` spells its return type
+          // through one.
+          for typeParam in method.typeParameters {
+            currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))
+          }
           let receiverMutable = isMutableNominalReceiverType(type)
           let selfBindingType = adjustReceiverParameterType(
             paramName: "self",
@@ -4139,10 +4191,57 @@ extension TypeChecker {
               returnType: returnType
             ))
         }
-        if extensionMethods[methodOwnerKey] == nil {
-          extensionMethods[methodOwnerKey] = [:]
+        if method.typeParameters.isEmpty {
+          if extensionMethods[methodOwnerKey] == nil {
+            extensionMethods[methodOwnerKey] = [:]
+          }
+          extensionMethods[methodOwnerKey]![method.name] = methodSymbol
+        } else {
+          // A method-generic intrinsic method is a template: upsert it into
+          // `genericExtensionMethods` with the SYMBOL's DefId, which is the
+          // identity call sites resolve to.
+          if genericExtensionMethods[methodOwnerKey] == nil {
+            genericExtensionMethods[methodOwnerKey] = []
+          }
+          // An intrinsic method has no body; the placeholder never runs
+          // because the call lowers to a scalar op before codegen.
+          let tmplMethod = MethodDeclaration(
+            name: method.name,
+            typeParameters: method.typeParameters,
+            parameters: method.parameters,
+            returnType: method.returnType,
+            body: .integerLiteral("0", span: .unknown),
+            access: method.access,
+            defId: methodSymbol.defId
+          )
+          if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
+            $0.method.defId == methodSymbol.defId || ($0.method.name == method.name && $0.typeParams.isEmpty)
+          }) {
+            genericExtensionMethods[methodOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
+              typeParams: [],
+              method: tmplMethod,
+              conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
+              checkedBody: typedBody,
+              checkedParameters: params,
+              checkedReturnType: returnType
+            )
+          } else {
+            genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
+              typeParams: [],
+              method: tmplMethod,
+              conformanceTraitName: nil,
+              sourceFile: currentSourceFile,
+              modulePath: currentModulePath,
+              packageID: currentPackageID,
+              checkedBody: typedBody,
+              checkedParameters: params,
+              checkedReturnType: returnType
+            ))
+          }
         }
-        extensionMethods[methodOwnerKey]![method.name] = methodSymbol
       }
 
       return shouldEmitGiven ? .givenDeclaration(type: type, trait: nil, methods: typedMethods) : nil

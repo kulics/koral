@@ -311,14 +311,14 @@ extension TypeChecker {
         
         // Resolve case parameter types with substitution
         cases = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named, defaultValue: param.defaultValue)
           }
           return EnumCase(name: caseDef.name, parameters: resolvedParams)
         }
@@ -473,7 +473,7 @@ extension TypeChecker {
       
     case .structPattern(let typeName, let subPatternArgs, let span):
       // Get struct member info based on subject type
-      let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
+      let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]
       let structDefId: DefId?
       // The pattern's name is resolved ONCE, here, and everything below
       // compares the declaration it denotes. A non-generic nominal lives in the
@@ -516,7 +516,7 @@ extension TypeChecker {
             return try resolveTypeNode(param.type)
           }
           let fieldAccess = param.access
-          return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess, named: param.named)
+          return (name: param.name, type: resolvedType, mutable: param.mutable, access: fieldAccess, named: param.named, defaultValue: param.defaultValue)
         }
         structDefId = template.defId
         
@@ -734,14 +734,14 @@ extension TypeChecker {
   /// the type arguments substituted. `nil` when the subject is not a struct at
   /// all; `[]` when it is a struct whose fields are not registered.
   func tupleDestructuringMembers(of subjectType: Type) throws ->
-    [(name: String, type: Type, access: AccessModifier, named: Bool)]? {
+    [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]? {
     switch subjectType {
     case .structure(let defId):
       guard let members = context.getStructMembers(defId) else {
         return []
       }
       return members.map {
-        (name: $0.name, type: $0.type, access: $0.access, named: $0.named)
+        (name: $0.name, type: $0.type, access: $0.access, named: $0.named, defaultValue: $0.defaultValue)
       }
 
     case .genericStruct(let tplDefId, let typeArgs):
@@ -753,7 +753,7 @@ extension TypeChecker {
       for (index, param) in template.typeParameters.enumerated() where index < typeArgs.count {
         substitution[param.name] = typeArgs[index]
       }
-      var resolved: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+      var resolved: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
       resolved.reserveCapacity(template.parameters.count)
       for param in template.parameters {
         let resolvedType = try withNewScope {
@@ -762,7 +762,7 @@ extension TypeChecker {
           }
           return try resolveTypeNode(param.type)
         }
-        resolved.append((name: param.name, type: resolvedType, access: param.access, named: param.named))
+        resolved.append((name: param.name, type: resolvedType, access: param.access, named: param.named, defaultValue: param.defaultValue))
       }
       return resolved
 
@@ -795,7 +795,7 @@ extension TypeChecker {
   /// `binds[i]` says whether slot i reads field i -- `_` does not -- and
   /// `slotSpans[i]` is where that slot is written.
   func checkPositionalDestructuring(
-    members: [(name: String, type: Type, access: AccessModifier, named: Bool)],
+    members: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
     owner: DefId?,
     typeName: String,
     binds: [Bool],

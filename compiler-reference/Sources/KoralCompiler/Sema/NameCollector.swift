@@ -167,7 +167,7 @@ public class NameCollector: CompilerPass {
                 isStdLib: isStdLib
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span, let nameSpan):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutableType, let access, let span, let nameSpan):
             try collectStructDefinition(
                 name: name,
                 typeParameters: typeParameters,
@@ -175,7 +175,8 @@ public class NameCollector: CompilerPass {
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
-                isStdLib: isStdLib
+                isStdLib: isStdLib,
+                isMutableType: isMutableType
             )
             
         case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
@@ -349,10 +350,11 @@ public class NameCollector: CompilerPass {
     private func collectStructDefinition(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
-        isStdLib: Bool
+        isStdLib: Bool,
+        isMutableType: Bool = false
     ) throws {
         let isPrivate = (access == .file_private)
         
@@ -387,6 +389,14 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+
+        // `type mutable` travels with the DECLARATION, not with the finished
+        // definition: a field's own `?Node` is resolved before `Node` is
+        // complete, and asking about mutability then must already have the
+        // answer (§ self-referential weak fields).
+        if isMutableType {
+            defIdMap.markStructMutable(defId)
+        }
 
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -497,7 +507,7 @@ public class NameCollector: CompilerPass {
     private func collectFunctionDeclaration(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
         returnType: TypeNode,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,

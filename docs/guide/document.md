@@ -307,6 +307,59 @@ Pointer types use the same spelling as type annotations: `*Int(p)`,
 `*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
 and `String(x)` are errors (`Type does not support cast`).
 
+A numeric conversion is **checked** — it does not wrap. Whether a check applies
+depends on the widths involved:
+
+- A **width-changing** conversion (narrowing or widening) is checked against the
+  target type's range. If the value does not fit, the program panics at run time.
+- A **same-width** conversion between signed and unsigned reinterprets the bit
+  pattern and never panics — no information is lost, only its signedness.
+
+```koral
+let big Int = 300;
+let a UInt8 = UInt8(big);      // Panic: numeric conversion overflow
+let n Int = -5;
+let u UInt = UInt(n);          // 18446744073709551611 -- reinterpreted, not wrapped
+```
+
+A float-to-int conversion truncates toward zero, and the range check applies to
+the truncated value: `Int(3.9)` is `3`, `Int(-3.9)` is `-3`, `Int(1e20)` panics,
+and so does converting a NaN or an infinity.
+
+A conversion whose source is a literal is checked at compile time instead, and
+refuses to compile rather than panicking — `UInt8(300)` is an error
+(`Integer literal 300 is out of range for UInt8`), not a run-time panic.
+
+When the bit pattern is what you want, `wrapping_cast` is the opt-out: an
+unchecked integer-to-integer conversion with C/Rust-`as` semantics. It takes the
+value's two's-complement representation and truncates or sign/zero-extends it to
+the target width, and it never panics.
+
+```koral
+let big Int = 300;
+let low UInt8 = big.wrapping_cast[UInt8]();   // 44 -- the low byte
+let n Int = -5;
+let u UInt = n.wrapping_cast[UInt]();         // 18446744073709551611 -- sign-extends
+let b Int8 = -1;
+let wide UInt = b.wrapping_cast[UInt]();      // 18446744073709551615 -- sign-extends first
+let raw UInt8 = b.wrapping_cast[UInt8]();     // 255
+```
+
+This is the byte-take idiom — serialization, hashing, bit tricks — where a
+truncation is the point and a panic would be noise. A negative `Int8` hashed
+through it sign-extends, so the same number hashes the same whichever width it
+arrives in:
+
+```koral
+given Int8 as Hash {
+    public hash(self) UInt = self.wrapping_cast[UInt]();
+};
+```
+
+The target must be an integer type: `x.wrapping_cast[Float64]()` is the same
+error a non-castable `Type(expr)` target gives. A float-to-int is a numeric
+conversion, not a bit move, and stays checked.
+
 #### String ↔ Number
 
 Converting between text and numbers is not a cast — there is no numeric

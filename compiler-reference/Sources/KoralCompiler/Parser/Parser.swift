@@ -3,13 +3,6 @@ public class Parser {
   let lexer: Lexer
   var currentToken: Token
 
-  /// Default values for named parameters collected during parsing.
-  /// Key format: "ParentName.paramName" (e.g., "Window.width", "connect.port")
-  public var parsedParameterDefaults: [String: ExpressionNode] = [:]
-
-  /// Accumulated defaults from ALL parsed files (static, used by TypeChecker)
-  nonisolated(unsafe) public static var allParsedParameterDefaults: [String: ExpressionNode] = [:]
-
   /// "TraitName#methodName#paramName" keys whose default came from a trait
   /// method signature.
   public var traitDeclaredParameterDefaults: Set<String> = []

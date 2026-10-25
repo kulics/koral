@@ -81,7 +81,7 @@ extension Monomorphizer {
         instantiatedTypes[key] = placeholder
 
         // Resolve members with concrete types
-        var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
+        var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
         do {
             // Create type substitution map
             var typeSubstitution: [String: Type] = [:]
@@ -96,7 +96,7 @@ extension Monomorphizer {
                 // Resolve any nested genericStruct/genericEnum types
                 // This ensures types like List<T ref> get instantiated
                 fieldType = resolveParameterizedType(fieldType, visited: [])
-                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access, named: param.named))
+                resolvedMembers.append((name: param.name, type: fieldType, mutable: param.mutable, access: param.access, named: param.named, defaultValue: param.defaultValue))
             }
         } catch {
             instantiatedTypes.removeValue(forKey: key)
@@ -196,7 +196,7 @@ extension Monomorphizer {
             }
             
             for c in template.cases {
-                var params: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+                var params: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
                 for p in c.parameters {
                     var resolved = try resolveTypeNode(p.type, substitution: typeSubstitution)
                     // Allow direct recursion in generic enums — the compiler will
@@ -204,7 +204,7 @@ extension Monomorphizer {
                     // Resolve any nested genericStruct/genericEnum types
                     // This ensures types like List<Expr ref> get instantiated
                     resolved = resolveParameterizedType(resolved, visited: [])
-                    params.append((name: p.name, type: resolved, access: AccessModifier.public, named: p.named))
+                    params.append((name: p.name, type: resolved, access: AccessModifier.public, named: p.named, defaultValue: p.defaultValue))
                 }
                 resolvedCases.append(EnumCase(name: c.name, parameters: params))
             }

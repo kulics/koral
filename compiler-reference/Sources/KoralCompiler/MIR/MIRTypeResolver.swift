@@ -145,7 +145,7 @@ struct MIRTypeResolver {
     case .pointer(let place):
       guard let element = type(of: place) else { return nil }
       return .pointer(element: element)
-    case .cast(_, let type):
+    case .cast(_, let type, checked: _):
       return type
     case .intrinsic(let intrinsic):
       return type(of: intrinsic)

@@ -26,7 +26,7 @@ extension Monomorphizer {
 
     private func preservedParameters(
         resolvedParams: [Symbol],
-        declaredParams: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+        declaredParams: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
     ) -> [Parameter] {
         zip(resolvedParams, declaredParams).map { resolved, declared in
             Parameter(type: resolved.type, kind: preservedPassKind(for: declared.type))
@@ -1956,6 +1956,16 @@ extension Monomorphizer {
     }
 
     /// Checks if a type supports builtin arithmetic operations.
+    internal func isBuiltinIntegerType(_ type: Type) -> Bool {
+        switch type {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64:
+            return true
+        default:
+            return false
+        }
+    }
+
     internal func isBuiltinArithmeticType(_ type: Type) -> Bool {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
@@ -2044,6 +2054,53 @@ extension Monomorphizer {
         default:
             return nil
         }
+    }
+
+    /// `Type.wrapping_*(...)` is the static spelling of the instance form: the
+    /// first explicit argument is the receiver (`Type.method(args)` is
+    /// `args[0].method(args[1..])`). Lower it to the same scalar op the instance
+    /// form gets -- a body-less intrinsic would be emitted as a call otherwise.
+    internal func lowerWrappingStaticMethodCall(
+        methodName: String,
+        arguments: [TypedExpressionNode],
+        resultType: Type
+    ) -> TypedExpressionNode? {
+        guard let base = arguments.first else { return nil }
+        guard isBuiltinArithmeticType(base.type) else { return nil }
+        let extraArgs = Array(arguments.dropFirst())
+        if extraArgs.count == 1 {
+            let rhs = extraArgs[0]
+            switch methodName {
+            case "wrapping_add" where base.type == rhs.type:
+                return .wrappingArithmeticExpression(left: base, op: .plus, right: rhs, type: resultType)
+            case "wrapping_sub" where base.type == rhs.type:
+                return .wrappingArithmeticExpression(left: base, op: .minus, right: rhs, type: resultType)
+            case "wrapping_mul" where base.type == rhs.type:
+                return .wrappingArithmeticExpression(left: base, op: .multiply, right: rhs, type: resultType)
+            case "wrapping_div" where base.type == rhs.type:
+                return .wrappingArithmeticExpression(left: base, op: .divide, right: rhs, type: resultType)
+            case "wrapping_rem" where base.type == rhs.type:
+                return .wrappingArithmeticExpression(left: base, op: .remainder, right: rhs, type: resultType)
+            case "wrapping_shl" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
+                return .wrappingShiftExpression(left: base, op: .shiftLeft, right: rhs, type: resultType)
+            case "wrapping_shr" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
+                return .wrappingShiftExpression(left: base, op: .shiftRight, right: rhs, type: resultType)
+            default:
+                break
+            }
+        }
+        if extraArgs.isEmpty {
+            switch methodName {
+            case "wrapping_neg":
+                let zero = makeZeroLiteral(for: base.type)
+                return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: resultType)
+            case "wrapping_cast" where isBuiltinIntegerType(resultType):
+                return .castExpression(expression: base, type: resultType, checked: false)
+            default:
+                break
+            }
+        }
+        return nil
     }
 
     /// Creates a zero literal for a builtin numeric type.

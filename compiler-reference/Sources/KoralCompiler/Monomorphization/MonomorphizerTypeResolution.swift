@@ -366,7 +366,8 @@ extension Monomorphizer {
                     type: resolveParameterizedType(member.type, visited: newVisited),
                     mutable: member.mutable,
                     access: member.access,
-                    named: member.named
+                    named: member.named,
+                    defaultValue: member.defaultValue
                 )
             }
             let membersChanged = zip(members, newMembers).contains { old, new in
@@ -396,7 +397,7 @@ extension Monomorphizer {
                 EnumCase(
                     name: enumCase.name,
                     parameters: enumCase.parameters.map { param in
-                        (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited), access: param.access, named: param.named)
+                        (name: param.name, type: resolveParameterizedType(param.type, visited: newVisited), access: param.access, named: param.named, defaultValue: param.defaultValue)
                     }
                 )
             }
@@ -478,7 +479,7 @@ extension Monomorphizer {
                 EnumCase(
                     name: enumCase.name,
                     parameters: enumCase.parameters.map { param in
-                        (name: param.name, type: resolveParameterizedType(param.type), access: param.access, named: param.named)
+                        (name: param.name, type: resolveParameterizedType(param.type), access: param.access, named: param.named, defaultValue: param.defaultValue)
                     }
                 )
             }
@@ -662,10 +663,11 @@ extension Monomorphizer {
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: resolveParameterizedType(type))
             
-        case .castExpression(let expression, let type):
+        case .castExpression(let expression, let type, let checked):
             return .castExpression(
                 expression: resolveTypesInExpression(expression),
-                type: resolveParameterizedType(type)
+                type: resolveParameterizedType(type),
+                checked: checked
             )
             
         case .arithmeticExpression(let left, let op, let right, let type):
@@ -912,6 +914,15 @@ extension Monomorphizer {
                     if methodName == "wrapping_neg", newArguments.isEmpty {
                         let zero = makeZeroLiteral(for: base.type)
                         return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: newType)
+                    }
+                    // `wrapping_cast` is the unchecked integer-to-integer
+                    // conversion: take the two's-complement representation and
+                    // truncate or sign/zero-extend it to the target width. It
+                    // never panics -- that is Rust's `as`, spelled out loud,
+                    // because Koral's `Type(x)` is checked by default.
+                    if methodName == "wrapping_cast", newArguments.isEmpty,
+                       isBuiltinIntegerType(newType) {
+                        return .castExpression(expression: base, type: newType, checked: false)
                     }
                 }
             }
@@ -1277,6 +1288,16 @@ extension Monomorphizer {
                     arguments: resolvedArguments,
                     type: resolvedReturnType
                 )
+            }
+
+            // `Type.wrapping_*(...)` lowers exactly like the instance form: the
+            // first explicit argument is the receiver.
+            if let lowered = lowerWrappingStaticMethodCall(
+                methodName: methodName,
+                arguments: resolvedArguments,
+                resultType: resolvedReturnType
+            ) {
+                return lowered
             }
             
             // Compute extension-template and emitted symbol scopes from the resolved base type

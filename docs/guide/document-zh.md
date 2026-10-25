@@ -306,6 +306,51 @@ let d UInt8 = UInt8(255);      // Int -> UInt8
 指针类型与类型标注同拼写：`*Int(p)`、`*mutable T(q)`。
 只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
+数值转换是**受检的**——不会回绕。是否受检取决于两端的宽度：
+
+- **改变宽度**（收窄或放宽）的转换按目标类型的取值范围受检。装不下就 panic。
+- **同宽度**的有符号 ↔ 无符号转换重解释位模式，永不 panic——信息没有丢失，
+  只是换了有无符号的读法。
+
+```koral
+let big Int = 300;
+let a UInt8 = UInt8(big);      // Panic: numeric conversion overflow
+let n Int = -5;
+let u UInt = UInt(n);          // 18446744073709551611 —— 重解释，不是回绕
+```
+
+浮点转整数向零截断，范围检查作用在截断后的值上：`Int(3.9)` 得 `3`、`Int(-3.9)`
+得 `-3`、`Int(1e20)` panic，NaN 与无穷同样 panic。
+
+源是字面量的转换在编译期受检，直接拒绝编译而不是留下一个 panic——`UInt8(300)`
+是错误（"Integer literal 300 is out of range for UInt8"），不是运行期 panic。
+
+当你要的就是位模式时，`wrapping_cast` 是那个出口：一个不受检的整数到整数转换，
+语义与 C/Rust 的 `as` 完全一致。它取该值的二进制补码表示，按目标宽度截断或符号/零
+扩展，永不 panic。
+
+```koral
+let big Int = 300;
+let low UInt8 = big.wrapping_cast[UInt8]();   // 44 —— 低字节
+let n Int = -5;
+let u UInt = n.wrapping_cast[UInt]();         // 18446744073709551611 —— 符号扩展
+let b Int8 = -1;
+let wide UInt = b.wrapping_cast[UInt]();      // 18446744073709551615 —— 先符号扩展
+let raw UInt8 = b.wrapping_cast[UInt8]();     // 255
+```
+
+这正是取字节的惯用法——序列化、哈希、位运算技巧——截断是目的，panic 只会碍事。
+负的 `Int8` 经它哈希会符号扩展，于是同一个数无论以哪种宽度进来，哈希值都一致：
+
+```koral
+given Int8 as Hash {
+    public hash(self) UInt = self.wrapping_cast[UInt]();
+};
+```
+
+目标必须是整数类型：`x.wrapping_cast[Float64]()` 与不可转型的 `Type(expr)` 目标一样
+报错。浮点转整数是数值转换，不是位移动，仍然受检。
+
 #### 字符串 ↔ 数值
 
 文本与数值之间的转换不是转型——两者之间没有可利用的数值关系。它走 `std/text`，

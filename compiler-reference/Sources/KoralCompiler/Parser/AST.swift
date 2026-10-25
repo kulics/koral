@@ -140,14 +140,14 @@ public indirect enum TypeNode: CustomStringConvertible {
 public struct TraitMethodSignature {
   public let name: String
   public let typeParameters: [TypeParameterDecl]  // 方法级泛型参数
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
   public let access: AccessModifier
   
   public init(
     name: String,
     typeParameters: [TypeParameterDecl] = [],
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     access: AccessModifier
   ) {
@@ -161,7 +161,7 @@ public struct TraitMethodSignature {
 
 public struct EnumCaseDeclaration {
   public let name: String
-  public let parameters: [(name: String, type: TypeNode, named: Bool)]
+  public let parameters: [(name: String, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
 }
 public indirect enum GlobalNode {
   // Using declaration (must appear at the beginning of a file)
@@ -173,7 +173,7 @@ public indirect enum GlobalNode {
   case globalFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
@@ -183,7 +183,7 @@ public indirect enum GlobalNode {
   case intrinsicFunctionDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     access: AccessModifier,
     span: SourceSpan,
@@ -191,7 +191,7 @@ public indirect enum GlobalNode {
   )
   case foreignFunctionDeclaration(
     name: String,
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     access: AccessModifier,
     span: SourceSpan,
@@ -200,7 +200,7 @@ public indirect enum GlobalNode {
   case globalStructDeclaration(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+    parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
     isMutable: Bool,
     access: AccessModifier,
     span: SourceSpan,
@@ -348,14 +348,14 @@ extension GlobalNode {
 public struct IntrinsicMethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
   public let access: AccessModifier
 
   public init(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     access: AccessModifier
   ) {
@@ -369,7 +369,7 @@ public struct IntrinsicMethodDeclaration {
 public struct MethodDeclaration {
   public let name: String
   public let typeParameters: [TypeParameterDecl]
-  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+  public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
   public let body: ExpressionNode
   public let access: AccessModifier
@@ -378,7 +378,7 @@ public struct MethodDeclaration {
   public init(
     name: String,
     typeParameters: [TypeParameterDecl],
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,

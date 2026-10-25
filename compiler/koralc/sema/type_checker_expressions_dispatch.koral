@@ -932,7 +932,7 @@ given TypeChecker {
                             .Some(ta) then self.resolve_type_in_scope(ta, scope),
                             .None() then Type.Unknown(),
                         };
-                        typed_params.push(TypedParam(p.name, false, pt, false));
+                        typed_params.push(TypedParam(p.name, false, pt, false, Option[Expr].None()));
                     };
                     self.validate_lambda_parameter_types(params, typed_params);
                     let ret = when return_type in {
@@ -1867,7 +1867,7 @@ given TypeChecker {
         let mutable index UInt = 0;
         while index < param_types.count() then {
             let spec = if index < param_specs.count() then param_specs[index]
-            else FunctionParamSpec("", false, false, false);
+            else FunctionParamSpec("", false, false, false, Option[Expr].None());
             let param_name = if spec.name.is_empty() then {
                 let mutable generated = StringBuilder.new();
                 generated.push_string("__member_arg_");
@@ -1875,7 +1875,7 @@ given TypeChecker {
                 generated.to_string()
             } else spec.name;
             typed_params.push(
-                TypedParam(param_name, spec.is_mutable, param_types[index], spec.named),
+                TypedParam(param_name, spec.is_mutable, param_types[index], spec.named, spec.default_value),
             );
             index += 1;
         };
@@ -3286,7 +3286,7 @@ given TypeChecker {
                 let _ = span;
                 self.lower_interpolated_string(parts, scope)
             },
-            .CastExpr(type_node, inner, _) then {
+            .CastExpr(type_node, inner, cast_span) then {
                 let target = self.resolve_type_in_scope(type_node, scope);
                 // `?T(expr)` is weak-reference construction (a handle wrap, not
                 // a bit reinterpretation). It lowers to the downgrade intrinsic.
@@ -3299,6 +3299,23 @@ given TypeChecker {
                         expr_span(inner),
                     ) then {
                         result_type = Type.Unknown();
+                    };
+                    // The referent is `T`, so the argument has to be a `T`.
+                    // Mutability alone would let `?B(a)` build a `?B` out of an
+                    // `A` -- two unrelated mutable types.
+                    if result_type is not .Unknown() then {
+                        let weak_referent = when target in {
+                            .WeakReferenceType(r) then r,
+                            .MutableWeakReferenceType(r) then r,
+                            _ then Type.Unknown(),
+                        };
+                        if not self.same_expr_type(typed_inner.expr_type, weak_referent) then {
+                            self.push_diagnostic_at_span(
+                                "Type mismatch: expected \(self.display_type_name(weak_referent)), got \(self.display_type_name(typed_inner.expr_type))",
+                                cast_span,
+                            );
+                            result_type = Type.Unknown();
+                        };
                     };
                     return make_typed_expr(
                         TypedExprKind.IntrinsicCall(
@@ -3344,7 +3361,7 @@ given TypeChecker {
                     ),
                     _ then adapted_inner,
                 };
-                make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target)
+                make_typed_expr(TypedExprKind.CastExpr(target, typed_inner, true), target)
             },
             .Unary(op, inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, expected, scope);

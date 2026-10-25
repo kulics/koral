@@ -387,7 +387,7 @@ public class TypeResolver: CompilerPass {
     private func resolveStructSignature(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+        parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
         access: AccessModifier,
         span: SourceSpan,
         defIdMap: DefIdMap
@@ -479,7 +479,7 @@ public class TypeResolver: CompilerPass {
     private func resolveFunctionSignature(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
         returnType: TypeNode,
         access: AccessModifier,
         span: SourceSpan,
@@ -509,7 +509,7 @@ public class TypeResolver: CompilerPass {
     private func resolveIntrinsicFunctionSignature(
         name: String,
         typeParameters: [TypeParameterDecl],
-        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+        parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
         returnType: TypeNode,
         span: SourceSpan,
         defIdMap: DefIdMap

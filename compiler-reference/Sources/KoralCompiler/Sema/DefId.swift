@@ -241,12 +241,12 @@ public class DefIdMap {
 
     public struct GenericStructTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
-        public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)]
+        public let parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]
         public let isMutable: Bool
 
         public init(
             typeParameters: [TypeParameterDecl],
-            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool)],
+            parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
             isMutable: Bool = false
         ) {
             self.typeParameters = typeParameters
@@ -270,7 +270,7 @@ public class DefIdMap {
 
     public struct GenericFunctionTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
-        public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]
+        public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
         public let returnType: TypeNode
         public let body: ExpressionNode
         public var checkedBody: TypedExpressionNode?
@@ -279,7 +279,7 @@ public class DefIdMap {
 
         public init(
             typeParameters: [TypeParameterDecl],
-            parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+            parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
             returnType: TypeNode,
             body: ExpressionNode,
             checkedBody: TypedExpressionNode? = nil,
@@ -324,7 +324,7 @@ public class DefIdMap {
     }
 
     public struct StructTypeInfo {
-        public let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]
+        public let members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]
         public let isGenericInstantiation: Bool
         public let typeArguments: [Type]?
         public let templateName: String?  // 泛型模板名称
@@ -335,7 +335,7 @@ public class DefIdMap {
         public let isMutable: Bool
 
         public init(
-            members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
+            members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
             isGenericInstantiation: Bool,
             typeArguments: [Type]?,
             templateName: String? = nil,
@@ -727,7 +727,7 @@ public class DefIdMap {
 
     public func addStructInfo(
         defId: DefId,
-        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
+        members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
         isGenericInstantiation: Bool = false,
         typeArguments: [Type]? = nil,
         templateName: String? = nil,
@@ -774,7 +774,7 @@ public class DefIdMap {
         return typeMap[defId.id]
     }
 
-    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+    public func getStructMembers(_ defId: DefId) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]? {
         return structInfoMap[defId.id]?.members
     }
 
@@ -822,8 +822,20 @@ public class DefIdMap {
         return nil
     }
 
+    /// `type mutable`, recorded as soon as the DECLARATION is collected.
+    ///
+    /// `structInfoMap` only learns mutability when the type is fully defined,
+    /// which is after its own field types have been resolved -- so a
+    /// self-referential `type mutable Node(next ?Node)` used to ask about a
+    /// mutability that had not been written yet and get a false negative.
+    private var declaredMutableTypeIds: Set<UInt64> = []
+
+    public func markStructMutable(_ defId: DefId) {
+        declaredMutableTypeIds.insert(defId.id)
+    }
+
     public func isStructMutable(_ defId: DefId) -> Bool {
-        return structInfoMap[defId.id]?.isMutable ?? false
+        return (structInfoMap[defId.id]?.isMutable ?? false) || declaredMutableTypeIds.contains(defId.id)
     }
 
     public func getTypeArguments(_ defId: DefId) -> [Type]? {

@@ -247,16 +247,15 @@ public class TypeChecker {
 
   // Named parameter info for functions: DefId -> [(name, named)] for each parameter
   // Used to validate named argument labels at call sites
-  var functionNamedParams: [DefId: [(name: String, named: Bool)]] = [:]
+  var functionNamedParams: [DefId: [(name: String, named: Bool, defaultValue: ExpressionNode?)]] = [:]
 
   // Parameter labels for methods keyed by owner type name and method name.
   // Method symbols share a `DefId` with same-named methods on other types, so
   // `functionNamedParams` alone cannot identify a method's labels reliably.
-  var methodParamLabels: [String: [String: [(name: String, named: Bool)]]] = [:]
+  var methodParamLabels: [String: [String: [(name: String, named: Bool, defaultValue: ExpressionNode?)]]] = [:]
   
   // Parsed default values for named parameters (from parser)
   // Key format: "ParentName.paramName" (e.g., "Window.width", "connect.port")
-  var parsedParameterDefaults: [String: ExpressionNode] = [:]
 
   // "TraitName#methodName#paramName" keys whose default came from a trait signature
   var traitDeclaredParameterDefaults: Set<String> = []
@@ -474,26 +473,53 @@ public class TypeChecker {
 
   // MARK: - Receiver Method Metadata
 
-  func isReceiverStyleMethodParameters(_ parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)]) -> Bool {
+  func isReceiverStyleMethodParameters(_ parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]) -> Bool {
     guard let first = parameters.first else { return false }
     return first.name == "self"
   }
 
   func registerReceiverStyleMethod(
     _ symbol: Symbol,
-    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool)],
+    parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     declaredName: String? = nil,
     owner: ReceiverMethodOwner? = nil,
     conformanceTraitName: String? = nil,
     conformanceTraitDefId: DefId? = nil,
-    traitMethodDefId: DefId? = nil
+    traitMethodDefId: DefId? = nil,
+    traitMethodParameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]? = nil
   ) {
+    let labelName = declaredName ?? context.getName(symbol.defId) ?? ""
+    // A trait implementation may not declare its own defaults (the conformance
+    // rules forbid it), so the defaults a call fills come from the TRAIT
+    // method's signature -- which is a declaration node like any other. The
+    // impl's parameters carry none; merge the trait's in by parameter name.
+    var traitDefaults: [String: ExpressionNode] = [:]
+    let traitParams: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]? = {
+      if let traitMethodParameters { return traitMethodParameters }
+      if let traitName = conformanceTraitName {
+        return visibleTraitInfo(traitName)?.methods.first(where: { $0.name == labelName })?.parameters
+      }
+      return nil
+    }()
+    if let traitParams {
+      for p in traitParams {
+        if let d = p.defaultValue {
+          traitDefaults[p.name] = d
+        }
+      }
+    }
+    func callParamMeta(from parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)])
+      -> [(name: String, named: Bool, defaultValue: ExpressionNode?)] {
+      return parameters.map { p in
+        (name: p.name, named: p.named, defaultValue: p.defaultValue ?? traitDefaults[p.name])
+      }
+    }
+
     // Store named parameter info for call-site validation
-    functionNamedParams[symbol.defId] = parameters.map { (name: $0.name, named: $0.named) }
+    functionNamedParams[symbol.defId] = callParamMeta(from: parameters)
 
     // Method `DefId`s are shared with same-named methods on other types, so also
     // key the labels by owner identity + method name.
-    let labelName = declaredName ?? context.getName(symbol.defId) ?? ""
     // Keyed by the owner's IDENTITY (`methodLabelKey`). It used to use the
     // owner's spelling, which is not unique across modules.
     let labelOwner: String? = {
@@ -504,8 +530,7 @@ public class TypeChecker {
       }
     }()
     if let labelOwner {
-      methodParamLabels[labelOwner, default: [:]][labelName] =
-        parameters.map { (name: $0.name, named: $0.named) }
+      methodParamLabels[labelOwner, default: [:]][labelName] = callParamMeta(from: parameters)
     }
     
     if isReceiverStyleMethodParameters(parameters) {
@@ -1203,7 +1228,6 @@ public class TypeChecker {
     self.userFileName = userFileName
     self.currentFileName = userFileName
     self.importGraph = importGraph
-    self.parsedParameterDefaults = Parser.allParsedParameterDefaults
     self.traitDeclaredParameterDefaults = Parser.allTraitDeclaredParameterDefaults
     self.implDeclaredParameterDefaults = Parser.allImplDeclaredParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
@@ -1234,7 +1258,6 @@ public class TypeChecker {
     self.userFileName = userFileName
     self.currentFileName = userFileName
     self.importGraph = importGraph
-    self.parsedParameterDefaults = Parser.allParsedParameterDefaults
     self.traitDeclaredParameterDefaults = Parser.allTraitDeclaredParameterDefaults
     self.implDeclaredParameterDefaults = Parser.allImplDeclaredParameterDefaults
     SemanticErrorContext.currentFileName = userFileName
@@ -1625,7 +1648,7 @@ public class TypeChecker {
   func ensureStructConstructionAccess(
     typeName: String,
     defId: DefId,
-    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)],
+    members: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
     span: SourceSpan
   ) throws {
     if let blocked = members.first(where: { !isFieldAccessibleFromCurrentContext(fieldAccess: $0.access, defId: defId) }) {
@@ -1791,14 +1814,14 @@ public class TypeChecker {
       // Resolve case parameter types with substitution
       do {
         let resolvedCases: [EnumCase] = try template.cases.map { caseDef in
-          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
+          let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = try caseDef.parameters.map { param in
             let resolvedType = try withNewScope {
               for (paramName, paramType) in substitution {
                 try currentScope.defineType(paramName, type: paramType)
               }
               return try resolveTypeNode(param.type)
             }
-            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
+            return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named, defaultValue: param.defaultValue)
           }
           return EnumCase(name: caseDef.name, parameters: resolvedParams)
         }

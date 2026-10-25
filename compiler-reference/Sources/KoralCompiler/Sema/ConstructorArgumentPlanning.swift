@@ -57,8 +57,8 @@ extension TypeChecker {
     _ callArgs: [CallArg],
     paramNames: [String],
     paramIsNamed: [Bool],
+    paramDefaults: [ExpressionNode?],
     callDescription: String,
-    defaultsKeyPrefix: String,
     paramTypeKeys: [String] = []
   ) throws -> ConstructorArgumentPlan {
     var orderedCallArgs: [CallArg?] = Array(repeating: nil, count: paramNames.count)
@@ -105,9 +105,8 @@ extension TypeChecker {
     var usesDefaults = false
     for (index, param) in paramNames.enumerated() {
       if orderedCallArgs[index] == nil {
-        let key = "\(defaultsKeyPrefix).\(param)"
-        let bareKey = defaultsKeyPrefix.contains(".") ? String(defaultsKeyPrefix.split(separator: ".").last!) + "." + param : key
-        if self.parsedParameterDefaults[key] != nil || self.parsedParameterDefaults[bareKey] != nil {
+        // The parameter's OWN declaration carries its default (if any).
+        if index < paramDefaults.count && paramDefaults[index] != nil {
           usesDefaults = true
         } else if paramIsNamed[index] {
           throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
@@ -130,16 +129,16 @@ extension TypeChecker {
     _ callArgs: [CallArg],
     paramNames: [String],
     paramIsNamed: [Bool],
+    paramDefaults: [ExpressionNode?],
     callDescription: String,
-    defaultsKeyPrefix: String,
     paramTypeKeys: [String] = []
   ) throws -> [ExpressionNode] {
     let plan = try planCallArguments(
       callArgs,
       paramNames: paramNames,
       paramIsNamed: paramIsNamed,
-      callDescription: callDescription,
-      defaultsKeyPrefix: defaultsKeyPrefix
+      paramDefaults: paramDefaults,
+      callDescription: callDescription
     )
 
     var expressions: [ExpressionNode] = []
@@ -148,9 +147,8 @@ extension TypeChecker {
         expressions.append(expression)
         continue
       }
-      let key = "\(defaultsKeyPrefix).\(param)"
-      let bareKey = defaultsKeyPrefix.contains(".") ? String(defaultsKeyPrefix.split(separator: ".").last!) + "." + param : key
-      guard let defaultExpr = self.parsedParameterDefaults[key] ?? self.parsedParameterDefaults[bareKey] else {
+      // Fill from the parameter's OWN declaration.
+      guard index < paramDefaults.count, let defaultExpr = paramDefaults[index] else {
         if paramIsNamed[index] {
           throw SemanticError(.generic("Missing named argument '\(param)' for '\(callDescription)'; provide '\(param):' or declare a default value"), span: callArgs.first?.span ?? currentSpan)
         } else {
@@ -167,6 +165,7 @@ extension TypeChecker {
     _ callArgs: [CallArg],
     fieldNames: [String],
     fieldIsNamed: [Bool],
+    fieldDefaults: [ExpressionNode?],
     constructorDescription: String,
     paramTypeKeys: [String] = [],
     parentName: String = ""
@@ -175,8 +174,8 @@ extension TypeChecker {
       callArgs,
       paramNames: fieldNames,
       paramIsNamed: fieldIsNamed,
+      paramDefaults: fieldDefaults,
       callDescription: constructorDescription,
-      defaultsKeyPrefix: parentName,
       paramTypeKeys: paramTypeKeys
     )
   }
@@ -188,7 +187,7 @@ extension TypeChecker {
     methodName: String,
     fallbackDefId: DefId?,
     argumentCount: Int
-  ) -> (names: [String], isNamed: [Bool]) {
+  ) -> (names: [String], isNamed: [Bool], defaults: [ExpressionNode?]) {
     if let ownerTypeName, let labels = methodParamLabels[ownerTypeName]?[methodName] {
       return callParamMeta(from: labels, argumentCount: argumentCount)
     }
@@ -228,7 +227,7 @@ extension TypeChecker {
   func callArgumentParamMeta(
     defId: DefId,
     argumentCount: Int
-  ) -> (names: [String], isNamed: [Bool]) {
+  ) -> (names: [String], isNamed: [Bool], defaults: [ExpressionNode?]) {
     return callParamMeta(from: functionNamedParams[defId] ?? [], argumentCount: argumentCount)
   }
 
@@ -236,17 +235,17 @@ extension TypeChecker {
   /// declaration's parameter list directly (used for extension-method
   /// templates that are not registered by `DefId`).
   func callParamMeta(
-    from raw: [(name: String, named: Bool)],
+    from raw: [(name: String, named: Bool, defaultValue: ExpressionNode?)],
     argumentCount: Int
-  ) -> (names: [String], isNamed: [Bool]) {
-    var meta: [(name: String, named: Bool)] = raw
+  ) -> (names: [String], isNamed: [Bool], defaults: [ExpressionNode?]) {
+    var meta: [(name: String, named: Bool, defaultValue: ExpressionNode?)] = raw
     if meta.count == argumentCount + 1 && meta.first?.name == "self" {
       meta = Array(meta.dropFirst())
     }
     if meta.count != argumentCount {
-      meta = (0..<argumentCount).map { (name: "arg\($0)", named: false) }
+      meta = (0..<argumentCount).map { (name: "arg\($0)", named: false, defaultValue: nil) }
     }
-    return (meta.map { $0.name }, meta.map { $0.named })
+    return (meta.map { $0.name }, meta.map { $0.named }, meta.map { $0.defaultValue })
   }
 
   /// Pattern arguments follow the call rules exactly -- same shape, same
@@ -406,9 +405,29 @@ extension TypeChecker {
     }
   }
 
+  /// Declared defaults for an enum case's payload fields, in declaration
+  /// order. Each entry is the field's OWN default (or nil).
+  func enumCaseFieldDefaults(enumType: Type, caseName: String) throws -> [ExpressionNode?]? {
+    switch enumType {
+    case .enum(let defId):
+      guard let enumCase = context.getEnumCases(defId)?.first(where: { $0.name == caseName }) else {
+        return nil
+      }
+      return enumCase.parameters.map { $0.defaultValue }
+    case .genericEnum(let tplDefId, _):
+      guard let template = currentScope.genericEnumTemplate(defId: tplDefId),
+            let enumCase = template.cases.first(where: { $0.name == caseName }) else {
+        return nil
+      }
+      return enumCase.parameters.map { $0.defaultValue }
+    default:
+      return nil
+    }
+  }
+
   func typeCheckConstructorArguments(
     plan: ConstructorArgumentPlan,
-    members: [(name: String, type: Type, named: Bool)],
+    members: [(name: String, type: Type, named: Bool, defaultValue: ExpressionNode?)],
     constructorDescription: String,
     paramTypeKeys: [String] = [],
     parentName: String = ""
@@ -430,9 +449,8 @@ extension TypeChecker {
         continue
       }
 
-      // Try to use parsed default value
-      let key = "\(parentName).\(member.name)"
-      if let defaultExpr = self.parsedParameterDefaults[key] {
+      // Fill from the member's OWN declared default value expression.
+      if let defaultExpr = member.defaultValue {
         var typedArg = try inferTypedExpression(defaultExpr, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)
         if typedArg.type != .error && typedArg.type != member.type {

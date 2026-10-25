@@ -828,9 +828,9 @@ private final class MIRFunctionBuilder {
       return lowerUnary(inner: inner, type: type, operatorKind: .logicalNot)
     case .bitwiseNotExpression(let inner, let type):
       return lowerUnary(inner: inner, type: type, operatorKind: .bitwiseNot)
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, let checked):
       let operand = lowerOperand(inner)
-      let result = materialize(.cast(operand, to: type), type: type)
+      let result = materialize(.cast(operand, to: type, checked: checked), type: type)
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
     case .typeConstruction(let identifier, _, let arguments, let type):
       let values = arguments.map { lowerValue($0) }
@@ -2280,7 +2280,7 @@ private final class MIRFunctionBuilder {
 
   private func resolvedPatternStructMembers(
     for type: Type
-  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]? {
     let resolvedType = resolveConcretePatternNominalType(type)
     switch resolvedType {
     case .structure(let defId):
@@ -2300,7 +2300,8 @@ private final class MIRFunctionBuilder {
               type: parameter.type,
               mutable: parameter.isMutable(),
               access: .public,
-              named: true
+              named: true,
+            defaultValue: nil
             )
           }
         case .foreignStruct(let identifier, let fields)
@@ -2311,7 +2312,8 @@ private final class MIRFunctionBuilder {
               type: field.type,
               mutable: false,
               access: .public,
-              named: true
+              named: true,
+            defaultValue: nil
             )
           }
         default:
@@ -2332,13 +2334,13 @@ private final class MIRFunctionBuilder {
       for (index, param) in info.typeParameters.enumerated() where index < args.count {
         substitution[param.name] = args[index]
       }
-      var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
+      var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
       resolvedMembers.reserveCapacity(info.parameters.count)
       for member in info.parameters {
         guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
           return nil
         }
-        resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named))
+        resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named, defaultValue: member.defaultValue))
       }
       return resolvedMembers
     default:
@@ -2379,13 +2381,13 @@ private final class MIRFunctionBuilder {
       var resolvedCases: [EnumCase] = []
       resolvedCases.reserveCapacity(info.cases.count)
       for caseDecl in info.cases {
-        var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+        var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
         resolvedParams.reserveCapacity(caseDecl.parameters.count)
         for parameter in caseDecl.parameters {
           guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
             return nil
           }
-          resolvedParams.append((name: parameter.name, type: resolvedType, access: AccessModifier.public, named: parameter.named))
+          resolvedParams.append((name: parameter.name, type: resolvedType, access: AccessModifier.public, named: parameter.named, defaultValue: parameter.defaultValue))
         }
         resolvedCases.append(EnumCase(name: caseDecl.name, parameters: resolvedParams))
       }
@@ -2401,7 +2403,7 @@ private final class MIRFunctionBuilder {
 
   private func programStructMembers(
     matching type: Type
-  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]? {
     for node in program.globalNodes {
       switch node {
       case .globalStructDeclaration(let identifier, let parameters)
@@ -2412,7 +2414,8 @@ private final class MIRFunctionBuilder {
             type: parameter.type,
             mutable: parameter.isMutable(),
             access: .public,
-            named: true
+            named: true,
+          defaultValue: nil
           )
         }
       case .foreignStruct(let identifier, let fields)
@@ -2423,7 +2426,8 @@ private final class MIRFunctionBuilder {
             type: field.type,
             mutable: false,
             access: .public,
-            named: true
+            named: true,
+          defaultValue: nil
           )
         }
       default:
@@ -2446,7 +2450,7 @@ private final class MIRFunctionBuilder {
 
   private func instantiatedStructMembers(
     for defId: DefId
-  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)]? {
+  ) -> [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)]? {
     guard let templateName = context.getTemplateName(defId),
           let args = context.getTypeArguments(defId) else {
       return nil
@@ -2463,13 +2467,13 @@ private final class MIRFunctionBuilder {
     for (index, param) in info.typeParameters.enumerated() where index < args.count {
       substitution[param.name] = args[index]
     }
-    var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool)] = []
+    var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
     resolvedMembers.reserveCapacity(info.parameters.count)
     for member in info.parameters {
       guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
         return nil
       }
-      resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named))
+      resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named, defaultValue: member.defaultValue))
     }
     return resolvedMembers
   }
@@ -2491,13 +2495,13 @@ private final class MIRFunctionBuilder {
     var resolvedCases: [EnumCase] = []
     resolvedCases.reserveCapacity(info.cases.count)
     for caseDecl in info.cases {
-      var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = []
+      var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
       resolvedParams.reserveCapacity(caseDecl.parameters.count)
       for parameter in caseDecl.parameters {
         guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
           return nil
         }
-        resolvedParams.append((name: parameter.name, type: resolvedType, access: .public, named: parameter.named))
+        resolvedParams.append((name: parameter.name, type: resolvedType, access: .public, named: parameter.named, defaultValue: parameter.defaultValue))
       }
       resolvedCases.append(EnumCase(name: caseDecl.name, parameters: resolvedParams))
     }
@@ -4145,7 +4149,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func lowerBorrowedSourceValue(_ expression: TypedExpressionNode) -> MIRValue {
-    if case .castExpression(let inner, let targetType) = expression,
+    if case .castExpression(let inner, let targetType, _) = expression,
        isOwnershipPreservingBorrowCast(sourceType: inner.type, targetType: targetType) {
       return lowerBorrowedSourceValue(inner)
     }
@@ -4265,7 +4269,7 @@ private final class MIRFunctionBuilder {
         case .derefExpression(let inner, let type),
           .unsafeDerefExpression(let inner, let type):
       return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, _):
       switch (inner.type, type) {
       case (.reference, .reference),
            (.reference, .mutableReference),

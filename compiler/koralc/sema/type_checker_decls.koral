@@ -402,7 +402,15 @@ given TypeChecker {
                     .Some(ta) then Option[Type].Some(self.resolve_type(ta)),
                     .None() then Option[Type].None(),
                 };
+                // A global `let` may read a global `let` declared before it and
+                // no other: forward references -- and therefore every cycle --
+                // would read a zero the runtime has not written yet (§ global
+                // initialization order).
+                let prev_in_global_init = self.storage.in_global_init;
+                self.storage.in_global_init = true;
                 let typed_init = self.check_expr_global_ref(initializer, expected_type);
+                self.storage.in_global_init = prev_in_global_init;
+                self.storage.initialized_globals.insert(name);
                 let resolved = when expected_type in {
                     .Some(t) then t,
                     .None() then typed_init.expr_type,
@@ -952,7 +960,7 @@ given TypeChecker {
                                     f.name,
                                     f.is_mutable,
                                     self.resolve_type(f.type_name),
-                                    f.named,
+                                    f.named, f.default_value
                                 ),
                             );
                         };
@@ -1403,23 +1411,10 @@ given TypeChecker {
                                             let trait_param = trait_method.params[pi];
                                             let impl_param = member.params[pi];
                                             if trait_param.named and impl_param.named then {
-                                                // Default-value keys are owner-qualified
-                                                // (`Owner.method.param`). Trait methods are
-                                                // keyed by trait name, impl methods by type name.
-                                                let trait_type_name = type_node_name(
-                                                    trait_type,
-                                                );
-                                                let impl_type_name = type_node_name(
-                                                    target_type,
-                                                );
-                                                let trait_key = "\(trait_type_name).\(member.name).\(trait_param.name)";
-                                                let impl_key = "\(impl_type_name).\(member.name).\(impl_param.name)";
-                                                let trait_has_default = self.context().parsed_default_values.contains_key(
-                                                    trait_key,
-                                                );
-                                                let impl_has_default = self.context().parsed_default_values.contains_key(
-                                                    impl_key,
-                                                );
+                                                // The DECLARATION carries its default; presence
+                                                // is whether the parameter has one at all.
+                                                let trait_has_default = trait_param.default_value is .Some(_);
+                                                let impl_has_default = impl_param.default_value is .Some(_);
                                                 if trait_has_default and impl_has_default then {
                                                     self.push_diagnostic(
                                                         "Trait method '\(member.name)' has default value for parameter '\(trait_param.name)', implementation must not also declare a default value",

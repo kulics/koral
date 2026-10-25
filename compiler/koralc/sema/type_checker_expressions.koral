@@ -491,6 +491,24 @@ given TypeChecker {
             let def_id = self.allocate_unindexed_def_id(name, def_kind);
             Symbol(def_id, fallback_type, symbol_kind)
         };
+        // Global `let` initializers run in declaration order. Reading one that
+        // has not been checked yet is a forward reference -- and a cycle is
+        // always made of those -- so it would load the zero the runtime has not
+        // written over yet. Only same-module globals: an imported one was
+        // initialized with its own module.
+        if self.storage.in_global_init and local_sym_opt is .None() and sym.kind is .Variable(_) then {
+            if file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then {
+                if not self.storage.initialized_globals.contains(name) then {
+                    // Worded as the seed does: its globals are defined only
+                    // after their initializer is checked, so a forward
+                    // reference is already an "Undefined variable" there and
+                    // the two must agree verbatim. A message that names the
+                    // initialization order is a strictly better follow-up and
+                    // needs both sides moved at once.
+                    self.push_diagnostic_at_span("Undefined variable: \(name)", span);
+                };
+            };
+        };
         let mutable normalized_sym = sym;
         if sym.kind is .TypeSymbol() then {
             when self.try_resolve_named_type_without_diag(name) in {

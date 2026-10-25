@@ -528,10 +528,6 @@ public class ModuleResolver {
             throw ModuleError.parseError(file: file, underlying: error)
         }
 
-        // Accumulate parsed parameter defaults from this file
-        for (key, value) in parser.parsedParameterDefaults {
-            Parser.allParsedParameterDefaults[key] = value
-        }
         Parser.allTraitDeclaredParameterDefaults.formUnion(parser.traitDeclaredParameterDefaults)
         Parser.allImplDeclaredParameterDefaults.formUnion(parser.implDeclaredParameterDefaults)
 

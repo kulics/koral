@@ -72,10 +72,11 @@ extension Monomorphizer {
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: substituteType(type, substitution: substitution))
             
-        case .castExpression(let expression, let type):
+        case .castExpression(let expression, let type, let checked):
             return .castExpression(
                 expression: substituteTypesInExpression(expression, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
+                type: substituteType(type, substitution: substitution),
+                checked: checked
             )
             
         case .arithmeticExpression(let left, let op, let right, let type):
@@ -425,6 +426,15 @@ extension Monomorphizer {
                         let zero = makeZeroLiteral(for: base.type)
                         return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: newType)
                     }
+                    // `wrapping_cast` is the unchecked integer-to-integer
+                    // conversion: take the two's-complement representation and
+                    // truncate or sign/zero-extend it to the target width. It
+                    // never panics -- that is Rust's `as`, spelled out loud,
+                    // because Koral's `Type(x)` is checked by default.
+                    if methodName == "wrapping_cast", newArguments.isEmpty,
+                       isBuiltinIntegerType(newType) {
+                        return .castExpression(expression: base, type: newType, checked: false)
+                    }
                 }
             }
             
@@ -771,7 +781,17 @@ extension Monomorphizer {
             let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
             let substitutedReturnType = substituteType(type, substitution: substitution)
-            
+
+            // `Type.wrapping_*(...)` lowers exactly like the instance form: the
+            // first explicit argument is the receiver.
+            if let lowered = lowerWrappingStaticMethodCall(
+                methodName: methodName,
+                arguments: substitutedArguments,
+                resultType: substitutedReturnType
+            ) {
+                return lowered
+            }
+
             return .staticMethodCall(
                 baseType: substitutedBaseType,
                 methodName: methodName,

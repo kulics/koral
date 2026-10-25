@@ -281,7 +281,7 @@ final class MIRVerifier {
     case .ref(let place, _, _),
          .pointer(let place):
       try verifyPlace(place, in: function, localIDs: localIDs)
-    case .cast(let operand, let type):
+    case .cast(let operand, let type, checked: _):
       try verifyOperand(operand, in: function, localIDs: localIDs)
       try verifyConcrete(type, in: function, description: "cast target has unresolved generic type")
     case .intrinsic(let intrinsic):

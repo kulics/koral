@@ -689,7 +689,7 @@ file_private let mir_walk_value_uses(
             block,
             active_scopes,
         ),
-        .Cast(operand, _) then mir_walk_operand_uses(
+        .Cast(operand, _, _) then mir_walk_operand_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -1477,7 +1477,11 @@ given MIRFunctionCodeEmitter {
                 allocation,
             ),
             .Pointer(place) then self.emit_pointer(place),
-            .Cast(operand, target_type) then self.emit_cast_operand(operand, target_type),
+            .Cast(operand, target_type, checked) then self.emit_cast_operand(
+                operand,
+                target_type,
+                checked,
+            ),
             .Intrinsic(node) then self.emit_intrinsic(node),
             .Lambda(lambda) then self.emit_lambda(lambda),
         };
@@ -3109,6 +3113,84 @@ given MIRFunctionCodeEmitter {
         };
     };
 
+    module_private is_int_cast_source_type(self, t Type) Bool = {
+        // The signed/unsigned predicates below already name the integer types;
+        // this is their union, asked from the source side of a cast.
+        return self.is_signed_int_cast_target_type(t) or self.is_unsigned_int_cast_target_type(
+            t,
+        );
+    };
+
+    /// A width-changing numeric conversion is checked and does not wrap; a
+    /// same-width one reinterprets the bit pattern and never panics. The width
+    /// test is left to the C compiler (`sizeof` is a constant expression), so
+    /// the guards disappear entirely for same-width pairs and the rule holds on
+    /// every target regardless of how wide `Int` is there.
+    ///
+    /// Two guards are needed inside the width-changing case, because the round
+    /// trip alone is blind across signedness: `(int)(unsigned)(-1) == -1`, so a
+    /// value the target cannot hold can come back unchanged. Same-signedness
+    /// widening needs neither guard to fire, and the C compiler folds the round
+    /// trip away there.
+    module_private emit_numeric_conversion_guard(
+        self,
+        source_value String,
+        converted String,
+        source_type Type,
+        target_type Type,
+        bounds Option[Pair[String, String]],
+    ) Void = {
+        let source_c_type = self.codegen.c_type_name(source_type);
+        let target_c_type = self.codegen.c_type_name(target_type);
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "if (sizeof(\(source_c_type)) != sizeof(\(target_c_type))) {\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "if (((\(source_c_type))\(converted)) != (\(source_c_type))\(source_value)) {\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "    __koral_panic_numeric_conversion_overflow();\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("}\n");
+        if self.is_signed_int_cast_target_type(
+            source_type,
+        ) and self.is_unsigned_int_cast_target_type(target_type) then {
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("if (\(source_value) < 0) {\n");
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string(
+                "    __koral_panic_numeric_conversion_overflow();\n",
+            );
+            self.codegen.add_indent();
+            self.codegen.buffer.push_string("}\n");
+        };
+        if self.is_unsigned_int_cast_target_type(
+            source_type,
+        ) and self.is_signed_int_cast_target_type(target_type) then {
+            when bounds in {
+                .Some(b) then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(
+                        "if ((unsigned long long)\(source_value) > (unsigned long long)\(b.second)) {\n",
+                    );
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(
+                        "    __koral_panic_numeric_conversion_overflow();\n",
+                    );
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("}\n");
+                },
+                .None() then {},
+            };
+        };
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("}\n");
+    };
+
     module_private is_signed_int_cast_target_type(self, t Type) Bool = {
         let _ = self;
         return when t in {
@@ -3174,11 +3256,20 @@ given MIRFunctionCodeEmitter {
         self,
         operand MIROperand,
         target_type Type,
+        checked Bool,
     ) MIRValueEmission = {
         let source = self.emit_operand_value(operand);
         let mutable source_type = self.type_of_operand(operand);
         let mutable target_c_type = self.codegen.c_type_name(target_type);
-        let expression = if self.is_float_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
+        // An unchecked cast is a pure C cast: truncate or sign/zero-extend the
+        // two's-complement representation to the target width and never panic.
+        // That is Rust's `as` and a C cast between integers, and it is exactly
+        // what `wrapping_cast` asks for.
+        let expression = if not checked then self.codegen.next_temp_with_init(
+            target_c_type,
+            "(\(target_c_type))\(source.expression)",
+        )
+        else if self.is_float_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
             target_type,
         ) or self.is_unsigned_int_cast_target_type(target_type)) then when self.float_cast_target_bounds(
             target_type,
@@ -3194,7 +3285,7 @@ given MIRFunctionCodeEmitter {
                 );
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string(
-                    "    __koral_panic_float_cast_overflow();\n",
+                    "    __koral_panic_numeric_conversion_overflow();\n",
                 );
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("}\n");
@@ -3207,6 +3298,27 @@ given MIRFunctionCodeEmitter {
                 target_c_type,
                 "(\(target_c_type))\(source.expression)",
             ),
+        }
+        else if self.is_int_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
+            target_type,
+        ) or self.is_unsigned_int_cast_target_type(target_type)) then {
+            let source_c_type = self.codegen.c_type_name(source_type);
+            let source_value = self.codegen.next_temp_with_init(
+                source_c_type,
+                source.expression,
+            );
+            let converted = self.codegen.next_temp_with_init(
+                target_c_type,
+                "(\(target_c_type))\(source_value)",
+            );
+            self.emit_numeric_conversion_guard(
+                source_value,
+                converted,
+                source_type,
+                target_type,
+                self.float_cast_target_bounds(target_type),
+            );
+            converted
         }
         else self.codegen.next_temp_with_init(
             target_c_type,
@@ -3884,7 +3996,7 @@ given MIRFunctionCodeEmitter {
             .TraitMethodCall(call) then call.result_type,
             .Ref(place, kind, _) then self.type_of_ref(place, kind),
             .Pointer(place) then self.type_of_pointer(place),
-            .Cast(_, target_type) then target_type,
+            .Cast(_, target_type, _) then target_type,
             .Intrinsic(node) then self.type_of_intrinsic(node),
             .Lambda(lambda) then lambda.lambda_type,
         };
@@ -4008,7 +4120,7 @@ given MIRFunctionCodeEmitter {
                     self.consume_moved_place(place);
                 };
             },
-            .Cast(operand, target_type) then {
+            .Cast(operand, target_type, _) then {
                 let source_type = self.type_of_value(MIRValue.Operand(operand));
                 if self.is_ownership_preserving_cast(source_type, target_type) then {
                     self.consume_moved_source(MIRValue.Operand(operand));

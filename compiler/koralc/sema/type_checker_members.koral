@@ -29,7 +29,13 @@ given TypeChecker {
         let mutable specs = List[FunctionParamSpec].new();
         for param in params then {
             specs.push(
-                FunctionParamSpec(param.name, param.is_mutable, param.named, false),
+                FunctionParamSpec(
+                    param.name,
+                    param.is_mutable,
+                    param.named,
+                    param.default_value is .Some(_),
+                    param.default_value,
+                ),
             );
         };
         return specs;
@@ -42,10 +48,126 @@ given TypeChecker {
         let mutable specs = List[FunctionParamSpec].new();
         for param in params then {
             specs.push(
-                FunctionParamSpec(param.name, param.is_mutable, param.named, false),
+                FunctionParamSpec(
+                    param.name,
+                    param.is_mutable,
+                    param.named,
+                    param.default_value is .Some(_),
+                    param.default_value,
+                ),
             );
         };
         return specs;
+    };
+
+    /// Merge a trait method's declared defaults into an implementation's
+    /// parameter specs.
+    ///
+    /// An implementation may not declare its own defaults (the conformance
+    /// rules forbid it), so the defaults a call fills come from the TRAIT
+    /// method's signature -- a declaration node like any other. The impl's
+    /// parameters carry none; the trait's are merged in by parameter name.
+    module_private merge_param_defaults_from_trait_params(
+        self,
+        specs List[FunctionParamSpec],
+        trait_params Option[List[TypedParam]],
+    ) List[FunctionParamSpec] = {
+        let mutable result = specs;
+        when trait_params in {
+            .Some(params) then {
+                let mutable defaults = Dict[String, Expr].new();
+                for tp in params then {
+                    when tp.default_value in {
+                        .Some(d) then defaults.insert(tp.name, d),
+                        .None() then {},
+                    };
+                };
+                if defaults.count() > 0 then {
+                    let mutable out = List[FunctionParamSpec].new();
+                    for spec in specs then {
+                        when spec.default_value in {
+                            .Some(_) then out.push(spec),
+                            .None() then {
+                                when defaults.get(spec.name) in {
+                                    .Some(d) then out.push(
+                                        FunctionParamSpec(
+                                            spec.name,
+                                            spec.is_mutable,
+                                            spec.named,
+                                            true,
+                                            Option[Expr].Some(d),
+                                        ),
+                                    ),
+                                    .None() then out.push(spec),
+                                };
+                            },
+                        };
+                    };
+                    result = out;
+                };
+            },
+            .None() then {},
+        };
+        return result;
+    };
+
+    module_private merge_trait_param_defaults(
+        self,
+        specs List[FunctionParamSpec],
+        conformance_trait_name Option[String],
+        method_name String,
+    ) List[FunctionParamSpec] = {
+        let mutable trait_params = Option[List[TypedParam]].None();
+        when conformance_trait_name in {
+            .Some(trait_name) then {
+                when self.storage.trait_registry.flatten_methods_in_module(
+                    trait_name,
+                    self.storage.module_path,
+                ) in {
+                    .Ok(methods) then {
+                        when methods.get(method_name) in {
+                            .Some(trait_member) then {
+                                trait_params = Option[List[TypedParam]].Some(
+                                    trait_member.params,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .Error(_) then {},
+                };
+            },
+            .None() then {},
+        };
+        return self.merge_param_defaults_from_trait_params(specs, trait_params);
+    };
+
+    module_private merge_trait_param_defaults_for_def(
+        self,
+        specs List[FunctionParamSpec],
+        trait_def_id Option[DefId],
+        method_name String,
+    ) List[FunctionParamSpec] = {
+        let mutable trait_params = Option[List[TypedParam]].None();
+        when trait_def_id in {
+            .Some(def_id) then {
+                when self.storage.trait_registry.flatten_methods_for_def(def_id) in {
+                    .Ok(methods) then {
+                        when methods.get(method_name) in {
+                            .Some(trait_member) then {
+                                trait_params = Option[List[TypedParam]].Some(
+                                    trait_member.params,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .Error(_) then {},
+                };
+            },
+            .None() then {},
+        };
+        return self.merge_param_defaults_from_trait_params(specs, trait_params);
     };
 
     module_private register_function_symbol_metadata(
@@ -320,7 +442,7 @@ given TypeChecker {
                                 spec.name,
                                 spec.is_mutable,
                                 entry.param_type,
-                                spec.named,
+                                spec.named, spec.default_value
                             ),
                         );
                         idx += UInt(1);
@@ -386,7 +508,7 @@ given TypeChecker {
         let mutable out = List[TypedParam].new();
         for p in params then {
             out.push(
-                TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named),
+                TypedParam(p.name, p.is_mutable, self.resolve_type(p.type_name), p.named, p.default_value),
             );
         };
         return out;
@@ -403,7 +525,7 @@ given TypeChecker {
         let mutable idx UInt = 0;
         while idx < params.count() and idx < resolved_types.count() then {
             let p = params[idx];
-            out.push(TypedParam(p.name, p.is_mutable, resolved_types[idx], p.named));
+            out.push(TypedParam(p.name, p.is_mutable, resolved_types[idx], p.named, p.default_value));
             idx += 1;
         };
         return out;
@@ -421,7 +543,7 @@ given TypeChecker {
                     p.name,
                     p.is_mutable,
                     self.resolve_type_in_scope(p.type_name, scope),
-                    p.named,
+                    p.named, p.default_value
                 ),
             );
         };
@@ -474,7 +596,7 @@ given TypeChecker {
                         self_type,
                         bindings,
                     ),
-                    p.named,
+                    p.named, p.default_value
                 ),
             );
         };
@@ -518,7 +640,7 @@ given TypeChecker {
                         p.name,
                         p.is_mutable,
                         self.resolve_type_with_self(p.type_name, self_type),
-                        p.named,
+                        p.named, p.default_value
                     ),
                 );
             } else {
@@ -527,7 +649,7 @@ given TypeChecker {
                         p.name,
                         p.is_mutable,
                         self.resolve_type_with_self(p.type_name, self_type),
-                        p.named,
+                        p.named, p.default_value
                     ),
                 );
             };
@@ -757,7 +879,7 @@ given TypeChecker {
                     f.name,
                     f.is_mutable,
                     self.resolve_type(f.type_name),
-                    f.named,
+                    f.named, f.default_value
                 ),
             );
         };
@@ -777,7 +899,7 @@ given TypeChecker {
                     f.name,
                     f.is_mutable,
                     self.resolve_type_in_scope(f.type_name, scope),
-                    f.named,
+                    f.named, f.default_value
                 ),
             );
         };
@@ -919,7 +1041,7 @@ given TypeChecker {
             let mutable typed_fields = List[TypedEnumCaseField].new();
             for f in c.fields then {
                 typed_fields.push(
-                    TypedEnumCaseField(f.name, self.resolve_type(f.type_name), f.named),
+                    TypedEnumCaseField(f.name, self.resolve_type(f.type_name), f.named, f.default_value),
                 );
             };
             out.push(TypedEnumCase(c.name, typed_fields));
@@ -940,7 +1062,7 @@ given TypeChecker {
                     TypedEnumCaseField(
                         f.name,
                         self.resolve_type_in_scope(f.type_name, scope),
-                        f.named,
+                        f.named, f.default_value
                     ),
                 );
             };
@@ -995,7 +1117,7 @@ given TypeChecker {
                         p.name,
                         p.is_mutable,
                         self.resolve_type(p.type_name),
-                        p.named,
+                        p.named, p.default_value
                     ),
                 );
             };
@@ -1293,8 +1415,12 @@ given TypeChecker {
                         false,
                     ),
                 );
-                let param_specs = self.function_param_specs_from_typed_params(
-                    typed_params,
+                let param_specs = self.merge_trait_param_defaults(
+                    self.function_param_specs_from_typed_params(
+                        typed_params,
+                    ),
+                    conformance_trait_name,
+                    method_name,
                 );
                 context.set_param_specs(generic_method_def_id, param_specs);
                 self.register_method_type_params_for_def(
@@ -1397,8 +1523,12 @@ given TypeChecker {
                             false,
                         ),
                     );
-                    let param_specs = self.function_param_specs_from_typed_params(
-                        typed_params,
+                    let param_specs = self.merge_trait_param_defaults(
+                        self.function_param_specs_from_typed_params(
+                            typed_params,
+                        ),
+                        conformance_trait_name,
+                        method_name,
                     );
                     context.set_param_specs(method_def_id, param_specs);
                     self.register_method_type_params_for_def(

@@ -648,7 +648,7 @@ extension TypeChecker {
     if expr.type == expectedType {
       return expr
     }
-    return .castExpression(expression: expr, type: expectedType)
+    return .castExpression(expression: expr, type: expectedType, checked: true)
   }
 
   /// Applies the standard coercion chain to a typed argument that doesn't match the expected type.
@@ -1654,11 +1654,21 @@ extension TypeChecker {
       if case .weakReference(let innerType) = targetType {
         let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
         try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+        // The referent is `T`, so the argument has to be a `T`. Mutability
+        // alone would let `?B(a)` build a `?B` out of an `A`.
+        if typedInner.type != innerType {
+          throw SemanticError.typeMismatch(
+            expected: innerType.description, got: typedInner.type.description)
+        }
         return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
       }
       if case .mutableWeakReference(let innerType) = targetType {
         let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
         try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+        if typedInner.type != innerType {
+          throw SemanticError.typeMismatch(
+            expected: innerType.description, got: typedInner.type.description)
+        }
         return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
       }
 
@@ -1675,9 +1685,18 @@ extension TypeChecker {
       }
 
       // Cast always produces an rvalue.
-      return .castExpression(expression: typedInner, type: targetType)
+      return .castExpression(expression: typedInner, type: targetType, checked: true)
 
-    case .integerLiteral(let value, _):
+    case .integerLiteral(let value, let literalSpan):
+      // Synthesis has no expected type to aim at, so the literal defaults to
+      // Int -- and is range-checked against that default. Skipping the check
+      // here leaves an un-annotated literal unexamined until it reaches the C
+      // compiler, which reports it far from the source line. When there IS an
+      // expected type, the coerce path checks against that type instead; do not
+      // check here too or the same literal is reported twice.
+      if expectedType == nil {
+        try checkIntegerLiteralRange(value: value, targetType: .int, span: literalSpan)
+      }
       return .integerLiteral(value: value, type: .int)
 
     case .floatLiteral(let value, _):
@@ -2255,7 +2274,8 @@ extension TypeChecker {
         baseExpr: baseExpr,
         methodTypeArgs: methodTypeArgs,
         methodName: methodName,
-        callArgs: arguments
+        callArgs: arguments,
+        expectedType: expectedType
       )
 
     case .qualifiedMethodCall(let base, let traitType, let methodName, let arguments, _):
@@ -2284,7 +2304,8 @@ extension TypeChecker {
         typeName: typeName,
         typeArgs: typeArgs,
         methodName: methodName,
-        callArgs: arguments
+        callArgs: arguments,
+        expectedType: expectedType
       )
 
     case .forExpression(let pattern, let iterable, let body, let guardExpr, _):
@@ -3106,14 +3127,14 @@ extension TypeChecker {
       
       // Resolve case parameter types with substitution
       let resolvedCases: [EnumCase] = try template.cases.map { caseDef in
-        let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool)] = try caseDef.parameters.map { param in
+        let resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = try caseDef.parameters.map { param in
           let resolvedType = try withNewScope {
             for (paramName, paramType) in substitution {
               try currentScope.defineType(paramName, type: paramType)
             }
             return try resolveTypeNode(param.type)
           }
-          return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named)
+          return (name: param.name, type: resolvedType, access: AccessModifier.public, named: param.named, defaultValue: param.defaultValue)
         }
         return EnumCase(name: caseDef.name, parameters: resolvedParams)
       }
@@ -3135,12 +3156,13 @@ extension TypeChecker {
       callArgs,
       fieldNames: caseInfo.parameters.map { $0.name },
       fieldIsNamed: caseInfo.parameters.map { $0.named },
+      fieldDefaults: caseInfo.parameters.map { $0.defaultValue },
       constructorDescription: ".\(memberName)",
       parentName: ""
     )
     let typedArgs = try typeCheckConstructorArguments(
       plan: plan,
-      members: caseInfo.parameters.map { (name: $0.name, type: $0.type, named: $0.named) },
+      members: caseInfo.parameters.map { (name: $0.name, type: $0.type, named: $0.named, defaultValue: $0.defaultValue) },
       constructorDescription: ".\(memberName)",
       parentName: ""
     )
@@ -3419,7 +3441,7 @@ extension TypeChecker {
     methodName: String,
     selfType: Type,
     methodTypeArgs: [Type]?
-  ) throws -> (parameters: [(name: String, named: Bool)], functionType: Type) {
+  ) throws -> (parameters: [(name: String, named: Bool, defaultValue: ExpressionNode?)], functionType: Type) {
     // Bind the trait's own type parameters (e.g. `T` in `MyEq[T]`) so method
     // signatures mentioning them resolve against the invocation's trait args.
     return try withNewScope {
@@ -3444,7 +3466,7 @@ extension TypeChecker {
     methodName: String,
     selfType: Type,
     methodTypeArgs: [Type]?
-  ) throws -> (parameters: [(name: String, named: Bool)], functionType: Type) {
+  ) throws -> (parameters: [(name: String, named: Bool, defaultValue: ExpressionNode?)], functionType: Type) {
     func substitute(_ functionType: Type, typeParams: [TypeParameterDecl]) throws -> Type {
       guard let methodTypeArgs, !methodTypeArgs.isEmpty else { return functionType }
       var substitution: [String: Type] = [:]
@@ -3459,7 +3481,7 @@ extension TypeChecker {
         expectedFunctionTypeForToolMethod(tool, selfType: selfType),
         typeParams: tool.typeParameters
       )
-      return (tool.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+      return (tool.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }, functionType)
     }
 
     // `given[T] Trait[T] { ... }` tool methods register as generic extension
@@ -3474,7 +3496,7 @@ extension TypeChecker {
         expectedFunctionTypeForToolMethod(ext.method, selfType: selfType),
         typeParams: ext.method.typeParameters
       )
-      return (ext.method.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+      return (ext.method.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }, functionType)
     }
 
     let methods = try flattenedTraitMethods(traitName)
@@ -3492,7 +3514,7 @@ extension TypeChecker {
       ),
       typeParams: sig.typeParameters
     )
-    return (sig.parameters.map { (name: $0.name, named: $0.named) }, functionType)
+    return (sig.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }, functionType)
   }
 
   /// Fully qualified call `Type(Trait).method(args...)`, conceptually Rust's
@@ -3538,7 +3560,7 @@ extension TypeChecker {
       )
     }
     // Cast always produces an rvalue.
-    return .castExpression(expression: typedInner, type: targetType)
+    return .castExpression(expression: typedInner, type: targetType, checked: true)
   }
 
   ///
@@ -3595,8 +3617,8 @@ extension TypeChecker {
       effectiveArgs,
       paramNames: paramMeta.names,
       paramIsNamed: paramMeta.isNamed,
+      paramDefaults: paramMeta.defaults,
       callDescription: methodName,
-      defaultsKeyPrefix: methodName,
       paramTypeKeys: paramTypeKeys
     )
     if arguments.count != params.count {
@@ -3726,15 +3748,15 @@ extension TypeChecker {
             }
 
             let traitStaticMeta = callParamMeta(
-              from: sig.parameters.map { (name: $0.name, named: $0.named) },
+              from: sig.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
               argumentCount: params.count
             )
             let arguments = try planCallArgumentExpressions(
               callArgs,
               paramNames: traitStaticMeta.names,
               paramIsNamed: traitStaticMeta.isNamed,
-              callDescription: methodName,
-              defaultsKeyPrefix: methodName
+              paramDefaults: traitStaticMeta.defaults,
+              callDescription: methodName
             )
 
             if arguments.count != params.count {
@@ -3939,13 +3961,14 @@ extension TypeChecker {
             callArgs,
             fieldNames: c.parameters.map { $0.name },
             fieldIsNamed: c.parameters.map { $0.named },
+            fieldDefaults: c.parameters.map { $0.defaultValue },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type, named: source.named)
+              (name: source.name, type: resolved.type, named: source.named, defaultValue: source.defaultValue)
             },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
@@ -4022,13 +4045,14 @@ extension TypeChecker {
             callArgs,
             fieldNames: c.parameters.map { $0.name },
             fieldIsNamed: c.parameters.map { $0.named },
+            fieldDefaults: c.parameters.map { $0.defaultValue },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type, named: source.named)
+              (name: source.name, type: resolved.type, named: source.named, defaultValue: source.defaultValue)
             },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
@@ -4057,13 +4081,14 @@ extension TypeChecker {
             callArgs,
             fieldNames: c.parameters.map { $0.name },
             fieldIsNamed: c.parameters.map { $0.named },
+            fieldDefaults: c.parameters.map { $0.defaultValue },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type, named: source.named)
+              (name: source.name, type: resolved.type, named: source.named, defaultValue: source.defaultValue)
             },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
@@ -4117,13 +4142,14 @@ extension TypeChecker {
             callArgs,
             fieldNames: c.parameters.map { $0.name },
             fieldIsNamed: c.parameters.map { $0.named },
+            fieldDefaults: c.parameters.map { $0.defaultValue },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
           )
           let typedArgs = try typeCheckConstructorArguments(
             plan: plan,
             members: zip(c.parameters, resolvedParams).map { source, resolved in
-              (name: source.name, type: resolved.type, named: source.named)
+              (name: source.name, type: resolved.type, named: source.named, defaultValue: source.defaultValue)
             },
             constructorDescription: "\(baseName).\(memberName)",
             parentName: memberName
@@ -4170,17 +4196,21 @@ extension TypeChecker {
             let paramIsNamed2 = try enumCaseFieldIsNamed(enumType: returnType, caseName: caseName)
               ?? functionNamedParams[symbol.defId]?.map { $0.named }
               ?? params.enumerated().map { _, _ in false }
+            let paramDefaults2: [ExpressionNode?] = try enumCaseFieldDefaults(enumType: returnType, caseName: caseName)
+              ?? functionNamedParams[symbol.defId]?.map { $0.defaultValue }
+              ?? params.enumerated().map { _, _ in nil as ExpressionNode? }
             let plan = try planConstructorArguments(
               callArgs,
               fieldNames: paramNames,
               fieldIsNamed: paramIsNamed2,
+              fieldDefaults: paramDefaults2,
               constructorDescription: symbolName,
               parentName: ""
             )
             let typedArgs = try typeCheckConstructorArguments(
               plan: plan,
-              members: zip(paramNames, params).map { name, param in
-                (name: name, type: param.type, named: false)
+              members: zip(paramNames, zip(paramIsNamed2, zip(paramDefaults2, params))).map { name, rest in
+                (name: name, type: rest.1.1.type, named: rest.0, defaultValue: rest.1.0)
               },
               constructorDescription: symbolName,
               parentName: ""
@@ -4237,12 +4267,13 @@ extension TypeChecker {
           callArgs,
           fieldNames: parameters.map { $0.name },
           fieldIsNamed: parameters.map { $0.named },
+          fieldDefaults: parameters.map { $0.defaultValue },
           constructorDescription: name,
           parentName: name
         )
         let typedArguments = try typeCheckConstructorArguments(
           plan: plan,
-          members: parameters.map { (name: $0.name, type: $0.type, named: $0.named) },
+          members: parameters.map { (name: $0.name, type: $0.type, named: $0.named, defaultValue: $0.defaultValue) },
           constructorDescription: name,
           parentName: name
         )
@@ -4332,15 +4363,15 @@ extension TypeChecker {
       let expectedArgCount = params.count - 1
       let placeholderMethods = (try? flattenedTraitMethods(traitName)) ?? [:]
       let placeholderMeta = callParamMeta(
-        from: placeholderMethods[methodName]?.parameters.map { (name: $0.name, named: $0.named) } ?? [],
+        from: placeholderMethods[methodName]?.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) } ?? [],
         argumentCount: expectedArgCount
       )
       let arguments = try planCallArgumentExpressions(
         callArgs,
         paramNames: placeholderMeta.names,
         paramIsNamed: placeholderMeta.isNamed,
-        callDescription: methodName,
-        defaultsKeyPrefix: methodName
+        paramDefaults: placeholderMeta.defaults,
+        callDescription: methodName
       )
 
       if arguments.count != expectedArgCount {
@@ -4424,7 +4455,7 @@ extension TypeChecker {
         return nil
       }()
       let calleeName = calleeDefId.flatMap { context.getName($0) } ?? "expression"
-      let functionMeta: (names: [String], isNamed: [Bool]) = {
+      let functionMeta: (names: [String], isNamed: [Bool], defaults: [ExpressionNode?]) = {
         if let calleeDefId {
           return callArgumentParamMeta(defId: calleeDefId, argumentCount: params.count)
         }
@@ -4435,8 +4466,8 @@ extension TypeChecker {
         callArgs,
         paramNames: functionMeta.names,
         paramIsNamed: functionMeta.isNamed,
+        paramDefaults: functionMeta.defaults,
         callDescription: calleeName,
-        defaultsKeyPrefix: calleeName,
         paramTypeKeys: paramTypeKeys
       )
 
@@ -4501,7 +4532,7 @@ extension TypeChecker {
         typeName: base,
         defId: template.defId,
         members: template.parameters.map { param in
-          (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named)
+          (name: param.name, type: .void, mutable: param.mutable, access: param.access, named: param.named, defaultValue: param.defaultValue)
         },
         span: span
       )
@@ -4551,12 +4582,15 @@ extension TypeChecker {
         callArgs ?? arguments.map { CallArg(expression: $0) },
         fieldNames: template.parameters.map { $0.name },
         fieldIsNamed: template.parameters.map { $0.named },
+        fieldDefaults: template.parameters.map { $0.defaultValue },
         constructorDescription: base,
         parentName: base
       )
       let typedArguments = try typeCheckConstructorArguments(
         plan: plan,
-        members: memberTypes.map { (name: $0.name, type: $0.type, named: false) },
+        members: zip(memberTypes, template.parameters).map { member, param in
+          (name: member.name, type: member.type, named: false, defaultValue: param.defaultValue)
+        },
         constructorDescription: base,
         parentName: base
       )
@@ -4793,15 +4827,15 @@ extension TypeChecker {
       }
 
       let explicitGenericMeta = callParamMeta(
-        from: template.parameters.map { (name: $0.name, named: $0.named) },
+        from: template.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
         argumentCount: params.count
       )
       let arguments = try planCallArgumentExpressions(
         callArgs ?? arguments.map { CallArg(expression: $0) },
         paramNames: explicitGenericMeta.names,
         paramIsNamed: explicitGenericMeta.isNamed,
-        callDescription: base,
-        defaultsKeyPrefix: base
+        paramDefaults: explicitGenericMeta.defaults,
+        callDescription: base
       )
 
       if arguments.count != params.count {
@@ -4846,7 +4880,7 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     // Plan call arguments through the unified planner (labels + defaults).
     let genericMeta = callParamMeta(
-      from: template.parameters.map { (name: $0.name, named: $0.named) },
+      from: template.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
       argumentCount: template.parameters.count
     )
     let paramTypeKeys = template.parameters.map { $0.type.description }
@@ -4854,8 +4888,8 @@ extension TypeChecker {
       callArgs,
       paramNames: genericMeta.names,
       paramIsNamed: genericMeta.isNamed,
+      paramDefaults: genericMeta.defaults,
       callDescription: name,
-      defaultsKeyPrefix: name,
       paramTypeKeys: paramTypeKeys
     )
 
@@ -5068,6 +5102,19 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a method call expression
+  /// `wrapping_cast` is an integer bit-move: the type argument it binds is the
+  /// conversion TARGET, and only integers have a two's-complement
+  /// representation to move. A non-integer target is the same mistake the
+  /// explicit cast form rejects, and gets the same complaint.
+  func rejectNonIntegerWrappingCastTarget(methodName: String, targetType: Type) throws {
+    guard methodName == "wrapping_cast" else { return }
+    if case .error = targetType { return }
+    if context.containsGenericParameter(targetType) { return }
+    if isIntegerScalarType(targetType) { return }
+    throw SemanticError(
+      .generic("Type '\(targetType.description)' does not support cast: only numeric and pointer types can be cast"))
+  }
+
   func inferMethodCall(
     base: TypedExpressionNode,
     method: Symbol,
@@ -5100,8 +5147,8 @@ extension TypeChecker {
         callArgs,
         paramNames: paramMeta.names,
         paramIsNamed: paramMeta.isNamed,
+        paramDefaults: paramMeta.defaults,
         callDescription: methodName,
-        defaultsKeyPrefix: "\(ownerKey).\(methodName)",
         paramTypeKeys: paramTypeKeys
       )
 
@@ -5379,6 +5426,7 @@ extension TypeChecker {
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: finalMethodType)
 
+      try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: finalReturns)
       let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
       return wrapReceiverMaterialization(materializedReceiver, body: call, type: finalReturns)
     }
@@ -5398,7 +5446,8 @@ extension TypeChecker {
     baseExpr: ExpressionNode,
     methodTypeArgs: [TypeNode],
     methodName: String,
-    callArgs: [CallArg]
+    callArgs: [CallArg],
+    expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
     if case .identifier(let typeName, _) = baseExpr,
        currentScope.lookup(typeName, sourceFile: currentSourceFile) == nil,
@@ -5411,7 +5460,8 @@ extension TypeChecker {
           baseType: baseType,
           methodName: methodName,
           callArgs: callArgs,
-          explicitMethodTypeArgs: resolvedMethodTypeArgs
+          explicitMethodTypeArgs: resolvedMethodTypeArgs,
+          expectedType: expectedType
         )
       }
     }
@@ -5463,8 +5513,8 @@ extension TypeChecker {
       callArgs,
       paramNames: paramMeta.names,
       paramIsNamed: paramMeta.isNamed,
-      callDescription: methodName,
-      defaultsKeyPrefix: methodName
+      paramDefaults: paramMeta.defaults,
+      callDescription: methodName
     )
 
     // Check argument count (excluding self)
@@ -5545,6 +5595,7 @@ extension TypeChecker {
       )
     }
     
+    try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: returns)
     let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
     return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
@@ -6282,7 +6333,7 @@ extension TypeChecker {
 
         // Register named parameter info from the trait method signature
         // so that call-site validation uses the trait's named parameter requirements
-        functionNamedParams[methodSym.defId] = sig.parameters.map { (name: $0.name, named: $0.named) }
+        functionNamedParams[methodSym.defId] = sig.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }
 
         let base: TypedExpressionNode
         if typedPath.isEmpty {
@@ -6308,7 +6359,8 @@ extension TypeChecker {
     typeName: String,
     typeArgs: [TypeNode],
     methodName: String,
-    callArgs: [CallArg]
+    callArgs: [CallArg],
+    expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
     if typeName.contains(".") {
       throw SemanticError(
@@ -6389,7 +6441,8 @@ extension TypeChecker {
         typeName: typeName,
         resolvedTypeArgs: resolvedTypeArgs,
         methodName: methodName,
-        callArgs: callArgs
+        callArgs: callArgs,
+        expectedType: expectedType
       )
     }
 
@@ -6443,15 +6496,15 @@ extension TypeChecker {
           }
 
           let extMeta = callParamMeta(
-            from: ext.method.parameters.map { (name: $0.name, named: $0.named) },
+            from: ext.method.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
             argumentCount: params.count
           )
           let arguments = try planCallArgumentExpressions(
             callArgs,
             paramNames: extMeta.names,
             paramIsNamed: extMeta.isNamed,
-            callDescription: methodName,
-            defaultsKeyPrefix: methodName
+            paramDefaults: extMeta.defaults,
+            callDescription: methodName
           )
 
           if arguments.count != params.count {
@@ -6533,15 +6586,15 @@ extension TypeChecker {
           }
 
           let enumExtMeta = callParamMeta(
-            from: ext.method.parameters.map { (name: $0.name, named: $0.named) },
+            from: ext.method.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
             argumentCount: params.count
           )
           let arguments = try planCallArgumentExpressions(
             callArgs,
             paramNames: enumExtMeta.names,
             paramIsNamed: enumExtMeta.isNamed,
-            callDescription: methodName,
-            defaultsKeyPrefix: methodName
+            paramDefaults: enumExtMeta.defaults,
+            callDescription: methodName
           )
 
           if arguments.count != params.count {
@@ -6732,7 +6785,8 @@ extension TypeChecker {
     typeName: String,
     resolvedTypeArgs: [Type],
     methodName: String,
-    callArgs: [CallArg]
+    callArgs: [CallArg],
+    expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
     if !resolvedTypeArgs.isEmpty {
       throw SemanticError(.generic("Type \(typeName) is not generic"), span: currentSpan)
@@ -6755,7 +6809,8 @@ extension TypeChecker {
           baseType: type,
           methodName: methodName,
           callArgs: callArgs,
-          explicitMethodTypeArgs: nil
+          explicitMethodTypeArgs: nil,
+          expectedType: expectedType
         )
       }
 
@@ -6773,8 +6828,8 @@ extension TypeChecker {
         callArgs,
         paramNames: staticMeta.names,
         paramIsNamed: staticMeta.isNamed,
-        callDescription: methodName,
-        defaultsKeyPrefix: methodName
+        paramDefaults: staticMeta.defaults,
+        callDescription: methodName
       )
 
       if arguments.count != params.count {
@@ -6807,7 +6862,8 @@ extension TypeChecker {
         baseType: type,
         methodName: methodName,
         callArgs: callArgs,
-        explicitMethodTypeArgs: nil
+        explicitMethodTypeArgs: nil,
+        expectedType: expectedType
       )
     }
     
@@ -6843,15 +6899,15 @@ extension TypeChecker {
             }
 
             let sigMeta = callParamMeta(
-              from: sig.parameters.map { (name: $0.name, named: $0.named) },
+              from: sig.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
               argumentCount: params.count
             )
             let arguments = try planCallArgumentExpressions(
               callArgs,
               paramNames: sigMeta.names,
               paramIsNamed: sigMeta.isNamed,
-              callDescription: methodName,
-              defaultsKeyPrefix: methodName
+              paramDefaults: sigMeta.defaults,
+              callDescription: methodName
             )
 
             if arguments.count != params.count {
@@ -6911,7 +6967,8 @@ extension TypeChecker {
     baseType: Type,
     methodName: String,
     callArgs: [CallArg],
-    explicitMethodTypeArgs: [Type]?
+    explicitMethodTypeArgs: [Type]?,
+    expectedType: Type? = nil
   ) throws -> TypedExpressionNode {
     let methodTypeArgs: [Type]
     if let explicitMethodTypeArgs {
@@ -6920,7 +6977,8 @@ extension TypeChecker {
       methodTypeArgs = try inferStaticGenericMethodTypeArguments(
         baseType: baseType,
         methodName: methodName,
-        arguments: callArgs.compactMap { $0.expression }
+        arguments: callArgs.compactMap { $0.expression },
+        expectedType: expectedType
       )
     }
 
@@ -6934,6 +6992,7 @@ extension TypeChecker {
     guard case .function(let params, let returnType) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
     }
+    try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: returnType)
 
     let paramMeta = methodCallParamMeta(
       ownerTypeName: methodLabelKey(baseType),
@@ -6945,8 +7004,8 @@ extension TypeChecker {
       callArgs,
       paramNames: paramMeta.names,
       paramIsNamed: paramMeta.isNamed,
-      callDescription: methodName,
-      defaultsKeyPrefix: methodName
+      paramDefaults: paramMeta.defaults,
+      callDescription: methodName
     )
 
     if arguments.count != params.count {
@@ -6991,7 +7050,8 @@ extension TypeChecker {
   private func inferStaticGenericMethodTypeArguments(
     baseType: Type,
     methodName: String,
-    arguments: [ExpressionNode]
+    arguments: [ExpressionNode],
+    expectedType: Type? = nil
   ) throws -> [Type] {
     let templateName: String
     switch baseType {
@@ -7078,6 +7138,12 @@ extension TypeChecker {
       var typedArg = try inferTypedExpression(arg)
       typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
       _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
+    }
+    // A method type parameter that appears only in the return position
+    // (`wrapping_cast[T Any](self) T`) is bound by the expected type, exactly
+    // as the instance form binds it.
+    if let expectedType, case .function(_, let returns) = unresolvedFunctionType {
+      _ = unifyTypes(returns, expectedType, bindings: &methodTypeParamBindings)
     }
 
     var resolvedMethodTypeArgs: [Type] = []

@@ -75,7 +75,7 @@ struct __koral_Control {
     ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
 
 void __koral_set_args(int32_t argc, uint8_t** argv);
-void __koral_panic_float_cast_overflow(void);
+void __koral_panic_numeric_conversion_overflow(void);
 
 int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                              struct __koral_Closure closure, uint64_t stack_size);

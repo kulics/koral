@@ -14,6 +14,11 @@ public type mutable TypedParam(
     is_mutable Bool,
     param_type Type,
     named Bool,
+    // The declared default value (an untyped `Expr`). The typed layer carries
+    // the raw expression because a default is filled at the CALL site, where it
+    // is type-checked against the parameter's resolved type -- the seed keeps
+    // `ExpressionNode` in its TypeChecker for the same reason.
+    default_value Option[Expr],
 );
 
 public type mutable TypedField(
@@ -22,9 +27,17 @@ public type mutable TypedField(
     is_mutable Bool,
     field_type Type,
     named Bool,
+    // The declared default value; see `TypedParam.default_value`.
+    default_value Option[Expr],
 );
 
-public type TypedEnumCaseField(name String, field_type Type, named Bool);
+public type TypedEnumCaseField(
+    name String,
+    field_type Type,
+    named Bool,
+    // The declared default value; see `TypedParam.default_value`.
+    default_value Option[Expr],
+);
 
 public type TypedEnumCase(name String, fields List[TypedEnumCaseField]);
 
@@ -146,7 +159,7 @@ public let typed_intrinsic_type(node TypedIntrinsic) Type = {
 public let typed_expr_type(expr TypedExpr) Type = {
     return when expr.expr_kind in {
         .Variable(symbol) then symbol.symbol_type,
-        .CastExpr(target_type, _) then target_type,
+        .CastExpr(target_type, _, _) then target_type,
         .RefExpr(inner) then {
             let inner_type = typed_expr_type(inner);
             when expr.expr_type in {
@@ -202,7 +215,7 @@ public type TypedExprKind {
     FloatLiteral(value String),
     StringLiteral(value String),
     BoolLiteral(value Bool),
-    CastExpr(target_type Type, expr TypedExpr),
+    CastExpr(target_type Type, expr TypedExpr, checked Bool),
     Unary(op UnaryOperator, expr TypedExpr),
     RefExpr(expr TypedExpr),
     PtrExpr(expr TypedExpr),
@@ -327,7 +340,7 @@ public let typed_expr_value_category(expr TypedExpr) ValueCategory = {
         .MemberPath(source, _) then typed_expr_value_category(source),
         .DerefExpr(_) then ValueCategory.LValue(),
         .UnsafeDerefExpr(_) then ValueCategory.LValue(),
-        .CastExpr(target_type, inner) then {
+        .CastExpr(target_type, inner, _) then {
             if typed_value_category_preserves_identity_cast(inner.expr_type, target_type) then typed_expr_value_category(
                 inner,
             ) else ValueCategory.RValue()

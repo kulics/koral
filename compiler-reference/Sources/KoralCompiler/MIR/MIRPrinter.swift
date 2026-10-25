@@ -201,7 +201,7 @@ final class MIRPrinter {
       return "ref[\(kind), \(allocation)] \(renderPlace(place))"
     case .pointer(let place):
       return "ptr \(renderPlace(place))"
-    case .cast(let operand, let type):
+    case .cast(let operand, let type, checked: _):
       return "cast \(renderOperand(operand)) to \(context.getDebugName(type))"
     case .intrinsic:
       return "intrinsic"

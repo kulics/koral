@@ -240,22 +240,43 @@ given TypeChecker {
             typed_left.expr_type,
             typed_right.expr_type,
         ) then {
-            if self.is_numeric_type(typed_left.expr_type) or self.is_float_type(
-                typed_left.expr_type,
-            ) then {
+            // A literal joins the OTHER side's width, and only within its own
+            // kind: an integer literal becomes the other side's integer type, a
+            // float literal the other side's float type. There is no int<->float
+            // promotion -- `1 + 1.5` and `1.5 * 2` are rejected rather than
+            // resolved by whichever side the literal happened to sit on.
+            let left_is_int = self.is_integer_type(typed_left.expr_type);
+            let left_is_float = self.is_float_type(typed_left.expr_type);
+            let right_is_int = self.is_integer_type(typed_right.expr_type);
+            let right_is_float = self.is_float_type(typed_right.expr_type);
+            let right_is_int_lit = typed_right.expr_kind is .IntegerLiteral(_);
+            let right_is_float_lit = typed_right.expr_kind is .FloatLiteral(_);
+            let left_is_int_lit = typed_left.expr_kind is .IntegerLiteral(_);
+            let left_is_float_lit = typed_left.expr_kind is .FloatLiteral(_);
+            if (left_is_int and right_is_int_lit) or (left_is_float and right_is_float_lit) then {
                 typed_right = self.adapt_expr_to_expected_type_at(
                     typed_right,
                     Option[Type].Some(typed_left.expr_type),
                     Option[SourceSpan].Some(expr_span(right)),
                 );
             };
-            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (self.is_numeric_type(
-                typed_right.expr_type,
-            ) or self.is_float_type(typed_right.expr_type)) then {
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (
+                (right_is_int and left_is_int_lit) or (right_is_float and left_is_float_lit)
+            ) then {
                 typed_left = self.adapt_expr_to_expected_type_at(
                     typed_left,
                     Option[Type].Some(typed_right.expr_type),
                     Option[SourceSpan].Some(expr_span(left)),
+                );
+            };
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) then {
+                self.push_diagnostic(
+                    "Invalid operation \(self.arithmetic_operation_name(op)) between types \(self.display_type_name(typed_left.expr_type)) and \(self.display_type_name(typed_right.expr_type))",
+                    expr_span(left),
+                );
+                return make_typed_expr(
+                    TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                    Type.Unknown(),
                 );
             };
         };
@@ -422,6 +443,19 @@ given TypeChecker {
         return result;
     };
 
+    /// The operator's name as the diagnostic spells it. Deliberately the seed's
+    /// spelling: the two must agree verbatim on the message.
+    module_private bitwise_operator_name(self, op BitwiseOperator) String = {
+        let _ = self;
+        return when op in {
+            .BitAnd() then "and",
+            .BitOr() then "or",
+            .BitXor() then "xor",
+            .LeftShift() then "shiftLeft",
+            .RightShift() then "shiftRight",
+        };
+    };
+
     module_private check_bitwise_expr_ref(
         self,
         left Expr,
@@ -447,6 +481,17 @@ given TypeChecker {
                 scope,
             );
             let op_i = ops[i - UInt(1)];
+            // A bitwise operation is defined on one integer width at a time:
+            // both sides must be the same integer scalar type. `1 & true` is
+            // not a narrower rule about `true`, it is not a bitwise operation.
+            if not self.is_integer_type(current.expr_type) or not self.is_integer_type(
+                typed_right.expr_type,
+            ) or not self.same_expr_type(current.expr_type, typed_right.expr_type) then {
+                self.push_diagnostic(
+                    "Type mismatch: expected Matching Integer Types, got \(self.display_type_name(current.expr_type)) \(self.bitwise_operator_name(op_i)) \(self.display_type_name(typed_right.expr_type))",
+                    expr_span(first_operand),
+                );
+            };
             current = make_typed_expr(
                 TypedExprKind.BitwiseExpr(current, op_i, typed_right),
                 current.expr_type,
@@ -1162,7 +1207,7 @@ given TypeChecker {
                     reported_ids,
                 );
             },
-            .CastExpr(_, inner_ref) then {
+            .CastExpr(_, inner_ref, _) then {
                 self.validate_lambda_captures_in_expr(
                     inner_ref,
                     local_names,
@@ -1665,6 +1710,20 @@ given TypeChecker {
         );
     };
 
+    /// The operator's name as the diagnostic spells it. Deliberately the seed's
+    /// spelling: the two must agree verbatim on the message.
+    module_private comparison_operation_name(self, op ComparisonOperator) String = {
+        let _ = self;
+        return when op in {
+            .Equal() then "equal",
+            .NotEqual() then "notEqual",
+            .Greater() then "greater",
+            .GreaterEqual() then "greaterEqual",
+            .Less() then "less",
+            .LessEqual() then "lessEqual",
+        };
+    };
+
     module_private check_comparison_expr_ref(
         self,
         left Expr,
@@ -1685,6 +1744,14 @@ given TypeChecker {
             Option[Expr].Some(right),
             scope,
         );
+        // A comparison relates two values of ONE type. `1 < true` is not a
+        // narrow rule about `true`, it is not a comparison.
+        if not self.same_expr_type(normalized.first.expr_type, normalized.second.expr_type) then {
+            self.push_diagnostic(
+                "Invalid operation \(self.comparison_operation_name(op)) between types \(self.display_type_name(normalized.first.expr_type)) and \(self.display_type_name(normalized.second.expr_type))",
+                expr_span(left),
+            );
+        };
         return self.build_typed_comparison_expr(
             normalized.first,
             op,

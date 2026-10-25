@@ -193,7 +193,7 @@ indirect enum MIRValue {
   case traitMethodCall(MIRTraitMethodCall)
   case ref(MIRPlace, kind: MIRReferenceKind, allocation: MIRReferenceAllocation)
   case pointer(MIRPlace)
-  case cast(MIROperand, to: Type)
+  case cast(MIROperand, to: Type, checked: Bool)
   case intrinsic(MIRIntrinsic)
   case lambda(MIRLambda)
 }

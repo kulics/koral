@@ -715,8 +715,11 @@ extension TypeChecker {
          .uint, .uint8, .uint16, .uint32, .uint64,
          .float32, .float64:
       return true
-    case .pointer, .mutablePointer:
-      return true
+    case .pointer(let inner), .mutablePointer(let inner):
+      // A raw pointer is only FFI-shaped as far as what it POINTS AT is:
+      // `*String` carries a managed pointee across the boundary just as much
+      // as `String` does.
+      return satisfiesForeignConstraint(inner)
     case .structure(let defId):
       return context.isForeignStruct(defId) || context.isStdNominal(defId, context.stdRuneDefId)
     case .genericParameter(let name):
@@ -1115,10 +1118,10 @@ extension TypeChecker {
     switch (expected, expr.type) {
     case (.reference(let expectedInner), .mutableReference(let actualInner))
       where expectedInner == actualInner:
-      return .castExpression(expression: expr, type: expected)
+      return .castExpression(expression: expr, type: expected, checked: true)
     case (.pointer(let expectedElement), .mutablePointer(let actualElement))
       where expectedElement == actualElement:
-      return .castExpression(expression: expr, type: expected)
+      return .castExpression(expression: expr, type: expected, checked: true)
     default:
       break
     }
