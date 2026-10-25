@@ -23,6 +23,7 @@ public enum ModuleError: Error, CustomStringConvertible {
     case invalidModuleSpecifier(String, span: SourceSpan)
     case fileMergeWithList(String, span: SourceSpan)
     case fileMergeNotKoral(String, span: SourceSpan)
+    case crossPackageMerge(String, span: SourceSpan)
     case fileClaimedTwice(file: String, owner: String, claimant: String, entryFile: String)
 
     /// The phase the failure belongs to.
@@ -66,7 +67,8 @@ public enum ModuleError: Error, CustomStringConvertible {
              .noMainModule(_, _, let span),
              .invalidModuleSpecifier(_, let span),
              .fileMergeWithList(_, let span),
-             .fileMergeNotKoral(_, let span):
+             .fileMergeNotKoral(_, let span),
+             .crossPackageMerge(_, let span):
             return span
         case .parseError(_, let underlying as ParserError):
             return underlying.span
@@ -130,6 +132,8 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "File merge '\(specifier)' takes no import list; it merges the whole file"
         case .fileMergeNotKoral(let specifier, _):
             return "File merge path must end in '.koral'; write '\(specifier).koral'"
+        case .crossPackageMerge(let specifier, _):
+            return "cannot merge '\(specifier)': merge is limited to the current package; import it with 'using \"\(specifier)\" { ... };'"
         case .fileClaimedTwice(let file, let owner, let claimant, _):
             return "Error: source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'"
         }
@@ -162,7 +166,8 @@ public enum ModuleError: Error, CustomStringConvertible {
              .noMainModule(_, _, let span),
              .invalidModuleSpecifier(_, let span),
              .fileMergeWithList(_, let span),
-             .fileMergeNotKoral(_, let span):
+             .fileMergeNotKoral(_, let span),
+             .crossPackageMerge(_, let span):
             return "\(span): error: \(messageWithoutLocation)"
         }
     }
@@ -805,6 +810,32 @@ public class ModuleResolver {
         recordImportToGraph(using: using, module: module, unit: unit, target: spec, sourceFile: currentFile)
     }
 
+    /// The `packageRoot` of the registered package whose source tree contains
+    /// `file` -- longest match wins, since a path dependency may sit inside the
+    /// root package's tree. `nil` when no package claims the file.
+    private func packageRoot(containing file: String) -> String? {
+        let entryPath = URL(fileURLWithPath: file).standardized.path
+        var candidates: [LoadedPackage] = []
+        if let root = rootPackage {
+            candidates.append(root)
+        }
+        if let registry = registry {
+            candidates.append(contentsOf: registry.all)
+        }
+        var best: String? = nil
+        var bestLen = 0
+        for package in candidates {
+            let rootPath = URL(fileURLWithPath: package.manifest.packageRoot).standardized.path
+            if entryPath == rootPath || entryPath.hasPrefix(rootPath + "/") {
+                if rootPath.count > bestLen {
+                    bestLen = rootPath.count
+                    best = rootPath
+                }
+            }
+        }
+        return best
+    }
+
     /// Merge a whole module into the current one (§3.2). The target's boundary
     /// is gone afterwards: its `module_private` names are this module's own, so
     /// it may be merged into at most one module and, once merged, can no longer
@@ -817,6 +848,14 @@ public class ModuleResolver {
         span: SourceSpan,
         unit: CompilationUnit
     ) throws {
+        // Merge dissolves the target's boundary, so it stays inside one package
+        // (§3.2): the target's `module_private` names become this module's and
+        // its declarations join this package's identity. Another package's
+        // module can only be imported, never merged. A bare file has no package
+        // of its own, so any registered target is another package's.
+        guard let currentOwner = module.owner, spec.owner.identity == currentOwner.identity else {
+            throw ModuleError.crossPackageMerge(specifier, span: span)
+        }
         let target = URL(fileURLWithPath: spec.entryFile).standardized.path
         if module.mergedSubmodules.contains(target) {
             throw ModuleError.duplicateUsing(specifier, span: span)
@@ -844,6 +883,16 @@ public class ModuleResolver {
 
         guard FileManager.default.fileExists(atPath: filePath) else {
             throw ModuleError.fileNotFound(fileName, searchPath: currentDir)
+        }
+
+        // Merge claims ownership, so the target must live inside the current
+        // package's source tree (§3.2) -- the same rule the bare form enforces
+        // by package identity. With no package claiming the current file there
+        // is no boundary to respect.
+        if let myRoot = packageRoot(containing: currentFile) {
+            guard let targetRoot = packageRoot(containing: filePath), targetRoot == myRoot else {
+                throw ModuleError.crossPackageMerge(fileName, span: using.span)
+            }
         }
 
         // A merge cycle means each file is waiting on the other's definitions

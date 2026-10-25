@@ -24,6 +24,7 @@ public type ModuleError {
     UnknownModule(name String, package_name String, declared List[String], span SourceSpan),
     NoMainModule(package_name String, declared List[String], span SourceSpan),
     InvalidModuleSpecifier(specifier String, span SourceSpan),
+    CrossPackageMerge(specifier String, span SourceSpan),
     FileClaimedTwice(file String, owner String, claimant String),
 };
 
@@ -36,6 +37,7 @@ given ModuleError {
         .UnknownModule(_, _, _, span) then Option[SourceSpan].Some(span),
         .NoMainModule(_, _, span) then Option[SourceSpan].Some(span),
         .InvalidModuleSpecifier(_, span) then Option[SourceSpan].Some(span),
+        .CrossPackageMerge(_, span) then Option[SourceSpan].Some(span),
         _ then Option[SourceSpan].None(),
     };
 
@@ -90,6 +92,7 @@ given ModuleError as Error {
                 "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared_list)"
             },
             .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
+            .CrossPackageMerge(specifier, _) then "cannot merge '\(specifier)': merge is limited to the current package; import it with 'using \"\(specifier)\" { ... };'",
             .FileClaimedTwice(file, owner, claimant) then "source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'",
         };
     };
@@ -724,6 +727,45 @@ given ModuleResolver {
         return Result[Void].Ok({});
     };
 
+    /// The `package_root` of the registered package whose source tree contains
+    /// `file_path` -- longest match wins, since a path dependency may sit inside
+    /// the root package's tree. `None` when no package claims the file.
+    file_private package_root_containing(self, file_path String) Option[String] = {
+        let entry_path = (when absolute_path(file_path.into_path()) in {
+            .Ok(p) then p,
+            .Error(_) then file_path.into_path(),
+        }).normalize();
+        let mutable candidates = List[LoadedPackage].new();
+        when self.storage.root_package in {
+            .Some(pkg) then candidates.push(pkg),
+            .None() then {},
+        };
+        when self.storage.registry in {
+            .Some(reg) then {
+                for pkg in reg.all then {
+                    candidates.push(pkg);
+                };
+            },
+            .None() then {},
+        };
+        let mutable best = Option[String].None();
+        let mutable best_len UInt = 0;
+        let entry_str = entry_path.to_string();
+        for pkg in candidates then {
+            let root_str = pkg.manifest.package_root.into_path().normalize().to_string();
+            // Segment boundary, not raw prefix: `root/src` must not claim
+            // `root/src2/file.koral`.
+            if entry_str == root_str or entry_str.starts_with(root_str + "/") then {
+                let len = root_str.count();
+                if len > best_len then {
+                    best_len = len;
+                    best = Option[String].Some(root_str);
+                };
+            };
+        };
+        return best;
+    };
+
     /// Merge a whole module into the current one (§3.2). The bare form of
     /// `using "spec";` lands here for a registered module exactly as it does
     /// for a local entry file -- a specifier says where the target is, the
@@ -740,6 +782,17 @@ given ModuleResolver {
         module ModuleInfo,
         unit CompilationUnit,
     ) Result[Void] = {
+        // Merge dissolves the target's boundary, so it stays inside one package
+        // (§3.2): the target's `module_private` names become this module's and
+        // its declarations join this package's identity. Another package's
+        // module can only be imported, never merged.
+        if package_id_for_kind(spec.package_kind) != module.package_id() then {
+            return Result[Void].Error(
+                ModuleError.CrossPackageMerge(specifier, specifier_span).render(
+                    module.entry_file(),
+                ),
+            );
+        };
         let target = when absolute_path(spec.entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then spec.entry_file,
@@ -774,7 +827,6 @@ given ModuleResolver {
                 "File merge path must end in '.koral'; write '\(file_name).koral'",
             );
         };
-        let _ = using_span;
 
         // Resolve `.` / `..` ourselves. `join` keeps them, so `./a.koral` and
         // `a.koral` would be two names for one file -- and then neither the
@@ -798,6 +850,32 @@ given ModuleResolver {
                     module.entry_file(),
                 ),
             );
+        };
+
+        // Merge claims ownership, so the target must live inside the current
+        // package's source tree (§3.2) -- the same rule the bare form enforces
+        // by package identity. With no package claiming the current file there
+        // is no boundary to respect.
+        when self.package_root_containing(current_file) in {
+            .Some(my_root) then {
+                let mutable same_package = false;
+                when self.package_root_containing(file_path) in {
+                    .Some(target_root) then {
+                        if target_root == my_root then {
+                            same_package = true;
+                        };
+                    },
+                    .None() then {},
+                };
+                if not same_package then {
+                    return Result[Void].Error(
+                        ModuleError.CrossPackageMerge(file_name, using_span).render(
+                            module.entry_file(),
+                        ),
+                    );
+                };
+            },
+            .None() then {},
         };
 
         // A merge cycle means each file is waiting on the other's definitions

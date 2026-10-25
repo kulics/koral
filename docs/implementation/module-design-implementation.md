@@ -118,3 +118,22 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
 `scripts/verify.sh` 全链 **ALL GREEN**（2026-10-24）：seed 自检、主门、stage2、
 差分门各 823/823，`FIXED POINT`，`dangling=0`；koralfmt 225/225，corpus gate
 220 文件 0 失败；样本三个全部构建通过。差分门默认开诊断比对，两端错误面逐字相同。
+
+## 9. 2026-10-25 跨包合并收口
+
+形态层重做时「合并只在包内」漏了实现——裸形态与路径形态都会把**别的包的**目标并进来。
+后果实测是拼运气：`using "std/hex";` 能跑（目标恰好不碰原包私有），`using "std/text";`
+死在 `package_private String.data` 上，且报错指向 std 源码行号。根因是合并让被并文件
+换上本包身份，可见性按新包判定。
+
+- **裁定**：合并目标必须是本包模块/文件。裸形态按 `package_id` 判同包；路径形态按
+  最长包根前缀判归属（`src`/`src2` 兄弟目录按段边界，不吃裸前缀）。裸文件编译无所属包，
+  目标是已登记模块时同样拒绝——两侧判定在 `merge_module_into` / `mergeModule` 与
+  `resolve_file_merge` / `resolveFileMerge` 各一道。
+- **诊断**：`ModuleError.CrossPackageMerge`，两端逐字相同，指路 `{ … }` 导入。
+- **同包合并不受影响**：按名合并本包注册模块（`using_bare_form_merges_module_test`）与
+  路径合并本地文件照常。
+- 看护：`using_cross_package_merge_error`；跨包路径形态在包布局探针里验证
+  （dep 路径依赖被拒、同包 helper 放行）。
+
+验证：seed 自检与主门各 826/826（2026-10-25），跨包诊断两端逐字相同。
