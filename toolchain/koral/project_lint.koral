@@ -1,0 +1,202 @@
+// ============================================================================
+// Koral Build System - Project Layout Lint
+// ============================================================================
+//
+// Questions about the REPOSITORY, not about the program. `koralc` compiles a
+// target module and everything its closure reaches; a file outside that closure
+// is not part of the program and the compiler has no opinion on it. Whether it
+// is MEANT to be part of the program is a question only the project can answer
+// -- so it lives here (§7).
+//
+// The one thing checked today: every `.koral` file under the package root must
+// be claimed by exactly one module's closure. A file nobody claims is compiled
+// nowhere, checked by nothing, and rots silently. The usual cause is a `using`
+// that was never written.
+// ============================================================================
+
+using "std" { ... };
+using "std/os" { ... };
+
+/// A project-layout problem, with the paths it is about (package-root-relative).
+public type LayoutProblem(message String, paths List[String]);
+
+/// Whether `rel_path` is covered by any of the manifest's `exclude` entries.
+/// An entry naming a directory covers everything under it.
+file_private let is_excluded(rel_path String, exclude List[String]) Bool = {
+    for entry in exclude then {
+        if rel_path == entry then {
+            return true;
+        };
+        if rel_path.starts_with(entry + "/") then {
+            return true;
+        };
+    };
+    return false;
+};
+
+/// The local specifier of a `using` line, when the line has one.
+///
+/// Deliberately narrow: §3 puts the specifier in the same place on every
+/// `using`, and only the LOCAL form (`./` / `../`) can reach a file inside this
+/// package root. A registered-module spec (`"std/io"`) names another package
+/// and cannot claim a file here. Both local forms claim the target -- bare
+/// `using "./x.koral";` merges it (§3.2) and `using "./x.koral" { … };` makes it
+/// a module of its own (§3.1) -- so one walk covers both.
+file_private let local_using_specifier(line String) Option[String] = {
+    let trimmed = line.trim_ascii();
+    if not trimmed.starts_with("using \"") then {
+        return Option[String].None();
+    };
+    let rest = trimmed.trim_prefix("using \"");
+    let close = when rest.find_from(0, "\"") in {
+        .Some(i) then i,
+        .None() then {
+            return Option[String].None();
+        },
+    };
+    let spec = rest.substring(0..<close);
+    if not spec.starts_with("./") and not spec.starts_with("../") then {
+        return Option[String].None();
+    };
+    return Option[String].Some(spec);
+};
+
+/// The files a source file claims through its local `using` specs.
+file_private let local_uses_of(file_path String) List[String] = {
+    let mutable out = List[String].new();
+    let text = when read_text_file(file_path) in {
+        .Ok(t) then t,
+        .Error(_) then {
+            return out;
+        },
+    };
+    let base_dir = file_path.into_path().dir_name();
+    for line in text.split("\n") then {
+        when local_using_specifier(line) in {
+            .Some(spec) then {
+                out.push(base_dir.join(spec).to_string());
+            },
+            .None() then {},
+        };
+    };
+    return out;
+};
+
+/// Absolute when the platform can produce one, so `./a/../b` and `b` compare
+/// equal across the walk.
+file_private let normalized_path(p String) String = {
+    return when absolute_path(p) in {
+        .Ok(a) then a.to_string(),
+        .Error(_) then p,
+    };
+};
+
+/// Every file under `root` that is package source of no module, as
+/// package-root-relative paths. Empty when the layout is clean.
+///
+/// `declared_entries` are the manifest's `modules[*].entry` values. The claimed
+/// set is the transitive closure of local `using` specs starting from them.
+public let find_orphan_sources(
+    root String,
+    declared_entries List[String],
+    exclude List[String],
+) Result[List[String]] = {
+    let root_norm = normalized_path(root);
+
+    let mutable claimed = Set[String].new();
+    let mutable pending = List[String].new();
+    for entry in declared_entries then {
+        pending.push(normalized_path(root.into_path().join(entry).to_string()));
+    };
+    while not pending.is_empty() then {
+        let current = when pending.pop() in {
+            .Some(p) then p,
+            .None() then {
+                break;
+            },
+        };
+        if claimed.contains(current) then {
+            continue;
+        };
+        claimed.insert(current);
+        for next in local_uses_of(current) then {
+            let n = normalized_path(next);
+            if not claimed.contains(n) then {
+                pending.push(n);
+            };
+        };
+    };
+
+    let mutable orphans = List[String].new();
+    when walk_dir(root) in {
+        .Ok(mut_iter) then {
+            let mutable iter = mut_iter;
+            while iter.next() is .Some(entry) then {
+                let path = entry.path().to_string();
+                if not path.ends_with(".koral") then {
+                    continue;
+                };
+                let normalized = normalized_path(path);
+                if claimed.contains(normalized) then {
+                    continue;
+                };
+                let rel = normalized.trim_prefix(root_norm + "/");
+                if is_excluded(rel, exclude) then {
+                    continue;
+                };
+                orphans.push(rel);
+            };
+        },
+        .Error(e) then {
+            return Result[List[String]].Error(
+                "cannot scan package root '\(root)': \(e.message())",
+            );
+        },
+    };
+
+    orphans.sort();
+    return Result[List[String]].Ok(orphans);
+};
+
+/// The lint's verdict for one package. `None` when the layout is clean.
+///
+/// Takes the manifest's words rather than a `ProjectConfig`: this module is
+/// deliberately free of the CLI's types, so both `koral` and its tests can
+/// reach it without dragging the CLI's `main` along.
+public let lint_orphans(
+    root String,
+    declared_entries List[String],
+    exclude List[String],
+) Option[LayoutProblem] = {
+    let orphans = when find_orphan_sources(root, declared_entries, exclude) in {
+        .Ok(list) then list,
+        .Error(e) then {
+            return Option[LayoutProblem].Some(
+                LayoutProblem(e.message(), List[String].new()),
+            );
+        },
+    };
+
+    if orphans.is_empty() then {
+        return Option[LayoutProblem].None();
+    };
+
+    let mutable message =
+        "source file(s) belong to no module; every .koral file in the package must be part of exactly one module's closure";
+    if not exclude.is_empty() then {
+        message = message
+            + " (paths in 'exclude' are skipped -- put fixtures there instead of leaving them loose)";
+    };
+    message = message + ":";
+    return Option[LayoutProblem].Some(LayoutProblem(message, orphans));
+};
+
+/// Render a problem's body. The caller owns the `error: ` envelope --
+/// `error_msg` already adds it.
+public let render_layout_problem(problem LayoutProblem) String = {
+    let mutable text = problem.message;
+    for p in problem.paths then {
+        text = text + "\n  " + p;
+    };
+    return text;
+};

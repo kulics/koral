@@ -11,7 +11,8 @@ using "std/os" { ... };
 /// name, `package[/subpath]`; the manifest only describes the inside (§5.2).
 public type ModuleConfig(entry String, links List[String]);
 
-/// Four fields (§5.1): `package`, `version`, `modules`, `dependencies`.
+/// Five fields (§5.1): `package`, `version`, `modules`, `dependencies`,
+/// `exclude`.
 /// No `name` (same thing as `package`), no top-level `entry` (the default build
 /// target IS the main module), no `requires` (the module graph comes from
 /// `using`, §5.4), no `module_aliases` (renaming is the dependency key, §5.3).
@@ -20,6 +21,12 @@ public type ProjectConfig(
     version String,
     modules Dict[String, ModuleConfig],
     dependencies Dict[String, DepConfig],
+    /// Package-root-relative paths that are NOT package source -- formatter
+    /// fixtures, generated inputs, anything `.koral` that no module may claim.
+    /// The project lint (`koral lint`) skips them; the compiler never sees this
+    /// field, because "is this file meant to be in the program" is a question
+    /// about the repository, not about the program (§7).
+    exclude List[String],
 );
 
 /// `source` is the fetch location and the package's identity (§5.3). The key
@@ -268,9 +275,6 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
             "error: invalid package name '\(package)'. Must be a single lowercase identifier",
         );
     };
-    if package == "std" then {
-        return .Error("error: package name 'std' is reserved");
-    };
 
     let version_ref = json.get_field("version") or else {
         return .Error("error: missing required field 'version' in koral.json");
@@ -390,7 +394,29 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
         };
     };
 
-    return .Ok(ProjectConfig(package, version, modules, dependencies));
+    // `exclude` is optional and defaults to empty. Paths are package-root
+    // relative and name a file or a directory (a directory covers everything
+    // under it).
+    let mutable exclude = List[String].new();
+    if json.get_field("exclude") is .Some(exclude_ref) then {
+        let exclude_arr = exclude_ref.as_array() or else {
+            return .Error("error: 'exclude' must be an array of strings in koral.json");
+        };
+        let mutable exclude_iter = exclude_arr.iterator();
+        while exclude_iter.next() is .Some(item) then {
+            let path = item.as_string() or else {
+                return .Error("error: 'exclude' must be an array of strings in koral.json");
+            };
+            if path.is_empty() or path.starts_with("/") or path.contains("..") then {
+                return .Error(
+                    "error: 'exclude' entries must be non-empty package-relative paths without '..': '\(path)'",
+                );
+            };
+            exclude.push(path);
+        };
+    };
+
+    return .Ok(ProjectConfig(package, version, modules, dependencies, exclude));
 };
 
 public let save_config(project_dir String, config ProjectConfig) Result[Void] = {
@@ -421,6 +447,10 @@ public let save_config(project_dir String, config ProjectConfig) Result[Void] = 
         modules_obj.insert(module_entry.first, JsonValue.Object(module_json));
     };
     obj.insert("modules", JsonValue.Object(modules_obj));
+
+    if not config.exclude.is_empty() then {
+        obj.insert("exclude", json_string_array(config.exclude));
+    };
 
     let json = JsonValue.Object(obj);
     let text = json.to_string_pretty() + "\n";

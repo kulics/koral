@@ -1,0 +1,60 @@
+// ============================================================================
+// Koral Build System - lint Command
+// ============================================================================
+//
+// `config.koral`, `utils.koral` and the other `cmd_*.koral` files are merged
+// into this module by `koral.koral` -- their names are already this module's,
+// so no `using` here. A second local merge would claim those files twice (§7).
+//
+// The scan itself lives in the `koral/lint` module, which carries no CLI types
+// so the test suite can reach it without dragging this module's `main` along.
+
+using "koral/lint" { lint_orphans, render_layout_problem };
+using "std/os" { ... };
+
+/// Run the layout lint and report. True when the caller should stop.
+///
+/// `koral build` and `koral check` call this before handing anything to
+/// `koralc`, so a project that goes through `koral` is never silently missing a
+/// file. `koral lint` runs the same check on its own.
+public let fail_on_layout_problem(root String, config ProjectConfig) Bool = {
+    let mutable declared = List[String].new();
+    for entry in config.modules.iterator() then {
+        declared.push(entry.second.entry);
+    };
+    when lint_orphans(root, declared, config.exclude) in {
+        .Some(problem) then {
+            error_msg(render_layout_problem(problem));
+            return true;
+        },
+        .None() then {
+            return false;
+        },
+    };
+};
+
+/// Project-layout checks only: is this source tree the one the manifest means?
+///
+/// Deliberately does not compile. `koral check` type-checks the program;
+/// `koral lint` reviews the repository. A `.koral` file that belongs to no
+/// module is invisible to the first and is exactly what the second is for (§7).
+///
+/// koral lint [<dir>]
+public let cmd_lint(args List[String], flags Dict[String, String]) Int = {
+    let _ = flags;
+    let mutable root = ".";
+    if args.count() > 0 then {
+        root = args[0];
+    };
+
+    let config = load_config(root) or else as e in {
+        error_msg(e.message());
+        return 1;
+    };
+
+    if fail_on_layout_problem(root, config) then {
+        return 1;
+    };
+    status_msg("Finished", "no layout problems");
+    return 0;
+};

@@ -164,4 +164,31 @@ say "toolchain"
 "bin/toolchain-doc-gen/koral_doc$EXE" --self-test
 "bin/toolchain-doc-gen/koral_doc$EXE" --check
 
+# ── project layout (koral lint) ──────────────────────────────────────────────
+# Ownership of a `.koral` file is checked here, not in `koralc`: a file outside
+# the target's closure is not being compiled, so the compiler has no opinion on
+# it. Whether it was MEANT to be in the program is a question about the
+# repository (design `module-design.md` §7).
+say "project layout"
+"$BOOTSTRAP" build \
+  --package-config toolchain/koral/koral.json \
+  --target-module koral -o bin/koral-tool
+"$BOOTSTRAP" build \
+  --package-config toolchain/koral/koral.json \
+  --target-module koral/test -o bin/koral-tool-test
+"bin/koral-tool-test/koral__test$EXE"
+
+for pkg in \
+  compiler \
+  std \
+  toolchain/koral \
+  toolchain/koral-syntax \
+  toolchain/koralfmt \
+  toolchain/doc \
+  tests/compiler-runner
+do
+  "bin/koral-tool/koral$EXE" lint "$pkg"
+done
+echo "project layout OK"
+
 say "ALL GREEN"

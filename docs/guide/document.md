@@ -2629,7 +2629,7 @@ re-export semantics.
 
 #### Manifest
 
-A `koral.json` has four fields:
+A `koral.json` has five fields:
 
 ```json
 {
@@ -2641,7 +2641,8 @@ A `koral.json` has four fields:
   },
   "dependencies": {
     "slug": { "source": "path:../slug", "version": "^1.2" }
-  }
+  },
+  "exclude": ["test/cases"]
 }
 ```
 
@@ -2654,6 +2655,15 @@ A `koral.json` has four fields:
 - **`dependencies`** -- **source name** -> `{ source, version }`. `source` is the
   fetch location and the identity, and carries no ref; `version` is a semver
   constraint. Renaming a dependency is changing its key -- there is no extra field.
+- **`exclude`** -- package-root-relative paths that are **not** package source:
+  formatter fixtures, generated inputs, anything `.koral` that no module may
+  claim. Optional. The compiler never reads it; `koral lint` does.
+
+`koral lint` reviews the project's layout, separately from compiling it. Its one
+check today: every `.koral` file under the package root must belong to exactly
+one module's closure. A file nobody claims is compiled nowhere and checked by
+nothing -- the usual cause is a `using` that was never written. `koral build`
+and `koral check` run the same check first.
 
 There is no top-level `entry` (the default build target IS the main module), no
 `name` (it duplicates `package`), no `requires` (the module graph comes from

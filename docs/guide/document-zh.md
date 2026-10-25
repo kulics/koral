@@ -2561,7 +2561,7 @@ Koral 提供两层组织单位，用来把代码分到多个文件和目录里�
 
 #### manifest
 
-一份 `koral.json` 四个字段：
+一份 `koral.json` 五个字段：
 
 ```json
 {
@@ -2573,7 +2573,8 @@ Koral 提供两层组织单位，用来把代码分到多个文件和目录里�
   },
   "dependencies": {
     "slug": { "source": "path:../slug", "version": "^1.2" }
-  }
+  },
+  "exclude": ["test/cases"]
 }
 ```
 
@@ -2583,6 +2584,12 @@ Koral 提供两层组织单位，用来把代码分到多个文件和目录里�
   `entry` 是相对包根的入口文件。
 - **`dependencies`**：**源码名** → `{ source, version }`。`source` 是获取位置也是身份，不含 ref；
   `version` 是 semver 约束。改名就是换 key，没有额外字段。
+- **`exclude`**：**不是包源码**的包根相对路径——格式化器夹具、生成输入，任何不该被模块认领的
+  `.koral`。可选。**编译器不读它**，`koral lint` 读。
+
+`koral lint` 检查工程布局，与编译分开。今天只查一条：包根下每个 `.koral` 文件必须属于
+恰好一个模块的闭包。没人认领的文件不在任何编译单元里、不被任何检查覆盖——最常见的原因是
+少写了一行 `using`。`koral build` 与 `koral check` 会先跑同一条检查。
 
 没有顶层 `entry`（默认构建目标 = 主模块）、没有 `name`（与 `package` 重复）、
 没有 `requires`（模块图从 `using` 派生）、没有 `module_aliases`（改名即换 key）。

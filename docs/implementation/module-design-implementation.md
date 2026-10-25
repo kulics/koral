@@ -1,6 +1,6 @@
 # `../design/module-design.md` —— 实施记录
 
-> **状态**：形态层重做（2026-10-24）与方法面（2026-10-25）已在两端落地，看护齐全。
+> **状态**：形态层重做（2026-10-24）、方法面与跨包合并收口、孤儿文件归属（2026-10-25）已落地，看护齐全。
 > 设计正本是 [`../design/module-design.md`](../design/module-design.md)。
 > 验证走 [`developer-guide.md`](developer-guide.md) 的验证链。
 
@@ -17,7 +17,7 @@
 | **方法面规则**（inherent 跟值走 / trait 跟 trait 名走，Rust 版） | **已落地**（2026-10-25） |
 | **模块身份 =（`source`，入口位置）** | **未做** |
 | **`modules` 降为对外命名表** | **未做**（本地模块不登记已可，manifest 仍是清单） |
-| **孤儿文件报错**（不被任何模块闭包覆盖） | **未做** |
+| **孤儿文件报错** | **已移交给 `koral lint`**（2026-10-25）——不是编译条件，见 §8 |
 
 ## 1. 形态的 AST 承载
 
@@ -96,7 +96,7 @@
 koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字不丢。
 `using_empty_import_list_error` 与 `using_file_merge_*_list_error` 已随规则翻转改名。
 
-方法面（§8）12 条：`method_face_trait_in_scope_test` / `method_face_missing_trait_error` /
+方法面（§9）12 条：`method_face_trait_in_scope_test` / `method_face_missing_trait_error` /
 `method_face_unrelated_name_error` / `method_face_inert_import_error` /
 `method_face_batch_import_test` / `method_face_alias_keeps_trait_test` /
 `method_face_exclude_drops_trait_error` / `method_face_inherent_no_import_test` /
@@ -107,25 +107,53 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
 
 - **把 `{ a as b, ... }` 的改名展开成批边的改名表。** 否掉：改名的解析路径会变成
   第二条，与 `{ a as b }` 不同。改名一律走符号边。
-- **方法面按「导入了模块就放开该模块全部 `given`」。** 这是旧现状，已被 §8 换掉。
+- **方法面按「导入了模块就放开该模块全部 `given`」。** 这是旧现状，已被 §9 换掉。
   它的真实机制是**模块可达性**——不导入则整个模块不载入，`given` 根本不注册；
   导入任意一个名字（`{ env }`）就把该模块的全部 `given` 带进来了。
 - **在 `resolve_extension_template_signature` 上加一道模板粒度的名字可见性门。**
   **试过，已回退。** 判据写成「点名 trait，或点名类型且该 `given` 与类型同模块」，
   结果把 `List.push`、`Option.is_none` 一起挡掉了——一个模板可能给多个类型供方法。
-  正解是**逐个方法**记来源（§8 的 `method_traits`），不是查找处加个 if。
+  正解是**逐个方法**记来源（§9 的 `method_traits`），不是查找处加个 if。
 - **「同模块的 `given X as T` 白送」。** 否掉，理由见设计正本「替代方案」——
   Rust 里 `impl Read for File` 就在 `File` 的文件里，`f.read()` 照样要 `use std::io::Read;`。
 - **按模板（`conformance_trait_def_id`）一刀切判方法面。** 不够：`given X as Leaf` 经
   `Leaf` 的**扁平方法表**能摸到超 trait `Root` 的方法，按 `Leaf` 判就把它放行了——
   而命名子 trait 不该打开超 trait（Rust：`use a::Sub;` 后 `x.b()` 仍 E0599）。
   改成**接收者方法表记的来源说了算**，无记录时才退回 conformance 自己的 trait。
-- **孤儿文件报错。** 需要「包内源文件全集」与「模块闭包全集」求差，是一个包级扫描。
-  归属不变量的正向一半（一文件不属两模块）已落；反向一半未做。
+- **把孤儿文件检查留在编译器里。** 否掉，2026-10-25 移交 `koral lint`。
+  它不改产物，回答的是「这份仓库里有没有我以为进了程序、其实没进的东西」——
+  仓库的问题不是程序的问题。留在编译器里的代价是两个：两端各抄一份**非语言语义**
+  的代码进差分甲骨文；以及 `koralc` 被迫对闭包之外的文件有意见。
+- **「与已认领文件同目录」的收窄。** 否掉。它抓「你在编的目录里多了个杂散文件」，
+  放过**整个忘掉的目录**——而「加了个 `helpers/` 模块、忘了写那行 `using`」才是
+  最常见的漏。改成铺满包根 + manifest `exclude` 显式排夹具。
+  `access_checker.koral` 上次之所以被抓到，纯粹因为它凑巧躺在正在编的目录里。
 - **模块身份 =（`source`，入口位置）。** 那会改 codegen 符号前缀，属 ABI 变更。
   本地未登记模块的暂用入口文件名作身份，与设计 §5.3.1 不一致，**是有意留的偏差**。
 
-## 8. 方法面怎么落的（2026-10-25）
+## 8. 孤儿文件归谁（2026-10-25）
+
+**切法**：`koralc` 管「这个程序良构吗」，`koral` 管「这份工程良构吗」。
+孤儿文件在目标闭包**之外**，按定义就不是要编译的东西，编译器不该有意见。
+
+| | 落点 |
+|---|---|
+| 扫描 | `toolchain/koral/project_lint.koral`（模块 `koral/lint`，**不带 CLI 类型**，测试可直接调） |
+| 命令 | `koral lint [<dir>]`；`koral build` / `koral check` 前置同一条 |
+| 排除 | manifest `exclude: ["test/cases"]`——包根相对，目录覆盖其下全部 |
+| 看护 | `toolchain/koral/test_lint.koral`（9 条），`verify.sh` 对 7 个包各跑一次 |
+
+**`project_lint` 为什么是独立模块**：它若并进 `koral.koral` 的模块，测试要 import 它就
+会把 CLI 的 `main` 一起拖进来，`__koral_user_main` 撞签名。分出去之后测试只 `using
+"koral/lint" { … }`。
+
+**`load_config` 不再拒 `package: "std"`**：那条是**选名字**的规则，不是**读 manifest** 的
+规则——`koral lint std` 得能在真的 std 包上跑。改到 `is_valid_project_name`（`koral init`
+那条路）；构建时 koralc 仍然拒。
+
+**顺带删掉**：`tests/compiler-cases/using_orphan_source_error`（驱动的是编译器侧的检查）。
+
+## 9. 方法面怎么落的（2026-10-25）
 
 **规则**是 Rust 的：inherent 方法跟着值走、零准入；trait 方法跟着 trait 名走；
 点名类型不带 trait 方法。设计正本 §3.4 是判据，本节是落点。
@@ -153,7 +181,7 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
 Swift 的 `extensionMethods` 读点分散，关键一处在 `inferMethodOnType`（它排在
 `lookupDeclaredMethod` **之前**，不走门就绕过去了）。
 
-## 9. 2026-10-25 跨包合并收口
+## 10. 2026-10-25 跨包合并收口
 
 形态层重做时「合并只在包内」漏了实现——裸形态与路径形态都会把**别的包的**目标并进来。
 后果实测是拼运气：`using "std/hex";` 能跑（目标恰好不碰原包私有），`using "std/text";`
@@ -172,11 +200,15 @@ Swift 的 `extensionMethods` 读点分散，关键一处在 `inferMethodOnType`�
 
 验证：seed 自检与主门各 826/826（2026-10-25），跨包诊断两端逐字相同。
 
-## 10. 验证
+## 11. 验证
 
-`scripts/verify.sh` 全链 **ALL GREEN**（2026-10-25，含方法面）：seed 自检、主门、
-stage2、差分门各 **836/836**（824 + 方法面 12），`FIXED POINT`，`dangling=0`；
-koralfmt 225/225，corpus gate 219 文件 0 失败；样本三个全部构建通过；
-doc gen 自检通过、14 个模块的 API 文档是新的。差分门默认开诊断比对，
-**两端错误面逐字相同**——方法面的诊断（`Trait 'T' provides it but is not in scope; …`）
-也在比对范围内。
+`scripts/verify.sh` 全链 **ALL GREEN**（2026-10-25，合并 origin/master 后复验）：
+seed 自检、主门、stage2、差分门各 **838/838**（823 + 方法面 12 + 跨包/and-then 3，
+减去随孤儿检查搬家删除的 `using_orphan_source_error`），`FIXED POINT`，`dangling=0`；
+koralfmt 225/225，corpus gate 222 文件 0 失败；样本三个全部构建通过；
+doc gen 自检通过、14 个模块的 API 文档是新的。
+
+**project layout**：`koral/lint` 9/9，`koral lint` 对 7 个包各跑一遍全干净。
+差分门默认开诊断比对，**两端错误面逐字相同**——方法面的诊断
+（`Trait 'T' provides it but is not in scope; …`）与跨包合并的
+`CrossPackageMerge` 都在比对范围内。孤儿检查不进差分，它不是语言语义。
