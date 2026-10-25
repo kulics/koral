@@ -257,9 +257,6 @@ public class ModuleInfo {
 
     /// 已合并子模块列表（以入口文件绝对路径表示）
     public var mergedSubmodules: [String] = []
-    /// Which module's closure already claims each source file (§7). See
-    /// `ModuleResolver.claimedFiles`.
-
     /// 是否为外部模块
     public let isExternal: Bool
 
