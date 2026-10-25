@@ -420,8 +420,24 @@ given TypeChecker {
                     self.check_expr_scoped_ref(lowered, expected, scope)
                 }
             },
-            .AndThenExpr(operand, transform_expr, _) then {
+            .AndThenExpr(operand, transform_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope);
+                // `and then` is defined over std's `Option` and `Result` -- the
+                // same rule `or else` / `or return` enforce. Declaration
+                // identity only: an enum that merely declares `Some`/`Ok`/`Error`
+                // cases is a different type. Without this check the operand
+                // leaks an unresolved type past sema and dies in MIR instead.
+                if not self.is_std_flow_enum(typed_op.expr_type, "Option") and not self.is_std_flow_enum(
+                    typed_op.expr_type,
+                    "Result",
+                ) then {
+                    let operand_type_name = type_to_string(typed_op.expr_type);
+                    self.push_diagnostic(
+                        "'and then' can only be used with Option or Result types, got '\(operand_type_name)'",
+                        span,
+                    );
+                    return typed_op;
+                };
                 let mutable inner_type = self.extract_option_result_inner(
                     typed_op.expr_type,
                 );
