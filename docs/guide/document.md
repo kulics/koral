@@ -2761,6 +2761,50 @@ using "game/render" { !List, ... };        // fine -- drop theirs
 using "game/render" { Sprite };            // fine
 ```
 
+##### Method Face
+
+An import brings two things: **names** (what the list picks) and the **method
+face** -- which `given` methods are dispatchable here. The face follows what is
+*named*, never the module that happens to hold it:
+
+| Call | Needs |
+| --- | --- |
+| `x.m(…)`, `m` from `given X { … }` | **nothing** -- a value of `X` is enough |
+| `x.m(…)`, `m` from `given X as T { … }` or `given T { … }` | **`T` in scope** |
+| `X.m(…)` (associated / qualified) | **`X` in scope** |
+
+Naming a type brings **no** trait methods. Naming a trait opens its methods on
+**every** implementing type.
+
+`T` is in scope when it is declared in this file's module (a merged module
+counts -- merging removes the boundary), imported as `{ T }` or `{ T as A }`,
+batch-imported without `!`, in the prelude, or named in the enclosing
+declaration's generic bounds. Renaming keeps it: `{ T as A }` leaves `T`
+unwritable but the trait is still in scope and its methods are called by their
+own names.
+
+Not in scope: `{ }`, an unrelated name (`{ env }`), **the type itself**
+(`{ Path }`), nothing at all.
+
+A generic **bound** is different from an import: `[T Leaf]` puts `Leaf`'s
+methods in scope for that parameter, supertraits included. So `fn go[T Leaf](x T) = x.r() + x.l()`
+works with `Leaf: Root`, while a concrete receiver with only `Leaf` imported
+cannot call `r()`.
+
+```koral
+using "std/os" { open_file, File };         // `File` named
+f.read(into: buf, span: ...);               // error: `Reader` is not in scope
+
+using "std/io" { Reader };                  // name the trait you are using
+f.read(into: buf, span: ...);               // fine
+
+using "std/os" { read_file };               // the free function needs no trait
+read_file("/etc/hosts");
+```
+
+When a method exists but its trait is out of scope, the diagnostic says so and
+prints the `using` line to add.
+
 #### Resolution
 
 `using "X"` splits at the first `/`:

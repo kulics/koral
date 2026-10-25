@@ -292,6 +292,36 @@ given TypeChecker {
         };
     };
 
+    /// METHOD FACE (§3.4): is trait `trait_def_id` in scope in this file?
+    ///
+    /// The gate every conformance-provided method goes through. A trait with no
+    /// resolvable declaration (built-in) is always in scope; so is one we
+    /// cannot look up -- refusing there would make the face depend on how much
+    /// the checker happens to know, not on the file's imports.
+    module_private trait_in_scope(self, trait_def_id DefId) Bool = {
+        if not trait_def_id.is_valid() then {
+            return true;
+        };
+        if self.make_visibility_checker() is .Some(checker) and self.context().get_module_path(
+            trait_def_id,
+        ) is .Some(module_path) then {
+            let trait_name = self.context().get_name(trait_def_id) or else def_id_spelling(
+                trait_def_id,
+            );
+            return checker.trait_declaration_in_scope(module_path, trait_name);
+        };
+        return true;
+    };
+
+    /// Does the method face admit a method provided by `trait_def_id`?
+    /// `.None()` is an inherent member: no gate at all.
+    module_private face_allows_trait(self, trait_def_id Option[DefId]) Bool = {
+        return when trait_def_id in {
+            .None() then true,
+            .Some(tid) then self.trait_in_scope(tid),
+        };
+    };
+
     /// `span` is where the type is written. A message about the type belongs
     /// at the spelling, not at whatever declaration happens to carry it.
     module_private check_type_visibility(

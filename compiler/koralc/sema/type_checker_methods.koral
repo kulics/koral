@@ -443,6 +443,66 @@ given TypeChecker {
         return self.storage.method_table.lookup(owner, method_name);
     };
 
+    /// METHOD FACE (§3.4) for a method sitting in the method table.
+    ///
+    /// Inherent (`given X { m }`) is always open. A method stamped by a trait
+    /// (`given X as T { m }`, or a `given T { … }` tool member materialised
+    /// onto `X`) is open only when that trait is in scope here. Unstamped
+    /// non-inherent slots stay open: refusing them would make the face depend
+    /// on whether the checker happened to record provenance.
+    module_private method_table_face_allows(
+        self,
+        owner MethodOwner,
+        method_name String,
+    ) Bool = {
+        if self.storage.method_table.is_inherent(owner, method_name) then {
+            return true;
+        };
+        let traits = self.storage.method_table.providing_traits(owner, method_name);
+        if traits.is_empty() then {
+            return true;
+        };
+        for trait_def_id in traits then {
+            if self.trait_in_scope(trait_def_id) then {
+                return true;
+            };
+        };
+        return false;
+    };
+
+    /// Why a method that exists on `owner` is not callable here, as a sentence
+    /// to append to `Member '…' not found`. Rust prints the same thing at
+    /// E0599 ("trait `Read` which provides `read` is implemented but not in
+    /// scope; perhaps you want to import it") -- without it the reader sees a
+    /// method that plainly exists and is told it does not.
+    module_private method_face_hint(
+        self,
+        owner MethodOwner,
+        method_name String,
+    ) Option[String] = {
+        if self.storage.method_table.is_inherent(owner, method_name) then {
+            return Option[String].None();
+        };
+        let traits = self.storage.method_table.providing_traits(owner, method_name);
+        if traits.is_empty() then {
+            return Option[String].None();
+        };
+        for trait_def_id in traits then {
+            if self.trait_in_scope(trait_def_id) then {
+                return Option[String].None();
+            };
+        };
+        let trait_def_id = traits[UInt(0)];
+        let trait_name = self.context().get_name(trait_def_id) or else def_id_spelling(
+            trait_def_id,
+        );
+        let module_path = self.context().get_module_path(trait_def_id) or else List[String].new();
+        let spec = module_path_to_using_specifier(module_path);
+        return Option[String].Some(
+            "Trait '\(trait_name)' provides it but is not in scope; import it with using \"\(spec)\" { \(trait_name) };",
+        );
+    };
+
     /// Owner identity of a type known only by its spelling.
     ///
     /// RESOLUTION is the one place a name decides something; the identity then
@@ -1779,13 +1839,20 @@ given TypeChecker {
                 Option[UInt].None(),
                 Option[UInt].Some(self.receiver_type_args(inner_type).count()),
             ) in {
-                .Some(template) then self.resolve_extension_method_template_signature(
-                    base_type,
-                    inner_type,
-                    template,
-                    self.receiver_type_args(inner_type),
-                    span,
-                ),
+                .Some(template) then {
+                    // METHOD FACE (§3.4): a template with a conformance trait
+                    // is that trait's method; without one it is inherent.
+                    if not self.face_allows_trait(template.conformance_trait_def_id) then {
+                        return Option[Symbol].None();
+                    };
+                    self.resolve_extension_method_template_signature(
+                        base_type,
+                        inner_type,
+                        template,
+                        self.receiver_type_args(inner_type),
+                        span,
+                    )
+                },
                 .None() then Option[Symbol].None(),
             },
             .None() then Option[Symbol].None(),
@@ -2316,7 +2383,36 @@ given TypeChecker {
             };
 
             let trait_name = template.trait_name;
-            let bound_trait_def_id = self.conformance_trait_def_id_named(trait_name);
+            // The conformance carries its trait's DECLARATION. Re-resolving the
+            // spelling in whatever module is checking loses it the moment that
+            // module cannot name the trait -- which is exactly the case the
+            // method face has to deny.
+            let bound_trait_def_id = if template.trait_def_id.is_valid() then {
+                template.trait_def_id
+            } else {
+                self.conformance_trait_def_id_named(trait_name)
+            };
+            // METHOD FACE (§3.4): the face is a property of the METHOD on the
+            // RECEIVER, not of the route that found it. A conformance of `Leaf`
+            // reaches `Root`'s methods through `Leaf`'s flattened method table;
+            // gating on `Leaf` would open a supertrait's methods that naming the
+            // subtrait does not (§3.4, and Rust's `use a::Sub` leaving `x.b()`
+            // an error). When the receiver's table records providers, they say
+            // who unlocks the method; only an unrecorded slot falls back to the
+            // conformance's own trait.
+            let receiver_owner = self.extension_template_key(normalized_receiver);
+            let mutable face_open = false;
+            if self.storage.method_table.providing_traits(
+                receiver_owner,
+                method_name,
+            ).is_empty() then {
+                face_open = self.trait_in_scope(bound_trait_def_id);
+            } else {
+                face_open = self.method_table_face_allows(receiver_owner, method_name);
+            };
+            if not face_open then {
+                continue;
+            };
             let mutable method_bindings = bindings;
             when self.storage.trait_registry.get_in_module(
                 trait_name,
@@ -2530,6 +2626,25 @@ given TypeChecker {
             };
 
             let trait_name = conformance.trait_name;
+            // METHOD FACE (§3.4): same rule as `resolve_conformance_method_signature`
+            // -- the receiver's recorded providers decide; the conformance's own
+            // trait only decides when nothing is recorded.
+            let conformance_owner = self.extension_template_key(normalized_receiver);
+            let mutable conformance_face_open = false;
+            if self.storage.method_table.providing_traits(
+                conformance_owner,
+                method_name,
+            ).is_empty() then {
+                conformance_face_open = self.trait_in_scope(conformance.trait_def_id);
+            } else {
+                conformance_face_open = self.method_table_face_allows(
+                    conformance_owner,
+                    method_name,
+                );
+            };
+            if not conformance_face_open then {
+                continue;
+            };
             // Keyed by the trait's DECLARATION, not its spelling.
             let template_opt = self.storage.generic_templates.lookup_extension_method(
                 MethodOwner.Decl(conformance.trait_def_id),
@@ -4418,7 +4533,10 @@ given TypeChecker {
         // The call is typed from what the slot holds, as it would be for an
         // uncontested name.
         let type_key = self.extension_template_key(inner_type);
-        if self.lookup_method_signature(type_key, method_name) is .Some(raw_method) then {
+        if self.lookup_method_signature(type_key, method_name) is .Some(raw_method) and self.method_table_face_allows(
+            type_key,
+            method_name,
+        ) then {
             return Option[Symbol].Some(
                 self.bind_direct_method_signature(base_type, method_name, raw_method),
             );
@@ -4437,7 +4555,10 @@ given TypeChecker {
         };
 
         let template_key = self.resolve_method_template_key(inner_type);
-        if template_key is .Some(key) and self.lookup_method_signature(key, method_name) is .Some(raw_method) then {
+        if template_key is .Some(key) and self.lookup_method_signature(key, method_name) is .Some(raw_method) and self.method_table_face_allows(
+            key,
+            method_name,
+        ) then {
             return Option[Symbol].Some(
                 self.bind_direct_method_signature(base_type, method_name, raw_method),
             );

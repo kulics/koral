@@ -1,6 +1,6 @@
 # `../design/module-design.md` —— 实施记录
 
-> **状态**：形态层重做（2026-10-24）已在两端落地，看护齐全。
+> **状态**：形态层重做（2026-10-24）与方法面（2026-10-25）已在两端落地，看护齐全。
 > 设计正本是 [`../design/module-design.md`](../design/module-design.md)。
 > 验证走 [`developer-guide.md`](developer-guide.md) 的验证链。
 
@@ -14,7 +14,7 @@
 | 未登记本地模块走相对路径（导入 + 合并） | 已落地 |
 | 模块归属不变量（一文件属一模块） | 已落地 |
 | 全仓源码迁移（432 处 bare import → `{ ... }`） | 已落地 |
-| **方法面规则**（`given` 跟被点名的东西走） | **未做** |
+| **方法面规则**（inherent 跟值走 / trait 跟 trait 名走，Rust 版） | **已落地**（2026-10-25） |
 | **模块身份 =（`source`，入口位置）** | **未做** |
 | **`modules` 降为对外命名表** | **未做**（本地模块不登记已可，manifest 仍是清单） |
 | **孤儿文件报错**（不被任何模块闭包覆盖） | **未做** |
@@ -73,7 +73,11 @@
   它在 Koral 没有第二个岗位。
 - **`{ a, !b, ... }` 混写**——正负不得同表。`!` 只在带 `...` 的清单里出现。
 - **目录推断模块树**——模块边界永远由入口文件指明（`name-resolution.md` 硬规则）。
-- **方法面收紧**——见 §7，现在是模块可达性决定，不是命名决定。
+- **`use Trait as _`（不绑名、只带方法）**——Rust 有这个形态，Koral **不新增**。
+  `as _` 已被否（`_` 是模式通配符，公理 6 的单一拼写）。要方法不想要名字就别名到一个
+  不用的拼写，或用 `{ !X, ... }`。六形态不扩。
+- **同类型同名方法不学 Rust 的 inherent 优先**——`MethodTable` 同槽即歧义，保持。
+  Rust 那个 `&self` 探测排在 `&mut self` 前面、结果调到 trait 那个的怪例，Koral 不要。
 
 ## 6. 看护
 
@@ -92,32 +96,62 @@
 koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字不丢。
 `using_empty_import_list_error` 与 `using_file_merge_*_list_error` 已随规则翻转改名。
 
+方法面（§8）12 条：`method_face_trait_in_scope_test` / `method_face_missing_trait_error` /
+`method_face_unrelated_name_error` / `method_face_inert_import_error` /
+`method_face_batch_import_test` / `method_face_alias_keeps_trait_test` /
+`method_face_exclude_drops_trait_error` / `method_face_inherent_no_import_test` /
+`method_face_prelude_trait_test` / `method_face_bound_brings_methods_test` /
+`method_face_merge_brings_methods_test` / `method_face_subtrait_no_supertrait_error`。
+
 ## 7. 被否掉的实现写法 / 未做项的理由
 
 - **把 `{ a as b, ... }` 的改名展开成批边的改名表。** 否掉：改名的解析路径会变成
   第二条，与 `{ a as b }` 不同。改名一律走符号边。
-- **方法面按「导入了模块就放开该模块全部 `given`」。** 这是现状，**不是设计想要的**。
-  实测发现它的真实机制是**模块可达性**——不导入则整个模块不载入，`given` 根本不注册；
-  导入任意一个名字（`{ env }`）就把该模块的全部 `given` 带进来了。设计 §3.4 要的是
-  「跟被点名的东西走」。
+- **方法面按「导入了模块就放开该模块全部 `given`」。** 这是旧现状，已被 §8 换掉。
+  它的真实机制是**模块可达性**——不导入则整个模块不载入，`given` 根本不注册；
+  导入任意一个名字（`{ env }`）就把该模块的全部 `given` 带进来了。
 - **在 `resolve_extension_template_signature` 上加一道模板粒度的名字可见性门。**
   **试过，已回退。** 判据写成「点名 trait，或点名类型且该 `given` 与类型同模块」，
-  结果把 `List.push`、`Option.is_none` 一起挡掉了——`given` 的方法面不能按模板一刀切：
-  一个模板可能给多个类型供方法，而「谁解锁它」是**逐个方法**的事（inherent 方法跟类型走、
-  trait 方法跟 trait 走、跨模块扩展只跟 trait 走）。要做得给方法表记来源，
-  那是方法表的键结构改动，不是查找处加个 if。
-  **影响面已量过**：全仓 31 个调用非 prelude trait 方法的文件全部走导入全部，
-  收紧本身是 0 破坏；难点在判定的粒度，不在兼容性。
+  结果把 `List.push`、`Option.is_none` 一起挡掉了——一个模板可能给多个类型供方法。
+  正解是**逐个方法**记来源（§8 的 `method_traits`），不是查找处加个 if。
+- **「同模块的 `given X as T` 白送」。** 否掉，理由见设计正本「替代方案」——
+  Rust 里 `impl Read for File` 就在 `File` 的文件里，`f.read()` 照样要 `use std::io::Read;`。
+- **按模板（`conformance_trait_def_id`）一刀切判方法面。** 不够：`given X as Leaf` 经
+  `Leaf` 的**扁平方法表**能摸到超 trait `Root` 的方法，按 `Leaf` 判就把它放行了——
+  而命名子 trait 不该打开超 trait（Rust：`use a::Sub;` 后 `x.b()` 仍 E0599）。
+  改成**接收者方法表记的来源说了算**，无记录时才退回 conformance 自己的 trait。
 - **孤儿文件报错。** 需要「包内源文件全集」与「模块闭包全集」求差，是一个包级扫描。
   归属不变量的正向一半（一文件不属两模块）已落；反向一半未做。
 - **模块身份 =（`source`，入口位置）。** 那会改 codegen 符号前缀，属 ABI 变更。
   本地未登记模块的暂用入口文件名作身份，与设计 §5.3.1 不一致，**是有意留的偏差**。
 
-## 8. 验证
+## 8. 方法面怎么落的（2026-10-25）
 
-`scripts/verify.sh` 全链 **ALL GREEN**（2026-10-24）：seed 自检、主门、stage2、
-差分门各 823/823，`FIXED POINT`，`dangling=0`；koralfmt 225/225，corpus gate
-220 文件 0 失败；样本三个全部构建通过。差分门默认开诊断比对，两端错误面逐字相同。
+**规则**是 Rust 的：inherent 方法跟着值走、零准入；trait 方法跟着 trait 名走；
+点名类型不带 trait 方法。设计正本 §3.4 是判据，本节是落点。
+
+**来源记在方法表上**（`MethodTable.method_traits: Dict[MethodOwner, Dict[String, List[DefId]]]`），
+不是模板上。`register_conformance_method_signatures_for_concrete_type` 已经分得清
+`mark_inherent`（`given X { }` / `given intrinsic X { }`）与 `trait_def_id`（`given X as T`、
+工具块物化），顺着它记一条「哪个 trait 提供的」即可。**一个方法可以被多个 trait 提供，
+任一在作用域内即放行。**
+
+**门只问一句**：`trait_in_scope(trait_def_id)`——本文件能不能**够到这个 trait 声明**。
+它故意不是 `can_access_directly`：那问的是「能不能写这个拼写」，而 `{ T as A }` 让
+`T` 不可写却仍让方法面开着（Rust `use Read as R;` 仍允许 `f.read()`）。
+
+**超 trait 不随行于具体接收者**。`resolve_conformance_method_signature` 从 `Leaf` 的
+扁平方法表能拿到 `Root` 的 `r`，若按 `Leaf` 判就把 `Root` 的面打开了。改成：
+**接收者方法表有记录就按记录判**，无记录才退回 conformance 的 trait。泛型界那条路
+（`.GenericParameter`）本来就早退、不走门——界自己带方法（含超 trait）。
+
+**顺手修的一个真 bug**：Swift 侧 `DefIdMap.nextId` 从 `0` 起，而 `DefId.invalid == 0`——
+**第一个分配的 DefId 就是 invalid**。本地模块先于 std 处理时，它的第一个 trait 拿到
+`defId == .invalid`，conformance 就没法按声明对齐。koralc 一直从 `1` 起，已对齐。
+
+**两端同一处形状不同**：koralc 的门在 `resolve_method_signature_unchecked` 的各条返回路上；
+Swift 的 `extensionMethods` 读点分散，关键一处在 `inferMethodOnType`（它排在
+`lookupDeclaredMethod` **之前**，不走门就绕过去了）。
 
 ## 9. 2026-10-25 跨包合并收口
 
@@ -137,3 +171,12 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
   （dep 路径依赖被拒、同包 helper 放行）。
 
 验证：seed 自检与主门各 826/826（2026-10-25），跨包诊断两端逐字相同。
+
+## 10. 验证
+
+`scripts/verify.sh` 全链 **ALL GREEN**（2026-10-25，含方法面）：seed 自检、主门、
+stage2、差分门各 **836/836**（824 + 方法面 12），`FIXED POINT`，`dangling=0`；
+koralfmt 225/225，corpus gate 219 文件 0 失败；样本三个全部构建通过；
+doc gen 自检通过、14 个模块的 API 文档是新的。差分门默认开诊断比对，
+**两端错误面逐字相同**——方法面的诊断（`Trait 'T' provides it but is not in scope; …`）
+也在比对范围内。

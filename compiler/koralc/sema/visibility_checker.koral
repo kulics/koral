@@ -140,4 +140,70 @@ given VisibilityChecker {
             .ModuleImport() then false,
         };
     };
+
+    /// METHOD FACE (§3.4): is this trait DECLARATION in scope in this file?
+    ///
+    /// Deliberately NOT `can_access_directly`: that answers "can this file
+    /// WRITE the spelling", and `{ IntoPath as IT }` leaves `IntoPath`
+    /// unwritable. A trait in scope under any spelling still opens its methods
+    /// -- the method is called by its own name (`f.read()`), and Rust agrees
+    /// (`use std::io::Read as R;` still permits `f.read()`). So this asks
+    /// whether the declaration is REACHABLE here, under whatever spelling.
+    ///
+    /// `{ }` answers no: it is a dependency edge with no member surface, and
+    /// §3.3 gives it no methods either.
+    public trait_declaration_in_scope(
+        self,
+        trait_module_path List[String],
+        trait_name String,
+    ) Bool = {
+        if trait_module_path.count() == 0 then {
+            return true;
+        };
+        if string_list_eq(trait_module_path, self.current_module_path) then {
+            return true;
+        };
+        if self.is_std_root(trait_module_path) and not self.is_std_module(
+            self.current_module_path,
+        ) then {
+            return true;
+        };
+
+        // A symbol import reaches this file under either spelling: `{ T }`
+        // brings `T`, `{ T as A }` brings the declaration under `A` and leaves
+        // `T` unwritable -- but the TRAIT is in scope either way.
+        when self.import_graph.symbol_import_candidates(trait_name) in {
+            .Some(candidates) then {
+                for si in candidates then {
+                    if string_list_eq(si.module, self.current_module_path) and string_list_eq(
+                        si.target,
+                        trait_module_path,
+                    ) and source_file_matches(si.source_file, Option[String].Some(self.current_source_file)) then {
+                        return true;
+                    };
+                };
+            },
+            .None() then {},
+        };
+
+        // Batch import: `{ ... }` and `{ !a, ... }` arrive whole minus the
+        // filter; `{ a as b, ... }` is covered by its own symbol edge above.
+        for edge in self.import_graph.edges then {
+            if string_list_eq(edge.source, self.current_module_path) and string_list_eq(
+                edge.target,
+                trait_module_path,
+            ) and source_file_matches(edge.source_file, Option[String].Some(self.current_source_file)) then {
+                when edge.kind in {
+                    .BatchImport() then {
+                        if batch_filter_allows(edge.filter, trait_name) then {
+                            return true;
+                        };
+                    },
+                    _ then {},
+                };
+            };
+        };
+
+        return false;
+    };
 };

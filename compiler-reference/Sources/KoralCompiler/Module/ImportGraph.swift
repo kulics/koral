@@ -148,6 +148,66 @@ public struct ImportGraph {
         
         return .moduleImport
     }
+
+    /// METHOD FACE (§3.4): is this trait DECLARATION reachable in `inSourceFile`?
+    ///
+    /// Deliberately NOT `getImportKind(...).allowsDirectAccess`: that answers
+    /// "can this file WRITE the spelling", and `{ T as A }` leaves `T`
+    /// unwritable. A trait in scope under any spelling still opens its methods
+    /// -- Rust agrees (`use std::io::Read as R;` permits `f.read()`). So this
+    /// asks whether the DECLARATION reaches this file, under whatever spelling.
+    ///
+    /// `{ }` answers false: it is a dependency edge with no member surface, and
+    /// §3.3 gives it no methods either.
+    public func traitDeclarationInScope(
+        traitModulePath: [String],
+        traitName: String,
+        currentModulePath: [String],
+        currentSourceFile: String? = nil
+    ) -> Bool {
+        if traitModulePath.isEmpty {
+            return true
+        }
+        if traitModulePath == currentModulePath {
+            return true
+        }
+        // std root is a compiler-provided prelude for non-std modules only.
+        if traitModulePath.count == 1,
+            (traitModulePath[0] == "Std" || traitModulePath[0] == "std"),
+            !(currentModulePath.first == "Std" || currentModulePath.first == "std")
+        {
+            return true
+        }
+
+        // A symbol import reaches this file under either spelling: `{ T }`
+        // brings `T`, `{ T as A }` brings the declaration under `A` and leaves
+        // `T` unwritable -- but the TRAIT is in scope either way.
+        for symbolImport in symbolImports {
+            if symbolImport.module == currentModulePath,
+                symbolImport.target == traitModulePath,
+                (symbolImport.symbol == traitName || symbolImport.originalSymbol == traitName),
+                (symbolImport.sourceFile == nil || symbolImport.sourceFile == currentSourceFile)
+            {
+                return true
+            }
+        }
+
+        // Batch import: `{ ... }` and `{ !a, ... }` arrive whole minus the
+        // filter; `{ a as b, ... }` is covered by its own symbol edge above.
+        for edge in edges {
+            guard edge.source == currentModulePath,
+                edge.target == traitModulePath,
+                (edge.sourceFile == nil || edge.sourceFile == currentSourceFile)
+            else {
+                continue
+            }
+            if case .batchImport = edge.kind, batchFilterAllows(edge.filter, spelling: traitName) {
+                return true
+            }
+        }
+
+        return false
+    }
 }
 
 

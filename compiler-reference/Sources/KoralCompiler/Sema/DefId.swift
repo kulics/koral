@@ -377,7 +377,12 @@ public class DefIdMap {
     // MARK: - 私有属性
     
     /// 下一个可用的 ID
-    private var nextId: UInt64 = 0
+    // Starts at 1: `DefId.invalid` is `DefId(id: 0)`, so id 0 must never be
+    // handed out. A DefIdMap that starts at 0 makes its FIRST allocation
+    // unusable -- which is how a trait declared before anything else came back
+    // with `defId == .invalid` and no conformance could key on it. koralc's
+    // `DefIdMap` starts at 1 for the same reason.
+    private var nextId: UInt64 = 1
     
     /// 名称到 DefId 的映射（用于查找）
     ///

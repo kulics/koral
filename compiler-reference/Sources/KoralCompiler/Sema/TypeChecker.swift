@@ -148,6 +148,14 @@ public class TypeChecker {
   // declarations provide an extension slot so repeated trait paths can reuse the
   // same source without being treated as ambiguous.
   var extensionMethodTraitSources: [MethodOwner: [String: [DefId]]] = [:]
+  // METHOD FACE (§3.4). Inherent (`given X { m }`) is always callable; a method
+  // provided by a conformance / trait-tool (`given X as T { m }`, `given T { … }`)
+  // is callable only when `T` is in scope at the call site -- Rust's "items from
+  // traits can only be used if the trait is in scope". A slot in neither map is
+  // unstamped and stays open: refusing it would make the face depend on whether
+  // the checker happened to record provenance.
+  var inherentMethodNames: [MethodOwner: Set<String>] = [:]
+  var methodProviderTraits: [MethodOwner: [String: [DefId]]] = [:]
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]

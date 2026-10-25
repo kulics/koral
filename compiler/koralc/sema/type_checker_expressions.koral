@@ -78,8 +78,20 @@ given TypeChecker {
         if self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
             return false;
         };
+        // METHOD FACE (§3.4): when the method exists but its trait is out of
+        // scope, say so and hand over the `using` line. Rust does the same at
+        // E0599 -- without it the reader is told a method that plainly exists
+        // does not.
+        let face_hint = self.method_face_hint(
+            self.extension_template_key(self.normalize_method_receiver_type(lookup_type)),
+            member,
+        );
+        let message = "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'";
         self.push_diagnostic(
-            "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'",
+            when face_hint in {
+                .Some(hint) then "\(message). \(hint)",
+                .None() then message,
+            },
             span,
         );
         return true;

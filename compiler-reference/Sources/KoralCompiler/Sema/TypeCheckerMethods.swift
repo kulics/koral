@@ -4,6 +4,100 @@ import Foundation
 // This extension contains methods for resolving methods and handling intrinsic calls.
 
 extension TypeChecker {
+  // MARK: - Method Face (§3.4)
+
+  /// Stamp a method as inherent (`given X { m }`) -- always callable.
+  func markInherentMethod(owner: MethodOwner, name: String) {
+    var set = inherentMethodNames[owner] ?? []
+    set.insert(name)
+    inherentMethodNames[owner] = set
+  }
+
+  /// Stamp the TRAIT that provides a method (`given X as T { m }`, or a
+  /// `given T { … }` tool member materialised onto `X`). One method may be
+  /// stamped by several traits; the slot is open if ANY of them is in scope.
+  func markTraitProvidedMethod(owner: MethodOwner, name: String, traitDefId: DefId) {
+    guard traitDefId != .invalid else { return }
+    var byName = methodProviderTraits[owner] ?? [:]
+    var traits = byName[name] ?? []
+    if !traits.contains(traitDefId) {
+      traits.append(traitDefId)
+    }
+    byName[name] = traits
+    methodProviderTraits[owner] = byName
+  }
+
+  /// Is this trait DECLARATION in scope in the file being checked?
+  ///
+  /// Deliberately not "can this file write the spelling": `{ T as A }` leaves
+  /// `T` unwritable but the trait is still in scope, and its methods are called
+  /// by their own names. Rust agrees -- `use std::io::Read as R;` still permits
+  /// `f.read()`. `{ }` answers false: it is a dependency edge with no member
+  /// surface and no methods.
+  func traitInScope(_ traitDefId: DefId) -> Bool {
+    guard traitDefId != .invalid else { return true }
+    guard let modulePath = context.getModulePath(traitDefId) else { return true }
+    guard let graph = importGraph else { return true }
+    let traitName = context.getName(traitDefId) ?? ""
+    let r = graph.traitDeclarationInScope(
+      traitModulePath: modulePath,
+      traitName: traitName,
+      currentModulePath: currentModulePath,
+      currentSourceFile: currentSourceFile.isEmpty ? nil : currentSourceFile)
+    return r
+  }
+
+  /// Does the method face admit `owner.name` here?
+  func methodFaceAllows(owner: MethodOwner, name: String) -> Bool {
+    if inherentMethodNames[owner]?.contains(name) == true {
+      return true
+    }
+    let traits = methodProviderTraits[owner]?[name] ?? []
+    if traits.isEmpty {
+      return true
+    }
+    let ok = traits.contains(where: { traitInScope($0) })
+    return ok
+  }
+
+  /// A method-table read that honours the method face (§3.4).
+  func visibleDeclaredMethod(on selfType: Type, name: String) -> Symbol? {
+    let owner = context.methodOwner(of: selfType)
+    guard let sym = extensionMethods[owner]?[name] else { return nil }
+    guard methodFaceAllows(owner: owner, name: name) else { return nil }
+    return sym
+  }
+
+  /// Why `owner.name` is not callable here, as a sentence to append to
+  /// `Member '…' not found`. Rust prints the same at E0599.
+  func methodFaceHint(owner: MethodOwner, name: String) -> String? {
+    if inherentMethodNames[owner]?.contains(name) == true {
+      return nil
+    }
+    let traits = methodProviderTraits[owner]?[name] ?? []
+    if traits.isEmpty {
+      return nil
+    }
+    if traits.contains(where: { traitInScope($0) }) {
+      return nil
+    }
+    let traitDefId = traits[0]
+    let traitName = context.getName(traitDefId) ?? ""
+    let modulePath = context.getModulePath(traitDefId) ?? []
+    let spec = modulePathToUsingSpecifier(modulePath)
+    return
+      "Trait '\(traitName)' provides it but is not in scope; import it with using \"\(spec)\" { \(traitName) };"
+  }
+
+  /// `Member '…' not found in type '…'`, with the method-face hint appended when
+  /// the method exists but its trait is out of scope (§3.4). Mirrors koralc's
+  /// `report_missing_member_if_needed`.
+  func missingMemberMessage(memberName: String, typeName: String, owner: MethodOwner) -> String {
+    let base = "Member '\(memberName)' not found in type '\(typeName)'"
+    guard let hint = methodFaceHint(owner: owner, name: memberName) else { return base }
+    return "\(base). \(hint)"
+  }
+
   private func lookupDeclaredMethodDirect(on selfType: Type, name: String) throws -> Symbol? {
     switch selfType {
     case .reference(let inner):
@@ -109,7 +203,7 @@ extension TypeChecker {
     switch selfType {
     case .structure(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
+      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
@@ -138,7 +232,7 @@ extension TypeChecker {
 
     case .`enum`(let defId):
       let typeName = context.getName(defId) ?? ""
-      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
+      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
@@ -306,7 +400,7 @@ extension TypeChecker {
       .float32, .float64,
       .bool:
       let typeName = selfType.description
-      if let methods = extensionMethods[context.methodOwner(of: selfType)], let sym = methods[name] {
+      if let sym = visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
@@ -538,6 +632,11 @@ extension TypeChecker {
         continue
       }
       let traitName = traitInfo.name
+      // METHOD FACE (§3.4): a trait tool member is that trait's method, and is
+      // callable only when the trait is in scope here.
+      guard traitInScope(traitInfo.defId) else {
+        continue
+      }
       guard let methodTemplate = templates.first(where: { $0.method.name == name }) else {
         continue
       }

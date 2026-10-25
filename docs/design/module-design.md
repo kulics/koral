@@ -1,18 +1,19 @@
 # Koral 模块与导入设计
 
-> **Status**：Implemented（2026-10-24 形态层重做已落地；方法面/身份/命名表/孤儿文件四条未做，见「实施」）· 2026-10-24
+> **Status**：Implemented（2026-10-24 形态层重做、2026-10-25 方法面已落地；身份/命名表/孤儿文件三条未做，见「实施」）· 2026-10-25
 > **对应实现**：[`module-design-implementation.md`](../implementation/module-design-implementation.md)
 > **体裁**：设计文档 —— 记决定与取舍，不记执行过程。执行过程与验收判据在实现记录里。
 > **取舍判据**（复杂度预算、设计公理）见 [`design-axioms.md`](design-axioms.md)。
 
-## 摘要 —— 原文「0. 一句话」（2026-10-24 重写）
+## 摘要 —— 原文「0. 一句话」（2026-10-24 重写，2026-10-25 方法面改 Rust 版）
 
 > **外部单元是 package，包内含一个或多个 module。**
 > **单文件即模块**——文件不是模块系统的概念，它只是模块的最小尺寸。
 > **`using "X";` 是合并（边界消掉），`using "X" { … };` 是导入（边界保留）。**
 > 括号是「边界还在」的记号，也是过滤器的家；两者不许交叉。
 > **合并只在包内**——别的包的模块只能导入，包边界是合并停下的地方。
-> **`given` 挂在类型（+ trait）上**，方法面跟被点名的东西走，不跟模块走。
+> **`given` 挂在类型（+ trait）上**：inherent 方法跟着值走，trait 方法跟着 trait 名走。
+> **点名类型不带来 trait 方法**——与 Rust 同规则，实测钉死。
 > **模块全名 = `包名[/子路径]`** 只对已登记模块；未登记的本地模块走相对路径。
 > **单模块包不特殊处理**——它就是只有主模块的包，主模块名 = 包名。
 
@@ -237,25 +238,58 @@ rename-item  ::= name "as" name
 「错误从表达式里走」、模式取反破坏 `when` 穷尽性）。它要么在这里干活，要么该从三个前端的
 lexer 里删掉——**「已词法化、无产生式」的中间态是纯负债**，不允许保持。
 
-#### 3.4 方法面：`given` 挂在类型（+ trait）上，不挂在模块上
+#### 3.4 方法面：inherent 跟着值走，trait 跟着 trait 名走
 
 `using` 带进来的是两样东西：**名字**（清单挑的）与**方法面**（可派发的 `given` 方法）。
-后者跟被点名的东西走，**不跟模块走**：
+后者只跟**被点名的 trait** 与**值本身**走，**不跟模块走**：
 
-| 文件点名了 | 方法面 |
+| 调用形态 | 准入 |
 | --- | --- |
-| **trait `T`** | `T` 的方法在**所有实现类型**上可派发（能力契约） |
-| **类型 `X`** | `X` 的 inherent `given` 方法 **+ 与 `X` 同模块**声明的 `given X as T` 方法 |
-| 无关名字 | 方法面**不变** |
-| `{ }` | 方法面**不变**（惰性） |
+| `x.m(…)`，`m` 来自 `given X { … }` | **无**——有 `X` 的值即可 |
+| `x.m(…)`，`m` 来自 `given X as T { … }` 或 `given T { … }` | **`T` 在作用域内** |
+| `X.m(…)`（关联 / 限定形式） | **`X` 在作用域内** |
 
-**跨模块加给 `X` 的 `given X as T`，只跟 trait 走。** 例：`given String as IntoPath` 在
-`std/os`，而 `String` 在 prelude（处处可点名）——若点名 `X` 就带出方法面，`std/os` 的
-`into_path()` 会漏进每个文件。判据是：**类型带上它自己模块给它加的面；别的模块加的面
-要走 trait 这道显式门。**
+> **点名类型不带来任何 trait 方法。点名 trait 在所有实现类型上打开它的方法。**
 
-推论：`using "std/os" { env };` **不再**捎带 `String.into_path()`；要 `into_path` 就点名
-`IntoPath`，或点名 `Path`（`given Path as IntoPath` 与 `Path` 同模块），或干脆 `{ ... }`。
+这就是 Rust 的规则。判据是硬的，两处实测（rustc 1.88）：
+
+- `pub struct File` 与 `impl Read for File` 同在 `library/std/src/fs.rs`（115 行 / 1308 行），
+  **同文件同模块**；`use std::fs::File;` 后调 `f.read()` 仍然 E0599
+  「trait `Read` … is implemented but not in scope; perhaps you want to import it」；
+- 最小反例：`S`、`T`、`impl T for S` **全在同一模块**，外模块拿 `S` 的值不 import `T`，
+  `s.m()` 同样 E0599。
+
+**「同模块的 `given X as T` 白送」被明确否掉**（见「替代方案」）：它会让同一个 trait 方法
+在不同接收者上准入不同、让 impl 挪文件改下游、让读清单判不了，而换来的只是省一行
+`using`——那一行编译器会直接写给你。
+
+**`T` 在作用域内**指下列之一：
+
+1. `T` 在当前文件所属模块里声明——**合并进来的也算**（合并就是同模块）；
+2. `{ T }` 或 `{ T as A }` 显式导入。**改名仍然算**：`{ T as A }` 让 `A` 可写、`T` 不可写，
+   但 **trait 本身在作用域内**，它的方法照旧用自己的名字调（Rust：`use std::io::Read as R;`
+   仍允许 `f.read()`）；
+3. 从 `T` 所在模块批导入且未被 `!` 排除（`{ ... }`、`{ !a, ... }`）；
+4. prelude（`std` 主模块的 trait）；
+5. 出现在**当前声明的泛型界**里（`[T IntoPath]`、`[T Ord and Hash]`）——**含该界的超 trait**。
+
+**不算的**：`{ }` · 导入了模块里别的名字（`{ env }`）· **导入了类型（`{ Path }`）** · 什么都没写。
+
+第 5 条与其余四条刻意不同：界是写在**当前声明**里的，`fn go[T Leaf](x T) = x.r() + x.l()`
+在 `Leaf: Root` 下两个方法都能调，而**具体接收者**只导入 `Leaf` 时 `x.r()` 不行——
+Rust 一样（`use a::Sub;` 之后 `x.b()` 仍是 E0599）。界是「我声明了这个约束」，
+导入是「我拿了这个名字」，两件事。
+
+推论：
+
+- **合并 = 方法面全开**。`using "./x.koral";` 之后 x 的 trait 都是同模块，名字与方法一起到。
+  合并/导入的对比因此更硬：一个是全开，一个按清单；
+- **impl 全局注册、门在 trait**。只要模块进了构建图，它的 `given` 就是候选；能不能调只看
+  trait 在不在作用域。所以 `std/os` 的 `given String as IntoPath` 被别的文件加载了，
+  也漏不到没点名 `IntoPath` 的文件里——prelude 泄漏不存在；
+- **诊断必须给补丁**。非 inherent 方法找不到时，报错要写出
+  `Trait 'T' provides it but is not in scope; import it with using "…" { T };`。
+  对齐 Rust 的 E0599 help——不给的话读者看见一个明明存在的方法被说成不存在。
 
 规则：
 
@@ -844,6 +878,36 @@ using "std" { ... };
 **为什么记在这里**：这套东西被替换过一次（公理 7「替换不叠加」），而替代方案里没记，
 下一轮评审必然重新问「为什么不给 `io.Reader`」。记下来是一劳永逸的那一步。
 
+### 方法面：不采用「同模块的 `given X as T` 白送」
+
+**否掉。** 初稿 §3.4 写过「点名类型 `X` → `X` 的 inherent 方法 **+ 与 `X` 同模块**声明的
+`given X as T` 方法」，理由是「拿到了 `File` 却不能 `read` 像缺了基本功能」。**实测推翻**：
+Rust 里 `impl Read for File` 就写在 `File` 自己的文件里，`f.read()` 照样要 `use std::io::Read;`。
+
+| | 「同模块白送」 | **Rust 规则（现行）** |
+| --- | --- | --- |
+| 同一 trait 方法在不同接收者上 | **准入不同**（`given Path as IntoPath` 在 `std/os`，`Path` 也在；`String` 不在） | 一致 |
+| impl 挪个文件 | **下游静默断** | 无影响 |
+| 读 `using "std/os" { Path };` | 判不出 `into_path` 能不能用 | 判得出 |
+| `given T { … }` 工具块 | 与 `given T` 必然同模块 → 工具方法白送、required 方法不送，**同一 trait 内分裂** | 一致 |
+| 规则条数 | 三条准入 | 两条准入 |
+
+「基本功能」由三层吃掉，不由弱化规则吃掉：
+
+| 层 | 准入 | `File` 的例子 |
+| --- | --- | --- |
+| **inherent** | 有值就行 | `metadata` / `set_len` / `sync_all` |
+| **自由函数** | 导入函数名 | `read_file(path)` / `write_file(path, …)` |
+| **trait** | trait 在作用域 | `read` / `write` / `seek` |
+
+`read` 不是 `File` 的基本功能，`File` **参与 `Reader` 抽象**才是——所以它是 trait 方法，
+`fn copy<R: Reader, W: Writer>(…)` 才能作用在任何东西上。要「读一个文件」用 `read_file`；
+要「流式读」说明你正在用 `Reader`，那点名 `Reader` 不是摩擦，是信号。
+
+配套：**诊断必须把该补的 `using` 写出来**（§3.4），否则这条规则的代价就没人付得起。
+
+### 排除导入的拼写
+
 ### 排除导入的拼写
 
 **否掉 `hide` / `except` / `hiding` 关键字。** 为一个低频形态占一个关键字不值——那几个词
@@ -903,6 +967,7 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 | 全量导入 | 无 | `import *` | `use foo::*` | **`{ ... }`** |
 | 排除导入 | 无 | 无 | 无 | **`{ !a, ... }`**（同 Dart `hide`、Haskell `hiding`） |
 | 惰性导入 | `import _` | 无 | `use foo as _` | **`{ }`** |
+| trait 方法准入 | 无 trait | 无 trait | **trait 在作用域** | **trait 在作用域（同 Rust）** |
 
 **从各语言借来的惯例**：
 
@@ -916,6 +981,7 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 | 相对路径带 `./`，裸名是包 | ES modules |
 | `{ }` 惰性占位 | Go 的 `import _` |
 | 排除导入 | Dart `hide` / Haskell `hiding`（拼写改用 `!`） |
+| 方法面：inherent 免准入、trait 要在作用域 | Rust |
 | 声明用包内名、引用用全名 | Java（类名 vs import） |
 
 
@@ -947,13 +1013,12 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 
 本文与该记录按文件名词干配对：`module-design.md` / `module-design-implementation.md`。
 
-**2026-10-24 形态层重做的这一批**：已落地的见
+**2026-10-24 形态层重做 + 2026-10-25 方法面**：已落地的见
 [`module-design-implementation.md`](../implementation/module-design-implementation.md) §0。
-四条**未做**，理由记在那里 §7：
+三条**未做**，理由记在那里 §7：
 
 | 未做 | 理由摘要 |
 | --- | --- |
-| §3.4 方法面（`given` 跟被点名的东西走） | 现状是模块可达性决定；收紧需在方法查找加名字可见性门。影响面已量：**0 破坏** |
 | §5.3.1 模块身份 =（`source`，入口位置） | 会改 codegen 符号前缀，属 ABI 变更；本地未登记模块暂用入口名，**是有意留的偏差** |
 | §5.2 `modules` 降为对外命名表 | 本地模块不登记已可用；manifest 仍是清单 |
 | §7 孤儿文件报错 | 需要包级「源文件全集 − 模块闭包全集」扫描；正向一半（一文件不属两模块）已落 |

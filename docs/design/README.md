@@ -58,7 +58,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 
 | 设计 | Status | 对应实现记录 | 最近状态变更 |
 |---|---|---|---|
-| [`module-design.md`](module-design.md) —— 模块与导入 | Implemented（2026-10-24 形态层重做已落地；方法面/身份/命名表/孤儿文件四条未做，见实现记录 §7） | [`../implementation/module-design-implementation.md`](../implementation/module-design-implementation.md) | 2026-10-24 |
+| [`module-design.md`](module-design.md) —— 模块与导入 | Implemented（2026-10-24 形态层重做、2026-10-25 方法面已落地；身份/命名表/孤儿文件三条未做，见实现记录 §7） | [`../implementation/module-design-implementation.md`](../implementation/module-design-implementation.md) | 2026-10-25 |
 | [`thin-pointer-design.md`](thin-pointer-design.md) —— 薄指针对象表示 | Implemented | 文内 `## 实施` 一节（未单独拆出） | 2026-10 |
 | [`type-semantics.md`](type-semantics.md) —— type / type mutable / Clone / Drop | Implemented | 无单独记录（随 std 与两编译器同批） | 2026-10 |
 | [`control-flow.md`](control-flow.md) —— 控制流 | Implemented（**材料不足**） | 无单独记录（回归用例看住） | 2026-10 |

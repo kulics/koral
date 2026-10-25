@@ -1525,7 +1525,8 @@ extension TypeChecker {
   /// Also resolves struct and enum types so function signatures can reference them.
   func collectGivenSignatures(
     _ decl: GlobalNode,
-    enforceTypeDeclarationModuleLocality: Bool = true
+    enforceTypeDeclarationModuleLocality: Bool = true,
+    providingTrait: DefId? = nil
   ) throws {
     switch decl {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
@@ -1835,6 +1836,14 @@ extension TypeChecker {
             }
 
             extensionMethods[methodOwnerKey]![registeredMethod.name] = methodSymbol
+            // METHOD FACE (§3.4): a conformance member travels with its trait;
+            // an inherent member is always callable.
+            if let providingTrait {
+              markTraitProvidedMethod(
+                owner: methodOwnerKey, name: registeredMethod.name, traitDefId: providingTrait)
+            } else {
+              markInherentMethod(owner: methodOwnerKey, name: registeredMethod.name)
+            }
           } else {
             let existsInGeneric = genericExtensionMethods[methodOwnerKey]!.contains(where: { $0.method.name == registeredMethod.name })
             let existsInIntrinsic = (genericIntrinsicExtensionMethods[methodOwnerKey] ?? []).contains(where: { $0.method.name == registeredMethod.name })
@@ -2055,7 +2064,8 @@ extension TypeChecker {
         if !hasExistingMethodSignature {
           try collectGivenSignatures(
             .givenDeclaration(typeParams: typeParams, type: typeNode, methods: preRegisteredMethods, span: span),
-            enforceTypeDeclarationModuleLocality: false
+            enforceTypeDeclarationModuleLocality: false,
+            providingTrait: visibleTraitInfo(traitName)?.defId
           )
         }
       }
@@ -2156,11 +2166,13 @@ extension TypeChecker {
           if extensionMethods[methodOwnerKey]![method.name] != nil {
             throw SemanticError.duplicateDefinition(method.name, span: span)
           }
-          
+
           extensionMethods[methodOwnerKey]![method.name] = methodSymbol
+          // `given intrinsic X { … }` is inherent: no face gate (§3.4).
+          markInherentMethod(owner: methodOwnerKey, name: method.name)
         }
       }
-      
+
     case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span, let nameSpan):
       self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them

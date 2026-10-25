@@ -11,6 +11,13 @@ public type mutable MethodTable(
     // (owner, method_name). The DefId form of Swift's
     // `extensionMethodTraitSources[typeName][methodName]`.
     mutable method_sources Dict[MethodOwner, Dict[String, List[DefId]]],
+    // METHOD FACE (§3.4): which TRAIT provides a non-inherent method.
+    // Empty means "no trait claimed it" -- an inherent `given X { }` or a
+    // declaration whose provenance was never stamped -- and such a method is
+    // always callable. A method listed here is callable only when one of these
+    // traits is in scope at the call site (Rust: "items from traits can only be
+    // used if the trait is in scope").
+    mutable method_traits Dict[MethodOwner, Dict[String, List[DefId]]],
 );
 
 given MethodTable {
@@ -18,6 +25,7 @@ given MethodTable {
         return MethodTable(
             Dict[MethodOwner, Dict[String, Symbol]].new(),
             Dict[MethodOwner, Set[String]].new(),
+            Dict[MethodOwner, Dict[String, List[DefId]]].new(),
             Dict[MethodOwner, Dict[String, List[DefId]]].new(),
         );
     };
@@ -99,5 +107,47 @@ given MethodTable {
 
     public is_inherent(self, owner MethodOwner, method_name String) Bool = {
         return self.name_set(self.inherent_keys, owner).contains(method_name);
+    };
+
+    /// Stamp the TRAIT that provides this method (§3.4 method face).
+    /// `given X as T { m }` and a `given T { … }` tool member materialised onto
+    /// `X` both stamp `T`; an inherent `given X { m }` stamps nothing and stays
+    /// in `inherent_keys`. One method may be stamped by several traits -- the
+    /// slot is then open if ANY of them is in scope.
+    public register_providing_trait(
+        self,
+        owner MethodOwner,
+        method_name String,
+        trait_def_id DefId,
+    ) Void = {
+        let mutable by_name = when self.method_traits.get(owner) in {
+            .Some(m) then m,
+            .None() then Dict[String, List[DefId]].new(),
+        };
+        let mutable traits = when by_name.get(method_name) in {
+            .Some(list) then list,
+            .None() then List[DefId].new(),
+        };
+        for existing in traits then {
+            if existing == trait_def_id then {
+                return;
+            };
+        };
+        traits.push(trait_def_id);
+        by_name.insert(method_name, traits);
+        self.method_traits.insert(owner, by_name);
+    };
+
+    /// Traits that provide `method_name` on `owner`. Empty when the method is
+    /// inherent or its provenance was never stamped -- the caller treats that
+    /// as always callable.
+    public providing_traits(self, owner MethodOwner, method_name String) List[DefId] = {
+        return when self.method_traits.get(owner) in {
+            .Some(by_name) then when by_name.get(method_name) in {
+                .Some(list) then list,
+                .None() then List[DefId].new(),
+            },
+            .None() then List[DefId].new(),
+        };
     };
 };

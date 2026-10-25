@@ -5795,14 +5795,20 @@ extension TypeChecker {
           if isForeignStruct {
             throw SemanticError(.unknownForeignField(type: name, field: memberName), span: currentSpan)
           }
-          throw SemanticError.undefinedMember(memberName, name)
+          throw SemanticError(
+            .generic(missingMemberMessage(memberName: memberName, typeName: name, owner: context.methodOwner(of: typeToLookup))),
+            span: currentSpan)
         } else {
           // Every receiver kind reports the same missing-member diagnostic.
           // This used to fall through to
           // `.invalidOperation(op: "member access", type1: typeToLookup.description, type2: "")`,
           // which renders as `Invalid operation member access between types Box[Int] and `
           // -- `type2` is spelled as an empty string, so the message ends mid-clause.
-          throw SemanticError.undefinedMember(memberName, typeToLookup.description)
+          throw SemanticError(
+            .generic(missingMemberMessage(
+              memberName: memberName, typeName: typeToLookup.description,
+              owner: context.methodOwner(of: typeToLookup))),
+            span: currentSpan)
         }
       }
     }
@@ -6078,7 +6084,8 @@ extension TypeChecker {
         type: methodSym.type
       )
     }
-    if let methods = extensionMethods[context.methodOwner(of: typeToLookup)], let methodSym = methods[memberName] {
+    // METHOD FACE (§3.4): the instance-method read goes through the face gate.
+    if let methodSym = visibleDeclaredMethod(on: typeToLookup, name: memberName) {
       guard isReceiverStyleMethod(methodSym) else {
         return nil
       }
