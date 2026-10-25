@@ -33,6 +33,7 @@ docs/
     type-semantics.md                type / type mutable / Clone / Drop
     control-flow.md                  控制流
     flow-logical-layers.md           流程层与逻辑层
+    flow-operator-forms.md           流程算子形态与折叠（and then / or else / it）
     generics-and-monomorphization.md 泛型与单态化
     traits-and-givens.md             trait / given / trait object
     name-resolution.md               名字解析与身份
@@ -41,6 +42,7 @@ docs/
     README.md                          章程 vs 记录
     developer-guide.md                    活的章程
     module-design-implementation.md       记录
+    flow-operator-forms-implementation.md 记录
     identity-matching-tracking.md         记录
     bootstrap-productization.md           章程
     samples-capability.md                 记录
