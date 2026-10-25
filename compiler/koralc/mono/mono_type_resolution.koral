@@ -5943,12 +5943,11 @@ file_private let resolve_method_reference_call_callee(
     // has instantiated it yet. Only a DefId that has actually been materialized
     // may be used as-is; anything else falls through to identity resolution,
     // which materializes the specialization and returns ITS DefId.
-    let exact_concrete_bound_method = method.def_id.id > 0 and not has_generic_parameter(
+    let exact_concrete_bound_method = method.def_id.id > 0 and mono.storage.instantiated_method_def_ids.contains(
+        method.def_id.id,
+    ) and not has_generic_parameter(
         expected_method_type,
-    ) and not mono_is_unresolved_expr_type(mono, expected_method_type) and declared_static_receiver_method_is_materialized(
-        mono,
-        method.def_id,
-    ) and method_def_id_matches_receiver_exactly(
+    ) and not mono_is_unresolved_expr_type(mono, expected_method_type) and method_def_id_matches_receiver_exactly(
         mono,
         method.def_id,
         method_resolution_receiver_type,
@@ -10121,12 +10120,19 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
                 // type is not an emitted symbol. Only a materialized DefId may
                 // be kept as-is; a template's DefId must go through identity
                 // resolution so the specialization is actually instantiated.
-                let exact_concrete_method_match = new_method.def_id.id > 0 and not has_generic_parameter(
+                // "Materialized" means the DefId IS the emitted identity
+                // (`instantiated_method_def_ids`, the same L0 answer
+                // `resolve_method_instance_by_identity` short-circuits on) --
+                // not merely "a FunctionDecl exists somewhere", which is also
+                // true for a template and would keep the template's DefId. That
+                // is what once emitted `List_U32_d57_push` (composed from the
+                // template) next to `List_U32_push_d57` (the instance's minted
+                // name) and failed to link.
+                let exact_concrete_method_match = new_method.def_id.id > 0 and mono.storage.instantiated_method_def_ids.contains(
+                    new_method.def_id.id,
+                ) and not has_generic_parameter(
                     resolved_method_type,
-                ) and not mono_is_unresolved_expr_type(mono, resolved_method_type) and declared_static_receiver_method_is_materialized(
-                    mono,
-                    new_method.def_id,
-                ) and method_def_id_matches_receiver_exactly(
+                ) and not mono_is_unresolved_expr_type(mono, resolved_method_type) and method_def_id_matches_receiver_exactly(
                     mono,
                     new_method.def_id,
                     binding_receiver_type,

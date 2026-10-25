@@ -4779,17 +4779,35 @@ given MIRFunctionBuilder {
                 .None() then {},
             };
         };
-        if direct_matched.count() == UInt(1) then {
-            let resolved_def_id = direct_matched[UInt(0)];
+        if direct_matched.count() >= UInt(1) then {
+            // More than one match means the same specialization was
+            // materialized under several DefIds (two instantiation paths).
+            // They answer for one C symbol, so picking one is right -- but
+            // refusing to pick is not: the caller then falls back to the
+            // definition-time DefId, which names a DIFFERENT C symbol and the
+            // program fails to link. Keep the caller's own choice when it is
+            // among the matches; otherwise take the lowest DefId so the pick
+            // is deterministic.
+            let mutable resolved_def_id = direct_matched[UInt(0)];
+            for candidate in direct_matched then {
+                if candidate == method.def_id then {
+                    resolved_def_id = candidate;
+                    break;
+                };
+            };
+            if not (resolved_def_id == method.def_id) then {
+                for candidate in direct_matched then {
+                    if candidate.id < resolved_def_id.id then {
+                        resolved_def_id = candidate;
+                    };
+                };
+            };
             return when self.context.get_function_type(resolved_def_id) in {
                 .Some(function_type) then Option[Symbol].Some(
                     Symbol(resolved_def_id, function_type, SymbolKind.Function()),
                 ),
                 .None() then Option[Symbol].None(),
             };
-        };
-        if direct_matched.count() > UInt(1) then {
-            return Option[Symbol].None();
         };
         if trait_receiver_matched.count() == UInt(1) then {
             let resolved_def_id = trait_receiver_matched[UInt(0)];

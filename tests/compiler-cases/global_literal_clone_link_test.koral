@@ -1,0 +1,34 @@
+// EXPECT: table 1 2 3
+// EXPECT: local 4 5
+// EXPECT: shared 1 3
+// EXPECT: independent 1 99
+// EXPECT: words a b
+
+// A module-level collection literal is desugared into `push` calls inside the
+// global initializer, and `List.clone()` reaches `push` through its own body.
+// Both call sites must name the SAME C symbol for their shared instantiation.
+//
+// Regression: they once got two spellings of `List[T].push` -- the minted
+// `List_U32_push_d57` and the composed `List_U32_d57_push` -- so the program
+// failed to link (LNK2019: unresolved external). The trigger is exactly this
+// pairing: a module-level collection literal and `List.clone()` in one
+// program, either one alone linking fine.
+
+file_private let table List[UInt32] = [1, 2, 3];
+file_private let words List[String] = ["a", "b"];
+
+public let main() Int = {
+    let local List[UInt32] = [4, 5];
+    let local_copy = local.clone();
+    let shared_copy = table.clone();
+    let word_copy = words.clone();
+
+    println("table \(table[0]) \(table[1]) \(table[2])");
+    println("local \(local_copy[0]) \(local_copy[1])");
+    println("shared \(shared_copy[0]) \(shared_copy[2])");
+
+    shared_copy[0] = 99;
+    println("independent \(table[0]) \(shared_copy[0])");
+    println("words \(word_copy[0]) \(word_copy[1])");
+    return 0;
+};
