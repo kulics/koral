@@ -687,6 +687,206 @@ given Duration as Div[Int] {
     public div(self, k Int) Duration;
 };
 
+given WrappingInt8 as Add[WrappingInt8] {
+    public add(self, other WrappingInt8) WrappingInt8;
+};
+
+given WrappingInt8 as Sub[WrappingInt8] {
+    public sub(self, other WrappingInt8) WrappingInt8;
+};
+
+given WrappingInt8 as Mul[WrappingInt8] {
+    public mul(self, other WrappingInt8) WrappingInt8;
+};
+
+given WrappingInt8 as Div[WrappingInt8] {
+    public div(self, other WrappingInt8) WrappingInt8;
+};
+
+given WrappingInt8 as Rem[WrappingInt8] {
+    public rem(self, other WrappingInt8) WrappingInt8;
+};
+
+given WrappingInt16 as Add[WrappingInt16] {
+    public add(self, other WrappingInt16) WrappingInt16;
+};
+
+given WrappingInt16 as Sub[WrappingInt16] {
+    public sub(self, other WrappingInt16) WrappingInt16;
+};
+
+given WrappingInt16 as Mul[WrappingInt16] {
+    public mul(self, other WrappingInt16) WrappingInt16;
+};
+
+given WrappingInt16 as Div[WrappingInt16] {
+    public div(self, other WrappingInt16) WrappingInt16;
+};
+
+given WrappingInt16 as Rem[WrappingInt16] {
+    public rem(self, other WrappingInt16) WrappingInt16;
+};
+
+given WrappingInt32 as Add[WrappingInt32] {
+    public add(self, other WrappingInt32) WrappingInt32;
+};
+
+given WrappingInt32 as Sub[WrappingInt32] {
+    public sub(self, other WrappingInt32) WrappingInt32;
+};
+
+given WrappingInt32 as Mul[WrappingInt32] {
+    public mul(self, other WrappingInt32) WrappingInt32;
+};
+
+given WrappingInt32 as Div[WrappingInt32] {
+    public div(self, other WrappingInt32) WrappingInt32;
+};
+
+given WrappingInt32 as Rem[WrappingInt32] {
+    public rem(self, other WrappingInt32) WrappingInt32;
+};
+
+given WrappingInt64 as Add[WrappingInt64] {
+    public add(self, other WrappingInt64) WrappingInt64;
+};
+
+given WrappingInt64 as Sub[WrappingInt64] {
+    public sub(self, other WrappingInt64) WrappingInt64;
+};
+
+given WrappingInt64 as Mul[WrappingInt64] {
+    public mul(self, other WrappingInt64) WrappingInt64;
+};
+
+given WrappingInt64 as Div[WrappingInt64] {
+    public div(self, other WrappingInt64) WrappingInt64;
+};
+
+given WrappingInt64 as Rem[WrappingInt64] {
+    public rem(self, other WrappingInt64) WrappingInt64;
+};
+
+given WrappingUInt8 as Add[WrappingUInt8] {
+    public add(self, other WrappingUInt8) WrappingUInt8;
+};
+
+given WrappingUInt8 as Sub[WrappingUInt8] {
+    public sub(self, other WrappingUInt8) WrappingUInt8;
+};
+
+given WrappingUInt8 as Mul[WrappingUInt8] {
+    public mul(self, other WrappingUInt8) WrappingUInt8;
+};
+
+given WrappingUInt8 as Div[WrappingUInt8] {
+    public div(self, other WrappingUInt8) WrappingUInt8;
+};
+
+given WrappingUInt8 as Rem[WrappingUInt8] {
+    public rem(self, other WrappingUInt8) WrappingUInt8;
+};
+
+given WrappingUInt16 as Add[WrappingUInt16] {
+    public add(self, other WrappingUInt16) WrappingUInt16;
+};
+
+given WrappingUInt16 as Sub[WrappingUInt16] {
+    public sub(self, other WrappingUInt16) WrappingUInt16;
+};
+
+given WrappingUInt16 as Mul[WrappingUInt16] {
+    public mul(self, other WrappingUInt16) WrappingUInt16;
+};
+
+given WrappingUInt16 as Div[WrappingUInt16] {
+    public div(self, other WrappingUInt16) WrappingUInt16;
+};
+
+given WrappingUInt16 as Rem[WrappingUInt16] {
+    public rem(self, other WrappingUInt16) WrappingUInt16;
+};
+
+given WrappingUInt32 as Add[WrappingUInt32] {
+    public add(self, other WrappingUInt32) WrappingUInt32;
+};
+
+given WrappingUInt32 as Sub[WrappingUInt32] {
+    public sub(self, other WrappingUInt32) WrappingUInt32;
+};
+
+given WrappingUInt32 as Mul[WrappingUInt32] {
+    public mul(self, other WrappingUInt32) WrappingUInt32;
+};
+
+given WrappingUInt32 as Div[WrappingUInt32] {
+    public div(self, other WrappingUInt32) WrappingUInt32;
+};
+
+given WrappingUInt32 as Rem[WrappingUInt32] {
+    public rem(self, other WrappingUInt32) WrappingUInt32;
+};
+
+given WrappingUInt64 as Add[WrappingUInt64] {
+    public add(self, other WrappingUInt64) WrappingUInt64;
+};
+
+given WrappingUInt64 as Sub[WrappingUInt64] {
+    public sub(self, other WrappingUInt64) WrappingUInt64;
+};
+
+given WrappingUInt64 as Mul[WrappingUInt64] {
+    public mul(self, other WrappingUInt64) WrappingUInt64;
+};
+
+given WrappingUInt64 as Div[WrappingUInt64] {
+    public div(self, other WrappingUInt64) WrappingUInt64;
+};
+
+given WrappingUInt64 as Rem[WrappingUInt64] {
+    public rem(self, other WrappingUInt64) WrappingUInt64;
+};
+
+given WrappingInt as Add[WrappingInt] {
+    public add(self, other WrappingInt) WrappingInt;
+};
+
+given WrappingInt as Sub[WrappingInt] {
+    public sub(self, other WrappingInt) WrappingInt;
+};
+
+given WrappingInt as Mul[WrappingInt] {
+    public mul(self, other WrappingInt) WrappingInt;
+};
+
+given WrappingInt as Div[WrappingInt] {
+    public div(self, other WrappingInt) WrappingInt;
+};
+
+given WrappingInt as Rem[WrappingInt] {
+    public rem(self, other WrappingInt) WrappingInt;
+};
+
+given WrappingUInt as Add[WrappingUInt] {
+    public add(self, other WrappingUInt) WrappingUInt;
+};
+
+given WrappingUInt as Sub[WrappingUInt] {
+    public sub(self, other WrappingUInt) WrappingUInt;
+};
+
+given WrappingUInt as Mul[WrappingUInt] {
+    public mul(self, other WrappingUInt) WrappingUInt;
+};
+
+given WrappingUInt as Div[WrappingUInt] {
+    public div(self, other WrappingUInt) WrappingUInt;
+};
+
+given WrappingUInt as Rem[WrappingUInt] {
+    public rem(self, other WrappingUInt) WrappingUInt;
+};
+
 given Bool as Eq {
     public equals(self, other Bool) Bool;
 };
@@ -1306,61 +1506,21 @@ given Float32 {
 };
 
 given UInt {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
     public is_power_of_two(self) Bool;
     public next_power_of_two(self) Self;
 };
 
 given UInt64 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
     public is_power_of_two(self) Bool;
     public next_power_of_two(self) Self;
 };
 
 given UInt32 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
     public is_power_of_two(self) Bool;
     public next_power_of_two(self) Self;
 };
 
 given UInt16 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
     public is_power_of_two(self) Bool;
     public next_power_of_two(self) Self;
 };
@@ -1377,84 +1537,19 @@ given UInt8 {
     public to_ascii_lowercase(self) UInt8;
     public to_ascii_uppercase(self) UInt8;
     public equals_ascii_ignore_case(self, other UInt8) Bool;
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
     public is_power_of_two(self) Bool;
     public next_power_of_two(self) Self;
 };
 
-given Int {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
-};
+given Int {};
 
-given Int64 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
-};
+given Int64 {};
 
-given Int32 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
-};
+given Int32 {};
 
-given Int16 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
-};
+given Int16 {};
 
-given Int8 {
-    public count_ones(self) UInt;
-    public count_zeros(self) UInt;
-    public leading_zeros(self) UInt;
-    public trailing_zeros(self) UInt;
-    public leading_ones(self) UInt;
-    public trailing_ones(self) UInt;
-    public rotate_left(self, n UInt) Self;
-    public rotate_right(self, n UInt) Self;
-    public reverse_bits(self) Self;
-    public swap_bytes(self) Self;
-};
+given Int8 {};
 
 given SliceSpec {
     public new(offset: UInt, len: UInt) SliceSpec;

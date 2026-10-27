@@ -99,7 +99,12 @@ public class BodyChecker: CompilerPass {
             checker.currentModulePath = sourceInfo?.modulePath ?? []
             checker.currentPackageID = sourceInfo?.packageID ?? ""
             checker.currentSpan = decl.span
-            
+
+            // Each declaration reports its own violations. The constraint
+            // caches otherwise carry one declaration's recorded failure as a
+            // pass, and the next declaration's identical mistake goes unseen.
+            checker.resetDeclarationBoundaryCaches()
+
             do {
                 let result = try checker.checkGlobalDeclaration(decl)
                 

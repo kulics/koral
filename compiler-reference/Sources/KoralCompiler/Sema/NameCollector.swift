@@ -127,12 +127,26 @@ public class NameCollector: CompilerPass {
                 checker.currentModulePath = currentModulePath
                 checker.currentPackageID = currentPackageID
                 checker.currentSpan = node.span
+                checker.resetDeclarationBoundaryCaches()
             }
 
-            try collectDefinition(node, isStdLib: isStdLib)
-
-            if let checker {
-                try checker.collectTypeDefinition(node, isStdLib: isStdLib)
+            // One declaration is one unit of recovery: a rejection is recorded
+            // once, and the NEXT declaration is still collected. Walking away
+            // at the first duplicate would hide every later one; recording
+            // both halves of one rejection separately would say it twice --
+            // these two calls are one declaration's collection, and the second
+            // one only re-discovers what the first already refused.
+            do {
+                try collectDefinition(node, isStdLib: isStdLib)
+                if let checker {
+                    try checker.collectTypeDefinition(node, isStdLib: isStdLib)
+                }
+            } catch let error as SemanticError {
+                if let checker {
+                    try? checker.handleError(error)
+                } else {
+                    throw error
+                }
             }
         }
         

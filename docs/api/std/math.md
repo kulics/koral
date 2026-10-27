@@ -138,13 +138,24 @@ public trait FloatMath FloatingPoint {
 };
 
 public trait Integer Numeric and Div[Self] and Rem[Self] {
-    wrapping_abs(self) Self;
     pow(self, exp UInt) Self;
-    wrapping_pow(self, exp UInt) Self;
     gcd(a Self, b Self) Self;
     lcm(a Self, b Self) Self;
     ilog2(x Self) UInt;
     ilog10(x Self) UInt;
+};
+
+public trait BinaryInteger Integer {
+    count_ones(self) UInt;
+    count_zeros(self) UInt;
+    leading_zeros(self) UInt;
+    trailing_zeros(self) UInt;
+    leading_ones(self) UInt;
+    trailing_ones(self) UInt;
+    rotate_left(self, n UInt) Self;
+    rotate_right(self, n UInt) Self;
+    reverse_bits(self) Self;
+    swap_bytes(self) Self;
 };
 ```
 
@@ -177,39 +188,229 @@ given Int8 as Numeric {};
 
 given Int8 as Integer {};
 
+given Int8 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
+
 given Int16 as Numeric {};
 
 given Int16 as Integer {};
+
+given Int16 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int32 as Numeric {};
 
 given Int32 as Integer {};
 
+given Int32 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
+
 given Int64 as Numeric {};
 
 given Int64 as Integer {};
+
+given Int64 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given UInt8 as Numeric {};
 
 given UInt8 as Integer {};
 
+given UInt8 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
+
 given UInt16 as Numeric {};
 
 given UInt16 as Integer {};
+
+given UInt16 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given UInt32 as Numeric {};
 
 given UInt32 as Integer {};
 
+given UInt32 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
+
 given UInt64 as Numeric {};
 
 given UInt64 as Integer {};
+
+given UInt64 as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given Int as Numeric {};
 
 given Int as Integer {};
 
-given UInt as Integer {};
+given Int as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
 
 given UInt as Numeric {};
+
+given UInt as Integer {};
+
+given UInt as BinaryInteger {
+    public count_ones(self) UInt;
+    public count_zeros(self) UInt;
+    public leading_zeros(self) UInt;
+    public trailing_zeros(self) UInt;
+    public leading_ones(self) UInt;
+    public trailing_ones(self) UInt;
+    public rotate_left(self, n UInt) Self;
+    public rotate_right(self, n UInt) Self;
+    public reverse_bits(self) Self;
+    public swap_bytes(self) Self;
+};
+
+given WrappingInt8 as Numeric {};
+
+given WrappingInt8 as Integer {};
+
+given WrappingInt8 as BinaryInteger {};
+
+given WrappingInt16 as Numeric {};
+
+given WrappingInt16 as Integer {};
+
+given WrappingInt16 as BinaryInteger {};
+
+given WrappingInt32 as Numeric {};
+
+given WrappingInt32 as Integer {};
+
+given WrappingInt32 as BinaryInteger {};
+
+given WrappingInt64 as Numeric {};
+
+given WrappingInt64 as Integer {};
+
+given WrappingInt64 as BinaryInteger {};
+
+given WrappingUInt8 as Numeric {};
+
+given WrappingUInt8 as Integer {};
+
+given WrappingUInt8 as BinaryInteger {};
+
+given WrappingUInt16 as Numeric {};
+
+given WrappingUInt16 as Integer {};
+
+given WrappingUInt16 as BinaryInteger {};
+
+given WrappingUInt32 as Numeric {};
+
+given WrappingUInt32 as Integer {};
+
+given WrappingUInt32 as BinaryInteger {};
+
+given WrappingUInt64 as Numeric {};
+
+given WrappingUInt64 as Integer {};
+
+given WrappingUInt64 as BinaryInteger {};
+
+given WrappingInt as Numeric {};
+
+given WrappingInt as Integer {};
+
+given WrappingInt as BinaryInteger {};
+
+given WrappingUInt as Numeric {};
+
+given WrappingUInt as Integer {};
+
+given WrappingUInt as BinaryInteger {};
 ```

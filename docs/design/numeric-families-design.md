@@ -30,8 +30,9 @@
   （[`design-axioms.md`](design-axioms.md) 拒绝清单：高阶类型）。
 - **不做函数重载**：`Type(x)` 一族同形，靠目标类型区分策略，不靠重载集选型
   （拒绝清单：函数重载）。
-- **不给回绕/饱和家族全套整数工具**（`count_ones`、`leading_zeros`、`reverse_bits`、
-  `swap_bytes`、`rotate_*`、`parse`…）。这些留在常规家族，需要时经转换取用。
+- **不给回绕/饱和家族文本边界操作**（`parse`、格式化规格…）。那些不是整数操作，
+  在回绕家族上「解析 `"999..."` 该截断还是报错」没有自然答案，所以留在常规家族。
+  数学工具箱（`Numeric`/`Integer`）与二进制工具箱（`BinaryInteger`）**三家族都实现**，见 §操作面。
 - **不改浮点算术语义**：浮点溢出仍是 IEEE 的 ±inf，不另设 `WrappingFloat*`。
 - **不做 sealed trait**：那是独立的语言能力（封闭 trait），与本设计正交，另行交付。
 
@@ -65,6 +66,37 @@
 **trait 面**取最小可用集：`Eq` `Ord` `Hash` `Clone` `Default` `ToString`。
 够放进 `Dict`/`List` 做键、够打印，不为完整性补别的。这是常规家族已有 trait 的子集，
 不新增 trait 定义。
+
+**两个抽象，三个家族都实现。** 整数能力分属两个不同的概念，不能混进一个 trait：
+
+| 抽象 | 成员 | 说的是 |
+|---|---|---|
+| `Numeric` / `Integer` | `abs` `pow` `gcd` `lcm` `ilog2` `ilog10` | **数学整数** |
+| `BinaryInteger` | `count_ones` `count_zeros` `leading_*` `trailing_*` `rotate_*` `reverse_bits` `swap_bytes` | **定宽二进制整数** |
+
+依据是别处已有的拆分：Haskell 是 `class Bits a` 与 `class Bits b => FiniteBits b`，
+而且它的 `Integer`（无界数学整数）**是 `Bits` 但不是 `FiniteBits`** —— 正因为那不是一个
+定宽二进制字。Swift 是 `BinaryInteger`，C++ `<bit>` 是 `unsigned_integer` concept。
+三家都把二进制整数当独立抽象，没人把它塞进数学整数。所以 `Integer` **不得**有位操作；
+`BinaryInteger` 是独立的公开 trait，常规与回绕（及将来的饱和）三家族都实现。
+
+位运算的**运算符**（`& | ^ ~`、`<< >>`）是内建的、已家族多态，不进 `BinaryInteger`；
+`BinaryInteger` 承载的是方法。
+
+**溢出策略只落在会溢出的操作上**：`+ - * / %`、一元 `-`、`abs`、`pow`、`lcm`
+随家族变；`BinaryInteger` 与 `gcd`/`ilog2` 这类全函数在三家族上行为完全相同，
+函数体可逐字相同。
+
+同一份函数体在不同家族上行为不同，因为 `+ - * / %` 本身是家族多态的：
+
+```koral
+given Int8       as Integer { pow(self, e UInt) Self = { …用 self * self… }; };   // 溢出 panic
+given WrappingInt8 as Integer { pow(self, e UInt) Self = { …用 self * self… }; }; // 溢出回绕
+```
+
+**方法名不携带策略。** 因此 `Integer` 不得有 `wrapping_abs` / `wrapping_pow` 这类
+「名字标策略」的成员——那正是本设计要取代的形态（`wrapping_add` 一族的残留）。
+溢出策略一律由接收者的家族决定：`Int.MIN.abs()` panic，`WrappingInt.MIN.abs()` 绕回 `MIN`。
 
 **家族的分界线是：有没有回绕答案。有就回绕，没有才 panic。**
 
@@ -226,6 +258,24 @@ sealed trait 作为通用语言能力另行独立交付。
 
 6. **未决：`Wrapping*` 是否可作泛型实参**（`List[WrappingInt]`）。
    作为内建类型应当可以，但要确认它在实例键、显示、单态化里走常规整数类型的路径。
+
+### 两编译器诊断条数的残留差异
+
+以下差异**无用例覆盖**，是两编译器错误恢复粒度不同造成的。登记在此，不在本设计内修；
+前两条要动错误模型的**声明内**粒度，代价与收益不匹配。
+
+| 形状 | 种子 | 主实现 |
+|---|---|---|
+| 同一声明内两个相同违例（两个调用，或一个块内两条语句） | 1 条 | 2 条 |
+| 签名错误后面的函数体错误 | 3 条 | 4 条（多报函数体不匹配） |
+
+跨声明的重复违例已经逐条对齐（种子在声明边界恢复并重置约束缓存）；差异只剩声明内。
+
+### 先前就有的差异（与本设计无关）
+
+- 种子拒绝 `panic(...); return 0;`（「unreachable statement after control flow terminator」），主实现接受。
+- 函数体内嵌套的泛型 `let`，解析器报错文本不同（`Expected '=' in let statement` vs `Expected type identifier, got: [`）。
+- 名字阶段报错后，主实现仍会追加 import 冲突诊断，种子在该路径不再检查 import 冲突。
 
 ## 实施
 

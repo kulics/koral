@@ -107,7 +107,19 @@ public class TypeResolver: CompilerPass {
             // resolution so same-named generic types keep distinct identity.
             defIdMap.currentModulePath = currentModulePath
 
-            try resolveSignatures(node, defIdMap: defIdMap, index: index)
+            // One declaration is one unit of recovery: a rejected signature is
+            // recorded and the following declarations are still resolved.
+            // Throwing out of the loop left every later declaration unchecked,
+            // so one bad parameter type hid the next file's worth of mistakes.
+            do {
+                try resolveSignatures(node, defIdMap: defIdMap, index: index)
+            } catch let error as SemanticError {
+                if let checker {
+                    try? checker.handleError(error)
+                } else {
+                    throw error
+                }
+            }
         }
 
         // Pass 2: 注册 given 方法签名到 TypeChecker（用于后续体检查）
@@ -124,7 +136,12 @@ public class TypeResolver: CompilerPass {
                 checker.currentModulePath = sourceInfo?.modulePath ?? []
                 checker.currentPackageID = sourceInfo?.packageID ?? ""
                 checker.currentSpan = node.span
-                try checker.collectGivenSignatures(node)
+                checker.resetDeclarationBoundaryCaches()
+                do {
+                    try checker.collectGivenSignatures(node)
+                } catch let error as SemanticError {
+                    try? checker.handleError(error)
+                }
             }
         }
         

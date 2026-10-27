@@ -1208,5 +1208,21 @@ file_private let run_run(options InvocationOptions) Int = {
         eprintln("failed to run: \(e.message())");
         return 1;
     };
-    return if result.is_success() then 0 else (result.code() or else 1);
+    // Propagate the child's raw status the way the shell reports it: a normal
+    // exit carries its exit code, and a signal death is `128 + signal`. This
+    // is what running the compiled binary directly does, and what the frozen
+    // seed's driver reports for the same program.
+    when result.code() in {
+        .Some(code) then {
+            return code;
+        },
+        .None() then {},
+    };
+    when result.signal() in {
+        .Some(signal_number) then {
+            return 128 + signal_number;
+        },
+        .None() then {},
+    };
+    return 1;
 };

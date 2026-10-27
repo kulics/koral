@@ -287,6 +287,15 @@ extension TypeChecker {
       } catch let error as SemanticError {
         try? handleError(error)
       }
+
+      // A name-collection rejection stops the pipeline here. The declaration
+      // it rejected does not exist for the later passes to look at, and every
+      // downstream complaint would be about the consequences of that, not
+      // about a second mistake. This is the same gate the bootstrap compiler
+      // draws after its name pass.
+      if hasCollectedErrors {
+        throw diagnosticCollector
+      }
       
       // TRAIT NAMES must be bound BEFORE TypeResolver: a signature like
       // `given[T Any] Stack[T] as Default` resolves its trait name while its
@@ -2366,23 +2375,42 @@ extension TypeChecker {
       let genericTypeParameters = typeParameters
       // Register function signature so it can be called from methods defined earlier
       if genericTypeParameters.isEmpty {
-        // Non-generic function: register signature now
-        let returnType = try resolveTypeNode(returnTypeNode)
-        try assertNotOpaqueType(returnType, span: span)
-        try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
-        let params = try parameters.map { param -> Parameter in
-          let paramType = try resolveTypeNode(param.type)
-          try assertNotOpaqueType(paramType, span: span)
-          try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
-          // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
-          let passKind = passKindForParameterType(paramType)
-          return Parameter(type: paramType, kind: passKind)
+        // Non-generic function: register signature now. A signature that fails
+        // to resolve is still REGISTERED, at error type, so the declarations
+        // after this one see the function they wrote instead of an undefined
+        // name. The complaint stays about the signature; it does not become a
+        // second one at every call site.
+        let resolvedSignature: (params: [Parameter], returnType: Type)?
+        do {
+          let returnType = try resolveTypeNode(returnTypeNode)
+          try assertNotOpaqueType(returnType, span: span)
+          try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
+          let params = try parameters.map { param -> Parameter in
+            let paramType = try resolveTypeNode(param.type)
+            try assertNotOpaqueType(paramType, span: span)
+            try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
+            // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
+            let passKind = passKindForParameterType(paramType)
+            return Parameter(type: paramType, kind: passKind)
+          }
+          resolvedSignature = (params, returnType)
+        } catch let error as SemanticError {
+          try? handleError(error)
+          resolvedSignature = nil
         }
-        let functionType = Type.function(parameters: params, returns: returnType)
-        
+        let functionType: Type
+        if let resolvedSignature {
+          functionType = Type.function(parameters: resolvedSignature.params, returns: resolvedSignature.returnType)
+        } else {
+          functionType = Type.function(
+            parameters: parameters.map { _ in Parameter(type: .error, kind: .byVal) },
+            returns: .error
+          )
+        }
+
         // Store named parameter info for call-site validation
         let namedParamInfo = parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }
-        
+
         // For private functions, use file-isolated registration
         let isPrivate = (access == .file_private)
         if isPrivate {
@@ -2390,7 +2418,7 @@ extension TypeChecker {
         } else {
           currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
         }
-        
+
         // Register named parameter info by DefId
         if let funcDefId = currentScope.lookup(name, sourceFile: isPrivate ? currentSourceFile : nil) {
           functionNamedParams[funcDefId] = namedParamInfo
@@ -2615,12 +2643,22 @@ extension TypeChecker {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
 
-      // Resolve expected type: explicit annotation or nil for inference
-      let expectedType: Type? = typeNode != nil ? try resolveTypeNode(typeNode!) : nil
-      if let type = expectedType {
-        try assertNotOpaqueType(type, span: span)
-        try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
-        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
+      // Resolve expected type: explicit annotation or nil for inference. A
+      // type that fails to resolve still becomes the variable's own type --
+      // at error type -- so later uses of the name see the variable they
+      // wrote instead of an undefined name.
+      var expectedType: Type? = nil
+      if typeNode != nil {
+        do {
+          let resolvedType = try resolveTypeNode(typeNode!)
+          try assertNotOpaqueType(resolvedType, span: span)
+          try assertNoBorrowedReferenceType(resolvedType, context: "global variable type", span: span)
+          try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [resolvedType], span: nameSpan)
+          expectedType = resolvedType
+        } catch let error as SemanticError {
+          try? handleError(error)
+          expectedType = .error
+        }
       }
 
       // Type-check the initializer, passing expected type for inference/coercion
@@ -2640,7 +2678,7 @@ extension TypeChecker {
       let type: Type
       if let expectedType = expectedType {
         type = expectedType
-        if typedValue.type != .never && typedValue.type != .error && typedValue.type != type {
+        if typedValue.type != .never && typedValue.type != .error && type != .error && typedValue.type != type {
           throw SemanticError.typeMismatch(
             expected: type.description, got: typedValue.type.description)
         }

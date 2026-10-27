@@ -1012,7 +1012,14 @@ public class Driver {
 
     try process.run()
     process.waitUntilExit()
-    
+
+    // Propagate the child's raw status the way the shell reports it: a normal
+    // exit carries its exit code, and a signal death is `128 + signal`. This
+    // is what running the compiled binary directly does, and what the
+    // bootstrap driver reports for the same program.
+    if process.terminationReason == .uncaughtSignal {
+      return 128 + process.terminationStatus
+    }
     return process.terminationStatus
   }
 

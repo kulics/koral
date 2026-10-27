@@ -657,6 +657,12 @@ extension TypeChecker {
   /// No implicit ref promotion (T → ref T) or auto-deref (ref T → T) for function arguments.
   /// Use explicit .ref / .val at the call site instead.
   func coerceArgumentType(_ typedArg: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
+    // A value that already failed -- on either side -- agrees with nothing,
+    // including the parameter it is passed to. The complaint about the
+    // failure has been made; this one would be about its consequence.
+    if expectedType == .error || typedArg.type == .error {
+      return typedArg
+    }
     if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
       return flavorConversion
     }
@@ -676,6 +682,11 @@ extension TypeChecker {
   /// NOTE: This handles compiler-internal .reference/.mutableReference types
   /// produced by managed nominal layout, NOT user-written *T syntax (which is removed).
   func coerceReceiverType(_ base: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode {
+    // Same rule as coerceArgumentType: a failed value or a failed parameter
+    // type draws no second complaint at the receiver.
+    if expectedType == .error || base.type == .error {
+      return base
+    }
     if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType) {
       return flavorConversion
     }
@@ -4963,7 +4974,7 @@ extension TypeChecker {
       for (arg, expectedParam) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg)
         typedArg = try coerceLiteral(typedArg, to: expectedParam.type, span: arg.span)
-        if typedArg.type != expectedParam.type {
+        if typedArg.type != expectedParam.type && typedArg.type != .error && expectedParam.type != .error {
           throw SemanticError.typeMismatch(
             expected: expectedParam.type.description,
             got: typedArg.type.description

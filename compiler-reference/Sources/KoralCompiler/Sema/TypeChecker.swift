@@ -365,6 +365,20 @@ public class TypeChecker {
   func endSpeculativeQuery() {
     speculativeQueryDepth -= 1
   }
+
+  /// Drop the constraint caches that carry a FAILED check as a passed one.
+  ///
+  /// `enforceTraitConformance` records a missing conformance and then caches
+  /// the pair as satisfied, so the same violation at a later use site is never
+  /// raised again. Inside one declaration that is the intended de-duplication;
+  /// across declarations it hides one independent mistake behind another, and
+  /// the two compilers stop agreeing on how many problems the file has. Every
+  /// declaration boundary resets them, so each declaration reports its own
+  /// violations while repeats inside one declaration still collapse.
+  func resetDeclarationBoundaryCaches() {
+    traitConformanceCache.removeAll()
+    genericConstraintCache.removeAll()
+  }
   
   /// 记录错误到诊断收集器
   /// - Parameters:
