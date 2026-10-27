@@ -241,7 +241,8 @@ extension TypeChecker {
 
   private func isUnsignedIntegerType(_ type: Type) -> Bool {
     switch type {
-    case .uint, .uint8, .uint16, .uint32, .uint64:
+    case .uint, .uint8, .uint16, .uint32, .uint64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
       return true
     default:
       return false
@@ -648,7 +649,7 @@ extension TypeChecker {
     if expr.type == expectedType {
       return expr
     }
-    return .castExpression(expression: expr, type: expectedType, checked: true)
+    return .castExpression(expression: expr, type: expectedType)
   }
 
   /// Applies the standard coercion chain to a typed argument that doesn't match the expected type.
@@ -1685,7 +1686,7 @@ extension TypeChecker {
       }
 
       // Cast always produces an rvalue.
-      return .castExpression(expression: typedInner, type: targetType, checked: true)
+      return .castExpression(expression: typedInner, type: targetType)
 
     case .integerLiteral(let value, let literalSpan):
       // Synthesis has no expected type to aim at, so the literal defaults to
@@ -2002,25 +2003,27 @@ extension TypeChecker {
       }
 
     case .arithmeticExpression(let left, let op, let right, _):
-      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
-      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
+      var (typedLeft, typedRight) = try inferJoinedBinaryOperands(
+        left, right, expectedType: expectedType)
 
       // Allow numeric literals to coerce to the other operand type only for numeric ops.
       let leftIsNumeric = isIntegerType(typedLeft.type) || isFloatType(typedLeft.type)
       let rightIsNumeric = isIntegerType(typedRight.type) || isFloatType(typedRight.type)
       if leftIsNumeric && rightIsNumeric, typedLeft.type != typedRight.type {
-        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type, span: right.span)
         if typedLeft.type != typedRight.type {
-          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type, span: left.span)
         }
       }
 
       return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
 
     case .comparisonExpression(let left, let op, let right, _):
-      let typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
-      let typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
-      return try buildTypedComparisonExpression(lhs: typedLeft, op: op, rhs: typedRight)
+      let (typedLeft, typedRight) = try inferJoinedBinaryOperands(
+        left, right, expectedType: nil)
+      return try buildTypedComparisonExpression(
+        lhs: typedLeft, op: op, rhs: typedRight,
+        leftSpan: left.span, rightSpan: right.span)
 
     case .comparisonChainExpression(let operands, let operators, let span):
       return try inferComparisonChainExpression(operands: operands, operators: operators, span: span)
@@ -2113,9 +2116,15 @@ extension TypeChecker {
 
     case .unaryMinusExpression(let expr, _):
       let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
-      if isIntegerType(typedExpr.type) {
+      if typedExpr.type.isPlainIntegerType {
         let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
         return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+      }
+      if typedExpr.type.isWrappingIntegerType {
+        // Negation wraps like every other wrapping subtraction: MIN negates to
+        // MIN, never a panic.
+        let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
+        return .wrappingArithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
       }
       if isFloatType(typedExpr.type) {
         let zero: TypedExpressionNode = .floatLiteral(value: "0", type: typedExpr.type)
@@ -2140,20 +2149,20 @@ extension TypeChecker {
       return .notExpression(expression: typedExpr, type: .bool)
 
     case .bitwiseExpression(let left, let op, let right, _):
-      var typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
-      var typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
+      var (typedLeft, typedRight) = try inferJoinedBinaryOperands(
+        left, right, expectedType: expectedType)
 
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
         if isIntegerType(typedLeft.type) {
-          typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+          typedRight = try coerceLiteral(typedRight, to: typedLeft.type, span: right.span)
         }
         if typedLeft.type != typedRight.type, isIntegerType(typedRight.type) {
-          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+          typedLeft = try coerceLiteral(typedLeft, to: typedRight.type, span: left.span)
         }
       }
 
-      if !isIntegerScalarType(typedLeft.type) || typedLeft.type != typedRight.type {
+      if !typedLeft.type.isIntegerType || typedLeft.type != typedRight.type {
         throw SemanticError.typeMismatch(
           expected: "Matching Integer Types", got: "\(typedLeft.type) \(op) \(typedRight.type)")
       }
@@ -2445,9 +2454,62 @@ extension TypeChecker {
     return "__KORAL_cmp_chain_\(synthesizedTempIndex)"
   }
 
+  /// Whether an expression is an integer literal in either spelling. These
+  /// are the operands that join another operand's integer width before they
+  /// are range-checked.
+  private func isIntegerLiteralExpression(_ expr: ExpressionNode) -> Bool {
+    if case .integerLiteral = expr { return true }
+    return false
+  }
+
+  /// Type a binary operator's operands so an integer literal is range-checked
+  /// against the width it JOINS, not against its Int default.
+  ///
+  /// - Exactly one literal operand: the other operand types first and the
+  ///   literal is checked against the other side's integer type (either
+  ///   position: `x + big` and `big + x` alike).
+  /// - Two literal operands with an integer expected type: both join that
+  ///   width, which is what makes `let y UInt8 = 5 + 3` narrow.
+  /// - Anything else keeps the source order and the Int default check.
+  private func inferJoinedBinaryOperands(
+    _ left: ExpressionNode,
+    _ right: ExpressionNode,
+    expectedType: Type?
+  ) throws -> (TypedExpressionNode, TypedExpressionNode) {
+    let leftIsLiteral = isIntegerLiteralExpression(left)
+    let rightIsLiteral = isIntegerLiteralExpression(right)
+    if leftIsLiteral != rightIsLiteral {
+      let literal = leftIsLiteral ? left : right
+      let other = leftIsLiteral ? right : left
+      let typedOther = autoDereferenceValueContext(try inferTypedExpression(other))
+      // An integer literal joins an INTEGER type only: a float other side is
+      // no join at all, and the literal keeps its default check.
+      let joinType: Type? = isIntegerType(typedOther.type) ? typedOther.type : nil
+      let typedLiteral = autoDereferenceValueContext(
+        try inferTypedExpression(literal, expectedType: joinType))
+      return leftIsLiteral ? (typedLiteral, typedOther) : (typedOther, typedLiteral)
+    }
+    if leftIsLiteral, rightIsLiteral, let expectedType, isIntegerType(expectedType) {
+      let typedLeft = try coerceLiteral(
+        autoDereferenceValueContext(
+          try inferTypedExpression(left, expectedType: expectedType)),
+        to: expectedType, span: left.span)
+      let typedRight = try coerceLiteral(
+        autoDereferenceValueContext(
+          try inferTypedExpression(right, expectedType: expectedType)),
+        to: expectedType, span: right.span)
+      return (typedLeft, typedRight)
+    }
+    let typedLeft = autoDereferenceValueContext(try inferTypedExpression(left))
+    let typedRight = autoDereferenceValueContext(try inferTypedExpression(right))
+    return (typedLeft, typedRight)
+  }
+
   private func normalizeComparisonOperands(
     lhs initialLeft: TypedExpressionNode,
-    rhs initialRight: TypedExpressionNode
+    rhs initialRight: TypedExpressionNode,
+    leftSpan: SourceSpan? = nil,
+    rightSpan: SourceSpan? = nil
   ) throws -> (TypedExpressionNode, TypedExpressionNode) {
     var typedLeft = initialLeft
     var typedRight = initialRight
@@ -2455,32 +2517,32 @@ extension TypeChecker {
     // Allow numeric literals to coerce to the other operand type.
     if typedLeft.type != typedRight.type {
       if isIntegerType(typedLeft.type) || isFloatType(typedLeft.type) {
-        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type, span: rightSpan)
       }
       if typedLeft.type != typedRight.type,
         isIntegerType(typedRight.type) || isFloatType(typedRight.type)
       {
-        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type, span: leftSpan)
       }
     }
 
     // Allow rune literals to coerce to UInt8 in comparisons when needed.
     if typedLeft.type != typedRight.type {
       if typedLeft.type == .uint8 {
-        typedRight = try coerceLiteral(typedRight, to: .uint8)
+        typedRight = try coerceLiteral(typedRight, to: .uint8, span: rightSpan)
       }
       if typedRight.type == .uint8 {
-        typedLeft = try coerceLiteral(typedLeft, to: .uint8)
+        typedLeft = try coerceLiteral(typedLeft, to: .uint8, span: leftSpan)
       }
     }
 
     // Allow rune literals to coerce to Rune in comparisons.
     if typedLeft.type != typedRight.type {
       if isRuneType(typedLeft.type) {
-        typedRight = try coerceLiteral(typedRight, to: typedLeft.type)
+        typedRight = try coerceLiteral(typedRight, to: typedLeft.type, span: rightSpan)
       }
       if typedLeft.type != typedRight.type, isRuneType(typedRight.type) {
-        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type)
+        typedLeft = try coerceLiteral(typedLeft, to: typedRight.type, span: leftSpan)
       }
     }
 
@@ -2515,9 +2577,13 @@ extension TypeChecker {
   private func buildTypedComparisonExpression(
     lhs initialLeft: TypedExpressionNode,
     op: ComparisonOperator,
-    rhs initialRight: TypedExpressionNode
+    rhs initialRight: TypedExpressionNode,
+    leftSpan: SourceSpan? = nil,
+    rightSpan: SourceSpan? = nil
   ) throws -> TypedExpressionNode {
-    let (typedLeft, typedRight) = try normalizeComparisonOperands(lhs: initialLeft, rhs: initialRight)
+    let (typedLeft, typedRight) = try normalizeComparisonOperands(
+      lhs: initialLeft, rhs: initialRight,
+      leftSpan: leftSpan, rightSpan: rightSpan)
 
     // Operator sugar for Eq: lower `==`/`!=` to `equals(self, other)`
     // for non-builtin scalar types (struct/enum/String/generic parameters).
@@ -2559,23 +2625,40 @@ extension TypeChecker {
     func buildChain(
       from index: Int,
       leftExpr: TypedExpressionNode,
+      preTypedRight: TypedExpressionNode?,
       in typeChecker: TypeChecker
     ) throws -> TypedExpressionNode {
-      let rawRight = typeChecker.autoDereferenceValueContext(
-        try typeChecker.inferTypedExpression(operands[index + 1])
-      )
+      let rawRight: TypedExpressionNode
+      if let preTypedRight {
+        rawRight = preTypedRight
+      } else {
+        // A literal operand joins the width of the value it is compared
+        // against, so hand it that width instead of letting it default to
+        // Int and be range-checked against the default.
+        let nextExpr = operands[index + 1]
+        let joinType: Type? =
+          typeChecker.isIntegerLiteralExpression(nextExpr) && typeChecker.isIntegerType(leftExpr.type)
+          ? leftExpr.type : nil
+        rawRight = typeChecker.autoDereferenceValueContext(
+          try typeChecker.inferTypedExpression(nextExpr, expectedType: joinType)
+        )
+      }
 
       if index == operators.count - 1 {
         return try typeChecker.buildTypedComparisonExpression(
           lhs: leftExpr,
           op: operators[index],
-          rhs: rawRight
+          rhs: rawRight,
+          leftSpan: operands[index].span,
+          rightSpan: operands[index + 1].span
         )
       }
 
       let (normalizedLeft, normalizedRight) = try typeChecker.normalizeComparisonOperands(
         lhs: leftExpr,
-        rhs: rawRight
+        rhs: rawRight,
+        leftSpan: operands[index].span,
+        rightSpan: operands[index + 1].span
       )
       let tempSymbol = typeChecker.makeLocalSymbol(
         name: typeChecker.freshComparisonChainTempName(),
@@ -2586,9 +2669,12 @@ extension TypeChecker {
       let condition = try typeChecker.buildTypedComparisonExpression(
         lhs: normalizedLeft,
         op: operators[index],
-        rhs: tempRef
+        rhs: tempRef,
+        leftSpan: operands[index].span,
+        rightSpan: operands[index + 1].span
       )
-      let next = try buildChain(from: index + 1, leftExpr: tempRef, in: typeChecker)
+      let next = try buildChain(
+        from: index + 1, leftExpr: tempRef, preTypedRight: nil, in: typeChecker)
       let elseExpr: TypedExpressionNode = .booleanLiteral(value: false, type: .bool)
 
       return .blockExpression(
@@ -2605,8 +2691,23 @@ extension TypeChecker {
       )
     }
 
-    let firstLeft = autoDereferenceValueContext(try inferTypedExpression(operands[0]))
-    return try buildChain(from: 0, leftExpr: firstLeft, in: self)
+    // A leading integer literal joins the width of the operand it is compared
+    // against, so that neighbour types first and its width is handed to the
+    // literal. The neighbour is typed once and passed along as the first
+    // step's right operand.
+    var firstRight: TypedExpressionNode? = nil
+    var firstLeft: TypedExpressionNode
+    if isIntegerLiteralExpression(operands[0]), !isIntegerLiteralExpression(operands[1]) {
+      let typedOther = autoDereferenceValueContext(try inferTypedExpression(operands[1]))
+      let joinType: Type? = isIntegerType(typedOther.type) ? typedOther.type : nil
+      firstLeft = autoDereferenceValueContext(
+        try inferTypedExpression(operands[0], expectedType: joinType))
+      firstRight = typedOther
+    } else {
+      firstLeft = autoDereferenceValueContext(try inferTypedExpression(operands[0]))
+    }
+    return try buildChain(
+      from: 0, leftExpr: firstLeft, preTypedRight: firstRight, in: self)
   }
 
   private enum CollectionTargetKind {
@@ -2820,7 +2921,9 @@ extension TypeChecker {
   private func expressionFromTypeOnlyLiteral(_ type: Type) -> ExpressionNode? {
     // This helper intentionally only covers primitive defaults used in literal type reconciliation.
     switch type {
-    case .int, .int8, .int16, .int32, .int64, .uint, .uint8, .uint16, .uint32, .uint64:
+    case .int, .int8, .int16, .int32, .int64, .uint, .uint8, .uint16, .uint32, .uint64,
+         .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
       return .integerLiteral("0", span: .unknown)
     case .float32, .float64:
       return .floatLiteral("0.0", span: .unknown)
@@ -2982,6 +3085,16 @@ extension TypeChecker {
     case .uint16: return .identifier("UInt16", span: .unknown)
     case .uint32: return .identifier("UInt32", span: .unknown)
     case .uint64: return .identifier("UInt64", span: .unknown)
+    case .wrappingInt: return .identifier("WrappingInt", span: .unknown)
+    case .wrappingInt8: return .identifier("WrappingInt8", span: .unknown)
+    case .wrappingInt16: return .identifier("WrappingInt16", span: .unknown)
+    case .wrappingInt32: return .identifier("WrappingInt32", span: .unknown)
+    case .wrappingInt64: return .identifier("WrappingInt64", span: .unknown)
+    case .wrappingUInt: return .identifier("WrappingUInt", span: .unknown)
+    case .wrappingUInt8: return .identifier("WrappingUInt8", span: .unknown)
+    case .wrappingUInt16: return .identifier("WrappingUInt16", span: .unknown)
+    case .wrappingUInt32: return .identifier("WrappingUInt32", span: .unknown)
+    case .wrappingUInt64: return .identifier("WrappingUInt64", span: .unknown)
     case .float32: return .identifier("Float32", span: .unknown)
     case .float64: return .identifier("Float64", span: .unknown)
     case .bool: return .identifier("Bool", span: .unknown)
@@ -3560,7 +3673,7 @@ extension TypeChecker {
       )
     }
     // Cast always produces an rvalue.
-    return .castExpression(expression: typedInner, type: targetType, checked: true)
+    return .castExpression(expression: typedInner, type: targetType)
   }
 
   ///
@@ -5102,19 +5215,6 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a method call expression
-  /// `wrapping_cast` is an integer bit-move: the type argument it binds is the
-  /// conversion TARGET, and only integers have a two's-complement
-  /// representation to move. A non-integer target is the same mistake the
-  /// explicit cast form rejects, and gets the same complaint.
-  func rejectNonIntegerWrappingCastTarget(methodName: String, targetType: Type) throws {
-    guard methodName == "wrapping_cast" else { return }
-    if case .error = targetType { return }
-    if context.containsGenericParameter(targetType) { return }
-    if isIntegerScalarType(targetType) { return }
-    throw SemanticError(
-      .generic("Type '\(targetType.description)' does not support cast: only numeric and pointer types can be cast"))
-  }
-
   func inferMethodCall(
     base: TypedExpressionNode,
     method: Symbol,
@@ -5426,7 +5526,6 @@ extension TypeChecker {
       let finalCallee: TypedExpressionNode = .methodReference(
         base: finalBase, method: method, typeArgs: nil, methodTypeArgs: inferredMethodTypeArgs, type: finalMethodType)
 
-      try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: finalReturns)
       let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: finalReturns)
       return wrapReceiverMaterialization(materializedReceiver, body: call, type: finalReturns)
     }
@@ -5595,7 +5694,6 @@ extension TypeChecker {
       )
     }
     
-    try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: returns)
     let call: TypedExpressionNode = .call(callee: finalCallee, arguments: typedArguments, type: returns)
     return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
@@ -6992,7 +7090,6 @@ extension TypeChecker {
     guard case .function(let params, let returnType) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
     }
-    try rejectNonIntegerWrappingCastTarget(methodName: methodName, targetType: returnType)
 
     let paramMeta = methodCallParamMeta(
       ownerTypeName: methodLabelKey(baseType),
@@ -7140,7 +7237,7 @@ extension TypeChecker {
       _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
     }
     // A method type parameter that appears only in the return position
-    // (`wrapping_cast[T Any](self) T`) is bound by the expected type, exactly
+    // (`f[T Any](self) T`) is bound by the expected type, exactly
     // as the instance form binds it.
     if let expectedType, case .function(_, let returns) = unresolvedFunctionType {
       _ = unifyTypes(returns, expectedType, bindings: &methodTypeParamBindings)
@@ -7453,18 +7550,22 @@ extension TypeChecker {
     var left = lhs
     var right = rhs
 
-    var leftIsNumeric = isIntegerType(left.type) || isFloatType(left.type)
-    var rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
+    // Both integer families have an arithmetic surface: the plain family is
+    // checked and panics on overflow, the wrapping family wraps modulo 2^N.
+    // A Wrapping operand only ever combines with its own width -- the family
+    // is isolated from the plain types and from the other widths.
+    var leftIsNumeric = left.type.isIntegerType || isFloatType(left.type)
+    var rightIsNumeric = right.type.isIntegerType || isFloatType(right.type)
 
     if leftIsNumeric && !rightIsNumeric {
       if case .typeConstruction(_, _, _, let srcType) = right, isRuneType(srcType) {
         right = try coerceLiteral(right, to: left.type)
-        rightIsNumeric = isIntegerType(right.type) || isFloatType(right.type)
+        rightIsNumeric = right.type.isIntegerType || isFloatType(right.type)
       }
     } else if rightIsNumeric && !leftIsNumeric {
       if case .typeConstruction(_, _, _, let srcType) = left, isRuneType(srcType) {
         left = try coerceLiteral(left, to: right.type)
-        leftIsNumeric = isIntegerType(left.type) || isFloatType(left.type)
+        leftIsNumeric = left.type.isIntegerType || isFloatType(left.type)
       }
     }
 
@@ -7477,9 +7578,26 @@ extension TypeChecker {
       }
 
       if left.type == right.type {
+        if left.type.isWrappingIntegerType {
+          return .wrappingArithmeticExpression(left: left, op: op, right: right, type: left.type)
+        }
         return .arithmeticExpression(left: left, op: op, right: right, type: left.type)
       }
 
+      let opName: String
+      switch op {
+      case .plus: opName = "plus"
+      case .minus: opName = "minus"
+      case .multiply: opName = "multiply"
+      case .divide: opName = "divide"
+      case .remainder: opName = "remainder"
+      }
+      throw SemanticError.invalidOperation(op: opName, type1: left.type.description, type2: right.type.description)
+    }
+
+    // A Wrapping operand paired with anything else is the same invalid
+    // operation a mismatched numeric pair gets.
+    if left.type.isWrappingIntegerType || right.type.isWrappingIntegerType {
       let opName: String
       switch op {
       case .plus: opName = "plus"

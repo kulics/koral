@@ -626,14 +626,6 @@ given MIRFunctionBuilder {
                     MIRBinaryOperator.WrappingArithmetic(op),
                 ),
             ),
-            .WrappingShiftExpr(left, op, right) then Option[MIRExprResult].Some(
-                self.lower_binary(
-                    left,
-                    right,
-                    expression.expr_type,
-                    MIRBinaryOperator.WrappingShift(op),
-                ),
-            ),
             .ComparisonExpr(left, op, right) then Option[MIRExprResult].Some(
                 self.lower_binary(
                     left,
@@ -665,14 +657,14 @@ given MIRFunctionBuilder {
             .Unary(op, inner) then Option[MIRExprResult].Some(
                 self.lower_unary_or_negate(op, inner, expression.expr_type),
             ),
-            .CastExpr(target_type, inner, checked) then {
+            .CastExpr(target_type, inner) then {
                 let mutable source_type = self.deref_pointee_type(
                     inner.expr_type,
                     inner.expr_type,
                 );
                 let operand = self.lower_operand_for_expected_type(inner, source_type);
                 let result = self.materialize(
-                    MIRValue.Cast(operand, target_type, checked),
+                    MIRValue.Cast(operand, target_type),
                     target_type,
                 );
                 Option[MIRExprResult].Some(
@@ -1519,6 +1511,16 @@ given MIRFunctionBuilder {
                         .UInt16Type() then true,
                         .UInt32Type() then true,
                         .UInt64Type() then true,
+                        .WrappingIntType() then true,
+                        .WrappingInt8Type() then true,
+                        .WrappingInt16Type() then true,
+                        .WrappingInt32Type() then true,
+                        .WrappingInt64Type() then true,
+                        .WrappingUIntType() then true,
+                        .WrappingUInt8Type() then true,
+                        .WrappingUInt16Type() then true,
+                        .WrappingUInt32Type() then true,
+                        .WrappingUInt64Type() then true,
                         _ then false,
                     };
                     if not is_int then {
@@ -4319,11 +4321,11 @@ given MIRFunctionBuilder {
             parts.push(path_str.to_string());
         };
         if is_private and not source_file.is_empty() then {
-            let mutable hash UInt32 = 0;
+            let mutable hash WrappingUInt32 = 0;
             for byte in source_file.bytes() then {
-                hash = hash.wrapping_mul(31).wrapping_add(UInt32(byte));
+                hash = hash * 31 + WrappingUInt32(byte);
             };
-            parts.push("f\(UInt((hash % 10000)))");
+            parts.push("f\(UInt(hash % 10000))");
         };
         parts.push(name);
 
@@ -5896,7 +5898,7 @@ given MIRFunctionBuilder {
             .TraitMethodCall(call) then call.result_type,
             .Ref(place, kind, _) then self.type_of_ref(place, kind),
             .Pointer(place) then Type.PointerType(self.place_type(place)),
-            .Cast(_, target_type, _) then target_type,
+            .Cast(_, target_type) then target_type,
             .Intrinsic(node) then self.mir_intrinsic_result_type(node),
             .Lambda(lambda) then lambda.lambda_type,
         };
@@ -6433,7 +6435,7 @@ given MIRFunctionBuilder {
     };
 
     file_private lower_borrowed_source_value(self, expression TypedExpr) MIRValue = {
-        if expression.expr_kind is .CastExpr(_, inner, _) and self.is_ownership_preserving_place_cast(
+        if expression.expr_kind is .CastExpr(_, inner) and self.is_ownership_preserving_place_cast(
             inner.expr_type,
             expression.expr_type,
         ) then {
@@ -6754,7 +6756,7 @@ given MIRFunctionBuilder {
                     MIRPlace.Deref(self.lower_borrowed_source_value(inner), pointee),
                 )
             },
-            .CastExpr(target_type, inner, _) then {
+            .CastExpr(target_type, inner) then {
                 if self.is_ownership_preserving_place_cast(inner.expr_type, target_type) then {
                     self.lower_place(inner)
                 } else {
@@ -7060,7 +7062,7 @@ given MIRFunctionBuilder {
                 param_names,
                 out,
             ),
-            .CastExpr(_, inner, _) then self.collect_captures_expr(inner, param_names, out),
+            .CastExpr(_, inner) then self.collect_captures_expr(inner, param_names, out),
             .Unary(_, inner) then self.collect_captures_expr(inner, param_names, out),
             .MemberPath(base, _) then self.collect_captures_expr(base, param_names, out),
             .ArithmeticExpr(l, _, r) then {
@@ -7068,10 +7070,6 @@ given MIRFunctionBuilder {
                 self.collect_captures_expr(r, param_names, out);
             },
             .WrappingArithmeticExpr(l, _, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .WrappingShiftExpr(l, _, r) then {
                 self.collect_captures_expr(l, param_names, out);
                 self.collect_captures_expr(r, param_names, out);
             },

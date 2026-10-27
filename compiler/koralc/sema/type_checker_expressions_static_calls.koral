@@ -204,6 +204,16 @@ given TypeChecker {
             .UInt16Type() then TypeNode.Identifier("UInt16", unknown_span()),
             .UInt32Type() then TypeNode.Identifier("UInt32", unknown_span()),
             .UInt64Type() then TypeNode.Identifier("UInt64", unknown_span()),
+            .WrappingIntType() then TypeNode.Identifier("WrappingInt", unknown_span()),
+            .WrappingInt8Type() then TypeNode.Identifier("WrappingInt8", unknown_span()),
+            .WrappingInt16Type() then TypeNode.Identifier("WrappingInt16", unknown_span()),
+            .WrappingInt32Type() then TypeNode.Identifier("WrappingInt32", unknown_span()),
+            .WrappingInt64Type() then TypeNode.Identifier("WrappingInt64", unknown_span()),
+            .WrappingUIntType() then TypeNode.Identifier("WrappingUInt", unknown_span()),
+            .WrappingUInt8Type() then TypeNode.Identifier("WrappingUInt8", unknown_span()),
+            .WrappingUInt16Type() then TypeNode.Identifier("WrappingUInt16", unknown_span()),
+            .WrappingUInt32Type() then TypeNode.Identifier("WrappingUInt32", unknown_span()),
+            .WrappingUInt64Type() then TypeNode.Identifier("WrappingUInt64", unknown_span()),
             .Float32Type() then TypeNode.Identifier("Float32", unknown_span()),
             .Float64Type() then TypeNode.Identifier("Float64", unknown_span()),
             .BoolType() then TypeNode.Identifier("Bool", unknown_span()),
@@ -1189,10 +1199,15 @@ given TypeChecker {
                                     target,
                                 )
                             },
-                            .FloatLiteral(value, _) then make_typed_expr(
-                                TypedExprKind.FloatLiteral(value),
-                                target,
-                            ),
+                            .FloatLiteral(value, _) then {
+                                if target is .Float32Type() or is .Float64Type() then make_typed_expr(
+                                    TypedExprKind.FloatLiteral(value),
+                                    target,
+                                ) else make_typed_expr(
+                                    TypedExprKind.FloatLiteral(value),
+                                    Type.Float64Type(),
+                                )
+                            },
                             .RuneLiteral(value, rune_span) then {
                                 let outer_span = self.enter_current_span(rune_span);
                                 let lowered = self.lower_rune_literal_for_cast(
@@ -1225,7 +1240,7 @@ given TypeChecker {
                             _ then adapted_inner,
                         };
                         make_typed_expr(
-                            TypedExprKind.CastExpr(target, typed_inner, true),
+                            TypedExprKind.CastExpr(target, typed_inner),
                             target,
                         )
                     }
@@ -1448,22 +1463,6 @@ given TypeChecker {
                     },
                     _ then with_type_args,
                 };
-                // `Type.wrapping_cast[U](x)` is the static spelling of
-                // `x.wrapping_cast[U]()` and owes the same complaint when `U`
-                // is not an integer. The bound type argument IS the return
-                // type, so both spellings are checked here.
-                for bound in resolved_method_type_args then {
-                    self.reject_non_integer_wrapping_cast_target(
-                        method_name,
-                        bound,
-                        type_name_span,
-                    );
-                };
-                self.reject_non_integer_wrapping_cast_target(
-                    method_name,
-                    ret_type,
-                    type_name_span,
-                );
                 let method_symbol = when static_sig_opt in {
                     .Some(sig) then sig,
                     .None() then self.make_method_symbol_for_receiver(
@@ -1725,6 +1724,11 @@ given TypeChecker {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -1754,19 +1758,19 @@ given TypeChecker {
         let i64max = UInt64(9223372036854775807);
         let u64max = i64max * UInt64(2) + UInt64(1);
         let bounds = when target_type in {
-            .IntType() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
-            .Int64Type() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
-            .Int8Type() then Pair[UInt64, UInt64](UInt64(128), UInt64(127)),
-            .Int16Type() then Pair[UInt64, UInt64](UInt64(32768), UInt64(32767)),
-            .Int32Type() then Pair[UInt64, UInt64](
+            .IntType() or .WrappingIntType() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
+            .Int64Type() or .WrappingInt64Type() then Pair[UInt64, UInt64](i64max + UInt64(1), i64max),
+            .Int8Type() or .WrappingInt8Type() then Pair[UInt64, UInt64](UInt64(128), UInt64(127)),
+            .Int16Type() or .WrappingInt16Type() then Pair[UInt64, UInt64](UInt64(32768), UInt64(32767)),
+            .Int32Type() or .WrappingInt32Type() then Pair[UInt64, UInt64](
                 UInt64(2147483648),
                 UInt64(2147483647),
             ),
-            .UIntType() then Pair[UInt64, UInt64](UInt64(0), u64max),
-            .UInt64Type() then Pair[UInt64, UInt64](UInt64(0), u64max),
-            .UInt8Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(255)),
-            .UInt16Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(65535)),
-            .UInt32Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(4294967295)),
+            .UIntType() or .WrappingUIntType() then Pair[UInt64, UInt64](UInt64(0), u64max),
+            .UInt64Type() or .WrappingUInt64Type() then Pair[UInt64, UInt64](UInt64(0), u64max),
+            .UInt8Type() or .WrappingUInt8Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(255)),
+            .UInt16Type() or .WrappingUInt16Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(65535)),
+            .UInt32Type() or .WrappingUInt32Type() then Pair[UInt64, UInt64](UInt64(0), UInt64(4294967295)),
             _ then Pair[UInt64, UInt64](UInt64(0), UInt64(0)),
         };
         if bounds.first == UInt64(0) and bounds.second == UInt64(0) and not self.is_integer_type(
@@ -1824,7 +1828,7 @@ given TypeChecker {
             let sign = if is_negative then "-" else "";
             let display = if overflow then s else sign + magnitude.to_string();
             self.push_diagnostic_at_span(
-                "Integer literal \(display) is out of range for \(type_to_string(target_type))",
+                "Integer literal \(display) is out of range for \(type_to_string(plain_width_counterpart(target_type)))",
                 span,
             );
             return false;
@@ -1910,7 +1914,6 @@ given TypeChecker {
                 TypedExprKind.CastExpr(
                     target_type,
                     self.empty_typed_block(Type.Unknown()),
-                    true,
                 ),
                 target_type,
             );
@@ -1926,7 +1929,6 @@ given TypeChecker {
                     TypedExprKind.CastExpr(
                         target_type,
                         self.empty_typed_block(Type.Unknown()),
-                        true,
                     ),
                     target_type,
                 );
@@ -1977,7 +1979,7 @@ given TypeChecker {
             ),
             _ then adapted_inner,
         };
-        make_typed_expr(TypedExprKind.CastExpr(target_type, typed_inner, true), target_type)
+        make_typed_expr(TypedExprKind.CastExpr(target_type, typed_inner), target_type)
     };
 
     module_private check_call_expr_ref(

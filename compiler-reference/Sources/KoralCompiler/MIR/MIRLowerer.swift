@@ -809,8 +809,6 @@ private final class MIRFunctionBuilder {
       return lowerBinary(left: left, right: right, type: type, operatorKind: .arithmetic(op, checked: true))
     case .wrappingArithmeticExpression(let left, let op, let right, let type):
       return lowerBinary(left: left, right: right, type: type, operatorKind: .wrappingArithmetic(op))
-    case .wrappingShiftExpression(let left, let op, let right, let type):
-      return lowerBinary(left: left, right: right, type: type, operatorKind: .wrappingShift(op))
     case .comparisonExpression(let left, let op, let right, let type):
       return lowerBinary(left: left, right: right, type: type, operatorKind: .comparison(op))
     case .isExpression(let subject, let pattern, let type):
@@ -828,9 +826,9 @@ private final class MIRFunctionBuilder {
       return lowerUnary(inner: inner, type: type, operatorKind: .logicalNot)
     case .bitwiseNotExpression(let inner, let type):
       return lowerUnary(inner: inner, type: type, operatorKind: .bitwiseNot)
-    case .castExpression(let inner, let type, let checked):
+    case .castExpression(let inner, let type):
       let operand = lowerOperand(inner)
-      let result = materialize(.cast(operand, to: type, checked: checked), type: type)
+      let result = materialize(.cast(operand, to: type), type: type)
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
     case .typeConstruction(let identifier, _, let arguments, let type):
       let values = arguments.map { lowerValue($0) }
@@ -4149,7 +4147,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func lowerBorrowedSourceValue(_ expression: TypedExpressionNode) -> MIRValue {
-    if case .castExpression(let inner, let targetType, _) = expression,
+    if case .castExpression(let inner, let targetType) = expression,
        isOwnershipPreservingBorrowCast(sourceType: inner.type, targetType: targetType) {
       return lowerBorrowedSourceValue(inner)
     }
@@ -4269,7 +4267,7 @@ private final class MIRFunctionBuilder {
         case .derefExpression(let inner, let type),
           .unsafeDerefExpression(let inner, let type):
       return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
-    case .castExpression(let inner, let type, _):
+    case .castExpression(let inner, let type):
       switch (inner.type, type) {
       case (.reference, .reference),
            (.reference, .mutableReference),

@@ -210,13 +210,11 @@ public indirect enum TypedExpressionNode {
   case stringLiteral(value: String, type: Type)
   case interpolatedString(parts: [TypedInterpolatedPart], type: Type)
   case booleanLiteral(value: Bool, type: Type)
-  case castExpression(expression: TypedExpressionNode, type: Type, checked: Bool)
+  case castExpression(expression: TypedExpressionNode, type: Type)
   case arithmeticExpression(
     left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
   case wrappingArithmeticExpression(
     left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
-  case wrappingShiftExpression(
-    left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
   case comparisonExpression(
     left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
   case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
@@ -518,10 +516,9 @@ extension TypedExpressionNode {
       .stringLiteral(_, let type),
       .interpolatedString(_, let type),
       .booleanLiteral(_, let type),
-      .castExpression(_, let type, _),
+      .castExpression(_, let type),
       .arithmeticExpression(_, _, _, let type),
       .wrappingArithmeticExpression(_, _, _, let type),
-      .wrappingShiftExpression(_, _, _, let type),
       .comparisonExpression(_, _, _, let type),
       .andExpression(_, _, let type),
       .orExpression(_, _, let type),
@@ -580,7 +577,7 @@ extension TypedExpressionNode {
       return .rvalue
     case .ptrExpression:
       return .rvalue
-    case .castExpression(let inner, let type, _):
+    case .castExpression(let inner, let type):
       // Reference-to-reference casts (identity, ref↔ref mutable) preserve the
       // underlying value category because the C representation is identical
       // (struct __koral_Ref). All other casts produce rvalues.

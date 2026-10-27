@@ -201,7 +201,7 @@ final class MIRPrinter {
       return "ref[\(kind), \(allocation)] \(renderPlace(place))"
     case .pointer(let place):
       return "ptr \(renderPlace(place))"
-    case .cast(let operand, let type, checked: _):
+    case .cast(let operand, let type):
       return "cast \(renderOperand(operand)) to \(context.getDebugName(type))"
     case .intrinsic:
       return "intrinsic"
@@ -275,8 +275,6 @@ final class MIRPrinter {
       return "logical_or"
     case .bitwise(let op, let checkedShift):
       return checkedShift ? "checked_\(renderBitwiseOperator(op))" : renderBitwiseOperator(op)
-    case .wrappingShift(let op):
-      return "wrapping_\(renderBitwiseOperator(op))"
     }
   }
 

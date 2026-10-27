@@ -307,58 +307,83 @@ Pointer types use the same spelling as type annotations: `*Int(p)`,
 `*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
 and `String(x)` are errors (`Type does not support cast`).
 
-A numeric conversion is **checked** — it does not wrap. Whether a check applies
-depends on the widths involved:
+There is only one conversion spelling, and the **target type decides the
+policy**. The integers form three parallel families — ten types each, same
+widths, strictly isolated (`WrappingInt` and `Int` never mix in one operation):
 
-- A **width-changing** conversion (narrowing or widening) is checked against the
-  target type's range. If the value does not fit, the program panics at run time.
-- A **same-width** conversion between signed and unsigned reinterprets the bit
-  pattern and never panics — no information is lost, only its signedness.
+| Family | Types | Arithmetic overflow | Width-changing conversion | Status |
+|---|---|---|---|---|
+| Regular | `Int` `Int8` `Int16` `Int32` `Int64` `UInt` `UInt8` `UInt16` `UInt32` `UInt64` | panics | checked | default |
+| Wrapping | `WrappingInt` `WrappingInt8` ... `WrappingUInt64` | wraps modulo 2^N | takes the target's low bits | built in |
+| Saturating | `SaturatingInt` `SaturatingInt8` ... | clamps to MIN/MAX | clamps to MIN/MAX | reserved, not implemented |
+
+The boundary is **whether a wrapped answer exists**: wrap when one does, panic
+only when none does. Arithmetic overflow wraps (modulo 2^N); an out-of-range
+shift amount is masked to the width (`WrappingInt8(1) << 9` is `2`); `MIN / -1`
+wraps to `MIN`. Division and remainder by zero have no wrapped answer and still
+panic — as does converting a NaN or an infinity to an integer. `Wrapping*` types
+share the regular types' width and ABI: the family is a compile-time policy, not
+a different machine value.
+
+The conversion matrix follows from the target alone:
+
+| Source → Target | Same width | Width-changing |
+|---|---|---|
+| Regular → Regular | lossless retype | **checked** |
+| Regular → Wrapping | lossless retype | **truncates** |
+| Wrapping → Regular | lossless retype | **checked** |
+| Wrapping → Wrapping | lossless retype | **truncates** |
+
+- **Same width** is always a lossless retype, in either direction, signedness
+  flips included: no information is lost, only how the bits are read.
+  `UInt(n)` for `n = -5` reinterprets to `18446744073709551611`; it does not
+  wrap.
+- **Width-changing to a regular target** is checked against the target type's
+  range (narrowing or widening alike). If the value does not fit, the program
+  panics at run time.
+- **Width-changing to a Wrapping target** takes the target width's low bits —
+  truncating, or sign/zero-extending when widening the two's-complement
+  representation — and never panics.
 
 ```koral
 let big Int = 300;
-let a UInt8 = UInt8(big);      // Panic: numeric conversion overflow
+let a UInt8 = UInt8(big);                        // Panic: numeric conversion overflow
 let n Int = -5;
-let u UInt = UInt(n);          // 18446744073709551611 -- reinterpreted, not wrapped
-```
-
-A float-to-int conversion truncates toward zero, and the range check applies to
-the truncated value: `Int(3.9)` is `3`, `Int(-3.9)` is `-3`, `Int(1e20)` panics,
-and so does converting a NaN or an infinity.
-
-A conversion whose source is a literal is checked at compile time instead, and
-refuses to compile rather than panicking — `UInt8(300)` is an error
-(`Integer literal 300 is out of range for UInt8`), not a run-time panic.
-
-When the bit pattern is what you want, `wrapping_cast` is the opt-out: an
-unchecked integer-to-integer conversion with C/Rust-`as` semantics. It takes the
-value's two's-complement representation and truncates or sign/zero-extends it to
-the target width, and it never panics.
-
-```koral
-let big Int = 300;
-let low UInt8 = big.wrapping_cast[UInt8]();   // 44 -- the low byte
-let n Int = -5;
-let u UInt = n.wrapping_cast[UInt]();         // 18446744073709551611 -- sign-extends
+let u UInt = UInt(n);                            // 18446744073709551611 -- reinterpreted
+let low UInt8 = UInt8(WrappingUInt8(big));       // 44 -- the low byte
 let b Int8 = -1;
-let wide UInt = b.wrapping_cast[UInt]();      // 18446744073709551615 -- sign-extends first
-let raw UInt8 = b.wrapping_cast[UInt8]();     // 255
+let wide UInt = UInt(WrappingUInt(b));           // 18446744073709551615 -- sign-extends first
+let raw UInt8 = UInt8(WrappingUInt8(b));         // 255
 ```
 
-This is the byte-take idiom — serialization, hashing, bit tricks — where a
-truncation is the point and a panic would be noise. A negative `Int8` hashed
-through it sign-extends, so the same number hashes the same whichever width it
-arrives in:
+The byte-take idiom -- serialization, hashing, bit tricks -- is where the
+Wrapping target earns its keep: truncation is the point and a panic would be
+noise. A negative `Int8` hashed through it sign-extends, so the same number
+hashes the same whichever width it arrives in:
 
 ```koral
 given Int8 as Hash {
-    public hash(self) UInt = self.wrapping_cast[UInt]();
+    public hash(self) UInt = UInt(WrappingUInt(self));
 };
 ```
 
-The target must be an integer type: `x.wrapping_cast[Float64]()` is the same
-error a non-castable `Type(expr)` target gives. A float-to-int is a numeric
-conversion, not a bit move, and stays checked.
+A literal is checked at **compile time**, by width and not by family: a constant
+that does not fit is an author's mistake, not data-dependent overflow.
+`WrappingUInt8(300)` is the same `Integer literal 300 is out of range for UInt8`
+error as `UInt8(300)`. Literals also join the other operand's integer width in
+either operand position — `WrappingInt(n) + 123` and `123 + WrappingInt(n)` are
+both ordinary Wrapping arithmetic.
+
+Floats have no family. An integer converted to a float is never checked —
+precision may be lost (`|n|` > 2^53) — and a float narrowing to a float is
+never checked either (it may lose precision or overflow to ±inf). A float
+converts to an integer in two steps:
+
+1. **Domain**: NaN and ±inf have no truncatable integer value and panic,
+   whatever the target family.
+2. **Range**: the value truncated toward zero then follows the target's policy
+   — a regular target checks (`Int(1e20)` panics), a Wrapping target takes the
+   low bits (`WrappingUInt8(300.7)` is `44`).
 
 #### String ↔ Number
 

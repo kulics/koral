@@ -193,7 +193,7 @@ indirect enum MIRValue {
   case traitMethodCall(MIRTraitMethodCall)
   case ref(MIRPlace, kind: MIRReferenceKind, allocation: MIRReferenceAllocation)
   case pointer(MIRPlace)
-  case cast(MIROperand, to: Type, checked: Bool)
+  case cast(MIROperand, to: Type)
   case intrinsic(MIRIntrinsic)
   case lambda(MIRLambda)
 }
@@ -233,7 +233,6 @@ enum MIRBinaryOperator {
   case logicalAnd
   case logicalOr
   case bitwise(BitwiseOperator, checkedShift: Bool)
-  case wrappingShift(BitwiseOperator)
 }
 
 struct MIRUnaryOperation {

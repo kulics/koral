@@ -1185,6 +1185,16 @@ given TypeChecker {
                 .UInt16Type() then "UInt16",
                 .UInt32Type() then "UInt32",
                 .UInt64Type() then "UInt64",
+                .WrappingIntType() then "WrappingInt",
+                .WrappingInt8Type() then "WrappingInt8",
+                .WrappingInt16Type() then "WrappingInt16",
+                .WrappingInt32Type() then "WrappingInt32",
+                .WrappingInt64Type() then "WrappingInt64",
+                .WrappingUIntType() then "WrappingUInt",
+                .WrappingUInt8Type() then "WrappingUInt8",
+                .WrappingUInt16Type() then "WrappingUInt16",
+                .WrappingUInt32Type() then "WrappingUInt32",
+                .WrappingUInt64Type() then "WrappingUInt64",
                 .Float32Type() then "Float32",
                 .Float64Type() then "Float64",
                 .BoolType() then "Bool",
@@ -1968,6 +1978,36 @@ given TypeChecker {
             ),
             .UInt64Type() then Option[Pair[String, List[Type]]].Some(
                 Pair[String, List[Type]]("UInt64", List[Type].new()),
+            ),
+            .WrappingIntType() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingInt", List[Type].new()),
+            ),
+            .WrappingInt8Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingInt8", List[Type].new()),
+            ),
+            .WrappingInt16Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingInt16", List[Type].new()),
+            ),
+            .WrappingInt32Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingInt32", List[Type].new()),
+            ),
+            .WrappingInt64Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingInt64", List[Type].new()),
+            ),
+            .WrappingUIntType() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingUInt", List[Type].new()),
+            ),
+            .WrappingUInt8Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingUInt8", List[Type].new()),
+            ),
+            .WrappingUInt16Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingUInt16", List[Type].new()),
+            ),
+            .WrappingUInt32Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingUInt32", List[Type].new()),
+            ),
+            .WrappingUInt64Type() then Option[Pair[String, List[Type]]].Some(
+                Pair[String, List[Type]]("WrappingUInt64", List[Type].new()),
             ),
             .Float32Type() then Option[Pair[String, List[Type]]].Some(
                 Pair[String, List[Type]]("Float32", List[Type].new()),
@@ -3252,6 +3292,16 @@ given TypeChecker {
                         .UInt16Type() then et,
                         .UInt32Type() then et,
                         .UInt64Type() then et,
+                        .WrappingInt8Type() then et,
+                        .WrappingInt16Type() then et,
+                        .WrappingInt32Type() then et,
+                        .WrappingInt64Type() then et,
+                        .WrappingUIntType() then et,
+                        .WrappingUInt8Type() then et,
+                        .WrappingUInt16Type() then et,
+                        .WrappingUInt32Type() then et,
+                        .WrappingUInt64Type() then et,
+                        .WrappingIntType() then et,
                         .IntType() then et,
                         _ then Type.IntType(),
                     },
@@ -3329,10 +3379,15 @@ given TypeChecker {
                         TypedExprKind.IntegerLiteral(value),
                         target,
                     ),
-                    .FloatLiteral(value, _) then make_typed_expr(
-                        TypedExprKind.FloatLiteral(value),
-                        target,
-                    ),
+                    .FloatLiteral(value, _) then {
+                        if target is .Float32Type() or is .Float64Type() then make_typed_expr(
+                            TypedExprKind.FloatLiteral(value),
+                            target,
+                        ) else make_typed_expr(
+                            TypedExprKind.FloatLiteral(value),
+                            Type.Float64Type(),
+                        )
+                    },
                     .RuneLiteral(value, rune_span) then {
                         let outer_span = self.enter_current_span(rune_span);
                         let lowered = self.lower_rune_literal_for_cast(value, target);
@@ -3361,7 +3416,7 @@ given TypeChecker {
                     ),
                     _ then adapted_inner,
                 };
-                make_typed_expr(TypedExprKind.CastExpr(target, typed_inner, true), target)
+                make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target)
             },
             .Unary(op, inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, expected, scope);
@@ -3372,7 +3427,7 @@ given TypeChecker {
                                 TypedExprKind.IntegerLiteral("-\(value)"),
                                 typed_inner.expr_type,
                             )
-                            else if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(
+                            else if self.is_plain_integer_type(typed_inner.expr_type) or self.is_float_type(
                                 typed_inner.expr_type,
                             ) then make_typed_expr(
                                 TypedExprKind.Unary(op, typed_inner),
@@ -3393,7 +3448,18 @@ given TypeChecker {
                                 typed_inner.expr_type,
                             )
                         },
-                        _ then if self.is_numeric_type(typed_inner.expr_type) or self.is_float_type(
+                        _ then if self.is_wrapping_integer_type(typed_inner.expr_type) then make_typed_expr(
+                            TypedExprKind.WrappingArithmeticExpr(
+                                make_typed_expr(
+                                    TypedExprKind.IntegerLiteral("0"),
+                                    typed_inner.expr_type,
+                                ),
+                                ArithmeticOperator.Subtract(),
+                                typed_inner,
+                            ),
+                            typed_inner.expr_type,
+                        )
+                        else if self.is_plain_integer_type(typed_inner.expr_type) or self.is_float_type(
                             typed_inner.expr_type,
                         ) then make_typed_expr(
                             TypedExprKind.Unary(op, typed_inner),

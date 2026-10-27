@@ -37,15 +37,22 @@ given TypeChecker {
         if expected is .Some(et) then {
             when expr in {
                 .IntegerLiteral(value, lit_span) then {
-                    if self.is_numeric_type(et) then {
-                        if self.is_integer_type(et) then {
-                            let _ = self.check_integer_literal_range(value, et, lit_span);
-                        };
+                    // An integer literal joins an INTEGER expected type only
+                    // (the seed's `coerceLiteral`): there is no int<->float
+                    // promotion outside a written cast. A literal facing a
+                    // float expected type falls through to the core path,
+                    // which types it at its default (Int) so the caller
+                    // reports the mismatch.
+                    if self.is_integer_type(et) then {
+                        let _ = self.check_integer_literal_range(value, et, lit_span);
                         return make_typed_expr(TypedExprKind.IntegerLiteral(value), et);
                     };
                 },
                 .FloatLiteral(value, _) then {
-                    if self.is_float_type(et) or self.is_numeric_type(et) then {
+                    // Float literals join a FLOAT expected type only, for the
+                    // same reason: `let x Int = 3.9` is a mismatch, not a
+                    // truncation.
+                    if self.is_float_type(et) then {
                         return make_typed_expr(TypedExprKind.FloatLiteral(value), et);
                     };
                 },

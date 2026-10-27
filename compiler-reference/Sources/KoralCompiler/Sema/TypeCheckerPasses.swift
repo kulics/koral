@@ -1451,6 +1451,16 @@ extension TypeChecker {
         case "UInt16": type = .uint16
         case "UInt32": type = .uint32
         case "UInt64": type = .uint64
+        case "WrappingInt": type = .wrappingInt
+        case "WrappingInt8": type = .wrappingInt8
+        case "WrappingInt16": type = .wrappingInt16
+        case "WrappingInt32": type = .wrappingInt32
+        case "WrappingInt64": type = .wrappingInt64
+        case "WrappingUInt": type = .wrappingUInt
+        case "WrappingUInt8": type = .wrappingUInt8
+        case "WrappingUInt16": type = .wrappingUInt16
+        case "WrappingUInt32": type = .wrappingUInt32
+        case "WrappingUInt64": type = .wrappingUInt64
         case "Float32": type = .float32
         case "Float64": type = .float64
         case "Bool": type = .bool
@@ -2027,6 +2037,8 @@ extension TypeChecker {
               return context.getName(defId)
             case .int, .int8, .int16, .int32, .int64,
                  .uint, .uint8, .uint16, .uint32, .uint64,
+                 .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+                 .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
                  .float32, .float64, .bool:
               return selfType.description
             default:
@@ -2122,6 +2134,8 @@ extension TypeChecker {
           typeName = context.getName(defId) ?? ""
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64,
              .bool:
           typeName = type.description
@@ -2140,7 +2154,7 @@ extension TypeChecker {
           let methodType = try withNewScope {
             try currentScope.defineType("Self", type: type)
             // Method-level type parameters are binders for the signature
-            // itself: `wrapping_cast[T Any](self) T` spells its return type
+            // itself: `f[T Any](self) T` spells its return type
             // through one. They shadow anything named alike (genericParameters
             // is consulted before typeNames in lookupTypeInternal).
             for typeParam in method.typeParameters {
@@ -3989,6 +4003,8 @@ extension TypeChecker {
         concreteTypeName = context.getName(defId) ?? ""
       case .int, .int8, .int16, .int32, .int64,
            .uint, .uint8, .uint16, .uint32, .uint64,
+           .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+           .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
            .float32, .float64, .bool:
         concreteTypeName = selfType.description
       default:
@@ -4108,6 +4124,8 @@ extension TypeChecker {
         shouldEmitGiven = true
       case .int, .int8, .int16, .int32, .int64,
         .uint, .uint8, .uint16, .uint32, .uint64,
+        .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+        .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
         .float32, .float64,
         .bool:
         typeName = type.description
@@ -4123,7 +4141,7 @@ extension TypeChecker {
         let (methodType, typedBody, params, returnType) = try withNewScope {
           try currentScope.defineType("Self", type: type)
           // Method-level type parameters are binders for the signature
-          // itself: `wrapping_cast[T Any](self) T` spells its return type
+          // itself: `f[T Any](self) T` spells its return type
           // through one.
           for typeParam in method.typeParameters {
             currentScope.defineGenericParameter(typeParam.name, type: .genericParameter(name: typeParam.name))

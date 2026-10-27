@@ -397,6 +397,8 @@ extension TypeChecker {
 
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
+      .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+      .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
       .float32, .float64,
       .bool:
       let typeName = selfType.description
@@ -978,6 +980,36 @@ extension TypeChecker {
       typeArgs = []
     case .uint64:
       templateName = "UInt64"
+      typeArgs = []
+    case .wrappingInt:
+      templateName = "WrappingInt"
+      typeArgs = []
+    case .wrappingInt8:
+      templateName = "WrappingInt8"
+      typeArgs = []
+    case .wrappingInt16:
+      templateName = "WrappingInt16"
+      typeArgs = []
+    case .wrappingInt32:
+      templateName = "WrappingInt32"
+      typeArgs = []
+    case .wrappingInt64:
+      templateName = "WrappingInt64"
+      typeArgs = []
+    case .wrappingUInt:
+      templateName = "WrappingUInt"
+      typeArgs = []
+    case .wrappingUInt8:
+      templateName = "WrappingUInt8"
+      typeArgs = []
+    case .wrappingUInt16:
+      templateName = "WrappingUInt16"
+      typeArgs = []
+    case .wrappingUInt32:
+      templateName = "WrappingUInt32"
+      typeArgs = []
+    case .wrappingUInt64:
+      templateName = "WrappingUInt64"
       typeArgs = []
     case .float32:
       templateName = "Float32"

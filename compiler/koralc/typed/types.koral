@@ -632,10 +632,10 @@ given DefIdMap {
             };
             if is_private and not source_file.is_empty() then {
                 // 简单文件哈希
-                let mutable hash UInt = 0;
+                let mutable hash WrappingUInt = 0;
                 let bytes = source_file.bytes();
                 for b in bytes then {
-                    hash = hash.wrapping_mul(UInt(31)).wrapping_add(UInt(b));
+                    hash = hash * 31 + WrappingUInt(b);
                 };
                 if needs_separator then {
                     result.push_byte('_');
@@ -956,6 +956,16 @@ public type Type {
     UInt16Type(),
     UInt32Type(),
     UInt64Type(),
+    WrappingIntType(),
+    WrappingInt8Type(),
+    WrappingInt16Type(),
+    WrappingInt32Type(),
+    WrappingInt64Type(),
+    WrappingUIntType(),
+    WrappingUInt8Type(),
+    WrappingUInt16Type(),
+    WrappingUInt32Type(),
+    WrappingUInt64Type(),
     Float32Type(),
     Float64Type(),
     BoolType(),
@@ -1154,6 +1164,16 @@ public let stable_type_key(t Type) String = {
         .UInt16Type() then "UInt16",
         .UInt32Type() then "UInt32",
         .UInt64Type() then "UInt64",
+        .WrappingIntType() then "WrappingInt",
+        .WrappingInt8Type() then "WrappingInt8",
+        .WrappingInt16Type() then "WrappingInt16",
+        .WrappingInt32Type() then "WrappingInt32",
+        .WrappingInt64Type() then "WrappingInt64",
+        .WrappingUIntType() then "WrappingUInt",
+        .WrappingUInt8Type() then "WrappingUInt8",
+        .WrappingUInt16Type() then "WrappingUInt16",
+        .WrappingUInt32Type() then "WrappingUInt32",
+        .WrappingUInt64Type() then "WrappingUInt64",
         .Float32Type() then "Float32",
         .Float64Type() then "Float64",
         .BoolType() then "Bool",
@@ -1194,6 +1214,26 @@ public let type_to_string(t Type) String = {
     return type_to_string_impl(t, UInt(0));
 };
 
+/// The plain same-width counterpart of an integer type. A wrapping type maps
+/// to its plain twin (`WrappingInt8` -> `Int8`); a plain type maps to itself.
+/// Width is the only thing a literal range check keys on, so this is how
+/// `WrappingUInt8(300)` gets the exact `UInt8(300)` complaint.
+public let plain_width_counterpart(t Type) Type = {
+    return when t in {
+        .WrappingIntType() then Type.IntType(),
+        .WrappingInt8Type() then Type.Int8Type(),
+        .WrappingInt16Type() then Type.Int16Type(),
+        .WrappingInt32Type() then Type.Int32Type(),
+        .WrappingInt64Type() then Type.Int64Type(),
+        .WrappingUIntType() then Type.UIntType(),
+        .WrappingUInt8Type() then Type.UInt8Type(),
+        .WrappingUInt16Type() then Type.UInt16Type(),
+        .WrappingUInt32Type() then Type.UInt32Type(),
+        .WrappingUInt64Type() then Type.UInt64Type(),
+        _ then t,
+    };
+};
+
 // Iterative-safe type_to_string with depth limit to prevent stack overflow
 // on deeply nested generic types in the bootstrap binary.
 file_private let type_to_string_impl(t Type, depth UInt) String = {
@@ -1210,6 +1250,16 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
         .UInt16Type() then "UInt16",
         .UInt32Type() then "UInt32",
         .UInt64Type() then "UInt64",
+        .WrappingIntType() then "WrappingInt",
+        .WrappingInt8Type() then "WrappingInt8",
+        .WrappingInt16Type() then "WrappingInt16",
+        .WrappingInt32Type() then "WrappingInt32",
+        .WrappingInt64Type() then "WrappingInt64",
+        .WrappingUIntType() then "WrappingUInt",
+        .WrappingUInt8Type() then "WrappingUInt8",
+        .WrappingUInt16Type() then "WrappingUInt16",
+        .WrappingUInt32Type() then "WrappingUInt32",
+        .WrappingUInt64Type() then "WrappingUInt64",
         .Float32Type() then "Float32",
         .Float64Type() then "Float64",
         .BoolType() then "Bool",
@@ -1367,8 +1417,8 @@ file_private let type_to_string_impl(t Type, depth UInt) String = {
 };
 
 public let stable_hash_combine_value(seed UInt, value UInt) UInt = {
-    let folded = value.wrapping_add(UInt(11400714819323198485));
-    return (seed ^ folded).wrapping_mul(UInt(1099511628211));
+    let folded = WrappingUInt(value) + WrappingUInt(11400714819323198485);
+    return UInt((WrappingUInt(seed) ^ folded) * WrappingUInt(1099511628211));
 };
 
 public let stable_hash_combine_string(seed UInt, text String) UInt = {
@@ -1423,6 +1473,36 @@ public let stable_type_hash(t Type) UInt = {
         },
         .UInt64Type() then {
             hash = stable_hash_combine_value(hash, UInt(10));
+        },
+        .WrappingIntType() then {
+            hash = stable_hash_combine_value(hash, UInt(34));
+        },
+        .WrappingInt8Type() then {
+            hash = stable_hash_combine_value(hash, UInt(35));
+        },
+        .WrappingInt16Type() then {
+            hash = stable_hash_combine_value(hash, UInt(36));
+        },
+        .WrappingInt32Type() then {
+            hash = stable_hash_combine_value(hash, UInt(37));
+        },
+        .WrappingInt64Type() then {
+            hash = stable_hash_combine_value(hash, UInt(38));
+        },
+        .WrappingUIntType() then {
+            hash = stable_hash_combine_value(hash, UInt(39));
+        },
+        .WrappingUInt8Type() then {
+            hash = stable_hash_combine_value(hash, UInt(40));
+        },
+        .WrappingUInt16Type() then {
+            hash = stable_hash_combine_value(hash, UInt(41));
+        },
+        .WrappingUInt32Type() then {
+            hash = stable_hash_combine_value(hash, UInt(42));
+        },
+        .WrappingUInt64Type() then {
+            hash = stable_hash_combine_value(hash, UInt(43));
         },
         .Float32Type() then {
             hash = stable_hash_combine_value(hash, UInt(11));
@@ -1810,6 +1890,16 @@ given Type as Eq {
         .UInt16Type() then other is .UInt16Type(),
         .UInt32Type() then other is .UInt32Type(),
         .UInt64Type() then other is .UInt64Type(),
+        .WrappingIntType() then other is .WrappingIntType(),
+        .WrappingInt8Type() then other is .WrappingInt8Type(),
+        .WrappingInt16Type() then other is .WrappingInt16Type(),
+        .WrappingInt32Type() then other is .WrappingInt32Type(),
+        .WrappingInt64Type() then other is .WrappingInt64Type(),
+        .WrappingUIntType() then other is .WrappingUIntType(),
+        .WrappingUInt8Type() then other is .WrappingUInt8Type(),
+        .WrappingUInt16Type() then other is .WrappingUInt16Type(),
+        .WrappingUInt32Type() then other is .WrappingUInt32Type(),
+        .WrappingUInt64Type() then other is .WrappingUInt64Type(),
         .Float32Type() then other is .Float32Type(),
         .Float64Type() then other is .Float64Type(),
         .BoolType() then other is .BoolType(),

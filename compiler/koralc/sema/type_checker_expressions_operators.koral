@@ -97,6 +97,84 @@ given TypeChecker {
         };
     };
 
+    /// Whether the expression is an integer literal operand -- the operand
+    /// that joins the other side's integer width before it is range-checked.
+    /// A negative spelling is folded into the literal's value, not a node.
+    module_private is_integer_literal_operand(self, e Expr) Bool = {
+        return e is .IntegerLiteral(...);
+    };
+
+    /// One operand of an arithmetic expression. `expected` flows into nested
+    /// arithmetic/bitwise operands and the default path: the caller passes the
+    /// enclosing expected for the left operand and the left operand's type for
+    /// the right one.
+    module_private check_arithmetic_operand_ref(
+        self,
+        expr Expr,
+        expected Option[Type],
+        scope Scope,
+    ) TypedExpr = {
+        return when expr in {
+            .Identifier(name, span) then self.check_identifier_expr_at(
+                name,
+                span,
+                scope,
+                false,
+            ),
+            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                expected,
+                scope,
+            ),
+            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                scope,
+            ),
+            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(
+                inner_left,
+                inner_op,
+                inner_right,
+                expected,
+                scope,
+            ),
+            .DerefExpr(inner, _) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then inner_ref,
+                    .ReferenceType(inner_ref) then inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
+                    .BorrowedReferenceType(inner_ref) then inner_ref,
+                    .WeakReferenceType(inner_ref) then inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref,
+                    .MutablePointerType(inner_ref) then inner_ref,
+                    .PointerType(inner_ref) then inner_ref,
+                    _ then Type.Unknown(),
+                };
+                make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
+            },
+            .UnsafeDerefExpr(inner, _) then {
+                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                let inner_t = when typed_inner.expr_type in {
+                    .MutableReferenceType(inner_ref) then inner_ref,
+                    .ReferenceType(inner_ref) then inner_ref,
+                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
+                    .BorrowedReferenceType(inner_ref) then inner_ref,
+                    .WeakReferenceType(inner_ref) then inner_ref,
+                    .MutableWeakReferenceType(inner_ref) then inner_ref,
+                    .MutablePointerType(inner_ref) then inner_ref,
+                    .PointerType(inner_ref) then inner_ref,
+                    _ then Type.Unknown(),
+                };
+                make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
+            },
+            _ then self.check_expr_core_ref(expr, expected, scope),
+        };
+    };
+
     module_private check_arithmetic_expr_ref(
         self,
         left Expr,
@@ -106,127 +184,32 @@ given TypeChecker {
         scope Scope,
     ) TypedExpr = {
 
-        let initial_typed_left = when left in {
-            .Identifier(name, span) then self.check_identifier_expr_at(
-                name,
-                span,
-                scope,
-                false,
-            ),
-            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                expected,
-                scope,
-            ),
-            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                scope,
-            ),
-            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                expected,
-                scope,
-            ),
-            .DerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
-                let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
-                    _ then Type.Unknown(),
-                };
-                make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
-            },
-            .UnsafeDerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
-                let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
-                    _ then Type.Unknown(),
-                };
-                make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
-            },
-            _ then self.check_expr_core_ref(left, expected, scope),
-        };
-        let initial_typed_right = when right in {
-            .Identifier(name, span) then self.check_identifier_expr_at(
-                name,
-                span,
-                scope,
-                false,
-            ),
-            .ArithmeticExpr(inner_left, inner_op, inner_right, _) then self.check_arithmetic_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                .Some(initial_typed_left.expr_type),
-                scope,
-            ),
-            .ComparisonExpr(inner_left, inner_op, inner_right, _) then self.check_comparison_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                scope,
-            ),
-            .BitwiseExpr(inner_left, inner_op, inner_right, _) then self.check_bitwise_expr_ref(
-                inner_left,
-                inner_op,
-                inner_right,
-                .Some(initial_typed_left.expr_type),
-                scope,
-            ),
-            .DerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
-                let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
-                    _ then Type.Unknown(),
-                };
-                make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
-            },
-            .UnsafeDerefExpr(inner, _) then {
-                let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
-                let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
-                    _ then Type.Unknown(),
-                };
-                make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
-            },
-            _ then self.check_expr_core_ref(
+        // Join first, then range-check: a leading integer literal joins the
+        // other operand's integer width in either position, so the neighbour
+        // types first and the literal is checked against that width instead of
+        // against its Int default before the two ever meet.
+        let leading_literal_join = self.is_integer_literal_operand(left) and not self.is_integer_literal_operand(
+            right,
+        );
+        let mutable initial_typed_left = self.empty_typed_block(Type.Unknown());
+        let mutable initial_typed_right = self.empty_typed_block(Type.Unknown());
+        if leading_literal_join then {
+            initial_typed_right = self.check_arithmetic_operand_ref(
                 right,
-                .Some(initial_typed_left.expr_type),
+                Option[Type].None(),
                 scope,
-            ),
+            );
+            let left_expected = if self.is_integer_type(initial_typed_right.expr_type) then Option[Type].Some(
+                initial_typed_right.expr_type,
+            ) else expected;
+            initial_typed_left = self.check_arithmetic_operand_ref(left, left_expected, scope);
+        } else {
+            initial_typed_left = self.check_arithmetic_operand_ref(left, expected, scope);
+            initial_typed_right = self.check_arithmetic_operand_ref(
+                right,
+                Option[Type].Some(initial_typed_left.expr_type),
+                scope,
+            );
         };
         let mutable typed_left = initial_typed_left;
         let mutable typed_right = initial_typed_right;
@@ -322,9 +305,31 @@ given TypeChecker {
             .PointerType(_) then true,
             _ then false,
         };
-        let is_non_numeric_candidate = not left_is_pointer and not self.is_numeric_type(
+        // The Wrapping family has its own arithmetic surface: modular, no
+        // overflow guard, and isolated -- a Wrapping operand only combines with
+        // its own width. A partial type (Unknown / TypeVar) keeps the caller's
+        // shape without a cascading complaint.
+        let left_is_wrapping = self.is_wrapping_integer_type(left_t);
+        let right_is_wrapping = self.is_wrapping_integer_type(right_t);
+        if (left_is_wrapping or right_is_wrapping) and left_t is not .Unknown() and right_t is not .Unknown() and left_t is not .TypeVar(_) and right_t is not .TypeVar(_) then {
+            if left_is_wrapping and right_is_wrapping and same_type then {
+                return make_typed_expr(
+                    TypedExprKind.WrappingArithmeticExpr(typed_left, op, typed_right),
+                    left_t,
+                );
+            };
+            self.push_diagnostic(
+                "Invalid operation \(self.arithmetic_operation_name(op)) between types \(self.display_type_name(left_t)) and \(self.display_type_name(right_t))",
+                blame_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                Type.Unknown(),
+            );
+        };
+        let is_non_numeric_candidate = (not left_is_pointer and not self.is_numeric_type(
             left_t,
-        ) and not self.is_float_type(left_t) and left_t is not .VoidType() and is not .NeverType() and when left_t in {
+        ) and not self.is_float_type(left_t)) and left_t is not .VoidType() and is not .NeverType() and when left_t in {
             .TypeVar(_) then false,
             .Unknown() then false,
             _ then true,
@@ -417,6 +422,16 @@ given TypeChecker {
                 .UInt16Type() then Type.UInt16Type(),
                 .UInt32Type() then Type.UInt32Type(),
                 .UInt64Type() then Type.UInt64Type(),
+                .WrappingIntType() then Type.WrappingIntType(),
+                .WrappingInt8Type() then Type.WrappingInt8Type(),
+                .WrappingInt16Type() then Type.WrappingInt16Type(),
+                .WrappingInt32Type() then Type.WrappingInt32Type(),
+                .WrappingInt64Type() then Type.WrappingInt64Type(),
+                .WrappingUIntType() then Type.WrappingUIntType(),
+                .WrappingUInt8Type() then Type.WrappingUInt8Type(),
+                .WrappingUInt16Type() then Type.WrappingUInt16Type(),
+                .WrappingUInt32Type() then Type.WrappingUInt32Type(),
+                .WrappingUInt64Type() then Type.WrappingUInt64Type(),
                 _ then left_t,
             },
             .Unknown() then when right_t in {
@@ -432,15 +447,49 @@ given TypeChecker {
                 .UInt16Type() then Type.UInt16Type(),
                 .UInt32Type() then Type.UInt32Type(),
                 .UInt64Type() then Type.UInt64Type(),
+                .WrappingIntType() then Type.WrappingIntType(),
+                .WrappingInt8Type() then Type.WrappingInt8Type(),
+                .WrappingInt16Type() then Type.WrappingInt16Type(),
+                .WrappingInt32Type() then Type.WrappingInt32Type(),
+                .WrappingInt64Type() then Type.WrappingInt64Type(),
+                .WrappingUIntType() then Type.WrappingUIntType(),
+                .WrappingUInt8Type() then Type.WrappingUInt8Type(),
+                .WrappingUInt16Type() then Type.WrappingUInt16Type(),
+                .WrappingUInt32Type() then Type.WrappingUInt32Type(),
+                .WrappingUInt64Type() then Type.WrappingUInt64Type(),
                 _ then left_t,
             },
             _ then left_t,
         };
-        let result = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+        let result = self.make_binary_arithmetic_expr(
+            typed_left,
+            op,
+            typed_right,
             result_t,
         );
         return result;
+    };
+
+    /// The binary arithmetic node for `op`: modular for the Wrapping family,
+    /// checked for everything else. Compound assignment builds through here so
+    /// a wrapping target gets the wrapping node, never the checked one.
+    module_private make_binary_arithmetic_expr(
+        self,
+        lhs TypedExpr,
+        op ArithmeticOperator,
+        rhs TypedExpr,
+        result_type Type,
+    ) TypedExpr = {
+        if self.is_wrapping_integer_type(result_type) then {
+            return make_typed_expr(
+                TypedExprKind.WrappingArithmeticExpr(lhs, op, rhs),
+                result_type,
+            );
+        };
+        return make_typed_expr(
+            TypedExprKind.ArithmeticExpr(lhs, op, rhs),
+            result_type,
+        );
     };
 
     /// The operator's name as the diagnostic spells it. Deliberately the seed's
@@ -470,20 +519,36 @@ given TypeChecker {
         let ops = chain.second;
 
         let first_operand = (operands[UInt(0)]);
-        let mutable current = self.check_operand_expr_ref(first_operand, expected, scope);
+        // Join first, then range-check: a leading integer literal joins the
+        // next operand's integer width, so that neighbour types first and the
+        // literal is checked against that width instead of against its Int
+        // default before the two ever meet.
+        let second_operand = if operands.count() > UInt(1) then Option[Expr].Some(operands[UInt(1)]) else Option[Expr].None();
+        let mutable pre_typed_second = Option[TypedExpr].None();
+        if self.is_integer_literal_operand(first_operand) and second_operand is .Some(second) and not self.is_integer_literal_operand(second) then {
+            pre_typed_second = Option[TypedExpr].Some(self.check_operand_expr_ref(second, Option[Type].None(), scope));
+        };
+        let mutable current = if pre_typed_second is .Some(typed_second) and self.is_integer_type(
+            typed_second.expr_type,
+        ) then self.check_operand_expr_ref(
+            first_operand,
+            Option[Type].Some(typed_second.expr_type),
+            scope,
+        ) else self.check_operand_expr_ref(first_operand, expected, scope);
 
         let mutable i UInt = 1;
         while i < operands.count() then {
             let next_operand = (operands[i]);
-            let typed_right = self.check_operand_expr_ref(
+            let typed_right = if i == UInt(1) and pre_typed_second is .Some(pre_typed) then pre_typed else self.check_operand_expr_ref(
                 next_operand,
                 .Some(current.expr_type),
                 scope,
             );
             let op_i = ops[i - UInt(1)];
             // A bitwise operation is defined on one integer width at a time:
-            // both sides must be the same integer scalar type. `1 & true` is
-            // not a narrower rule about `true`, it is not a bitwise operation.
+            // both sides must be the same integer scalar type -- either family.
+            // `1 & true` is not a narrower rule about `true`, it is not a
+            // bitwise operation.
             if not self.is_integer_type(current.expr_type) or not self.is_integer_type(
                 typed_right.expr_type,
             ) or not self.same_expr_type(current.expr_type, typed_right.expr_type) then {
@@ -1207,7 +1272,7 @@ given TypeChecker {
                     reported_ids,
                 );
             },
-            .CastExpr(_, inner_ref, _) then {
+            .CastExpr(_, inner_ref) then {
                 self.validate_lambda_captures_in_expr(
                     inner_ref,
                     local_names,
@@ -1357,20 +1422,6 @@ given TypeChecker {
                 };
             },
             .WrappingArithmeticExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    left_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-                self.validate_lambda_captures_in_expr(
-                    right_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .WrappingShiftExpr(left_ref, _, right_ref) then {
                 self.validate_lambda_captures_in_expr(
                     left_ref,
                     local_names,
@@ -1613,15 +1664,19 @@ given TypeChecker {
         index UInt,
         left_expr TypedExpr,
         left_source Option[Expr],
+        pre_typed_right Option[TypedExpr],
         scope Scope,
     ) TypedExpr = {
         let mutable right_source = (operands[index + UInt(1)]);
         let right_source_ref = right_source;
-        let raw_right = self.check_expr_scoped_ref(
-            right_source_ref,
-            .Some(left_expr.expr_type),
-            scope,
-        );
+        let raw_right = when pre_typed_right in {
+            .Some(typed_right) then typed_right,
+            .None() then self.check_expr_scoped_ref(
+                right_source_ref,
+                .Some(left_expr.expr_type),
+                scope,
+            ),
+        };
         let normalized = self.normalize_comparison_operands(
             left_expr,
             left_source,
@@ -1666,6 +1721,7 @@ given TypeChecker {
             index + UInt(1),
             temp_ref,
             Option[Expr].None(),
+            Option[TypedExpr].None(),
             scope,
         );
         let mutable block_statements = List[TypedStatement].new();
@@ -1699,13 +1755,29 @@ given TypeChecker {
         };
         let mutable first_operand = (operands[UInt(0)]);
         let first_operand_ref = first_operand;
-        let typed_left = self.check_expr_core_ref(first_operand_ref, .None(), scope);
+        // Join first, then range-check: a leading integer literal joins the
+        // next operand's integer width, so that neighbour types first and the
+        // literal is checked against that width instead of against its Int
+        // default before the two ever meet.
+        let second_operand = (operands[UInt(1)]);
+        let mutable pre_typed_right = Option[TypedExpr].None();
+        if self.is_integer_literal_operand(first_operand_ref) and not self.is_integer_literal_operand(second_operand) then {
+            pre_typed_right = Option[TypedExpr].Some(self.check_expr_core_ref(second_operand, .None(), scope));
+        };
+        let typed_left = if pre_typed_right is .Some(typed_second) and self.is_integer_type(
+            typed_second.expr_type,
+        ) then self.check_expr_core_ref(
+            first_operand_ref,
+            Option[Type].Some(typed_second.expr_type),
+            scope,
+        ) else self.check_expr_core_ref(first_operand_ref, .None(), scope);
         return self.lower_comparison_chain_step(
             operands,
             operators,
             UInt(0),
             typed_left,
             Option[Expr].Some(first_operand_ref),
+            pre_typed_right,
             scope,
         );
     };
@@ -1731,12 +1803,29 @@ given TypeChecker {
         right Expr,
         scope Scope,
     ) TypedExpr = {
-        let typed_left = self.check_expr_core_ref(left, .None(), scope);
-        let typed_right = self.check_expr_scoped_ref(
+        // Join first, then range-check: a leading integer literal joins the
+        // other operand's integer width, so the neighbour types first and the
+        // literal is checked against that width instead of against its Int
+        // default before the two ever meet.
+        let leading_literal_join = self.is_integer_literal_operand(left) and not self.is_integer_literal_operand(
             right,
-            .Some(typed_left.expr_type),
-            scope,
         );
+        let mutable typed_left = self.empty_typed_block(Type.Unknown());
+        let mutable typed_right = self.empty_typed_block(Type.Unknown());
+        if leading_literal_join then {
+            typed_right = self.check_expr_core_ref(right, .None(), scope);
+            let left_expected = if self.is_integer_type(typed_right.expr_type) then Option[Type].Some(
+                typed_right.expr_type,
+            ) else Option[Type].None();
+            typed_left = self.check_expr_core_ref(left, left_expected, scope);
+        } else {
+            typed_left = self.check_expr_core_ref(left, .None(), scope);
+            typed_right = self.check_expr_scoped_ref(
+                right,
+                .Some(typed_left.expr_type),
+                scope,
+            );
+        };
         let normalized = self.normalize_comparison_operands(
             typed_left,
             Option[Expr].Some(left),
@@ -1772,6 +1861,16 @@ given TypeChecker {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
             .BoolType() then true,
@@ -1793,6 +1892,16 @@ given TypeChecker {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
             _ then false,

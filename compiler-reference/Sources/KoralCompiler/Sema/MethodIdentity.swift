@@ -90,6 +90,10 @@ extension TypeChecker {
       "Ptr": "Ptr", "MutPtr": "MutPtr", "WeakRef": "WeakRef", "MutWeakRef": "MutWeakRef",
       "Int": "Int", "Int8": "Int8", "Int16": "Int16", "Int32": "Int32", "Int64": "Int64",
       "UInt": "UInt", "UInt8": "UInt8", "UInt16": "UInt16", "UInt32": "UInt32", "UInt64": "UInt64",
+      "WrappingInt": "WrappingInt", "WrappingInt8": "WrappingInt8", "WrappingInt16": "WrappingInt16",
+      "WrappingInt32": "WrappingInt32", "WrappingInt64": "WrappingInt64",
+      "WrappingUInt": "WrappingUInt", "WrappingUInt8": "WrappingUInt8", "WrappingUInt16": "WrappingUInt16",
+      "WrappingUInt32": "WrappingUInt32", "WrappingUInt64": "WrappingUInt64",
       "Float32": "Float32", "Float64": "Float64", "Bool": "Bool",
     ]
     if let builtin = builtins[name] {
@@ -203,6 +207,16 @@ extension CompilerContext {
     case .uint16: return .builtin("UInt16")
     case .uint32: return .builtin("UInt32")
     case .uint64: return .builtin("UInt64")
+    case .wrappingInt: return .builtin("WrappingInt")
+    case .wrappingInt8: return .builtin("WrappingInt8")
+    case .wrappingInt16: return .builtin("WrappingInt16")
+    case .wrappingInt32: return .builtin("WrappingInt32")
+    case .wrappingInt64: return .builtin("WrappingInt64")
+    case .wrappingUInt: return .builtin("WrappingUInt")
+    case .wrappingUInt8: return .builtin("WrappingUInt8")
+    case .wrappingUInt16: return .builtin("WrappingUInt16")
+    case .wrappingUInt32: return .builtin("WrappingUInt32")
+    case .wrappingUInt64: return .builtin("WrappingUInt64")
     case .float32: return .builtin("Float32")
     case .float64: return .builtin("Float64")
     case .bool: return .builtin("Bool")

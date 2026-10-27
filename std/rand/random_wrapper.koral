@@ -13,22 +13,22 @@ using "std" { ... };
 // ============================================================================
 
 let mul128(a UInt64, b UInt64) Pair[UInt64, UInt64] = {
-    let a_lo = a & UInt64(4294967295);
-    let a_hi = a >> 32;
-    let b_lo = b & UInt64(4294967295);
-    let b_hi = b >> 32;
+    let wa = WrappingUInt64(a);
+    let wb = WrappingUInt64(b);
+    let a_lo = wa & 4294967295;
+    let a_hi = wa >> 32;
+    let b_lo = wb & 4294967295;
+    let b_hi = wb >> 32;
 
-    let lo_lo = a_lo.wrapping_mul(b_lo);
-    let hi_lo = a_hi.wrapping_mul(b_lo);
-    let lo_hi = a_lo.wrapping_mul(b_hi);
-    let hi_hi = a_hi.wrapping_mul(b_hi);
+    let lo_lo = a_lo * b_lo;
+    let hi_lo = a_hi * b_lo;
+    let lo_hi = a_lo * b_hi;
+    let hi_hi = a_hi * b_hi;
 
-    let cross = (lo_lo >> 32).wrapping_add(hi_lo & UInt64(4294967295)).wrapping_add(
-        lo_hi,
-    );
-    let high = hi_hi.wrapping_add(hi_lo >> 32).wrapping_add(cross >> 32);
-    let low = (cross << 32) | (lo_lo & UInt64(4294967295));
-    return Pair[UInt64, UInt64](high, low);
+    let cross = (lo_lo >> 32) + (hi_lo & 4294967295) + lo_hi;
+    let high = hi_hi + (hi_lo >> 32) + (cross >> 32);
+    let low = (cross << 32) | (lo_lo & 4294967295);
+    return Pair[UInt64, UInt64](UInt64(high), UInt64(low));
 };
 
 // Lemire bounded random: maps a uniform UInt64 to [0, range) without bias.
@@ -38,7 +38,7 @@ let lemire_bounded[R RandomSource](source R, range UInt64) UInt64 = {
     let mutable hi = m.first;
     let mutable lo = m.second;
     if lo < range then {
-        let threshold = UInt64(0).wrapping_sub(range) % range;
+        let threshold = UInt64(-WrappingUInt64(range)) % range;
         while lo < threshold then {
             let x2 = source.generate();
             let m2 = mul128(x2, range);

@@ -18,8 +18,8 @@ using "std/hex" { ... };
 // ============================================================================
 // SHA-256 core (FIPS 180-4)
 // ============================================================================
-// Every 32-bit step wraps modulo 2^32, so all accumulation goes through
-// `wrapping_add`. Plain `+` would panic on the first overflow.
+// Every 32-bit step wraps modulo 2^32, so the word arithmetic lives on
+// `WrappingUInt32`. Plain `+` would panic on the first overflow.
 
 /// The 64 round constants K[0..63].
 ///
@@ -108,6 +108,12 @@ file_private let initial_state List[UInt32] = [
     0x5be0cd19,
 ];
 
+/// The integer toolbox stays on the plain family: rotate via a same-width
+/// retype out and back.
+file_private let rotr32(x WrappingUInt32, n UInt) WrappingUInt32 = WrappingUInt32(
+    UInt32(x).rotate_right(n),
+);
+
 /// The SHA-256 streaming hasher. Feed bytes with `update`, then ask for `digest`.
 type mutable Sha256(
     mutable state List[UInt32],
@@ -124,14 +130,14 @@ given Sha256 {
     /// `state` is the running H[0..7] and is updated in place.
     file_private compress_block(self, block List[UInt8], offset UInt) Void = {
         // W[0..15]: the block as 16 big-endian 32-bit words.
-        let mutable w = List[UInt32].with_capacity(64);
+        let mutable w = List[WrappingUInt32].with_capacity(64);
         let mutable i UInt = 0;
         while i < 16 then {
             let b = offset + i * 4;
-            let b0 = UInt32(block[b]) << 24;
-            let b1 = UInt32(block[b + 1]) << 16;
-            let b2 = UInt32(block[b + 2]) << 8;
-            let b3 = UInt32(block[b + 3]);
+            let b0 = WrappingUInt32(block[b]) << 24;
+            let b1 = WrappingUInt32(block[b + 1]) << 16;
+            let b2 = WrappingUInt32(block[b + 2]) << 8;
+            let b3 = WrappingUInt32(block[b + 3]);
             w.push(b0 | b1 | b2 | b3);
             i += 1;
         };
@@ -140,52 +146,50 @@ given Sha256 {
         while i < 64 then {
             let w15 = w[i - 15];
             let w2 = w[i - 2];
-            let s0 = w15.rotate_right(7) ^ w15.rotate_right(18) ^ (w15 >> 3);
-            let s1 = w2.rotate_right(17) ^ w2.rotate_right(19) ^ (w2 >> 10);
-            w.push(w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1));
+            let s0 = rotr32(w15, 7) ^ rotr32(w15, 18) ^ (w15 >> 3);
+            let s1 = rotr32(w2, 17) ^ rotr32(w2, 19) ^ (w2 >> 10);
+            w.push(w[i - 16] + s0 + w[i - 7] + s1);
             i += 1;
         };
 
-        let mutable a = self.state[0];
-        let mutable b = self.state[1];
-        let mutable c = self.state[2];
-        let mutable d = self.state[3];
-        let mutable e = self.state[4];
-        let mutable f = self.state[5];
-        let mutable g = self.state[6];
-        let mutable h = self.state[7];
+        let mutable a = WrappingUInt32(self.state[0]);
+        let mutable b = WrappingUInt32(self.state[1]);
+        let mutable c = WrappingUInt32(self.state[2]);
+        let mutable d = WrappingUInt32(self.state[3]);
+        let mutable e = WrappingUInt32(self.state[4]);
+        let mutable f = WrappingUInt32(self.state[5]);
+        let mutable g = WrappingUInt32(self.state[6]);
+        let mutable h = WrappingUInt32(self.state[7]);
 
         i = 0;
         while i < 64 then {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let s1 = rotr32(e, 6) ^ rotr32(e, 11) ^ rotr32(e, 25);
             let ch = (e & f) ^ ((~e) & g);
-            let temp1 = h.wrapping_add(s1).wrapping_add(ch).wrapping_add(round_constants[i]).wrapping_add(
-                w[i],
-            );
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let temp1 = h + s1 + ch + WrappingUInt32(round_constants[i]) + w[i];
+            let s0 = rotr32(a, 2) ^ rotr32(a, 13) ^ rotr32(a, 22);
             let maj = (a & b) ^ (a & c) ^ (b & c);
-            let temp2 = s0.wrapping_add(maj);
+            let temp2 = s0 + maj;
 
             h = g;
             g = f;
             f = e;
-            e = d.wrapping_add(temp1);
+            e = d + temp1;
             d = c;
             c = b;
             b = a;
-            a = temp1.wrapping_add(temp2);
+            a = temp1 + temp2;
 
             i += 1;
         };
 
-        self.state[0] = self.state[0].wrapping_add(a);
-        self.state[1] = self.state[1].wrapping_add(b);
-        self.state[2] = self.state[2].wrapping_add(c);
-        self.state[3] = self.state[3].wrapping_add(d);
-        self.state[4] = self.state[4].wrapping_add(e);
-        self.state[5] = self.state[5].wrapping_add(f);
-        self.state[6] = self.state[6].wrapping_add(g);
-        self.state[7] = self.state[7].wrapping_add(h);
+        self.state[0] = UInt32(WrappingUInt32(self.state[0]) + a);
+        self.state[1] = UInt32(WrappingUInt32(self.state[1]) + b);
+        self.state[2] = UInt32(WrappingUInt32(self.state[2]) + c);
+        self.state[3] = UInt32(WrappingUInt32(self.state[3]) + d);
+        self.state[4] = UInt32(WrappingUInt32(self.state[4]) + e);
+        self.state[5] = UInt32(WrappingUInt32(self.state[5]) + f);
+        self.state[6] = UInt32(WrappingUInt32(self.state[6]) + g);
+        self.state[7] = UInt32(WrappingUInt32(self.state[7]) + h);
     };
 
     /// Absorb bytes. Any whole block is compressed immediately; the tail is
@@ -217,17 +221,18 @@ given Sha256 {
         while (self.pending.count() + pad.count()) % 64 != 56 then {
             pad.push(0);
         };
-        // Each byte is taken explicitly, high byte first. `wrapping_cast` is
-        // the unchecked truncation -- a checked `UInt8(...)` would panic on any
-        // shifted value still wider than a byte.
-        pad.push((bit_len >> 56).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 48).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 40).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 32).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 24).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 16).wrapping_cast[UInt8]());
-        pad.push((bit_len >> 8).wrapping_cast[UInt8]());
-        pad.push(bit_len.wrapping_cast[UInt8]());
+        // Each byte is taken explicitly, high byte first. `WrappingUInt8(...)`
+        // truncates to the target width's low bits -- a checked `UInt8(...)`
+        // would panic on any shifted value still wider than a byte -- and the
+        // same-width `UInt8(...)` retypes it.
+        pad.push(UInt8(WrappingUInt8(bit_len >> 56)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 48)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 40)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 32)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 24)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 16)));
+        pad.push(UInt8(WrappingUInt8(bit_len >> 8)));
+        pad.push(UInt8(WrappingUInt8(bit_len)));
 
         self.update(pad);
 
@@ -236,10 +241,10 @@ given Sha256 {
         let mutable i UInt = 0;
         while i < 8 then {
             let word = self.state[i];
-            out.push((word >> 24).wrapping_cast[UInt8]());
-            out.push((word >> 16).wrapping_cast[UInt8]());
-            out.push((word >> 8).wrapping_cast[UInt8]());
-            out.push(word.wrapping_cast[UInt8]());
+            out.push(UInt8(WrappingUInt8(word >> 24)));
+            out.push(UInt8(WrappingUInt8(word >> 16)));
+            out.push(UInt8(WrappingUInt8(word >> 8)));
+            out.push(UInt8(WrappingUInt8(word)));
             i += 1;
         };
         return out;

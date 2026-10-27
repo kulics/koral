@@ -1,0 +1,46 @@
+// EXPECT: PASS
+// Wrapping -> Wrapping, the target decides: same width is a lossless retype
+// in either direction (signedness flips included), and a width change takes
+// the target width's low bits -- truncate, or sign/zero-extend when widening
+// -- and never panics.
+
+let main() Int = {
+    // Same width, signedness flip and back.
+    let b WrappingInt8 = -1;
+    let ub WrappingUInt8 = WrappingUInt8(b);
+    if not (ub == 255) then {
+        eprintln("FAIL: WrappingUInt8(WrappingInt8(-1)) != 255");
+        return 1;
+    };
+    let back WrappingInt8 = WrappingInt8(ub);
+    if not (back == -1) then {
+        eprintln("FAIL: WrappingInt8(WrappingUInt8(255)) != -1");
+        return 1;
+    };
+
+    // Width-changing truncate: the low 8 bits of all ones.
+    let w64 WrappingUInt64 = WrappingUInt64(18446744073709551615);
+    let low WrappingUInt8 = WrappingUInt8(w64);
+    if not (low == 255) then {
+        eprintln("FAIL: WrappingUInt8(WrappingUInt64 all ones) != 255");
+        return 1;
+    };
+
+    // Widening a signed source sign-extends.
+    let wide WrappingUInt = WrappingUInt(b);
+    if not (wide == WrappingUInt(18446744073709551615)) then {
+        eprintln("FAIL: WrappingUInt(WrappingInt8(-1)) did not sign-extend");
+        return 1;
+    };
+
+    // Widening an unsigned source zero-extends.
+    let small WrappingUInt8 = 255;
+    let zext WrappingUInt16 = WrappingUInt16(small);
+    if not (zext == 255) then {
+        eprintln("FAIL: WrappingUInt16(WrappingUInt8(255)) != 255");
+        return 1;
+    };
+
+    println("PASS");
+    return 0;
+};

@@ -165,6 +165,8 @@ extension TypeHandlerKind {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return .primitive
         case .structure:
@@ -847,6 +849,8 @@ public class PrimitiveHandler: TypeHandler {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return true
         default:
@@ -874,6 +878,18 @@ public class PrimitiveHandler: TypeHandler {
         case .uint16: return "uint16_t"
         case .uint32: return "uint32_t"
         case .uint64: return "uint64_t"
+        // The wrapping family shares its plain counterpart's ABI: wrapping is
+        // a compile-time policy, not a runtime representation.
+        case .wrappingInt: return "intptr_t"
+        case .wrappingInt8: return "int8_t"
+        case .wrappingInt16: return "int16_t"
+        case .wrappingInt32: return "int32_t"
+        case .wrappingInt64: return "int64_t"
+        case .wrappingUInt: return "uintptr_t"
+        case .wrappingUInt8: return "uint8_t"
+        case .wrappingUInt16: return "uint16_t"
+        case .wrappingUInt32: return "uint32_t"
+        case .wrappingUInt64: return "uint64_t"
         case .float32: return "float"
         case .float64: return "double"
         case .bool: return "int"

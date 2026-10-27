@@ -1811,6 +1811,16 @@ file_private let resolve_builtin_type(name String) Option[Type] = {
         "UInt16" then Option[Type].Some(Type.UInt16Type()),
         "UInt32" then Option[Type].Some(Type.UInt32Type()),
         "UInt64" then Option[Type].Some(Type.UInt64Type()),
+        "WrappingInt" then Option[Type].Some(Type.WrappingIntType()),
+        "WrappingInt8" then Option[Type].Some(Type.WrappingInt8Type()),
+        "WrappingInt16" then Option[Type].Some(Type.WrappingInt16Type()),
+        "WrappingInt32" then Option[Type].Some(Type.WrappingInt32Type()),
+        "WrappingInt64" then Option[Type].Some(Type.WrappingInt64Type()),
+        "WrappingUInt" then Option[Type].Some(Type.WrappingUIntType()),
+        "WrappingUInt8" then Option[Type].Some(Type.WrappingUInt8Type()),
+        "WrappingUInt16" then Option[Type].Some(Type.WrappingUInt16Type()),
+        "WrappingUInt32" then Option[Type].Some(Type.WrappingUInt32Type()),
+        "WrappingUInt64" then Option[Type].Some(Type.WrappingUInt64Type()),
         "Float32" then Option[Type].Some(Type.Float32Type()),
         "Float64" then Option[Type].Some(Type.Float64Type()),
         "Bool" then Option[Type].Some(Type.BoolType()),
@@ -4219,6 +4229,16 @@ file_private let is_concrete_integer_type(t Type) Bool = {
         .UInt16Type() then true,
         .UInt32Type() then true,
         .UInt64Type() then true,
+        .WrappingIntType() then true,
+        .WrappingInt8Type() then true,
+        .WrappingInt16Type() then true,
+        .WrappingInt32Type() then true,
+        .WrappingInt64Type() then true,
+        .WrappingUIntType() then true,
+        .WrappingUInt8Type() then true,
+        .WrappingUInt16Type() then true,
+        .WrappingUInt32Type() then true,
+        .WrappingUInt64Type() then true,
         _ then false,
     };
 };
@@ -4233,23 +4253,6 @@ file_private let is_concrete_float_type(t Type) Bool = {
 
 file_private let is_concrete_numeric_type(t Type) Bool = {
     return is_concrete_integer_type(t) or is_concrete_float_type(t);
-};
-
-file_private let is_matching_unsigned_shift_amount_type(
-    value_type Type,
-    shift_type Type,
-) Bool = {
-    if not is_concrete_integer_type(value_type) then {
-        return false;
-    };
-    return when shift_type in {
-        .UIntType() then true,
-        .UInt8Type() then true,
-        .UInt16Type() then true,
-        .UInt32Type() then true,
-        .UInt64Type() then true,
-        _ then false,
-    };
 };
 
 file_private let method_semantic_name_from_dispatch(
@@ -4276,10 +4279,6 @@ file_private let method_semantic_name_from_callsite(
 
 file_private let make_zero_integer_literal_expr(t Type) TypedExpr = {
     return TypedExpr(TypedExprKind.IntegerLiteral("0"), t, unknown_span());
-};
-
-file_private let is_wrapping_method_name(name String) Bool = {
-    return name == "wrapping_add" or name == "wrapping_sub" or name == "wrapping_mul" or name == "wrapping_div" or name == "wrapping_rem" or name == "wrapping_neg" or name == "wrapping_shl" or name == "wrapping_shr" or name == "wrapping_cast";
 };
 
 public let push_receiver_owner(owners List[MethodOwner], candidate MethodOwner) Void = {
@@ -4467,183 +4466,6 @@ public let collect_receiver_owners(
             push_receiver_owner(owners, mono.storage.context.method_owner_of(resolved));
         },
     };
-};
-
-file_private let try_lower_wrapping_generic_method_call(
-    mono Monomorphizer,
-    base TypedExpr,
-    method Symbol,
-    args List[TypedExpr],
-    result_type Type,
-    dispatch_callsite Option[DefId],
-) Option[TypedExpr] = {
-    let mutable base_type = resolve_parameterized_type(mono, base.expr_type);
-    if not is_concrete_integer_type(base_type) then {
-        return Option[TypedExpr].None();
-    };
-
-    let callsite_name = method_semantic_name_from_callsite(mono, dispatch_callsite) or else "";
-    let method_name = if is_wrapping_method_name(callsite_name) then callsite_name
-    else get_semantic_method_name(mono, method);
-    if not is_wrapping_method_name(method_name) then {
-        return Option[TypedExpr].None();
-    };
-
-    return try_lower_wrapping_method_name_call(mono, base, method_name, args, result_type);
-};
-
-file_private let try_lower_wrapping_method_name_call(
-    mono Monomorphizer,
-    base TypedExpr,
-    method_name String,
-    args List[TypedExpr],
-    result_type Type,
-) Option[TypedExpr] = {
-    let mutable base_type = resolve_parameterized_type(mono, base.expr_type);
-    if not is_concrete_integer_type(base_type) then {
-        return Option[TypedExpr].None();
-    };
-    if not is_wrapping_method_name(method_name) then {
-        return Option[TypedExpr].None();
-    };
-
-    if args.count() == UInt(1) then {
-        let rhs = args[UInt(0)];
-        let mutable rhs_type = resolve_parameterized_type(mono, rhs.expr_type);
-        let compatible_rhs = mono.storage.context.get_layout_key(base_type) == mono.storage.context.get_layout_key(
-            rhs_type,
-        ) or is_concrete_integer_type(rhs_type);
-        if method_name == "wrapping_add" and compatible_rhs then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingArithmeticExpr(
-                        base,
-                        ArithmeticOperator.Add(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_sub" and compatible_rhs then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingArithmeticExpr(
-                        base,
-                        ArithmeticOperator.Subtract(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_mul" and compatible_rhs then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingArithmeticExpr(
-                        base,
-                        ArithmeticOperator.Multiply(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_div" and compatible_rhs then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingArithmeticExpr(
-                        base,
-                        ArithmeticOperator.Divide(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_rem" and compatible_rhs then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingArithmeticExpr(
-                        base,
-                        ArithmeticOperator.Remainder(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_shl" and is_matching_unsigned_shift_amount_type(
-            base_type,
-            rhs_type,
-        ) then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingShiftExpr(
-                        base,
-                        BitwiseOperator.LeftShift(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-        if method_name == "wrapping_shr" and is_matching_unsigned_shift_amount_type(
-            base_type,
-            rhs_type,
-        ) then {
-            return Option[TypedExpr].Some(
-                TypedExpr(
-                    TypedExprKind.WrappingShiftExpr(
-                        base,
-                        BitwiseOperator.RightShift(),
-                        rhs,
-                    ),
-                    result_type,
-                    base.span,
-                ),
-            );
-        };
-    };
-
-    if method_name == "wrapping_neg" and args.count() == 0 then {
-        let zero = make_zero_integer_literal_expr(base_type);
-        return Option[TypedExpr].Some(
-            TypedExpr(
-                TypedExprKind.WrappingArithmeticExpr(
-                    zero,
-                    ArithmeticOperator.Subtract(),
-                    base,
-                ),
-                result_type,
-                base.span,
-            ),
-        );
-    };
-
-    // `wrapping_cast` is the unchecked integer-to-integer conversion: take the
-    // two's-complement representation and truncate or sign/zero-extend it to the
-    // target width. It never panics -- that is Rust's `as`, spelled out loud,
-    // because Koral's `Type(x)` is checked by default.
-    if method_name == "wrapping_cast" and args.count() == 0 and is_concrete_integer_type(
-        result_type,
-    ) then {
-        return Option[TypedExpr].Some(
-            TypedExpr(
-                TypedExprKind.CastExpr(result_type, base, false),
-                result_type,
-                base.span,
-            ),
-        );
-    };
-
-    return Option[TypedExpr].None();
 };
 
 file_private let prefer_more_concrete_type(
@@ -5922,19 +5744,6 @@ file_private let resolve_method_reference_call_callee(
         ) and not has_generic_parameter(inferred_receiver_type) then inferred_receiver_type
         else declared_receiver_type,
     };
-    when try_lower_wrapping_generic_method_call(
-        mono,
-        resolved_base,
-        method,
-        new_args,
-        resolved_call_type,
-        dispatch_callsite,
-    ) in {
-        .Some(lowered_expr) then {
-            return lowered_expr;
-        },
-        .None() then {},
-    };
     let mutable resolved_method_type_args = List[Type].new();
     for method_type_arg in method_type_args then {
         resolved_method_type_args.push(
@@ -6509,19 +6318,6 @@ file_private let resolve_method_reference_call_callee(
         bound_method,
         Option[String].Some(mono.storage.context.symbol_name(method)),
     );
-    when try_lower_wrapping_generic_method_call(
-        mono,
-        adapted_base,
-        bound_method,
-        adapted_args,
-        resolved_type,
-        effective_dispatch_callsite,
-    ) in {
-        .Some(lowered_expr) then {
-            return lowered_expr;
-        },
-        .None() then {},
-    };
     let receiver_trait_name_opt = when effective_receiver_type in {
         .TraitObject(trait_def_id, _) then Option[String].Some(
             def_id_spelling(trait_def_id),
@@ -6645,18 +6441,6 @@ file_private let resolve_member_path_call_callee(
     // The path carries the member's definition-time Symbol, so the DefId is
     // already on hand -- `member_name` above is display only.
     let member_symbol = path[path.count() - 1];
-    when try_lower_wrapping_method_name_call(
-        mono,
-        receiver_expr,
-        member_name,
-        new_args,
-        resolved_call_type,
-    ) in {
-        .Some(lowered_expr) then {
-            return Option[TypedExpr].Some(lowered_expr);
-        },
-        .None() then {},
-    };
     let bound_method_opt = identity_method_instance_option(
         mono,
         member_symbol,
@@ -6725,19 +6509,6 @@ file_private let resolve_member_path_call_callee(
                 bound_method,
                 Option[String].Some(member_name),
             );
-            when try_lower_wrapping_generic_method_call(
-                mono,
-                adapted_receiver,
-                bound_method,
-                new_args,
-                resolved_type,
-                dispatch_callsite,
-            ) in {
-                .Some(lowered_expr) then {
-                    return Option[TypedExpr].Some(lowered_expr);
-                },
-                .None() then {},
-            };
             let rebound_callee = TypedExpr(
                 TypedExprKind.MethodReference(
                     adapted_receiver,
@@ -7078,19 +6849,6 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
                                         Option[String].Some(normalized_name),
                                     );
                                     let first_arg = new_args[UInt(0)];
-                                    when try_lower_wrapping_generic_method_call(
-                                        mono,
-                                        first_arg,
-                                        rebound_method,
-                                        method_args,
-                                        resolved_type,
-                                        dispatch_callsite,
-                                    ) in {
-                                        .Some(lowered_expr) then {
-                                            return lowered_expr;
-                                        },
-                                        .None() then {},
-                                    };
                                     let adapted_receiver = adapt_receiver_expr_for_method(
                                         mono,
                                         first_arg,
@@ -7290,7 +7048,6 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
             mono,
             expr.expr_type,
         ),
-        .WrappingShiftExpr(_, _, _) then resolve_parameterized_type(mono, expr.expr_type),
         .MethodReference(_, _, method, _, _, _) then resolve_parameterized_type(
             mono,
             method.symbol_type,
@@ -7342,10 +7099,9 @@ file_private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String
         .ComparisonExpr(_, _, _) then "comparison",
         .ArithmeticExpr(_, _, _) then "arithmetic",
         .WrappingArithmeticExpr(_, _, _) then "wrapping-arithmetic",
-        .WrappingShiftExpr(_, _, _) then "wrapping-shift",
         .BitwiseExpr(_, _, _) then "bitwise",
         .Unary(_, _) then "unary",
-        .CastExpr(target_type, inner, _) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
+        .CastExpr(target_type, inner) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
         .RefExpr(inner) then "ref:\(mono.storage.context.get_layout_key(inner.expr_type))",
         .PtrExpr(inner) then "ptr:\(mono.storage.context.get_layout_key(inner.expr_type))",
         .DerefExpr(inner) then "deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
@@ -8050,7 +7806,7 @@ file_private let mono_register_pattern_binding_types_in_expr(
             symbol,
             bindings,
         ),
-        .CastExpr(_, inner, _) then mono_register_pattern_binding_types_in_expr(
+        .CastExpr(_, inner) then mono_register_pattern_binding_types_in_expr(
             mono,
             inner,
             bindings,
@@ -9821,10 +9577,10 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
         .FloatLiteral(value) then TypedExprKind.FloatLiteral(value),
         .StringLiteral(value) then TypedExprKind.StringLiteral(value),
         .BoolLiteral(value) then TypedExprKind.BoolLiteral(value),
-        .CastExpr(target_type, inner, checked) then {
+        .CastExpr(target_type, inner) then {
             let new_target = resolve_parameterized_type(mono, target_type);
             let resolved_inner = resolve_types_in_expression(mono, inner);
-            TypedExprKind.CastExpr(new_target, resolved_inner, checked)
+            TypedExprKind.CastExpr(new_target, resolved_inner)
         },
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
             let new_inner = resolve_types_in_expression(mono, inner);
@@ -9887,13 +9643,6 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
         },
         .WrappingArithmeticExpr(left, op, right) then {
             TypedExprKind.WrappingArithmeticExpr(
-                resolve_types_in_expression(mono, left),
-                op,
-                resolve_types_in_expression(mono, right),
-            )
-        },
-        .WrappingShiftExpr(left, op, right) then {
-            TypedExprKind.WrappingShiftExpr(
                 resolve_types_in_expression(mono, left),
                 op,
                 resolve_types_in_expression(mono, right),
@@ -11465,31 +11214,6 @@ file_private let resolve_static_method_call_to_call(
         );
     };
 
-    // `Type.wrapping_*(...)` is the static spelling of the instance form: the
-    // first explicit argument is the receiver (`Type.method(args)` is
-    // `args[0].method(args[1..])`). Lower it to the same scalar op the instance
-    // form gets -- a body-less intrinsic would be emitted as a call otherwise.
-    if is_wrapping_method_name(static_method_name) and not new_args.is_empty() then {
-        let mutable extra_args = List[TypedExpr].new();
-        let mutable extra_idx UInt = 1;
-        while extra_idx < new_args.count() then {
-            extra_args.push(new_args[extra_idx]);
-            extra_idx += 1;
-        };
-        when try_lower_wrapping_method_name_call(
-            mono,
-            new_args[UInt(0)],
-            static_method_name,
-            extra_args,
-            resolve_parameterized_type(mono, expr.expr_type),
-        ) in {
-            .Some(lowered) then {
-                return lowered.expr_kind;
-            },
-            .None() then {},
-        };
-    };
-
     let rebound_static_method = bind_static_method_symbol_for_type_resolution(
         mono,
         new_receiver_type,
@@ -11989,6 +11713,16 @@ file_private let resolve_static_call_template_name(mono Monomorphizer, t Type) S
         .UInt16Type() then "UInt16",
         .UInt32Type() then "UInt32",
         .UInt64Type() then "UInt64",
+        .WrappingIntType() then "WrappingInt",
+        .WrappingInt8Type() then "WrappingInt8",
+        .WrappingInt16Type() then "WrappingInt16",
+        .WrappingInt32Type() then "WrappingInt32",
+        .WrappingInt64Type() then "WrappingInt64",
+        .WrappingUIntType() then "WrappingUInt",
+        .WrappingUInt8Type() then "WrappingUInt8",
+        .WrappingUInt16Type() then "WrappingUInt16",
+        .WrappingUInt32Type() then "WrappingUInt32",
+        .WrappingUInt64Type() then "WrappingUInt64",
         .Float32Type() then "Float32",
         .Float64Type() then "Float64",
         .BoolType() then "Bool",

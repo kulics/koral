@@ -224,6 +224,26 @@ public type intrinsic UInt32;
 
 public type intrinsic UInt64;
 
+public type intrinsic WrappingInt;
+
+public type intrinsic WrappingInt8;
+
+public type intrinsic WrappingInt16;
+
+public type intrinsic WrappingInt32;
+
+public type intrinsic WrappingInt64;
+
+public type intrinsic WrappingUInt;
+
+public type intrinsic WrappingUInt8;
+
+public type intrinsic WrappingUInt16;
+
+public type intrinsic WrappingUInt32;
+
+public type intrinsic WrappingUInt64;
+
 public type intrinsic Float32;
 
 public type intrinsic Float64;
@@ -283,121 +303,6 @@ public type mutable Cell[T Any](mutable value T);
 
 ## Given Implementations
 ```koral
-intrinsic given Int {
-    public wrapping_add(self, other Int) Int;
-    public wrapping_sub(self, other Int) Int;
-    public wrapping_mul(self, other Int) Int;
-    public wrapping_div(self, other Int) Int;
-    public wrapping_rem(self, other Int) Int;
-    public wrapping_neg(self) Int;
-    public wrapping_shl(self, other UInt32) Int;
-    public wrapping_shr(self, other UInt32) Int;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given Int8 {
-    public wrapping_add(self, other Int8) Int8;
-    public wrapping_sub(self, other Int8) Int8;
-    public wrapping_mul(self, other Int8) Int8;
-    public wrapping_div(self, other Int8) Int8;
-    public wrapping_rem(self, other Int8) Int8;
-    public wrapping_neg(self) Int8;
-    public wrapping_shl(self, other UInt32) Int8;
-    public wrapping_shr(self, other UInt32) Int8;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given Int16 {
-    public wrapping_add(self, other Int16) Int16;
-    public wrapping_sub(self, other Int16) Int16;
-    public wrapping_mul(self, other Int16) Int16;
-    public wrapping_div(self, other Int16) Int16;
-    public wrapping_rem(self, other Int16) Int16;
-    public wrapping_neg(self) Int16;
-    public wrapping_shl(self, other UInt32) Int16;
-    public wrapping_shr(self, other UInt32) Int16;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given Int32 {
-    public wrapping_add(self, other Int32) Int32;
-    public wrapping_sub(self, other Int32) Int32;
-    public wrapping_mul(self, other Int32) Int32;
-    public wrapping_div(self, other Int32) Int32;
-    public wrapping_rem(self, other Int32) Int32;
-    public wrapping_neg(self) Int32;
-    public wrapping_shl(self, other UInt32) Int32;
-    public wrapping_shr(self, other UInt32) Int32;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given Int64 {
-    public wrapping_add(self, other Int64) Int64;
-    public wrapping_sub(self, other Int64) Int64;
-    public wrapping_mul(self, other Int64) Int64;
-    public wrapping_div(self, other Int64) Int64;
-    public wrapping_rem(self, other Int64) Int64;
-    public wrapping_neg(self) Int64;
-    public wrapping_shl(self, other UInt32) Int64;
-    public wrapping_shr(self, other UInt32) Int64;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given UInt {
-    public wrapping_add(self, other UInt) UInt;
-    public wrapping_sub(self, other UInt) UInt;
-    public wrapping_mul(self, other UInt) UInt;
-    public wrapping_div(self, other UInt) UInt;
-    public wrapping_rem(self, other UInt) UInt;
-    public wrapping_shl(self, other UInt32) UInt;
-    public wrapping_shr(self, other UInt32) UInt;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given UInt8 {
-    public wrapping_add(self, other UInt8) UInt8;
-    public wrapping_sub(self, other UInt8) UInt8;
-    public wrapping_mul(self, other UInt8) UInt8;
-    public wrapping_div(self, other UInt8) UInt8;
-    public wrapping_rem(self, other UInt8) UInt8;
-    public wrapping_shl(self, other UInt32) UInt8;
-    public wrapping_shr(self, other UInt32) UInt8;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given UInt16 {
-    public wrapping_add(self, other UInt16) UInt16;
-    public wrapping_sub(self, other UInt16) UInt16;
-    public wrapping_mul(self, other UInt16) UInt16;
-    public wrapping_div(self, other UInt16) UInt16;
-    public wrapping_rem(self, other UInt16) UInt16;
-    public wrapping_shl(self, other UInt32) UInt16;
-    public wrapping_shr(self, other UInt32) UInt16;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given UInt32 {
-    public wrapping_add(self, other UInt32) UInt32;
-    public wrapping_sub(self, other UInt32) UInt32;
-    public wrapping_mul(self, other UInt32) UInt32;
-    public wrapping_div(self, other UInt32) UInt32;
-    public wrapping_rem(self, other UInt32) UInt32;
-    public wrapping_shl(self, other UInt32) UInt32;
-    public wrapping_shr(self, other UInt32) UInt32;
-    public wrapping_cast[T Any](self) T;
-};
-
-intrinsic given UInt64 {
-    public wrapping_add(self, other UInt64) UInt64;
-    public wrapping_sub(self, other UInt64) UInt64;
-    public wrapping_mul(self, other UInt64) UInt64;
-    public wrapping_div(self, other UInt64) UInt64;
-    public wrapping_rem(self, other UInt64) UInt64;
-    public wrapping_shl(self, other UInt32) UInt64;
-    public wrapping_shr(self, other UInt32) UInt64;
-    public wrapping_cast[T Any](self) T;
-};
-
 given Int as Zero {
     public zero() Int;
 };
@@ -944,6 +849,86 @@ given Float64 as Ord {
 given Float64 as Bounded {
     public max_value() Self;
     public min_value() Self;
+};
+
+given WrappingInt as Eq {
+    public equals(self, other WrappingInt) Bool;
+};
+
+given WrappingInt as Ord {
+    public compare(self, other WrappingInt) Int;
+};
+
+given WrappingInt8 as Eq {
+    public equals(self, other WrappingInt8) Bool;
+};
+
+given WrappingInt8 as Ord {
+    public compare(self, other WrappingInt8) Int;
+};
+
+given WrappingInt16 as Eq {
+    public equals(self, other WrappingInt16) Bool;
+};
+
+given WrappingInt16 as Ord {
+    public compare(self, other WrappingInt16) Int;
+};
+
+given WrappingInt32 as Eq {
+    public equals(self, other WrappingInt32) Bool;
+};
+
+given WrappingInt32 as Ord {
+    public compare(self, other WrappingInt32) Int;
+};
+
+given WrappingInt64 as Eq {
+    public equals(self, other WrappingInt64) Bool;
+};
+
+given WrappingInt64 as Ord {
+    public compare(self, other WrappingInt64) Int;
+};
+
+given WrappingUInt as Eq {
+    public equals(self, other WrappingUInt) Bool;
+};
+
+given WrappingUInt as Ord {
+    public compare(self, other WrappingUInt) Int;
+};
+
+given WrappingUInt8 as Eq {
+    public equals(self, other WrappingUInt8) Bool;
+};
+
+given WrappingUInt8 as Ord {
+    public compare(self, other WrappingUInt8) Int;
+};
+
+given WrappingUInt16 as Eq {
+    public equals(self, other WrappingUInt16) Bool;
+};
+
+given WrappingUInt16 as Ord {
+    public compare(self, other WrappingUInt16) Int;
+};
+
+given WrappingUInt32 as Eq {
+    public equals(self, other WrappingUInt32) Bool;
+};
+
+given WrappingUInt32 as Ord {
+    public compare(self, other WrappingUInt32) Int;
+};
+
+given WrappingUInt64 as Eq {
+    public equals(self, other WrappingUInt64) Bool;
+};
+
+given WrappingUInt64 as Ord {
+    public compare(self, other WrappingUInt64) Int;
 };
 
 given[T Any] Deque[T] as Drop {};
@@ -1776,6 +1761,46 @@ given UInt64 as ToString {
     public to_string(self) String;
 };
 
+given WrappingInt as ToString {
+    public to_string(self) String;
+};
+
+given WrappingInt8 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingInt16 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingInt32 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingInt64 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingUInt as ToString {
+    public to_string(self) String;
+};
+
+given WrappingUInt8 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingUInt16 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingUInt32 as ToString {
+    public to_string(self) String;
+};
+
+given WrappingUInt64 as ToString {
+    public to_string(self) String;
+};
+
 given Float32 as ToString {
     public to_string(self) String;
 };
@@ -1910,6 +1935,126 @@ given Int64 as Hash {
 
 given Int64 as Default {
     public default() Self;
+};
+
+given WrappingUInt as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingUInt as Default {
+    public default() Self;
+};
+
+given WrappingUInt as Clone {
+    public clone(self) Self;
+};
+
+given WrappingUInt8 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingUInt8 as Default {
+    public default() Self;
+};
+
+given WrappingUInt8 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingUInt16 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingUInt16 as Default {
+    public default() Self;
+};
+
+given WrappingUInt16 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingUInt32 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingUInt32 as Default {
+    public default() Self;
+};
+
+given WrappingUInt32 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingUInt64 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingUInt64 as Default {
+    public default() Self;
+};
+
+given WrappingUInt64 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingInt as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingInt as Default {
+    public default() Self;
+};
+
+given WrappingInt as Clone {
+    public clone(self) Self;
+};
+
+given WrappingInt8 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingInt8 as Default {
+    public default() Self;
+};
+
+given WrappingInt8 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingInt16 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingInt16 as Default {
+    public default() Self;
+};
+
+given WrappingInt16 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingInt32 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingInt32 as Default {
+    public default() Self;
+};
+
+given WrappingInt32 as Clone {
+    public clone(self) Self;
+};
+
+given WrappingInt64 as Hash {
+    public hash(self) UInt;
+};
+
+given WrappingInt64 as Default {
+    public default() Self;
+};
+
+given WrappingInt64 as Clone {
+    public clone(self) Self;
 };
 
 given[T Any] *T as Eq {

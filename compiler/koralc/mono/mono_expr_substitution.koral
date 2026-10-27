@@ -35,7 +35,7 @@ public let substitute_types_in_expression(
         return expr;
     };
     let new_type = when expr.expr_kind in {
-        .CastExpr(target_type, _, _) then when target_type in {
+        .CastExpr(target_type, _) then when target_type in {
             .TraitObject(original_trait_def_id, original_type_args) then {
                 let mutable substituted_type_args = List[Type].new();
                 for original_type_arg in original_type_args then {
@@ -87,13 +87,12 @@ file_private let substitution_debug_expr_kind(kind TypedExprKind) String = {
         .GenericInstantiation(_, type_args) then "GenericInstantiation(targs=\(type_args.count().to_string()))",
         .ArithmeticExpr(_, _, _) then "ArithmeticExpr",
         .WrappingArithmeticExpr(_, _, _) then "WrappingArithmeticExpr",
-        .WrappingShiftExpr(_, _, _) then "WrappingShiftExpr",
         .ComparisonExpr(_, _, _) then "ComparisonExpr",
         .BitwiseExpr(_, _, _) then "BitwiseExpr",
         .AndExpr(_, _) then "AndExpr",
         .OrExpr(_, _) then "OrExpr",
         .IsExpr(...) then "IsExpr",
-        .CastExpr(_, _, _) then "CastExpr",
+        .CastExpr(_, _) then "CastExpr",
         .TraitObjectConversion(_, _, _) then "TraitObjectConversion",
         .Unary(_, _) then "Unary",
         .Variable(symbol) then "Variable(def=\(symbol.def_id.id.to_string()))",
@@ -111,7 +110,7 @@ file_private let recover_unknown_expr_type(
 ) Type = {
     let recovered = when kind in {
         .Variable(symbol) then resolve_parameterized_type(mono, symbol.symbol_type),
-        .CastExpr(target_type, _, _) then resolve_parameterized_type(mono, target_type),
+        .CastExpr(target_type, _) then resolve_parameterized_type(mono, target_type),
         .RefExpr(inner) then Type.ReferenceType(
             resolve_parameterized_type(mono, inner.expr_type),
         ),
@@ -1288,7 +1287,7 @@ file_private let substitute_expr_kind(
         .StringLiteral(value) then TypedExprKind.StringLiteral(value),
         .BoolLiteral(value) then TypedExprKind.BoolLiteral(value),
         // CastExpr: substitute target type and inner expression.
-        .CastExpr(target_type, e, checked) then {
+        .CastExpr(target_type, e) then {
             let new_target = when target_type in {
                 .TraitObject(original_trait_def_id, original_type_args) then {
                     let mutable substituted_type_args = List[Type].new();
@@ -1304,7 +1303,6 @@ file_private let substitute_expr_kind(
             TypedExprKind.CastExpr(
                 new_target,
                 substitute_types_in_expression(mono, e, substitution),
-                checked,
             )
         },
         .TraitObjectConversion(inner, trait_type, concrete_type) then {
@@ -1386,11 +1384,6 @@ file_private let substitute_expr_kind(
             let new_left = substitute_types_in_expression(mono, left, substitution);
             let new_right = substitute_types_in_expression(mono, right, substitution);
             TypedExprKind.WrappingArithmeticExpr(new_left, op, new_right)
-        },
-        .WrappingShiftExpr(left, op, right) then {
-            let new_left = substitute_types_in_expression(mono, left, substitution);
-            let new_right = substitute_types_in_expression(mono, right, substitution);
-            TypedExprKind.WrappingShiftExpr(new_left, op, new_right)
         },
         // ComparisonExpr: substitute both sides.
         .ComparisonExpr(left, op, right) then {

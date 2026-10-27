@@ -173,6 +173,23 @@ void __koral_panic_numeric_conversion_overflow(void) {
     abort();
 }
 
+uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits) {
+    if (!isfinite(v)) {
+        __koral_panic_numeric_conversion_overflow();
+    }
+    // fmod is exact in IEEE 754: the remainder of the value modulo 2^N is the
+    // two's-complement low bits of the truncated integer. The C cast below
+    // truncates the remaining fraction toward zero.
+    double modulus = (width_bits >= 64)
+        ? 18446744073709551616.0
+        : (double)((uint64_t)1 << width_bits);
+    double r = fmod(v, modulus);
+    if (r < 0.0) {
+        return 0ull - (uint64_t)(-r);
+    }
+    return (uint64_t)r;
+}
+
 void __koral_panic_overflow_add(void) {
     fprintf(stderr, "Panic: integer overflow in addition\n");
     abort();

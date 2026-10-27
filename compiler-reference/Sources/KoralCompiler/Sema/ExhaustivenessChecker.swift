@@ -358,17 +358,17 @@ extension ExhaustivenessChecker {
 
     private func integerTypeBounds(_ type: Type) -> (hasMin: Bool, min: Int64, hasMax: Bool, max: Int64) {
         switch type {
-        case .uint8:
+        case .uint8, .wrappingUInt8:
             return (true, 0, true, 255)
-        case .uint16:
+        case .uint16, .wrappingUInt16:
             return (true, 0, true, 65535)
-        case .uint32, .uint64, .uint:
+        case .uint32, .uint64, .uint, .wrappingUInt32, .wrappingUInt64, .wrappingUInt:
             return (true, 0, false, 0)
-        case .int8:
+        case .int8, .wrappingInt8:
             return (true, -128, true, 127)
-        case .int16:
+        case .int16, .wrappingInt16:
             return (true, -32768, true, 32767)
-        case .int32, .int64, .int:
+        case .int32, .int64, .int, .wrappingInt32, .wrappingInt64, .wrappingInt:
             return (false, 0, false, 0)
         default:
             return (false, 0, false, 0)
@@ -542,6 +542,8 @@ extension ExhaustivenessChecker {
             
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64:
             if subjectType.isIntegerType {
                 if patternsCoverIntegerDomain() {

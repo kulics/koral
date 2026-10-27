@@ -77,6 +77,12 @@ struct __koral_Control {
 void __koral_set_args(int32_t argc, uint8_t** argv);
 void __koral_panic_numeric_conversion_overflow(void);
 
+// Float -> wrapping-integer conversion (numeric-families design): step one is
+// the domain check -- NaN and +-inf have no truncatable integer value and
+// panic -- step two takes the truncated-toward-zero value's low `width_bits`
+// bits in two's complement. Never panics after the domain step.
+uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits);
+
 int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                              struct __koral_Closure closure, uint64_t stack_size);
 int32_t __koral_thread_join(uint8_t* handle);
@@ -440,6 +446,46 @@ KORAL_DEFINE_CHECKED_UNSIGNED_SHR(uint64_t, u64, 64)
 KORAL_DEFINE_CHECKED_UNSIGNED_SHL(uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8))
 KORAL_DEFINE_CHECKED_UNSIGNED_SHR(uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8))
 
+// Wrapping-family shifts: the amount is reduced modulo the width instead of
+// panicking. A wrapped answer exists -- `WrappingInt8(1) << 9` masks 9 to 1
+// and yields 2 -- so the family wraps; the plain family keeps the checked
+// panic above. Both shift out bits are discarded the same way.
+#define KORAL_DEFINE_WRAPPING_SIGNED_SHL(type, unsigned_type, suffix, bit_width) \
+    static inline type koral_wrapping_shl_##suffix(type a, type b) { \
+        return (type)((unsigned_type)a << (((unsigned_type)b) & (unsigned_type)((bit_width) - 1))); \
+    }
+
+#define KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(type, unsigned_type, suffix, bit_width) \
+    static inline type koral_wrapping_shl_##suffix(type a, type b) { \
+        return (type)(a << (((unsigned_type)b) & (unsigned_type)((bit_width) - 1))); \
+    }
+
+#define KORAL_DEFINE_WRAPPING_SHR(type, unsigned_type, suffix, bit_width) \
+    static inline type koral_wrapping_shr_##suffix(type a, type b) { \
+        return (type)(a >> (((unsigned_type)b) & (unsigned_type)((bit_width) - 1))); \
+    }
+
+KORAL_DEFINE_WRAPPING_SIGNED_SHL(int8_t, uint8_t, i8, 8)
+KORAL_DEFINE_WRAPPING_SHR(int8_t, uint8_t, i8, 8)
+KORAL_DEFINE_WRAPPING_SIGNED_SHL(int16_t, uint16_t, i16, 16)
+KORAL_DEFINE_WRAPPING_SHR(int16_t, uint16_t, i16, 16)
+KORAL_DEFINE_WRAPPING_SIGNED_SHL(int32_t, uint32_t, i32, 32)
+KORAL_DEFINE_WRAPPING_SHR(int32_t, uint32_t, i32, 32)
+KORAL_DEFINE_WRAPPING_SIGNED_SHL(int64_t, uint64_t, i64, 64)
+KORAL_DEFINE_WRAPPING_SHR(int64_t, uint64_t, i64, 64)
+KORAL_DEFINE_WRAPPING_SIGNED_SHL(intptr_t, uintptr_t, isize, (int)(sizeof(intptr_t) * 8))
+KORAL_DEFINE_WRAPPING_SHR(intptr_t, uintptr_t, isize, (int)(sizeof(intptr_t) * 8))
+KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint8_t, uint8_t, u8, 8)
+KORAL_DEFINE_WRAPPING_SHR(uint8_t, uint8_t, u8, 8)
+KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint16_t, uint16_t, u16, 16)
+KORAL_DEFINE_WRAPPING_SHR(uint16_t, uint16_t, u16, 16)
+KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint32_t, uint32_t, u32, 32)
+KORAL_DEFINE_WRAPPING_SHR(uint32_t, uint32_t, u32, 32)
+KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint64_t, uint64_t, u64, 64)
+KORAL_DEFINE_WRAPPING_SHR(uint64_t, uint64_t, u64, 64)
+KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uintptr_t, uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8))
+KORAL_DEFINE_WRAPPING_SHR(uintptr_t, uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8))
+
 #define KORAL_DEFINE_CHECKED_NEG(type, suffix, type_min) \
     static inline type koral_checked_neg_##suffix(type a) { \
         if (a == (type_min)) { \
@@ -453,138 +499,5 @@ KORAL_DEFINE_CHECKED_NEG(int16_t, i16, INT16_MIN)
 KORAL_DEFINE_CHECKED_NEG(int32_t, i32, INT32_MIN)
 KORAL_DEFINE_CHECKED_NEG(int64_t, i64, INT64_MIN)
 KORAL_DEFINE_CHECKED_NEG(intptr_t, isize, INTPTR_MIN)
-
-#define KORAL_DEFINE_WRAPPING_SIGNED(type, unsigned_type, suffix) \
-    static inline type koral_wrapping_add_##suffix(type a, type b) { \
-        return (type)((unsigned_type)a + (unsigned_type)b); \
-    } \
-    static inline type koral_wrapping_sub_##suffix(type a, type b) { \
-        return (type)((unsigned_type)a - (unsigned_type)b); \
-    } \
-    static inline type koral_wrapping_mul_##suffix(type a, type b) { \
-        return (type)((unsigned_type)a * (unsigned_type)b); \
-    }
-
-#define KORAL_DEFINE_WRAPPING_UNSIGNED(type, suffix) \
-    static inline type koral_wrapping_add_##suffix(type a, type b) { \
-        return a + b; \
-    } \
-    static inline type koral_wrapping_sub_##suffix(type a, type b) { \
-        return a - b; \
-    } \
-    static inline type koral_wrapping_mul_##suffix(type a, type b) { \
-        return a * b; \
-    }
-
-KORAL_DEFINE_WRAPPING_SIGNED(int8_t, uint8_t, i8)
-KORAL_DEFINE_WRAPPING_SIGNED(int16_t, uint16_t, i16)
-KORAL_DEFINE_WRAPPING_SIGNED(int32_t, uint32_t, i32)
-KORAL_DEFINE_WRAPPING_SIGNED(int64_t, uint64_t, i64)
-KORAL_DEFINE_WRAPPING_SIGNED(intptr_t, uintptr_t, isize)
-KORAL_DEFINE_WRAPPING_UNSIGNED(uint8_t, u8)
-KORAL_DEFINE_WRAPPING_UNSIGNED(uint16_t, u16)
-KORAL_DEFINE_WRAPPING_UNSIGNED(uint32_t, u32)
-KORAL_DEFINE_WRAPPING_UNSIGNED(uint64_t, u64)
-KORAL_DEFINE_WRAPPING_UNSIGNED(uintptr_t, usize)
-
-#define KORAL_DEFINE_WRAPPING_SIGNED_DIV(type, unsigned_type, suffix, type_min) \
-    static inline type koral_wrapping_div_##suffix(type a, type b) { \
-        if (b == 0) { \
-            __koral_panic_overflow_div(); \
-        } \
-        if (a == (type_min) && b == -1) { \
-            return (type_min); \
-        } \
-        return a / b; \
-    }
-
-#define KORAL_DEFINE_WRAPPING_SIGNED_MOD(type, unsigned_type, suffix, type_min) \
-    static inline type koral_wrapping_rem_##suffix(type a, type b) { \
-        if (b == 0) { \
-            __koral_panic_overflow_mod(); \
-        } \
-        if (a == (type_min) && b == -1) { \
-            return 0; \
-        } \
-        return a % b; \
-    }
-
-#define KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(type, suffix) \
-    static inline type koral_wrapping_div_##suffix(type a, type b) { \
-        if (b == 0) { \
-            __koral_panic_overflow_div(); \
-        } \
-        return a / b; \
-    }
-
-#define KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(type, suffix) \
-    static inline type koral_wrapping_rem_##suffix(type a, type b) { \
-        if (b == 0) { \
-            __koral_panic_overflow_mod(); \
-        } \
-        return a % b; \
-    }
-
-KORAL_DEFINE_WRAPPING_SIGNED_DIV(int8_t, uint8_t, i8, INT8_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_MOD(int8_t, uint8_t, i8, INT8_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_DIV(int16_t, uint16_t, i16, INT16_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_MOD(int16_t, uint16_t, i16, INT16_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_DIV(int32_t, uint32_t, i32, INT32_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_MOD(int32_t, uint32_t, i32, INT32_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_DIV(int64_t, uint64_t, i64, INT64_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_MOD(int64_t, uint64_t, i64, INT64_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_DIV(intptr_t, uintptr_t, isize, INTPTR_MIN)
-KORAL_DEFINE_WRAPPING_SIGNED_MOD(intptr_t, uintptr_t, isize, INTPTR_MIN)
-KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uint8_t, u8)
-KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uint8_t, u8)
-KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uint16_t, u16)
-KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uint16_t, u16)
-KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uint32_t, u32)
-KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uint32_t, u32)
-KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uint64_t, u64)
-KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uint64_t, u64)
-KORAL_DEFINE_WRAPPING_UNSIGNED_DIV(uintptr_t, usize)
-KORAL_DEFINE_WRAPPING_UNSIGNED_MOD(uintptr_t, usize)
-
-#define KORAL_DEFINE_WRAPPING_SIGNED_SHL(type, unsigned_type, suffix, mask) \
-    static inline type koral_wrapping_shl_##suffix(type a, unsigned_type b) { \
-        return (type)((unsigned_type)a << ((unsigned_type)b & (mask))); \
-    }
-
-#define KORAL_DEFINE_WRAPPING_SIGNED_SHR(type, unsigned_type, suffix, mask) \
-    static inline type koral_wrapping_shr_##suffix(type a, unsigned_type b) { \
-        return a >> ((unsigned_type)b & (mask)); \
-    }
-
-#define KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(type, suffix, mask) \
-    static inline type koral_wrapping_shl_##suffix(type a, type b) { \
-        return a << (b & (mask)); \
-    }
-
-#define KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(type, suffix, mask) \
-    static inline type koral_wrapping_shr_##suffix(type a, type b) { \
-        return a >> (b & (mask)); \
-    }
-
-KORAL_DEFINE_WRAPPING_SIGNED_SHL(int8_t, uint8_t, i8, 7)
-KORAL_DEFINE_WRAPPING_SIGNED_SHR(int8_t, uint8_t, i8, 7)
-KORAL_DEFINE_WRAPPING_SIGNED_SHL(int16_t, uint16_t, i16, 15)
-KORAL_DEFINE_WRAPPING_SIGNED_SHR(int16_t, uint16_t, i16, 15)
-KORAL_DEFINE_WRAPPING_SIGNED_SHL(int32_t, uint32_t, i32, 31)
-KORAL_DEFINE_WRAPPING_SIGNED_SHR(int32_t, uint32_t, i32, 31)
-KORAL_DEFINE_WRAPPING_SIGNED_SHL(int64_t, uint64_t, i64, 63)
-KORAL_DEFINE_WRAPPING_SIGNED_SHR(int64_t, uint64_t, i64, 63)
-KORAL_DEFINE_WRAPPING_SIGNED_SHL(intptr_t, uintptr_t, isize, (uintptr_t)(sizeof(intptr_t) * 8 - 1))
-KORAL_DEFINE_WRAPPING_SIGNED_SHR(intptr_t, uintptr_t, isize, (uintptr_t)(sizeof(intptr_t) * 8 - 1))
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint8_t, u8, 7)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(uint8_t, u8, 7)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint16_t, u16, 15)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(uint16_t, u16, 15)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint32_t, u32, 31)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(uint32_t, u32, 31)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uint64_t, u64, 63)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(uint64_t, u64, 63)
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHL(uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8 - 1))
-KORAL_DEFINE_WRAPPING_UNSIGNED_SHR(uintptr_t, usize, (uintptr_t)(sizeof(uintptr_t) * 8 - 1))
 
 #endif // KORAL_RUNTIME_H

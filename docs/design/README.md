@@ -37,6 +37,7 @@
 | `design-axioms.md` | 复杂度预算与拒绝清单；设计公理本身；提案过闸顺序 | 技术前提（身份）→ 本 README「共同前提」；子系统取舍 → 各子系统文档 |
 | `module-design.md` | 模块与导入的命名、语法、manifest | 导入写法 → `guide/document.md` |
 | `thin-pointer-design.md` | 对象/头布局、借用表示、trait object 布局、niche | 语言可见的内存语义 → `type-semantics.md` |
+| `numeric-families-design.md` | 整数家族（常规/回绕/预留饱和）如何划分、为何是内建类型而非包装；转换为何由目标类型决定；字面量为何一律编译期受检；浮点为何不设家族 | 具体写法与规则表 → `guide/document.md` §Numeric Casting；被替换的 `wrapping_*` 方法族 → `git log`；sealed trait → 另行独立交付 |
 
 ## 去重铁律
 
@@ -69,6 +70,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
 | [`design-axioms.md`](design-axioms.md) —— 设计公理与复杂度预算 | Accepted | 无独立记录（贯穿性规则，由各设计文档的取舍看护） | 2026-10-24 |
+| [`numeric-families-design.md`](numeric-families-design.md) —— 数值类型家族与转换语义 | Draft（**未施工**；饱和家族仅预留命名与语义空间，落地须单独过闸） | 无（分三期，见文内 `## 实施`） | 2026-10-26 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 

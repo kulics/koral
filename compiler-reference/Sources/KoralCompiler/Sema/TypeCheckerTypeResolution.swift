@@ -713,6 +713,8 @@ extension TypeChecker {
     switch type {
     case .bool, .int, .int8, .int16, .int32, .int64,
          .uint, .uint8, .uint16, .uint32, .uint64,
+         .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
          .float32, .float64:
       return true
     case .pointer(let inner), .mutablePointer(let inner):
@@ -929,13 +931,7 @@ extension TypeChecker {
   // MARK: - Type Checking Utilities
   
   func isIntegerType(_ type: Type) -> Bool {
-    switch type {
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64:
-      return true
-    default:
-      return false
-    }
+    return type.isIntegerType
   }
 
   func isFloatType(_ type: Type) -> Bool {
@@ -955,14 +951,14 @@ extension TypeChecker {
   /// unsigned and no negative literal fits.
   private func integerTypeMagnitudeBounds(_ type: Type) -> (negative: UInt64, positive: UInt64)? {
     switch type {
-    case .int, .int64: return (9223372036854775808, 9223372036854775807)
-    case .int8: return (128, 127)
-    case .int16: return (32768, 32767)
-    case .int32: return (2147483648, 2147483647)
-    case .uint, .uint64: return (0, 18446744073709551615)
-    case .uint8: return (0, 255)
-    case .uint16: return (0, 65535)
-    case .uint32: return (0, 4294967295)
+    case .int, .int64, .wrappingInt, .wrappingInt64: return (9223372036854775808, 9223372036854775807)
+    case .int8, .wrappingInt8: return (128, 127)
+    case .int16, .wrappingInt16: return (32768, 32767)
+    case .int32, .wrappingInt32: return (2147483648, 2147483647)
+    case .uint, .uint64, .wrappingUInt, .wrappingUInt64: return (0, 18446744073709551615)
+    case .uint8, .wrappingUInt8: return (0, 255)
+    case .uint16, .wrappingUInt16: return (0, 65535)
+    case .uint32, .wrappingUInt32: return (0, 4294967295)
     default: return nil
     }
   }
@@ -1037,7 +1033,7 @@ extension TypeChecker {
         display = (parsed.negative ? "-" : "") + String(parsed.magnitude)
       }
       throw SemanticError(.generic(
-        "Integer literal \(display) is out of range for \(targetType.description)"
+        "Integer literal \(display) is out of range for \(targetType.plainWidthCounterpart.description)"
       ), span: span)
     }
   }
@@ -1118,10 +1114,10 @@ extension TypeChecker {
     switch (expected, expr.type) {
     case (.reference(let expectedInner), .mutableReference(let actualInner))
       where expectedInner == actualInner:
-      return .castExpression(expression: expr, type: expected, checked: true)
+      return .castExpression(expression: expr, type: expected)
     case (.pointer(let expectedElement), .mutablePointer(let actualElement))
       where expectedElement == actualElement:
-      return .castExpression(expression: expr, type: expected, checked: true)
+      return .castExpression(expression: expr, type: expected)
     default:
       break
     }

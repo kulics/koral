@@ -689,7 +689,7 @@ file_private let mir_walk_value_uses(
             block,
             active_scopes,
         ),
-        .Cast(operand, _, _) then mir_walk_operand_uses(
+        .Cast(operand, _) then mir_walk_operand_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -1175,7 +1175,7 @@ given MIRFunctionCodeEmitter {
         ) then {
             let shift_op = if assignment.operator_kind is .LeftShiftAssign() then BitwiseOperator.LeftShift(
             ) else BitwiseOperator.RightShift();
-            let func_name = self.codegen.checked_shift_func_name(shift_op, target_type);
+            let func_name = self.codegen.shift_func_name(shift_op, target_type);
             self.codegen.add_indent();
             self.codegen.buffer.push_string(access.path);
             self.codegen.buffer.push_string(" = ");
@@ -1477,10 +1477,9 @@ given MIRFunctionCodeEmitter {
                 allocation,
             ),
             .Pointer(place) then self.emit_pointer(place),
-            .Cast(operand, target_type, checked) then self.emit_cast_operand(
+            .Cast(operand, target_type) then self.emit_cast_operand(
                 operand,
                 target_type,
-                checked,
             ),
             .Intrinsic(node) then self.emit_intrinsic(node),
             .Lambda(lambda) then self.emit_lambda(lambda),
@@ -1596,11 +1595,9 @@ given MIRFunctionCodeEmitter {
                 );
                 expr
             },
-            .WrappingArithmetic(op) then self.codegen.next_temp_with_call_2(
+            .WrappingArithmetic(op) then self.codegen.next_temp_with_init(
                 c_type,
-                self.wrapping_arithmetic_func_name(op, result_type),
-                left,
-                right,
+                self.codegen.wrapping_arithmetic_init_expr(op, left, right, result_type),
             ),
             .Comparison(op) then self.codegen.next_temp_with_infix_init(
                 c_type,
@@ -1625,7 +1622,7 @@ given MIRFunctionCodeEmitter {
                     result_type,
                 ) and (op is .LeftShift() or is .RightShift()) then self.codegen.next_temp_with_call_2(
                     c_type,
-                    self.codegen.checked_shift_func_name(op, result_type),
+                    self.codegen.shift_func_name(op, result_type),
                     left,
                     right,
                 )
@@ -1637,41 +1634,11 @@ given MIRFunctionCodeEmitter {
                 );
                 expr
             },
-            .WrappingShift(op) then self.codegen.next_temp_with_call_2(
-                c_type,
-                self.wrapping_shift_func_name(op, result_type),
-                left,
-                right,
-            ),
         };
         return MIRValueEmission(
             expression,
             self.cleanup_for_temporary_result(expression, result_type),
         );
-    };
-
-    module_private wrapping_arithmetic_func_name(
-        self,
-        op ArithmeticOperator,
-        t Type,
-    ) String = {
-        let op_name = when op in {
-            .Add() then "add",
-            .Subtract() then "sub",
-            .Multiply() then "mul",
-            .Divide() then "div",
-            .Remainder() then "rem",
-        };
-        return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))";
-    };
-
-    module_private wrapping_shift_func_name(self, op BitwiseOperator, t Type) String = {
-        let op_name = when op in {
-            .LeftShift() then "shl",
-            .RightShift() then "shr",
-            _ then "shl",
-        };
-        return "koral_wrapping_\(op_name)_\(self.codegen.type_suffix(t))";
     };
 
     module_private call_arguments_match_function_type(
@@ -3199,6 +3166,11 @@ given MIRFunctionCodeEmitter {
             .Int32Type() then true,
             .Int64Type() then true,
             .IntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingIntType() then true,
             _ then false,
         };
     };
@@ -3211,6 +3183,11 @@ given MIRFunctionCodeEmitter {
             .UInt32Type() then true,
             .UInt64Type() then true,
             .UIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
+            .WrappingUIntType() then true,
             _ then false,
         };
     };
@@ -3221,34 +3198,82 @@ given MIRFunctionCodeEmitter {
             .Int8Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT8_MIN", "INT8_MAX"),
             ),
+            .WrappingInt8Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("INT8_MIN", "INT8_MAX"),
+            ),
             .Int16Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("INT16_MIN", "INT16_MAX"),
+            ),
+            .WrappingInt16Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT16_MIN", "INT16_MAX"),
             ),
             .Int32Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT32_MIN", "INT32_MAX"),
             ),
+            .WrappingInt32Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("INT32_MIN", "INT32_MAX"),
+            ),
             .Int64Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("INT64_MIN", "INT64_MAX"),
+            ),
+            .WrappingInt64Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT64_MIN", "INT64_MAX"),
             ),
             .IntType() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INTPTR_MIN", "INTPTR_MAX"),
             ),
+            .WrappingIntType() then Option[Pair[String, String]].Some(
+                Pair[String, String]("INTPTR_MIN", "INTPTR_MAX"),
+            ),
             .UInt8Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("0", "UINT8_MAX"),
+            ),
+            .WrappingUInt8Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT8_MAX"),
             ),
             .UInt16Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT16_MAX"),
             ),
+            .WrappingUInt16Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("0", "UINT16_MAX"),
+            ),
             .UInt32Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("0", "UINT32_MAX"),
+            ),
+            .WrappingUInt32Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT32_MAX"),
             ),
             .UInt64Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT64_MAX"),
             ),
+            .WrappingUInt64Type() then Option[Pair[String, String]].Some(
+                Pair[String, String]("0", "UINT64_MAX"),
+            ),
             .UIntType() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINTPTR_MAX"),
             ),
+            .WrappingUIntType() then Option[Pair[String, String]].Some(
+                Pair[String, String]("0", "UINTPTR_MAX"),
+            ),
             _ then Option[Pair[String, String]].None(),
+        };
+    };
+
+    /// The wrapping-family cast targets: `WrappingInt` .. `WrappingUInt64`.
+    module_private is_wrapping_int_cast_target_type(self, t Type) Bool = {
+        let _ = self;
+        return when t in {
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
+            _ then false,
         };
     };
 
@@ -3256,19 +3281,33 @@ given MIRFunctionCodeEmitter {
         self,
         operand MIROperand,
         target_type Type,
-        checked Bool,
     ) MIRValueEmission = {
         let source = self.emit_operand_value(operand);
         let mutable source_type = self.type_of_operand(operand);
         let mutable target_c_type = self.codegen.c_type_name(target_type);
-        // An unchecked cast is a pure C cast: truncate or sign/zero-extend the
-        // two's-complement representation to the target width and never panic.
-        // That is Rust's `as` and a C cast between integers, and it is exactly
-        // what `wrapping_cast` asks for.
-        let expression = if not checked then self.codegen.next_temp_with_init(
-            target_c_type,
-            "(\(target_c_type))\(source.expression)",
-        )
+        // The TARGET decides the conversion policy (numeric-families design):
+        // a wrapping-family target truncates to the target width's low bits and
+        // never panics; a plain-family target is checked. A same-width pair is
+        // a lossless retype either way.
+        let expression = if self.is_wrapping_int_cast_target_type(target_type) then {
+            if self.is_float_cast_source_type(source_type) then {
+                // Float -> Wrapping is two steps. Domain first: NaN and +-inf
+                // have no truncatable integer value and panic regardless of
+                // family. Then the truncated-toward-zero value takes the target
+                // width's low bits.
+                self.codegen.next_temp_with_init(
+                    target_c_type,
+                    "(\(target_c_type))__koral_wrapping_bits_from_f64((double)\(source.expression), (unsigned)(sizeof(\(target_c_type)) * 8))",
+                )
+            } else {
+                // Integer -> Wrapping is a pure C cast: narrowing takes the low
+                // bits, widening sign/zero-extends. It never panics.
+                self.codegen.next_temp_with_init(
+                    target_c_type,
+                    "(\(target_c_type))\(source.expression)",
+                )
+            }
+        }
         else if self.is_float_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
             target_type,
         ) or self.is_unsigned_int_cast_target_type(target_type)) then when self.float_cast_target_bounds(
@@ -3996,7 +4035,7 @@ given MIRFunctionCodeEmitter {
             .TraitMethodCall(call) then call.result_type,
             .Ref(place, kind, _) then self.type_of_ref(place, kind),
             .Pointer(place) then self.type_of_pointer(place),
-            .Cast(_, target_type, _) then target_type,
+            .Cast(_, target_type) then target_type,
             .Intrinsic(node) then self.type_of_intrinsic(node),
             .Lambda(lambda) then lambda.lambda_type,
         };
@@ -4120,7 +4159,7 @@ given MIRFunctionCodeEmitter {
                     self.consume_moved_place(place);
                 };
             },
-            .Cast(operand, target_type, _) then {
+            .Cast(operand, target_type) then {
                 let source_type = self.type_of_value(MIRValue.Operand(operand));
                 if self.is_ownership_preserving_cast(source_type, target_type) then {
                     self.consume_moved_source(MIRValue.Operand(operand));

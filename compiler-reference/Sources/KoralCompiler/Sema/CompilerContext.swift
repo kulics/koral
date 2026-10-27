@@ -242,6 +242,8 @@ public final class CompilerContext: @unchecked Sendable {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never,
              .function, .reference, .mutableReference, .borrowedReference,
              .mutableBorrowedReference, .pointer, .mutablePointer,
@@ -334,6 +336,8 @@ public final class CompilerContext: @unchecked Sendable {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never,
              .function, .reference, .mutableReference, .borrowedReference,
              .mutableBorrowedReference, .pointer, .mutablePointer,
@@ -581,6 +585,16 @@ public final class CompilerContext: @unchecked Sendable {
         case .uint16: return "UInt16"
         case .uint32: return "UInt32"
         case .uint64: return "UInt64"
+        case .wrappingInt: return "WrappingInt"
+        case .wrappingInt8: return "WrappingInt8"
+        case .wrappingInt16: return "WrappingInt16"
+        case .wrappingInt32: return "WrappingInt32"
+        case .wrappingInt64: return "WrappingInt64"
+        case .wrappingUInt: return "WrappingUInt"
+        case .wrappingUInt8: return "WrappingUInt8"
+        case .wrappingUInt16: return "WrappingUInt16"
+        case .wrappingUInt32: return "WrappingUInt32"
+        case .wrappingUInt64: return "WrappingUInt64"
         case .float32: return "Float32"
         case .float64: return "Float64"
         case .bool: return "Bool"
@@ -640,6 +654,8 @@ public final class CompilerContext: @unchecked Sendable {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return []
         case .typeVariable(let tv):
@@ -714,6 +730,16 @@ public final class CompilerContext: @unchecked Sendable {
         case .uint16: return "U16"
         case .uint32: return "U32"
         case .uint64: return "U64"
+        case .wrappingInt: return "WI"
+        case .wrappingInt8: return "WI8"
+        case .wrappingInt16: return "WI16"
+        case .wrappingInt32: return "WI32"
+        case .wrappingInt64: return "WI64"
+        case .wrappingUInt: return "WU"
+        case .wrappingUInt8: return "WU8"
+        case .wrappingUInt16: return "WU16"
+        case .wrappingUInt32: return "WU32"
+        case .wrappingUInt64: return "WU64"
         case .float32: return "F32"
         case .float64: return "F64"
         case .bool: return "B"
@@ -813,6 +839,8 @@ public final class CompilerContext: @unchecked Sendable {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return false
         case .function(let params, let returns):

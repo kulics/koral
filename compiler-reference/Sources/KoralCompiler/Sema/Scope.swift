@@ -722,6 +722,26 @@ public class UnifiedScope {
       .uint32
     case "UInt64":
       .uint64
+    case "WrappingInt":
+      .wrappingInt
+    case "WrappingInt8":
+      .wrappingInt8
+    case "WrappingInt16":
+      .wrappingInt16
+    case "WrappingInt32":
+      .wrappingInt32
+    case "WrappingInt64":
+      .wrappingInt64
+    case "WrappingUInt":
+      .wrappingUInt
+    case "WrappingUInt8":
+      .wrappingUInt8
+    case "WrappingUInt16":
+      .wrappingUInt16
+    case "WrappingUInt32":
+      .wrappingUInt32
+    case "WrappingUInt64":
+      .wrappingUInt64
     case "Float32":
       .float32
     case "Float64":

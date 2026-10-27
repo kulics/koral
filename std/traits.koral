@@ -17,9 +17,10 @@ given Hash {
     public combine_hash(self, value UInt) UInt = {
         let magic UInt = 2654435769; // 0x9e3779b9
         let seed = self.hash();
-        return seed ^ value.wrapping_add(magic).wrapping_add(seed << 6).wrapping_add(
+        let combined = WrappingUInt(value) + WrappingUInt(magic) + WrappingUInt(seed << 6) + WrappingUInt(
             seed >> 2,
         );
+        return seed ^ UInt(combined);
     };
 };
 
@@ -128,10 +129,10 @@ given Int as Default {
 
 given Int8 as Hash {
 
-    // Hash the BIT PATTERN, not the number: `wrapping_cast` is the unchecked
-    // move to `UInt`, so a negative sign-extends instead of being rejected by
-    // the checked `Type(x)` conversion.
-    public hash(self) UInt = self.wrapping_cast[UInt]();
+    // Hash the BIT PATTERN, not the number: `WrappingUInt(self)` sign-extends
+    // the two's-complement representation instead of being rejected by the
+    // checked `Type(x)` conversion, and the same-width `UInt(...)` retypes it.
+    public hash(self) UInt = UInt(WrappingUInt(self));
 };
 
 given Int8 as Default {
@@ -141,7 +142,7 @@ given Int8 as Default {
 
 given Int16 as Hash {
 
-    public hash(self) UInt = self.wrapping_cast[UInt]();
+    public hash(self) UInt = UInt(WrappingUInt(self));
 };
 
 given Int16 as Default {
@@ -151,7 +152,7 @@ given Int16 as Default {
 
 given Int32 as Hash {
 
-    public hash(self) UInt = self.wrapping_cast[UInt]();
+    public hash(self) UInt = UInt(WrappingUInt(self));
 };
 
 given Int32 as Default {
@@ -172,6 +173,175 @@ given Int64 as Hash {
 given Int64 as Default {
 
     public default() Self = Int64(0);
+};
+
+// ============================================================================
+// Wrapping Hash, Default, and Clone Implementations
+// ============================================================================
+// Hash delegates to the plain counterpart of the same width after a lossless
+// same-width retype, so a Wrapping value and its plain twin hash alike.
+
+given WrappingUInt as Hash {
+
+    public hash(self) UInt = UInt(self);
+};
+
+given WrappingUInt as Default {
+
+    public default() Self = WrappingUInt(0);
+};
+
+given WrappingUInt as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingUInt8 as Hash {
+
+    public hash(self) UInt = UInt(self);
+};
+
+given WrappingUInt8 as Default {
+
+    public default() Self = WrappingUInt8(0);
+};
+
+given WrappingUInt8 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingUInt16 as Hash {
+
+    public hash(self) UInt = UInt(self);
+};
+
+given WrappingUInt16 as Default {
+
+    public default() Self = WrappingUInt16(0);
+};
+
+given WrappingUInt16 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingUInt32 as Hash {
+
+    public hash(self) UInt = UInt(self);
+};
+
+given WrappingUInt32 as Default {
+
+    public default() Self = WrappingUInt32(0);
+};
+
+given WrappingUInt32 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingUInt64 as Hash {
+
+    public hash(self) UInt = {
+        let v UInt64 = UInt64(self);
+        let lo UInt = UInt(v);
+        let hi UInt = UInt((v / 4294967296));
+        return lo.combine_hash(hi);
+    };
+};
+
+given WrappingUInt64 as Default {
+
+    public default() Self = WrappingUInt64(0);
+};
+
+given WrappingUInt64 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingInt as Hash {
+
+    public hash(self) UInt = UInt(self);
+};
+
+given WrappingInt as Default {
+
+    public default() Self = 0;
+};
+
+given WrappingInt as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingInt8 as Hash {
+
+    // Same bit-pattern reading as plain `Int8`: `WrappingUInt(self)`
+    // sign-extends the two's-complement representation, and the same-width
+    // `UInt(...)` retypes it.
+    public hash(self) UInt = UInt(WrappingUInt(self));
+};
+
+given WrappingInt8 as Default {
+
+    public default() Self = WrappingInt8(0);
+};
+
+given WrappingInt8 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingInt16 as Hash {
+
+    public hash(self) UInt = UInt(WrappingUInt(self));
+};
+
+given WrappingInt16 as Default {
+
+    public default() Self = WrappingInt16(0);
+};
+
+given WrappingInt16 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingInt32 as Hash {
+
+    public hash(self) UInt = UInt(WrappingUInt(self));
+};
+
+given WrappingInt32 as Default {
+
+    public default() Self = WrappingInt32(0);
+};
+
+given WrappingInt32 as Clone {
+
+    public clone(self) Self = self;
+};
+
+given WrappingInt64 as Hash {
+
+    public hash(self) UInt = {
+        let v UInt64 = UInt64(self);
+        let lo UInt = UInt(v);
+        let hi UInt = UInt((v / 4294967296));
+        return UInt(0).combine_hash(lo).combine_hash(hi);
+    };
+};
+
+given WrappingInt64 as Default {
+
+    public default() Self = WrappingInt64(0);
+};
+
+given WrappingInt64 as Clone {
+
+    public clone(self) Self = self;
 };
 
 given[T Any] *T as Eq {

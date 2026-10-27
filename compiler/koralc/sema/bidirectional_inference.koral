@@ -31,8 +31,53 @@ given TypeChecker {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             .Float32Type() then true,
             .Float64Type() then true,
+            _ then false,
+        };
+    };
+
+    /// The plain (checked) integer family only. The wrapping family is
+    /// excluded: its operation surface is a separate delivery, and a plain
+    /// checked operator must not silently stand in for it.
+    module_private is_plain_integer_type(self, t Type) Bool = {
+        return when t in {
+            .IntType() then true,
+            .Int8Type() then true,
+            .Int16Type() then true,
+            .Int32Type() then true,
+            .Int64Type() then true,
+            .UIntType() then true,
+            .UInt8Type() then true,
+            .UInt16Type() then true,
+            .UInt32Type() then true,
+            .UInt64Type() then true,
+            _ then false,
+        };
+    };
+
+    module_private is_wrapping_integer_type(self, t Type) Bool = {
+        return when t in {
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -49,6 +94,16 @@ given TypeChecker {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -183,7 +238,7 @@ given TypeChecker {
             );
         };
         let typed_inner = self.bidirectional_check(inner, .Some(target), scope);
-        return make_typed_expr(TypedExprKind.CastExpr(target, typed_inner, true), target);
+        return make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target);
     };
 
     module_private typed_float_literal(
@@ -193,10 +248,9 @@ given TypeChecker {
         expected Type,
         scope Scope,
     ) TypedExpr = {
+        // A float literal joins a FLOAT expected type only (the seed's
+        // `coerceLiteral`): no int<->float promotion outside a written cast.
         if self.is_float_type(expected) then {
-            return make_typed_expr(TypedExprKind.FloatLiteral(value), expected);
-        };
-        if self.is_numeric_type(expected) then {
             return make_typed_expr(TypedExprKind.FloatLiteral(value), expected);
         };
         return self.bidi_synthesize_mode(expr, scope);
@@ -209,12 +263,12 @@ given TypeChecker {
         expected Type,
         scope Scope,
     ) TypedExpr = {
-        if self.is_numeric_type(expected) then {
-            if self.is_integer_type(expected) then {
-                let _ = self.check_integer_literal_range(value, expected, expr_span(
-                    expr,
-                ));
-            };
+        // An integer literal joins an INTEGER expected type only (the seed's
+        // `coerceLiteral`): a float expected type is a mismatch, not a join.
+        if self.is_integer_type(expected) then {
+            let _ = self.check_integer_literal_range(value, expected, expr_span(
+                expr,
+            ));
             return make_typed_expr(TypedExprKind.IntegerLiteral(value), expected);
         };
         return self.bidi_synthesize_mode(expr, scope);

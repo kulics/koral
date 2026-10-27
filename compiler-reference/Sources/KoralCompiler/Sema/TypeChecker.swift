@@ -97,6 +97,16 @@ indirect enum ConformanceTypeKey: Hashable {
   case uint16
   case uint32
   case uint64
+  case wrappingInt
+  case wrappingInt8
+  case wrappingInt16
+  case wrappingInt32
+  case wrappingInt64
+  case wrappingUInt
+  case wrappingUInt8
+  case wrappingUInt16
+  case wrappingUInt32
+  case wrappingUInt64
   case float32
   case float64
   case bool
@@ -672,6 +682,26 @@ public class TypeChecker {
       return .uint32
     case .uint64:
       return .uint64
+    case .wrappingInt:
+      return .wrappingInt
+    case .wrappingInt8:
+      return .wrappingInt8
+    case .wrappingInt16:
+      return .wrappingInt16
+    case .wrappingInt32:
+      return .wrappingInt32
+    case .wrappingInt64:
+      return .wrappingInt64
+    case .wrappingUInt:
+      return .wrappingUInt
+    case .wrappingUInt8:
+      return .wrappingUInt8
+    case .wrappingUInt16:
+      return .wrappingUInt16
+    case .wrappingUInt32:
+      return .wrappingUInt32
+    case .wrappingUInt64:
+      return .wrappingUInt64
     case .float32:
       return .float32
     case .float64:
@@ -826,6 +856,16 @@ public class TypeChecker {
          (.uint16, .uint16),
          (.uint32, .uint32),
          (.uint64, .uint64),
+         (.wrappingInt, .wrappingInt),
+         (.wrappingInt8, .wrappingInt8),
+         (.wrappingInt16, .wrappingInt16),
+         (.wrappingInt32, .wrappingInt32),
+         (.wrappingInt64, .wrappingInt64),
+         (.wrappingUInt, .wrappingUInt),
+         (.wrappingUInt8, .wrappingUInt8),
+         (.wrappingUInt16, .wrappingUInt16),
+         (.wrappingUInt32, .wrappingUInt32),
+         (.wrappingUInt64, .wrappingUInt64),
          (.float32, .float32),
          (.float64, .float64),
          (.bool, .bool),
@@ -1109,6 +1149,8 @@ public class TypeChecker {
     switch type {
     case .int, .int8, .int16, .int32, .int64,
          .uint, .uint8, .uint16, .uint32, .uint64,
+         .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
          .float32, .float64, .bool, .void, .never:
       return true
     case .pointer:
@@ -1321,13 +1363,7 @@ public class TypeChecker {
   }
 
   func isIntegerScalarType(_ type: Type) -> Bool {
-    switch type {
-    case .int, .int8, .int16, .int32, .int64,
-      .uint, .uint8, .uint16, .uint32, .uint64:
-      return true
-    default:
-      return false
-    }
+    return type.isIntegerType
   }
 
   func isFloatScalarType(_ type: Type) -> Bool {

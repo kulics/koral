@@ -109,13 +109,81 @@ given CodeGen {
         return "koral_checked_\(op_name)_\(self.type_suffix(t))";
     };
 
-    checked_shift_func_name(self, op BitwiseOperator, t Type) String = {
+    /// The shift helper for a target width. Plain widths panic on an
+    /// out-of-range amount; the Wrapping family masks the amount modulo the
+    /// width instead, because a wrapped answer exists.
+    shift_func_name(self, op BitwiseOperator, t Type) String = {
         let op_name = when op in {
             .LeftShift() then "shl",
             .RightShift() then "shr",
             _ then "shl",
         };
-        return "koral_checked_\(op_name)_\(self.type_suffix(t))";
+        let family = if self.is_wrapping_integer_type(t) then "koral_wrapping_" else "koral_checked_";
+        return "\(family)\(op_name)_\(self.type_suffix(t))";
+    };
+
+    is_wrapping_integer_type(self, t Type) Bool = {
+        return when t in {
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
+            _ then false,
+        };
+    };
+
+    /// Unsigned C twin used to compute Wrapping arithmetic in well-defined
+    /// unsigned C arithmetic; the outer cast back to the result type truncates
+    /// to the family's width (modulo 2^N). Wider than the narrow widths on
+    /// purpose: `uint16_t * uint16_t` promotes to signed `int` and can
+    /// overflow it.
+    wrapping_unsigned_op_type_name(self, t Type) String = {
+        return when t in {
+            .WrappingIntType() or .WrappingUIntType() then "uintptr_t",
+            .WrappingInt64Type() or .WrappingUInt64Type() then "uint64_t",
+            _ then "uint32_t",
+        };
+    };
+
+    is_signed_wrapping_integer_type(self, t Type) Bool = {
+        return when t in {
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            _ then false,
+        };
+    };
+
+    /// Wrapping arithmetic emits the C operator itself with no overflow guard
+    /// -- modular by construction. Division and remainder keep the plain
+    /// family's divide-by-zero panic and additionally wrap `MIN / -1` to `MIN`
+    /// (`MIN % -1` to `0`) instead of the C undefined result.
+    wrapping_arithmetic_init_expr(
+        self,
+        op ArithmeticOperator,
+        left String,
+        right String,
+        t Type,
+    ) String = {
+        let c_type = self.c_type_name(t);
+        let unsigned_type = self.wrapping_unsigned_op_type_name(t);
+        return when op in {
+            .Add() then "(\(c_type))((\(unsigned_type))(\(left)) + (\(unsigned_type))(\(right)))",
+            .Subtract() then "(\(c_type))((\(unsigned_type))(\(left)) - (\(unsigned_type))(\(right)))",
+            .Multiply() then "(\(c_type))((\(unsigned_type))(\(left)) * (\(unsigned_type))(\(right)))",
+            .Divide() then if self.is_signed_wrapping_integer_type(t) then "((\(right)) == -1 ? (\(c_type))((\(unsigned_type))0 - (\(unsigned_type))(\(left))) : koral_checked_div_\(self.type_suffix(t))(\(left), \(right)))"
+            else "koral_checked_div_\(self.type_suffix(t))(\(left), \(right))",
+            .Remainder() then if self.is_signed_wrapping_integer_type(t) then "((\(right)) == -1 ? (\(c_type))0 : koral_checked_mod_\(self.type_suffix(t))(\(left), \(right)))"
+            else "koral_checked_mod_\(self.type_suffix(t))(\(left), \(right))",
+        };
     };
 
     type_suffix(self, t Type) String = {
@@ -130,6 +198,16 @@ given CodeGen {
             .UInt16Type() then "u16",
             .UInt32Type() then "u32",
             .UInt64Type() then "u64",
+            .WrappingIntType() then "isize",
+            .WrappingInt8Type() then "i8",
+            .WrappingInt16Type() then "i16",
+            .WrappingInt32Type() then "i32",
+            .WrappingInt64Type() then "i64",
+            .WrappingUIntType() then "usize",
+            .WrappingUInt8Type() then "u8",
+            .WrappingUInt16Type() then "u16",
+            .WrappingUInt32Type() then "u32",
+            .WrappingUInt64Type() then "u64",
             _ then "isize",
         };
     };
@@ -146,6 +224,16 @@ given CodeGen {
             .UInt16Type() then true,
             .UInt32Type() then true,
             .UInt64Type() then true,
+            .WrappingIntType() then true,
+            .WrappingInt8Type() then true,
+            .WrappingInt16Type() then true,
+            .WrappingInt32Type() then true,
+            .WrappingInt64Type() then true,
+            .WrappingUIntType() then true,
+            .WrappingUInt8Type() then true,
+            .WrappingUInt16Type() then true,
+            .WrappingUInt32Type() then true,
+            .WrappingUInt64Type() then true,
             _ then false,
         };
     };

@@ -222,7 +222,8 @@ extension TypeChecker {
         throw SemanticError(.typeMismatch(expected: "integer type", got: subjectType.description), span: span)
       }
       switch subjectType {
-      case .uint, .uint8, .uint16, .uint32, .uint64:
+      case .uint, .uint8, .uint16, .uint32, .uint64,
+           .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
         throw SemanticError(.generic("Negative integer literal cannot match unsigned type"), span: span)
       default:
         break

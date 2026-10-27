@@ -202,6 +202,16 @@ public indirect enum Type: CustomStringConvertible {
   case uint16
   case uint32
   case uint64
+  case wrappingInt
+  case wrappingInt8
+  case wrappingInt16
+  case wrappingInt32
+  case wrappingInt64
+  case wrappingUInt
+  case wrappingUInt8
+  case wrappingUInt16
+  case wrappingUInt32
+  case wrappingUInt64
   case float32
   case float64
   case bool
@@ -349,6 +359,16 @@ public indirect enum Type: CustomStringConvertible {
     case .uint16: return "UInt16"
     case .uint32: return "UInt32"
     case .uint64: return "UInt64"
+    case .wrappingInt: return "WrappingInt"
+    case .wrappingInt8: return "WrappingInt8"
+    case .wrappingInt16: return "WrappingInt16"
+    case .wrappingInt32: return "WrappingInt32"
+    case .wrappingInt64: return "WrappingInt64"
+    case .wrappingUInt: return "WrappingUInt"
+    case .wrappingUInt8: return "WrappingUInt8"
+    case .wrappingUInt16: return "WrappingUInt16"
+    case .wrappingUInt32: return "WrappingUInt32"
+    case .wrappingUInt64: return "WrappingUInt64"
     case .float32: return "Float32"
     case .float64: return "Float64"
     case .bool: return "Bool"
@@ -473,6 +493,26 @@ public indirect enum Type: CustomStringConvertible {
       hasher.combine(9)
     case .uint64:
       hasher.combine(10)
+    case .wrappingInt:
+      hasher.combine(34)
+    case .wrappingInt8:
+      hasher.combine(35)
+    case .wrappingInt16:
+      hasher.combine(36)
+    case .wrappingInt32:
+      hasher.combine(37)
+    case .wrappingInt64:
+      hasher.combine(38)
+    case .wrappingUInt:
+      hasher.combine(39)
+    case .wrappingUInt8:
+      hasher.combine(40)
+    case .wrappingUInt16:
+      hasher.combine(41)
+    case .wrappingUInt32:
+      hasher.combine(42)
+    case .wrappingUInt64:
+      hasher.combine(43)
     case .float32:
       hasher.combine(11)
     case .float64:
@@ -575,6 +615,16 @@ public indirect enum Type: CustomStringConvertible {
     case .uint16: return "UInt16"
     case .uint32: return "UInt32"
     case .uint64: return "UInt64"
+    case .wrappingInt: return "WrappingInt"
+    case .wrappingInt8: return "WrappingInt8"
+    case .wrappingInt16: return "WrappingInt16"
+    case .wrappingInt32: return "WrappingInt32"
+    case .wrappingInt64: return "WrappingInt64"
+    case .wrappingUInt: return "WrappingUInt"
+    case .wrappingUInt8: return "WrappingUInt8"
+    case .wrappingUInt16: return "WrappingUInt16"
+    case .wrappingUInt32: return "WrappingUInt32"
+    case .wrappingUInt64: return "WrappingUInt64"
     case .float32: return "Float32"
     case .float64: return "Float64"
     case .bool: return "Bool"
@@ -627,14 +677,61 @@ public indirect enum Type: CustomStringConvertible {
     }
   }
   
-  /// Returns true if this type is an integer type (signed or unsigned)
+  /// Returns true if this type is an integer type (signed or unsigned),
+  /// in either the plain or the wrapping family.
   public var isIntegerType: Bool {
+    switch self {
+    case .int, .int8, .int16, .int32, .int64,
+         .uint, .uint8, .uint16, .uint32, .uint64,
+         .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// Returns true only for the plain (checked) integer family. The wrapping
+  /// family is excluded: its operation surface is a separate delivery, and a
+  /// plain checked operator must not silently stand in for it.
+  public var isPlainIntegerType: Bool {
     switch self {
     case .int, .int8, .int16, .int32, .int64,
          .uint, .uint8, .uint16, .uint32, .uint64:
       return true
     default:
       return false
+    }
+  }
+
+  /// Returns true only for the wrapping integer family.
+  public var isWrappingIntegerType: Bool {
+    switch self {
+    case .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+         .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// The plain same-width counterpart of an integer type. A wrapping type
+  /// maps to its plain twin (`WrappingInt8` -> `Int8`); a plain type maps to
+  /// itself. Width is the only thing a literal range check keys on, so this is
+  /// how `WrappingUInt8(300)` gets the exact `UInt8(300)` complaint.
+  public var plainWidthCounterpart: Type {
+    switch self {
+    case .wrappingInt: return .int
+    case .wrappingInt8: return .int8
+    case .wrappingInt16: return .int16
+    case .wrappingInt32: return .int32
+    case .wrappingInt64: return .int64
+    case .wrappingUInt: return .uint
+    case .wrappingUInt8: return .uint8
+    case .wrappingUInt16: return .uint16
+    case .wrappingUInt32: return .uint32
+    case .wrappingUInt64: return .uint64
+    default: return self
     }
   }
   
@@ -647,6 +744,8 @@ public indirect enum Type: CustomStringConvertible {
     switch self {
     case .int, .int8, .int16, .int32, .int64,
       .uint, .uint8, .uint16, .uint32, .uint64,
+      .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+      .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
       .float32, .float64, .bool, .void, .never: return self
     case .reference(_), .mutableReference(_): return .reference(inner: .void)
     case .borrowedReference: return .borrowedReference(inner: .void)
@@ -779,6 +878,10 @@ extension Type: Equatable, Hashable {
     case (.int, .int),
       (.int8, .int8), (.int16, .int16), (.int32, .int32), (.int64, .int64),
       (.uint, .uint), (.uint8, .uint8), (.uint16, .uint16), (.uint32, .uint32), (.uint64, .uint64),
+      (.wrappingInt, .wrappingInt), (.wrappingInt8, .wrappingInt8), (.wrappingInt16, .wrappingInt16),
+      (.wrappingInt32, .wrappingInt32), (.wrappingInt64, .wrappingInt64),
+      (.wrappingUInt, .wrappingUInt), (.wrappingUInt8, .wrappingUInt8), (.wrappingUInt16, .wrappingUInt16),
+      (.wrappingUInt32, .wrappingUInt32), (.wrappingUInt64, .wrappingUInt64),
       (.float32, .float32), (.float64, .float64),
       (.bool, .bool),
       (.void, .void),

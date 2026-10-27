@@ -57,6 +57,8 @@ public enum SemaUtils {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64,
              .bool,
              .pointer:
@@ -73,6 +75,8 @@ public enum SemaUtils {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64,
              .bool:
             return true
@@ -98,6 +102,16 @@ public enum SemaUtils {
         case "UInt16": return .uint16
         case "UInt32": return .uint32
         case "UInt64": return .uint64
+        case "WrappingInt": return .wrappingInt
+        case "WrappingInt8": return .wrappingInt8
+        case "WrappingInt16": return .wrappingInt16
+        case "WrappingInt32": return .wrappingInt32
+        case "WrappingInt64": return .wrappingInt64
+        case "WrappingUInt": return .wrappingUInt
+        case "WrappingUInt8": return .wrappingUInt8
+        case "WrappingUInt16": return .wrappingUInt16
+        case "WrappingUInt32": return .wrappingUInt32
+        case "WrappingUInt64": return .wrappingUInt64
         case "Float32": return .float32
         case "Float64": return .float64
         case "Bool": return .bool
@@ -240,6 +254,8 @@ public enum SemaUtils {
         switch type {
         case .int, .int8, .int16, .int32, .int64,
              .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return type
             
@@ -339,6 +355,16 @@ public enum SemaUtils {
         case "U16": return .uint16
         case "U32": return .uint32
         case "U64": return .uint64
+        case "WI": return .wrappingInt
+        case "WI8": return .wrappingInt8
+        case "WI16": return .wrappingInt16
+        case "WI32": return .wrappingInt32
+        case "WI64": return .wrappingInt64
+        case "WU": return .wrappingUInt
+        case "WU8": return .wrappingUInt8
+        case "WU16": return .wrappingUInt16
+        case "WU32": return .wrappingUInt32
+        case "WU64": return .wrappingUInt64
         case "F32": return .float32
         case "F64": return .float64
         case "B": return .bool

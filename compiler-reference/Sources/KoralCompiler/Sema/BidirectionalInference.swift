@@ -564,6 +564,16 @@ public class BidirectionalInference {
         case "UInt16": return .uint16
         case "UInt32": return .uint32
         case "UInt64": return .uint64
+        case "WrappingInt": return .wrappingInt
+        case "WrappingInt8": return .wrappingInt8
+        case "WrappingInt16": return .wrappingInt16
+        case "WrappingInt32": return .wrappingInt32
+        case "WrappingInt64": return .wrappingInt64
+        case "WrappingUInt": return .wrappingUInt
+        case "WrappingUInt8": return .wrappingUInt8
+        case "WrappingUInt16": return .wrappingUInt16
+        case "WrappingUInt32": return .wrappingUInt32
+        case "WrappingUInt64": return .wrappingUInt64
         case "Float32": return .float32
         case "Float64": return .float64
         case "Bool": return .bool

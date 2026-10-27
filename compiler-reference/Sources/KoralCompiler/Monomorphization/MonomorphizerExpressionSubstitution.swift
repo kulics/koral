@@ -72,11 +72,10 @@ extension Monomorphizer {
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: substituteType(type, substitution: substitution))
             
-        case .castExpression(let expression, let type, let checked):
+        case .castExpression(let expression, let type):
             return .castExpression(
                 expression: substituteTypesInExpression(expression, substitution: substitution),
-                type: substituteType(type, substitution: substitution),
-                checked: checked
+                type: substituteType(type, substitution: substitution)
             )
             
         case .arithmeticExpression(let left, let op, let right, let type):
@@ -95,14 +94,6 @@ extension Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
 
-        case .wrappingShiftExpression(let left, let op, let right, let type):
-            return .wrappingShiftExpression(
-                left: substituteTypesInExpression(left, substitution: substitution),
-                op: op,
-                right: substituteTypesInExpression(right, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
-            )
-            
         case .comparisonExpression(let left, let op, let right, let type):
             return .comparisonExpression(
                 left: substituteTypesInExpression(left, substitution: substitution),
@@ -395,49 +386,6 @@ extension Monomorphizer {
                 }
             }
 
-            
-            // Apply lowering for wrapping intrinsic methods
-            if case .methodReference(let base, let method, _, _, _) = newCallee {
-                let methodName = receiverMethodDispatch[method.defId]?.methodName ?? ""
-                // Lower wrapping intrinsic methods to scalar ops
-                if isBuiltinArithmeticType(base.type) {
-                    if newArguments.count == 1 {
-                        let rhs = newArguments[0]
-                        switch methodName {
-                        case "wrapping_add" where base.type == rhs.type:
-                            return .wrappingArithmeticExpression(left: base, op: .plus, right: rhs, type: newType)
-                        case "wrapping_sub" where base.type == rhs.type:
-                            return .wrappingArithmeticExpression(left: base, op: .minus, right: rhs, type: newType)
-                        case "wrapping_mul" where base.type == rhs.type:
-                            return .wrappingArithmeticExpression(left: base, op: .multiply, right: rhs, type: newType)
-                        case "wrapping_div" where base.type == rhs.type:
-                            return .wrappingArithmeticExpression(left: base, op: .divide, right: rhs, type: newType)
-                        case "wrapping_rem" where base.type == rhs.type:
-                            return .wrappingArithmeticExpression(left: base, op: .remainder, right: rhs, type: newType)
-                        case "wrapping_shl" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
-                            return .wrappingShiftExpression(left: base, op: .shiftLeft, right: rhs, type: newType)
-                        case "wrapping_shr" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
-                            return .wrappingShiftExpression(left: base, op: .shiftRight, right: rhs, type: newType)
-                        default:
-                            break
-                        }
-                    }
-                    if methodName == "wrapping_neg", newArguments.isEmpty {
-                        let zero = makeZeroLiteral(for: base.type)
-                        return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: newType)
-                    }
-                    // `wrapping_cast` is the unchecked integer-to-integer
-                    // conversion: take the two's-complement representation and
-                    // truncate or sign/zero-extend it to the target width. It
-                    // never panics -- that is Rust's `as`, spelled out loud,
-                    // because Koral's `Type(x)` is checked by default.
-                    if methodName == "wrapping_cast", newArguments.isEmpty,
-                       isBuiltinIntegerType(newType) {
-                        return .castExpression(expression: base, type: newType, checked: false)
-                    }
-                }
-            }
-            
             // Convert traitMethodPlaceholder with trait object base to traitMethodCall
             // This handles the case where a generic function like [T ToString]f(a T ref)
             // is instantiated with T = traitObject("ToString") — method calls on the
@@ -781,16 +729,6 @@ extension Monomorphizer {
             let substitutedMethodTypeArgs = methodTypeArgs.map { substituteType($0, substitution: substitution) }
             let substitutedArguments = arguments.map { substituteTypesInExpression($0, substitution: substitution) }
             let substitutedReturnType = substituteType(type, substitution: substitution)
-
-            // `Type.wrapping_*(...)` lowers exactly like the instance form: the
-            // first explicit argument is the receiver.
-            if let lowered = lowerWrappingStaticMethodCall(
-                methodName: methodName,
-                arguments: substitutedArguments,
-                resultType: substitutedReturnType
-            ) {
-                return lowered
-            }
 
             return .staticMethodCall(
                 baseType: substitutedBaseType,

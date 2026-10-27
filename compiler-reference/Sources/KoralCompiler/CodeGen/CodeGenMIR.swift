@@ -241,7 +241,7 @@ final class MIRFunctionCodeEmitter {
         }
       case .ref(let place, _, _):
         walkPlace(place)
-      case .cast(let operand, _, checked: _):
+      case .cast(let operand, _):
         walkOperand(operand)
       case .intrinsic(let intrinsic):
         walkIntrinsic(intrinsic)
@@ -498,7 +498,7 @@ final class MIRFunctionCodeEmitter {
         if case .local(let localID) = place {
           markUnsafe(localID)
         }
-      case .cast(let operand, _, checked: _):
+      case .cast(let operand, _):
         walkOperand(operand)
       case .intrinsic:
         break
@@ -518,7 +518,7 @@ final class MIRFunctionCodeEmitter {
         return localID
       case .placeRead(.local(let localID), _):
         return localID
-      case .cast(.local(let localID), _, checked: _):
+      case .cast(.local(let localID), _):
         return localID
       default:
         return nil
@@ -893,7 +893,7 @@ final class MIRFunctionCodeEmitter {
 
     if (assignment.operatorKind == .shiftLeft || assignment.operatorKind == .shiftRight) && targetType.isIntegerType {
       let op: BitwiseOperator = assignment.operatorKind == .shiftLeft ? .shiftLeft : .shiftRight
-      let functionName = codeGen.checkedShiftFuncName(op: op, type: targetType)
+      let functionName = codeGen.shiftFuncName(op: op, type: targetType)
       codeGen.addIndent()
       codeGen.appendToBuffer("\(access.path) = \(functionName)(\(access.path), \(valueEmission.expression));\n")
     } else {
@@ -1143,8 +1143,8 @@ final class MIRFunctionCodeEmitter {
       return emitReference(place: place, kind: kind, allocation: allocation)
     case .pointer(let place):
       return emitPointer(place)
-    case .cast(let operand, let type, let checked):
-      return emitCastOperand(operand, targetType: type, checked: checked)
+    case .cast(let operand, let type):
+      return emitCastOperand(operand, targetType: type)
     case .intrinsic(let intrinsic):
       return emitIntrinsic(intrinsic)
     case .lambda(let lambda):
@@ -1464,8 +1464,9 @@ final class MIRFunctionCodeEmitter {
         expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.arithmeticOpToC(op)) \(right)")
       }
     case .wrappingArithmetic(let op):
-      let functionName = codeGen.wrappingArithmeticFuncName(op: op, type: resultType)
-      expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right))")
+      expression = codeGen.nextTempWithInit(
+        cType: cType,
+        initExpr: codeGen.wrappingArithmeticInitExpr(op: op, left: left, right: right, type: resultType))
     case .comparison(let op):
       expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.comparisonOpToC(op)) \(right)")
     case .logicalAnd:
@@ -1474,14 +1475,11 @@ final class MIRFunctionCodeEmitter {
       expression = codeGen.nextTempWithInit(cType: "_Bool", initExpr: "\(left) || \(right)")
     case .bitwise(let op, let checkedShift):
       if checkedShift && resultType.isIntegerType {
-        let functionName = codeGen.checkedShiftFuncName(op: op, type: resultType)
+        let functionName = codeGen.shiftFuncName(op: op, type: resultType)
         expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right))")
       } else {
         expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.bitwiseOpToC(op)) \(right)")
       }
-    case .wrappingShift(let op):
-      let functionName = codeGen.wrappingShiftFuncName(op: op, type: resultType)
-      expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right))")
     }
 
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
@@ -1986,7 +1984,7 @@ final class MIRFunctionCodeEmitter {
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: type))
   }
 
-  private func emitCastOperand(_ operand: MIROperand, targetType: Type, checked: Bool) -> MIRValueEmission {
+  private func emitCastOperand(_ operand: MIROperand, targetType: Type) -> MIRValueEmission {
     let sourceEmission = emitOperandValue(operand)
     let sourceType = resolver.type(of: operand) ?? targetType
 
@@ -1994,7 +1992,7 @@ final class MIRFunctionCodeEmitter {
       return sourceEmission
     }
 
-    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType, checked: checked)
+    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType)
     emitCleanups(sourceEmission.cleanups)
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: targetType))
   }
@@ -2429,7 +2427,7 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
-  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type, checked: Bool) -> String {
+  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type) -> String {
     if sourceType == targetType {
       return expression
     }
@@ -2445,7 +2443,8 @@ final class MIRFunctionCodeEmitter {
 
     func isSignedInt(_ type: Type) -> Bool {
       switch type {
-      case .int, .int8, .int16, .int32, .int64:
+      case .int, .int8, .int16, .int32, .int64,
+           .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64:
         return true
       default:
         return false
@@ -2454,7 +2453,8 @@ final class MIRFunctionCodeEmitter {
 
     func isUnsignedInt(_ type: Type) -> Bool {
       switch type {
-      case .uint, .uint8, .uint16, .uint32, .uint64:
+      case .uint, .uint8, .uint16, .uint32, .uint64,
+           .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64:
         return true
       default:
         return false
@@ -2463,28 +2463,41 @@ final class MIRFunctionCodeEmitter {
 
     func minMaxMacros(for type: Type) -> (String, String)? {
       switch type {
-      case .int8: return ("INT8_MIN", "INT8_MAX")
-      case .int16: return ("INT16_MIN", "INT16_MAX")
-      case .int32: return ("INT32_MIN", "INT32_MAX")
-      case .int64: return ("INT64_MIN", "INT64_MAX")
-      case .int: return ("INTPTR_MIN", "INTPTR_MAX")
-      case .uint8: return ("0", "UINT8_MAX")
-      case .uint16: return ("0", "UINT16_MAX")
-      case .uint32: return ("0", "UINT32_MAX")
-      case .uint64: return ("0", "UINT64_MAX")
-      case .uint: return ("0", "UINTPTR_MAX")
+      case .int8, .wrappingInt8: return ("INT8_MIN", "INT8_MAX")
+      case .int16, .wrappingInt16: return ("INT16_MIN", "INT16_MAX")
+      case .int32, .wrappingInt32: return ("INT32_MIN", "INT32_MAX")
+      case .int64, .wrappingInt64: return ("INT64_MIN", "INT64_MAX")
+      case .int, .wrappingInt: return ("INTPTR_MIN", "INTPTR_MAX")
+      case .uint8, .wrappingUInt8: return ("0", "UINT8_MAX")
+      case .uint16, .wrappingUInt16: return ("0", "UINT16_MAX")
+      case .uint32, .wrappingUInt32: return ("0", "UINT32_MAX")
+      case .uint64, .wrappingUInt64: return ("0", "UINT64_MAX")
+      case .uint, .wrappingUInt: return ("0", "UINTPTR_MAX")
       default: return nil
       }
     }
 
     let targetCType = codeGen.cTypeName(targetType)
-    // An unchecked cast is a pure C cast: truncate or sign/zero-extend the
-    // two's-complement representation to the target width and never panic.
-    // That is Rust's `as` and a C cast between integers, and it is exactly
-    // what `wrapping_cast` asks for.
-    if !checked {
+
+    // The TARGET decides the conversion policy (numeric-families design):
+    // a wrapping-family target truncates to the target width's low bits and
+    // never panics; a plain-family target is checked. A same-width pair is a
+    // lossless retype either way -- the width test below folds away at the C
+    // compiler for same-width pairs, and the truncating path is a pure cast.
+    if targetType.isWrappingIntegerType {
+      if isFloat(sourceType) {
+        // Float -> Wrapping is two steps. Domain first: NaN and +-inf have no
+        // truncatable integer value and panic regardless of family. Then the
+        // truncated-toward-zero value takes the target width's low bits.
+        return codeGen.nextTempWithInit(
+          cType: targetCType,
+          initExpr: "(\(targetCType))__koral_wrapping_bits_from_f64((double)\(expression), (unsigned)(sizeof(\(targetCType)) * 8))")
+      }
+      // Integer -> Wrapping is a pure C cast: narrowing takes the low bits,
+      // widening sign/zero-extends. It never panics.
       return codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(expression)")
     }
+
     if isFloat(sourceType) && (isSignedInt(targetType) || isUnsignedInt(targetType)), let (minMacro, maxMacro) = minMaxMacros(for: targetType) {
       let floatValue = codeGen.nextTempWithInit(cType: "double", initExpr: "(double)\(expression)")
       codeGen.addIndent()
@@ -2696,7 +2709,7 @@ final class MIRFunctionCodeEmitter {
       if ownership == .move {
         consumeMovedPlace(place)
       }
-    case .cast(let operand, let targetType, _):
+    case .cast(let operand, let targetType):
       let sourceType = resolver.type(of: operand) ?? targetType
       guard isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) else {
         break

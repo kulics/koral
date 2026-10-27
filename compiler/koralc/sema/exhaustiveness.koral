@@ -54,12 +54,16 @@ file_private type PatternSpace {
     ListLengths(type_value Type, covered_exact Set[Int], covered_tail_from Option[Int]),
 };
 
-// Simple integer string parser for exhaustiveness checking.
-let parse_int_str(s String) Int = {
+// Simple integer string parser for exhaustiveness checking. The magnitude
+// accumulates in UInt and the sign is applied at the end, so every Int value
+// parses -- Int.min included -- and a value past the Int domain comes back
+// None and contributes no coverage (the reference compiler's `Int64(value)`
+// reads nil there).
+let parse_int_str(s String) Option[Int] = {
     if s.is_empty() then {
-        return 0;
+        return Option[Int].None();
     };
-    let mutable result = 0;
+    let mutable magnitude UInt = 0;
     let mutable negative = false;
     let mutable i UInt = 0;
     let first = s[UInt(0)];
@@ -94,14 +98,26 @@ let parse_int_str(s String) Int = {
             digit = 9;
         };
         if digit >= 0 then {
-            result = result * 10 + digit;
+            if magnitude > (UInt(18446744073709551615) - UInt(digit)) / UInt(10) then {
+                return Option[Int].None();
+            };
+            magnitude = magnitude * UInt(10) + UInt(digit);
         };
         i += 1;
     };
     if negative then {
-        return 0 - result;
+        if magnitude > UInt(9223372036854775808) then {
+            return Option[Int].None();
+        };
+        if magnitude == UInt(9223372036854775808) then {
+            return Option[Int].Some(0 - 9223372036854775807 - 1);
+        };
+        return Option[Int].Some(0 - Int(magnitude));
     };
-    return result;
+    if magnitude > UInt(9223372036854775807) then {
+        return Option[Int].None();
+    };
+    return Option[Int].Some(Int(magnitude));
 };
 
 given ExhaustivenessChecker {
@@ -167,7 +183,7 @@ given ExhaustivenessChecker {
                 if not self.pattern_space_is_empty(remaining) then {
                     let type_name = self.exhaustiveness_type_name();
                     when self.subject_type in {
-                        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then {
+                        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type() or .WrappingUInt64Type() then {
                             let message = self.missing_catchall_message(type_name);
                             return Result[Void].Error(message.to_string());
                         },
@@ -267,6 +283,66 @@ given ExhaustivenessChecker {
                     return Result[Void].Error(message.to_string());
                 };
             },
+            .WrappingIntType() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingInt");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingInt8Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingInt8");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingInt16Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingInt16");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingInt32Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingInt32");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingInt64Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingInt64");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingUIntType() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingUInt");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingUInt8Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingUInt8");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingUInt16Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingUInt16");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingUInt32Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingUInt32");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
+            .WrappingUInt64Type() then {
+                if not has_catchall then {
+                    let message = self.missing_catchall_message("WrappingUInt64");
+                    return Result[Void].Error(message.to_string());
+                };
+            },
             .Float32Type() then {
                 if not has_catchall then {
                     let message = self.missing_catchall_message("Float32");
@@ -337,7 +413,7 @@ given ExhaustivenessChecker {
     /// Whether the subject is one of the integer types.
     file_private subject_is_integer(self) Bool = {
         return when self.subject_type in {
-            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() then true,
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type() or .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -348,16 +424,16 @@ given ExhaustivenessChecker {
     /// / `UInt64` as merely non-negative.
     file_private integer_type_bounds(self) PatternSpace = {
         return when self.subject_type in {
-            .UInt8Type() then PatternSpace.IntRange(true, 0, true, 255),
-            .UInt16Type() then PatternSpace.IntRange(true, 0, true, 65535),
-            .UIntType() or .UInt32Type() or .UInt64Type() then PatternSpace.IntRange(
+            .UInt8Type() or .WrappingUInt8Type() then PatternSpace.IntRange(true, 0, true, 255),
+            .UInt16Type() or .WrappingUInt16Type() then PatternSpace.IntRange(true, 0, true, 65535),
+            .UIntType() or .UInt32Type() or .UInt64Type() or .WrappingUIntType() or .WrappingUInt32Type() or .WrappingUInt64Type() then PatternSpace.IntRange(
                 true,
                 0,
                 false,
                 0,
             ),
-            .Int8Type() then PatternSpace.IntRange(true, -128, true, 127),
-            .Int16Type() then PatternSpace.IntRange(true, -32768, true, 32767),
+            .Int8Type() or .WrappingInt8Type() then PatternSpace.IntRange(true, -128, true, 127),
+            .Int16Type() or .WrappingInt16Type() then PatternSpace.IntRange(true, -32768, true, 32767),
             _ then PatternSpace.IntRange(false, 0, false, 0),
         };
     };
@@ -367,13 +443,14 @@ given ExhaustivenessChecker {
     /// A single contiguous `IntRange` cannot represent the holes an interior
     /// subtraction leaves behind, so integer coverage is judged by union and
     /// intersection of spans instead of by `PatternSpace` subtraction. This
-    /// mirrors the reference compiler's interval model, so both agree on
-    /// shapes like `>= 65 and <= 90` (the intersection) and `5 then .., <= 4`
-    /// (a hole that keeps the match non-exhaustive).
+    /// mirrors the reference compiler's interval model exactly -- sort the
+    /// spans, merge the touching ones, and ask whether any merged span covers
+    /// the whole domain -- so both agree on shapes like `>= 65 and <= 90` (the
+    /// intersection) and `5 then .., <= 4` (a hole that keeps the match
+    /// non-exhaustive), and on the unbounded edges of Int.
     file_private patterns_cover_integer_domain(self) Bool = {
         let bounds = self.integer_type_bounds();
-        let mutable remaining = List[PatternSpace].new();
-        remaining.push(bounds);
+        let mutable intervals = List[PatternSpace].new();
         for p in self.patterns.iterator() then {
             if is_catchall(p) then {
                 return true;
@@ -381,17 +458,155 @@ given ExhaustivenessChecker {
             for span in self.pattern_int_spans(p).iterator() then {
                 let clamped = self.span_intersect(span, bounds);
                 if not self.span_is_empty(clamped) then {
-                    let mutable next = List[PatternSpace].new();
-                    for r in remaining.iterator() then {
-                        for piece in self.span_subtract(r, clamped).iterator() then {
-                            next.push(piece);
-                        };
-                    };
-                    remaining = next;
+                    intervals.push(clamped);
                 };
             };
         };
-        return remaining.is_empty();
+        if intervals.is_empty() then {
+            return false;
+        };
+        self.sort_spans(intervals);
+        let mutable merged = List[PatternSpace].new();
+        for interval in intervals.iterator() then {
+            let mutable current = interval;
+            let last = merged.last();
+            if not merged.is_empty() and last is .Some(last_span) and self.spans_touch_or_overlap(
+                last_span,
+                current,
+            ) then {
+                when merged.pop() in {
+                    .Some(prev) then {
+                        current = self.merge_spans(prev, current);
+                    },
+                    .None() then {},
+                };
+            };
+            merged.push(current);
+        };
+        for m in merged.iterator() then {
+            if self.span_covers_bounds(m, bounds) then {
+                return true;
+            };
+        };
+        return false;
+    };
+
+    /// Order spans the way the reference compiler sorts its intervals:
+    /// unbounded-lower first, then by lower bound; unbounded-upper beats
+    /// bounded, then by upper bound. The merge walk below is only correct on
+    /// this order.
+    file_private sort_spans(self, spans List[PatternSpace]) Void = {
+        let mutable i UInt = 1;
+        while i < spans.count() then {
+            let key = spans[i];
+            let mutable j = i;
+            while j > UInt(0) and self.span_sort_less(key, spans[j - UInt(1)]) then {
+                spans[j] = spans[j - UInt(1)];
+                j -= 1;
+            };
+            spans[j] = key;
+            i += 1;
+        };
+    };
+
+    file_private span_sort_less(self, a PatternSpace, b PatternSpace) Bool = {
+        return when a in {
+            .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
+                .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
+                    if not a_lo_has and b_lo_has then {
+                        return true;
+                    };
+                    if a_lo_has and not b_lo_has then {
+                        return false;
+                    };
+                    if not a_lo_has and not b_lo_has then {
+                        if a_hi_has != b_hi_has then {
+                            return a_hi_has;
+                        };
+                        return a_hi < b_hi;
+                    };
+                    if a_lo != b_lo then {
+                        return a_lo < b_lo;
+                    };
+                    if a_hi_has != b_hi_has then {
+                        return not a_hi_has;
+                    };
+                    a_hi < b_hi
+                },
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// Whether two spans merge: they overlap, sit next to each other, or one
+    /// side is unbounded in the meeting direction. The reference compiler's
+    /// rule verbatim -- an interval ending at Int.max touches anything.
+    file_private spans_touch_or_overlap(self, a PatternSpace, b PatternSpace) Bool = {
+        return when a in {
+            .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
+                .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
+                    if self.span_is_empty(a) or self.span_is_empty(b) then {
+                        return false;
+                    };
+                    if not a_hi_has or not b_lo_has then {
+                        return true;
+                    };
+                    if a_hi == 9223372036854775807 then {
+                        return true;
+                    };
+                    b_lo <= a_hi + 1
+                },
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// The one span covering both: a bound survives only when BOTH sides pin
+    /// it.
+    file_private merge_spans(self, a PatternSpace, b PatternSpace) PatternSpace = {
+        return when a in {
+            .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
+                .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
+                    let lo_has = a_lo_has and b_lo_has;
+                    let lo = if a_lo_has and b_lo_has then {
+                        if a_lo < b_lo then a_lo else b_lo
+                    } else {
+                        0
+                    };
+                    let hi_has = a_hi_has and b_hi_has;
+                    let hi = if a_hi_has and b_hi_has then {
+                        if a_hi > b_hi then a_hi else b_hi
+                    } else {
+                        0
+                    };
+                    PatternSpace.IntRange(lo_has, lo, hi_has, hi)
+                },
+                _ then a,
+            },
+            _ then a,
+        };
+    };
+
+    /// Whether one span stretches across every value the domain carries. An
+    /// unbounded domain side is covered only by an unbounded span side -- the
+    /// reference compiler's reading.
+    file_private span_covers_bounds(self, c PatternSpace, bounds PatternSpace) Bool = {
+        return when c in {
+            .IntRange(c_lo_has, c_lo, c_hi_has, c_hi) then when bounds in {
+                .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
+                    if self.span_is_empty(c) then {
+                        return false;
+                    };
+                    let lower_ok = if b_lo_has then (c_lo_has and c_lo <= b_lo) else (not c_lo_has);
+                    let upper_ok = if b_hi_has then (c_hi_has and c_hi >= b_hi) else (not c_hi_has);
+                    lower_ok and upper_ok
+                },
+                _ then false,
+            },
+            _ then false,
+        };
     };
 
     /// The integer spans a pattern covers. `or` concatenates, `and`
@@ -409,15 +624,26 @@ given ExhaustivenessChecker {
                 spans
             },
             .IntegerLiteral(value_str) then {
-                let value = parse_int_str(value_str);
+                // A value past the Int domain parses to None and contributes
+                // no coverage: one contiguous range cannot claim it, so the
+                // match stays non-exhaustive without a wildcard.
                 let mutable spans = List[PatternSpace].new();
-                spans.push(PatternSpace.IntRange(true, value, true, value));
+                when parse_int_str(value_str) in {
+                    .Some(value) then {
+                        spans.push(PatternSpace.IntRange(true, value, true, value));
+                    },
+                    .None() then {},
+                };
                 spans
             },
             .NegativeIntegerLiteral(value_str) then {
-                let value = 0 - (parse_int_str(value_str));
                 let mutable spans = List[PatternSpace].new();
-                spans.push(PatternSpace.IntRange(true, value, true, value));
+                when parse_int_str("-" + value_str) in {
+                    .Some(value) then {
+                        spans.push(PatternSpace.IntRange(true, value, true, value));
+                    },
+                    .None() then {},
+                };
                 spans
             },
             .ComparisonPattern(op, value_str) then {
@@ -490,6 +716,11 @@ given ExhaustivenessChecker {
     /// spans. Exact, so the remaining set never shrinks past the truth.
     file_private span_subtract(self, span PatternSpace, sub PatternSpace) List[PatternSpace] = {
         let pieces = List[PatternSpace].new();
+        // Subtracting an empty span removes nothing.
+        if self.span_is_empty(sub) then {
+            pieces.push(span);
+            return pieces;
+        };
         when span in {
             .IntRange(s_lo_has, s_lo, s_hi_has, s_hi) then when sub in {
                 .IntRange(d_lo_has, d_lo, d_hi_has, d_hi) then {
@@ -975,18 +1206,25 @@ given ExhaustivenessChecker {
         };
     };
 
-    // Convert a comparison pattern to an IntRange.
+    // Convert a comparison pattern to an IntRange. An empty span is the
+    // answer when the comparison can pin no value at all: the bound is out of
+    // the Int domain, or `> Int.MAX` / `< Int.MIN` admits nothing (the
+    // reference compiler's interval model reads these the same way).
     file_private comparison_to_int_range(
         self,
         op ComparisonPatternOperator,
         value_str String,
     ) PatternSpace = {
-        let value = parse_int_str(value_str);
-        return when op in {
-            .Greater() then PatternSpace.IntRange(true, value + 1, false, 0),
-            .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
-            .Less() then PatternSpace.IntRange(false, 0, true, value - 1),
-            .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
+        return when parse_int_str(value_str) in {
+            .None() then PatternSpace.IntRange(true, 1, true, 0),
+            .Some(value) then when op in {
+                .Greater() then if value == 9223372036854775807 then PatternSpace.IntRange(true, 1, true, 0)
+                else PatternSpace.IntRange(true, value + 1, false, 0),
+                .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
+                .Less() then if value == 0 - 9223372036854775807 - 1 then PatternSpace.IntRange(true, 1, true, 0)
+                else PatternSpace.IntRange(false, 0, true, value - 1),
+                .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
+            },
         };
     };
 

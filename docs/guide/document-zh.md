@@ -306,50 +306,69 @@ let d UInt8 = UInt8(255);      // Int -> UInt8
 指针类型与类型标注同拼写：`*Int(p)`、`*mutable T(q)`。
 只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
 
-数值转换是**受检的**——不会回绕。是否受检取决于两端的宽度：
+转换只有这一套拼写，**策略由目标类型决定**。整数按算术/转换策略分成三个平行家族——
+每族十个类型，同宽平行、强制隔离（`WrappingInt` 与 `Int` 不能出现在同一个操作里）：
 
-- **改变宽度**（收窄或放宽）的转换按目标类型的取值范围受检。装不下就 panic。
-- **同宽度**的有符号 ↔ 无符号转换重解释位模式，永不 panic——信息没有丢失，
-  只是换了有无符号的读法。
+| 家族 | 类型 | 算术溢出 | 改宽度转换 | 状态 |
+|---|---|---|---|---|
+| 常规 | `Int` `Int8` `Int16` `Int32` `Int64` `UInt` `UInt8` `UInt16` `UInt32` `UInt64` | panic | 受检 | 默认 |
+| 回绕 | `WrappingInt` `WrappingInt8` … `WrappingUInt64` | 模 2^N 回绕 | 取目标宽度低位 | 已内建 |
+| 饱和 | `SaturatingInt` `SaturatingInt8` … | 夹到 MIN/MAX | 夹到 MIN/MAX | 预留，未实现 |
+
+分界线是**有没有回绕答案**：有就回绕，没有才 panic。算术溢出回绕（模 2^N）；
+移位量越界按宽度取掩码（`WrappingInt8(1) << 9` 得 `2`）；`MIN / -1` 回绕到 `MIN`。
+除零 / 取余零没有回绕答案，照样 panic——`NaN` / ±inf 转整数同理。
+`Wrapping*` 与同名常规类型同宽同 ABI：家族是编译期策略，不是另一种机器表示。
+
+转换矩阵只看目标：
+
+| 源 → 目标 | 同宽 | 改宽度 |
+|---|---|---|
+| 常规 → 常规 | 无损重贴标签 | **受检** |
+| 常规 → 回绕 | 无损重贴标签 | **截断** |
+| 回绕 → 常规 | 无损重贴标签 | **受检** |
+| 回绕 → 回绕 | 无损重贴标签 | **截断** |
+
+- **同宽**永远无损重贴标签，双向皆然，含符号互转的位重解释：信息不丢，只是读法
+  不同。`n = -5` 的 `UInt(n)` 重解释为 `18446744073709551611`，不是回绕。
+- **改宽度 + 常规目标**按目标类型的取值范围受检（收窄、放宽同理）。装不下就在
+  运行期 panic。
+- **改宽度 + 回绕目标**取目标宽度的低位——截断，放宽时对二进制补码表示做符号/零
+  扩展——永不 panic。
 
 ```koral
 let big Int = 300;
-let a UInt8 = UInt8(big);      // Panic: numeric conversion overflow
+let a UInt8 = UInt8(big);                        // Panic: numeric conversion overflow
 let n Int = -5;
-let u UInt = UInt(n);          // 18446744073709551611 —— 重解释，不是回绕
-```
-
-浮点转整数向零截断，范围检查作用在截断后的值上：`Int(3.9)` 得 `3`、`Int(-3.9)`
-得 `-3`、`Int(1e20)` panic，NaN 与无穷同样 panic。
-
-源是字面量的转换在编译期受检，直接拒绝编译而不是留下一个 panic——`UInt8(300)`
-是错误（"Integer literal 300 is out of range for UInt8"），不是运行期 panic。
-
-当你要的就是位模式时，`wrapping_cast` 是那个出口：一个不受检的整数到整数转换，
-语义与 C/Rust 的 `as` 完全一致。它取该值的二进制补码表示，按目标宽度截断或符号/零
-扩展，永不 panic。
-
-```koral
-let big Int = 300;
-let low UInt8 = big.wrapping_cast[UInt8]();   // 44 —— 低字节
-let n Int = -5;
-let u UInt = n.wrapping_cast[UInt]();         // 18446744073709551611 —— 符号扩展
+let u UInt = UInt(n);                            // 18446744073709551611 —— 重解释
+let low UInt8 = UInt8(WrappingUInt8(big));       // 44 —— 低字节
 let b Int8 = -1;
-let wide UInt = b.wrapping_cast[UInt]();      // 18446744073709551615 —— 先符号扩展
-let raw UInt8 = b.wrapping_cast[UInt8]();     // 255
+let wide UInt = UInt(WrappingUInt(b));           // 18446744073709551615 —— 先符号扩展
+let raw UInt8 = UInt8(WrappingUInt8(b));         // 255
 ```
 
-这正是取字节的惯用法——序列化、哈希、位运算技巧——截断是目的，panic 只会碍事。
-负的 `Int8` 经它哈希会符号扩展，于是同一个数无论以哪种宽度进来，哈希值都一致：
+取字节的惯用法——序列化、哈希、位运算技巧——正是回绕目标的价值所在：截断是目的，
+panic 只会碍事。负的 `Int8` 经它哈希会符号扩展，于是同一个数无论以哪种宽度进来，
+哈希值都一致：
 
 ```koral
 given Int8 as Hash {
-    public hash(self) UInt = self.wrapping_cast[UInt]();
+    public hash(self) UInt = UInt(WrappingUInt(self));
 };
 ```
 
-目标必须是整数类型：`x.wrapping_cast[Float64]()` 与不可转型的 `Type(expr)` 目标一样
-报错。浮点转整数是数值转换，不是位移动，仍然受检。
+字面量一律**编译期**受检，按宽度而不按家族判断：写死的常量装不下是作者笔误，不是
+数据相关的溢出。`WrappingUInt8(300)` 与 `UInt8(300)` 报同一个错
+（`Integer literal 300 is out of range for UInt8`）。字面量还完整参与整数字面量收窄，
+向另一侧的整数类型靠拢——`WrappingInt(n) + 123` 与 `123 + WrappingInt(n)` 都是
+普通的回绕算术。
+
+浮点不设家族。整数转浮点永不检查——精度可失（|n| > 2^53）——浮点转浮点同样不检查
+（可失精度或溢出得 ±inf）。浮点转整数分两步：
+
+1. **定义域**：`NaN` 与 ±inf 没有可截断的整数值，无论目标家族一律 panic。
+2. **范围**：向零截断后的整数值按目标家族的策略处理——常规受检（`Int(1e20)` panic），
+   回绕取低位（`WrappingUInt8(300.7)` 得 `44`）。
 
 #### 字符串 ↔ 数值
 

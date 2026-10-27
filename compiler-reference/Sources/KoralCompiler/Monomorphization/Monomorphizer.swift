@@ -384,6 +384,8 @@ public class Monomorphizer {
                     typeName = context.getName(defId) ?? receiverType.description
                 case .int, .int8, .int16, .int32, .int64,
                      .uint, .uint8, .uint16, .uint32, .uint64,
+                     .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+                     .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
                      .float32, .float64,
                      .bool:
                     typeName = receiverType.description

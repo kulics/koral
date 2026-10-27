@@ -921,6 +921,16 @@ extension Monomorphizer {
             case "UInt16": return .uint16
             case "UInt32": return .uint32
             case "UInt64": return .uint64
+            case "WrappingInt": return .wrappingInt
+            case "WrappingInt8": return .wrappingInt8
+            case "WrappingInt16": return .wrappingInt16
+            case "WrappingInt32": return .wrappingInt32
+            case "WrappingInt64": return .wrappingInt64
+            case "WrappingUInt": return .wrappingUInt
+            case "WrappingUInt8": return .wrappingUInt8
+            case "WrappingUInt16": return .wrappingUInt16
+            case "WrappingUInt32": return .wrappingUInt32
+            case "WrappingUInt64": return .wrappingUInt64
             case "Float32": return .float32
             case "Float64": return .float64
             case "Bool": return .bool
@@ -1966,28 +1976,6 @@ extension Monomorphizer {
         }
     }
 
-    internal func isBuiltinArithmeticType(_ type: Type) -> Bool {
-        switch type {
-        case .int, .int8, .int16, .int32, .int64,
-             .uint, .uint8, .uint16, .uint32, .uint64,
-             .float32, .float64:
-            return true
-        default:
-            return false
-        }
-    }
-
-    internal func isMatchingUnsignedShiftAmountType(valueType: Type, shiftType: Type) -> Bool {
-        switch (valueType, shiftType) {
-        case (.int, .uint32), (.int8, .uint32), (.int16, .uint32), (.int32, .uint32), (.int64, .uint32):
-            return true
-        case (.uint, .uint32), (.uint8, .uint32), (.uint16, .uint32), (.uint32, .uint32), (.uint64, .uint32):
-            return true
-        default:
-            return false
-        }
-    }
-
     // MARK: - Trait Object Method Resolution
 
     /// Returns an ordered list of trait methods for vtable layout.
@@ -2056,63 +2044,4 @@ extension Monomorphizer {
         }
     }
 
-    /// `Type.wrapping_*(...)` is the static spelling of the instance form: the
-    /// first explicit argument is the receiver (`Type.method(args)` is
-    /// `args[0].method(args[1..])`). Lower it to the same scalar op the instance
-    /// form gets -- a body-less intrinsic would be emitted as a call otherwise.
-    internal func lowerWrappingStaticMethodCall(
-        methodName: String,
-        arguments: [TypedExpressionNode],
-        resultType: Type
-    ) -> TypedExpressionNode? {
-        guard let base = arguments.first else { return nil }
-        guard isBuiltinArithmeticType(base.type) else { return nil }
-        let extraArgs = Array(arguments.dropFirst())
-        if extraArgs.count == 1 {
-            let rhs = extraArgs[0]
-            switch methodName {
-            case "wrapping_add" where base.type == rhs.type:
-                return .wrappingArithmeticExpression(left: base, op: .plus, right: rhs, type: resultType)
-            case "wrapping_sub" where base.type == rhs.type:
-                return .wrappingArithmeticExpression(left: base, op: .minus, right: rhs, type: resultType)
-            case "wrapping_mul" where base.type == rhs.type:
-                return .wrappingArithmeticExpression(left: base, op: .multiply, right: rhs, type: resultType)
-            case "wrapping_div" where base.type == rhs.type:
-                return .wrappingArithmeticExpression(left: base, op: .divide, right: rhs, type: resultType)
-            case "wrapping_rem" where base.type == rhs.type:
-                return .wrappingArithmeticExpression(left: base, op: .remainder, right: rhs, type: resultType)
-            case "wrapping_shl" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
-                return .wrappingShiftExpression(left: base, op: .shiftLeft, right: rhs, type: resultType)
-            case "wrapping_shr" where isMatchingUnsignedShiftAmountType(valueType: base.type, shiftType: rhs.type):
-                return .wrappingShiftExpression(left: base, op: .shiftRight, right: rhs, type: resultType)
-            default:
-                break
-            }
-        }
-        if extraArgs.isEmpty {
-            switch methodName {
-            case "wrapping_neg":
-                let zero = makeZeroLiteral(for: base.type)
-                return .wrappingArithmeticExpression(left: zero, op: .minus, right: base, type: resultType)
-            case "wrapping_cast" where isBuiltinIntegerType(resultType):
-                return .castExpression(expression: base, type: resultType, checked: false)
-            default:
-                break
-            }
-        }
-        return nil
-    }
-
-    /// Creates a zero literal for a builtin numeric type.
-    internal func makeZeroLiteral(for type: Type) -> TypedExpressionNode {
-        switch type {
-        case .float32, .float64:
-            return .floatLiteral(value: "0.0", type: type)
-        case .int, .int8, .int16, .int32, .int64,
-             .uint, .uint8, .uint16, .uint32, .uint64:
-            return .integerLiteral(value: "0", type: type)
-        default:
-            return .integerLiteral(value: "0", type: .int)
-        }
-    }
 }

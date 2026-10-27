@@ -1089,26 +1089,63 @@ public class CodeGen {
     return "koral_checked_\(opName)_\(integerRuntimeTypeSuffix(type))"
   }
 
-  func wrappingArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
-    let opName: String
-    switch op {
-    case .plus: opName = "add"
-    case .minus: opName = "sub"
-    case .multiply: opName = "mul"
-    case .divide: opName = "div"
-    case .remainder: opName = "rem"
+  /// Unsigned C twin used to compute Wrapping arithmetic in well-defined
+  /// unsigned C arithmetic; the outer cast back to the result type truncates to
+  /// the family's width (modulo 2^N). Wider than the narrow widths on purpose:
+  /// `uint16_t * uint16_t` promotes to signed `int` and can overflow it.
+  func wrappingUnsignedOpTypeName(_ type: Type) -> String {
+    switch type {
+    case .wrappingInt, .wrappingUInt: return "uintptr_t"
+    case .wrappingInt64, .wrappingUInt64: return "uint64_t"
+    default: return "uint32_t"
     }
-    return "koral_wrapping_\(opName)_\(integerRuntimeTypeSuffix(type))"
   }
 
-  func checkedShiftFuncName(op: BitwiseOperator, type: Type) -> String {
-    let opName = op == .shiftRight ? "shr" : "shl"
-    return "koral_checked_\(opName)_\(integerRuntimeTypeSuffix(type))"
+  func isSignedWrappingIntegerType(_ type: Type) -> Bool {
+    switch type {
+    case .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64:
+      return true
+    default:
+      return false
+    }
   }
 
-  func wrappingShiftFuncName(op: BitwiseOperator, type: Type) -> String {
+  /// Wrapping arithmetic emits the C operator itself with no overflow guard --
+  /// modular by construction. Division and remainder keep the plain family's
+  /// divide-by-zero panic and additionally wrap `MIN / -1` to `MIN`
+  /// (`MIN % -1` to `0`) instead of the C undefined result.
+  func wrappingArithmeticInitExpr(op: ArithmeticOperator, left: String, right: String, type: Type) -> String {
+    let cType = cTypeName(type)
+    let unsignedType = wrappingUnsignedOpTypeName(type)
+    switch op {
+    case .plus, .minus, .multiply:
+      let opC: String
+      switch op {
+      case .minus: opC = "-"
+      case .multiply: opC = "*"
+      default: opC = "+"
+      }
+      return "(\(cType))((\(unsignedType))(\(left)) \(opC) (\(unsignedType))(\(right)))"
+    case .divide:
+      if isSignedWrappingIntegerType(type) {
+        return "((\(right)) == -1 ? (\(cType))((\(unsignedType))0 - (\(unsignedType))(\(left))) : koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right)))"
+      }
+      return "koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right))"
+    case .remainder:
+      if isSignedWrappingIntegerType(type) {
+        return "((\(right)) == -1 ? (\(cType))0 : koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right)))"
+      }
+      return "koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right))"
+    }
+  }
+
+  /// The shift helper for a target width. Plain widths panic on an
+  /// out-of-range amount; the Wrapping family masks the amount modulo the
+  /// width instead, because a wrapped answer exists.
+  func shiftFuncName(op: BitwiseOperator, type: Type) -> String {
     let opName = op == .shiftRight ? "shr" : "shl"
-    return "koral_wrapping_\(opName)_\(integerRuntimeTypeSuffix(type))"
+    let family = type.isWrappingIntegerType ? "koral_wrapping_" : "koral_checked_"
+    return "\(family)\(opName)_\(integerRuntimeTypeSuffix(type))"
   }
 
   private func integerRuntimeTypeSuffix(_ type: Type) -> String {
@@ -1123,6 +1160,16 @@ public class CodeGen {
     case .uint16: return "u16"
     case .uint32: return "u32"
     case .uint64: return "u64"
+    case .wrappingInt: return "isize"
+    case .wrappingInt8: return "i8"
+    case .wrappingInt16: return "i16"
+    case .wrappingInt32: return "i32"
+    case .wrappingInt64: return "i64"
+    case .wrappingUInt: return "usize"
+    case .wrappingUInt8: return "u8"
+    case .wrappingUInt16: return "u16"
+    case .wrappingUInt32: return "u32"
+    case .wrappingUInt64: return "u64"
     default: return "isize"
     }
   }
