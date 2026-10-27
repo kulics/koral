@@ -366,28 +366,14 @@ let main() Void = {
     t.test("method call", "let r=a.add(b);\n", "let r = a.add(b);\n");
 
     // === Casts and type applications ===
-    // Casts spell the target type FIRST: `Type(expr)` (`Int(x)`, `Int64(42)`).
-    // A prefixed target type keeps its prefix: `*Int(p)`, `?T(q)`. The
-    // old postfix spelling `expr(Type)` is gone.
+    // Numeric / generic conversion spells the target type FIRST: `Type(expr)`
+    // (`Int(x)`, `Int64(42)`). Pointer and weak casts are `expr as Type`
+    // (`p as *Int`, `x as ?T`); the old `*Int(p)` / `?T(q)` spellings no
+    // longer parse.
     t.test(
         "cast target type leads",
         "let main() Void={\nlet y=Int64(42);\nlet z=Int(y);\n};\n",
         "let main() Void = {\n    let y = Int64(42);\n    let z = Int(y);\n};\n",
-    );
-    t.test(
-        "raw pointer cast",
-        "let main() Void={\nlet p=*Int(q);\n};\n",
-        "let main() Void = {\n    let p = *Int(q);\n};\n",
-    );
-    t.test(
-        "mutable raw pointer cast",
-        "let main() Void={\nlet p=*mutable Int(q);\n};\n",
-        "let main() Void = {\n    let p = *mutable Int(q);\n};\n",
-    );
-    t.test(
-        "weak reference construction",
-        "let main() Void={\nlet w=?T(x);\n};\n",
-        "let main() Void = {\n    let w = ?T(x);\n};\n",
     );
     t.test(
         "generic cast target",
@@ -406,6 +392,74 @@ let main() Void = {
         "deref of a star argument is not a cast",
         "let main() Void={\nlet v=f(*p);\n};\n",
         "let main() Void = {\n    let v = f(*p);\n};\n",
+    );
+    // `expr as Type` is the cast spelling for pointer and weak targets, and
+    // for trait-object erasure. The chain groups left and the cast result
+    // takes no postfix suffixes.
+    t.test_checked(
+        "raw pointer cast",
+        "let main() Void={\nlet p = q as *Int;\n};\n",
+        "let main() Void = {\n    let p = q as *Int;\n};\n",
+    );
+    t.test_checked(
+        "mutable raw pointer cast",
+        "let main() Void={\nlet p = q as *mutable Int;\n};\n",
+        "let main() Void = {\n    let p = q as *mutable Int;\n};\n",
+    );
+    t.test_checked(
+        "weak reference cast",
+        "let main() Void={\nlet w = x as ?T;\n};\n",
+        "let main() Void = {\n    let w = x as ?T;\n};\n",
+    );
+    t.test_checked(
+        "trait cast",
+        "let main() Void={\nlet d = c as Drawable;\n};\n",
+        "let main() Void = {\n    let d = c as Drawable;\n};\n",
+    );
+    t.test_checked(
+        "chained cast groups left",
+        "let main() Void={\nlet p2 = p as UInt as *mutable UInt;\n};\n",
+        "let main() Void = {\n    let p2 = p as UInt as *mutable UInt;\n};\n",
+    );
+    t.test_checked(
+        "cast result needs parens before a method call",
+        "let main() Void={\nlet r = (x as *T).equals(1);\n};\n",
+        "let main() Void = {\n    let r = (x as *T).equals(1);\n};\n",
+    );
+    t.test_checked(
+        "cast binds tighter than comparison",
+        "let main() Void={\nlet b = p as *Int == q;\n};\n",
+        "let main() Void = {\n    let b = p as *Int == q;\n};\n",
+    );
+    // The old spellings are gone: a prefixed type in expression position is
+    // written `expr as Type` now, with or without the `(`.
+    t.test_error_contains(
+        "old pointer cast shape rejected",
+        "let main() Void={\nlet p = *Int(q);\n};\n",
+        "written 'expr as Type'",
+    );
+    t.test_error_contains(
+        "bare prefixed type in expression position rejected",
+        "let main() Void={\nlet p = ?T;\n};\n",
+        "written 'expr as Type'",
+    );
+    t.test_error_contains(
+        "nested old cast shape rejected",
+        "let main() Void={\nlet p = ?*T(x);\n};\n",
+        "written 'expr as Type'",
+    );
+    // `?` before a lowercase pointee is the upgrade operator and `*` is
+    // deref, so `**p` / `?*p` are chains, not cast shapes. The legacy `?*T`
+    // TYPE spelling stays rejected -- at the type, not the lexer.
+    t.test_checked(
+        "deref and upgrade chains keep their sigils",
+        "let main() Void={\nlet a = **p;\nlet b = ? *p;\n};\n",
+        "let main() Void = {\n    let a = **p;\n    let b = ?*p;\n};\n",
+    );
+    t.test_error_contains(
+        "legacy weak type spelling rejected",
+        "let main() Void={\nlet w ?*T = x;\n};\n",
+        "legacy '?*T'",
     );
 
     // === Mutable and destructuring ===
@@ -871,12 +925,20 @@ let main() Void = {
         "Default values are only allowed for named parameters",
     );
     // The only written form of a qualified call is `Type(Trait).method(...)`
-    // (grammar.bnf <qualified-path-suffix>). The `(expr as Trait)` spelling was
-    // never documented and the compiler never supported it.
+    // (grammar.bnf <qualified-path-suffix>). `(x as Tag).plus_ten(1)` is no
+    // longer a qualified-call spelling: it is a trait cast in parentheses
+    // followed by an ordinary method call, and it round-trips. Without the
+    // parentheses the cast result cannot take the call -- `x as Tag.plus_ten(1)`
+    // leaves `.plus_ten` a stray token.
+    t.test_checked(
+        "parenthesized trait cast takes a method call",
+        "let main() Void={\nlet r = (x as Tag).plus_ten(1);\n};\n",
+        "let main() Void = {\n    let r = (x as Tag).plus_ten(1);\n};\n",
+    );
     t.test_error_contains(
-        "`expr as Trait` rejected",
-        "let main() Void={\nlet r=(x as Tag).plus_ten(1);\n};\n",
-        "expected ')', got 'as'",
+        "method call on unparenthesized cast rejected",
+        "let main() Void={\nlet r = x as Tag.plus_ten(1);\n};\n",
+        "expected ';'",
     );
     t.test_error_contains(
         "mutable type alias rejected",

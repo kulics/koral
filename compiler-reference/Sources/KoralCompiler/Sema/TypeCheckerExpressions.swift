@@ -790,6 +790,180 @@ extension TypeChecker {
     }
   }
 
+  // MARK: - `expr as Type` reinterpretation casts
+
+  /// `expr as Type` -- a new type view on the same value. The RESOLVED target
+  /// type (aliases expanded) decides which cast this is: weak construction
+  /// (`?U`), an explicit trait-object upcast (trait name), or pointer
+  /// reinterpretation (`*U`, and `Int`/`UInt` in both directions). Numeric
+  /// conversion and nominal construction are `Type(expr)` and are refused
+  /// here with a pointer at that spelling.
+  private func inferAsCast(typeNode: TypeNode, innerExpr: ExpressionNode) throws -> TypedExpressionNode {
+    let targetType = try resolveTypeNode(typeNode)
+
+    // Weak construction (?U): a handle wrap, not a bit reinterpretation. The
+    // same checks and the same `downgrade` intrinsic the `?U(expr)` spelling
+    // used. `?Trait` is not a weak cast: a trait referent never satisfies the
+    // 'type mutable' constraint, and `resolveTypeNode` already says so.
+    if case .weakReference(let innerType) = targetType {
+      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+      try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+      // The referent is `T`, so the argument has to be a `T`. Mutability
+      // alone would let `?B(a)` build a `?B` out of an `A`.
+      if typedInner.type != innerType {
+        throw SemanticError.typeMismatch(
+          expected: innerType.description, got: typedInner.type.description)
+      }
+      return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
+    }
+    if case .mutableWeakReference(let innerType) = targetType {
+      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+      try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
+      if typedInner.type != innerType {
+        throw SemanticError.typeMismatch(
+          expected: innerType.description, got: typedInner.type.description)
+      }
+      return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
+    }
+
+    // Trait-object upcast. The conversion machinery carries the object-safety
+    // and conformance checks; the silent declines it leaves behind (trait
+    // object to trait object, rvalue to mutable reference) are errors here.
+    if isTraitObjectCastTarget(targetType) {
+      let typedInner = try inferTypedExpression(innerExpr)
+      // Identity: the source already IS that trait object.
+      if typedInner.type == targetType {
+        return typedInner
+      }
+      if case .traitObject = peelReferenceWrappers(typedInner.type) {
+        throw SemanticError(.generic(
+          "Cannot cast a trait object to another trait object"
+        ), span: currentSpan)
+      }
+      let converted = try tryTraitObjectConversion(typedInner, to: targetType)
+      if converted.type != targetType {
+        throw SemanticError.invalidOperation(
+          op: "cast",
+          type1: typedInner.type.description,
+          type2: targetType.description
+        )
+      }
+      return converted
+    }
+
+    // Pointer reinterpretation: any pointer flavor/pointee in either
+    // direction, or `Int`/`UInt` as an address.
+    if isPointerCastType(targetType) {
+      if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
+        return optimized
+      }
+      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+      if isValidAsCast(from: typedInner.type, to: targetType) {
+        // Cast always produces an rvalue.
+        return .castExpression(expression: typedInner, type: targetType)
+      }
+      throw SemanticError.invalidOperation(
+        op: "cast",
+        type1: typedInner.type.description,
+        type2: targetType.description
+      )
+    }
+
+    // `Int`/`UInt` (and the other numeric spellings): pointer bits read as an
+    // integer for `Int`/`UInt`, a pointer at `Type(expr)` for anything
+    // numeric, and no numeric conversion through `as` at all.
+    if isIntegerScalarType(targetType) || isFloatScalarType(targetType) {
+      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+      if isPointerCastType(typedInner.type) {
+        if targetType == .int || targetType == .uint {
+          return .castExpression(expression: typedInner, type: targetType)
+        }
+      } else if isIntegerScalarType(typedInner.type) || isFloatScalarType(typedInner.type) {
+        throw SemanticError(.generic(
+          "Numeric conversion is written 'Type(expr)', not 'expr as Type'"
+        ), span: currentSpan)
+      }
+      throw SemanticError.invalidOperation(
+        op: "cast",
+        type1: typedInner.type.description,
+        type2: targetType.description
+      )
+    }
+
+    // Nominals are built, not cast. Std's String is nominal in the type
+    // system but reads as a builtin (literal syntax), so it takes the
+    // wrong-target message rather than a construction hint.
+    if isNominalCastTarget(targetType) {
+      throw SemanticError(.generic(
+        "Construction is written 'Type(args)', not 'expr as Type'"
+      ), span: currentSpan)
+    }
+    throw SemanticError(.generic(
+      "'as' casts to pointer, weak, or trait-object types"
+    ), span: currentSpan)
+  }
+
+  /// The `as` trait-object row: a resolved trait-object reference target.
+  private func isTraitObjectCastTarget(_ type: Type) -> Bool {
+    switch type {
+    case .traitObject:
+      return true
+    case .reference(let inner), .mutableReference(let inner):
+      if case .traitObject = inner { return true }
+      return false
+    default:
+      return false
+    }
+  }
+
+  /// Strips managed-reference wrappers to find the value underneath.
+  private func peelReferenceWrappers(_ type: Type) -> Type {
+    switch type {
+    case .reference(let inner), .mutableReference(let inner),
+         .borrowedReference(let inner), .mutableBorrowedReference(let inner):
+      return peelReferenceWrappers(inner)
+    default:
+      return type
+    }
+  }
+
+  private func isPointerCastType(_ type: Type) -> Bool {
+    switch type {
+    case .pointer, .mutablePointer:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// Whether `type` is one of the reinterpretation families -- pointer, weak,
+  /// or trait-object -- that `as` casts to and `Type(expr)` must refuse.
+  private func isPointerWeakOrTraitCastTarget(_ type: Type) -> Bool {
+    switch type {
+    case .pointer, .mutablePointer, .weakReference, .mutableWeakReference:
+      return true
+    case .traitObject:
+      return true
+    case .reference(let inner), .mutableReference(let inner):
+      if case .traitObject = inner { return true }
+      return false
+    default:
+      return false
+    }
+  }
+
+  /// The `as` construction-error row: struct/enum targets (aliases included,
+  /// having resolved already). Std's String is excluded -- it reads as a
+  /// builtin, not a constructor.
+  private func isNominalCastTarget(_ type: Type) -> Bool {
+    switch type {
+    case .structure, .`enum`, .genericStruct, .genericEnum:
+      return !context.isStdNominalType(type, context.stdStringDefId)
+    default:
+      return false
+    }
+  }
+
   private func makeBreakBlock(span: SourceSpan) -> ExpressionNode {
     .blockExpression(statements: [.break(span: span)], tailExpression: nil, span: span)
   }
@@ -1659,45 +1833,7 @@ extension TypeChecker {
 
     switch expr {
     case .castExpression(let typeNode, let innerExpr, _):
-      let targetType = try resolveTypeNode(typeNode)
-
-      // `?T(expr)` is weak-reference construction (a handle wrap, not a bit
-      // reinterpretation). It lowers to the same intrinsic `downgrade` used.
-      if case .weakReference(let innerType) = targetType {
-        let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
-        try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
-        // The referent is `T`, so the argument has to be a `T`. Mutability
-        // alone would let `?B(a)` build a `?B` out of an `A`.
-        if typedInner.type != innerType {
-          throw SemanticError.typeMismatch(
-            expected: innerType.description, got: typedInner.type.description)
-        }
-        return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
-      }
-      if case .mutableWeakReference(let innerType) = targetType {
-        let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
-        try enforceMutableConstraintForCall(typedInner.type, function: "downgrade", span: innerExpr.span)
-        if typedInner.type != innerType {
-          throw SemanticError.typeMismatch(
-            expected: innerType.description, got: typedInner.type.description)
-        }
-        return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
-      }
-
-      if let optimized = try tryOptimizeLiteralCast(innerExpr, targetType: targetType) {
-        return optimized
-      }
-
-      let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
-
-      if !isValidExplicitCast(from: typedInner.type, to: targetType) {
-        throw SemanticError(.generic(
-          "Type '\(targetType.description)' does not support cast"
-        ), span: currentSpan)
-      }
-
-      // Cast always produces an rvalue.
-      return .castExpression(expression: typedInner, type: targetType)
+      return try inferAsCast(typeNode: typeNode, innerExpr: innerExpr)
 
     case .integerLiteral(let value, let literalSpan):
       // Synthesis has no expected type to aim at, so the literal defaults to
@@ -3658,7 +3794,9 @@ extension TypeChecker {
 
   /// `Type(expr)` -- the explicit cast form of a type application. The parser
   /// leaves `Type(...)` as a call; the type checker routes builtin scalar
-  /// targets here and structural targets to the constructor path.
+  /// targets here and structural targets to the constructor path. Only
+  /// numeric conversion survives here: pointer reinterpretation and
+  /// weak/trait casts are `expr as Type` now.
   private func inferTypeApplicationCast(
     targetType: Type,
     callArgs: [CallArg],
@@ -3676,6 +3814,13 @@ extension TypeChecker {
       return optimized
     }
     let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
+    // A pointer source is reinterpretation, not numeric conversion: `UInt(p)`
+    // is the retired spelling for `p as UInt`.
+    if isPointerCastType(typedInner.type) {
+      throw SemanticError(.generic(
+        "Pointer and integer casts are written 'expr as Type', not 'Type(expr)'"
+      ), span: span)
+    }
     if !isValidExplicitCast(from: typedInner.type, to: targetType) {
       throw SemanticError.invalidOperation(
         op: "cast",
@@ -4371,6 +4516,15 @@ extension TypeChecker {
            isIntegerScalarType(resolvedType) || isFloatScalarType(resolvedType) {
           return try inferTypeApplicationCast(targetType: resolvedType, callArgs: callArgs, span: callee.span)
         }
+        // A resolved pointer/weak/trait target is the retired cast spelling,
+        // even when it arrives through an alias (`MyPtr(x)`). It must not fall
+        // into the construction path or the generic message below.
+        if let resolvedType = currentScope.resolveType(name, sourceFile: currentSourceFile),
+           isPointerWeakOrTraitCastTarget(resolvedType) {
+          throw SemanticError(.generic(
+            "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
+          ), span: callee.span)
+        }
         if case .opaque = type {
           throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: type.description), span: currentSpan)
         }
@@ -4409,7 +4563,15 @@ extension TypeChecker {
           type: type
         )
       }
-      
+
+      // A bare trait name in call position is the retired cast spelling too:
+      // `Drawable(x)` writes `x as Drawable` now.
+      if visibleTraitInfo(name) != nil {
+        throw SemanticError(.generic(
+          "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
+        ), span: callee.span)
+      }
+
       // 2. Try Generic Struct/Enum Template (Implicit Type Inference)
       // Only for identifiers starting with uppercase (type naming convention)
       // This allows writing Stream(iter) instead of [T, R]Stream(iter)

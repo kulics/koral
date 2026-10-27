@@ -1726,38 +1726,20 @@ given Parser {
         return .Ok(trait_type);
     };
 
-    /// `*T(args)` / `*mutable T(args)` / `?T(args)` -- a cast whose target type is
-    /// written with a prefix, at expression start. The spelling matches the type
-    /// annotation: `*Int(p)`, `*mutable T(q)`, `?Int(r)`.
-    module_private parse_prefixed_type_application(self, start Token) Result[Expr] = {
+    /// The old prefixed cast / weak-construction spellings at expression start
+    /// -- `* [mutable] T(expr)`, `?T(expr)`, and the bare `*T` / `?T` (any
+    /// prefixed type in expression position). All rejected at parse time, with
+    /// or without the `(`: pointer and weak casts are written `expr as Type`.
+    /// Reached from the prefix `*` / `?` branches when the tokens after the
+    /// prefix spell a type shape. The span blamed is the type node's own span.
+    module_private parse_prefixed_type_cast_error(self) Result[Expr] = {
         let cast_type = self.parse_type() or return;
-        when self.current().kind in {
-            .LParen() then {
-                self.advance();
-            },
-            _ then {
-                return .Error(
-                    self.parser_error(
-                        "Expected '(' after cast type; a prefixed type in expression position must be a cast",
-                    ),
-                );
-            },
-        };
-        let value = self.parse_expression() or return;
-        when self.current().kind in {
-            .RParen() then {
-                self.advance();
-            },
-            _ then {
-                return .Error(
-                    self.parser_error(
-                        "Expected ')' after cast expression; a prefixed type is a cast target, not a constructor",
-                    ),
-                );
-            },
-        };
-        let cast = Expr.CastExpr(cast_type, value, self.span_from_start(start));
-        return self.parse_postfix_suffixes(cast);
+        return .Error(
+            self.parser_error_at_span(
+                "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'",
+                type_node_span(cast_type),
+            ),
+        );
     };
 
     /// Parses the composite `base(Trait).method(...)` /
@@ -2283,11 +2265,12 @@ given Parser {
 
         if self.current().kind is .Star() then {
             let start = self.current();
-            // `*T(args)` is a pointer type application; bare `*` is deref.
-            // `*` + type-head (mutable, uppercase ident, Self) at expression
-            // start can only be a type; `*` + anything else is deref.
-            if self.index_followed_by_type_application_at(self.index) then {
-                return self.parse_prefixed_type_application(start);
+            // A prefixed type at expression start -- `*T(x)`, bare `*T`, any
+            // prefixed type -- is the old cast spelling and is rejected; the
+            // cast is `expr as *T`. `*` before a type shape is that old shape;
+            // `*` before anything else (`*p`, `**p`) is deref.
+            if self.type_shape_starts_at(self.index + 1) then {
+                return self.parse_prefixed_type_cast_error();
             };
             self.advance();
             let operand = self.parse_unary() or return;
@@ -2295,13 +2278,14 @@ given Parser {
         };
 
         if self.current().kind is .QuestionMark() then {
-            // `?T(args)` is weak-reference construction (type application);
-            // `?expr` upgrades a weak reference to `Option[T]`.
-            // Disambiguation: `?` + type-head tries type application;
-            // `?` + anything else is the upgrade operator.
+            // `?T(x)` / bare `?T` is the old weak-construction spelling and is
+            // rejected; the cast is `expr as ?T`. `?expr` upgrades a weak
+            // reference to `Option[T]` and stays. Disambiguation: `?` before a
+            // type shape is the old shape; `?` before anything else (`?p`,
+            // `?*p`) is the upgrade operator.
             let start = self.current();
-            if self.index_followed_by_type_application_at(self.index) then {
-                return self.parse_prefixed_type_application(start);
+            if self.type_shape_starts_at(self.index + 1) then {
+                return self.parse_prefixed_type_cast_error();
             };
             self.advance();
             let operand = self.parse_unary() or return;

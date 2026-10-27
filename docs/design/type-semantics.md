@@ -102,7 +102,7 @@ let v = Vec(1, 2);
 ### 弱引用
 
 weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
-用户 API 只有两步：**`?T(x)` 构造**弱句柄，**`?expr` 升级**回 `Option[T]`。
+用户 API 只有两步：**`x as ?T` 构造**弱句柄，**`?expr` 升级**回 `Option[T]`。
 弱引用不保活。运行时内部名与表示见 [`thin-pointer-design.md`](thin-pointer-design.md)「弱引用」。
 
 **`?T` 是句柄，不透明。** 在升级之前它不携带被引用对象的字段、分支或

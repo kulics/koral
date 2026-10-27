@@ -303,8 +303,10 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-指针类型与类型标注同拼写：`*Int(p)`、`*mutable T(q)`。
-只有数值和指针类型支持转型；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"）。
+指针重解释换一套拼写：`expr as Type`（见「指针类型」）——`p as *T`、`u as *Int`、
+`p as UInt`、`b as ?T`、`c as Drawable`。`Type(expr)` 只做数值转换，外加构造
+（`Point(1, 2)`）；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"），
+数值目标的 `x as Int` 同样拒绝。
 
 转换只有这一套拼写，**策略由目标类型决定**。整数按算术/转换策略分成三个平行家族——
 每族十个类型，同宽平行、强制隔离（`WrappingInt` 与 `Int` 不能出现在同一个操作里）：
@@ -1596,7 +1598,7 @@ let describe[T ToString and Hash](value T) String = value.to_string();
 
 约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
-- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`?T(x)` / `?expr` 亦然）。
+- `T mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`x as ?T` / `?expr` 亦然）。
 - `T foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` / `*mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
@@ -1741,14 +1743,14 @@ b.push(3);
 
 弱引用不维持被引用对象的存活。写作 `?T`，只对满足 `mutable` 约束的类型有效。
 
-用 `?T(x)` 构造弱引用（句柄包装，不是位级重解释）。用 `?expr` 升级：结果是
+用 `x as ?T` 构造弱引用（句柄包装，不是位级重解释）。用 `?expr` 升级：结果是
 `Option[T]`——对象存活时为 `.Some(v)`，已死时为 `.None()`。
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = ?Node(node);                 // ?Node
+let weak = node as ?Node;               // ?Node
 let value = when ?weak in {
     .Some(v) then v.value,              // v 是 Node，仅在存活时
     .None() then 0,
@@ -1767,7 +1769,7 @@ let value = when ?weak in {
 把句柄**整体**绑定是允许的，并且保留 `?T`：
 
 ```koral
-let w = ?Node(node);
+let w = node as ?Node;
 let w2 ?Node = w;              // 可以：复制的是句柄
 let xs = List[?Node].new();
 xs.push(w);
@@ -2481,6 +2483,10 @@ let shape Drawable = Circle(10);
 shape.draw();
 ```
 
+赋值会把具体值隐式转换到 trait object 上下文。显式 upcast 写 `c as Drawable`，
+可以用在任何需要表达式的位置——包括立刻调用：`(c as Drawable).draw()`。
+从一个 trait object 转到另一个 trait object 是被拒绝的。
+
 重要规则：
 
 - trait object 分发使用具体值的语义，不在公开表层暴露内部包装。
@@ -2891,6 +2897,11 @@ raw pointer 是面向 FFI 与系统编程的低层内存访问：
 - `*mutable T` —— 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取与 `p[i] = value` 赋值。
 - `*mutable T` 可隐式转换为 `*T`。反向不允许。
 
+指针重解释写作 `expr as Type`。`*mutable T` 可以直接看作 `*T`（`p as *T`），
+指针也可以一步换元素类型重读（`p as *UInt`），指针与整数地址双向互通
+（`p as UInt` / `u as *Int`）。强转结果调用方法要加括号：
+`(self as *T).equals(other as *T)`。旧的类型构造拼写（`*Int(u)`、`UInt(p)`）一律拒绝。
+
 ### 不安全取址与解引用
 
 `&` / `&mutable` 是 raw 取址操作符。它们要求可取地址的存储；字面量和临时值会被拒绝。
@@ -2901,6 +2912,7 @@ let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw 解引用读取
 *mp = 42;         // raw 解引用写入
+let q = &value as *Int;   // (&value) as *Int：as 覆盖整个前缀表达式
 
 // let bad = & 42  // error: raw 取址需要可取地址的存储
 ```
@@ -2909,6 +2921,7 @@ let x = *p;       // raw 解引用读取
 
 - `&` 产生 `*T`；`&mutable` 产生 `*mutable T`。
 - `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
+- `as` 松于前缀算子：`&x as *T` 是 `(&x) as *T`，`*p as *Int` 是 `(*p) as *Int`。
 - raw pointer 不是「任意类型到 `*T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
 
 ### 外部函数接口

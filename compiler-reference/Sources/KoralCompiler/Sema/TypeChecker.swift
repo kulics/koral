@@ -1389,42 +1389,41 @@ public class TypeChecker {
     }
   }
 
+  /// Legality for the `Type(expr)` cast path: identity and numeric
+  /// conversion. Pointer reinterpretation and weak/trait construction are
+  /// `expr as Type` now (see `isValidAsCast`); nominal values are built by the
+  /// construction path.
   func isValidExplicitCast(from: Type, to: Type) -> Bool {
     if from == to { return true }
-
-    switch (from, to) {
-    case (.mutableReference(let fromInner), .reference(let toInner)):
-      return fromInner == toInner
-    case (.mutablePointer(let fromElement), .pointer(let toElement)):
-      return fromElement == toElement
-    default:
-      break
-    }
 
     // Numeric casts (ints <-> ints/uints/floats and floats <-> ints/uints/floats).
     if (isIntegerScalarType(from) || isFloatScalarType(from)) && (isIntegerScalarType(to) || isFloatScalarType(to)) {
       return true
     }
 
-    // Pointer casts.
-    if case .pointer = from {
-      if case .pointer = to { return true }
-      if case .mutablePointer = to { return true }
-      if to == .int || to == .uint { return true }
-    }
-    if case .mutablePointer = from {
-      if case .pointer = to { return true }
-      if case .mutablePointer = to { return true }
-      if to == .int || to == .uint { return true }
-    }
-    if case .pointer = to {
-      if from == .int || from == .uint { return true }
-    }
-    if case .mutablePointer = to {
-      if from == .int || from == .uint { return true }
-    }
-
     return false
+  }
+
+  /// Legality for the `expr as Type` reinterpretation rows: any pointer
+  /// flavor to any pointer flavor (element-type-agnostic), `Int`/`UInt` to
+  /// pointers and back, and identity. Numeric conversion and nominal
+  /// construction stay on `Type(expr)`.
+  func isValidAsCast(from: Type, to: Type) -> Bool {
+    if from == to { return true }
+
+    switch (from, to) {
+    // Pointer reinterpretation: any pointee, any flavor, in both directions.
+    case (.pointer, .pointer), (.pointer, .mutablePointer),
+         (.mutablePointer, .pointer), (.mutablePointer, .mutablePointer),
+         // Address <-> integer, `Int`/`UInt` only.
+         (.int, .pointer), (.uint, .pointer),
+         (.int, .mutablePointer), (.uint, .mutablePointer),
+         (.pointer, .int), (.pointer, .uint),
+         (.mutablePointer, .int), (.mutablePointer, .uint):
+      return true
+    default:
+      return false
+    }
   }
 
   func nextSynthSymbol(prefix: String, type: Type) -> Symbol {

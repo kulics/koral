@@ -491,8 +491,26 @@
 <additive-expression> ::= <multiplicative-expression> (<additive-op> <multiplicative-expression>)*
 <additive-op> ::= "+" | "-"
 
-<multiplicative-expression> ::= <prefix-expression> (<multiplicative-op> <prefix-expression>)*
+<multiplicative-expression> ::= <cast-expression> (<multiplicative-op> <cast-expression>)*
 <multiplicative-op> ::= "*" | "/" | "%"
+
+// ============================================================================
+// Cast Expressions
+// ============================================================================
+
+<cast-expression> ::= <prefix-expression> ("as" <type>)*
+// `as` 强转（expression cast）。目标类型**只有三种**：指针、弱引用、trait object。
+//   p as *T            指针重解释（`*mutable T` 可直接看作 `*T`；换元素类型也是一步）
+//   u as *Int          整数地址 -> 指针
+//   p as UInt          指针 -> 整数地址（两个方向都走 `as`）
+//   b as ?T            弱句柄包装（T 须声明 `type mutable`，源须正好是 T）
+//   c as Trait         显式 trait object upcast（须有 conformance 且 object-safe）
+//   MyPtr(u) 的旧拼法一律拒绝：`expr as Type` 是唯一写法（别名目标合法：`u as MyPtr`）。
+// 优先级：松于前缀算子（`&x as *T` 是 `(&x) as *T`；`*p as *Int` 是 `(*p) as *Int`），
+// 紧于 `*` / `/` / `%` 与一切二元 / 比较算子（`p as UInt == q` 是 `(p as UInt) == q`）。
+// 结合性左结合：`p as UInt as *mutable UInt` == `(p as UInt) as *mutable UInt`。
+// 强转结果调用方法要加括号：`(self as *T).equals(other as *T)`。
+// 数值互转**不**走 `as`，仍写 `Type(expr)`；构造同理。
 
 // ============================================================================
 // Prefix Expressions
@@ -582,14 +600,20 @@
 
 // 类型应用：`Type(expr)` 把 expr 转换到 Type，或 `Type(args)` 构造 Type 的值。
 // 两者的区分是语义的（类型检查器按 Type 的种类决定），文法上同形：
-//   基础类型（数值 / 指针）+ 单个位置实参 -> 显式转型（cast）
-//   结构 / 枚举 + 实参列表                -> 构造（constructor）
-// 带前缀的类型（*T、*mutable T、?T）在表达式开头直接写，
-// 与类型标注同拼写：`*Int(p)`、`*mutable T(q)`、`?Counter(v)`
-// （`Counter` 是 `type mutable`——weak 只指向 `type mutable` 目标）。
-// `*` 只会是类型起始；裸 `*` 是解引用，不会歧义。
-// NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 仍然只有两个用途：
-// import 别名（`using "..." { X as Y }`）和 `given Type as Trait`。
+//   数值类型 + 单个位置实参 -> 数值转换（`Int(f)`、`UInt8(i)`）
+//   结构 / 枚举 + 实参列表  -> 构造（constructor）
+// 指针 / 弱引用 / trait 的强转**不**在这里写：一律 `expr as Type`
+// （见 <cast-expression>）。表达式开头的带前缀类型是旧拼法，报错指路：
+//   `*Int(u)` / `?Counter(v)` / 裸 `*T` / 别名调用 `MyPtr(u)`
+//     -> `Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'`
+//   `UInt(p)` / `Int(p)`（数值目标 + 指针源）
+//     -> `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`
+// 指针 -> 整数同样走 `as`：`p as UInt`。数值互转仍是 `Type(expr)`；`x as Int` 反而报
+// `Numeric conversion is written 'Type(expr)', not 'expr as Type'`。
+// NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 有三个用途：
+// import 别名（`using "..." { X as Y }`）、`given Type as Trait`、表达式强转
+// （`expr as Type`）。此外 `and then as name in body` 里的 `as` 是 flow 绑定，
+// 不是强转。
 <type-application> ::= <type> "(" <argument-list> ")"
 
 // 限定调用（组合节点）：消歧义，指定 trait。两套写法，都必须**带着方法调用**，
@@ -633,9 +657,10 @@
                        | <block-expression>
                        | <lambda-expression>
                        | "(" <expression> ")"
-// <type-application> 的类型可以带前缀，直接写在表达式开头：
-//   *Int(p)  /  *mutable T(q)  /  ?Counter(v)
-// 裸 `*` 是解引用；`*` 开头只可能是类型应用。
+// <type-application> 的类型**不**带前缀：指针 / 弱 / trait 强转写 `expr as Type`
+// （见 <cast-expression>）。表达式开头的带前缀类型（`*Int(p)`、`?Counter(v)`、
+// 裸 `*Int`）是旧拼法，报错指路到 `as`。裸 `*` 仍是解引用；
+// `*` + 类型头只会是被拒绝的旧拼法。
 // There is NO tuple/pair literal. A `Pair` is constructed with its own
 // constructor (`Pair[Int, String](1, "a")`) like any other type.
 

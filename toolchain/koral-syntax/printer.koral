@@ -565,6 +565,16 @@ given Printer {
             self.print_call_args(args, true);
             self.write_token(rp);
         },
+        .AsCast(operand, as_kw, cast_type) then {
+            // `operand as Type` -- the chain groups left and the cast result
+            // takes no postfix suffixes (a method call needs parentheses), so
+            // the shape is always `operand as type` with plain spacing.
+            self.print_expr(operand);
+            self.write_space();
+            self.write_token(as_kw);
+            self.write_space();
+            self.print_type(cast_type);
+        },
         .QualifiedTrait(lp, trait_type, rp, operand) then {
             // The `base(trait)` prefix of the composite `base(trait).method(...)`
             // -- printed as its prefix here; the enclosing FieldAccess + Call
@@ -2385,6 +2395,8 @@ given Printer {
             };
             len
         },
+        .AsCast(operand, as_kw, cast_type) then self.estimate_expr_length(operand) + 1 + as_kw.to_string(
+        ).count() + 1 + self.estimate_type_length(cast_type),
         _ then 10,
     };
 
@@ -3061,6 +3073,7 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
     .AddressOf(_, _, operand) then validate_expr_usage(operand, false),
     .IsExpr(subject, _, _, _) then validate_expr_usage(subject, false),
     .TypeCast(_, _, _, operand) then validate_expr_usage(operand, false),
+    .AsCast(operand, _, _) then validate_expr_usage(operand, false),
     .QualifiedTrait(_, _, _, operand) then validate_expr_usage(operand, false),
     .Paren(_, inner, _) then validate_expr_usage(inner, false),
     .FieldAccess(base, _, _) then validate_expr_usage(base, false),

@@ -258,7 +258,7 @@ public func printTypedAST(_ node: TypedProgram) {
       print("\(indent)BoolLiteral: \(value) : \(type)")
 
     case .castExpression(let inner, let type):
-      print("\(indent)CastExpression: : \(type)")
+      print("\(indent)CastExpression: expr as \(type)")
       withIndent {
         print("\(indent)Operand:")
         withIndent {

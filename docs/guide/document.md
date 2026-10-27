@@ -303,9 +303,11 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-Pointer types use the same spelling as type annotations: `*Int(p)`,
-`*mutable T(q)`. Only numeric and pointer types can be cast; `Bool(x)`
-and `String(x)` are errors (`Type does not support cast`).
+Pointer reinterpretation uses a different spelling, `expr as Type` (see
+[Raw Pointer Types](#raw-pointer-types)): `p as *T`, `u as *Int`, `p as UInt`,
+`b as ?T`, `c as Drawable`. `Type(expr)` is numeric-only, plus construction
+(`Point(1, 2)`); `Bool(x)` and `String(x)` are errors
+(`Type does not support cast`), and so is a numeric `as` (`x as Int`).
 
 There is only one conversion spelling, and the **target type decides the
 policy**. The integers form three parallel families — ten types each, same
@@ -1624,7 +1626,7 @@ declaration can implement it, and the compiler decides whether a type satisfies
 it from the type's own declaration.
 
 - `T mutable` — the subject must have been declared `type mutable`. This is what
-  weak references require (`?T(x)` / `?expr` spell it).
+  weak references require (`x as ?T` / `?expr` spell it).
 - `T foreign` — the subject's representation is fixed outside Koral's layout
   freedom and may cross the FFI boundary: a built-in scalar, a `*` /
   `*mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
@@ -1783,13 +1785,13 @@ b.push(3);
 
 Weak references do not keep the referent alive. They are written as `?T` and are only valid for types that satisfy the `mutable` constraint.
 
-Use `?T(x)` to construct a weak reference (a handle wrap, not a bit reinterpretation). Use `?expr` to upgrade: the result is `Option[T]` — `.Some(v)` when the object is still alive, `.None()` when it is dead.
+Use `x as ?T` to construct a weak reference (a handle wrap, not a bit reinterpretation). Use `?expr` to upgrade: the result is `Option[T]` — `.Some(v)` when the object is still alive, `.None()` when it is dead.
 
 ```koral
 type mutable Node(mutable value Int);
 
 let node = Node(42);
-let weak = ?Node(node);                 // ?Node
+let weak = node as ?Node;               // ?Node
 let value = when ?weak in {
     .Some(v) then v.value,              // v is Node, only when alive
     .None() then 0,
@@ -1818,7 +1820,7 @@ exploits the referent's *shape* is refused against a `?T`:
 Binding the handle *whole* is fine and keeps the `?T`:
 
 ```koral
-let w = ?Node(node);
+let w = node as ?Node;
 let w2 ?Node = w;              // ok: the handle is copied
 let xs = List[?Node].new();
 xs.push(w);
@@ -1848,7 +1850,7 @@ Supported patterns include:
 - Rest pattern: `...` — ignores slots (the unwritten middle in a list, the whole element list in a struct or enum case); see below
 - Enum case patterns: `.Some(v)`, `.None()`
 - Trait-object exact type patterns: `IoError`, `err IoError`
-- (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`)
+- (removed: weak binding patterns `?v` / `?Node(v)` — use `?expr` to get `Option[T]`; construction is `x as ?T`)
 - Logical patterns: `pattern and pattern`, `pattern or pattern`, `not pattern`
 - `is` chains: `x is A or is B`, `x is A and is not B` — several tests on one subject, joined by the connectors `or is` / `and is`
 
@@ -2561,6 +2563,11 @@ let shape Drawable = Circle(10);
 shape.draw();
 ```
 
+The assignment coerces the concrete value into the trait-object context.
+An explicit upcast is `c as Drawable`, which works anywhere an expression
+is needed — including immediately: `(c as Drawable).draw()`. Casting from
+one trait object to another is refused.
+
 Important rules:
 
 - Trait-object dispatch uses the concrete value's semantics without exposing internal wrappers in the public surface.
@@ -3009,6 +3016,13 @@ Raw pointers are low-level memory access for FFI and system programming:
 - `*mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
 - `*mutable T` implicitly converts to `*T`. The reverse is not allowed.
 
+Pointer reinterpretation is written `expr as Type`. A `*mutable T` reads as
+its `*T` view (`p as *T`), a pointer may be re-read through a different
+pointee in one step (`p as *UInt`), and pointers cross to and from integer
+addresses in both directions (`p as UInt` / `u as *Int`). The result takes
+parentheses before a method call: `(self as *T).equals(other as *T)`. The
+old type-constructor spellings (`*Int(u)`, `UInt(p)`) are rejected.
+
 ### Unsafe Address-Of and Dereference
 
 `&` / `&mutable` are raw address-of operators. They require addressable storage; literals and temporaries are rejected.
@@ -3019,6 +3033,7 @@ let mp *mutable UInt8 = &mutable bytes[0];
 
 let x = *p;       // raw deref read
 *mp = 42;         // raw deref write
+let q = &value as *Int;   // (&value) as *Int: cast groups over the whole prefix
 
 // let bad = & 42  // error: raw address-of needs addressable storage
 ```
@@ -3027,6 +3042,8 @@ Rules:
 
 - `&` produces `*T`; `&mutable` produces `*mutable T`.
 - `*expr` reads and `*expr = value` writes are the raw dereference forms.
+- `as` binds looser than the prefix operators: `&x as *T` is `(&x) as *T`
+  and `*p as *Int` is `(*p) as *Int`.
 - Raw pointers are not a general "any type to `*T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
 
 ### Foreign Function Interface

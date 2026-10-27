@@ -65,11 +65,22 @@ public type CstExpr {
     BitwiseNot(op Token, operand CstExpr),
     PrefixKw(kw Token, operand CstExpr),
     /// `cast_type(operand)` -- the cast / type application `Int(x)`,
-    /// `* Int(p)`, `?T(q)`. The target type comes FIRST and the value is
+    /// `Option[Int](x)`. The target type comes FIRST and the value is
     /// the parenthesized operand; the old postfix spelling `operand(Type)` is
     /// gone. A structural `Type(args)` construction keeps the `Call` shape --
-    /// only the single-operand cast spelling lands here.
+    /// only the single-operand cast spelling lands here. Pointer and weak
+    /// targets are NOT written this way: those are `operand as Type`
+    /// (`AsCast`), and the old `*T(x)` / `?T(x)` spellings are rejected.
     TypeCast(lparen Token, cast_type CstType, rparen Token, operand CstExpr),
+    /// `operand as Type` -- pointer reinterpretation and weak construction:
+    /// `p as *Int`, `x as ?Box`, `c as Drawable`. The cast sits between the
+    /// multiplicative level and the prefix level (Rust's `as` position) and
+    /// chains left: `&x as *T` is `(&x) as *T`, `p * q as *T` is
+    /// `p * (q as *T)`, `p as UInt as *mutable UInt` groups left. The cast
+    /// result takes no postfix suffixes -- a method call on one needs
+    /// parentheses, `(self as *T).equals(...)`. The `as` token and the target
+    /// type travel with the node so the round trip is faithful.
+    AsCast(operand CstExpr, as_kw Token, cast_type CstType),
     /// The `base(Trait)` prefix of a qualified call `base(Trait).method(...)`.
     /// This prefix is never a standalone expression: the parser only builds it
     /// as part of the composite `Call(FieldAccess(QualifiedTrait(...), method),

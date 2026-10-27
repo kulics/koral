@@ -81,14 +81,39 @@ given Parser {
         );
     };
 
-    module_private parse_factor(self) Result[Expr] = {
+    /// `expr as Type` -- pointer reinterpretation, pointer <-> address, weak
+    /// construction, and explicit trait-object upcasts. Left-associative and
+    /// sitting between the multiplicative level and the prefix level (Rust's
+    /// `as` position):
+    ///
+    ///   `&x as *T`       == `(&x) as *T`
+    ///   `*p as *Int`     == `(*p) as *Int`
+    ///   `p * q as *T`    == `p * (q as *T)`
+    ///   `p as *Int == q` == `(p as *Int) == q`
+    ///
+    /// `as` takes a full `<type>`: `*T`, `*mutable T`, `?T`, `Trait[Int]`, an
+    /// alias. The cast result takes no postfix suffixes -- a method call on one
+    /// takes parentheses, `(self as *T).equals(...)`.
+    module_private parse_cast(self) Result[Expr] = {
         let mutable expr = self.parse_unary() or return;
+
+        while self.current().kind is .KwAs() then {
+            self.advance();
+            let cast_type = self.parse_type() or return;
+            expr = Expr.CastExpr(cast_type, expr, self.span_from_expr_start(expr));
+        };
+
+        return .Ok(expr);
+    };
+
+    module_private parse_factor(self) Result[Expr] = {
+        let mutable expr = self.parse_cast() or return;
 
         while true then {
             when self.current().kind in {
                 .Star() then {
                     self.advance();
-                    let rhs = self.parse_unary() or return;
+                    let rhs = self.parse_cast() or return;
                     expr = Expr.ArithmeticExpr(
                         expr,
                         ArithmeticOperator.Multiply(),
@@ -98,7 +123,7 @@ given Parser {
                 },
                 .Slash() then {
                     self.advance();
-                    let rhs = self.parse_unary() or return;
+                    let rhs = self.parse_cast() or return;
                     expr = Expr.ArithmeticExpr(
                         expr,
                         ArithmeticOperator.Divide(),
@@ -108,7 +133,7 @@ given Parser {
                 },
                 .Percent() then {
                     self.advance();
-                    let rhs = self.parse_unary() or return;
+                    let rhs = self.parse_cast() or return;
                     expr = Expr.ArithmeticExpr(
                         expr,
                         ArithmeticOperator.Remainder(),
@@ -669,7 +694,7 @@ given Parser {
                 or .EqualEqual() or .NotEqual() or .Greater() or .Less()
                 or .GreaterEqual() or .LessEqual()
                 or .Range() or .RangeLess() or .LessRange() or .LessRangeLess()
-                or .EllipsisLt() or .LtEllipsis() or .KwIs() then true,
+                or .EllipsisLt() or .LtEllipsis() or .KwIs() or .KwAs() then true,
                 _ then false,
             };
             if extends_chain then {

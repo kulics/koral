@@ -885,6 +885,27 @@ given Parser {
         };
     };
 
+    /// Whether the tokens at `index` spell a TYPE shape: a type head
+    /// (`mutable`, `Self`, uppercase ident), or a `*` / `?` type prefix chain
+    /// ending in one. This is how the old cast shape at a prefix `*` / `?` is
+    /// recognized -- `*T(x)`, `?T(x)`, and the bare `*T` / `?T` -- WITHOUT
+    /// requiring the `(` that no longer follows it. A `*` / `?` before a
+    /// lowercase pointee is not a type shape: `**p` / `?*p` stay deref /
+    /// upgrade chains.
+    module_private type_shape_starts_at(self, index UInt) Bool = {
+        if index >= self.tokens.count() then {
+            return false;
+        };
+        return when self.tokens[index].kind in {
+            .Star() then self.type_shape_starts_at(index + 1),
+            .QuestionMark() then self.type_shape_starts_at(index + 1),
+            .KwMut() then true,
+            .KwSelfType() then true,
+            .Identifier(name) then self.is_upper_first(name),
+            _ then false,
+        };
+    };
+
     /// Whether the token after `*` / `?` at `index` starts the TYPE of a type
     /// application (`*Int(p)`, `?T(x)`) rather than a deref / upgrade operand.
     /// A `(` counts only when it opens a function type's parameter list:
@@ -2532,7 +2553,14 @@ given Parser {
             );
         };
         let mutable expr = parsed_expr;
-        if self.should_continue_postfix_after_expression() then {
+        // A cast result takes no postfix suffixes: `x as *T.m()` leaves the
+        // `.m()` a stray token, and a method call on a cast needs parentheses,
+        // `(x as *T).m()`.
+        let cast_result = when parsed_expr in {
+            .CastExpr(_, _, _) then true,
+            _ then false,
+        };
+        if not cast_result and self.should_continue_postfix_after_expression() then {
             expr = self.parse_postfix_suffixes(expr) or return;
         };
         return .Ok(expr);

@@ -577,9 +577,10 @@ public indirect enum ExpressionNode {
   case runeLiteral(String, span: SourceSpan)     // Rune/byte literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool, span: SourceSpan)
-  /// Explicit cast `Type(expr)`. The parser also builds this for a
-  /// parenthesized target type `(*Int)(p)`. A bare `Type(args)` call is
-  /// left as `.call`; the type checker turns it into a cast or a construction.
+  /// `expr as Type` -- the reinterpretation cast. The resolved target decides
+  /// the meaning: pointer reinterpretation, weak construction, or trait-object
+  /// upcast. A `Type(args)` call is left as `.call`; the type checker turns it
+  /// into a numeric cast or a construction.
   case castExpression(type: TypeNode, expression: ExpressionNode, span: SourceSpan)
   case arithmeticExpression(
     left: ExpressionNode, operator: ArithmeticOperator, right: ExpressionNode, span: SourceSpan)

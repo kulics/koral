@@ -114,23 +114,6 @@ extension Parser {
     }
   }
 
-  /// Whether the token after the `*` / `?` at the cursor starts the TYPE of a
-  /// type application (`*Int(p)`, `?T(x)`) rather than a deref / upgrade
-  /// operand. A `(` counts only when it opens a function type's parameter
-  /// list: `*(Int) -> Int(p)` is a cast, `*(p)` is a deref.
-  /// Restores the stream.
-  private func peekStartsTypeApplication() -> Bool {
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-    defer {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-    }
-    advanceShape() // past the `*` / `?`
-    if isTypeHeadToken(currentToken) { return true }
-    return scanTypeShapeConsuming()
-  }
-
   /// Whether the run at the cursor is exactly one type. Restores the stream.
   @discardableResult
   private func scanTypeShape() -> Bool {
@@ -493,7 +476,7 @@ extension Parser {
          .ampersand, .pipe, .caret, .leftShift, .rightShift,
          .equalEqual, .notEqual, .greater, .less, .greaterEqual, .lessEqual,
          .range, .rangeLess, .lessRange, .lessRangeLess, .ellipsisLess, .lessEllipsis,
-         .isKeyword:
+         .isKeyword, .asKeyword:
       return true
     default:
       return false
@@ -1037,14 +1020,15 @@ extension Parser {
     return left
   }
 
-  /// Sixth level: Multiplication, division, and remainder
+  /// Sixth level: Multiplication, division, and remainder. Operands are cast
+  /// expressions, so `p * q as *T` is `p * (q as *T)`.
   private func parseMultiplicativeExpression() throws -> ExpressionNode {
-    var left = try parsePrefixExpression()
+    var left = try parseCastExpression()
 
     while currentToken === .multiply || currentToken === .divide || currentToken === .remainder {
       let op = currentToken
       try match(op)
-      let right = try parsePrefixExpression()
+      let right = try parseCastExpression()
       left = .arithmeticExpression(
         left: left,
         operator: tokenToArithmeticOperator(op),
@@ -1055,7 +1039,30 @@ extension Parser {
     return left
   }
 
-  
+
+  // MARK: - Cast Expressions
+
+  /// `<cast-expression> ::= <prefix-expression> ("as" <type>)*` -- the `as`
+  /// reinterpretation cast, left-associative: `p as UInt as *mutable UInt` is
+  /// `(p as UInt) as *mutable UInt`. Sits between the multiplicative and prefix
+  /// levels (Rust's position), so `&x as *T` is `(&x) as *T`, `*p as *Int` is
+  /// `(*p) as *Int`, and `p as *Int == q` is `(p as *Int) == q`. A cast result
+  /// takes parentheses before a method call: `(self as *T).equals(...)`.
+  private func parseCastExpression() throws -> ExpressionNode {
+    var expr = try parsePrefixExpression()
+    while currentToken === .asKeyword {
+      try match(.asKeyword)
+      let targetType = try parseType()
+      expr = .castExpression(
+        type: targetType,
+        expression: expr,
+        span: SourceSpan(start: expr.span.start, end: targetType.span.end)
+      )
+    }
+    return expr
+  }
+
+
   // MARK: - Prefix Expressions
   
   private func parsePrefixExpression() throws -> ExpressionNode {
@@ -1106,12 +1113,11 @@ extension Parser {
       return .ptrExpression(expr, mutable: mutable, span: ampersandSpan)
     }
     if currentToken === .multiply {
-      // `*T(args)` is a pointer type application; bare `*` is deref.
-      // `*` + type-head (mutable, uppercase ident, Self) at expression start
-      // can only be a type; `*` + anything else is deref.
-      if peekStartsTypeApplication() {
-        let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
-        return try parsePostfixSuffixes(from: cast)
+      // A prefixed type at expression start (`*T`, `*T(args)`, `*mutable T`)
+      // is the retired `Type(expr)` cast spelling, rejected at parse time. A
+      // `*` followed by anything that is not a type shape dereferences.
+      if peekStartsPrefixedType() {
+        try rejectPrefixedTypeInExpression()
       }
       let startSpan = currentSpan
       try match(.multiply)
@@ -1119,13 +1125,10 @@ extension Parser {
       return .derefExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     if currentToken === .questionMark {
-      // `?T(args)` is a weak-reference type application (construction);
-      // `?expr` upgrades a weak reference to `Option[T]`.
-      // Disambiguation: `?` + type-start tries type application; `?` + anything
-      // else is the upgrade operator.
-      if peekStartsTypeApplication() {
-        let cast = try parsePrefixedTypeApplication(startSpan: currentSpan)
-        return try parsePostfixSuffixes(from: cast)
+      // Same split as `*`: a prefixed type (`?T`, `?T(args)`) is the retired
+      // cast spelling; `?expr` upgrades a weak reference to `Option[T]`.
+      if peekStartsPrefixedType() {
+        try rejectPrefixedTypeInExpression()
       }
       let startSpan = currentSpan
       try match(.questionMark)
@@ -1135,32 +1138,32 @@ extension Parser {
     return try parsePostfixExpression()
   }
 
-  /// `*T(args)` / `*mutable T(args)` / `?T(args)` -- a cast whose target type is
-  /// written with a prefix, at expression start. The spelling matches the type
-  /// annotation: `*Int(p)`, `*mutable T(q)`, `?Int(r)`.
-  private func parsePrefixedTypeApplication(startSpan: SourceSpan) throws -> ExpressionNode {
-    let targetType = try parseType()
-    guard currentToken === .leftParen else {
-      throw ParserError.unexpectedToken(
-        span: currentSpan,
-        got: currentToken.description,
-        expected: "(" // a prefixed type in expression position must be a cast
-      )
+  /// Whether the `*` / `?` at the cursor is followed by a TYPE shape -- a type
+  /// head (`mutable`, uppercase identifier, `Self`) or nested `*` / `?`
+  /// prefixes around one -- and so starts a prefixed TYPE in expression
+  /// position. No `(` is required: bare `*T` names a cast target exactly as
+  /// `*T(x)` does. `**p` / `?*p` (lowercase pointee) are not type shapes and
+  /// stay deref / upgrade chains. Restores the stream.
+  private func peekStartsPrefixedType() -> Bool {
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
     }
-    try match(.leftParen)
-    let value = try expression()
-    guard currentToken === .rightParen else {
-      throw ParserError.unexpectedToken(
-        span: currentSpan,
-        got: currentToken.description,
-        expected: "a single expression; a prefixed type is a cast target, not a constructor"
-      )
-    }
-    try match(.rightParen)
-    return .castExpression(
-      type: targetType,
-      expression: value,
-      span: SourceSpan(start: startSpan.start, end: currentSpan.end)
+    advanceShape() // past the `*` / `?`
+    if isTypeHeadToken(currentToken) { return true }
+    return scanTypeShapeConsuming()
+  }
+
+  /// A prefixed type in expression position is the retired cast spelling
+  /// (`*T(x)`, `?T(x)`, and the bare `*T` / `?T` forms). Parse the type the
+  /// reader wrote so the error span covers exactly that, then reject it.
+  private func rejectPrefixedTypeInExpression() throws -> Never {
+    let castType = try parseType()
+    throw ParserError.rejectedConstruct(
+      span: castType.span,
+      message: "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
     )
   }
 

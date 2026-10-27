@@ -101,7 +101,7 @@ struct __koral_WeakRef { void* control; };   // 1 字，存 control 地址
 理由：**payload 可能已经销毁**，而 weak 仍要能查 `strong_count` 判断能否 upgrade。
 这也与 niche 表里的 `__koral_WeakRef | control == NULL` 一致。
 
-（用户 API 是 `?T(x)` 构造、`?expr` 升级；下面两个名字是 **C 运行时内部**
+（用户 API 是 `x as ?T` 构造、`?expr` 升级；下面两个名字是 **C 运行时内部**
 `__koral_downgrade_ref` / `__koral_upgrade_ref`，不是用户可调函数。）
 
 - `__koral_downgrade_ref(p)` → `w.control = __koral_control_of(r.ptr); __koral_weak_retain(w.control);`

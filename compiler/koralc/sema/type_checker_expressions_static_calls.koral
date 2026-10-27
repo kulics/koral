@@ -1142,108 +1142,9 @@ given TypeChecker {
                     static_param_expected,
                     scope,
                 ),
-                .CastExpr(type_node, inner, _) then {
+                .CastExpr(type_node, inner, cast_span) then {
                     let target = self.resolve_type_in_scope(type_node, scope);
-                    // `?T(expr)` is weak-reference construction.
-                    if target is .WeakReferenceType(_) or is .MutableWeakReferenceType(_) then {
-                        let weak_typed_inner = self.check_expr_scoped_ref(
-                            inner,
-                            .None(),
-                            scope,
-                        );
-                        let mutable weak_result_type = target;
-                        if not self.enforce_mutable_constraint_for_call(
-                            weak_typed_inner.expr_type,
-                            "downgrade",
-                            expr_span(inner),
-                        ) then {
-                            weak_result_type = Type.Unknown();
-                        };
-                        // The referent is `T`, so the argument has to be a `T`.
-                        // Mutability alone would let `?B(a)` build a `?B` out of
-                        // an `A` -- two unrelated mutable types.
-                        let weak_referent = when target in {
-                            .WeakReferenceType(r) then r,
-                            .MutableWeakReferenceType(r) then r,
-                            _ then Type.Unknown(),
-                        };
-                        if weak_result_type is not .Unknown() and not self.same_expr_type(
-                            weak_typed_inner.expr_type,
-                            weak_referent,
-                        ) then {
-                            self.push_diagnostic_at_span(
-                                "Type mismatch: expected \(self.display_type_name(weak_referent)), got \(self.display_type_name(weak_typed_inner.expr_type))",
-                                expr_span(inner),
-                            );
-                            weak_result_type = Type.Unknown();
-                        };
-                        make_typed_expr(
-                            TypedExprKind.IntrinsicCall(
-                                TypedIntrinsic.DowngradeRef(
-                                    weak_typed_inner,
-                                    weak_result_type,
-                                ),
-                            ),
-                            weak_result_type,
-                        )
-                    } else {
-                        let raw_typed_inner = when inner in {
-                            .IntegerLiteral(value, lit_span) then {
-                                let _ = self.check_integer_literal_range(
-                                    value,
-                                    target,
-                                    lit_span,
-                                );
-                                make_typed_expr(
-                                    TypedExprKind.IntegerLiteral(value),
-                                    target,
-                                )
-                            },
-                            .FloatLiteral(value, _) then {
-                                if target is .Float32Type() or is .Float64Type() then make_typed_expr(
-                                    TypedExprKind.FloatLiteral(value),
-                                    target,
-                                ) else make_typed_expr(
-                                    TypedExprKind.FloatLiteral(value),
-                                    Type.Float64Type(),
-                                )
-                            },
-                            .RuneLiteral(value, rune_span) then {
-                                let outer_span = self.enter_current_span(rune_span);
-                                let lowered = self.lower_rune_literal_for_cast(
-                                    value,
-                                    target,
-                                );
-                                self.leave_current_span(outer_span);
-                                lowered
-                            },
-                            _ then self.check_expr_scoped_ref(inner, .Some(target), scope),
-                        };
-                        let adapted_inner = self.adapt_expr_to_expected_type_at(
-                            raw_typed_inner,
-                            .Some(target),
-                            Option[SourceSpan].Some(expr_span(inner)),
-                        );
-                        // Reference-like source to a non-reference target: re-type
-                        // to the pointee. A reference-like target keeps the inner
-                        // value -- the cast is between the reference shapes.
-                        let typed_inner = when adapted_inner.expr_type in {
-                            .ReferenceType(inner_ref)
-                                or .MutableReferenceType(inner_ref)
-                                or .WeakReferenceType(inner_ref)
-                                or .MutableWeakReferenceType(inner_ref)
-                            where not self.is_ref_or_pointer_type(target) then self.adapt_expr_to_expected_type_at(
-                                adapted_inner,
-                                .Some(inner_ref),
-                                Option[SourceSpan].Some(expr_span(inner)),
-                            ),
-                            _ then adapted_inner,
-                        };
-                        make_typed_expr(
-                            TypedExprKind.CastExpr(target, typed_inner),
-                            target,
-                        )
-                    }
+                    self.lower_as_cast_target(target, inner, cast_span, scope, false)
                 },
                 .DerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
@@ -1836,61 +1737,495 @@ given TypeChecker {
         return true;
     };
 
+    // ── `as` casts ───────────────────────────────────────────────────────────
+    //
+    // `e as T` -- a new type view on the same value. The RESOLVED target type
+    // (aliases expanded) decides which cast this is: weak construction (`?U`),
+    // an explicit trait-object upcast (trait name), or pointer reinterpretation
+    // (`*U`, and `Int`/`UInt` in both directions). Numeric conversion and
+    // nominal construction are `Type(expr)` and are refused here with a
+    // pointer at that spelling. All three CastExpr sites route through
+    // `lower_as_cast_target` so the rows cannot drift again.
+
+    /// One managed-reference layer is a VALUE here: `&x as *T` reinterprets
+    /// the pointee, the same auto-dereference the implicit coercions do.
+    module_private as_cast_auto_deref(self, expr TypedExpr) TypedExpr = {
+        return when expr.expr_type in {
+            .ReferenceType(inner) then make_typed_expr(
+                TypedExprKind.DerefExpr(expr),
+                inner,
+            ),
+            .MutableReferenceType(inner) then make_typed_expr(
+                TypedExprKind.DerefExpr(expr),
+                inner,
+            ),
+            .BorrowedReferenceType(inner) then make_typed_expr(
+                TypedExprKind.DerefExpr(expr),
+                inner,
+            ),
+            .MutableBorrowedReferenceType(inner) then make_typed_expr(
+                TypedExprKind.DerefExpr(expr),
+                inner,
+            ),
+            _ then expr,
+        };
+    };
+
+    /// Strips managed-reference wrappers to find the value underneath.
+    module_private as_cast_peel_ref_wrappers(self, t Type) Type = {
+        return when t in {
+            .ReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
+            .MutableReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
+            .BorrowedReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
+            .MutableBorrowedReferenceType(inner) then self.as_cast_peel_ref_wrappers(
+                inner,
+            ),
+            _ then t,
+        };
+    };
+
+    /// The `as` trait-object row: a resolved trait-object reference target.
+    module_private as_cast_trait_object_target(self, t Type) Option[Type] = {
+        return when t in {
+            .TraitObject(_, _) then Option[Type].Some(t),
+            .ReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then Option[Type].Some(inner),
+                _ then Option[Type].None(),
+            },
+            .MutableReferenceType(inner) then when inner in {
+                .TraitObject(_, _) then Option[Type].Some(inner),
+                _ then Option[Type].None(),
+            },
+            _ then Option[Type].None(),
+        };
+    };
+
+    /// Whether `type` is one of the reinterpretation families -- pointer, weak,
+    /// or trait-object -- that `as` casts to and `Type(expr)` must refuse.
+    module_private is_pointer_weak_or_trait_cast_target(self, t Type) Bool = {
+        let canonical = self.canonicalize_alias_type(t);
+        return when canonical in {
+            .PointerType(_) then true,
+            .MutablePointerType(_) then true,
+            .WeakReferenceType(_) then true,
+            .MutableWeakReferenceType(_) then true,
+            .TraitObject(...) then true,
+            .ReferenceType(inner) then when inner in {
+                .TraitObject(...) then true,
+                _ then false,
+            },
+            .MutableReferenceType(inner) then when inner in {
+                .TraitObject(...) then true,
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// Whether `from` is a raw pointer type (`*U` / `*mutable U`), any pointee.
+    module_private as_cast_source_is_pointer(self, from Type) Bool = {
+        let source = self.canonicalize_alias_type(from);
+        return when source in {
+            .PointerType(_) then true,
+            .MutablePointerType(_) then true,
+            _ then false,
+        };
+    };
+
+    /// Legality for the `expr as Type` reinterpretation rows: any pointer
+    /// flavor to any pointer flavor (element-type-agnostic), `Int`/`UInt` to
+    /// pointers and back, and identity. Numeric conversion and nominal
+    /// construction stay on `Type(expr)`.
+    module_private is_valid_as_cast(self, from Type, to Type) Bool = {
+        let source = self.canonicalize_alias_type(from);
+        let target = self.canonicalize_alias_type(to);
+        if self.same_expr_type(source, target) then {
+            return true;
+        };
+        let source_is_pointer = self.as_cast_source_is_pointer(source);
+        let target_is_pointer = target is .PointerType(_) or is .MutablePointerType(_);
+        let target_is_address = target is .IntType() or is .UIntType();
+        if target_is_pointer then {
+            if source_is_pointer then {
+                return true;
+            };
+            if source is .IntType() or is .UIntType() then {
+                return true;
+            };
+            return false;
+        };
+        if target_is_address then {
+            return source_is_pointer;
+        };
+        return false;
+    };
+
+    /// `e as ?U` -- weak-reference construction: a handle wrap, not a bit
+    /// reinterpretation. The same checks and the same `downgrade` intrinsic
+    /// the `?U(expr)` spelling used.
+    module_private lower_as_weak_construction(
+        self,
+        target Type,
+        typed_inner TypedExpr,
+        cast_span SourceSpan,
+        inner_span SourceSpan,
+    ) TypedExpr = {
+        let mutable result_type = target;
+        if typed_inner.expr_type is .Unknown() then {
+            // The inner already reported; Swift stops there. Neutralise the
+            // cascade rather than complain about a value that failed.
+            result_type = Type.Unknown();
+        } else {
+            if not self.enforce_mutable_constraint_for_call(
+                typed_inner.expr_type,
+                "downgrade",
+                inner_span,
+            ) then {
+                result_type = Type.Unknown();
+            };
+            // The referent is `U`, so the argument has to be a `U`. Mutability
+            // alone would let `a as ?B` build a `?B` out of an `A` -- two
+            // unrelated mutable types.
+            if result_type is not .Unknown() then {
+                let weak_referent = when target in {
+                    .WeakReferenceType(r) then r,
+                    .MutableWeakReferenceType(r) then r,
+                    _ then Type.Unknown(),
+                };
+                if not self.same_expr_type(typed_inner.expr_type, weak_referent) then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected \(self.display_type_name(weak_referent)), got \(self.display_type_name(typed_inner.expr_type))",
+                        cast_span,
+                    );
+                    result_type = Type.Unknown();
+                };
+            };
+        };
+        return make_typed_expr(
+            TypedExprKind.IntrinsicCall(
+                TypedIntrinsic.DowngradeRef(typed_inner, result_type),
+            ),
+            result_type,
+        );
+    };
+
+    /// The `as` trait-object row: a resolved trait-object reference target. The
+    /// conversion machinery carries the object-safety and conformance checks;
+    /// the silent declines it leaves behind (trait object to trait object,
+    /// rvalue to mutable reference) are errors here.
+    module_private lower_as_trait_object_cast(
+        self,
+        target Type,
+        trait_obj Type,
+        inner Expr,
+        cast_span SourceSpan,
+        scope Scope,
+        use_bidi Bool,
+    ) TypedExpr = {
+        let typed_inner = self.as_cast_check_inner(inner, .None(), scope, use_bidi);
+        let source_type = typed_inner.expr_type;
+        if source_type is .Unknown() then {
+            return make_typed_expr(
+                TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                Type.Unknown(),
+            );
+        };
+        // Identity: the source already IS that trait object.
+        if self.same_expr_type(source_type, target) then {
+            return make_typed_expr_ref(typed_inner.expr_kind, target);
+        };
+        if self.as_cast_peel_ref_wrappers(source_type) is .TraitObject(...) then {
+            self.push_diagnostic_at_span(
+                "Cannot cast a trait object to another trait object",
+                cast_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                Type.Unknown(),
+            );
+        };
+        let converted = self.try_as_trait_object_conversion(
+            typed_inner,
+            trait_obj,
+            target,
+            cast_span,
+        );
+        if not self.same_expr_type(converted.expr_type, target) then {
+            self.push_diagnostic_at_span(
+                "Invalid operation cast between types \(self.display_type_name(source_type)) and \(self.display_type_name(target))",
+                cast_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                Type.Unknown(),
+            );
+        };
+        return converted;
+    };
+
+    /// The trait-object conversion the implicit coercions run, with its silent
+    /// declines returned as an unchanged expression so the `as` row can raise
+    /// on them. Conformance problems keep the conversion machinery's own
+    /// messages.
+    module_private try_as_trait_object_conversion(
+        self,
+        typed_inner TypedExpr,
+        trait_obj Type,
+        target Type,
+        cast_span SourceSpan,
+    ) TypedExpr = {
+        let trait_def_id = when trait_obj in {
+            .TraitObject(d, _) then d,
+            _ then DefId(UInt(0)),
+        };
+        let trait_name = def_id_spelling(trait_def_id);
+        let trait_args = self.trait_object_type_args(trait_obj);
+        let source_type = typed_inner.expr_type;
+        let expects_mutable_ref = target is .MutableReferenceType(_);
+        let mutable concrete_type = source_type;
+        let mutable source_for_conversion = typed_inner;
+        when source_type in {
+            .ReferenceType(inner) then {
+                if expects_mutable_ref then {
+                    // An immutable reference is not widened in place.
+                    return typed_inner;
+                };
+                concrete_type = inner;
+            },
+            .MutableReferenceType(inner) then {
+                concrete_type = inner;
+            },
+            _ then {
+                if expects_mutable_ref then {
+                    let source_is_lvalue = when typed_expr_value_category(typed_inner) in {
+                        .LValue() then true,
+                        .RValue() then false,
+                    };
+                    if source_is_lvalue and self.can_take_mutable_ref_of_expr(typed_inner) then {
+                        source_for_conversion = make_typed_expr(
+                            TypedExprKind.RefExpr(typed_inner),
+                            Type.MutableReferenceType(source_type),
+                        );
+                    } else {
+                        return typed_inner;
+                    };
+                } else {
+                    source_for_conversion = make_typed_expr(
+                        TypedExprKind.RefExpr(typed_inner),
+                        Type.ReferenceType(source_type),
+                    );
+                };
+            },
+        };
+        if trait_args.is_empty() then {
+            let _ = self.enforce_explicit_trait_requirement(
+                concrete_type,
+                trait_def_id,
+                trait_name,
+                cast_span,
+            );
+        } else {
+            let _ = self.enforce_explicit_generic_trait_conformance_with_note(
+                concrete_type,
+                trait_def_id,
+                trait_name,
+                trait_args,
+                "",
+                cast_span,
+            );
+        };
+        return self.wrap_trait_object_conversion(
+            source_for_conversion,
+            trait_obj,
+            target,
+        );
+    };
+
+    /// The inner expression of an `as` cast, checked in synthesis mode: the
+    /// cast target is not an expectation the inner joins. The three CastExpr
+    /// sites keep their own checker via `use_bidi`.
+    module_private as_cast_check_inner(
+        self,
+        inner Expr,
+        expected Option[Type],
+        scope Scope,
+        use_bidi Bool,
+    ) TypedExpr = {
+        if use_bidi then {
+            return self.bidirectional_check(inner, expected, scope);
+        };
+        return self.check_expr_scoped_ref(inner, expected, scope);
+    };
+
+    /// `e as T` -- one shared lowering for all three CastExpr sites. The inner
+    /// keeps its own checking flavor; the rows, the messages and the typed
+    /// output shapes are shared.
+    module_private lower_as_cast_target(
+        self,
+        target Type,
+        inner Expr,
+        cast_span SourceSpan,
+        scope Scope,
+        use_bidi Bool,
+    ) TypedExpr = {
+        let resolved_target = self.canonicalize_alias_type(target);
+
+        // A target that failed to resolve already reported (Swift throws at
+        // resolution). Keep the caller's shape and stop the cascade.
+        if resolved_target is .Unknown() then {
+            let typed_inner = self.as_cast_check_inner(
+                inner,
+                .None(),
+                scope,
+                use_bidi,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(resolved_target, typed_inner),
+                resolved_target,
+            );
+        };
+
+        // Weak construction (`?U`): a handle wrap, not a bit reinterpretation.
+        let target_is_weak = resolved_target is .WeakReferenceType(_) or is .MutableWeakReferenceType(_);
+        if target_is_weak then {
+            let typed_inner = self.as_cast_auto_deref(
+                self.as_cast_check_inner(inner, .None(), scope, use_bidi),
+            );
+            return self.lower_as_weak_construction(
+                resolved_target,
+                typed_inner,
+                cast_span,
+                expr_span(inner),
+            );
+        };
+
+        // Trait-object upcast (`c as Trait`).
+        when self.as_cast_trait_object_target(resolved_target) in {
+            .Some(trait_obj) then {
+                return self.lower_as_trait_object_cast(
+                    resolved_target,
+                    trait_obj,
+                    inner,
+                    cast_span,
+                    scope,
+                    use_bidi,
+                );
+            },
+            .None() then {},
+        };
+
+        // Pointer reinterpretation: any pointer flavor/pointee in either
+        // direction, or `Int`/`UInt` as an address.
+        let target_is_pointer = resolved_target is .PointerType(_) or is .MutablePointerType(_);
+        if target_is_pointer then {
+            let typed_inner = self.as_cast_auto_deref(
+                self.as_cast_check_inner(inner, .None(), scope, use_bidi),
+            );
+            let source_type = typed_inner.expr_type;
+            if source_type is .Unknown() then {
+                return make_typed_expr(
+                    TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                    Type.Unknown(),
+                );
+            };
+            if self.is_valid_as_cast(source_type, resolved_target) then {
+                // Cast always produces an rvalue.
+                return make_typed_expr(
+                    TypedExprKind.CastExpr(resolved_target, typed_inner),
+                    resolved_target,
+                );
+            };
+            self.push_diagnostic_at_span(
+                "Invalid operation cast between types \(self.display_type_name(source_type)) and \(self.display_type_name(resolved_target))",
+                cast_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                Type.Unknown(),
+            );
+        };
+
+        // `Int`/`UInt` (and the other numeric spellings): pointer bits read as
+        // an integer for `Int`/`UInt`, a pointer at `Type(expr)` for anything
+        // numeric, and no numeric conversion through `as` at all.
+        let target_is_numeric = self.is_integer_type(resolved_target) or self.is_float_type(
+            resolved_target,
+        );
+        if target_is_numeric then {
+            let typed_inner = self.as_cast_auto_deref(
+                self.as_cast_check_inner(inner, .None(), scope, use_bidi),
+            );
+            let source_type = typed_inner.expr_type;
+            if source_type is .Unknown() then {
+                return make_typed_expr(
+                    TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                    Type.Unknown(),
+                );
+            };
+            if self.as_cast_source_is_pointer(source_type) then {
+                if resolved_target is .IntType() or is .UIntType() then {
+                    return make_typed_expr(
+                        TypedExprKind.CastExpr(resolved_target, typed_inner),
+                        resolved_target,
+                    );
+                };
+            } else {
+                let source_is_numeric = self.is_integer_type(source_type) or self.is_float_type(
+                    source_type,
+                );
+                if source_is_numeric then {
+                    self.push_diagnostic_at_span(
+                        "Numeric conversion is written 'Type(expr)', not 'expr as Type'",
+                        cast_span,
+                    );
+                    return make_typed_expr(
+                        TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                        Type.Unknown(),
+                    );
+                };
+            };
+            self.push_diagnostic_at_span(
+                "Invalid operation cast between types \(self.display_type_name(source_type)) and \(self.display_type_name(resolved_target))",
+                cast_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(Type.Unknown(), typed_inner),
+                Type.Unknown(),
+            );
+        };
+
+        // Nominals are built, not cast. Std's String is nominal in the type
+        // system but reads as a builtin (literal syntax), so it takes the
+        // wrong-target message rather than a construction hint.
+        let target_is_nominal = self.is_nominal_type(resolved_target) and not self.is_string_type(
+            resolved_target,
+        );
+        if target_is_nominal then {
+            self.push_diagnostic_at_span(
+                "Construction is written 'Type(args)', not 'expr as Type'",
+                cast_span,
+            );
+            return self.empty_typed_block(Type.Unknown());
+        };
+        self.push_diagnostic_at_span(
+            "'as' casts to pointer, weak, or trait-object types",
+            cast_span,
+        );
+        return self.empty_typed_block(Type.Unknown());
+    };
+
+    /// Legality for the `Type(expr)` cast path: identity and numeric
+    /// conversion. Pointer reinterpretation and weak/trait construction are
+    /// `expr as Type` now (see `is_valid_as_cast`); nominal values are built by
+    /// the construction path.
     module_private is_valid_explicit_cast(self, from Type, to Type) Bool = {
         if self.same_expr_type(from, to) then {
             return true;
-        };
-        when from in {
-            .MutableReferenceType(from_inner) then when to in {
-                .ReferenceType(to_inner) then {
-                    return self.same_expr_type(from_inner, to_inner);
-                },
-                _ then {},
-            },
-            .MutablePointerType(from_elem) then when to in {
-                .PointerType(to_elem) then {
-                    return self.same_expr_type(from_elem, to_elem);
-                },
-                _ then {},
-            },
-            _ then {},
         };
         let from_numeric = self.is_integer_type(from) or self.is_float_type(from);
         let to_numeric = self.is_integer_type(to) or self.is_float_type(to);
         if from_numeric and to_numeric then {
             return true;
-        };
-        when from in {
-            .PointerType(_) then {
-                if to is .PointerType(_) or is .MutablePointerType(_) then {
-                    return true;
-                };
-                if to is .IntType() or is .UIntType() then {
-                    return true;
-                };
-            },
-            .MutablePointerType(_) then {
-                if to is .PointerType(_) or is .MutablePointerType(_) then {
-                    return true;
-                };
-                if to is .IntType() or is .UIntType() then {
-                    return true;
-                };
-            },
-            _ then {},
-        };
-        when to in {
-            .PointerType(_) then {
-                if from is .IntType() or is .UIntType() then {
-                    return true;
-                };
-            },
-            .MutablePointerType(_) then {
-                if from is .IntType() or is .UIntType() then {
-                    return true;
-                };
-            },
-            _ then {},
         };
         return false;
     };
@@ -1953,10 +2288,25 @@ given TypeChecker {
             },
             _ then self.check_expr_scoped_ref(arg, .Some(target_type), scope),
         };
-        // Peel references from the inner when the target is not a ref-like type.
-        if not self.is_valid_explicit_cast(raw_typed_inner.expr_type, target_type) then {
+        // A managed-reference source is its pointee here, the same
+        // auto-dereference the `as` rows do. The rows see the dereferenced
+        // type -- `UInt(r)` with `r &Int` is a numeric conversion, and a
+        // POINTER source is reinterpretation, not numeric conversion:
+        // `UInt(p)` is the retired spelling for `p as UInt`.
+        let source_view = self.as_cast_peel_ref_wrappers(raw_typed_inner.expr_type);
+        if self.as_cast_source_is_pointer(source_view) then {
             self.push_diagnostic_at_span(
-                "Invalid operation cast between types \(self.display_type_name(raw_typed_inner.expr_type)) and \(self.display_type_name(target_type))",
+                "Pointer and integer casts are written 'expr as Type', not 'Type(expr)'",
+                span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(target_type, raw_typed_inner),
+                target_type,
+            );
+        };
+        if not self.is_valid_explicit_cast(source_view, target_type) then {
+            self.push_diagnostic_at_span(
+                "Invalid operation cast between types \(self.display_type_name(source_view)) and \(self.display_type_name(target_type))",
                 span,
             );
         };
@@ -2027,18 +2377,32 @@ given TypeChecker {
             .Identifier(name, name_span) then {
                 when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
                     .Some(resolved_type) then {
-                        if self.is_integer_type(resolved_type) or self.is_float_type(
-                            resolved_type,
+                        let resolved_target = self.canonicalize_alias_type(resolved_type);
+                        if self.is_integer_type(resolved_target) or self.is_float_type(
+                            resolved_target,
                         ) then {
                             return self.infer_type_application_cast(
-                                resolved_type,
+                                resolved_target,
                                 call_args,
                                 name_span,
                                 scope,
                             );
                         };
+                        // A resolved pointer/weak/trait target is the retired
+                        // cast spelling, even when it arrives through an alias
+                        // (`MyPtr(x)`). It must not fall into the construction
+                        // path or the generic message below.
+                        if self.is_pointer_weak_or_trait_cast_target(resolved_target)
+                        then {
+                            self.push_diagnostic_at_span(
+                                "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'",
+                                name_span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
                         // Non-constructible, non-castable types error.
-                        if not self.is_nominal_type(resolved_type) and resolved_type is not .Unknown() then {
+                        if not self.is_nominal_type(resolved_target) and resolved_target is not .Unknown()
+                        then {
                             self.push_diagnostic_at_span(
                                 "Type '\(name)' does not support cast: only numeric and pointer types can be cast",
                                 name_span,

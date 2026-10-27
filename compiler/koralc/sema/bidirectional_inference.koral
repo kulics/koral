@@ -215,30 +215,11 @@ given TypeChecker {
         self,
         type_node TypeNode,
         inner Expr,
+        cast_span SourceSpan,
         scope Scope,
     ) TypedExpr = {
         let target = self.resolve_type_in_scope(type_node, scope);
-        // `?T(expr)` is weak-reference construction (a handle wrap, not a bit
-        // reinterpretation). It lowers to the downgrade intrinsic.
-        if target is .WeakReferenceType(_) or is .MutableWeakReferenceType(_) then {
-            let typed_inner = self.bidirectional_check(inner, .None(), scope);
-            let mutable result_type = target;
-            if not self.enforce_mutable_constraint_for_call(
-                typed_inner.expr_type,
-                "downgrade",
-                expr_span(inner),
-            ) then {
-                result_type = Type.Unknown();
-            };
-            return make_typed_expr(
-                TypedExprKind.IntrinsicCall(
-                    TypedIntrinsic.DowngradeRef(typed_inner, result_type),
-                ),
-                result_type,
-            );
-        };
-        let typed_inner = self.bidirectional_check(inner, .Some(target), scope);
-        return make_typed_expr(TypedExprKind.CastExpr(target, typed_inner), target);
+        return self.lower_as_cast_target(target, inner, cast_span, scope, true);
     };
 
     module_private typed_float_literal(
@@ -288,9 +269,10 @@ given TypeChecker {
                 expected,
                 scope,
             ),
-            .CastExpr(type_node, inner, _) then self.typed_cast_expr(
+            .CastExpr(type_node, inner, cast_span) then self.typed_cast_expr(
                 type_node,
                 inner,
+                cast_span,
                 scope,
             ),
             .LambdaExpr(params, return_type, body, _) then {

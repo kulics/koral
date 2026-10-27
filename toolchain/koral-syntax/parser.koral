@@ -137,11 +137,19 @@ given CstParser {
         };
     };
 
-    /// Whether the token at `raw_offset` (after skipping newlines from `self.pos`)
-    /// is a type head.
-    file_private peek_is_type_head_at(self, raw_offset UInt) Bool = {
+    /// Whether the tokens at `raw_offset` (after skipping newlines from
+    /// `self.pos`) spell a TYPE shape: a type head (`mutable`, `Self`,
+    /// uppercase ident), or a `*` / `?` type prefix in front of one. This is
+    /// how the old cast shape at a prefix `*` / `?` is recognized -- `*T(x)`,
+    /// `?T(x)`, and the bare `*T` / `?T` -- WITHOUT requiring the `(` that no
+    /// longer follows it. A `*` / `?` before a lowercase pointee is not a type
+    /// shape: `**p` / `?*p` stay deref / upgrade chains.
+    file_private peek_is_type_shape_at(self, raw_offset UInt) Bool = {
         let tok = self.peek_at_skip_nl(raw_offset);
-        return self.token_is_type_head(tok);
+        return when tok in {
+            .Star() or .KwWeakref() then self.peek_is_type_shape_at(raw_offset + 1),
+            _ then self.token_is_type_head(tok),
+        };
     };
 
     /// The index just past one type starting at `start_index`, or `None`.
@@ -736,6 +744,14 @@ given CstParser {
         };
         if self.check(.KwWeakref()) then {
             let kw = self.eat();
+            // The legacy `?*T` weak spelling is rejected at the type, where the
+            // compiler rejects it -- not at the lexer, which would also kill
+            // `?*p` in expression position (an upgrade chain).
+            if self.check(.Star()) then {
+                return .Error(
+                    "Parse error: Weak reference syntax is '?T', not legacy '?*T'",
+                );
+            };
             // `?` takes a type and nothing else: `?mutable T` is not a spelling
             // (weak capability is a `mutable` type-parameter constraint plus
             // `?T`, not a mutable weak reference). `mutable` fails as a type.
@@ -1594,7 +1610,7 @@ given CstParser {
     };
 
     file_private parse_multiplicative(self) Result[CstExpr] = {
-        let mutable left = when self.parse_prefix() in {
+        let mutable left = when self.parse_cast() in {
             .Ok(e) then e,
             .Error(e) then {
                 return .Error(e);
@@ -1604,7 +1620,7 @@ given CstParser {
             when self.peek() in {
                 .Star() or .Slash() or .Percent() then {
                     let op = self.eat();
-                    let right = when self.parse_prefix() in {
+                    let right = when self.parse_cast() in {
                         .Ok(e) then e,
                         .Error(e) then {
                             return .Error(e);
@@ -1616,6 +1632,43 @@ given CstParser {
                     break;
                 },
             };
+        };
+        return .Ok(left);
+    };
+
+    // ========================================================================
+    // Cast expressions
+    // ========================================================================
+
+    /// `expr as Type` -- pointer reinterpretation and weak construction,
+    /// left-associative and sitting between the multiplicative level and the
+    /// prefix level (Rust's `as` position):
+    ///
+    ///   `&x as *T`       == `(&x) as *T`
+    ///   `*p as *Int`     == `(*p) as *Int`
+    ///   `p * q as *T`    == `p * (q as *T)`
+    ///   `p as *Int == q` == `(p as *Int) == q`
+    ///
+    /// `as` takes a full `<type>`: `*T`, `*mutable T`, `?T`, `Trait[Int]`,
+    /// an alias. The cast result takes no postfix suffixes -- a method call on
+    /// one takes parentheses, `(self as *T).equals(...)`, and `x as *T.m()`
+    /// leaves `.m()` a stray token.
+    file_private parse_cast(self) Result[CstExpr] = {
+        let mutable left = when self.parse_prefix() in {
+            .Ok(e) then e,
+            .Error(e) then {
+                return .Error(e);
+            },
+        };
+        while self.check(.KwAs()) then {
+            let as_kw = self.eat();
+            let cast_type = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            left = .AsCast(left, as_kw, cast_type);
         };
         return .Ok(left);
     };
@@ -1681,13 +1734,12 @@ given CstParser {
             return .Ok(.BitwiseNot(op, operand));
         };
 
-        // Dereference, or a raw-pointer type application `* T(expr)`.
-        // `*` + type-head starts a pointer type application; `*` + anything
-        // else is deref. A prefixed type in expression position must be applied.
+        // Dereference, or the old raw-pointer cast shape `* [mutable] T(expr)`.
+        // `*` + a type shape is that old shape and is rejected; `*` + anything
+        // else is deref. Pointer casts are written `expr as *T`.
         if self.check(.Star()) then {
-            if self.peek_is_type_head_at(1) then {
-                let cast = self.parse_type_application() or return;
-                return self.parse_postfix_suffixes(cast);
+            if self.peek_is_type_shape_at(1) then {
+                return self.parse_type_application();
             };
             let op = self.eat();
             let operand = when self.parse_prefix() in {
@@ -1699,14 +1751,14 @@ given CstParser {
             return .Ok(.Deref(op, operand));
         };
 
-        // `?T(expr)` is weak-reference construction (type application);
+        // `?T(expr)` used to be weak-reference construction (type application);
         // `?expr` upgrades a weak reference to `Option[T]`.
-        // Disambiguation: `?` + type-head tries type application; `?` + anything
-        // else is the upgrade operator.
+        // Disambiguation: `?` + a type shape is the old construction shape and
+        // is rejected; `?` + anything else is the upgrade operator. Weak
+        // construction is written `expr as ?T`.
         if self.check(.KwWeakref()) then {
-            if self.peek_is_type_head_at(1) then {
-                let cast = self.parse_type_application() or return;
-                return self.parse_postfix_suffixes(cast);
+            if self.peek_is_type_shape_at(1) then {
+                return self.parse_type_application();
             };
             let op = self.eat();
             let operand = when self.parse_prefix() in {
@@ -1741,33 +1793,16 @@ given CstParser {
     // Postfix expressions
     // ========================================================================
 
-    /// `* [mutable] T(expr)` / `?T(expr)` -- a cast or weak construction
-    /// whose target type is written with a prefix, at expression start. The
-    /// spelling matches the type annotation: `* Int(p)`,
-    /// `*mutable T(q)`, `?T(r)`. The prefixed type is the target, and
-    /// the parenthesized operand is a single expression -- a prefixed type is
-    /// a cast target, not a constructor argument list.
+    /// The old prefixed cast / weak-construction spellings at expression start
+    /// -- `* [mutable] T(expr)`, `?T(expr)`, and the bare `*T` / `?T` (any
+    /// prefixed type in expression position). All rejected at parse time, with
+    /// or without the `(`: pointer and weak casts are written `expr as Type`.
+    /// Reached from the prefix `*` / `?` branches when the tokens after the
+    /// prefix spell a type shape.
     file_private parse_type_application(self) Result[CstExpr] = {
-        let cast_type = self.parse_type_node() or return;
-        if not self.check(.LParen()) then {
-            return .Error(
-                "Parse error: expected '(': a prefixed type in expression position must be a cast or weak construction, e.g. '* Int(p)' or '?T(p)'",
-            );
-        };
-        let lp = self.eat();
-        let value = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        if not self.check(.RParen()) then {
-            return .Error(
-                "Parse error: expected ')': a prefixed type is a cast target, not a constructor",
-            );
-        };
-        let rp = self.eat();
-        return .Ok(.TypeCast(lp, cast_type, rp, value));
+        return .Error(
+            "Parse error: pointer and weak casts are written 'expr as Type', not 'Type(expr)'",
+        );
     };
 
     /// The composite `base(Trait).method(...)` /
@@ -1789,7 +1824,7 @@ given CstParser {
         };
         if not self.check(.Dot()) then {
             return .Error(
-                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)' or 'expr as Type', not 'expr(Type)'",
             );
         };
         let dot = self.eat();
@@ -1828,7 +1863,7 @@ given CstParser {
         };
         if not self.check(.LParen()) then {
             return .Error(
-                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)', not 'expr(Type)'",
+                "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)' or 'expr as Type', not 'expr(Type)'",
             );
         };
         let call_lp = self.eat();
