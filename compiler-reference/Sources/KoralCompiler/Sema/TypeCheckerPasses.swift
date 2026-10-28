@@ -1150,7 +1150,7 @@ extension TypeChecker {
     }
   }
 
-  private func isTypeModifierBaseName(_ baseName: String) -> Bool {
+  func isTypeModifierBaseName(_ baseName: String) -> Bool {
     switch baseName {
     case "Ref", "MutRef", "Ptr", "MutPtr", "WeakRef", "MutWeakRef":
       return true
@@ -1638,11 +1638,13 @@ extension TypeChecker {
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
         }
 
-        if let baseOwner = givenGenericBaseOwner(named: baseName) {
-          let isTypeModifier = isTypeModifierBaseName(baseName)
-          if baseOwner.kind == .trait || enforceTypeDeclarationModuleLocality || isTypeModifier {
-            try enforceGivenOwnerLocality(baseOwner, span: span)
-          }
+        if let baseOwner = givenGenericBaseOwner(named: baseName), enforceTypeDeclarationModuleLocality {
+          // Rule 1 is the INHERENT `given T { }` rule. A `given T as Trait`
+          // re-enters this path through the recursion below to register its
+          // methods, with `enforceTypeDeclarationModuleLocality: false`: its
+          // locality was already decided by rule 2, and re-checking rule 1 here
+          // is what rejected `given[T] *T as LocalTrait` for a local trait.
+          try enforceGivenOwnerLocality(baseOwner, span: span)
         }
         for (i, arg) in args.enumerated() {
           guard case .identifier(let argName, _) = arg, argName == typeParams[i].name else {
@@ -1894,8 +1896,10 @@ extension TypeChecker {
       try validateTraitName(traitName)
 
       let selfType: Type
+      let localityBaseName: String?
       if !typeParams.isEmpty {
         let (baseName, args) = try decomposeGenericGivenTypeNode(typeNode)
+        localityBaseName = baseName
         if args.count != typeParams.count {
           throw SemanticError.typeMismatch(
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
@@ -1917,22 +1921,8 @@ extension TypeChecker {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
         }
-
-        // Orphan rule for type modifiers: ref/weakref/ptr are treated like intrinsic types.
-        // Only allowed in std (type owner) OR in the trait's declaring module.
-        let isTypeModifier = isTypeModifierBaseName(baseName)
-        if isTypeModifier {
-          let typeOwner = GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
-          if let traitOwner = givenTraitOwner(named: traitName) {
-            try enforceGivenConformanceLocality(
-              selfType: selfType, traitName: traitName,
-              typeOwner: typeOwner, traitOwner: traitOwner, span: span)
-          } else {
-            // Trait not found or built-in — only std can declare this
-            try enforceGivenOwnerLocality(typeOwner, span: span)
-          }
-        }
       } else {
+        localityBaseName = nil
         // Reject concrete type modifier given declarations before type resolution
         switch typeNode {
         case .reference, .pointer, .weakReference:
@@ -1944,6 +1934,21 @@ extension TypeChecker {
           break
         }
         selfType = try resolveTypeNode(typeNode)
+      }
+
+      // Orphan rule (rule 2) for `given T as Trait`, EVERY self-type shape --
+      // nominal, generic, pointer/ref/weak -- and before conflict detection: a
+      // locality failure is one terminal diagnostic and must not cascade into
+      // a conformance conflict on an already-illegal given.
+      if let typeOwner = givenConformanceTypeOwner(baseName: localityBaseName, selfType: selfType) {
+        if let traitOwner = givenTraitOwner(named: traitName) {
+          try enforceGivenConformanceLocality(
+            selfType: selfType, traitName: traitName,
+            typeOwner: typeOwner, traitOwner: traitOwner, span: span)
+        } else {
+          // Trait not found or built-in — only std can declare this
+          try enforceGivenOwnerLocality(typeOwner, span: span)
+        }
       }
 
       let traitArgTypes: [Type] = try withNewScope {
@@ -3363,21 +3368,23 @@ extension TypeChecker {
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           selfType = modifierSelfType
+          // A type modifier's owner is Std whatever it points at. Without this
+          // the locality check below saw `currentModulePath` as the type module
+          // and every `given[T] *T as ...` looked local.
+          typeModulePath = ["Std"]
         } else if currentScope.lookupGenericStructTemplate(baseName) != nil {
           selfType = genericStructType(template: baseName, args: genericSelfArgs)
+          typeModulePath = currentScope.lookupGenericStructTemplate(baseName).flatMap {
+            context.getModulePath($0.defId)
+          } ?? []
         } else if currentScope.lookupGenericEnumTemplate(baseName) != nil {
           selfType = genericEnumType(template: baseName, args: genericSelfArgs)
+          typeModulePath = currentScope.lookupGenericEnumTemplate(baseName).flatMap {
+            context.getModulePath($0.defId)
+          } ?? []
         } else {
           throw SemanticError.invalidOperation(
             op: "generic given on non-generic type", type1: baseName, type2: "")
-        }
-
-        if let template = currentScope.lookupGenericStructTemplate(baseName) {
-          typeModulePath = context.getModulePath(template.defId) ?? []
-        } else if let template = currentScope.lookupGenericEnumTemplate(baseName) {
-          typeModulePath = context.getModulePath(template.defId) ?? []
-        } else {
-          typeModulePath = currentModulePath
         }
         baseNameForGenericStorage = baseName
       } else {
@@ -3411,19 +3418,10 @@ extension TypeChecker {
 
       let conformanceKey = makeConformanceKey(selfType, traitName, traitArgTypes)
 
-      if explicitConformances.contains(conformanceKey) {
-        let origin = conformanceDeclOrigins[conformanceKey]
-        let originSuffix: String
-        if let origin {
-          originSuffix = " already declared at line \(origin.start.line)"
-        } else {
-          originSuffix = " already declared"
-        }
-        throw SemanticError(.generic(
-          "Conflicting conformance: 'given \(selfType) \(traitName)'\(originSuffix)"
-        ), span: span)
-      }
-
+      // Locality before conflict: a locality failure is one terminal
+      // diagnostic. Reporting the conflict first is what let `given[T] *T as
+      // Eq` print the orphan rule and then a follow-on "Conflicting
+      // conformance" on the same already-illegal given.
       let typeOwner = GivenOwner(
         kind: .type,
         displayName: selfType.description,
@@ -3441,6 +3439,19 @@ extension TypeChecker {
         traitOwner: traitOwner,
         span: span
       )
+
+      if explicitConformances.contains(conformanceKey) {
+        let origin = conformanceDeclOrigins[conformanceKey]
+        let originSuffix: String
+        if let origin {
+          originSuffix = " already declared at line \(origin.start.line)"
+        } else {
+          originSuffix = " already declared"
+        }
+        throw SemanticError(.generic(
+          "Conflicting conformance: 'given \(selfType) \(traitName)'\(originSuffix)"
+        ), span: span)
+      }
 
       // Require explicit conformance for direct parent traits.
       // Parent conformance can be declared in any file/module/order as long as

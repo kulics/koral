@@ -1128,7 +1128,10 @@ given TypeChecker {
                     let resolved_target = if trait_tool_name is .Some(_) or not type_params.is_empty(
                     ) then self.resolve_type_with_bindings(target_type, bindings)
                     else self.resolve_type(target_type);
-                    // Given locality check: target type must be in current module
+                    // Given locality check: target type must be in current
+                    // module (rule 1). Terminal for the declaration: one
+                    // diagnostic, and none of its members are checked on top
+                    // of it.
                     let locality_checker = GivenLocalityChecker.new(
                         self.context(),
                         self.storage.trait_registry,
@@ -1138,6 +1141,12 @@ given TypeChecker {
                     );
                     if locality_checker.check_given_owner_locality(resolved_target) is .Some(msg) then {
                         self.push_diagnostic(msg, span);
+                        self.restore_generic_constraints(generic_constraint_snapshot);
+                        return TypedDecl.GivenDecl(
+                            Type.Unknown(),
+                            List[TypedGivenMember].new(),
+                            span,
+                        );
                     };
                     let mutable typed_members = self.check_given_members_for_type(
                         members,
@@ -1203,6 +1212,42 @@ given TypeChecker {
                         trait_type,
                         bindings,
                     );
+                    // Given conformance locality check (orphan rule), BEFORE
+                    // conflict detection: a locality failure is one terminal
+                    // diagnostic -- no "Conflicting conformance" cascade on an
+                    // already-illegal given, no member checking either.
+                    let locality_checker = GivenLocalityChecker.new(
+                        self.context(),
+                        self.storage.trait_registry,
+                        self.storage.module_path,
+                        self.storage.generic_templates,
+                        self.storage.global_scope,
+                    );
+                    if locality_checker.check_given_conformance_locality(
+                        resolved_target,
+                        trait_name,
+                    ) is .Some(msg) then {
+                        self.push_diagnostic(msg, span);
+                        self.restore_generic_constraints(generic_constraint_snapshot);
+                        return result_decl;
+                    };
+                    // Conflict detection: a second declaration of the same
+                    // (self type, trait) pair points at the first.
+                    let conformance_key = self.trait_conformance_key(
+                        resolved_target,
+                        trait_def_id,
+                        trait_name,
+                        resolved_trait_args,
+                    );
+                    if not self.declare_conformance_origin(
+                        conformance_key,
+                        self.context().type_display_name(resolved_target),
+                        trait_name,
+                        span,
+                    ) then {
+                        self.restore_generic_constraints(generic_constraint_snapshot);
+                        return result_decl;
+                    };
                     self.record_explicit_trait_conformance(
                         resolved_target,
                         trait_def_id,
@@ -1216,20 +1261,6 @@ given TypeChecker {
                         trait_name,
                         resolved_trait_args,
                     );
-                    // Given conformance locality check (orphan rule)
-                    let locality_checker = GivenLocalityChecker.new(
-                        self.context(),
-                        self.storage.trait_registry,
-                        self.storage.module_path,
-                        self.storage.generic_templates,
-                        self.storage.global_scope,
-                    );
-                    if locality_checker.check_given_conformance_locality(
-                        resolved_target,
-                        trait_name,
-                    ) is .Some(msg) then {
-                        self.push_diagnostic(msg, span);
-                    };
                     let mutable typed_members = self.check_given_members_for_type(
                         members,
                         resolved_target,

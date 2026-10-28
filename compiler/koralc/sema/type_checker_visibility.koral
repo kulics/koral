@@ -1080,6 +1080,45 @@ given TypeChecker {
         );
     };
 
+    /// Conflict detection for `given X as T`: a second DECLARATION of the same
+    /// (self type, trait) pair is `Conflicting conformance: 'given X T' already
+    /// declared at line N`, N being the first declaration's line -- the same
+    /// text Swift prints from `declaredConformances`/`explicitConformances`.
+    ///
+    /// Returns false after reporting. The same declaration arrives here once
+    /// per pass and must not conflict with itself, so identity is the stored
+    /// span: re-registering one's own span is not a conflict, a different
+    /// declaration's is. Callers treat false as terminal for the declaration --
+    /// Swift throws before registration and before member checking.
+    module_private declare_conformance_origin(
+        self,
+        key ExplicitTraitConformanceKey,
+        display String,
+        trait_name String,
+        span SourceSpan,
+    ) Bool = {
+        when self.storage.conformance_decl_origins.get(key) in {
+            .Some(previous) then {
+                if self.spans_equal(previous, span) then {
+                    return true;
+                };
+                let mutable msg = StringBuilder.new();
+                msg.push_string("Conflicting conformance: 'given ");
+                msg.push_string(display);
+                msg.push_byte(' ');
+                msg.push_string(trait_name);
+                msg.push_string("' already declared at line ");
+                msg.push_string(previous.start.line.to_string());
+                self.push_diagnostic(msg.to_string(), span);
+                return false;
+            },
+            .None() then {
+                self.storage.conformance_decl_origins.insert(key, span);
+                return true;
+            },
+        };
+    };
+
     module_private is_implicitly_satisfied_trait_requirement(
         self,
         target_type Type,

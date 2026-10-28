@@ -25,7 +25,11 @@ extension TypeChecker {
     if let traitOwner = givenTraitOwner(named: baseName) {
       return traitOwner
     }
-    if baseName == "Ptr" || baseName == "Ref" || baseName == "WeakRef" {
+    if isTypeModifierBaseName(baseName) {
+      // Every type modifier -- `*T`, `*mutable T`, `T ref`, `?T` and their
+      // mutable forms -- is declared in Std whatever it points at. Missing
+      // `MutPtr`/`MutRef`/`MutWeakRef` here is what let `given[T] *mutable T`
+      // slip past rule 1 while `given[T] *T` did not.
       return GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
     }
     if let template = currentScope.lookupGenericStructTemplate(baseName) {
@@ -63,6 +67,34 @@ extension TypeChecker {
     default:
       return nil
     }
+  }
+
+  /// Rule 2's self-type owner for `given Self as Trait`, for every shape of
+  /// self type. Type modifiers are Std's whatever they point at; a nominal
+  /// carries its declaration's module; a primitive has no owner and therefore
+  /// no locality to enforce. Mirrors bootstrap's
+  /// `GivenLocalityChecker.resolve_type_owner`.
+  func givenConformanceTypeOwner(baseName: String?, selfType: Type) -> GivenOwner? {
+    if let baseName, isTypeModifierBaseName(baseName) {
+      return GivenOwner(kind: .type, displayName: baseName, modulePath: ["Std"])
+    }
+    if let baseName {
+      if let template = currentScope.lookupGenericStructTemplate(baseName) {
+        return GivenOwner(
+          kind: .type,
+          displayName: baseName,
+          modulePath: context.getModulePath(template.defId) ?? []
+        )
+      }
+      if let template = currentScope.lookupGenericEnumTemplate(baseName) {
+        return GivenOwner(
+          kind: .type,
+          displayName: baseName,
+          modulePath: context.getModulePath(template.defId) ?? []
+        )
+      }
+    }
+    return givenConcreteTypeInfo(from: selfType)?.owner
   }
 
   func enforceGivenOwnerLocality(_ owner: GivenOwner, span: SourceSpan) throws {

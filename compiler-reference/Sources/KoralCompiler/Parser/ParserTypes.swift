@@ -33,6 +33,14 @@ extension Parser {
     while true {
       if currentToken === .questionMark {
         try match(.questionMark)
+        // `?*T` is the removed weak-of-pointer spelling. A weak referent is a
+        // managed value, never a raw pointer -- koralc rejects this at the same
+        // point with the same text.
+        if currentToken === .multiply {
+          throw ParserError.rejectedConstruct(
+            span: currentSpan,
+            message: "Weak reference syntax is '?T', not legacy '?*T'")
+        }
         prefixes.append(.weakReference)
         continue
       }

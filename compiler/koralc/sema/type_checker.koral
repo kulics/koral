@@ -43,6 +43,12 @@ module_private type mutable TypeCheckerStorage(
     mutable instantiation_requests Set[InstantiationRequest],
     mutable import_graph Option[ImportGraph],
     mutable explicit_trait_conformances Set[ExplicitTraitConformanceKey],
+    /// Where each conformance was FIRST declared, keyed like
+    /// `explicit_trait_conformances`. Conflict detection compares the stored
+    /// span against the visiting declaration's: the same declaration arrives
+    /// once per pass and re-registering its own span is not a conflict, while a
+    /// second declaration of the same (self type, trait) pair is.
+    mutable conformance_decl_origins Dict[ExplicitTraitConformanceKey, SourceSpan],
     mutable generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
     mutable conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
     mutable trait_requirement_in_progress Set[ExplicitTraitConformanceKey],
@@ -272,6 +278,7 @@ given TypeChecker {
             Set[InstantiationRequest].new(),
             Option[ImportGraph].None(),
             Set[ExplicitTraitConformanceKey].new(),
+            Dict[ExplicitTraitConformanceKey, SourceSpan].new(),
             List[GenericTraitConformanceTemplate].new(),
             Dict[MethodOwner, List[GenericTraitConformanceTemplate]].new(),
             Set[ExplicitTraitConformanceKey].new(),
@@ -3740,6 +3747,40 @@ given TypeChecker {
                         trait_type,
                         bindings,
                     );
+                    // Locality (orphan rule) first, then conflict detection --
+                    // the same order `check_decl` uses. Both are terminal here
+                    // too: Swift's signature pass throws before recording the
+                    // conformance and before registering member signatures, so
+                    // an illegal or conflicting given must contribute exactly
+                    // one diagnostic and no registrations.
+                    let locality_checker = GivenLocalityChecker.new(
+                        self.context(),
+                        self.storage.trait_registry,
+                        self.storage.module_path,
+                        self.storage.generic_templates,
+                        self.storage.global_scope,
+                    );
+                    if locality_checker.check_given_conformance_locality(
+                        resolved_target,
+                        trait_name,
+                    ) is .Some(msg) then {
+                        self.push_diagnostic(msg, span);
+                        return;
+                    };
+                    let conformance_key = self.trait_conformance_key(
+                        resolved_target,
+                        trait_def_id,
+                        trait_name,
+                        resolved_trait_args,
+                    );
+                    if not self.declare_conformance_origin(
+                        conformance_key,
+                        self.context().type_display_name(resolved_target),
+                        trait_name,
+                        span,
+                    ) then {
+                        return;
+                    };
                     if self.sema_progress_debug_enabled() then {
                         println(
                             "[sema-pass2-giventrait] target=\(self.context().type_display_name(resolved_target)) step=record-conformance trait=\(trait_name)",

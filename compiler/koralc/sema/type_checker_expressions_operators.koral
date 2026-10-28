@@ -360,12 +360,13 @@ given TypeChecker {
                             trait_name,
                             trait_args,
                         ) then {
+                            // The seed blames the RECEIVER's family twice here:
+                            // `Invalid operation plus between types T and T`,
+                            // whatever the neighbour's type is. The complaint is
+                            // about the missing bound on T, not about the pair.
                             let type_name = self.context().type_display_name(left_t);
-                            let right_type_name = self.context().type_display_name(
-                                right_t,
-                            );
                             self.push_diagnostic(
-                                "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(right_type_name)",
+                                "Invalid operation \(self.arithmetic_operation_name(op)) between types \(type_name) and \(type_name)",
                                 blame_span,
                             );
                             return make_typed_expr(
@@ -390,6 +391,28 @@ given TypeChecker {
                     "operator '\(self.arithmetic_method_name(op))'",
                     blame_span,
                 ) then {
+                    // The seed records a NOMINAL's missing conformance and
+                    // keeps going: it then tries the operator method the
+                    // receiver does have and checks the neighbour against that
+                    // method's operand -- or reports the method as missing.
+                    // Every other refusal (a modifier's missing blanket, an
+                    // unsatisfied bound) is one complaint and stop.
+                    let records_and_continues = self.generic_trait_conformance_status(
+                        left_t,
+                        trait_def_id,
+                        trait_name,
+                        trait_args,
+                    ) is .MissingConformance() and self.type_modifier_inner_type(left_t) is .None();
+                    if records_and_continues then {
+                        return self.arithmetic_operator_method_followon(
+                            typed_left,
+                            left_t,
+                            op,
+                            typed_right,
+                            right_t,
+                            blame_span,
+                        );
+                    };
                     return make_typed_expr(
                         TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
                         Type.Unknown(),
@@ -402,6 +425,24 @@ given TypeChecker {
                     left_t,
                 );
             };
+        };
+        // Pair legality for the numeric/pointer fall-through. The trait
+        // dispatch above owns every non-numeric LEFT; this gate owns what is
+        // left: pointer arithmetic is only `ptr +/- offset`, and a numeric
+        // next to a non-numeric neighbour is not an operator at all. A
+        // partial operand (Unknown / TypeVar) decides nothing.
+        when self.arithmetic_pair_rejection(
+            typed_left,
+            left_t,
+            op,
+            typed_right,
+            right_t,
+            blame_span,
+        ) in {
+            .Some(rejected) then {
+                return rejected;
+            },
+            .None() then {},
         };
         let result_t = when left_t in {
             .Float64Type() then Type.Float64Type(),
@@ -468,6 +509,210 @@ given TypeChecker {
             result_t,
         );
         return result;
+    };
+
+    /// Compound assignment (`x op= v`) combines like the binary operator, but
+    /// the seed checks the VALUE against the TARGET'S type first and stops
+    /// there when they differ: `p += 1` is `Type mismatch: expected *Int, got
+    /// Int` at the statement, not pointer-offset arithmetic. Only a value that
+    /// already has the target's type reaches the operator.
+    module_private combine_compound_arithmetic_operands(
+        self,
+        typed_target TypedExpr,
+        op ArithmeticOperator,
+        typed_value TypedExpr,
+        blame_span SourceSpan,
+    ) TypedExpr = {
+        // A literal neighbour joins the target's integer width through the
+        // expected type at the operand check; whatever is still a bare literal
+        // default displays and compares as that default (`Int`, `Float64`).
+        let target_t = typed_target.expr_type;
+        let value_t = typed_value.expr_type;
+        if not self.same_expr_type(target_t, value_t) and not self.is_unresolved_expr_type(
+            self.concretize_default_literal_type(target_t),
+        ) and not self.is_unresolved_expr_type(self.concretize_default_literal_type(value_t)) and target_t is not .NeverType() and value_t is not .NeverType() then {
+            self.push_diagnostic(
+                "Type mismatch: expected \(self.display_type_name(target_t)), got \(self.display_type_name(value_t))",
+                blame_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.ArithmeticExpr(typed_target, op, typed_value),
+                Type.Unknown(),
+            );
+        };
+        return self.combine_arithmetic_operands(
+            typed_target,
+            op,
+            typed_value,
+            blame_span,
+        );
+    };
+
+    /// The pairs the seed refuses before it builds the node. Legal here:
+    /// numeric x numeric of one type (the join already ran), and
+    /// `pointer +/- offset` where the offset is an UInt or an integer literal
+    /// (which joins UInt). Everything else gets the seed's family for the
+    /// shape -- `Invalid operation ...` or the operator-trait complaint --
+    /// and an error node in place of the arithmetic.
+    module_private arithmetic_pair_rejection(
+        self,
+        typed_left TypedExpr,
+        left_t Type,
+        op ArithmeticOperator,
+        typed_right TypedExpr,
+        right_t Type,
+        blame_span SourceSpan,
+    ) Option[TypedExpr] = {
+        if self.is_unresolved_expr_type(left_t) or self.is_unresolved_expr_type(
+            right_t,
+        ) then {
+            return Option[TypedExpr].None();
+        };
+        if left_t is .NeverType() or right_t is .NeverType() then {
+            return Option[TypedExpr].None();
+        };
+        if self.arithmetic_trait_name(op) is .Some(trait_name) then {
+            let method_name = self.arithmetic_method_name(op);
+            let same_type = self.same_expr_type(left_t, right_t);
+            let left_is_pointer = when left_t in {
+                .MutablePointerType(_) then true,
+                .PointerType(_) then true,
+                _ then false,
+            };
+            if left_is_pointer then {
+                let op_takes_offset = when op in {
+                    .Add() then true,
+                    .Subtract() then true,
+                    _ then false,
+                };
+                if op_takes_offset then {
+                    // `ptr + offset`: the offset is an UInt, or an integer
+                    // literal that joins UInt. `p + 1` is legal; `p + n` for
+                    // an Int `n` is not pointer arithmetic at all.
+                    let offset_fits = self.same_expr_type(
+                        right_t,
+                        Type.UIntType(),
+                    ) or typed_right.expr_kind is .IntegerLiteral(_);
+                    if offset_fits then {
+                        return Option[TypedExpr].None();
+                    };
+                    self.push_diagnostic(
+                        "Invalid operation \(self.arithmetic_operation_name(op)) between types \(self.display_type_name(left_t)) and \(self.display_type_name(right_t))",
+                        blame_span,
+                    );
+                    return Option[TypedExpr].Some(
+                        make_typed_expr(
+                            TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                            Type.Unknown(),
+                        ),
+                    );
+                };
+                // mul / div / rem through a pointer is no operation at all.
+                // The operator family is missing and a pointer has no operator
+                // method to fall back on: the seed reports the conformance and
+                // stops there -- one line, no follow-on.
+                let mut_args = List[Type].new();
+                if same_type then {
+                    mut_args.push(left_t);
+                } else {
+                    mut_args.push(right_t);
+                };
+                self.push_diagnostic(
+                    self.trait_missing_conformance_message(
+                        left_t,
+                        trait_name,
+                        mut_args,
+                        "operator '\(method_name)'",
+                    ),
+                    blame_span,
+                );
+                return Option[TypedExpr].Some(
+                    make_typed_expr(
+                        TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+                        Type.Unknown(),
+                    ),
+                );
+            };
+            let left_is_numeric = self.is_numeric_type(left_t);
+            let right_is_numeric = self.is_numeric_type(right_t);
+            if left_is_numeric and not right_is_numeric then {
+                // The neighbour is not numeric: the pair is not arithmetic.
+                // The seed records the conformance complaint and KEEPS GOING
+                // into the operator method the receiver does have -- the
+                // shared follow-on below.
+                let mut_args = List[Type].new();
+                if same_type then {
+                    mut_args.push(left_t);
+                } else {
+                    mut_args.push(right_t);
+                };
+                self.push_diagnostic(
+                    self.trait_missing_conformance_message(
+                        left_t,
+                        trait_name,
+                        mut_args,
+                        "operator '\(method_name)'",
+                    ),
+                    blame_span,
+                );
+                return Option[TypedExpr].Some(
+                    self.arithmetic_operator_method_followon(
+                        typed_left,
+                        left_t,
+                        op,
+                        typed_right,
+                        right_t,
+                        blame_span,
+                    ),
+                );
+            };
+        };
+        return Option[TypedExpr].None();
+    };
+
+    /// The seed's record-and-continue follow-on. Once the missing conformance
+    /// is on the record, it still tries the operator method the receiver does
+    /// have and checks the neighbour against that method's operand: a fit
+    /// builds the call (the complaint stands alone), a miss adds
+    /// `Type mismatch: expected <param>, got <neighbour>`. No method at all is
+    /// `Member '<m>' not found in type '<receiver>'`. Both complaint lines
+    /// land on the same span the conformance line used.
+    module_private arithmetic_operator_method_followon(
+        self,
+        typed_left TypedExpr,
+        left_t Type,
+        op ArithmeticOperator,
+        typed_right TypedExpr,
+        right_t Type,
+        blame_span SourceSpan,
+    ) TypedExpr = {
+        let method_name = self.arithmetic_method_name(op);
+        let error_node = make_typed_expr(
+            TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
+            Type.Unknown(),
+        );
+        if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
+            let params = self.resolve_method_param_types(left_t, method_name);
+            let expected_t = if params.is_empty() then left_t else params[UInt(0)];
+            if not self.same_expr_type(expected_t, right_t) then {
+                self.push_diagnostic(
+                    "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(right_t))",
+                    blame_span,
+                );
+                return error_node;
+            };
+            return self.build_arithmetic_method_call(
+                typed_left,
+                typed_right,
+                method_name,
+                left_t,
+            );
+        };
+        self.push_diagnostic(
+            "Member '\(method_name)' not found in type '\(self.context().type_display_name(left_t))'",
+            blame_span,
+        );
+        return error_node;
     };
 
     /// The binary arithmetic node for `op`: modular for the Wrapping family,
