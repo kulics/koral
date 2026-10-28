@@ -237,6 +237,27 @@ extension TypeChecker {
       }
       return (.booleanLiteral(value: val), [])
 
+    case .nullLiteral(let span):
+      // A pointer literal pattern joins the SUBJECT's pointer type; any other
+      // subject is the mismatch row with the literal's spelling on the
+      // got-side. Managed-reference wrappers peel to the pointer underneath;
+      // a pointer itself is the value being tested and never peels further.
+      var subject = subjectType
+      switch subject {
+      case .reference(let inner), .mutableReference(let inner),
+           .borrowedReference(let inner), .mutableBorrowedReference(let inner):
+        subject = inner
+      default:
+        break
+      }
+      switch subject {
+      case .pointer, .mutablePointer:
+        return (.nullLiteral(resultType: subject), [])
+      default:
+        throw SemanticError(
+          .typeMismatch(expected: subjectType.description, got: "null"), span: span)
+      }
+
     case .stringLiteral(let value, let span):
       if isStringType(subjectType) {
         return (.stringLiteral(value: value), [])
@@ -839,6 +860,8 @@ extension TypeChecker {
       return patternContainsBindings(inner)
     case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
       return false
+    case .nullLiteral:
+      return false
     }
   }
 
@@ -885,6 +908,8 @@ extension TypeChecker {
     case .notPattern(let pattern):
       collectPatternSymbols(pattern, into: &symbols, seenDefIds: &seenDefIds)
     case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
+      break
+    case .nullLiteral:
       break
     }
   }
@@ -950,6 +975,8 @@ extension TypeChecker {
     case .notPattern(let inner):
       return .notPattern(pattern: canonicalizePatternBindings(inner, canonicalSymbolsByName: canonicalSymbolsByName))
     case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
+      return pattern
+    case .nullLiteral:
       return pattern
     }
   }

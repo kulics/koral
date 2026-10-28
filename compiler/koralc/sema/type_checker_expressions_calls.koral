@@ -318,6 +318,45 @@ given TypeChecker {
         return direct_param_types;
     };
 
+    /// Every type parameter needs a value from the arguments. A binding of a
+    /// parameter to ITSELF learns nothing -- it is what a pointer literal
+    /// joining `*mutable T` leaves behind, the pointee being the parameter
+    /// itself -- so it counts as unbound; the nested case (`outer[T]` calling
+    /// `f[T]` with a `*mutable T` value) keeps the name meaningful and stands.
+    module_private report_unbound_generic_params(
+        self,
+        template GenericFunctionTemplate,
+        bindings Dict[String, Type],
+        callee Expr,
+    ) Bool = {
+        for tp in template.type_parameters then {
+            let bound_ok = when bindings.get(tp.name) in {
+                .None() then false,
+                .Some(bound) then when bound in {
+                    .GenericParameter(bound_name) then {
+                        bound_name != tp.name or self.storage.generic_param_shape_bounds.get(
+                            tp.name,
+                        ) is .Some(_)
+                    },
+                    _ then true,
+                },
+            };
+            if not bound_ok then {
+                if not self.storage.diagnostics.has_error_at(
+                    self.storage.file_path,
+                    expr_span(callee),
+                ) then {
+                    self.push_diagnostic(
+                        "Type mismatch: expected inferred type for \(tp.name), got unknown",
+                        expr_span(callee),
+                    );
+                };
+                return false;
+            };
+        };
+        return true;
+    };
+
     module_private infer_generic_function_bindings(
         self,
         callee Expr,
@@ -371,6 +410,19 @@ given TypeChecker {
                     bindings,
                 );
                 idx += 1;
+            };
+            // Every type parameter needs a value from the arguments. A binding
+            // of a parameter to ITSELF learns nothing -- it is what a pointer
+            // literal joining `*mutable T` leaves behind, the pointee being
+            // the parameter itself -- so it counts as unbound; the nested case
+            // (`outer[T]` calling `f[T]` with a `*mutable T` value) keeps the
+            // name meaningful and stands.
+            if not self.report_unbound_generic_params(
+                template,
+                bindings,
+                callee,
+            ) then {
+                return Option[Dict[String, Type]].None();
             };
         };
 
@@ -449,6 +501,11 @@ given TypeChecker {
                     ) else Option[Dict[String, Type]].Some(inferred_bindings);
                     when bindings in {
                         .Some(resolved_bindings) then {
+                            let _ = self.report_unbound_generic_params(
+                                template,
+                                resolved_bindings,
+                                callee,
+                            );
                             for tp in template.type_parameters then {
                                 if resolved_bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {

@@ -488,47 +488,6 @@ given TypeChecker {
         );
     };
 
-    module_private check_null_ptr_intrinsic(
-        self,
-        intrinsic_type_args List[Type],
-        args List[Expr],
-        expected Option[Type],
-    ) Option[TypedExpr] = {
-        if args.count() != 0 then {
-            return Option[TypedExpr].None();
-        };
-        let mutable elem_type = self.first_type_arg_or_unknown(intrinsic_type_args);
-        if self.is_unresolved_expr_type(elem_type) or self.contains_generic_parameter(
-            elem_type,
-        ) then {
-            when expected in {
-                .Some(expected_type) then when expected_type in {
-                    .PointerType(inner) then {
-                        elem_type = inner;
-                    },
-                    .MutablePointerType(inner) then {
-                        elem_type = inner;
-                    },
-                    _ then {},
-                },
-                .None() then {},
-            };
-        };
-        when elem_type in {
-            .Unknown() then {
-                return Option[TypedExpr].None();
-            },
-            _ then {},
-        };
-        let result_type = Type.MutablePointerType(elem_type);
-        return Option[TypedExpr].Some(
-            make_typed_expr(
-                TypedExprKind.IntrinsicCall(TypedIntrinsic.NullPtr(result_type)),
-                result_type,
-            ),
-        );
-    };
-
     module_private check_spawn_thread_intrinsic(
         self,
         args List[Expr],
@@ -1517,10 +1476,6 @@ given TypeChecker {
             return self.check_alloc_memory_intrinsic(intrinsic_type_args, args, scope);
         };
 
-        if intrinsic_name == "null_ptr" then {
-            return self.check_null_ptr_intrinsic(intrinsic_type_args, args, expected);
-        };
-
         if intrinsic_name == "downgrade" then {
             if args.count() != 1 then {
                 return Option[TypedExpr].None();
@@ -2211,6 +2166,92 @@ given TypeChecker {
         use_bidi Bool,
     ) TypedExpr = {
         let resolved_target = self.canonicalize_alias_type(target);
+
+        // A `null` source is a pointer literal aimed at the cast target. It
+        // joins a pointer target directly, takes the pointer→integer
+        // reinterpretation row (reading as 0) for `Int`/`UInt`, and meets the
+        // weak path's referent check for `?U` -- which reports the REFERENT,
+        // spelled `null` on the got-side. Every other target refuses the cast
+        // the way the rows below do for a `*void` source.
+        when inner in {
+            .NullLiteral(literal_span) then {
+                when resolved_target in {
+                    .Unknown() then {
+                        // The target already reported; a literal that could
+                        // not be aimed is a consequence, not a second mistake.
+                        return self.empty_typed_block(Type.Unknown());
+                    },
+                    .PointerType(_) then {
+                        return make_typed_expr(
+                            TypedExprKind.IntrinsicCall(
+                                TypedIntrinsic.NullPtr(resolved_target),
+                            ),
+                            resolved_target,
+                        );
+                    },
+                    .MutablePointerType(_) then {
+                        return make_typed_expr(
+                            TypedExprKind.IntrinsicCall(
+                                TypedIntrinsic.NullPtr(resolved_target),
+                            ),
+                            resolved_target,
+                        );
+                    },
+                    .WeakReferenceType(referent) or .MutableWeakReferenceType(referent) then {
+                        self.push_diagnostic_at_span(
+                            "Type mismatch: expected \(self.display_type_name(referent)), got null",
+                            literal_span,
+                        );
+                        return self.empty_typed_block(Type.Unknown());
+                    },
+                    .IntType() or .UIntType() then {
+                        let null_source = make_typed_expr(
+                            TypedExprKind.IntrinsicCall(
+                                TypedIntrinsic.NullPtr(Type.PointerType(Type.VoidType())),
+                            ),
+                            Type.PointerType(Type.VoidType()),
+                        );
+                        return make_typed_expr(
+                            TypedExprKind.CastExpr(resolved_target, null_source),
+                            resolved_target,
+                        );
+                    },
+                    _ then {
+                        if self.as_cast_trait_object_target(resolved_target) is .Some(_) then {
+                            self.push_diagnostic_at_span(
+                                "Construction is written 'Type(args)', not 'expr as Type'",
+                                cast_span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
+                        if self.is_integer_type(resolved_target) or self.is_float_type(
+                            resolved_target,
+                        ) then {
+                            self.push_diagnostic_at_span(
+                                "Invalid operation cast between types \(self.display_type_name(Type.PointerType(Type.VoidType()))) and \(self.display_type_name(resolved_target))",
+                                cast_span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
+                        if self.is_nominal_type(resolved_target) and not self.is_string_type(
+                            resolved_target,
+                        ) then {
+                            self.push_diagnostic_at_span(
+                                "Construction is written 'Type(args)', not 'expr as Type'",
+                                cast_span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
+                        self.push_diagnostic_at_span(
+                            "'as' casts to pointer or weak types",
+                            cast_span,
+                        );
+                        return self.empty_typed_block(Type.Unknown());
+                    },
+                }
+            },
+            _ then {},
+        };
 
         // A target that failed to resolve already reported (Swift throws at
         // resolution). Keep the caller's shape and stop the cascade.
@@ -3353,7 +3394,7 @@ given TypeChecker {
                     .None() then Option[Type].None(),
                 },
             };
-            let param_expected = if has_generic_function_bindings then {
+            let raw_param_expected = if has_generic_function_bindings then {
                 when generic_function_template_opt in {
                     .Some(template) then {
                         when self.raw_generic_function_param_type(template, arg_idx) in {
@@ -3377,6 +3418,27 @@ given TypeChecker {
                 }
             } else {
                 fallback_param_expected
+            };
+            // An argument's aim: a bare type parameter is no expectation at
+            // all -- the argument is what infers it -- and an implicit generic
+            // construction infers its type arguments before any expected type
+            // exists, so its arguments must not be aimed at the very parameter
+            // being inferred. Explicit type arguments name the parameter and
+            // aim as usual.
+            let callee_is_implicit_type_ctor = when typed_callee.expr_kind in {
+                .Variable(sym) then sym.kind is .TypeSymbol(),
+                _ then false,
+            };
+            let param_expected = when raw_param_expected in {
+                .Some(pt) then {
+                    let bare_type_param = pt is .GenericParameter(_);
+                    let inferred_construction_param = callee_is_implicit_type_ctor and expected_constructor_param_types.get(
+                        arg_idx,
+                    ) is .Some(_) and self.contains_generic_parameter(pt);
+                    if bare_type_param or inferred_construction_param then Option[Type].None()
+                    else Option[Type].Some(pt)
+                },
+                .None() then Option[Type].None(),
             };
             let typed_arg = when a in {
                 .Identifier(name, span) then self.check_identifier_expr_at(
@@ -3849,6 +3911,7 @@ given TypeChecker {
             .StructureType(def_id) then self.infer_generic_struct_constructor_return_type_for_def_id(
                 def_id,
                 typed_args,
+                expr_span(callee),
             ),
             .GenericStruct(...) then Option[Type].Some(constructor_plan_type),
             _ then self.infer_generic_struct_constructor_return_type(callee, typed_args),
@@ -4777,6 +4840,7 @@ given TypeChecker {
         self,
         template_def_id DefId,
         typed_args List[TypedExpr],
+        call_span SourceSpan,
     ) Option[Type] = {
         let fields = self.context().get_struct_fields(template_def_id) or else {
             return Option[Type].None();
@@ -4801,6 +4865,30 @@ given TypeChecker {
         };
         let mutable resolved_args = List[Type].new();
         for type_param_name in type_parameter_names then {
+            // A binding of a parameter to ITSELF learns nothing -- the
+            // pointee of a joined pointer literal being the parameter itself
+            // -- so it counts as unbound here.
+            let bound_ok = when bindings.get(type_param_name) in {
+                .None() then false,
+                .Some(bound_type) then when bound_type in {
+                    .GenericParameter(bound_name) then bound_name != type_param_name,
+                    _ then true,
+                },
+            };
+            if not bound_ok then {
+                // Every type parameter needs a value from the arguments: an
+                // unbound one is the ordinary missing-inference error.
+                if not self.storage.diagnostics.has_error_at(
+                    self.storage.file_path,
+                    call_span,
+                ) then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected inferred type for \(type_param_name), got unknown",
+                        call_span,
+                    );
+                };
+                return Option[Type].None();
+            };
             when bindings.get(type_param_name) in {
                 .Some(bound_type) then resolved_args.push(bound_type),
                 .None() then {
@@ -4829,6 +4917,7 @@ given TypeChecker {
                 self.infer_generic_struct_constructor_return_type_for_def_id(
                     template_def_id,
                     typed_args,
+                    expr_span(callee),
                 )
             },
             _ then Option[Type].None(),

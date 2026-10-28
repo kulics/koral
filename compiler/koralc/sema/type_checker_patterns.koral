@@ -120,6 +120,11 @@ given TypeChecker {
         return when pattern in {
             .TraitObjectType(_, _) then true,
             .TraitObjectTypeBinding(_, _, _, _) then true,
+            .NullLiteral(_) then {
+                // The pattern tests the POINTER itself; auto-deref would hand
+                // it the pointee instead.
+                true
+            },
             .EnumCase(_, elements, _) then {
                 for element in elements then {
                     if self.pattern_requires_raw_subject(element.pattern) then {
@@ -355,6 +360,35 @@ given TypeChecker {
             );
         };
         return TypedPattern.BoolLiteral(value);
+    };
+
+    /// A pointer literal pattern joins the SUBJECT's pointer type; any other
+    /// subject is the mismatch row with the literal's spelling on the
+    /// got-side. Managed-reference wrappers peel to the pointer underneath; a
+    /// pointer itself is the value being tested and never peels further.
+    module_private lower_null_pointer_pattern(
+        self,
+        subject_type Type,
+        span SourceSpan,
+    ) TypedPattern = {
+        let peeled = when subject_type in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            _ then subject_type,
+        };
+        return when peeled in {
+            .PointerType(_) then TypedPattern.NullLiteral(peeled),
+            .MutablePointerType(_) then TypedPattern.NullLiteral(peeled),
+            _ then {
+                self.push_diagnostic_at_span(
+                    "Type mismatch: expected \(self.display_type_name(subject_type)), got null",
+                    span,
+                );
+                TypedPattern.NullLiteral(Type.Unknown())
+            },
+        };
     };
 
     /// An integer literal pattern only matches an integer subject.
@@ -612,6 +646,10 @@ given TypeChecker {
             },
             .BoolLiteral(value, span) then self.lower_bool_literal_pattern(
                 value,
+                subject_type,
+                span,
+            ),
+            .NullLiteral(span) then self.lower_null_pointer_pattern(
                 subject_type,
                 span,
             ),

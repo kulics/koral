@@ -29,8 +29,6 @@ public let intrinsic deinit_memory[T Any](p *mutable T) Void;
 
 public let intrinsic take_memory[T Any](p *mutable T) T;
 
-public let intrinsic null_ptr[T Any]() *mutable T;
-
 public let intrinsic spawn_thread(out_handle *mutable *mutable UInt8, out_tid *mutable UInt64, f () -> Void, stack_size UInt64) Int32;
 
 public let max[T Ord](a T, b T) T;

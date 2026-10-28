@@ -365,6 +365,7 @@ given Parser {
             .RuneLiteral(_) then true,
             .KwTrue() then true,
             .KwFalse() then true,
+            .KwNull() then true,
             .LParen() then true,
             .LBrace() then true,
             .LBracket() then true,
@@ -1517,8 +1518,8 @@ given Parser {
     /// Mirrors the seed's `parseDefaultValueLiteral` exactly: the expressions it
     /// produces and the errors it raises.
     /// Supported literals: integer, float, bool, string, rune, empty collection
-    /// (`[]`), full-range (`...`). A leading `-` is accepted for numeric
-    /// literals (`x: Int = -1`).
+    /// (`[]`), full-range (`...`), null (`null`). A leading `-` is accepted for
+    /// numeric literals (`x: Int = -1`).
     module_private parse_default_value_literal(self) Result[Expr] = {
         let start_token = self.current();
         let start_span = self.token_span(start_token);
@@ -1537,7 +1538,7 @@ given Parser {
                     return .Error(
                         self.unexpected_token_error_at(
                             "-",
-                            "a literal default value (number, bool, string, rune, [], or range)",
+                            "a literal default value (number, bool, string, rune, [], range, or null)",
                             start_token,
                         ),
                     );
@@ -1569,6 +1570,10 @@ given Parser {
                 self.advance();
                 return .Ok(Expr.BoolLiteral(false, start_span));
             },
+            .KwNull() then {
+                self.advance();
+                return .Ok(Expr.NullLiteral(start_span));
+            },
             .LBracket() then {
                 self.advance();
                 if self.current().kind is .RBracket() then {
@@ -1598,7 +1603,7 @@ given Parser {
                 return .Error(
                     self.unexpected_token_error_at(
                         token_kind_description(start_token),
-                        "a literal default value (number, bool, string, rune, [], or range)",
+                        "a literal default value (number, bool, string, rune, [], range, or null)",
                         start_token,
                     ),
                 );
@@ -2348,7 +2353,10 @@ given Parser {
         };
 
         let name_token = self.current();
-        let name = self.expect_identifier("let statement") or return;
+        // The seed spells this slot "let declaration" in every context (the
+        // `let` keyword names a declaration, statement position or not); the
+        // message must match verbatim.
+        let name = self.expect_identifier("let declaration") or return;
         if not self.is_valid_value_name(name) then {
             return .Error(
                 self.parser_error_at(self.invalid_variable_name_error(name), name_token),

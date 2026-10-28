@@ -1608,6 +1608,23 @@ private final class MIRFunctionBuilder {
         .binary(MIRBinaryOperation(left: subjectOperand, operatorKind: .comparison(op), right: expected, type: .bool)),
         type: .bool
       )
+    case .nullLiteral(let resultType):
+      // `p is null`: compare against a null pointer of the subject's own
+      // pointer type (the pattern joined that type when it was checked).
+      let nullType: Type
+      switch matchedType {
+      case .pointer, .mutablePointer:
+        nullType = matchedType
+      default:
+        nullType = resultType
+      }
+      let subjectOperand = materialize(matchedValue, type: nullType)
+      let nullOperand = materialize(.intrinsic(.nullPtr(resultType: nullType)), type: nullType)
+      let op: ComparisonOperator = negated ? .notEqual : .equal
+      return materialize(
+        .binary(MIRBinaryOperation(left: subjectOperand, operatorKind: .comparison(op), right: nullOperand, type: .bool)),
+        type: .bool
+      )
     case .integerLiteral(let value):
       let comparisonSubject: MIROperand
       let comparisonType: Type
@@ -2543,6 +2560,18 @@ private final class MIRFunctionBuilder {
       return traitObjectPatternInfo(subjectType: matchedType, targetType: targetType) != nil
     case .booleanLiteral:
       return matchedType == .bool
+    case .nullLiteral(let resultType):
+      switch matchedType {
+      case .pointer, .mutablePointer:
+        return true
+      default:
+        switch resultType {
+        case .pointer, .mutablePointer:
+          return true
+        default:
+          return false
+        }
+      }
     case .stringLiteral:
       return isStringPatternType(matchedType)
     case .integerLiteral:
@@ -2888,7 +2917,7 @@ private final class MIRFunctionBuilder {
         )
         assignPatternBindingLocals(pattern: element, subjectPlace: elementPlace, subjectType: ops.elementType)
       }
-    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType, .restPattern:
+    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .comparisonPattern, .notPattern, .traitObjectType, .restPattern, .nullLiteral:
       break
     }
   }

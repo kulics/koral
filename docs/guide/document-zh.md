@@ -927,6 +927,7 @@ type Config(
 | Rune | `'A'` |
 | 空集合 | `[]`（List、Set 或 Dict，由类型上下文推断） |
 | 空范围 | `...`（解析为 `Range[T].Full()`） |
+| 空指针 | `null`（加入 `*T` / `*mutable T`） |
 
 默认值类型必须与参数类型匹配。例如 `name: String = 42` 会报错。
 
@@ -2906,6 +2907,25 @@ raw pointer 是面向 FFI 与系统编程的低层内存访问：
 - `*T` —— 只读指针。支持 `*expr` 解引用读取，但**不**支持 `*expr` 赋值或 `p[i]` 赋值。
 - `*mutable T` —— 可变指针。支持 `*expr` 解引用读取、`*expr = value` 赋值、`p[i]` 读取与 `p[i] = value` 赋值。
 - `*mutable T` 可隐式转换为 `*T`。反向不允许。
+
+空指针是字面量 `null`。它加入期望类型为 `*T` 或 `*mutable T` 的位置——元素类型任意，
+包括类型参数——并可与指针做 `==` / `!=` 比较：
+
+```koral
+let p *Int = null;
+let m *mutable Int = null;
+if p == null then { ... };
+if p != null then { *p = 42; };
+```
+
+`null` 也可以作为字面量模式匹配——`p is null`、`p is not null`，或 `when` 分支
+`null then …`（字面量模式本身不穷尽，`when` 仍需兜底分支）——并可填充指针类型的
+默认值（`let f(p: *Int = null) Int = …`、`type Node(p: *Int = null)`）。
+在 `as` 下，`null as UInt` 是零地址；`null as *Int` / `null as *mutable T`
+把空指针转成对应指针类型，而 `null as ?Box` 报错——弱句柄没有空拼写。
+没有指针类型可加入的 `null` 报 `Cannot infer a pointer type for 'null': add a
+type annotation`；期望类型不是指针时报 `Type mismatch: expected <T>, got null`。
+`null` 是硬关键字（与 `true` / `false` 同级），不能作为标识符重新绑定。
 
 指针重解释写作 `expr as Type`。`*mutable T` 可以直接看作 `*T`（`p as *T`），
 指针也可以一步换元素类型重读（`p as *UInt`），指针与整数地址双向互通

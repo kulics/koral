@@ -930,9 +930,9 @@ given CstParser {
     // Generic parameters: [T Any, U Eq]
     // ========================================================================
 
-    /// `<default-value-literal>`: number, bool, string, rune, `[]`, or a bare
-    /// range. A leading `-` is accepted for numeric literals (`x: Int = -1`).
-    /// Never an expression -- `1 + 2` is not a default.
+    /// `<default-value-literal>`: number, bool, string, rune, `[]`, a bare
+    /// range, or `null`. A leading `-` is accepted for numeric literals
+    /// (`x: Int = -1`). Never an expression -- `1 + 2` is not a default.
     ///
     /// Rune literals scan as `IntLit` tokens carrying their quoted spelling
     /// (see `scan_char_literal`), so the literal case already covers them.
@@ -959,7 +959,7 @@ given CstParser {
                 },
                 _ then {
                     return .Error(
-                        "Parse error: expected a literal default value (number, bool, string, rune, [], or range)",
+                        "Parse error: expected a literal default value (number, bool, string, rune, [], range, or null)",
                     );
                 },
             };
@@ -971,12 +971,12 @@ given CstParser {
             };
             when self.peek() in {
                 .IntLit(_) or .FloatLit(_) or .StrLit(_) or .BoolTrue() or .BoolFalse()
-                    or .Ellipsis() then {
+                    or .NullLit() or .Ellipsis() then {
                     value_tokens.push(self.eat());
                 },
                 _ then {
                     return .Error(
-                        "Parse error: expected a literal default value (number, bool, string, rune, [], or range)",
+                        "Parse error: expected a literal default value (number, bool, string, rune, [], range, or null)",
                     );
                 },
             };
@@ -1588,7 +1588,7 @@ given CstParser {
     file_private can_start_range_bound(self) Bool = when self.peek() in {
         .KwIf() or .KwWhile() or .KwWhen() or .KwFor() then true,
         .Minus() or .Tilde() or .Amp() or .Star() then true,
-        .Ident(_) or .KwSelf() or .KwSelfType() or .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() then true,
+        .Ident(_) or .KwSelf() or .KwSelfType() or .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() or .NullLit() then true,
         .LBrace() or .LParen() or .LBracket() or .Dot() then true,
         _ then false,
     };
@@ -2220,6 +2220,9 @@ given CstParser {
             },
             .BoolTrue() or .BoolFalse() then {
                 return .Ok(.BoolLit(self.eat()));
+            },
+            .NullLit() then {
+                return .Ok(.NullLit(self.eat()));
             },
             .KwSelf() then {
                 return .Ok(.SelfExpr(self.eat()));
@@ -3116,6 +3119,9 @@ given CstParser {
             },
             .BoolTrue() or .BoolFalse() then {
                 return .Ok(.PatBoolLit(self.eat()));
+            },
+            .NullLit() then {
+                return .Ok(.PatNullLit(self.eat()));
             },
             _ then {},
         };

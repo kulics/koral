@@ -220,7 +220,7 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
   // Literals, the empty literal, generic instantiations and type references
   // carry no expression that could name `self`.
   case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral,
-       .booleanLiteral, .emptyLiteral, .genericInstantiation, .typeReference:
+       .booleanLiteral, .nullLiteral, .emptyLiteral, .genericInstantiation, .typeReference:
     return nil
   }
 }

@@ -104,6 +104,12 @@ given TypeChecker {
         return e is .IntegerLiteral(...);
     };
 
+    /// Whether the expression is a `null` operand -- the pointer literal that
+    /// aims at the other operand's type.
+    module_private is_null_literal_operand(self, e Expr) Bool = {
+        return e is .NullLiteral(...);
+    };
+
     /// One operand of an arithmetic expression. `expected` flows into nested
     /// arithmetic/bitwise operands and the default path: the caller passes the
     /// enclosing expected for the left operand and the left operand's type for
@@ -188,12 +194,51 @@ given TypeChecker {
         // other operand's integer width in either position, so the neighbour
         // types first and the literal is checked against that width instead of
         // against its Int default before the two ever meet.
+        let left_is_null = self.is_null_literal_operand(left);
+        let right_is_null = self.is_null_literal_operand(right);
         let leading_literal_join = self.is_integer_literal_operand(left) and not self.is_integer_literal_operand(
             right,
         );
         let mutable initial_typed_left = self.empty_typed_block(Type.Unknown());
         let mutable initial_typed_right = self.empty_typed_block(Type.Unknown());
-        if leading_literal_join then {
+        if left_is_null != right_is_null then {
+            // A null literal is aimed at the other operand's type: a pointer
+            // joins it; a non-pointer is the mismatch row with `null` on the
+            // got-side. With no other operand to aim at (`null + null`) it
+            // stays unaimable.
+            let literal = if left_is_null then left else right;
+            let other = if left_is_null then right else left;
+            let typed_other = self.check_arithmetic_operand_ref(
+                other,
+                Option[Type].None(),
+                scope,
+            );
+            let typed_literal = self.check_arithmetic_operand_ref(
+                literal,
+                Option[Type].Some(typed_other.expr_type),
+                scope,
+            );
+            if left_is_null then {
+                initial_typed_left = typed_literal;
+                initial_typed_right = typed_other;
+            } else {
+                initial_typed_left = typed_other;
+                initial_typed_right = typed_literal;
+            };
+        } else if left_is_null then {
+            // Two null literals: neither has an operand to aim at, so neither
+            // gets an expected type -- both report as unconstrained.
+            initial_typed_left = self.check_arithmetic_operand_ref(
+                left,
+                Option[Type].None(),
+                scope,
+            );
+            initial_typed_right = self.check_arithmetic_operand_ref(
+                right,
+                Option[Type].None(),
+                scope,
+            );
+        } else if leading_literal_join then {
             initial_typed_right = self.check_arithmetic_operand_ref(
                 right,
                 Option[Type].None(),
@@ -767,19 +812,42 @@ given TypeChecker {
         // Join first, then range-check: a leading integer literal joins the
         // next operand's integer width, so that neighbour types first and the
         // literal is checked against that width instead of against its Int
-        // default before the two ever meet.
+        // default before the two ever meet. A null literal is aimed at the
+        // neighbour's type the same way -- a pointer joins it, a non-pointer
+        // is the mismatch row with `null` on the got-side; two `null`s have no
+        // operand to aim at and both stay unconstrained.
         let second_operand = if operands.count() > UInt(1) then Option[Expr].Some(operands[UInt(1)]) else Option[Expr].None();
-        let mutable pre_typed_second = Option[TypedExpr].None();
-        if self.is_integer_literal_operand(first_operand) and second_operand is .Some(second) and not self.is_integer_literal_operand(second) then {
-            pre_typed_second = Option[TypedExpr].Some(self.check_operand_expr_ref(second, Option[Type].None(), scope));
+        let first_is_null = self.is_null_literal_operand(first_operand);
+        let second_is_null = when second_operand in {
+            .Some(second) then self.is_null_literal_operand(second),
+            .None() then false,
         };
-        let mutable current = if pre_typed_second is .Some(typed_second) and self.is_integer_type(
-            typed_second.expr_type,
-        ) then self.check_operand_expr_ref(
-            first_operand,
-            Option[Type].Some(typed_second.expr_type),
-            scope,
-        ) else self.check_operand_expr_ref(first_operand, expected, scope);
+        let mutable pre_typed_second = Option[TypedExpr].None();
+        let mutable current = self.empty_typed_block(Type.Unknown());
+        if first_is_null then {
+            let mutable aim_type = Option[Type].None();
+            if second_operand is .Some(second) and not second_is_null then {
+                let typed_second = self.check_operand_expr_ref(
+                    second,
+                    Option[Type].None(),
+                    scope,
+                );
+                pre_typed_second = Option[TypedExpr].Some(typed_second);
+                aim_type = Option[Type].Some(typed_second.expr_type);
+            };
+            current = self.check_operand_expr_ref(first_operand, aim_type, scope);
+        } else {
+            if self.is_integer_literal_operand(first_operand) and second_operand is .Some(second) and not self.is_integer_literal_operand(second) then {
+                pre_typed_second = Option[TypedExpr].Some(self.check_operand_expr_ref(second, Option[Type].None(), scope));
+            };
+            current = if pre_typed_second is .Some(typed_second) and self.is_integer_type(
+                typed_second.expr_type,
+            ) then self.check_operand_expr_ref(
+                first_operand,
+                Option[Type].Some(typed_second.expr_type),
+                scope,
+            ) else self.check_operand_expr_ref(first_operand, expected, scope);
+        };
 
         let mutable i UInt = 1;
         while i < operands.count() then {
@@ -789,6 +857,11 @@ given TypeChecker {
                 .Some(current.expr_type),
                 scope,
             );
+            // An operand that already failed has no type to compute with: stay
+            // silent rather than pile a second complaint on the first.
+            if current.expr_type is .Unknown() or typed_right.expr_type is .Unknown() then {
+                return self.empty_typed_block(Type.Unknown());
+            };
             let op_i = ops[i - UInt(1)];
             // A bitwise operation is defined on one integer width at a time:
             // both sides must be the same integer scalar type -- either family.
@@ -1686,6 +1759,7 @@ given TypeChecker {
 
     module_private is_null_ptr_call_expr(self, expr Expr) Bool = {
         return when expr in {
+            .NullLiteral(_) then true,
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then name == "null_ptr" and args.is_empty(),
                 _ then false,
@@ -1827,6 +1901,11 @@ given TypeChecker {
         typed_right TypedExpr,
         span SourceSpan,
     ) TypedExpr = {
+        // An operand that already failed has no type to compare: stay silent
+        // rather than pile a second complaint on the first.
+        if typed_left.expr_type is .Unknown() or typed_right.expr_type is .Unknown() then {
+            return self.empty_typed_block(Type.Unknown());
+        };
         let mutable same_type = self.same_expr_type(
             typed_left.expr_type,
             typed_right.expr_type,
@@ -1914,11 +1993,28 @@ given TypeChecker {
     ) TypedExpr = {
         let mutable right_source = (operands[index + UInt(1)]);
         let right_source_ref = right_source;
+        // A literal operand joins the width of the value it is compared
+        // against. A null literal joins the left side's POINTER type the same
+        // way; without a pointer there it stays unaimable.
+        let right_expected = when pre_typed_right in {
+            .Some(_) then Option[Type].None(),
+            .None() then {
+                if self.is_null_literal_operand(right_source_ref) then {
+                    when left_expr.expr_type in {
+                        .PointerType(_) then Option[Type].Some(left_expr.expr_type),
+                        .MutablePointerType(_) then Option[Type].Some(left_expr.expr_type),
+                        _ then Option[Type].None(),
+                    }
+                } else {
+                    Option[Type].Some(left_expr.expr_type)
+                }
+            },
+        };
         let raw_right = when pre_typed_right in {
             .Some(typed_right) then typed_right,
             .None() then self.check_expr_scoped_ref(
                 right_source_ref,
-                .Some(left_expr.expr_type),
+                right_expected,
                 scope,
             ),
         };
@@ -2052,12 +2148,39 @@ given TypeChecker {
         // other operand's integer width, so the neighbour types first and the
         // literal is checked against that width instead of against its Int
         // default before the two ever meet.
+        let left_is_null = self.is_null_literal_operand(left);
+        let right_is_null = self.is_null_literal_operand(right);
         let leading_literal_join = self.is_integer_literal_operand(left) and not self.is_integer_literal_operand(
             right,
         );
         let mutable typed_left = self.empty_typed_block(Type.Unknown());
         let mutable typed_right = self.empty_typed_block(Type.Unknown());
-        if leading_literal_join then {
+        if left_is_null != right_is_null then {
+            // A null literal is aimed at the other operand's type: a pointer
+            // joins it; a non-pointer is the mismatch row with `null` on the
+            // got-side. With no other operand to aim at (`null == null`) it
+            // stays unaimable.
+            let literal = if left_is_null then left else right;
+            let other = if left_is_null then right else left;
+            let typed_other = self.check_expr_core_ref(other, .None(), scope);
+            let typed_literal = self.check_expr_core_ref(
+                literal,
+                Option[Type].Some(typed_other.expr_type),
+                scope,
+            );
+            if left_is_null then {
+                typed_left = typed_literal;
+                typed_right = typed_other;
+            } else {
+                typed_left = typed_other;
+                typed_right = typed_literal;
+            };
+        } else if left_is_null then {
+            // Two null literals: neither has an operand to aim at, so neither
+            // gets an expected type -- both report as unconstrained.
+            typed_left = self.check_expr_core_ref(left, .None(), scope);
+            typed_right = self.check_expr_core_ref(right, .None(), scope);
+        } else if leading_literal_join then {
             typed_right = self.check_expr_core_ref(right, .None(), scope);
             let left_expected = if self.is_integer_type(typed_right.expr_type) then Option[Type].Some(
                 typed_right.expr_type,
@@ -2070,6 +2193,11 @@ given TypeChecker {
                 .Some(typed_left.expr_type),
                 scope,
             );
+        };
+        // An operand that already failed has no type to compare: stay silent
+        // rather than pile a second complaint on the first.
+        if typed_left.expr_type is .Unknown() or typed_right.expr_type is .Unknown() then {
+            return self.empty_typed_block(Type.Unknown());
         };
         let normalized = self.normalize_comparison_operands(
             typed_left,

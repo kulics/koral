@@ -215,7 +215,7 @@ extension TypeChecker {
     captures: inout [CapturedVariable]
   ) throws {
     switch expr {
-    case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .booleanLiteral, .genericInstantiation,
+    case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .booleanLiteral, .nullLiteral, .genericInstantiation,
          .typeReference:
       return
     case .interpolatedString(let parts, _):
@@ -498,7 +498,7 @@ extension TypeChecker {
       collectPatternBindingNames(right, into: &names)
     case .notPattern(let inner, _):
       collectPatternBindingNames(inner, into: &names)
-    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern:
+    case .booleanLiteral, .integerLiteral, .negativeIntegerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .wildcard, .comparisonPattern, .traitObjectType, .restPattern, .nullLiteral:
       break
     }
   }

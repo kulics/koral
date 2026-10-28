@@ -958,6 +958,7 @@ Supported default value literals:
 | Rune | `'A'` |
 | Empty collection | `[]` (List, Set, or Dict, inferred from type context) |
 | Empty range | `...` (resolves to `Range[T].Full()`) |
+| Null pointer | `null` (joins `*T` / `*mutable T`) |
 
 The default value type must match the parameter type. For example, `name: String = 42` is an error.
 
@@ -3026,6 +3027,29 @@ Raw pointers are low-level memory access for FFI and system programming:
 - `*T` — read-only pointer. Supports `*expr` dereference read but NOT `*expr` assignment or `p[i]` assignment.
 - `*mutable T` — mutable pointer. Supports `*expr` dereference read, `*expr = value` assignment, `p[i]` read, and `p[i] = value` assignment.
 - `*mutable T` implicitly converts to `*T`. The reverse is not allowed.
+
+The null pointer is the literal `null`. It joins an expected `*T` or
+`*mutable T` — any pointee, including type parameters — and compares with
+`==` / `!=`:
+
+```koral
+let p *Int = null;
+let m *mutable Int = null;
+if p == null then { ... };
+if p != null then { *p = 42; };
+```
+
+`null` also matches as a literal pattern — `p is null`, `p is not null`, or a
+`when` arm `null then …` (literal patterns are not exhaustive alone, so a
+`when` over them still needs a catch-all) — and it fills pointer-typed
+defaults (`let f(p: *Int = null) Int = …`, `type Node(p: *Int = null)`).
+Through `as`, `null as UInt` is the zero address; `null as *Int` /
+`null as *mutable T` cast the null pointer to those pointer types, while
+`null as ?Box` is an error — a weak handle has no null spelling. A `null`
+with no pointer type to join reports `Cannot infer a pointer type for 'null':
+add a type annotation`; a non-pointer expected type reports `Type mismatch:
+expected <T>, got null`. `null` is a hard keyword (like `true` / `false`) and
+cannot be rebound as an identifier.
 
 Pointer reinterpretation is written `expr as Type`. A `*mutable T` reads as
 its `*T` view (`p as *T`), a pointer may be re-read through a different

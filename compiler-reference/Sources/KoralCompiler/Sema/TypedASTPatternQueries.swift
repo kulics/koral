@@ -32,7 +32,8 @@ extension TypedPattern {
          .stringLiteral,
          .comparisonPattern,
          .notPattern,
-         .enumCase:
+         .enumCase,
+         .nullLiteral:
       return false
     }
   }
@@ -66,7 +67,8 @@ extension TypedPattern {
          .floatLiteral,
          .stringLiteral,
          .comparisonPattern,
-         .restPattern:
+         .restPattern,
+         .nullLiteral:
       return false
     }
   }
@@ -94,7 +96,8 @@ extension TypedPattern {
          .comparisonPattern,
          .andPattern,
          .orPattern,
-         .notPattern:
+         .notPattern,
+         .nullLiteral:
       return false
     }
   }
@@ -147,7 +150,8 @@ extension TypedPattern {
          .stringLiteral,
          .traitObjectType,
          .comparisonPattern,
-         .restPattern:
+         .restPattern,
+         .nullLiteral:
       break
     }
   }

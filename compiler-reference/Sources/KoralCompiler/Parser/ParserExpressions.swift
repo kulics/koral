@@ -1370,6 +1370,9 @@ extension Parser {
     case .bool(let value):
       try match(.bool(value))
       return .booleanLiteral(value, span: startSpan)
+    case .nullLiteral:
+      try match(.nullLiteral)
+      return .nullLiteral(span: startSpan)
     case .leftBrace:
       return try blockExpression()
     case .leftParen:

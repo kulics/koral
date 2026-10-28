@@ -1625,6 +1625,8 @@ extension Monomorphizer {
         switch pattern {
         case .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .wildcard:
             return pattern
+        case .nullLiteral(let resultType):
+            return .nullLiteral(resultType: resolveParameterizedType(resultType))
         case .weakBinding(let symbol):
             let newSymbol = copySymbolPreservingDefId(
                 symbol,

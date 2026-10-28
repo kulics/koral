@@ -578,6 +578,10 @@ public indirect enum ExpressionNode {
   case runeLiteral(String, span: SourceSpan)     // Rune/byte literal, e.g.: 'A', '\n'
   case interpolatedString(parts: [InterpolatedPart], span: SourceSpan)
   case booleanLiteral(Bool, span: SourceSpan)
+  /// Null pointer literal `null`. A pointer literal: it JOINS the expected
+  /// pointer type (`*T` / `*mutable T`, any pointee) and has no type of its
+  /// own -- an unconstrained `null` is an inference error.
+  case nullLiteral(span: SourceSpan)
   /// `expr as Type` -- the reinterpretation cast. The resolved target decides
   /// the meaning: pointer reinterpretation, weak construction, or trait-object
   /// upcast. A `Type(args)` call is left as `.call`; the type checker turns it
@@ -753,6 +757,9 @@ public indirect enum ExpressionNode {
 
 public indirect enum PatternNode: CustomStringConvertible {
   case booleanLiteral(value: Bool, span: SourceSpan)
+  /// Null pointer literal pattern `null`: matches a null pointer. The pattern
+  /// joins the subject's pointer type.
+  case nullLiteral(span: SourceSpan)
   case integerLiteral(value: String, span: SourceSpan)  // Store as string
   /// Negative integer literal pattern for matching negative integers (e.g., -5)
   case negativeIntegerLiteral(value: String, span: SourceSpan)
@@ -804,6 +811,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   public var description: String {
     switch self {
     case .booleanLiteral(let value, _): return "\(value)"
+    case .nullLiteral: return "null"
     case .integerLiteral(let value, _):
       return "\(value)"
     case .negativeIntegerLiteral(let value, _):
@@ -876,6 +884,7 @@ public indirect enum PatternNode: CustomStringConvertible {
   public var span: SourceSpan {
     switch self {
     case .booleanLiteral(_, let span): return span
+    case .nullLiteral(let span): return span
     case .integerLiteral(_, let span): return span
     case .negativeIntegerLiteral(_, let span): return span
     case .floatLiteral(_, let span): return span
@@ -926,6 +935,8 @@ extension ExpressionNode {
     case .runeLiteral(_, let span):
       return span
     case .booleanLiteral(_, let span):
+      return span
+    case .nullLiteral(let span):
       return span
     case .identifier(_, let span):
       return span

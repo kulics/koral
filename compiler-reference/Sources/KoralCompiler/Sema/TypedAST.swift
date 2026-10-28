@@ -389,6 +389,10 @@ public indirect enum TypedIntrinsic {
 }
 public indirect enum TypedPattern: CustomStringConvertible {
   case booleanLiteral(value: Bool)
+  /// Null pointer literal pattern `null`: compared against the subject with
+  /// the subject's own pointer type. That type is carried here so the MIR
+  /// lowerer emits the `nullPtr` intrinsic at the joined flavor/pointee.
+  case nullLiteral(resultType: Type)
   case integerLiteral(value: String)  // Store as string to support arbitrary precision
   /// Float literal pattern; the spelling is kept and the value takes the
   /// subject's width (`1.1` against `Float32` is `Float32(1.1)`).
@@ -433,6 +437,7 @@ public indirect enum TypedPattern: CustomStringConvertible {
   public var description: String {
     switch self {
     case .booleanLiteral(let v): return "\(v)"
+    case .nullLiteral: return "null"
     case .integerLiteral(let v): return "\(v)"
     case .floatLiteral(let v): return "\(v)"
     case .stringLiteral(let v): return "\"\(v)\""

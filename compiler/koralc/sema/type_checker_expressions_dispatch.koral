@@ -3265,6 +3265,56 @@ given TypeChecker {
         };
     };
 
+    /// `null` -- a pointer literal. It has no type of its own: it JOINS the
+    /// expected pointer type (`*T` / `*mutable T`, any pointee including a type
+    /// parameter). With no expected type it cannot be aimed, and with a
+    /// non-pointer expected type it is the ordinary mismatch row with the
+    /// literal's spelling as the got-side. It lowers to the `nullPtr` typed
+    /// intrinsic -- the same machinery `null_ptr()` used.
+    module_private lower_null_literal(
+        self,
+        expected Option[Type],
+        span SourceSpan,
+    ) TypedExpr = {
+        return when expected in {
+            .None() then {
+                self.push_diagnostic_at_span(
+                    "Cannot infer a pointer type for 'null': add a type annotation",
+                    span,
+                );
+                self.empty_typed_block(Type.Unknown())
+            },
+            .Some(expected_type) then {
+                // An already-failed expected type disagrees with nothing: stay
+                // silent.
+                if expected_type is .Unknown() then {
+                    return self.empty_typed_block(Type.Unknown());
+                };
+                when expected_type in {
+                    .PointerType(_) then make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.NullPtr(expected_type),
+                        ),
+                        expected_type,
+                    ),
+                    .MutablePointerType(_) then make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.NullPtr(expected_type),
+                        ),
+                        expected_type,
+                    ),
+                    _ then {
+                        self.push_diagnostic_at_span(
+                            "Type mismatch: expected \(self.display_type_name(expected_type)), got null",
+                            span,
+                        );
+                        self.empty_typed_block(Type.Unknown())
+                    },
+                }
+            },
+        };
+    };
+
     module_private check_literal_pattern_expr_ref(
         self,
         expr Expr,
@@ -3332,6 +3382,7 @@ given TypeChecker {
                 TypedExprKind.BoolLiteral(value),
                 Type.BoolType(),
             ),
+            .NullLiteral(null_span) then self.lower_null_literal(expected, null_span),
             .InterpolatedString(parts, span) then {
                 let _ = span;
                 self.lower_interpolated_string(parts, scope)
@@ -4089,6 +4140,11 @@ given TypeChecker {
                 expected,
                 scope,
             ),
+            .NullLiteral(...) then self.check_literal_pattern_expr_ref(
+                expr,
+                expected,
+                scope,
+            ),
             .InterpolatedString(_, _) then self.check_literal_pattern_expr_ref(
                 expr,
                 expected,
@@ -4150,6 +4206,7 @@ given TypeChecker {
             .StringLiteral(...) then self.check_basic_expr_ref(expr, expected, scope),
             .RuneLiteral(...) then self.check_basic_expr_ref(expr, expected, scope),
             .BoolLiteral(...) then self.check_basic_expr_ref(expr, expected, scope),
+            .NullLiteral(...) then self.check_basic_expr_ref(expr, expected, scope),
             .InterpolatedString(_, _) then self.check_basic_expr_ref(
                 expr,
                 expected,

@@ -17,6 +17,7 @@ extension TypeChecker {
          .stringLiteral,
          .runeLiteral,
          .booleanLiteral,
+         .nullLiteral,
          .emptyLiteral,
          .identifier,
          .genericInstantiation,
@@ -220,7 +221,10 @@ extension TypeChecker {
       let typedSubject = try inferTypedExpression(subject)
       var subjectType = typedSubject.type
       try rejectWeakPatternSubject(subjectType, span: whenSpan)
-      if let inner = dereferenceTargetType(of: subjectType) {
+      // A null pattern tests the POINTER itself -- mirror the when-expression
+      // path and keep the raw subject whenever a case needs it.
+      if !cases.contains(where: { untypedPatternRequiresRawSubject($0.pattern) }),
+         let inner = dereferenceTargetType(of: subjectType) {
         subjectType = inner
       }
 

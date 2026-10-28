@@ -122,6 +122,18 @@ extension TypeChecker {
           if existing != type {
             throw SemanticError.typeMismatch(expected: existing.description, got: type.description)
           }
+        } else if case .genericParameter(let boundName) = type, boundName == name,
+                  case .genericParameter = currentScope.lookupType(name) {
+          // A binding of the parameter to the name's ENCLOSING generic of the
+          // same spelling: the nested-generic case (`outer[T]` calling `f[T]`
+          // with a `*mutable T` value). It is kept -- the monomorphizer
+          // substitutes the outer parameter by name.
+          inferred[name] = type
+        } else if case .genericParameter(let boundName) = type, boundName == name {
+          // A binding of the parameter to ITSELF learns nothing: it is what a
+          // pointer literal joining `*mutable T` leaves behind, the pointee
+          // being the parameter itself. Leave it unbound so the call reports
+          // the ordinary missing-inference error.
         } else {
           inferred[name] = type
         }

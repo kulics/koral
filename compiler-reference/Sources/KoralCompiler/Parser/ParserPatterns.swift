@@ -254,6 +254,12 @@ extension Parser {
       return .booleanLiteral(value: v, span: startSpan)
     }
 
+    // Null pointer literal pattern
+    if currentToken === .nullLiteral {
+      try match(.nullLiteral)
+      return .nullLiteral(span: startSpan)
+    }
+
     // Identifier pattern (wildcard, variable binding, or struct destructuring)
     if case .identifier(let name) = currentToken {
       if name == "_" {

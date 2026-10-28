@@ -801,6 +801,50 @@ extension TypeChecker {
   private func inferAsCast(typeNode: TypeNode, innerExpr: ExpressionNode) throws -> TypedExpressionNode {
     let targetType = try resolveTypeNode(typeNode)
 
+    // A `null` source is a pointer literal aimed at the cast target. It joins
+    // a pointer target directly, takes the pointer→integer reinterpretation
+    // row (reading as 0) for `Int`/`UInt`, and meets the weak path's referent
+    // check for `?U` -- which reports the REFERENT, spelled `null` on the
+    // got-side. Every other target refuses the cast the way the rows below do
+    // for a `*void` source.
+    if case .nullLiteral(let literalSpan) = innerExpr {
+      switch targetType {
+      case .pointer, .mutablePointer:
+        return .intrinsicCall(.nullPtr(resultType: targetType))
+      case .weakReference(let referent), .mutableWeakReference(let referent):
+        try handleError(
+          SemanticError(
+            .typeMismatch(expected: referent.description, got: "null"),
+            span: literalSpan))
+        return failedExpression()
+      case .int, .uint:
+        return .castExpression(
+          expression: .intrinsicCall(.nullPtr(resultType: .pointer(element: .void))),
+          type: targetType)
+      default:
+        if isTraitObjectCastTarget(targetType) {
+          throw SemanticError(.generic(
+            "Construction is written 'Type(args)', not 'expr as Type'"
+          ), span: currentSpan)
+        }
+        if isIntegerScalarType(targetType) || isFloatScalarType(targetType) {
+          throw SemanticError.invalidOperation(
+            op: "cast",
+            type1: Type.pointer(element: .void).description,
+            type2: targetType.description
+          )
+        }
+        if isNominalCastTarget(targetType) {
+          throw SemanticError(.generic(
+            "Construction is written 'Type(args)', not 'expr as Type'"
+          ), span: currentSpan)
+        }
+        throw SemanticError(.generic(
+          "'as' casts to pointer or weak types"
+        ), span: currentSpan)
+      }
+    }
+
     // Weak construction (?U): a handle wrap, not a bit reinterpretation. The
     // same checks and the same `downgrade` intrinsic the `?U(expr)` spelling
     // used. `?Trait` is not a weak cast: a trait referent never satisfies the
@@ -1463,7 +1507,8 @@ extension TypeChecker {
          .traitObjectTypeBinding:
       return true
     case .wildcard, .booleanLiteral, .integerLiteral, .negativeIntegerLiteral,
-         .floatLiteral, .stringLiteral, .runeLiteral, .comparisonPattern, .traitObjectType:
+         .floatLiteral, .stringLiteral, .runeLiteral, .comparisonPattern, .traitObjectType,
+         .nullLiteral:
       return false
     case .enumCase(_, let elements, _):
       return elements.contains { untypedPatternContainsBindings($0.pattern) }
@@ -1483,9 +1528,15 @@ extension TypeChecker {
     }
   }
 
-  private func untypedPatternRequiresRawSubject(_ pattern: PatternNode) -> Bool {
+  // Not `private`: the when-statement path in TypeCheckerStatements gates its
+  // subject auto-deref on the same predicate.
+  func untypedPatternRequiresRawSubject(_ pattern: PatternNode) -> Bool {
     switch pattern {
     case .traitObjectType, .traitObjectTypeBinding:
+      return true
+    case .nullLiteral:
+      // The pattern tests the POINTER itself; auto-deref would hand it the
+      // pointee instead.
       return true
     case .enumCase(_, let elements, _),
          .structPattern(_, let elements, _),
@@ -1902,6 +1953,9 @@ extension TypeChecker {
 
     case .booleanLiteral(let value, _):
       return .booleanLiteral(value: value, type: .bool)
+
+    case .nullLiteral(let literalSpan):
+      return try inferNullLiteral(span: literalSpan, expectedType: expectedType)
 
     case .emptyLiteral(let span):
       return try inferEmptyLiteral(span: span, expectedType: expectedType)
@@ -2332,6 +2386,12 @@ extension TypeChecker {
       var (typedLeft, typedRight) = try inferJoinedBinaryOperands(
         left, right, expectedType: expectedType)
 
+      // An operand that already failed has no type to compute with: stay
+      // silent rather than pile a second complaint on the first.
+      if typedLeft.type == .error || typedRight.type == .error {
+        return failedExpression()
+      }
+
       // Allow numeric literals to coerce to the other operand type.
       if typedLeft.type != typedRight.type {
         if isIntegerType(typedLeft.type) {
@@ -2669,6 +2729,11 @@ extension TypeChecker {
     return false
   }
 
+  private func isNullLiteralExpression(_ expr: ExpressionNode) -> Bool {
+    if case .nullLiteral = expr { return true }
+    return false
+  }
+
   /// Type a binary operator's operands so an integer literal is range-checked
   /// against the width it JOINS, not against its Int default.
   ///
@@ -2677,12 +2742,26 @@ extension TypeChecker {
   ///   position: `x + big` and `big + x` alike).
   /// - Two literal operands with an integer expected type: both join that
   ///   width, which is what makes `let y UInt8 = 5 + 3` narrow.
+  /// - A null literal joins the other operand's pointer type the same way.
   /// - Anything else keeps the source order and the Int default check.
   private func inferJoinedBinaryOperands(
     _ left: ExpressionNode,
     _ right: ExpressionNode,
     expectedType: Type?
   ) throws -> (TypedExpressionNode, TypedExpressionNode) {
+    // A null literal is aimed at the other operand's type: a pointer joins
+    // it; a non-pointer is the mismatch row with `null` on the got-side. With
+    // no other operand to aim at (`null == null`) it stays unaimable.
+    let leftIsNull = isNullLiteralExpression(left)
+    let rightIsNull = isNullLiteralExpression(right)
+    if leftIsNull != rightIsNull {
+      let literal = leftIsNull ? left : right
+      let other = leftIsNull ? right : left
+      let typedOther = autoDereferenceValueContext(try inferTypedExpression(other))
+      let typedLiteral = autoDereferenceValueContext(
+        try inferTypedExpression(literal, expectedType: typedOther.type))
+      return leftIsNull ? (typedLiteral, typedOther) : (typedOther, typedLiteral)
+    }
     let leftIsLiteral = isIntegerLiteralExpression(left)
     let rightIsLiteral = isIntegerLiteralExpression(right)
     if leftIsLiteral != rightIsLiteral {
@@ -2753,7 +2832,7 @@ extension TypeChecker {
       }
     }
 
-    // Allow null_ptr() to infer pointer element type from the other operand.
+    // Allow a typed null pointer to take the other operand's pointer type.
     if typedLeft.type != typedRight.type {
       let leftIsPointerLike: Bool = {
         switch typedLeft.type {
@@ -2788,6 +2867,11 @@ extension TypeChecker {
     leftSpan: SourceSpan? = nil,
     rightSpan: SourceSpan? = nil
   ) throws -> TypedExpressionNode {
+    // An operand that already failed has no type to compare: stay silent
+    // rather than pile a second complaint on the first.
+    if initialLeft.type == .error || initialRight.type == .error {
+      return failedExpression()
+    }
     let (typedLeft, typedRight) = try normalizeComparisonOperands(
       lhs: initialLeft, rhs: initialRight,
       leftSpan: leftSpan, rightSpan: rightSpan)
@@ -2841,11 +2925,20 @@ extension TypeChecker {
       } else {
         // A literal operand joins the width of the value it is compared
         // against, so hand it that width instead of letting it default to
-        // Int and be range-checked against the default.
+        // Int and be range-checked against the default. A null literal joins
+        // the other side's pointer type the same way.
         let nextExpr = operands[index + 1]
         let joinType: Type? =
           typeChecker.isIntegerLiteralExpression(nextExpr) && typeChecker.isIntegerType(leftExpr.type)
-          ? leftExpr.type : nil
+          ? leftExpr.type
+          : (typeChecker.isNullLiteralExpression(nextExpr)
+             && {
+               switch leftExpr.type {
+               case .pointer, .mutablePointer: return true
+               default: return false
+               }
+             }()
+             ? leftExpr.type : nil)
         rawRight = typeChecker.autoDereferenceValueContext(
           try typeChecker.inferTypedExpression(nextExpr, expectedType: joinType)
         )
@@ -2922,6 +3015,37 @@ extension TypeChecker {
     case set(element: Type)
     case map(key: Type, value: Type)
     case range(element: Type)
+  }
+
+  /// `null` -- a pointer literal. It has no type of its own: it JOINS the
+  /// expected pointer type (`*T` or `*mutable T`, any pointee including a type
+  /// parameter). With no expected type it cannot be aimed, and with a
+  /// non-pointer expected type it is the ordinary mismatch row with the
+  /// literal's spelling as the got-side.
+  private func inferNullLiteral(span: SourceSpan, expectedType: Type?) throws -> TypedExpressionNode {
+    guard let expectedType else {
+      try handleError(
+        SemanticError(
+          .generic("Cannot infer a pointer type for 'null': add a type annotation"),
+          span: span
+        ))
+      return failedExpression()
+    }
+    // An already-failed expected type disagrees with nothing: stay silent.
+    if expectedType == .error {
+      return failedExpression()
+    }
+    switch expectedType {
+    case .pointer, .mutablePointer:
+      return .intrinsicCall(.nullPtr(resultType: expectedType))
+    default:
+      try handleError(
+        SemanticError(
+          .typeMismatch(expected: expectedType.description, got: "null"),
+          span: span
+        ))
+      return failedExpression()
+    }
   }
 
   private func inferEmptyLiteral(span: SourceSpan, expectedType: Type?) throws -> TypedExpressionNode {
@@ -5128,21 +5252,6 @@ extension TypeChecker {
         return .intrinsicCall(.takeMemory(ptr: ptrExpr))
       }
 
-      if base == "null_ptr" {
-        let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        guard resolvedArgs.count == 1 else {
-          throw SemanticError.typeMismatch(
-            expected: "1 generic arg", got: "\(resolvedArgs.count)")
-        }
-        guard arguments.isEmpty else {
-          throw SemanticError.invalidArgumentCount(
-            function: base, expected: 0, got: arguments.count)
-        }
-        let resultType = Type.mutablePointer(element: resolvedArgs[0])
-        return .intrinsicCall(.nullPtr(resultType: resultType))
-      }
-
-
       if base == "downgrade" {
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
         guard resolvedArgs.count == 1 else {
@@ -5269,7 +5378,9 @@ extension TypeChecker {
 
       var typedArguments: [TypedExpressionNode] = []
       for (arg, expectedParam) in zip(arguments, params) {
-        var typedArg = try inferTypedExpression(arg)
+        // The resolved parameter type is the argument's aim: literal joins
+        // (`null` at a `*T` parameter) need it before the coercion below.
+        var typedArg = try inferTypedExpression(arg, expectedType: expectedParam.type)
         typedArg = try coerceLiteral(typedArg, to: expectedParam.type, span: arg.span)
         if typedArg.type != expectedParam.type && typedArg.type != .error && expectedParam.type != .error {
           throw SemanticError.typeMismatch(
@@ -5323,10 +5434,6 @@ extension TypeChecker {
       paramTypeKeys: paramTypeKeys
     )
 
-    if name == "null_ptr" && arguments.isEmpty {
-      return .intrinsicCall(.nullPtr(resultType: .pointer(element: .void)))
-    }
-
     var inferred: [String: Type] = [:]
 
     func resolveTemplateTypeNode(_ typeNode: TypeNode, inferredBindings: [String: Type]) throws -> Type {
@@ -5359,7 +5466,11 @@ extension TypeChecker {
       )
     }
 
-    if arguments.count == 1 {
+    // The weak intrinsics read their single argument's type directly. Only
+    // they get this early look: inferring the argument speculatively, before
+    // the per-parameter pass below hands it its expected type, would aim a
+    // pointer literal at nothing.
+    if arguments.count == 1, name == "downgrade" || name == "upgrade" {
       let typedArgument = try inferTypedExpression(arguments[0])
 
       if name == "downgrade" {
@@ -5451,14 +5562,6 @@ extension TypeChecker {
       }
       try requireDerefablePointee(elementType, operation: "take_memory", spelledType: "*mutable")
       return .intrinsicCall(.takeMemory(ptr: typedArguments[0]))
-    }
-    if templateName == "null_ptr" {
-      guard typedArguments.isEmpty else {
-        throw SemanticError.invalidArgumentCount(
-          function: templateName, expected: 0, got: typedArguments.count)
-      }
-      let resultType = Type.mutablePointer(element: resolvedArgs[0])
-      return .intrinsicCall(.nullPtr(resultType: resultType))
     }
     if templateName == "dealloc_memory" {
       return .intrinsicCall(.deallocMemory(ptr: typedArguments[0]))
@@ -7864,6 +7967,11 @@ extension TypeChecker {
     lhs: TypedExpressionNode,
     rhs: TypedExpressionNode
   ) throws -> TypedExpressionNode {
+    // An operand that already failed has no type to compute with: stay silent
+    // rather than pile a second complaint on the first.
+    if lhs.type == .error || rhs.type == .error {
+      return failedExpression()
+    }
     var left = lhs
     var right = rhs
 
@@ -9488,6 +9596,8 @@ extension TypeChecker {
       return .wildcard
     case .booleanLiteral(let value, _):
       return .booleanLiteral(value: value)
+    case .nullLiteral:
+      return .nullLiteral(resultType: expectedType)
     case .integerLiteral(let value, _):
       return .integerLiteral(value: value)
     case .negativeIntegerLiteral(let value, _):
@@ -9567,7 +9677,7 @@ extension TypeChecker {
         kind: mutable ? .variable(.MutableValue) : .variable(.Value)
       )
       try currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
-    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType:
+    case .wildcard, .booleanLiteral, .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .negativeIntegerLiteral, .traitObjectType, .nullLiteral:
       break
     case .traitObjectTypeBinding(let name, let mutable, let targetType, let span):
       let boundType = try resolveTraitObjectPatternTargetType(targetType, subjectType: type, span: span)

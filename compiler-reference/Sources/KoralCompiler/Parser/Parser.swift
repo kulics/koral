@@ -363,7 +363,7 @@ public class Parser {
         throw ParserError.unexpectedToken(
           span: startSpan,
           got: "-",
-          expected: "a literal default value (number, bool, string, rune, [], or range)")
+          expected: "a literal default value (number, bool, string, rune, [], range, or null)")
       }
     }
     switch currentToken {
@@ -385,6 +385,9 @@ public class Parser {
     case .bool(false):
       try match(.bool(false))
       return .booleanLiteral(false, span: startSpan)
+    case .nullLiteral:
+      try match(.nullLiteral)
+      return .nullLiteral(span: startSpan)
     case .leftBracket:
       let span = currentSpan
       try match(.leftBracket)
@@ -403,7 +406,7 @@ public class Parser {
       try match(.ellipsis)
       return .emptyLiteral(span: span)
     default:
-      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "a literal default value (number, bool, string, rune, [], or range)")
+      throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description, expected: "a literal default value (number, bool, string, rune, [], range, or null)")
     }
   }
 

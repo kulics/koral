@@ -2316,6 +2316,30 @@ given MIRFunctionBuilder {
                 MIROperand.Constant(MIRConstant.Boolean(value)),
                 ComparisonOperator.Equal(),
             ),
+            .NullLiteral(result_type) then {
+                // The pattern compares the subject against a null pointer at
+                // the subject's own pointer type -- the same `nullPtr`
+                // intrinsic a `== null` comparison lowers to.
+                let null_operand = when self.lower_intrinsic_call(
+                    TypedIntrinsic.NullPtr(result_type),
+                ) in {
+                    .Some(null_result) then when null_result.operand in {
+                        .Some(operand) then operand,
+                        .None() then MIROperand.Constant(
+                            MIRConstant.Integer("0", result_type),
+                        ),
+                    },
+                    .None() then MIROperand.Constant(
+                        MIRConstant.Integer("0", result_type),
+                    ),
+                };
+                self.pattern_compare(
+                    subject_place,
+                    subject_type,
+                    null_operand,
+                    ComparisonOperator.Equal(),
+                )
+            },
             .IntegerLiteral(value) then when self.rune_pattern_value_access(
                 subject_place,
                 subject_type,

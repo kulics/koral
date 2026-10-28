@@ -60,6 +60,7 @@ public enum Token: CustomStringConvertible {
   case rightBracket  // Right bracket ']'
   case questionMark  // Question mark '?'
   case bool(Bool)  // Boolean literal, e.g.: true, false
+  case nullLiteral  // Null pointer literal, e.g.: null
   case ifKeyword  // 'if' keyword
   case thenKeyword  // 'then' keyword
   case elseKeyword  // 'else' keyword
@@ -137,6 +138,8 @@ public enum Token: CustomStringConvertible {
     case (.interpolatedString(_), .interpolatedString(_)):
       return true
     case (.bool(_), .bool(_)):
+      return true
+    case (.nullLiteral, .nullLiteral):
       return true
     case (.identifier(_), .identifier(_)):
       return true
@@ -275,6 +278,8 @@ public enum Token: CustomStringConvertible {
       return "BOF"
     case .bool(let value):
       return "Bool(\(value))"
+    case .nullLiteral:
+      return "null"
     case .ifKeyword:
       return "if"
     case .thenKeyword:
@@ -1616,6 +1621,7 @@ public class Lexer {
       case "mutable": .mutableKeyword
       case "true": .bool(true)
       case "false": .bool(false)
+      case "null": .nullLiteral
       case "if": .ifKeyword
       case "then": .thenKeyword
       case "else": .elseKeyword

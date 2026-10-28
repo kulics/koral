@@ -293,6 +293,8 @@ public func printAST(_ node: ASTNode) {
       }
     case .booleanLiteral(let value):
       print("\(indent)BoolLiteral: \(value)")
+    case .nullLiteral:
+      print("\(indent)NullLiteral")
     case .castExpression(let type, let expr, _):
       print("\(indent)CastExpression: expr as \(type)")
       withIndent {
