@@ -200,6 +200,14 @@ given TypeChecker {
                 };
                 false
             },
+            .TypeRefStaticMethodCall(_, _, _, args, _) then {
+                for arg in args then {
+                    if self.expr_contains_or_return(arg) then {
+                        return true;
+                    };
+                };
+                false
+            },
             .MemberPath(base, _, _) then self.expr_contains_or_return(base),
             .SubscriptExpr(base, args, _) then {
                 if self.expr_contains_or_return(base) then {
@@ -739,15 +747,18 @@ given TypeChecker {
                         }
                     },
                     _ then {
-                        let actual = when typed_inner.expr_type in {
-                            .TypeVar(_) then "Int",
-                            _ then type_to_string(typed_inner.expr_type),
-                        };
-                        self.push_expr_diagnostic(
-                            expr,
-                            "Type mismatch: expected Reference or raw pointer type, got \(actual)",
-                        );
-                        Type.Unknown()
+                        // A cascade, not a second mistake: an operand that
+                        // already failed carries the diagnostic; Swift stops
+                        // the expression there. Neutralise the follow-on.
+                        if typed_inner.expr_type is .Unknown() then {
+                            Type.Unknown()
+                        } else {
+                            self.push_expr_diagnostic(
+                                expr,
+                                "Type mismatch: expected Reference type, got \(type_to_string(typed_inner.expr_type))",
+                            );
+                            Type.Unknown()
+                        }
                     },
                 };
                 let checked_inner_t = when inner_t in {

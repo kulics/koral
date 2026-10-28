@@ -223,6 +223,7 @@
 <type-atom> ::= <type-identifier>
               | <generic-type>
               | <function-type>
+              | "(" <type> ")"
               | "Self"
 
 <type-prefix> ::= "*" "mutable"?
@@ -237,8 +238,15 @@
 // Function type: (T1, T2, TN) -> ReturnType
 // The types inside parentheses are parameter types; `->` separates them from
 // the return type. `->` is right-associative: `(A) -> (B) -> C` is
-// `(A) -> ((B) -> C)`. A function type in a type list is self-delimiting;
-// `(` in a TYPE opens a parameter list and nothing else (no grouping parens).
+// `(A) -> ((B) -> C)`. A function type in a type list is self-delimiting.
+// `(` in a TYPE now has two readings, decided by the token after `)`:
+//   `->` after `)`  -> function type: the parens are the parameter list.
+//   anything else   -> grouping of exactly ONE type: `(T)` is `T`
+//                      (so `let p (*Int)` is `let p *Int` and `*(Int)` is
+//                      `*((Int))` = `*Int`). A group with != 1 type and no
+//                      `->` is refused:
+//                      `A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'`
+//                      (both `(Int, String)` and `()` in a type slot).
 // Examples:
 //   () -> Int           - no params, returns Int
 //   (Int) -> Int        - one param, returns Int
@@ -499,13 +507,20 @@
 // ============================================================================
 
 <cast-expression> ::= <prefix-expression> ("as" <type>)*
-// `as` 强转（expression cast）。目标类型**只有三种**：指针、弱引用、trait object。
+// `as` 强转（expression cast）。目标类型**只有两种**：指针、弱引用。
 //   p as *T            指针重解释（`*mutable T` 可直接看作 `*T`；换元素类型也是一步）
 //   u as *Int          整数地址 -> 指针
 //   p as UInt          指针 -> 整数地址（两个方向都走 `as`）
 //   b as ?T            弱句柄包装（T 须声明 `type mutable`，源须正好是 T）
-//   c as Trait         显式 trait object upcast（须有 conformance 且 object-safe）
-//   MyPtr(u) 的旧拼法一律拒绝：`expr as Type` 是唯一写法（别名目标合法：`u as MyPtr`）。
+// trait object upcast **不**走 `as`，写调用形 `Trait(e)`（见 <type-head-expression>）。
+//   `x as Drawable` -> `Construction is written 'Type(args)', not 'expr as Type'`
+//   `x as String`   -> `'as' casts to pointer or weak types`
+//   `x as Int`      -> `Numeric conversion is written 'Type(expr)', not 'expr as Type'`
+// 指针 / 弱目标的旧调用拼法一律拒绝（别名目标的 `as` 合法：`u as MyPtr`）：
+//   `MyPtr(u)` / `(*Int)(u)` / `(?Box)(b)`
+//     -> `Pointer and weak casts are written 'expr as Type', not 'Type(expr)'`
+//   `UInt(p)`（数值目标 + 指针源）
+//     -> `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`
 // 优先级：松于前缀算子（`&x as *T` 是 `(&x) as *T`；`*p as *Int` 是 `(*p) as *Int`），
 // 紧于 `*` / `/` / `%` 与一切二元 / 比较算子（`p as UInt == q` 是 `(p as UInt) == q`）。
 // 结合性左结合：`p as UInt as *mutable UInt` == `(p as UInt) as *mutable UInt`。
@@ -526,7 +541,11 @@
                       | "*" <prefix-expression>
                       | "&" "mutable"? <prefix-expression>
                       | <postfix-expression>
-// Prefix operators:
+// Prefix operators -- always operators, never type-constructor spellings.
+// They take the WHOLE postfix chain as their operand: `?Foo.bar()` is
+// `?(Foo.bar())`, `*Int(u)` is `*(Int(u))`, `?Box(b)` is `?(Box(b))`. The old
+// cast spellings have no grammatical standing; they get the natural
+// operator-semantics errors of these readings, not a migration message.
 // - ?expr upgrades a weak reference to Option[T]
 // - *expr dereferences raw pointers
 // - & expr / &mutable expr form raw pointers
@@ -553,28 +572,41 @@
 //   **类型形状**（与 <type> 的文法逐条对齐）：
 //     类型前缀：`?`、`*` [`mutable`]（前缀可嵌套是解析形状；
 //     weak 现行拼写是 `?T`，`?*T` 是已删旧拼写）
-//     类型头  ：`Self`、首字母大写的标识符、`(` <type-list> `)` `->` <type>
+//     类型头  ：`Self`、首字母大写的标识符、`(` <type-list> `)` `->` <type>、
+//               分组 `(` <type> `)`（`->` 在 `)` 后是函数类型，否则分组）
 //     类型头后可跟 `[` <type-list> `]`
 //     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*` 才是类型。
 //
 //   **`let` 声明的 `(`**（签名还是类型标注）：
-//     括号内首 token 是类型头/类型前缀 -> 函数类型标注（变量绑定）
-//        例：`let f (Int) -> Int = g`、`let h ((Int) -> Int) -> Int = g`
+//     括号内首 token 是类型头/类型前缀/`(` -> 类型标注（变量绑定）
+//        例：`let p (Int) = 1`（`(Int)` 是分组，p 是 Int）、
+//            `let f (Int) -> Int = g`、`let h ((Int) -> Int) = g`、
+//            `let q *(Int) = &y`（`*(Int)` 是 `*Int`）
 //     括号内首 token 是 `mutable`/小写标识符 -> 参数表（函数声明）
 //        例：`let f(x Int) Int = ...`、`let inc(mutable x Int) Int = ...`
-//     括号为空时看 `)` 之后：`->` 是函数类型 `() -> R`，其余是零参签名。
+//     括号为空时看 `)` 之后：`->` 是函数类型 `() -> R`；紧跟 `=` 是空分组
+//     （类型位）-> `A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'`；
+//     其余（结果类型 + `=`）是零参签名（`let g () Int = 1`）。
 //     函数声明的结果类型**裸写**、不带 `->`（与 lambda 的结果类型一致）。
 //
 //   `(` 的归类：
-//     括号内是**单个类型**且后面紧跟 `)`：
-//        后面紧跟 `.method(` / `.method[` <type-list> `]` `(` ->
-//           <qualified-call-suffix>（组合节点，见下）
-//        否则 -> 错误：限定调用必须带方法调用；类型没有值，不能单独出现在括号里
-//     其余：
-//        base 是类型名 -> <type-application>（转型 / 构造）
-//        其它 base     -> <call-suffix>
-//   例：Num(Tag).m(n) 是限定调用；Int(x) 是把 x 转型到 Int；Point(1, 2) 是构造；
-//       f(1, 2) 是调用；f(*p) 是调用（`*p` 是解引用）。
+//     **表达式起首的 `(`**（primary 位置）——括号类型头（见 <type-head-expression>）：
+//        括号内是类型形状（单个类型，可带 `*`/`?` 前缀、可嵌套）->
+//           跟随门控：紧跟 `(`（命名目标调用）或 `.`（成员 / 静态调用）才成立；
+//           无调用 / 成员跟随 -> `Type 'X' cannot be used as an expression`；
+//           `->` 跟随是表达式位置的游离记号 -> syntax error（函数类型只活在类型位）
+//        例：(Point)(1, 2) 是构造；(Point).origin() 是静态调用；
+//           (*Foo).f() 在 `*Foo` 的方法面上找 `f`；(*Int) 是裸类型头
+//     **后缀位置的 `(`**（跟在完整表达式 / 标识符后）：
+//        括号内是**单个类型**且后面紧跟 `)`：
+//           后面紧跟 `.method(` / `.method[` <type-list> `]` `(` ->
+//              <qualified-call-suffix>（组合节点，见下）
+//           否则 -> 错误：限定调用必须带方法调用；类型没有值，不能单独出现在括号里
+//        其余：
+//           base 是类型名 -> <type-application>（命名目标家族：构造 / 数值转换 / trait upcast）
+//           其它 base     -> <call-suffix>
+//   例：Num(Tag).m(n) 是限定调用；Int(x) 是把 x 数值转换到 Int；Point(1, 2) 是构造；
+//       Drawable(c) 是 trait upcast；f(1, 2) 是调用；f(*p) 是调用（`*p` 是解引用）。
 //
 //   `[` 的归类：
 //     括号内是 <type-list> -> 泛型实例化（由 <subscript-suffix> 承担，见下）
@@ -598,22 +630,30 @@
 // subscripts: there is no collection in the language that indexes by a tuple.
 <member-suffix> ::= "." <identifier>
 
-// 类型应用：`Type(expr)` 把 expr 转换到 Type，或 `Type(args)` 构造 Type 的值。
-// 两者的区分是语义的（类型检查器按 Type 的种类决定），文法上同形：
+// 命名目标家族：`Target(expr)` / `Target[T](expr)` 是「命名目标调用」。文法上
+// 同形，语义按目标种类分流（类型检查器按 Target 的种类决定）：
 //   数值类型 + 单个位置实参 -> 数值转换（`Int(f)`、`UInt8(i)`）
-//   结构 / 枚举 + 实参列表  -> 构造（constructor）
-// 指针 / 弱引用 / trait 的强转**不**在这里写：一律 `expr as Type`
-// （见 <cast-expression>）。表达式开头的带前缀类型是旧拼法，报错指路：
-//   `*Int(u)` / `?Counter(v)` / 裸 `*T` / 别名调用 `MyPtr(u)`
-//     -> `Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'`
+//   结构 / 枚举 + 实参列表  -> 构造（constructor）：`Point(1, 2)`
+//   trait 名 + 恰好一个位置实参 -> trait object upcast：`Drawable(c)`、
+//     `Transform[Int](c)`。须有 conformance 且 object-safe。实参个数不对 ->
+//     `A cast takes exactly one positional argument: write 'Type(expr)'`；
+//     源已是 trait object ->
+//     `Cannot cast a trait object to another trait object`
+//   函数类型等不可转目标 -> `Type 'X' does not support cast: only numeric and pointer types can be cast`
+//     （`Bool(x)`、`String(x)`、`((Int) -> Int)(f)`）
+// 指针 / 弱目标在调用形里是旧拼法（别名目标按其真身裁决）：
+//   `*Int(u)` / `?Counter(v)` 现在是算子链 `*(Int(u))` / `?(Counter(v))`，
+//   只报算子语义的自然错误；括号类型头 / 别名调用 `(*Int)(u)`、`(?Box)(b)`、
+//   `MyPtr(u)` 报
+//     -> `Pointer and weak casts are written 'expr as Type', not 'Type(expr)'`
 //   `UInt(p)` / `Int(p)`（数值目标 + 指针源）
 //     -> `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`
 // 指针 -> 整数同样走 `as`：`p as UInt`。数值互转仍是 `Type(expr)`；`x as Int` 反而报
 // `Numeric conversion is written 'Type(expr)', not 'expr as Type'`。
 // NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 有三个用途：
 // import 别名（`using "..." { X as Y }`）、`given Type as Trait`、表达式强转
-// （`expr as Type`）。此外 `and then as name in body` 里的 `as` 是 flow 绑定，
-// 不是强转。
+// （`expr as Type`，仅指针 / 弱目标）。此外 `and then as name in body` 里的 `as` 是
+// flow 绑定，不是强转。
 <type-application> ::= <type> "(" <argument-list> ")"
 
 // 限定调用（组合节点）：消歧义，指定 trait。两套写法，都必须**带着方法调用**，
@@ -652,15 +692,26 @@
                        | "self"
                        | "it"
                        | <type-application>
+                       | <type-head-expression>
                        | <implicit-member-expression>
                        | <collection-literal>
                        | <block-expression>
                        | <lambda-expression>
                        | "(" <expression> ")"
-// <type-application> 的类型**不**带前缀：指针 / 弱 / trait 强转写 `expr as Type`
-// （见 <cast-expression>）。表达式开头的带前缀类型（`*Int(p)`、`?Counter(v)`、
-// 裸 `*Int`）是旧拼法，报错指路到 `as`。裸 `*` 仍是解引用；
-// `*` + 类型头只会是被拒绝的旧拼法。
+// 括号类型头：表达式起首的 `(` <type> `)` 是类型头，类型位的括号则是透明分组
+// （`let p (*Int)` ≡ `let p *Int`）。类型头只有两个合法跟随（跟随门控）：
+<type-head-expression> ::= "(" <type> ")" <type-head-follower>
+<type-head-follower> ::= "(" <argument-list> ")"
+                       | "." <identifier> <call-suffix>
+//   (Point)(1, 2)      ≡ Point(1, 2)     命名目标家族（构造 / 数值转换 / trait upcast）
+//   (Point).origin()   ≡ Point.origin()  静态调用
+//   (*Foo).f()         在 `*Foo` 的方法面上找 `f`（没有就 `Member 'f' not found`）
+//   ((Int) -> Int)(f)  目标是函数类型 -> `Type 'X' does not support cast: ...`
+// 无调用 / 成员跟随的裸 `(T)` 报
+// `Type 'X' cannot be used as an expression: types have no value`（X 含前缀拼写，
+// 例 `(*Int)` 报 `Type '*Int' ...`）。表达式位置的 `->` 是游离记号（syntax error）。
+// 表达式开头的 `*` / `?` 是纯算子，盖过整个后缀链：`?Foo.bar()` ≡ `?(Foo.bar())`、
+// `*Int(u)` ≡ `*(Int(u))`，不是 `(?Foo).bar()` / 旧拼法（见 <prefix-expression>）。
 // There is NO tuple/pair literal. A `Pair` is constructed with its own
 // constructor (`Pair[Int, String](1, "a")`) like any other type.
 
@@ -669,17 +720,19 @@
 //
 // 这条**文法表达不了**：`<identifier>` 在值位与类型位同形，而「首字母大写的
 // 标识符是类型」是词法/语义的判据，不是上下文无关文法的判据。所以文法把
-// 四种类型名位置各写成**显式产生式**，其余位置里出现的类型名由上文的
+// 五种类型名位置各写成**显式产生式**，其余位置里出现的类型名由上文的
 // 「类型形状 + 有界前看」分类决定，不靠文法。
 //
-//   <type-application>        Type(...)            转型 / 构造
+//   <type-application>        Type(...)            命名目标家族（转换 / 构造 / trait upcast）
+//   <type-head-expression>    (Type)(...) / (Type).m(...)  同上的括号类型头写法
 //   <static-call-suffix>      Type.method(...)     静态方法调用
 //   <generic-instance-suffix> Type[T]              泛型实例化
 //   <qualified-call-suffix>   Type(Trait).method(...)  类型限定调用
 //
-// 四者都由 <postfix-expression> 组合出来（见 <postfix-suffix>），而不是从
-// <primary-expression> 单独生成 `Type`：裸 `Point` 不是产生式，它是
-// <identifier> 与类型名同形之后由语义拒绝的那一种写法。
+// 除 <type-head-expression> 这个 primary 外，其余都由 <postfix-expression>
+// 组合出来（见 <postfix-suffix>），而不是从 <primary-expression> 单独生成
+// `Type`：裸 `Point` 不是产生式，它是 <identifier> 与类型名同形之后由语义
+// 拒绝的那一种写法。
 
 <static-call-suffix> ::= "." <identifier> <call-suffix>
 <generic-instance-suffix> ::= "[" <type-list> "]"
@@ -688,7 +741,7 @@
 //   TypeName[T].method(args)  → <identifier> <generic-instance-suffix> <member-suffix> <call-suffix>
 //   TypeName.method(args)  → <identifier> <static-call-suffix>
 //   make[T](1)  → <identifier> <generic-instance-suffix> <call-suffix>
-//   TypeName[T](args)  → <type-application>（构造）；TypeName(expr) → <type-application>（转型 / 构造）
+//   TypeName[T](args)  → <type-application>（命名目标家族）；TypeName(expr) → <type-application>（同上）
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"

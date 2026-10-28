@@ -242,6 +242,11 @@ given Printer {
         .Named(name) then self.write_token(name),
         .SelfType(kw) then self.write_token(kw),
         .ConstraintKeyword(kw) then self.write_token(kw),
+        .Paren(lp, inner, rp) then {
+            self.write_token(lp);
+            self.print_type(inner);
+            self.write_token(rp);
+        },
         .Mutable(inner, kw) then {
             when inner in {
                 .Ptr(ptr_inner, ptr_kw) then {
@@ -2404,6 +2409,7 @@ given Printer {
         .Named(name) then name.to_string().count(),
         .ConstraintKeyword(kw) then kw.to_string().count(),
         .SelfType(_) then 4,
+        .Paren(_, inner, _) then self.estimate_type_length(inner) + 2,
         .Mutable(inner, _) then when inner in {
             .Ptr(ptr_inner, _) then self.estimate_type_length(ptr_inner) + 15,
             .Weakref(weak_inner, _) then self.estimate_type_length(weak_inner) + 6,
@@ -3155,6 +3161,16 @@ file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Resul
         return .Ok({});
     },
     .Lambda(_, _, _, _, _, body) then validate_expr_usage(body, false),
+};
+
+/// The printed spelling of a type, laid out exactly as the printer would write
+/// it inline. Used where a type has to travel as text -- a function type read
+/// as a value has no expression node, so the type head carries its spelling in
+/// one token.
+public let type_to_string(t CstType) String = {
+    let mutable printer = Printer.new();
+    printer.print_type(t);
+    return printer.result();
 };
 
 public let format_source(source String) Result[String] = {

@@ -52,6 +52,87 @@ public let type_node_span(node TypeNode) SourceSpan = {
     };
 };
 
+/// The same type node blamed at a different span. A transparent grouping
+/// `(T)` is the inner type with its span extended to cover the parens.
+public let type_node_with_span(node TypeNode, span SourceSpan) TypeNode = {
+    return when node in {
+        .Identifier(name, _) then TypeNode.Identifier(name, span),
+        .Reference(inner, is_mutable, _) then TypeNode.Reference(inner, is_mutable, span),
+        .BorrowedReference(inner, is_mutable, _) then TypeNode.BorrowedReference(
+            inner,
+            is_mutable,
+            span,
+        ),
+        .Pointer(inner, is_mutable, _) then TypeNode.Pointer(inner, is_mutable, span),
+        .WeakReference(inner, is_mutable, _) then TypeNode.WeakReference(
+            inner,
+            is_mutable,
+            span,
+        ),
+        .Generic(base, args, _) then TypeNode.Generic(base, args, span),
+        .InferredSelf(_) then TypeNode.InferredSelf(span),
+        .FunctionType(param_types, return_type, _) then TypeNode.FunctionType(
+            param_types,
+            return_type,
+            span,
+        ),
+    };
+};
+
+/// How a type node is WRITTEN in source: `*Int`, `?T`, `(A, B) -> R`. This is
+/// the spelling a diagnostic quotes when the type itself is the subject
+/// (`Type '<T>' cannot be used as an expression`).
+public let type_node_spelling(node TypeNode) String = {
+    return when node in {
+        .Identifier(name, _) then name,
+        .Reference(inner, is_mutable, _) then {
+            if is_mutable then "&mutable \(type_node_spelling(inner))"
+            else "&\(type_node_spelling(inner))"
+        },
+        .BorrowedReference(inner, is_mutable, _) then {
+            if is_mutable then "ref mutable \(type_node_spelling(inner))"
+            else "ref \(type_node_spelling(inner))"
+        },
+        .Pointer(inner, is_mutable, _) then {
+            if is_mutable then "*mutable \(type_node_spelling(inner))"
+            else "*\(type_node_spelling(inner))"
+        },
+        .WeakReference(inner, _, _) then "?\(type_node_spelling(inner))",
+        .Generic(base, args, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_string(base);
+            out.push_byte('[');
+            let mutable first = true;
+            for a in args then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_node_spelling(a));
+                first = false;
+            };
+            out.push_byte(']');
+            out.to_string()
+        },
+        .InferredSelf(_) then "Self",
+        .FunctionType(param_types, return_type, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_byte('(');
+            let mutable first = true;
+            for pt in param_types then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_node_spelling(pt));
+                first = false;
+            };
+            out.push_byte(')');
+            out.push_string(" -> ");
+            out.push_string(type_node_spelling(return_type));
+            out.to_string()
+        },
+    };
+};
+
 /// A short display name for a type node, used to key default-value storage
 /// so that same-name methods on different types do not overwrite each other.
 public let type_node_name(node TypeNode) String = {
@@ -561,6 +642,10 @@ public type Expr {
     InterpolatedString(parts List[InterpolatedStringPart], span SourceSpan),
     BoolLiteral(value Bool, span SourceSpan),
     CastExpr(type_node TypeNode, expr Expr, span SourceSpan),
+    /// `(T)` in expression position, where `T` has no identifier-based
+    /// spelling (`*Foo`, `?Foo`, `(A) -> R`, `Self`). A nameable head
+    /// desugars to `Identifier` / `GenericInstantiation` instead.
+    TypeRef(type_node TypeNode, span SourceSpan),
     Unary(op UnaryOperator, expr Expr, span SourceSpan),
     RefExpr(expr Expr, is_mutable Bool, span SourceSpan),
     WeakrefExpr(inner Expr, span SourceSpan),
@@ -602,6 +687,10 @@ public type Expr {
     QualifiedGenericMethodCall(base Expr, trait_type TypeNode, method_type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
     GenericInstantiation(base String, type_args List[TypeNode], span SourceSpan),
     StaticMethodCall(type_name String, type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
+    /// `(T).m(...)` -- a static call whose base is a parenthesized type with
+    /// no identifier-based spelling. The string-keyed `StaticMethodCall`
+    /// stays as it is; this is the additive TypeNode-based twin.
+    TypeRefStaticMethodCall(type_node TypeNode, type_args List[TypeNode], method_name String, args List[Expr], span SourceSpan),
     SubscriptExpr(base Expr, args List[Expr], span SourceSpan),
     Block(statements List[Statement], tail_expression Option[Expr], span SourceSpan),
     IfExpr(condition Expr, then_branch Expr, else_branch Option[Expr], span SourceSpan),
@@ -659,6 +748,7 @@ public let expr_span(expr Expr) SourceSpan = {
         .InterpolatedString(_, span) then span,
         .BoolLiteral(_, span) then span,
         .CastExpr(_, _, span) then span,
+        .TypeRef(_, span) then span,
         .Unary(_, _, span) then span,
         .RefExpr(_, _, span) then span,
         .WeakrefExpr(_, span) then span,
@@ -693,6 +783,7 @@ public let expr_span(expr Expr) SourceSpan = {
         .QualifiedGenericMethodCall(_, _, _, _, _, span) then span,
         .GenericInstantiation(_, _, span) then span,
         .StaticMethodCall(_, _, _, _, span) then span,
+        .TypeRefStaticMethodCall(_, _, _, _, span) then span,
         .SubscriptExpr(_, _, span) then span,
         .Block(_, _, span) then span,
         .IfExpr(_, _, _, span) then span,

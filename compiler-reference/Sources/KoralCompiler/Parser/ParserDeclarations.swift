@@ -33,11 +33,14 @@ extension Parser {
   // MARK: - Global Declaration Parsing
   
   /// Parse global declaration
-  /// Whether the `(` at the cursor opens a function TYPE's parameter list
-  /// `(T1, T2) -> R` written as a binding's annotation, rather than a
-  /// declaration's parameter list. The tell is the `->` after the closing
-  /// `)`: a function type always has one, a signature never writes its result
-  /// type with one. Restores the stream.
+  /// Whether the `(` at the cursor opens a TYPE written as a binding's
+  /// annotation, rather than a declaration's parameter list. Two tells, in
+  /// order: a function type's parameter list `(T1, T2) -> R` is decided by the
+  /// `->` after the closing `)` -- a signature never writes its result type
+  /// with one -- and a parenthesized type group is decided by its contents: a
+  /// non-empty type list ending exactly at `)`. An empty `()` is decided by
+  /// `->` alone, so `let f () Int = ...` stays a signature. Restores the
+  /// stream.
   private func parenOpensTypeAnnotation() -> Bool {
     let savedLexer = lexer.saveState()
     let savedToken = currentToken
@@ -46,6 +49,39 @@ extension Parser {
       currentToken = savedToken
     }
     guard currentToken === .leftParen else { return false }
+
+    // Shape: the contents scan as a non-empty type list ending exactly at `)`.
+    // A parameter list (`(x Int)`) does not, and falls to the `->` rule below.
+    // This scan runs on its own saved stream: the balanced scan below counts
+    // from the `(` and must not start mid-run.
+    do {
+      let shapeLexer = lexer.saveState()
+      let shapeToken = currentToken
+      advanceShape()
+      if currentToken !== .rightParen {
+        var sawType = false
+        var wellFormed = true
+        while true {
+          guard scanTypeShapeConsuming() else {
+            wellFormed = false
+            break
+          }
+          sawType = true
+          if currentToken === .comma {
+            advanceShape()
+            if currentToken === .rightParen { break }
+            continue
+          }
+          break
+        }
+        if wellFormed, sawType, currentToken === .rightParen {
+          return true
+        }
+      }
+      lexer.restoreState(shapeLexer)
+      currentToken = shapeToken
+    }
+
     // The `(` at the cursor is already out of the lexer; count it here.
     var depth = 1
     while true {
@@ -128,9 +164,9 @@ extension Parser {
       }
 
       // Otherwise check for left paren to determine if it's a function or variable.
-      // A `(` that opens a function TYPE's parameter list (`let f (Int) -> Int =
-      // value`) is an annotation, not a signature: the first token inside is a
-      // type head, and an empty `()` is decided by `->` following it.
+      // A `(` that opens a TYPE (`let f (Int) -> Int = value`, `let p (Int) =
+      // 1`) is an annotation, not a signature: the contents scan as a type, or
+      // a `->` follows the closing `)`.
       if currentToken === .leftParen && !parenOpensTypeAnnotation() {
         if !isValidVariableName(name) {
           throw ParserError.invalidFunctionName(span: nameSpan, name: name)

@@ -25,6 +25,13 @@ public type CstType {
     // `(T1, T2) -> R`: the arrow is printed as part of the shape, so the node
     // keeps the delimiters that carry comments and spacing.
     Function(lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
+    // `(T)` -- grouping of exactly one type. The parens are LOAD-BEARING:
+    // `let p (*Int)` must round-trip WITH them, so the node keeps the
+    // delimiters the way `CstExpr.Paren` does. A doubled nesting collapses to
+    // one layer at parse time (`((T))` -> `(T)`), the same policy as the
+    // expression `Paren`. `(` with a type LIST and `->` is a `Function`, not
+    // this; a list without `->` is rejected outright.
+    Paren(lparen Token, inner CstType, rparen Token),
     Ptr(inner CstType, kw Token),
     Weakref(inner CstType, kw Token),
 };
@@ -70,10 +77,15 @@ public type CstExpr {
     /// gone. A structural `Type(args)` construction keeps the `Call` shape --
     /// only the single-operand cast spelling lands here. Pointer and weak
     /// targets are NOT written this way: those are `operand as Type`
-    /// (`AsCast`), and the old `*T(x)` / `?T(x)` spellings are rejected.
+    /// (`AsCast`). A leading `*` / `?` in expression position is ALWAYS an
+    /// operator: `*Int(q)` parses as `*(Int(q))` and `?T(x)` as `?(T(x))`,
+    /// operator chains over the call. The trait-object upcast IS this spelling:
+    /// `Drawable(c)`, `Transform[Int](c)`, `(Drawable)(c)`.
     TypeCast(lparen Token, cast_type CstType, rparen Token, operand CstExpr),
     /// `operand as Type` -- pointer reinterpretation and weak construction:
-    /// `p as *Int`, `x as ?Box`, `c as Drawable`. The cast sits between the
+    /// `p as *Int`, `x as ?Box`. (A trait target `c as Drawable` parses here
+    /// too but is a SEMA error: the trait upcast is written `Drawable(c)`.)
+    /// The cast sits between the
     /// multiplicative level and the prefix level (Rust's `as` position) and
     /// chains left: `&x as *T` is `(&x) as *T`, `p * q as *T` is
     /// `p * (q as *T)`, `p as UInt as *mutable UInt` groups left. The cast

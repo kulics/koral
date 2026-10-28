@@ -472,12 +472,19 @@ given Parser {
 
     module_private parse_parenthesized_expression(self) Result[Expr] = {
         let start = self.current();
-        // `(` opens either a lambda or a parenthesized expression. The shape
-        // classifier decides BEFORE anything is built, so there is no trial
-        // parse to roll back and no failed branch to swallow the better
-        // diagnostic.
+        // `(` opens a lambda, a parenthesized TYPE head, or a parenthesized
+        // expression. The shape classifiers decide BEFORE anything is built,
+        // so there is no trial parse to roll back and no failed branch to
+        // swallow the better diagnostic.
         if self.is_lambda_expression() then {
             return self.parse_lambda_expression();
+        };
+        // A type head: `(` <exactly one type> `)` -- `(Point)`, `(*Foo)`.
+        // A trailing comma disqualifies. The head desugars to the
+        // identifier-based nodes it names; a head with no name (`*Foo`,
+        // `?Foo`, `(A) -> R`, `Self`) becomes a `TypeRef`.
+        if self.scan_paren_type_suffix_at(self.index) is .Some(_) then {
+            return self.parse_parenthesized_type_head();
         };
 
         self.advance();
@@ -507,6 +514,40 @@ given Parser {
                     ),
                 );
             },
+        };
+    };
+
+    /// `( <type> )` in expression position: a type head. The SHAPE has already
+    /// been decided by `scan_paren_type_suffix_at` -- this only builds the
+    /// node. A nameable head desugars to the identifier-based nodes (`(Point)`
+    /// is `Point`, `(List[Int])` is `List[Int]`); anything else is a `TypeRef`
+    /// over the parenthesized type. The type node's span covers the parens,
+    /// the same transparent grouping the type position does.
+    module_private parse_parenthesized_type_head(self) Result[Expr] = {
+        let start = self.current();
+        self.advance();
+        let inner_type = self.parse_type() or return;
+        when self.current().kind in {
+            .RParen() then {
+                self.advance();
+            },
+            _ then {
+                return .Error(self.parser_error("Expected ')' after parenthesized type"));
+            },
+        };
+        let span = self.span_from_start(start);
+        let type_node = type_node_with_span(inner_type, span);
+        return .Ok(self.expr_from_type_head(type_node, span));
+    };
+
+    /// The expression a parenthesized type head stands for. Identifier-based
+    /// heads carry their name into the existing nodes; a head with no name is
+    /// a `TypeRef`.
+    module_private expr_from_type_head(self, type_node TypeNode, span SourceSpan) Expr = {
+        return when type_node in {
+            .Identifier(name, _) then Expr.Identifier(name, span),
+            .Generic(base, args, _) then Expr.GenericInstantiation(base, args, span),
+            _ then Expr.TypeRef(type_node, span),
         };
     };
 
@@ -1726,22 +1767,6 @@ given Parser {
         return .Ok(trait_type);
     };
 
-    /// The old prefixed cast / weak-construction spellings at expression start
-    /// -- `* [mutable] T(expr)`, `?T(expr)`, and the bare `*T` / `?T` (any
-    /// prefixed type in expression position). All rejected at parse time, with
-    /// or without the `(`: pointer and weak casts are written `expr as Type`.
-    /// Reached from the prefix `*` / `?` branches when the tokens after the
-    /// prefix spell a type shape. The span blamed is the type node's own span.
-    module_private parse_prefixed_type_cast_error(self) Result[Expr] = {
-        let cast_type = self.parse_type() or return;
-        return .Error(
-            self.parser_error_at_span(
-                "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'",
-                type_node_span(cast_type),
-            ),
-        );
-    };
-
     /// Parses the composite `base(Trait).method(...)` /
     /// `base(Trait).method[TypeArgs](...)` qualified call. The `(Trait)` SHAPE
     /// has already been decided by `scan_paren_type_suffix_at`; this consumes
@@ -2024,6 +2049,43 @@ given Parser {
             member,
         );
 
+        // `(T).m(...)` -- the base is a parenthesized type head with no
+        // identifier-based spelling. The static call keeps the TypeNode base;
+        // the string-keyed `StaticMethodCall` is untouched.
+        if has_lparen and base is .TypeRef(base_type_node, _) and not self.is_upper_first(
+            member,
+        ) then {
+            self.advance();
+            let args = self.parse_argument_list_until_rparen("static method call") or return;
+            when self.current().kind in {
+                .RParen() then {
+                    self.advance();
+                },
+                _ then {
+                    return .Error(
+                        self.parser_error(
+                            "Expected ')' after static method call arguments",
+                        ),
+                    );
+                },
+            };
+            when self.reject_non_constructor_call_args(args) in {
+                .Ok(_) then {},
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            return .Ok(
+                Expr.TypeRefStaticMethodCall(
+                    base_type_node,
+                    method_type_args,
+                    member,
+                    args,
+                    self.span_from_expr_start(base),
+                ),
+            );
+        };
+
         if has_lparen and static_receiver is .Some(receiver) and method_type_args.is_empty(
         ) and not self.is_upper_first(member) then {
             self.parse_debug(
@@ -2265,28 +2327,17 @@ given Parser {
 
         if self.current().kind is .Star() then {
             let start = self.current();
-            // A prefixed type at expression start -- `*T(x)`, bare `*T`, any
-            // prefixed type -- is the old cast spelling and is rejected; the
-            // cast is `expr as *T`. `*` before a type shape is that old shape;
-            // `*` before anything else (`*p`, `**p`) is deref.
-            if self.type_shape_starts_at(self.index + 1) then {
-                return self.parse_prefixed_type_cast_error();
-            };
+            // Expression-leading `*` is ALWAYS the dereference operator; a
+            // prefixed type here (`*T(x)`) parses as `*(T(x))`.
             self.advance();
             let operand = self.parse_unary() or return;
             return .Ok(Expr.DerefExpr(operand, self.span_from_start(start)));
         };
 
         if self.current().kind is .QuestionMark() then {
-            // `?T(x)` / bare `?T` is the old weak-construction spelling and is
-            // rejected; the cast is `expr as ?T`. `?expr` upgrades a weak
-            // reference to `Option[T]` and stays. Disambiguation: `?` before a
-            // type shape is the old shape; `?` before anything else (`?p`,
-            // `?*p`) is the upgrade operator.
+            // Expression-leading `?` is ALWAYS the upgrade operator; a
+            // prefixed type here (`?T(x)`) parses as `?(T(x))`.
             let start = self.current();
-            if self.type_shape_starts_at(self.index + 1) then {
-                return self.parse_prefixed_type_cast_error();
-            };
             self.advance();
             let operand = self.parse_unary() or return;
             return .Ok(Expr.UpgradeExpr(operand, self.span_from_start(start)));

@@ -19,7 +19,8 @@ extension TypeChecker {
          .booleanLiteral,
          .emptyLiteral,
          .identifier,
-         .genericInstantiation:
+         .genericInstantiation,
+         .typeReference:
       return true
     case .interpolatedString,
          .collectionLiteral,
@@ -27,6 +28,7 @@ extension TypeChecker {
          .lambdaExpression,
          .call,
          .staticMethodCall,
+         .typedStaticMethodCall,
          .genericMethodCall,
          .qualifiedMethodCall,
          .qualifiedGenericMethodCall,

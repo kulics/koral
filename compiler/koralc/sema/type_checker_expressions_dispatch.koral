@@ -3813,6 +3813,12 @@ given TypeChecker {
                 let strong_type = when strong_type_opt in {
                     .Some(t) then t,
                     .None() then {
+                        // A cascade, not a second mistake: an operand that
+                        // already failed carries the diagnostic; Swift stops
+                        // the expression there. Neutralise the follow-on.
+                        if typed_inner.expr_type is .Unknown() then {
+                            return self.empty_typed_block(Type.Unknown());
+                        };
                         self.push_expr_diagnostic(
                             expr,
                             "'?' expects a weak reference (?T), got \(type_to_string(typed_inner.expr_type))",
@@ -3946,15 +3952,18 @@ given TypeChecker {
                         }
                     },
                     _ then {
-                        let actual = when typed_inner.expr_type in {
-                            .TypeVar(_) then "Int",
-                            _ then type_to_string(typed_inner.expr_type),
-                        };
-                        self.push_expr_diagnostic(
-                            expr,
-                            "Type mismatch: expected Reference or raw pointer type, got \(actual)",
-                        );
-                        Type.Unknown()
+                        // A cascade, not a second mistake: an operand that
+                        // already failed carries the diagnostic; Swift stops
+                        // the expression there. Neutralise the follow-on.
+                        if typed_inner.expr_type is .Unknown() then {
+                            Type.Unknown()
+                        } else {
+                            self.push_expr_diagnostic(
+                                expr,
+                                "Type mismatch: expected Reference type, got \(type_to_string(typed_inner.expr_type))",
+                            );
+                            Type.Unknown()
+                        }
                     },
                 };
                 // Deref bound check removed: in the simplified type system,
@@ -4288,6 +4297,23 @@ given TypeChecker {
             .StaticMethodCall(_, _, _, _, _) then self.check_member_dispatch_expr_ref(
                 expr,
                 expected,
+                scope,
+            ),
+            // A bare parenthesized type head (`(*Int)`) names a type, and
+            // types have no value.
+            .TypeRef(type_node, span) then {
+                self.push_diagnostic_at_span(
+                    "Type '\(type_node_spelling(type_node))' cannot be used as an expression: types have no value",
+                    span,
+                );
+                self.empty_typed_block(Type.Unknown())
+            },
+            .TypeRefStaticMethodCall(type_node, type_args, method_name, args, call_span) then self.check_type_ref_static_method_call_ref(
+                type_node,
+                type_args,
+                method_name,
+                args,
+                call_span,
                 scope,
             ),
             .SubscriptExpr(_, _, _) then self.check_member_dispatch_expr_ref(

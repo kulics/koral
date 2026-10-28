@@ -94,6 +94,7 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     return dropSelfEscapeSpanIn(subject, inLambda: inLambda)
 
   case .staticMethodCall(_, _, _, let arguments, _),
+       .typedStaticMethodCall(_, _, _, let arguments, _),
        .implicitMemberExpression(_, let arguments, _):
     return dropSelfEscapeInArgs(arguments, inLambda: inLambda)
 
@@ -216,10 +217,10 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
   case .upgradeExpr(let inner, _):
     return dropSelfEscapeSpanIn(inner, inLambda: inLambda)
 
-  // Literals, the empty literal and generic instantiations carry no
-  // expression that could name `self`.
+  // Literals, the empty literal, generic instantiations and type references
+  // carry no expression that could name `self`.
   case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral,
-       .booleanLiteral, .emptyLiteral, .genericInstantiation:
+       .booleanLiteral, .emptyLiteral, .genericInstantiation, .typeReference:
     return nil
   }
 }

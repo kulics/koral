@@ -123,8 +123,9 @@ public indirect enum TypeNode: CustomStringConvertible {
       return mutable ? "*mutable \(inner)" : "*\(inner)"
     case .pointer(let inner, let mutable, _):
       return mutable ? "*mutable \(inner)" : "*\(inner)"
-    case .weakReference(let inner, let mutable, _):
-      return mutable ? "?*mutable \(inner)" : "?*\(inner)"
+    case .weakReference(let inner, _, _):
+      // Surface spelling is `?T`; the old `?*T` form is rejected at parse.
+      return "?\(inner)"
     case .generic(let base, let args, _):
       let argsStr = args.map { $0.description }.joined(separator: ", ")
       return "\(base)[\(argsStr)]"
@@ -641,6 +642,15 @@ public indirect enum ExpressionNode {
   /// - methodName: The method name (e.g., "empty", "new")
   /// - arguments: The method arguments
   case staticMethodCall(typeName: String, typeArgs: [TypeNode], methodName: String, arguments: [CallArg], span: SourceSpan)
+  /// A parenthesized type head in expression position with no nameable
+  /// spelling: `(*Int)`, `(?Box)`, `((T) -> R)`, `(Self)`. A type has no
+  /// value; this node only exists so the postfix chain can continue on the
+  /// type and inference can say so.
+  case typeReference(TypeNode, span: SourceSpan)
+  /// Static method call on a parenthesized type head with no nameable
+  /// spelling: `(*Foo).f(args)`. The nameable heads (`(Point).origin()`)
+  /// desugar to the string-keyed `staticMethodCall` instead.
+  case typedStaticMethodCall(base: TypeNode, methodName: String, methodTypeArgs: [TypeNode], arguments: [CallArg], span: SourceSpan)
   /// For loop expression: `for <match-pattern> in <iterable> ("where" <guard>)? then <body>`.
   /// The binding is a full match pattern and must be irrefutable; the guard
   /// filters -- a false guard skips the element and moves on.
@@ -1000,6 +1010,10 @@ extension ExpressionNode {
     case .subscriptExpression(_, _, let span):
       return span
     case .staticMethodCall(_, _, _, _, let span):
+      return span
+    case .typeReference(_, let span):
+      return span
+    case .typedStaticMethodCall(_, _, _, _, let span):
       return span
     case .forExpression(_, _, _, _, let span):
       return span

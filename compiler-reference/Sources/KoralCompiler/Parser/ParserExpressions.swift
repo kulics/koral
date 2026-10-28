@@ -61,25 +61,9 @@ extension Parser {
     // Named labels are now allowed for all calls (functions, methods, constructors)
   }
 
-  // MARK: - Bounded shape classification
-  //
-  // Parsing ambiguity is decided by SHAPE, not by "try to parse, fall back and
-  // re-parse". A trial parse has to save and restore the lexer, has to invent a
-  // failure path per alternative, and the branch that fails swallows the
-  // diagnostic the real parse would have produced. These predicates only look
-  // at a BOUNDED run of tokens: they build no tree and report nothing. The
-  // stream is restored either way -- that is how a streaming lexer gets
-  // lookahead -- and the caller then parses the alternative for real.
-  //
-  // The shapes mirror `parseType` exactly: type prefixes (`?`, `*`
-  // [`mutable`]) plus a type head (`Self`, an upper-first identifier, or
-  // `Func(...)` followed by its return type), with an optional
-  // `[` `<type-list>` `]` after the head. `*` + type-head starts a type; `*` +
-  // anything else dereferences: `f(*p)` dereferences, it does not cast.
-
   /// Non-throwing advance, for the shape scanner only: classification must not
   /// fail on a lexer error, it just runs out of tokens and says "no".
-  private func advanceShape() {
+  func advanceShape() {
     if let next = try? lexer.getNextToken() {
       currentToken = next
     } else {
@@ -129,7 +113,7 @@ extension Parser {
   /// The same scan, leaving the cursor just past the type it saw. Returns
   /// false (without promising anything about the cursor) when the run is not
   /// a type -- the caller only reaches this after `scanTypeShape` said yes.
-  private func scanTypeShapeConsuming() -> Bool {
+  func scanTypeShapeConsuming() -> Bool {
     // Prefixes: `?T`, `*T`, `*mutable T`. They nest. A `(` after `*` is a
     // pointer-to-function type, not a deref -- this is the TYPE shape scan.
     var morePrefixes = true
@@ -150,15 +134,18 @@ extension Parser {
       advanceShape()
       return true
     case .leftParen:
-      // Function type: `( <type-list> ) -> <type>`.
-      guard scanTypeParamListConsuming() else { return false }
-      guard currentToken === .arrow else { return false }
-      advanceShape()
-      return scanTypeShapeConsuming()
+      // Function type `( <type-list> ) -> <type>`, or a transparent group
+      // `( <type> )` around exactly one type.
+      guard let list = scanTypeParamListConsuming() else { return false }
+      if currentToken === .arrow {
+        advanceShape()
+        return scanTypeShapeConsuming()
+      }
+      return list.count == 1 && !list.trailingComma
     case .identifier(let name):
       advanceShape()
       if name == "Func", currentToken === .leftParen {
-        guard scanTypeParamListConsuming() else { return false }
+        guard scanTypeParamListConsuming() != nil else { return false }
         return scanTypeShapeConsuming()
       }
       guard isValidTypeName(name) else { return false }
@@ -208,27 +195,32 @@ extension Parser {
     }
   }
 
-  private func scanTypeParamListConsuming() -> Bool {
-    guard currentToken === .leftParen else { return false }
+  /// The parenthesized type list at the cursor, consumed through its `)`:
+  /// how many types it holds and whether a trailing comma was written. Nil
+  /// when the run is not a well-formed list.
+  private func scanTypeParamListConsuming() -> (count: Int, trailingComma: Bool)? {
+    guard currentToken === .leftParen else { return nil }
     advanceShape()
+    var count = 0
     if currentToken === .rightParen {
       advanceShape()
-      return true
+      return (count: 0, trailingComma: false)
     }
     while true {
-      guard scanTypeShapeConsuming() else { return false }
+      guard scanTypeShapeConsuming() else { return nil }
+      count += 1
       switch currentToken {
       case .comma:
         advanceShape()
         if currentToken === .rightParen {
           advanceShape()
-          return true
+          return (count: count, trailingComma: true)
         }
       case .rightParen:
         advanceShape()
-        return true
+        return (count: count, trailingComma: false)
       default:
-        return false
+        return nil
       }
     }
   }
@@ -1113,58 +1105,23 @@ extension Parser {
       return .ptrExpression(expr, mutable: mutable, span: ampersandSpan)
     }
     if currentToken === .multiply {
-      // A prefixed type at expression start (`*T`, `*T(args)`, `*mutable T`)
-      // is the retired `Type(expr)` cast spelling, rejected at parse time. A
-      // `*` followed by anything that is not a type shape dereferences.
-      if peekStartsPrefixedType() {
-        try rejectPrefixedTypeInExpression()
-      }
+      // Expression-leading `*` is ALWAYS the dereference operator: the operand
+      // recursion reaches the full postfix chain, so `*Int(u)` reads as
+      // `*(Int(u))`.
       let startSpan = currentSpan
       try match(.multiply)
       let expr = try parsePrefixExpression()
       return .derefExpression(expr, span: SourceSpan(start: startSpan.start, end: expr.span.end))
     }
     if currentToken === .questionMark {
-      // Same split as `*`: a prefixed type (`?T`, `?T(args)`) is the retired
-      // cast spelling; `?expr` upgrades a weak reference to `Option[T]`.
-      if peekStartsPrefixedType() {
-        try rejectPrefixedTypeInExpression()
-      }
+      // Expression-leading `?` is ALWAYS the weak-reference upgrade operator:
+      // `?Foo.bar()` reads as `?(Foo.bar())`.
       let startSpan = currentSpan
       try match(.questionMark)
       let operand = try parsePrefixExpression()
       return .upgradeExpr(operand, span: SourceSpan(start: startSpan.start, end: operand.span.end))
     }
     return try parsePostfixExpression()
-  }
-
-  /// Whether the `*` / `?` at the cursor is followed by a TYPE shape -- a type
-  /// head (`mutable`, uppercase identifier, `Self`) or nested `*` / `?`
-  /// prefixes around one -- and so starts a prefixed TYPE in expression
-  /// position. No `(` is required: bare `*T` names a cast target exactly as
-  /// `*T(x)` does. `**p` / `?*p` (lowercase pointee) are not type shapes and
-  /// stay deref / upgrade chains. Restores the stream.
-  private func peekStartsPrefixedType() -> Bool {
-    let savedLexer = lexer.saveState()
-    let savedToken = currentToken
-    defer {
-      lexer.restoreState(savedLexer)
-      currentToken = savedToken
-    }
-    advanceShape() // past the `*` / `?`
-    if isTypeHeadToken(currentToken) { return true }
-    return scanTypeShapeConsuming()
-  }
-
-  /// A prefixed type in expression position is the retired cast spelling
-  /// (`*T(x)`, `?T(x)`, and the bare `*T` / `?T` forms). Parse the type the
-  /// reader wrote so the error span covers exactly that, then reject it.
-  private func rejectPrefixedTypeInExpression() throws -> Never {
-    let castType = try parseType()
-    throw ParserError.rejectedConstruct(
-      span: castType.span,
-      message: "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
-    )
   }
 
   // MARK: - Postfix Expressions
@@ -1223,6 +1180,18 @@ extension Parser {
               } else {
                 expr = .genericMethodCall(base: expr, methodTypeArgs: methodTypeArgs, methodName: member, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               }
+              continue
+            }
+          }
+
+          // A parenthesized type head with no nameable spelling:
+          // `(*Foo).f(...)` is a static call on the TYPE, keyed by the type
+          // itself rather than by a name.
+          if case .typeReference(let baseType, _) = expr {
+            if currentToken === .leftParen {
+              let arguments = try parseCallArgumentsList()
+              try rejectNonConstructorCallSyntax(arguments: arguments, span: expr.span)
+              expr = .typedStaticMethodCall(base: baseType, methodName: member, methodTypeArgs: methodTypeArgs, arguments: arguments, span: SourceSpan(start: expr.span.start, end: currentSpan.end))
               continue
             }
           }
@@ -1624,13 +1593,21 @@ extension Parser {
   private func parseParenOrLambda() throws -> ExpressionNode {
     let startSpan = currentSpan
 
-    // `(` opens either a lambda or a parenthesized expression. The shape
-    // classifier decides BEFORE anything is built -- a lambda is
-    // `(params) [Type] => ...`, so the `=>` is the tell -- and then the chosen
-    // alternative is parsed for real. There is no trial to roll back and no
-    // failed branch to swallow the diagnostic the real parse would produce.
+    // `(` opens a lambda, a parenthesized TYPE head, or a parenthesized
+    // expression. The shape classifier decides BEFORE anything is built -- a
+    // lambda is `(params) [Type] => ...`, so the `=>` is the tell; a type head
+    // is `( <type> )`, exactly one type ending at `)`. There is no trial to
+    // roll back and no failed branch to swallow the diagnostic the real parse
+    // would produce.
     if shapeIsLambda() {
       return try parseLambdaExpression(startSpan: startSpan)
+    }
+
+    if parenthesizedTypeHeadFollows() {
+      // Parentheses are transparent around a type: `(Point)(1, 2)` IS
+      // `Point(1, 2)`, and the postfix suffixes continue on the head below.
+      let typeNode = try parseParenthesizedTypeHead(startSpan: startSpan)
+      return expressionNodeTypeHead(typeNode)
     }
 
     try match(.leftParen)
@@ -1646,6 +1623,51 @@ extension Parser {
     }
     try match(.rightParen)
     return first
+  }
+
+  /// Whether the `(` at the cursor encloses exactly one type ending at `)` --
+  /// a parenthesized type head in expression position. A trailing comma
+  /// disqualifies. Restores the stream.
+  private func parenthesizedTypeHeadFollows() -> Bool {
+    guard currentToken === .leftParen else { return false }
+    let savedLexer = lexer.saveState()
+    let savedToken = currentToken
+    defer {
+      lexer.restoreState(savedLexer)
+      currentToken = savedToken
+    }
+    advanceShape()
+    guard scanTypeShapeConsuming() else { return false }
+    return currentToken === .rightParen
+  }
+
+  /// Parses `( <type> )` -- parentheses transparent around the type, whose
+  /// span widens to cover them. The shape has already been decided.
+  private func parseParenthesizedTypeHead(startSpan: SourceSpan) throws -> TypeNode {
+    try match(.leftParen)
+    let inner = try parseType()
+    guard currentToken === .rightParen else {
+      throw ParserError.unexpectedToken(
+        span: currentSpan, got: currentToken.description, expected: "')' after type")
+    }
+    let closeSpan = currentSpan
+    try match(.rightParen)
+    return typeNodeWithSpan(inner, SourceSpan(start: startSpan.start, end: closeSpan.end))
+  }
+
+  /// The expression a parenthesized type head reads as. A nameable head is the
+  /// bare spelling's own node -- `(Point)` IS `Point` -- and anything else
+  /// (`(*Foo)`, `(?Box)`, `((T) -> R)`, `(Self)`) is a type reference: a type
+  /// the postfix chain continues on, but which has no value of its own.
+  private func expressionNodeTypeHead(_ typeNode: TypeNode) -> ExpressionNode {
+    switch typeNode {
+    case .identifier(let name, let span):
+      return .identifier(name, span: span)
+    case .generic(let base, let args, let span):
+      return .genericInstantiation(base: base, args: args, span: span)
+    default:
+      return .typeReference(typeNode, span: typeNode.span)
+    }
   }
 
   /// Parses a lambda whose SHAPE `shapeIsLambda` has already confirmed.

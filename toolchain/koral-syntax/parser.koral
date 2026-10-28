@@ -137,21 +137,6 @@ given CstParser {
         };
     };
 
-    /// Whether the tokens at `raw_offset` (after skipping newlines from
-    /// `self.pos`) spell a TYPE shape: a type head (`mutable`, `Self`,
-    /// uppercase ident), or a `*` / `?` type prefix in front of one. This is
-    /// how the old cast shape at a prefix `*` / `?` is recognized -- `*T(x)`,
-    /// `?T(x)`, and the bare `*T` / `?T` -- WITHOUT requiring the `(` that no
-    /// longer follows it. A `*` / `?` before a lowercase pointee is not a type
-    /// shape: `**p` / `?*p` stay deref / upgrade chains.
-    file_private peek_is_type_shape_at(self, raw_offset UInt) Bool = {
-        let tok = self.peek_at_skip_nl(raw_offset);
-        return when tok in {
-            .Star() or .KwWeakref() then self.peek_is_type_shape_at(raw_offset + 1),
-            _ then self.token_is_type_head(tok),
-        };
-    };
-
     /// The index just past one type starting at `start_index`, or `None`.
     file_private scan_type_shape_at(self, raw_start UInt) Option[UInt] = {
         let mutable i = self.sig_index_at(raw_start);
@@ -165,15 +150,19 @@ given CstParser {
                 i += 1;
             } else if self.tokens[i] is .Star() then {
                 let n = self.sig_index_at(i + 1);
-                if n >= self.tokens.count() or not self.token_is_type_head(
-                    self.tokens[n],
-                ) then {
+                // After `*` a type head OR a parenthesized type may follow:
+                // `*Int`, `*mutable Int`, `*(Int)`. A bare `*` before a
+                // lowercase pointee (`**p`) is a deref chain, not a type.
+                if n >= self.tokens.count() then {
                     more_prefixes = false;
-                } else {
+                } else if self.token_is_type_head(self.tokens[n])
+                    or self.tokens[n] is .LParen() then {
                     i = n;
                     if i < self.tokens.count() and self.tokens[i] is .KwMut() then {
                         i += 1;
                     };
+                } else {
+                    more_prefixes = false;
                 };
             } else {
                 more_prefixes = false;
@@ -187,16 +176,18 @@ given CstParser {
             return Option[UInt].Some(i + 1);
         };
         if self.tokens[i] is .LParen() then {
-            // Function type: `( <type-list> ) "->" <type>`. The `->` is
-            // mandatory -- a bare `( ... )` is not a type.
+            // Two shapes open with `(`: the function type
+            // `( <type-list> ) "->" <type>`, and the grouping `( <type> )`
+            // that holds exactly one type. A type LIST without the `->` is
+            // not a type.
             let after_params = self.scan_type_list_at(i) or else {
                 return Option[UInt].None();
             };
             let arrow_index = self.sig_index_at(after_params);
-            if arrow_index >= self.tokens.count() or self.tokens[arrow_index] is not .Arrow() then {
-                return Option[UInt].None();
+            if arrow_index < self.tokens.count() and self.tokens[arrow_index] is .Arrow() then {
+                return self.scan_type_shape_at(arrow_index + 1);
             };
-            return self.scan_type_shape_at(arrow_index + 1);
+            return self.scan_single_type_group_at(i);
         };
         if self.tokens[i] is .Ident(name) then {
             let after_name = self.sig_index_at(i + 1);
@@ -252,6 +243,30 @@ given CstParser {
             i = next;
         };
         return result;
+    };
+
+    /// The index just past a `( <type> )` grouping starting at `start_index`,
+    /// or `None`. The contents must be EXACTLY one type that ends at the
+    /// closing `)`: an empty `()` is not a type, a trailing comma disqualifies
+    /// (`(T,)`), and a type LIST is only a type with the `->` that turns it
+    /// into a function type.
+    file_private scan_single_type_group_at(self, raw_start UInt) Option[UInt] = {
+        let start_index = self.sig_index_at(raw_start);
+        if start_index >= self.tokens.count() or self.tokens[start_index] is not .LParen() then {
+            return Option[UInt].None();
+        };
+        let after_open = self.sig_index_at(start_index + 1);
+        if after_open >= self.tokens.count() or self.tokens[after_open] is .RParen() then {
+            return Option[UInt].None();
+        };
+        let after_type = self.scan_type_shape_at(after_open) or else {
+            return Option[UInt].None();
+        };
+        let rp_index = self.sig_index_at(after_type);
+        if rp_index >= self.tokens.count() or self.tokens[rp_index] is not .RParen() then {
+            return Option[UInt].None();
+        };
+        return Option[UInt].Some(rp_index + 1);
     };
 
     /// Whether `expr` is written as a TYPE NAME: a bare upper-first identifier
@@ -429,12 +444,12 @@ given CstParser {
         _ then false,
     };
 
-    /// Whether the `(` at `raw_start` opens a TYPE list -- the parameter list
-    /// of a function type `(T1, T2) -> R` written as a binding's annotation --
-    /// rather than a declaration's parameter list. The tell is the `->` after
-    /// the closing `)`: a function type always has one, a signature never
-    /// writes its result type with one.
-    file_private paren_opens_type_at(self, raw_start UInt) Bool = {
+    /// Whether the `(` at `raw_start` closes and the next token is `->` -- the
+    /// tell of a function type's parameter list `(T1, T2) -> R`. Reads the
+    /// buffer with a depth walk; nothing is parsed. The `->` is what separates
+    /// a function type from the parenthesized shapes a signature or a value
+    /// can write.
+    file_private paren_closes_before_arrow_at(self, raw_start UInt) Bool = {
         let start = self.sig_index_at(raw_start);
         if start >= self.tokens.count() or self.tokens[start] is not .LParen() then {
             return false;
@@ -458,6 +473,29 @@ given CstParser {
             i += 1;
         };
         return false;
+    };
+
+    /// Whether the `(` at `raw_start` opens a TYPE -- the annotation of a
+    /// binding (`let f (Int) -> Int = g`, `let p (*Int) = q`) -- rather than a
+    /// declaration's parameter list. Two tells, either one is enough:
+    /// `)` followed by `->` (a function type), or non-empty contents that scan
+    /// as a type list ending exactly at `)` (a grouping `(T)`, or a multi-type
+    /// list the type parser will then reject). A signature's parameters start
+    /// with `name Type` / `mutable`, never with a bare type head.
+    file_private paren_opens_type_at(self, raw_start UInt) Bool = {
+        if self.paren_closes_before_arrow_at(raw_start) then {
+            return true;
+        };
+        let start = self.sig_index_at(raw_start);
+        if start >= self.tokens.count() or self.tokens[start] is not .LParen() then {
+            return false;
+        };
+        let after_open = self.sig_index_at(start + 1);
+        if after_open >= self.tokens.count() or self.tokens[after_open] is .RParen() then {
+            // `()` is an empty parameter list, not a type.
+            return false;
+        };
+        return self.scan_type_list_at(start) is .Some(_);
     };
 
     /// Whether `name` is a value name: lowercase-first after underscores, or
@@ -764,12 +802,49 @@ given CstParser {
             return .Ok(.Weakref(inner, kw));
         };
 
-        // Function type: `(T1, T2) -> R`. The parameter list is a TYPE list,
-        // and `->` is mandatory -- it is what separates a function type from
-        // the parenthesized shapes that live in expression position.
+        // Two shapes open with `(`. A function type is `(T1, T2) -> R` -- its
+        // parameter list is a TYPE list and the `->` is mandatory. Otherwise
+        // the parens are GROUPING and hold exactly one type: `(*Int)`. A type
+        // list without `->`, and an empty `()`, are rejected with the grouping
+        // message (byte-identical with the compilers).
         if self.check(.LParen()) then {
+            if self.paren_closes_before_arrow_at(self.pos) then {
+                let lp = self.eat();
+                return self.parse_function_type_tail(lp, true);
+            };
             let lp = self.eat();
-            return self.parse_function_type_tail(lp, true);
+            if self.check(.RParen()) or self.check(.Comma()) then {
+                return .Error(
+                    "Parse error: A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
+                );
+            };
+            let inner = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            if self.check(.Comma()) then {
+                return .Error(
+                    "Parse error: A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
+                );
+            };
+            let rp = when self.expect(.RParen(), "')'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            // Keep one paren layer for readability, but collapse duplicate
+            // nesting: ((T)) -> (T) -- the same policy as expression `Paren`.
+            when inner in {
+                .Paren(_, nested, _) then {
+                    return .Ok(.Paren(lp, nested, rp));
+                },
+                _ then {
+                    return .Ok(.Paren(lp, inner, rp));
+                },
+            };
         };
 
         // Self type
@@ -1734,13 +1809,12 @@ given CstParser {
             return .Ok(.BitwiseNot(op, operand));
         };
 
-        // Dereference, or the old raw-pointer cast shape `* [mutable] T(expr)`.
-        // `*` + a type shape is that old shape and is rejected; `*` + anything
-        // else is deref. Pointer casts are written `expr as *T`.
+        // A leading `*` is ALWAYS the dereference operator -- it never opens a
+        // cast shape. `*Int(q)` parses as `*(Int(q))`, an operator chain over
+        // the call; bare `*Int` is a deref chain over a type-as-value (the
+        // compilers reject that one at sema). Pointer casts are written
+        // `expr as *T`.
         if self.check(.Star()) then {
-            if self.peek_is_type_shape_at(1) then {
-                return self.parse_type_application();
-            };
             let op = self.eat();
             let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
@@ -1751,15 +1825,11 @@ given CstParser {
             return .Ok(.Deref(op, operand));
         };
 
-        // `?T(expr)` used to be weak-reference construction (type application);
-        // `?expr` upgrades a weak reference to `Option[T]`.
-        // Disambiguation: `?` + a type shape is the old construction shape and
-        // is rejected; `?` + anything else is the upgrade operator. Weak
-        // construction is written `expr as ?T`.
+        // A leading `?` is ALWAYS the weak-upgrade operator (`?expr` upgrades
+        // a weak reference to `Option[T]`). `?T(x)` parses as `?(T(x))`; bare
+        // `?T` is an upgrade chain over a type-as-value. Weak construction is
+        // written `expr as ?T`.
         if self.check(.KwWeakref()) then {
-            if self.peek_is_type_shape_at(1) then {
-                return self.parse_type_application();
-            };
             let op = self.eat();
             let operand = when self.parse_prefix() in {
                 .Ok(e) then e,
@@ -1792,18 +1862,6 @@ given CstParser {
     // ========================================================================
     // Postfix expressions
     // ========================================================================
-
-    /// The old prefixed cast / weak-construction spellings at expression start
-    /// -- `* [mutable] T(expr)`, `?T(expr)`, and the bare `*T` / `?T` (any
-    /// prefixed type in expression position). All rejected at parse time, with
-    /// or without the `(`: pointer and weak casts are written `expr as Type`.
-    /// Reached from the prefix `*` / `?` branches when the tokens after the
-    /// prefix spell a type shape.
-    file_private parse_type_application(self) Result[CstExpr] = {
-        return .Error(
-            "Parse error: pointer and weak casts are written 'expr as Type', not 'Type(expr)'",
-        );
-    };
 
     /// The composite `base(Trait).method(...)` /
     /// `base(Trait).method[TypeArgs](...)` qualified call. The `(Trait)` SHAPE
@@ -2453,14 +2511,77 @@ given CstParser {
     // Parenthesized expression or lambda
     // ========================================================================
 
+    /// A type read as a VALUE -- the inner of a parenthesized type head `(T)`.
+    /// Named types and the `*` / `?` prefixes map onto the ordinary expression
+    /// nodes: bare `*Int` is already a deref chain over the type-as-value, and
+    /// `(*Foo).f()` just groups the same chain. A function type has no
+    /// expression spelling at all, so it travels as one opaque token whose
+    /// text is the type itself -- the round trip is the contract, and the
+    /// compilers reject these at sema anyway.
+    file_private type_as_expr(self, t CstType) CstExpr = when t in {
+        .Named(name) then .Ident(name),
+        .SelfType(kw) then .SelfExpr(kw),
+        .Generic(lb, args, rb, base) then .GenericInst(.Ident(base), lb, args, rb),
+        .Ptr(inner, kw) then .Deref(kw, self.type_as_expr(inner)),
+        .Weakref(inner, kw) then .Upgrade(kw, self.type_as_expr(inner)),
+        .Mutable(inner, kw) then when inner in {
+            // `*mutable T` prints star-mut-space-name; mirror that shape.
+            .Ptr(ptr_inner, ptr_kw) then .Deref(
+                ptr_kw,
+                .PrefixKw(kw, self.type_as_expr(ptr_inner)),
+            ),
+            _ then .PrefixKw(kw, self.type_as_expr(inner)),
+        },
+        .Paren(lp, inner, rp) then .Paren(lp, self.type_as_expr(inner), rp),
+        .ConstraintKeyword(kw) then .Ident(kw),
+        .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
+    };
+
     file_private parse_paren_or_lambda(self) Result[CstExpr] = {
-        // `(` opens either a lambda or a parenthesized expression. The shape
-        // classifier decides BEFORE anything is built -- a lambda is
-        // `(params) [Type] => ...`, so the `=>` is the tell -- and then the
-        // chosen alternative is parsed for real. No trial to roll back.
+        // `(` opens a lambda, a parenthesized TYPE head, or a parenthesized
+        // expression. The shape classifier decides BEFORE anything is built --
+        // a lambda is `(params) [Type] => ...`, so the `=>` is the tell; a type
+        // head is `( <one type> )` -- and then the chosen alternative is
+        // parsed for real. No trial to roll back.
         if self.shape_is_lambda_at(self.pos) then {
             let lambda_expr = self.parse_lambda_node() or return;
             return .Ok(lambda_expr);
+        };
+        // Type head: `(T)` is a type-as-value primary that takes postfix
+        // suffixes like any other -- `(Point)(1, 2)` a cast, `(Point).origin()`
+        // a call, bare `(T)` a primary the compilers reject at sema. The
+        // contents must be exactly one type that ends at the `)`; a trailing
+        // comma disqualifies and falls through to the pair-literal error.
+        if self.scan_single_type_group_at(self.pos) is .Some(_) then {
+            let lp = when self.expect(.LParen(), "'('") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let inner_type = when self.parse_type_node() in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let rp = when self.expect(.RParen(), "')'") in {
+                .Ok(t) then t,
+                .Error(e) then {
+                    return .Error(e);
+                },
+            };
+            let inner = self.type_as_expr(inner_type);
+            // Keep one paren layer for readability, but collapse duplicate
+            // nesting: ((T)) -> (T)
+            when inner in {
+                .Paren(_, nested, _) then {
+                    return .Ok(.Paren(lp, nested, rp));
+                },
+                _ then {
+                    return .Ok(.Paren(lp, inner, rp));
+                },
+            };
         };
         // Parenthesized expression
         let lp = when self.expect(.LParen(), "'('") in {

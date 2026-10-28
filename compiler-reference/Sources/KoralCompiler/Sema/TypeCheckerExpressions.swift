@@ -794,10 +794,10 @@ extension TypeChecker {
 
   /// `expr as Type` -- a new type view on the same value. The RESOLVED target
   /// type (aliases expanded) decides which cast this is: weak construction
-  /// (`?U`), an explicit trait-object upcast (trait name), or pointer
-  /// reinterpretation (`*U`, and `Int`/`UInt` in both directions). Numeric
-  /// conversion and nominal construction are `Type(expr)` and are refused
-  /// here with a pointer at that spelling.
+  /// (`?U`) or pointer reinterpretation (`*U`, and `Int`/`UInt` in both
+  /// directions). Numeric conversion, nominal construction and the
+  /// trait-object upcast are `Type(expr)` and are refused here with a pointer
+  /// at that spelling.
   private func inferAsCast(typeNode: TypeNode, innerExpr: ExpressionNode) throws -> TypedExpressionNode {
     let targetType = try resolveTypeNode(typeNode)
 
@@ -826,29 +826,13 @@ extension TypeChecker {
       return .intrinsicCall(.downgradeRef(val: typedInner, resultType: targetType))
     }
 
-    // Trait-object upcast. The conversion machinery carries the object-safety
-    // and conformance checks; the silent declines it leaves behind (trait
-    // object to trait object, rvalue to mutable reference) are errors here.
+    // The trait-object upcast moved to the call form `Trait(expr)`. The `as`
+    // spelling for it joins nominal construction in being refused here -- and
+    // it must not fall through to the wrong-target message below.
     if isTraitObjectCastTarget(targetType) {
-      let typedInner = try inferTypedExpression(innerExpr)
-      // Identity: the source already IS that trait object.
-      if typedInner.type == targetType {
-        return typedInner
-      }
-      if case .traitObject = peelReferenceWrappers(typedInner.type) {
-        throw SemanticError(.generic(
-          "Cannot cast a trait object to another trait object"
-        ), span: currentSpan)
-      }
-      let converted = try tryTraitObjectConversion(typedInner, to: targetType)
-      if converted.type != targetType {
-        throw SemanticError.invalidOperation(
-          op: "cast",
-          type1: typedInner.type.description,
-          type2: targetType.description
-        )
-      }
-      return converted
+      throw SemanticError(.generic(
+        "Construction is written 'Type(args)', not 'expr as Type'"
+      ), span: currentSpan)
     }
 
     // Pointer reinterpretation: any pointer flavor/pointee in either
@@ -899,11 +883,60 @@ extension TypeChecker {
       ), span: currentSpan)
     }
     throw SemanticError(.generic(
-      "'as' casts to pointer, weak, or trait-object types"
+      "'as' casts to pointer or weak types"
     ), span: currentSpan)
   }
 
-  /// The `as` trait-object row: a resolved trait-object reference target.
+  /// The trait-object upcast on a typed value: identity when the source
+  /// already is that trait object, `Cannot cast a trait object to another
+  /// trait object` when it is a different one, and a cast error when the
+  /// conversion machinery declines. The conversion machinery carries the
+  /// object-safety and conformance checks. This is the decline-checking
+  /// wrapper the `as` spelling used to inline; its only caller is the call
+  /// form `Trait(expr)` now.
+  private func performTraitObjectUpcast(
+    _ typedInner: TypedExpressionNode, target targetType: Type
+  ) throws -> TypedExpressionNode {
+    // Identity: the source already IS that trait object.
+    if typedInner.type == targetType {
+      return typedInner
+    }
+    if case .traitObject = peelReferenceWrappers(typedInner.type) {
+      throw SemanticError(.generic(
+        "Cannot cast a trait object to another trait object"
+      ), span: currentSpan)
+    }
+    let converted = try tryTraitObjectConversion(typedInner, to: targetType)
+    if converted.type != targetType {
+      throw SemanticError.invalidOperation(
+        op: "cast",
+        type1: typedInner.type.description,
+        type2: targetType.description
+      )
+    }
+    return converted
+  }
+
+  /// `Trait(expr)` / `(Trait)(expr)` / `Trait[Args](expr)` -- the explicit
+  /// trait-object upcast, keyed on the resolved target. Exactly one positional
+  /// argument; the result type is the resolved target (a trait-object
+  /// reference), same as the implicit coercion.
+  private func inferTraitObjectUpcastCall(
+    targetType: Type, callArgs: [CallArg], span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard callArgs.count == 1,
+          let arg = callArgs.first,
+          arg.label == nil,
+          let innerExpr = arg.expression else {
+      throw SemanticError(.generic(
+        "A cast takes exactly one positional argument: write 'Type(expr)'"
+      ), span: span)
+    }
+    let typedInner = try inferTypedExpression(innerExpr)
+    return try performTraitObjectUpcast(typedInner, target: targetType)
+  }
+
+  /// The trait-object row: a resolved trait-object reference target.
   private func isTraitObjectCastTarget(_ type: Type) -> Bool {
     switch type {
     case .traitObject:
@@ -2324,6 +2357,11 @@ extension TypeChecker {
 
     case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
+      // The operand already objected about itself; a dereference of the
+      // failure is a consequence, not a second mistake.
+      if typedInner.type == .error {
+        return failedExpression()
+      }
       if let info = typedInner.type.indirectionCompatibilityInfo,
          let targetType = dereferenceTargetType(of: typedInner.type) {
         let spelledType: String
@@ -2399,6 +2437,11 @@ extension TypeChecker {
     case .upgradeExpr(let inner, _):
       // `?expr` upgrades a weak reference to `Option[T]`.
       let typedInner = try inferTypedExpression(inner)
+      // The operand already objected about itself; the upgrade of the failure
+      // is a consequence, not a second mistake.
+      if typedInner.type == .error {
+        return failedExpression()
+      }
       let strongType: Type
       switch typedInner.type {
       case .weakReference(let innerType):
@@ -2460,6 +2503,23 @@ extension TypeChecker {
         typeName: typeName,
         typeArgs: typeArgs,
         methodName: methodName,
+        callArgs: arguments,
+        expectedType: expectedType
+      )
+
+    case .typeReference(let typeNode, let span):
+      // A bare parenthesized type head: `(*Int)`, `(?Box)`, `((T) -> R)`.
+      // A type has no value -- the same objection the bare spelling gets.
+      try handleError(SemanticError(.generic(
+        "Type '\(typeNode)' cannot be used as an expression: types have no value"
+      ), span: span))
+      return failedExpression()
+
+    case .typedStaticMethodCall(let typeNode, let methodName, let methodTypeArgs, let arguments, _):
+      return try inferTypeStaticMethodCallExpression(
+        typeNode: typeNode,
+        methodName: methodName,
+        methodTypeArgs: methodTypeArgs,
         callArgs: arguments,
         expectedType: expectedType
       )
@@ -3832,6 +3892,69 @@ extension TypeChecker {
     return .castExpression(expression: typedInner, type: targetType)
   }
 
+  /// `(T)(args)` -- the call family keyed on the RESOLVED target type (aliases
+  /// expanded), the parenthesized spelling of the bare `T(args)` dispatch.
+  /// Nameable heads never reach here (they parse as the bare spelling's own
+  /// nodes), so the rows left are pointer/weak (the retired cast spelling),
+  /// the trait-object upcast, numeric conversion, and the wrong-target family.
+  private func inferTypeReferenceCall(
+    typeNode: TypeNode, callArgs: [CallArg], span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    // `Self` has no cast meaning even where it resolves to a nominal.
+    if case .inferredSelf = typeNode {
+      throw SemanticError(.generic(
+        "Type '\(typeNode)' does not support cast: only numeric and pointer types can be cast"
+      ), span: span)
+    }
+    let targetType = try resolveTypeNode(typeNode)
+    if isTraitObjectCastTarget(targetType) {
+      return try inferTraitObjectUpcastCall(targetType: targetType, callArgs: callArgs, span: span)
+    }
+    if isPointerWeakOrTraitCastTarget(targetType) {
+      throw SemanticError(.generic(
+        "Pointer and weak casts are written 'expr as Type', not 'Type(expr)'"
+      ), span: span)
+    }
+    if isIntegerScalarType(targetType) || isFloatScalarType(targetType) {
+      return try inferTypeApplicationCast(targetType: targetType, callArgs: callArgs, span: span)
+    }
+    throw SemanticError(.generic(
+      "Type '\(typeNode)' does not support cast: only numeric and pointer types can be cast"
+    ), span: span)
+  }
+
+  /// `(*Foo).f(args)` -- a static call on a parenthesized type head with no
+  /// nameable spelling. The resolved type decides, exactly as the nameable
+  /// spellings do; a type with no such member reports the ordinary member
+  /// error.
+  private func inferTypeStaticMethodCallExpression(
+    typeNode: TypeNode,
+    methodName: String,
+    methodTypeArgs: [TypeNode],
+    callArgs: [CallArg],
+    expectedType: Type?
+  ) throws -> TypedExpressionNode {
+    let targetType = try resolveTypeNode(typeNode)
+    if !methodTypeArgs.isEmpty {
+      let resolvedMethodTypeArgs = try methodTypeArgs.map { try resolveTypeNode($0) }
+      return try inferStaticGenericMethodCallOnConcreteType(
+        baseType: targetType,
+        methodName: methodName,
+        callArgs: callArgs,
+        explicitMethodTypeArgs: resolvedMethodTypeArgs,
+        expectedType: expectedType
+      )
+    }
+    return try inferConcreteTypeStaticMethodCall(
+      type: targetType,
+      typeName: typeNode.description,
+      resolvedTypeArgs: [],
+      methodName: methodName,
+      callArgs: callArgs,
+      expectedType: expectedType
+    )
+  }
+
   ///
   /// Two spellings share this composite node:
   ///   Type(Trait).method(args)  -- base names the self type; an instance
@@ -4299,6 +4422,12 @@ extension TypeChecker {
       return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs, span: callee.span)
     }
 
+    // `(T)(args)` -- a parenthesized type head in call position goes through
+    // the same resolved-target dispatch as the bare spellings.
+    if case .typeReference(let typeNode, _) = callee {
+      return try inferTypeReferenceCall(typeNode: typeNode, callArgs: callArgs, span: callee.span)
+    }
+
     if case .memberPath(let baseExpr, let path, _) = callee,
        case .identifier(let baseName, _) = baseExpr,
        path.count == 1,
@@ -4516,13 +4645,19 @@ extension TypeChecker {
            isIntegerScalarType(resolvedType) || isFloatScalarType(resolvedType) {
           return try inferTypeApplicationCast(targetType: resolvedType, callArgs: callArgs, span: callee.span)
         }
-        // A resolved pointer/weak/trait target is the retired cast spelling,
-        // even when it arrives through an alias (`MyPtr(x)`). It must not fall
-        // into the construction path or the generic message below.
+        // A resolved pointer/weak/trait target is keyed on the RESOLVED type,
+        // even when it arrives through an alias (`MyPtr(x)`). Pointer and weak
+        // are the retired cast spelling; a trait is the explicit trait-object
+        // upcast. Neither may fall into the construction path or the generic
+        // message below.
         if let resolvedType = currentScope.resolveType(name, sourceFile: currentSourceFile),
            isPointerWeakOrTraitCastTarget(resolvedType) {
+          if isTraitObjectCastTarget(resolvedType) {
+            return try inferTraitObjectUpcastCall(
+              targetType: resolvedType, callArgs: callArgs, span: callee.span)
+          }
           throw SemanticError(.generic(
-            "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
+            "Pointer and weak casts are written 'expr as Type', not 'Type(expr)'"
           ), span: callee.span)
         }
         if case .opaque = type {
@@ -4564,12 +4699,12 @@ extension TypeChecker {
         )
       }
 
-      // A bare trait name in call position is the retired cast spelling too:
-      // `Drawable(x)` writes `x as Drawable` now.
+      // A bare trait name in call position is the explicit trait-object
+      // upcast: `Drawable(c)`.
       if visibleTraitInfo(name) != nil {
-        throw SemanticError(.generic(
-          "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'"
-        ), span: callee.span)
+        let targetType = try resolveTypeNode(.identifier(name, span: callee.span))
+        return try inferTraitObjectUpcastCall(
+          targetType: targetType, callArgs: callArgs, span: callee.span)
       }
 
       // 2. Try Generic Struct/Enum Template (Implicit Type Inference)
@@ -5153,6 +5288,15 @@ extension TypeChecker {
         type: returnType
       )
     } else {
+      // `Trait[Args](c)` -- the generic form of the explicit trait-object
+      // upcast, keyed on the resolved target like every call-family row.
+      if visibleTraitInfo(base) != nil {
+        let targetType = try resolveTypeNode(.generic(base: base, args: args, span: span))
+        return try inferTraitObjectUpcastCall(
+          targetType: targetType,
+          callArgs: callArgs ?? arguments.map { CallArg(expression: $0) },
+          span: span)
+      }
       throw SemanticError.functionNotFound(base)
     }
   }

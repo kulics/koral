@@ -368,8 +368,10 @@ let main() Void = {
     // === Casts and type applications ===
     // Numeric / generic conversion spells the target type FIRST: `Type(expr)`
     // (`Int(x)`, `Int64(42)`). Pointer and weak casts are `expr as Type`
-    // (`p as *Int`, `x as ?T`); the old `*Int(p)` / `?T(q)` spellings no
-    // longer parse.
+    // (`p as *Int`, `x as ?T`). A leading `*` / `?` in expression position is
+    // ALWAYS an operator, so `*Int(q)` / `?T(x)` parse as operator chains
+    // `*(Int(q))` / `?(T(x))` -- they are no longer rejected, and no longer
+    // casts.
     t.test(
         "cast target type leads",
         "let main() Void={\nlet y=Int64(42);\nlet z=Int(y);\n};\n",
@@ -393,9 +395,10 @@ let main() Void = {
         "let main() Void={\nlet v=f(*p);\n};\n",
         "let main() Void = {\n    let v = f(*p);\n};\n",
     );
-    // `expr as Type` is the cast spelling for pointer and weak targets, and
-    // for trait-object erasure. The chain groups left and the cast result
-    // takes no postfix suffixes.
+    // `expr as Type` is the cast spelling for pointer and weak targets. The
+    // chain groups left and the cast result takes no postfix suffixes. The
+    // trait-object upcast is the CALL form instead: `Drawable(c)`,
+    // `Transform[Int](c)`, `(Drawable)(c)`.
     t.test_checked(
         "raw pointer cast",
         "let main() Void={\nlet p = q as *Int;\n};\n",
@@ -412,7 +415,24 @@ let main() Void = {
         "let main() Void = {\n    let w = x as ?T;\n};\n",
     );
     t.test_checked(
-        "trait cast",
+        "trait upcast uses the call form",
+        "let main() Void={\nlet d = Drawable(c);\n};\n",
+        "let main() Void = {\n    let d = Drawable(c);\n};\n",
+    );
+    t.test_checked(
+        "generic trait upcast uses the call form",
+        "let main() Void={\nlet d = Transform[Int](c);\n};\n",
+        "let main() Void = {\n    let d = Transform[Int](c);\n};\n",
+    );
+    t.test_checked(
+        "parenthesized trait upcast uses the call form",
+        "let main() Void={\nlet d = (Drawable)(c);\n};\n",
+        "let main() Void = {\n    let d = (Drawable)(c);\n};\n",
+    );
+    // `c as Drawable` is now a SEMA error (the upcast is written `Drawable(c)`)
+    // -- but a trait target is syntactically fine, so the formatter keeps it.
+    t.test_checked(
+        "trait target in an as cast still round-trips",
         "let main() Void={\nlet d = c as Drawable;\n};\n",
         "let main() Void = {\n    let d = c as Drawable;\n};\n",
     );
@@ -431,22 +451,25 @@ let main() Void = {
         "let main() Void={\nlet b = p as *Int == q;\n};\n",
         "let main() Void = {\n    let b = p as *Int == q;\n};\n",
     );
-    // The old spellings are gone: a prefixed type in expression position is
-    // written `expr as Type` now, with or without the `(`.
-    t.test_error_contains(
-        "old pointer cast shape rejected",
+    // A leading `*` / `?` is always an operator, so the old cast-looking
+    // spellings are operator chains over the call or the type-as-value:
+    // `*Int(q)` is `*(Int(q))`, `?T(x)` is `?(T(x))`, `?*T(x)` is `?(*(T(x)))`.
+    // The compilers reject the bare type-as-value forms at sema; here they
+    // parse and round-trip.
+    t.test_checked(
+        "prefixed call parses as an operator chain",
         "let main() Void={\nlet p = *Int(q);\n};\n",
-        "written 'expr as Type'",
+        "let main() Void = {\n    let p = *Int(q);\n};\n",
     );
-    t.test_error_contains(
-        "bare prefixed type in expression position rejected",
+    t.test_checked(
+        "bare prefixed type parses as an operator chain",
         "let main() Void={\nlet p = ?T;\n};\n",
-        "written 'expr as Type'",
+        "let main() Void = {\n    let p = ?T;\n};\n",
     );
-    t.test_error_contains(
-        "nested old cast shape rejected",
+    t.test_checked(
+        "nested prefixed cast shape parses as operator chains",
         "let main() Void={\nlet p = ?*T(x);\n};\n",
-        "written 'expr as Type'",
+        "let main() Void = {\n    let p = ?*T(x);\n};\n",
     );
     // `?` before a lowercase pointee is the upgrade operator and `*` is
     // deref, so `**p` / `?*p` are chains, not cast shapes. The legacy `?*T`
@@ -460,6 +483,69 @@ let main() Void = {
         "legacy weak type spelling rejected",
         "let main() Void={\nlet w ?*T = x;\n};\n",
         "legacy '?*T'",
+    );
+
+    // === Type heads and parenthesized types ===
+    // `(T)` in expression position is a type-as-value primary that takes
+    // postfix suffixes like any other; `(T)` in type position is grouping and
+    // keeps its parens. A type list or an empty `()` in a type slot is
+    // rejected -- with no `->`, the parens hold exactly one type.
+    t.test_checked(
+        "parenthesized type head takes a call",
+        "let main() Void={\nlet p = (Point)(1, 2);\n};\n",
+        "let main() Void = {\n    let p = (Point)(1, 2);\n};\n",
+    );
+    t.test_checked(
+        "parenthesized type head takes a method call",
+        "let main() Void={\nlet o = (Point).origin();\n};\n",
+        "let main() Void = {\n    let o = (Point).origin();\n};\n",
+    );
+    t.test_checked(
+        "parenthesized pointer type head takes a method call",
+        "let main() Void={\nlet r = (*Foo).f();\n};\n",
+        "let main() Void = {\n    let r = (*Foo).f();\n};\n",
+    );
+    t.test_checked(
+        "parenthesized function type head takes a method call",
+        "let main() Void={\nlet r = ((Int) -> Int).call();\n};\n",
+        "let main() Void = {\n    let r = ((Int) -> Int).call();\n};\n",
+    );
+    t.test_checked(
+        "grouped pointer type annotation keeps its parens",
+        "let main() Void={\nlet p (*Int) = q;\n};\n",
+        "let main() Void = {\n    let p (*Int) = q;\n};\n",
+    );
+    t.test_checked(
+        "grouped function type annotation keeps its parens",
+        "let main() Void={\nlet f ((Int) -> Int) = g;\n};\n",
+        "let main() Void = {\n    let f ((Int) -> Int) = g;\n};\n",
+    );
+    t.test_checked(
+        "grouped pointee keeps its parens",
+        "let main() Void={\nlet p *(Int) = q;\n};\n",
+        "let main() Void = {\n    let p *(Int) = q;\n};\n",
+    );
+    t.test_checked(
+        "weak upgrade of a qualified call",
+        "let main() Void={\nlet v = ?Foo.bar();\n};\n",
+        "let main() Void = {\n    let v = ?Foo.bar();\n};\n",
+    );
+    // Bare `(T)` with no follower is the same type-head primary. The
+    // compilers reject it at sema; here it parses and round-trips.
+    t.test_checked(
+        "bare parenthesized type head round-trips",
+        "let main() Void={\nlet p = (T);\n};\n",
+        "let main() Void = {\n    let p = (T);\n};\n",
+    );
+    t.test_error_contains(
+        "multi-type grouping rejected",
+        "let p (Int, String) = q;\n",
+        "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
+    );
+    t.test_error_contains(
+        "empty grouping rejected in a type slot",
+        "type P(x ());\n",
+        "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
     );
 
     // === Mutable and destructuring ===
@@ -938,6 +1024,11 @@ let main() Void = {
     t.test_error_contains(
         "method call on unparenthesized cast rejected",
         "let main() Void={\nlet r = x as Tag.plus_ten(1);\n};\n",
+        "expected ';'",
+    );
+    t.test_error_contains(
+        "method call on unparenthesized pointer cast rejected",
+        "let main() Void={\nlet r = x as *T.equals(1);\n};\n",
         "expected ';'",
     );
     t.test_error_contains(

@@ -625,6 +625,25 @@ public func printAST(_ node: ASTNode) {
           }
         }
       }
+
+    case .typeReference(let typeNode, _):
+      print("\(indent)TypeReference: \(typeNode)")
+
+    case .typedStaticMethodCall(let base, let methodName, let methodTypeArgs, let arguments, _):
+      let typeArgsStr = methodTypeArgs.isEmpty ? "" : "[\(methodTypeArgs.map { "\($0)" }.joined(separator: ", "))]"
+      print("\(indent)TypedStaticMethodCall: (\(base)).\(methodName)\(typeArgsStr)")
+      print("\(indent)  Arguments:")
+      withIndent {
+        withIndent {
+          for arg in arguments {
+            if let expr = arg.expression {
+              printExpression(expr)
+            } else {
+              print("\(indent)...")
+            }
+          }
+        }
+      }
     
     case .forExpression(let pattern, let iterable, let body, let guardExpr, _):
       print("\(indent)ForExpression:")

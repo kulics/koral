@@ -303,10 +303,12 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-指针重解释换一套拼写：`expr as Type`（见「指针类型」）——`p as *T`、`u as *Int`、
-`p as UInt`、`b as ?T`、`c as Drawable`。`Type(expr)` 只做数值转换，外加构造
-（`Point(1, 2)`）；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"），
-数值目标的 `x as Int` 同样拒绝。
+指针重解释与弱句柄构造换一套拼写：`expr as Type`（见「指针类型」）——`p as *T`、
+`u as *Int`、`p as UInt`、`b as ?T`，`as` 的目标只允许指针与弱引用。
+`Type(expr)` 做数值转换，外加构造（`Point(1, 2)`）与 trait object upcast
+（`Drawable(c)`）；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"），
+数值目标的 `x as Int` 同样拒绝（`Numeric conversion is written 'Type(expr)', not 'expr as Type'`），
+其它 `as` 目标一律拒绝（`'as' casts to pointer or weak types`）。
 
 转换只有这一套拼写，**策略由目标类型决定**。整数按算术/转换策略分成三个平行家族——
 每族十个类型，同宽平行、强制隔离（`WrappingInt` 与 `Int` 不能出现在同一个操作里）：
@@ -2464,7 +2466,7 @@ trait object 是 Koral 实现运行期多态（动态分发）的机制，表层
 
 trait object 的构造遵循这些规则：
 
-- 目标类型是 trait 名。
+- 目标类型是 trait 名（泛型 trait 带上类型实参：`Transform[Int]`）。
 - 源值必须实现该 trait，并转换到该 trait object 上下文。
 - 不需要 `Object` 标记 trait。
 
@@ -2479,13 +2481,21 @@ given Circle as Drawable {
     draw(self) String = "Drawing circle";
 };
 
-let shape Drawable = Circle(10);
+let shape Drawable = Circle(10);   // 赋值时隐式转换
 shape.draw();
+
+let d = Drawable(Circle(10));      // 显式 upcast：恰好一个位置实参
+d.draw();
+Drawable(Circle(10)).draw();       // 任何需要表达式的位置都可以
 ```
 
-赋值会把具体值隐式转换到 trait object 上下文。显式 upcast 写 `c as Drawable`，
-可以用在任何需要表达式的位置——包括立刻调用：`(c as Drawable).draw()`。
-从一个 trait object 转到另一个 trait object 是被拒绝的。
+赋值会把具体值隐式转换到 trait object 上下文。显式 upcast 是单实参调用形
+`Trait(expr)`——`Drawable(c)`，泛型 trait 写 `Transform[Int](c)`。
+trait 目标遵循构造规则，`c as Drawable` 作为强转拼写会被拒绝
+（`Construction is written 'Type(args)', not 'expr as Type'`）。
+从一个 trait object 转到另一个 trait object 是被拒绝的
+（`Cannot cast a trait object to another trait object`），upcast 恰好接受一个
+位置实参（`A cast takes exactly one positional argument: write 'Type(expr)'`）。
 
 重要规则：
 
@@ -2900,7 +2910,18 @@ raw pointer 是面向 FFI 与系统编程的低层内存访问：
 指针重解释写作 `expr as Type`。`*mutable T` 可以直接看作 `*T`（`p as *T`），
 指针也可以一步换元素类型重读（`p as *UInt`），指针与整数地址双向互通
 （`p as UInt` / `u as *Int`）。强转结果调用方法要加括号：
-`(self as *T).equals(other as *T)`。旧的类型构造拼写（`*Int(u)`、`UInt(p)`）一律拒绝。
+`(self as *T).equals(other as *T)`。
+
+括号类型头在表达式位置命名同一个目标：`(*Foo).f()` 在 `*Foo` 的方法面上找 `f`，
+正如 `(Point).origin()` 就是 `Point.origin()`、`(Point)(1, 2)` 就是 `Point(1, 2)`。
+类型位的括号是恰好一个类型的透明分组——`let p (*Int)` 就是 `let p *Int`，
+`let f ((Int) -> Int) = g` 标注函数值——写在括号外的前缀作用于整组：`*(Int)` 是
+`*Int`，而 `*(Int) -> Int` 是函数类型 `(Int) -> Int` 的指针。
+
+旧的类型构造拼写一律拒绝。`*Int(u)` 现在读作算子链 `*(Int(u))`，`?Box(b)` 读作
+`?(Box(b))`，只报算子语义的自然错误；括号 / 别名调用形 `(*Int)(u)`、`(?Box)(b)`、
+`MyPtr(u)` 报 `Pointer and weak casts are written 'expr as Type', not 'Type(expr)'`，
+`UInt(p)` 报 `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`。
 
 ### 不安全取址与解引用
 

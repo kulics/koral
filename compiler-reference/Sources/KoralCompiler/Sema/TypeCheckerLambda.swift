@@ -215,7 +215,8 @@ extension TypeChecker {
     captures: inout [CapturedVariable]
   ) throws {
     switch expr {
-    case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .booleanLiteral, .genericInstantiation:
+    case .integerLiteral, .floatLiteral, .stringLiteral, .runeLiteral, .booleanLiteral, .genericInstantiation,
+         .typeReference:
       return
     case .interpolatedString(let parts, _):
       for part in parts {
@@ -368,7 +369,8 @@ extension TypeChecker {
          .upgradeExpr(let inner, _):
       try collectCapturedVariables(expr: inner, localNames: localNames, captures: &captures)
       
-    case .staticMethodCall(_, _, _, let arguments, _):
+    case .staticMethodCall(_, _, _, let arguments, _),
+         .typedStaticMethodCall(_, _, _, let arguments, _):
       for arg in arguments {
         if let expr = arg.expression {
           try collectCapturedVariables(expr: expr, localNames: localNames, captures: &captures)

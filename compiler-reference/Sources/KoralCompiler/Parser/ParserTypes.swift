@@ -72,13 +72,38 @@ extension Parser {
     return args
   }
 
-  private func parseTypeListInParens() throws -> [TypeNode] {
+  /// The same type node with its span replaced: a transparent `(...)` group
+  /// keeps the inner type's identity and widens where it is written.
+  func typeNodeWithSpan(_ type: TypeNode, _ span: SourceSpan) -> TypeNode {
+    switch type {
+    case .identifier(let name, _):
+      return .identifier(name, span: span)
+    case .reference(let inner, let mutable, _):
+      return .reference(inner, mutable: mutable, span: span)
+    case .pointer(let inner, let mutable, _):
+      return .pointer(inner, mutable: mutable, span: span)
+    case .weakReference(let inner, let mutable, _):
+      return .weakReference(inner, mutable: mutable, span: span)
+    case .generic(let base, let args, _):
+      return .generic(base: base, args: args, span: span)
+    case .inferredSelf:
+      return .inferredSelf(span: span)
+    case .functionType(let paramTypes, let returnType, _):
+      return .functionType(paramTypes: paramTypes, returnType: returnType, span: span)
+    }
+  }
+
+  /// `( <type-list> ) -> <type>` -- a function type -- or a transparent
+  /// grouping `( <type> )` around exactly one type. `startSpan` is the `(`.
+  private func parseParenthesizedType(startSpan: SourceSpan) throws -> TypeNode {
     try match(.leftParen)
-    var args: [TypeNode] = []
+    var types: [TypeNode] = []
+    var hadTrailingComma = false
     while currentToken !== .rightParen {
-      args.append(try parseType())
+      types.append(try parseType())
       if currentToken === .comma {
         try match(.comma)
+        hadTrailingComma = currentToken === .rightParen
       } else if currentToken !== .rightParen {
         throw ParserError.unexpectedToken(
           span: currentSpan,
@@ -87,30 +112,31 @@ extension Parser {
         )
       }
     }
+    let closeSpan = currentSpan
     try match(.rightParen)
-    return args
-  }
 
-  /// `(T1, T2) -> R` -- the parameter list is a type list and the arrow is
-  /// mandatory. `startSpan` is the `(`.
-  private func parseFunctionType(startSpan: SourceSpan) throws -> TypeNode {
-    let paramTypes = try parseTypeListInParens()
-    guard currentToken === .arrow else {
-      throw ParserError.invalidFunctionType(
-        span: currentSpan,
-        message: "Expected '->' between parameter types and return type"
-      )
+    if currentToken === .arrow {
+      try match(.arrow)
+      guard isTypeStart(currentToken) else {
+        throw ParserError.invalidFunctionType(
+          span: currentSpan,
+          message: "Function type must include a return type, e.g. (Int) -> String"
+        )
+      }
+      let returnType = try parseType()
+      return .functionType(paramTypes: types, returnType: returnType,
+                           span: SourceSpan(start: startSpan.start, end: returnType.span.end))
     }
-    try match(.arrow)
-    guard isTypeStart(currentToken) else {
-      throw ParserError.invalidFunctionType(
-        span: currentSpan,
-        message: "Function type must include a return type, e.g. (Int) -> String"
-      )
+
+    // Grouping: exactly one type ending at the `)`. Parentheses are
+    // transparent -- `(*Int)` IS `*Int`.
+    if types.count == 1, !hadTrailingComma, let inner = types.first {
+      return typeNodeWithSpan(inner, SourceSpan(start: startSpan.start, end: closeSpan.end))
     }
-    let returnType = try parseType()
-    return .functionType(paramTypes: paramTypes, returnType: returnType,
-                         span: SourceSpan(start: startSpan.start, end: returnType.span.end))
+    throw ParserError.rejectedConstruct(
+      span: SourceSpan(start: startSpan.start, end: closeSpan.end),
+      message: "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'"
+    )
   }
 
   private func parseTypeAtom() throws -> TypeNode {
@@ -123,7 +149,7 @@ extension Parser {
     }
 
     if currentToken === .leftParen {
-      return try parseFunctionType(startSpan: startSpan)
+      return try parseParenthesizedType(startSpan: startSpan)
     }
 
     guard case .identifier(let name) = currentToken else {

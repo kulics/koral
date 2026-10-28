@@ -1387,6 +1387,97 @@ given TypeChecker {
         };
     };
 
+    /// `(T).m(...)` -- the additive static-call case whose base is a
+    /// parenthesized type with no identifier-based spelling. The lookup is
+    /// keyed on the RESOLVED type (the string-keyed `StaticMethodCall` keeps
+    /// its name-keyed path). A miss is the ordinary missing-member complaint,
+    /// naming the type AS WRITTEN. A hit runs the ordinary call-shape and
+    /// argument checks -- their messages are the call machinery's own -- but
+    /// the call itself never lowers: the operand fails expression inference
+    /// (the seed's failedExpression intent), so it silently poisons the
+    /// enclosing declaration rather than producing a value.
+    module_private check_type_ref_static_method_call_ref(
+        self,
+        type_node TypeNode,
+        method_type_arg_nodes List[TypeNode],
+        method_name String,
+        args List[Expr],
+        call_span SourceSpan,
+        scope Scope,
+    ) TypedExpr = {
+        let receiver_type = self.canonicalize_alias_type(
+            self.resolve_type_in_scope(type_node, scope),
+        );
+        let mutable method_type_args = List[Type].new();
+        for ta in method_type_arg_nodes then {
+            method_type_args.push(self.resolve_type_in_scope(ta, scope));
+        };
+        let static_sig_opt = self.resolve_method_signature(receiver_type, method_name);
+        if static_sig_opt is .None() then {
+            // A cascade, not a second mistake: a receiver that failed to
+            // resolve, or a complaint already raised at this call, has said
+            // everything.
+            if not self.is_unresolved_expr_type(receiver_type) and not self.storage.diagnostics.has_error_at(
+                self.storage.file_path,
+                call_span,
+            ) then {
+                let face_hint = self.method_face_hint(
+                    self.extension_template_key(
+                        self.normalize_method_receiver_type(receiver_type),
+                    ),
+                    method_name,
+                );
+                let message = "Member '\(method_name)' not found in type '\(type_node_spelling(type_node))'";
+                self.push_diagnostic_at_span(
+                    when face_hint in {
+                        .Some(hint) then "\(message). \(hint)",
+                        .None() then message,
+                    },
+                    call_span,
+                );
+            };
+            return self.empty_typed_block(Type.Unknown());
+        };
+        when static_sig_opt in {
+            .Some(sig) then {
+                let param_specs = self.context().get_param_specs(sig.def_id) or else self.positional_param_specs_for_count(
+                    self.method_param_count(sig),
+                );
+                // The full declaration list, `self` included: `(T).m()` is not
+                // a method call with a receiver, so nothing is consumed off
+                // the front.
+                when self.plan_call_argument_exprs(args, param_specs, method_name) in {
+                    .Some(planned_args) then {
+                        let mutable arg_idx UInt = 0;
+                        for a in planned_args then {
+                            let param_expected = when self.method_param_type(
+                                sig,
+                                arg_idx,
+                            ) in {
+                                .Some(pt) then Option[Type].Some(pt),
+                                .None() then Option[Type].None(),
+                            };
+                            let typed_arg = self.check_expr_scoped_ref(
+                                a,
+                                param_expected,
+                                scope,
+                            );
+                            let _ = self.adapt_expr_to_expected_type_at(
+                                typed_arg,
+                                param_expected,
+                                Option[SourceSpan].Some(call_span),
+                            );
+                            arg_idx += 1;
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            .None() then {},
+        };
+        return self.empty_typed_block(Type.Unknown());
+    };
+
     module_private check_intrinsic_call_ref(
         self,
         callee Expr,
@@ -1909,20 +2000,19 @@ given TypeChecker {
         );
     };
 
-    /// The `as` trait-object row: a resolved trait-object reference target. The
-    /// conversion machinery carries the object-safety and conformance checks;
-    /// the silent declines it leaves behind (trait object to trait object,
-    /// rvalue to mutable reference) are errors here.
-    module_private lower_as_trait_object_cast(
+    /// The trait-object upcast: the shared body of the call form
+    /// (`Drawable(c)`). The conversion machinery carries the object-safety and
+    /// conformance checks; the silent declines it leaves behind (trait object
+    /// to trait object, rvalue to mutable reference) are errors here. The `as`
+    /// spelling of this row is an error now; this helper's caller is the call
+    /// form.
+    module_private lower_trait_object_upcast(
         self,
         target Type,
         trait_obj Type,
-        inner Expr,
+        typed_inner TypedExpr,
         cast_span SourceSpan,
-        scope Scope,
-        use_bidi Bool,
     ) TypedExpr = {
-        let typed_inner = self.as_cast_check_inner(inner, .None(), scope, use_bidi);
         let source_type = typed_inner.expr_type;
         if source_type is .Unknown() then {
             return make_typed_expr(
@@ -1961,6 +2051,58 @@ given TypeChecker {
             );
         };
         return converted;
+    };
+
+    /// The call form of a trait-object upcast: `Drawable(c)` /
+    /// `(Drawable)(c)` / `Transform[Int](c)`. Exactly one positional
+    /// argument; the upcast itself is `lower_trait_object_upcast`. The trait
+    /// object is taken from the RESOLVED target, so a generic trait keeps its
+    /// type arguments for the conformance check.
+    module_private lower_type_application_upcast_call(
+        self,
+        target Type,
+        call_args List[Expr],
+        span SourceSpan,
+        scope Scope,
+    ) TypedExpr = {
+        let trait_obj = when self.as_cast_trait_object_target(target) in {
+            .Some(trait_object_type) then trait_object_type,
+            .None() then target,
+        };
+        if call_args.count() != 1 then {
+            self.push_diagnostic_at_span(
+                "A cast takes exactly one positional argument: write 'Type(expr)'",
+                span,
+            );
+            return make_typed_expr(
+                TypedExprKind.CastExpr(
+                    target,
+                    self.empty_typed_block(Type.Unknown()),
+                ),
+                target,
+            );
+        };
+        let arg = call_args[UInt(0)];
+        when arg in {
+            .NamedArgument(_, _, _) then {
+                self.push_diagnostic_at_span(
+                    "A cast takes exactly one positional argument: write 'Type(expr)'",
+                    span,
+                );
+                return make_typed_expr(
+                    TypedExprKind.CastExpr(
+                        target,
+                        self.empty_typed_block(Type.Unknown()),
+                    ),
+                    target,
+                );
+            },
+            _ then {},
+        };
+        // The argument is checked in synthesis mode: the upcast target is not
+        // an expectation the argument joins.
+        let typed_inner = self.check_expr_scoped_ref(arg, .None(), scope);
+        return self.lower_trait_object_upcast(target, trait_obj, typed_inner, span);
     };
 
     /// The trait-object conversion the implicit coercions run, with its silent
@@ -2099,17 +2241,16 @@ given TypeChecker {
             );
         };
 
-        // Trait-object upcast (`c as Trait`).
+        // Trait-object upcast moved to the call form (`Trait(c)`); the `as`
+        // spelling of a trait target is a construction hint now, the same
+        // complaint a nominal target gets.
         when self.as_cast_trait_object_target(resolved_target) in {
-            .Some(trait_obj) then {
-                return self.lower_as_trait_object_cast(
-                    resolved_target,
-                    trait_obj,
-                    inner,
+            .Some(_) then {
+                self.push_diagnostic_at_span(
+                    "Construction is written 'Type(args)', not 'expr as Type'",
                     cast_span,
-                    scope,
-                    use_bidi,
                 );
+                return self.empty_typed_block(Type.Unknown());
             },
             .None() then {},
         };
@@ -2208,7 +2349,7 @@ given TypeChecker {
             return self.empty_typed_block(Type.Unknown());
         };
         self.push_diagnostic_at_span(
-            "'as' casts to pointer, weak, or trait-object types",
+            "'as' casts to pointer or weak types",
             cast_span,
         );
         return self.empty_typed_block(Type.Unknown());
@@ -2373,6 +2514,11 @@ given TypeChecker {
         );
         // `Type(expr)` on a builtin scalar is the explicit cast form. Cast and
         // construction share `Type(...)`; the type's kind decides which it is.
+        // The call family is keyed on the RESOLVED target (alias-expanded) and
+        // covers the bare identifier, the alias-resolved identifier, the
+        // generic instantiation `Transform[Int](c)`, and the paren form
+        // `(T)(args)`. A trait target is the trait-object upcast; a pointer or
+        // weak target is the retired cast spelling.
         when callee in {
             .Identifier(name, name_span) then {
                 when self.try_resolve_named_type_in_scope_without_diag(name, scope) in {
@@ -2388,14 +2534,33 @@ given TypeChecker {
                                 scope,
                             );
                         };
-                        // A resolved pointer/weak/trait target is the retired
-                        // cast spelling, even when it arrives through an alias
+                        // Trait target: the upcast `Drawable(c)`. The target is
+                        // resolved exactly as `c as Drawable` resolved it, so
+                        // the object-safety check and the trait-object wrapper
+                        // come out unchanged.
+                        when self.as_cast_trait_object_target(resolved_target) in {
+                            .Some(_) then {
+                                let target = self.resolve_type_in_scope(
+                                    TypeNode.Identifier(name, name_span),
+                                    scope,
+                                );
+                                return self.lower_type_application_upcast_call(
+                                    target,
+                                    call_args,
+                                    name_span,
+                                    scope,
+                                );
+                            },
+                            .None() then {},
+                        };
+                        // A resolved pointer/weak target is the retired cast
+                        // spelling, even when it arrives through an alias
                         // (`MyPtr(x)`). It must not fall into the construction
                         // path or the generic message below.
                         if self.is_pointer_weak_or_trait_cast_target(resolved_target)
                         then {
                             self.push_diagnostic_at_span(
-                                "Pointer, weak, and trait casts are written 'expr as Type', not 'Type(expr)'",
+                                "Pointer and weak casts are written 'expr as Type', not 'Type(expr)'",
                                 name_span,
                             );
                             return self.empty_typed_block(Type.Unknown());
@@ -2411,6 +2576,84 @@ given TypeChecker {
                         };
                     },
                     .None() then {},
+                };
+            },
+            // The same family for the generic instantiation call shape:
+            // `Transform[Int](c)` is the upcast to `Transform[Int]`.
+            .GenericInstantiation(base_name, type_args, inst_span) then {
+                when self.try_resolve_named_type_in_scope_without_diag(base_name, scope) in {
+                    .Some(resolved_type) then {
+                        let resolved_target = self.canonicalize_alias_type(resolved_type);
+                        when self.as_cast_trait_object_target(resolved_target) in {
+                            .Some(_) then {
+                                let target = self.resolve_type_in_scope(
+                                    TypeNode.Generic(base_name, type_args, inst_span),
+                                    scope,
+                                );
+                                return self.lower_type_application_upcast_call(
+                                    target,
+                                    call_args,
+                                    inst_span,
+                                    scope,
+                                );
+                            },
+                            .None() then {},
+                        };
+                        if self.is_pointer_weak_or_trait_cast_target(resolved_target)
+                        then {
+                            self.push_diagnostic_at_span(
+                                "Pointer and weak casts are written 'expr as Type', not 'Type(expr)'",
+                                inst_span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            // The paren form `(T)(args)`: the family keyed on the resolved
+            // target, with no name to leak into the message.
+            .TypeRef(type_node, _) then {
+                let call_span = expr_span(callee);
+                let target = self.resolve_type_in_scope(type_node, scope);
+                let resolved_target = self.canonicalize_alias_type(target);
+                when self.as_cast_trait_object_target(resolved_target) in {
+                    .Some(_) then {
+                        return self.lower_type_application_upcast_call(
+                            target,
+                            call_args,
+                            call_span,
+                            scope,
+                        );
+                    },
+                    .None() then {},
+                };
+                if self.is_pointer_weak_or_trait_cast_target(resolved_target) then {
+                    self.push_diagnostic_at_span(
+                        "Pointer and weak casts are written 'expr as Type', not 'Type(expr)'",
+                        call_span,
+                    );
+                    return self.empty_typed_block(Type.Unknown());
+                };
+                if self.is_integer_type(resolved_target) or self.is_float_type(
+                    resolved_target,
+                ) then {
+                    return self.infer_type_application_cast(
+                        resolved_target,
+                        call_args,
+                        call_span,
+                        scope,
+                    );
+                };
+                // Everything else -- including a nominal `(Self)` -- is
+                // special-cased before any construction row: a non-nameable
+                // type head in call position has no constructor spelling.
+                if resolved_target is not .Unknown() then {
+                    self.push_diagnostic_at_span(
+                        "Type '\(type_node_spelling(type_node))' does not support cast: only numeric and pointer types can be cast",
+                        call_span,
+                    );
+                    return self.empty_typed_block(Type.Unknown());
                 };
             },
             _ then {},

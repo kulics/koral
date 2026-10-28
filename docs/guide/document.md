@@ -303,11 +303,14 @@ let c Int32 = Int32(a);        // Int -> Int32
 let d UInt8 = UInt8(255);      // Int -> UInt8
 ```
 
-Pointer reinterpretation uses a different spelling, `expr as Type` (see
-[Raw Pointer Types](#raw-pointer-types)): `p as *T`, `u as *Int`, `p as UInt`,
-`b as ?T`, `c as Drawable`. `Type(expr)` is numeric-only, plus construction
-(`Point(1, 2)`); `Bool(x)` and `String(x)` are errors
-(`Type does not support cast`), and so is a numeric `as` (`x as Int`).
+Pointer reinterpretation and weak construction use a different spelling,
+`expr as Type` (see [Raw Pointer Types](#raw-pointer-types)): `p as *T`,
+`u as *Int`, `p as UInt`, `b as ?T` — an `as` target is pointer or weak only.
+`Type(expr)` is numeric conversion, construction (`Point(1, 2)`), and
+trait-object upcasting (`Drawable(c)`); `Bool(x)` and `String(x)` are errors
+(`Type does not support cast`), a numeric `as` is an error (`Numeric
+conversion is written 'Type(expr)', not 'expr as Type'`), and any other `as`
+target is refused (`'as' casts to pointer or weak types`).
 
 There is only one conversion spelling, and the **target type decides the
 policy**. The integers form three parallel families — ten types each, same
@@ -2544,7 +2547,7 @@ Trait objects are Koral's mechanism for runtime polymorphism (dynamic dispatch),
 
 Trait-object construction follows these rules:
 
-- The target type is a trait name.
+- The target type is a trait name (with type arguments if the trait is generic, `Transform[Int]`).
 - The source value must implement the trait and be converted into that trait-object context.
 - No `Object` marker trait is required.
 
@@ -2559,14 +2562,22 @@ given Circle as Drawable {
     draw(self) String = "Drawing circle";
 };
 
-let shape Drawable = Circle(10);
+let shape Drawable = Circle(10);   // implicit coercion on assignment
 shape.draw();
+
+let d = Drawable(Circle(10));      // explicit upcast, one positional argument
+d.draw();
+Drawable(Circle(10)).draw();       // anywhere an expression is needed
 ```
 
-The assignment coerces the concrete value into the trait-object context.
-An explicit upcast is `c as Drawable`, which works anywhere an expression
-is needed — including immediately: `(c as Drawable).draw()`. Casting from
-one trait object to another is refused.
+The assignment coerces the concrete value into the trait-object context. The
+explicit upcast is the one-argument call form `Trait(expr)` — `Drawable(c)`,
+or `Transform[Int](c)` for a generic trait. A trait target follows the
+nominal rule, so `c as Drawable` is refused as a cast spelling (`Construction
+is written 'Type(args)', not 'expr as Type'`). Casting from one trait object
+to another is refused (`Cannot cast a trait object to another trait object`),
+and the upcast takes exactly one positional argument (`A cast takes exactly
+one positional argument: write 'Type(expr)'`).
 
 Important rules:
 
@@ -3020,8 +3031,23 @@ Pointer reinterpretation is written `expr as Type`. A `*mutable T` reads as
 its `*T` view (`p as *T`), a pointer may be re-read through a different
 pointee in one step (`p as *UInt`), and pointers cross to and from integer
 addresses in both directions (`p as UInt` / `u as *Int`). The result takes
-parentheses before a method call: `(self as *T).equals(other as *T)`. The
-old type-constructor spellings (`*Int(u)`, `UInt(p)`) are rejected.
+parentheses before a method call: `(self as *T).equals(other as *T)`.
+
+A parenthesized type head is the same target as the bare name in expression
+position: `(*Foo).f()` looks `f` up on the `*Foo` method face, just as
+`(Point).origin()` is `Point.origin()` and `(Point)(1, 2)` is
+`Point(1, 2)`. Parentheses in a TYPE group exactly one type — `let p (*Int)`
+is `let p *Int`, `let f ((Int) -> Int) = g` annotates a function value — and
+a prefix written outside the group applies to the whole group: `*(Int)` is
+`*Int`, while `*(Int) -> Int` is a pointer to the function type
+`(Int) -> Int`.
+
+The old type-constructor spellings are rejected. `*Int(u)` now reads as the
+operator chain `*(Int(u))` and `?Box(b)` as `?(Box(b))`, so they fail with
+the natural operator errors; the paren and alias call forms `(*Int)(u)` /
+`(?Box)(b)` / `MyPtr(u)` report `Pointer and weak casts are written
+'expr as Type', not 'Type(expr)'`, and `UInt(p)` reports `Pointer and
+integer casts are written 'expr as Type', not 'Type(expr)'`.
 
 ### Unsafe Address-Of and Dereference
 

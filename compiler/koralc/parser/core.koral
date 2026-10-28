@@ -854,22 +854,8 @@ given Parser {
     // 有界问题：从某个下标起的 token 串是不是一个类型的形状，到哪里结束。
     //
     // 形状必须与 `parse_type` 接受的语法逐条对齐：类型前缀（`?`、`*`
-    // [`mutable`]）+ 类型头（`Self`、大写标识符、`Func(...)` + 返回类型），
+    // [`mutable`]）+ 类型头（`Self`、大写标识符、`( ... )` 分组/函数类型），
     // 类型头后可跟 `[` 类型实参表 `]`。`*` + 类型头是类型；`*` + 其他是解引用。
-
-    /// Whether `kind` at `index` can begin a type.
-    module_private token_kind_starts_type_at(self, index UInt) Bool = {
-        if index >= self.tokens.count() then {
-            return false;
-        };
-        return when self.tokens[index].kind in {
-            .QuestionMark() then true,
-            .KwSelfType() then true,
-            .Star() then self.index_followed_by_type_head_at(index),
-            .Identifier(name) then self.is_upper_first(name),
-            _ then false,
-        };
-    };
 
     /// `*` + type-head (mutable, uppercase ident, Self) starts a pointer type.
     /// `*` + anything else is the dereference operator.
@@ -885,31 +871,11 @@ given Parser {
         };
     };
 
-    /// Whether the tokens at `index` spell a TYPE shape: a type head
-    /// (`mutable`, `Self`, uppercase ident), or a `*` / `?` type prefix chain
-    /// ending in one. This is how the old cast shape at a prefix `*` / `?` is
-    /// recognized -- `*T(x)`, `?T(x)`, and the bare `*T` / `?T` -- WITHOUT
-    /// requiring the `(` that no longer follows it. A `*` / `?` before a
-    /// lowercase pointee is not a type shape: `**p` / `?*p` stay deref /
-    /// upgrade chains.
-    module_private type_shape_starts_at(self, index UInt) Bool = {
-        if index >= self.tokens.count() then {
-            return false;
-        };
-        return when self.tokens[index].kind in {
-            .Star() then self.type_shape_starts_at(index + 1),
-            .QuestionMark() then self.type_shape_starts_at(index + 1),
-            .KwMut() then true,
-            .KwSelfType() then true,
-            .Identifier(name) then self.is_upper_first(name),
-            _ then false,
-        };
-    };
-
     /// Whether the token after `*` / `?` at `index` starts the TYPE of a type
     /// application (`*Int(p)`, `?T(x)`) rather than a deref / upgrade operand.
-    /// A `(` counts only when it opens a function type's parameter list:
-    /// `*(Int) -> Int(p)` is a cast, `*(p)` is a deref.
+    /// A `(` counts when it opens a parenthesized TYPE: either a function
+    /// type's parameter list (`*(Int) -> Int(p)` is a cast) or a grouping
+    /// (`*(Int)(p)` is a cast); `*(p)` is a deref.
     module_private index_followed_by_type_application_at(self, index UInt) Bool = {
         if self.index_followed_by_type_head_at(index) then {
             return true;
@@ -918,9 +884,12 @@ given Parser {
             return false;
         };
         let after_params = self.scan_type_param_list_at(index + 1) or else {
-            return false;
+            return self.scan_paren_type_suffix_at(index + 1) is .Some(_);
         };
-        return after_params < self.tokens.count() and self.tokens[after_params].kind is .Arrow();
+        if after_params < self.tokens.count() and self.tokens[after_params].kind is .Arrow() then {
+            return true;
+        };
+        return self.scan_paren_type_suffix_at(index + 1) is .Some(_);
     };
 
     /// The index just past a `[` ... `]` type argument list that starts at
@@ -1020,12 +989,88 @@ given Parser {
         return result;
     };
 
-    /// Whether the `(` at `index` opens a function TYPE's parameter list
-    /// `(T1, T2) -> R` written as a binding's annotation, rather than a
-    /// declaration's parameter list. The tell is the `->` after the closing
-    /// `)`: a function type always has one, a signature never writes its
-    /// result type with one.
+    /// Whether the `(` at `index` opens a TYPE written as a binding's
+    /// annotation, rather than a declaration's parameter list. Two tells:
+    /// a `->` after the closing `)` (a function type always has one, a
+    /// signature never writes its result type with one), or contents that
+    /// scan as a non-empty type list ending exactly at `)` (a parenthesized
+    /// type). An empty `()` is decided by the `->` alone -- `let f () Int = …`
+    /// stays a signature.
     module_private paren_opens_type_at(self, index UInt) Bool = {
+        if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
+            return false;
+        };
+        let mutable depth UInt = 0;
+        let mutable i = index;
+        while i < self.tokens.count() then {
+            when self.tokens[i].kind in {
+                .LParen() then {
+                    depth += 1;
+                },
+                .RParen() then {
+                    depth -= 1;
+                    if depth == 0 then {
+                        let after = i + 1;
+                        if after < self.tokens.count() and self.tokens[after].kind is .Arrow() then {
+                            return true;
+                        };
+                        // Non-empty contents that scan as a type list closing
+                        // exactly here: a parenthesized type annotation.
+                        if i > index + 1 then {
+                            return when self.scan_type_param_list_at(index) in {
+                                .Some(after) then after == i + 1,
+                                .None() then false,
+                            };
+                        };
+                        return false;
+                    };
+                },
+                _ then {},
+            };
+            i += 1;
+        };
+        return false;
+    };
+
+    /// The span of the balanced `(` ... `)` group starting at `index` -- from
+    /// the opening paren to the closing one. A grouping complaint is anchored
+    /// at the whole group.
+    module_private paren_group_span_at(self, index UInt) Option[SourceSpan] = {
+        if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
+            return Option[SourceSpan].None();
+        };
+        let start_loc = SourceLocation(
+            self.tokens[index].line,
+            self.tokens[index].column,
+        );
+        let mutable depth UInt = 0;
+        let mutable i = index;
+        while i < self.tokens.count() then {
+            when self.tokens[i].kind in {
+                .LParen() then {
+                    depth += 1;
+                },
+                .RParen() then {
+                    depth -= 1;
+                    if depth == 0 then {
+                        let end_loc = SourceLocation(
+                            self.tokens[i].line,
+                            self.tokens[i].column,
+                        );
+                        return Option[SourceSpan].Some(SourceSpan(start_loc, end_loc));
+                    };
+                },
+                _ then {},
+            };
+            i += 1;
+        };
+        return Option[SourceSpan].None();
+    };
+
+    /// Whether the balanced `(` ... `)` run starting at `index` is followed by
+    /// a `->`: the tell of a function TYPE's parameter list. A parenthesized
+    /// group without the `->` is a grouping of exactly one type instead.
+    module_private paren_run_followed_by_arrow_at(self, index UInt) Bool = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return false;
         };
@@ -1082,15 +1127,17 @@ given Parser {
                 return Option[UInt].Some(i + 1);
             },
             .LParen() then {
-                // Function type: `( <type-list> ) "->" <type>`. The `->` is
-                // mandatory -- a bare `( ... )` is not a type.
+                // Function type: `( <type-list> ) "->" <type>`. Without the
+                // `->` a parenthesized run is a GROUPING of exactly one type:
+                // `( <type> )`. A type list without `->` and an empty `( )`
+                // are not type shapes.
                 let after_params = self.scan_type_param_list_at(i) or else {
-                    return Option[UInt].None();
+                    return self.scan_paren_type_suffix_at(i);
                 };
-                if after_params >= self.tokens.count() or self.tokens[after_params].kind is not .Arrow() then {
-                    return Option[UInt].None();
+                if after_params < self.tokens.count() and self.tokens[after_params].kind is .Arrow() then {
+                    return self.scan_type_shape_at(after_params + 1);
                 };
-                return self.scan_type_shape_at(after_params + 1);
+                return self.scan_paren_type_suffix_at(i);
             },
             .Identifier(name) then {
                 i += 1;
@@ -1270,34 +1317,72 @@ given Parser {
                 return .Ok(TypeNode.InferredSelf(self.span_from_start(start)));
             },
             .LParen() then {
-                // Function type: `(T1, T2) -> R`. The parameter list is a TYPE
-                // list, and the `->` is mandatory -- it is what separates a
-                // function type from the parenthesized shapes in expression
-                // position.
-                let param_types = self.parse_function_type_param_list() or return;
-                if self.current().kind is not .Arrow() then {
-                    return .Error(
-                        self.parser_error_at_current(
-                            "Expected '->' between parameter types and return type",
+                // Two shapes behind one `(`: a function type
+                // `(T1, T2) -> R` (the `->` after the closing `)` is the
+                // tell), and a transparent GROUPING of exactly one type
+                // `(T)`. A multi-type run and an empty `()` without `->`
+                // are errors -- a parenthesized type holds exactly one type.
+                if self.paren_run_followed_by_arrow_at(self.index) then {
+                    let param_types = self.parse_function_type_param_list() or return;
+                    if self.current().kind is not .Arrow() then {
+                        return .Error(
+                            self.parser_error_at_current(
+                                "Expected '->' between parameter types and return type",
+                            ),
+                        );
+                    };
+                    self.advance();
+                    if not self.is_type_start() then {
+                        return .Error(
+                            self.parser_error_at_current(
+                                "Function type must include a return type, e.g. (Int, String) -> Bool",
+                            ),
+                        );
+                    };
+                    let return_type = self.parse_type() or return;
+                    return .Ok(
+                        TypeNode.FunctionType(
+                            param_types,
+                            return_type,
+                            self.span_from_start(start),
                         ),
                     );
                 };
+                let paren_index = self.index;
                 self.advance();
-                if not self.is_type_start() then {
+                let grouping_message = "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'";
+                // The complaint is anchored at the whole `(...)` group.
+                let grouping_span = self.paren_group_span_at(paren_index) or else self.token_span(
+                    start,
+                );
+                if self.current().kind is .RParen() then {
                     return .Error(
-                        self.parser_error_at_current(
-                            "Function type must include a return type, e.g. (Int, String) -> Bool",
-                        ),
+                        self.parser_error_at_span(grouping_message, grouping_span),
                     );
                 };
-                let return_type = self.parse_type() or return;
-                return .Ok(
-                    TypeNode.FunctionType(
-                        param_types,
-                        return_type,
-                        self.span_from_start(start),
-                    ),
-                );
+                let inner = self.parse_type() or return;
+                when self.current().kind in {
+                    .RParen() then {
+                        self.advance();
+                        return .Ok(
+                            type_node_with_span(inner, self.span_from_start(start)),
+                        );
+                    },
+                    .Comma() then {
+                        return .Error(
+                            self.parser_error_at_span(grouping_message, grouping_span),
+                        );
+                    },
+                    _ then {
+                        return .Error(
+                            self.unexpected_token_error_at(
+                                token_text(self.current()),
+                                "')'",
+                                self.current(),
+                            ),
+                        );
+                    },
+                };
             },
             .Identifier(module_or_name) then {
                 self.advance();
