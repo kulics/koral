@@ -782,7 +782,7 @@ public final class CompilerContext: @unchecked Sendable {
             return SemaUtils.makeLayoutName(
                 baseName: Type.spelling(tplDefId), args: args, context: self, templateDefId: tplDefId)
         case .module(let info):
-            return "M_\(info.modulePath.joined(separator: "_"))"
+            return "M_\(defIdMap.moduleSymbolKey(for: info.modulePath))"
         case .typeVariable(let tv):
             return "TV_\(tv.id)"
         case .traitObject(let traitDefId, let typeArgs):
@@ -801,7 +801,7 @@ public final class CompilerContext: @unchecked Sendable {
         }
         var parts: [String] = []
         if !metadata.modulePath.isEmpty {
-            parts.append(metadata.modulePath.joined(separator: "_"))
+            parts.append(defIdMap.moduleSymbolKey(for: metadata.modulePath))
         }
         if metadata.access == .file_private {
             var hash: UInt32 = 0

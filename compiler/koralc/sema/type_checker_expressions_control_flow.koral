@@ -82,8 +82,8 @@ given TypeChecker {
                         return self.bidi_check_mode(expr, et, scope);
                     };
                 },
-                .EmptyLiteral(_) then {
-                    return self.lower_empty_literal_expr(Option[Type].Some(et));
+                .EmptyLiteral(lit_span) then {
+                    return self.lower_empty_literal_expr(Option[Type].Some(et), lit_span);
                 },
                 _ then {},
             };
@@ -696,6 +696,14 @@ given TypeChecker {
             } else {
                 raw_typed_subj
             };
+            // Auto-deref the subject for pattern matching (consistent with
+            // `when`): `p is 5` on a `*Int` sees the pointee. A null pattern
+            // tests the POINTER itself and keeps the raw subject.
+            let pattern_subject_t = if self.pattern_requires_raw_subject(pattern) then {
+                typed_subj.expr_type
+            } else {
+                self.peel_pointer_pattern_subject(typed_subj.expr_type)
+            };
             if negated and self.pattern_contains_bindings(pattern) and not self.pattern_is_weak_binding(
                 pattern,
             ) then {
@@ -705,25 +713,25 @@ given TypeChecker {
                 );
                 // Still define the names: the message is the only one Swift
                 // emits, and uses of these names must not pile a second.
-                let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
+                let _ = self.bind_pattern_vars(pattern, pattern_subject_t, scope);
             };
             if not negated then {
                 // Bind before lowering the pattern so the names resolve, the
                 // same order the arm pattern takes.
                 let _ = self.bind_pattern_vars(
                     pattern,
-                    typed_subj.expr_type,
+                    pattern_subject_t,
                     scope,
                 );
                 self.ensure_pattern_bindings_present(
                     pattern,
-                    typed_subj.expr_type,
+                    pattern_subject_t,
                     scope,
                 );
             };
             let typed_pattern = self.lower_typed_pattern(
                 pattern,
-                typed_subj.expr_type,
+                pattern_subject_t,
                 scope,
             );
             return make_typed_expr(

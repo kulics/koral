@@ -83,6 +83,12 @@ module_private type mutable TypeCheckerStorage(
     /// the way out. The innermost construct wins, which is what keeps a
     /// statement from swallowing an expression's location.
     mutable current_span SourceSpan,
+    /// While a construction's arguments are being checked, the span a literal
+    /// range violation blames: the construction CALL, not the literal. The
+    /// reference compiler coerces construction arguments after they are
+    /// checked and blames the ambient call, so `Point(300, 0)` points at
+    /// `Point` while `let x UInt8 = 300` still points at the literal.
+    mutable range_blame_span Option[SourceSpan],
     /// Global `let` initializers run in declaration order; a later one may read
     /// an earlier one, never the reverse. `initialized_globals` holds the names
     /// whose initializer has already been checked, so a forward reference -- and
@@ -289,6 +295,7 @@ given TypeChecker {
             Dict[String, ConformanceWitness].new(),
             global_scope,
             unknown_span(),
+            Option[SourceSpan].None(),
             Set[String].new(),
             false,
         );
@@ -682,6 +689,14 @@ given TypeChecker {
                     continue;
                 },
             };
+            // An explicit list is not a hole in the access rule (§3.3): only
+            // `public` and `package_private` traits travel, exactly like the
+            // batch path below. A name that cannot be imported is not in the
+            // file's scope to begin with, so its use is refused just like an
+            // un-imported one.
+            if not self.importable_trait_access(info.def_id) then {
+                continue;
+            };
             self.bind_imported_trait_name(edge.symbol, edge.module, info.def_id);
         };
         // A batch import (`using "std" { ... };`) has no symbol edges at all -- the
@@ -784,7 +799,16 @@ given TypeChecker {
                     qualified_symbol_key(importing_module, local_name),
                     decl,
                 );
-                self.storage.generic_templates.traits.insert(local_name, decl);
+                // The unqualified name index (`bare_symbol_key`) -- separate key
+                // space so it cannot clobber a real empty-path symbol; see
+                // `bare_symbol_key`. Skipped when the qualified key already IS
+                // the plain name.
+                if not importing_module.is_empty() then {
+                    self.storage.generic_templates.traits.insert(
+                        bare_symbol_key(local_name),
+                        decl,
+                    );
+                };
             },
             .None() then {},
         };
@@ -819,32 +843,29 @@ given TypeChecker {
             );
         };
         self.storage.trait_registry.register(info);
-        self.storage.generic_templates.traits.insert(
+        let decl_info = TraitDeclInfo(
+            trait_def_id,
             name,
-            TraitDeclInfo(
-                trait_def_id,
-                name,
-                self.to_template_type_params(type_params),
-                parent_constraints,
-                raw_members,
-                typed_members,
-                method_def_ids_by_name,
-                self.storage.module_path,
-            ),
+            self.to_template_type_params(type_params),
+            parent_constraints,
+            raw_members,
+            typed_members,
+            method_def_ids_by_name,
+            self.storage.module_path,
         );
         self.storage.generic_templates.traits.insert(
             qualified_symbol_key(self.storage.module_path, name),
-            TraitDeclInfo(
-                trait_def_id,
-                name,
-                self.to_template_type_params(type_params),
-                parent_constraints,
-                raw_members,
-                typed_members,
-                method_def_ids_by_name,
-                self.storage.module_path,
-            ),
+            decl_info,
         );
+        // The unqualified name index (`bare_symbol_key`) -- see
+        // `bind_imported_trait_name`. Skipped when the qualified key already IS
+        // the plain name.
+        if not self.storage.module_path.is_empty() then {
+            self.storage.generic_templates.traits.insert(
+                bare_symbol_key(name),
+                decl_info,
+            );
+        };
         self.storage.generic_templates.register_trait_decl(
             TraitDeclInfo(
                 trait_def_id,
@@ -3167,18 +3188,24 @@ given TypeChecker {
                             self.to_template_type_params(type_params),
                             template_fields,
                         );
-                        self.storage.generic_templates.struct_templates.insert(
-                            name,
-                            struct_template,
-                        );
-                        // Under its MODULE too. The bare key is last-wins when
-                        // two modules declare `Box`; only the module-qualified
-                        // key identifies the declaration (a top-level symbol is
+                        // Under its MODULE key. Only the module-qualified key
+                        // identifies the declaration (a top-level symbol is
                         // (module, name)).
                         self.storage.generic_templates.struct_templates.insert(
                             qualified_symbol_key(self.storage.module_path, name),
                             struct_template,
                         );
+                        // The unqualified name index (`bare_symbol_key`) is
+                        // last-wins when two modules declare `Box` and exists
+                        // only for the "Import it explicitly" diagnostic. Its
+                        // own key space keeps it from clobbering a real
+                        // empty-path symbol of the same name.
+                        if not self.storage.module_path.is_empty() then {
+                            self.storage.generic_templates.struct_templates.insert(
+                                bare_symbol_key(name),
+                                struct_template,
+                            );
+                        };
                         // By DECLARATION as well: `struct_templates` is keyed by
                         // spelling and two modules' `Box` would collide there.
                         self.storage.generic_templates.struct_templates_by_def_id.insert(
@@ -3304,15 +3331,19 @@ given TypeChecker {
                             self.to_template_type_params(type_params),
                             template_cases,
                         );
-                        self.storage.generic_templates.enum_templates.insert(
-                            name,
-                            enum_template,
-                        );
-                        // Under its MODULE too -- see the struct case above.
+                        // Under its MODULE key -- see the struct case above.
                         self.storage.generic_templates.enum_templates.insert(
                             qualified_symbol_key(self.storage.module_path, name),
                             enum_template,
                         );
+                        // The unqualified name index (`bare_symbol_key`) -- see
+                        // the struct case above.
+                        if not self.storage.module_path.is_empty() then {
+                            self.storage.generic_templates.enum_templates.insert(
+                                bare_symbol_key(name),
+                                enum_template,
+                            );
+                        };
                         // By DECLARATION as well: `enum_templates` is keyed by
                         // spelling and two same-named enums would collide there.
                         self.storage.generic_templates.enum_templates_by_def_id.insert(
@@ -3636,6 +3667,18 @@ given TypeChecker {
                         .None() then {},
                     };
                     let bindings = self.generic_type_param_bindings(type_params);
+                    // The given's own bounds are in scope while its target is
+                    // resolved: `[T mutable]` satisfies the `?T` referent rule
+                    // and a bare `[T Any]` does not. Without them the referent
+                    // check sees an unbounded parameter and rejects the shape
+                    // the seed accepts.
+                    let given_constraint_snapshot = self.snapshot_generic_constraints(
+                        type_params,
+                    );
+                    self.register_generic_constraints(type_params);
+                    defer {
+                        self.restore_generic_constraints(given_constraint_snapshot);
+                    };
                     let resolved_target = if type_params.is_empty() then self.resolve_type(
                         target_type,
                     ) else self.resolve_type_with_bindings(target_type, bindings);
@@ -3652,6 +3695,25 @@ given TypeChecker {
                         self.storage.module_path,
                     ) is .Some(_) then Option[String].Some(target_type_name)
                     else Option[String].None();
+                    // A given that fails its locality rule has no methods.
+                    // The seed throws from this signature pass BEFORE
+                    // registering anything, so every call site of its members
+                    // says `Member 'm' not found in type '<T>'`; registering
+                    // first would make the failure invisible at the call
+                    // sites. The complaint itself lands in the decl pass --
+                    // same message, same span, reported once.
+                    let signature_locality_checker = GivenLocalityChecker.new(
+                        self.context(),
+                        self.storage.trait_registry,
+                        self.storage.module_path,
+                        self.storage.generic_templates,
+                        self.storage.global_scope,
+                    );
+                    if signature_locality_checker.check_given_owner_locality(
+                        resolved_target,
+                    ) is .Some(_) then {
+                        return;
+                    };
                     self.collect_given_signatures(
                         members,
                         template_target_type,
@@ -3727,6 +3789,18 @@ given TypeChecker {
                     type_params,
                 ) then {} else {
                     let bindings = self.generic_type_param_bindings(type_params);
+                    // The given's own bounds are in scope while its target is
+                    // resolved: `[T mutable]` satisfies the `?T` referent rule
+                    // and a bare `[T Any]` does not. Without them the referent
+                    // check sees an unbounded parameter and rejects the shape
+                    // the seed accepts.
+                    let given_constraint_snapshot = self.snapshot_generic_constraints(
+                        type_params,
+                    );
+                    self.register_generic_constraints(type_params);
+                    defer {
+                        self.restore_generic_constraints(given_constraint_snapshot);
+                    };
                     let resolved_target = if type_params.is_empty() then self.resolve_type(
                         target_type,
                     ) else self.resolve_type_with_bindings(target_type, bindings);
@@ -3922,6 +3996,18 @@ given TypeChecker {
                     type_params,
                 ) then {} else {
                     let bindings = self.generic_type_param_bindings(type_params);
+                    // The given's own bounds are in scope while its target is
+                    // resolved: `[T mutable]` satisfies the `?T` referent rule
+                    // and a bare `[T Any]` does not. Without them the referent
+                    // check sees an unbounded parameter and rejects the shape
+                    // the seed accepts.
+                    let given_constraint_snapshot = self.snapshot_generic_constraints(
+                        type_params,
+                    );
+                    self.register_generic_constraints(type_params);
+                    defer {
+                        self.restore_generic_constraints(given_constraint_snapshot);
+                    };
                     let resolved_target = if type_params.is_empty() then self.resolve_type(
                         target_type,
                     ) else self.resolve_type_with_bindings(target_type, bindings);

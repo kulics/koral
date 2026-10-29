@@ -132,6 +132,70 @@ extension ExhaustivenessChecker {
         }
     }
 
+    /// Whether `subtract` can only over-claim what this pattern covers.
+    ///
+    /// The field-wise box subtraction loses the correlation between a
+    /// constructor's fields -- `(true, true)` eaten field-wise eats
+    /// `(true, *)` and `(*, true)` -- so a space that comes back unchanged may
+    /// simply have been emptied early. Only a subtraction that is precise for
+    /// this pattern and this space may stand as "already covered"; anything
+    /// else contributes its (possibly over-claimed) reduction and draws no
+    /// complaint. This is the gate `can_precisely_subtract_pattern` keeps in
+    /// the bootstrap compiler, for the same reason.
+    private func canPreciselySubtract(_ pattern: TypedPattern, space: PatternSpace, type: Type) -> Bool {
+        switch pattern {
+        case .wildcard, .variable:
+            return true
+        case .booleanLiteral:
+            if case .boolValues = space {
+                return true
+            }
+            return false
+        case .integerLiteral, .floatLiteral, .stringLiteral, .nullLiteral, .comparisonPattern:
+            // `subtract` claims nothing for these: an unchanged space says
+            // nothing about the pattern being covered already.
+            return false
+        case .enumCase(let caseName, _, let elements):
+            guard let caseFields = space.caseFieldSpaces(for: caseName, type: type, context: context) else {
+                return false
+            }
+            if elements.allSatisfy({ isCatchallPattern($0) }) {
+                return true
+            }
+            guard caseFields.count == elements.count else {
+                return false
+            }
+            for (field, element) in zip(caseFields, elements) {
+                if !canPreciselySubtract(element, space: field, type: patternSpaceType(field)) {
+                    return false
+                }
+            }
+            return true
+        case .orPattern(let left, let right):
+            return canPreciselySubtract(left, space: space, type: type)
+                && canPreciselySubtract(right, space: space, type: type)
+        case .andPattern(let left, let right):
+            return canPreciselySubtract(left, space: space, type: type)
+                && canPreciselySubtract(right, space: space, type: type)
+        default:
+            return false
+        }
+    }
+
+    /// The type a field space stands for, the recursion's subject type.
+    private func patternSpaceType(_ space: PatternSpace) -> Type {
+        switch space {
+        case .full(let t):
+            return t
+        case .listLengths(let t, _, _):
+            return t
+        case .boolValues:
+            return .bool
+        default:
+            return .void
+        }
+    }
+
     /// Check for unreachable patterns (patterns that can never match)
     private func checkUnreachablePatterns() throws {
         var catchallIndex: Int? = nil
@@ -180,7 +244,8 @@ extension ExhaustivenessChecker {
                 let reduced = finiteSpace.subtract(pattern, type: subjectType, context: context)
                 if coverageIsApproximate(pattern) {
                     remainingFiniteSpace = reduced
-                } else if reduced.structurallyEquals(finiteSpace) {
+                } else if canPreciselySubtract(pattern, space: finiteSpace, type: subjectType),
+                          reduced.structurallyEquals(finiteSpace) {
                     throw SemanticError(
                         .unreachablePattern(
                             pattern: pattern.description,

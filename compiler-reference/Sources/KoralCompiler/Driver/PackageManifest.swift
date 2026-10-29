@@ -190,6 +190,113 @@ public final class PackageRegistry {
   }
 }
 
+// MARK: - Module identity (§5.3.1)
+//
+// A module's identity is (package source, the entry file's normalized position
+// inside the package). The C symbol prefix is DERIVED from that identity and
+// from nothing else: renaming a dependency key must not change one ABI symbol,
+// and two packages whose modules sit at the same subpath must not collide (the
+// source side of the identity separates them). `std` is special-cased: its
+// identity is the toolchain version, and the std manifest's `version` is the
+// spelling of that version available here.
+
+/// The identity input hashed into a module's symbol key: WHICH package this is
+/// (its acquisition source), never what any consumer happens to call it.
+public func packageSourceTag(for package: LoadedPackage) -> String {
+  switch package.kind {
+  case .std:
+    return "std:\(package.manifest.version)"
+  case .root:
+    return "root:\(package.identity)"
+  case .dependency:
+    return "source:\(package.identity)"
+  }
+}
+
+/// FNV-1a 32 with the classic basis/prime.
+private func fnv1a32(_ text: String, basis: UInt32, prime: UInt32) -> UInt32 {
+  var hash = basis
+  for byte in text.utf8 {
+    hash ^= UInt32(byte)
+    hash = hash &* prime
+  }
+  return hash
+}
+
+/// The stable hash half of a symbol key: two independent FNV-1a 32 passes
+/// (different basis and prime) concatenated, i.e. 64 bits of separation over
+/// only 32-bit arithmetic -- the same spelling koralc's `module_symbol_key`
+/// computes, so both compilers derive identical keys.
+public func moduleIdentityHash(_ text: String) -> String {
+  let h1 = fnv1a32(text, basis: 0x811c_9dc5, prime: 0x0100_0193)
+  let h2 = fnv1a32(text, basis: 0x9e37_79b9, prime: 0x85eb_ca6b)
+  return String(format: "%08x%08x", h1, h2)
+}
+
+/// The entry file's position inside its package: the normalized path relative
+/// to the package root, forward slashes. When the entry sits outside its
+/// package (a local module pulled in from beyond the root) the walk is lexical
+/// and `..` segments are kept -- deterministic either way.
+public func entryRelativePath(entryFile: String, packageRoot: String) -> String {
+  let entry = URL(fileURLWithPath: entryFile).standardized.path
+  let root = URL(fileURLWithPath: packageRoot).standardized.path
+  let entryParts = entry.split(separator: "/").map(String.init)
+  let rootParts = root.split(separator: "/").map(String.init)
+  var common = 0
+  while common < entryParts.count, common < rootParts.count,
+        entryParts[common] == rootParts[common] {
+    common += 1
+  }
+  var parts: [String] = []
+  for _ in common..<rootParts.count {
+    parts.append("..")
+  }
+  parts.append(contentsOf: entryParts[common...])
+  return parts.joined(separator: "/")
+}
+
+/// C-identifier-safe PascalCase segments of a relative entry path, extension
+/// dropped. Directory segments keep their position, so `util/util.koral` and
+/// `helpers/util.koral` stay distinct -- the stem-collision fix. `..` walks up
+/// as `Up`, so an out-of-package entry still names a stable position.
+public func symbolKeySegments(relativeEntryPath: String) -> [String] {
+  var parts = relativeEntryPath.split(separator: "/").map(String.init)
+  if !parts.isEmpty {
+    parts[parts.count - 1] = (parts.last! as NSString).deletingPathExtension
+  }
+  return parts.map { raw -> String in
+    let spelled = raw == ".." ? "up" : raw
+    let camel = moduleFileNameToIdentifier(spelled)
+    var out = ""
+    for ch in camel {
+      if ch.isASCII, ch.isLetter || ch.isNumber || ch == "_" {
+        out.append(ch)
+      } else {
+        out.append("_")
+      }
+    }
+    if out.isEmpty {
+      return "M"
+    }
+    if let first = out.first, first.isNumber {
+      return "M" + out
+    }
+    return out
+  }
+}
+
+/// The derived symbol key of one module (§5.3.1): the entry's position inside
+/// the package, plus a short stable hash of the package identity source. The
+/// three symbol-derivation sites (`generateCIdentifier`, `layoutKey`, the
+/// `.module` layout key) prefix names with THIS, never with a module path --
+/// module paths carry the consumer's spelling and change when a dependency is
+/// renamed.
+public func moduleSymbolKey(sourceTag: String, entryFile: String, packageRoot: String) -> String {
+  let rel = entryRelativePath(entryFile: entryFile, packageRoot: packageRoot)
+  let segments = symbolKeySegments(relativeEntryPath: rel).joined(separator: "_")
+  return segments + "_" + moduleIdentityHash(sourceTag + "\n" + rel)
+}
+
 // MARK: - Resolved module
 
 /// Whether `packageID` was minted for a `.std` package. The tag is the one
@@ -208,6 +315,9 @@ public struct ResolvedModuleSpec {
   /// Full name split into identifier segments. Used to qualify top-level
   /// symbols; see §10.4 for why this is still name-based and open.
   public let pathSegments: [String]
+  /// The derived C symbol prefix (§5.3.1): a function of (package source,
+  /// entry position) only. Renaming a dependency key leaves this untouched.
+  public let symbolKey: String
   /// Package-internal module name: `"."` for the main module, else the subpath.
   public let key: String
   /// Subpath inside the package; empty for the main module.
@@ -238,6 +348,11 @@ public func makeResolvedModuleSpec(
   return ResolvedModuleSpec(
     fullName: fullName,
     pathSegments: segments,
+    symbolKey: moduleSymbolKey(
+      sourceTag: packageSourceTag(for: owner),
+      entryFile: config.entryPath,
+      packageRoot: owner.manifest.packageRoot
+    ),
     key: key,
     subpath: config.subpath,
     entryFile: config.entryPath,

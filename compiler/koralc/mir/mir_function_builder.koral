@@ -2280,11 +2280,32 @@ given MIRFunctionBuilder {
         pattern TypedPattern,
         negated Bool,
     ) MIROperand = {
+        // The subject the PATTERN was checked against: one pointer indirection
+        // for every pattern except the raw-subject family (`null` and
+        // trait-object tests), exactly the auto-deref the type checker did.
+        let matched_subject = self.pattern_match_subject_place(
+            subject_place,
+            subject_type,
+            pattern,
+        );
+        let matched_place = matched_subject.first;
+        let matched_type = matched_subject.second;
+        let peeled_pointer_subject = when subject_type in {
+            .PointerType(_) then not typed_pattern_requires_raw_subject(pattern),
+            .MutablePointerType(_) then not typed_pattern_requires_raw_subject(pattern),
+            _ then false,
+        };
+        if peeled_pointer_subject then {
+            // The cached subject/tag describe the RAW subject; a peeled
+            // pointer test must read through the deref instead.
+            self.pattern_subject_operand = Option[MIROperand].None();
+            self.pattern_subject_tag = Option[MIROperand].None();
+        };
         when pattern in {
             .NotPattern(inner) then {
                 return self.lower_pattern_condition(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     inner,
                     not negated,
                 );
@@ -2292,7 +2313,7 @@ given MIRFunctionBuilder {
             .ListPattern(ops, elements) then {
                 // Handles negation internally (the length condition forks).
                 return self.lower_list_pattern_condition(
-                    subject_place,
+                    matched_place,
                     ops,
                     elements,
                     negated,
@@ -2311,8 +2332,8 @@ given MIRFunctionBuilder {
             .Wildcard() then self.pattern_bool(true),
             .Variable(_) then self.pattern_bool(true),
             .BoolLiteral(value) then self.pattern_compare(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 MIROperand.Constant(MIRConstant.Boolean(value)),
                 ComparisonOperator.Equal(),
             ),
@@ -2334,15 +2355,15 @@ given MIRFunctionBuilder {
                     ),
                 };
                 self.pattern_compare(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     null_operand,
                     ComparisonOperator.Equal(),
                 )
             },
             .IntegerLiteral(value) then when self.rune_pattern_value_access(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
             ) in {
                 .Some(access) then self.pattern_compare(
                     access.first,
@@ -2351,34 +2372,34 @@ given MIRFunctionBuilder {
                     ComparisonOperator.Equal(),
                 ),
                 .None() then self.pattern_compare(
-                    subject_place,
-                    subject_type,
-                    MIROperand.Constant(MIRConstant.Integer(value, subject_type)),
+                    matched_place,
+                    matched_type,
+                    MIROperand.Constant(MIRConstant.Integer(value, matched_type)),
                     ComparisonOperator.Equal(),
                 ),
             },
             .NegativeIntegerLiteral(value) then self.pattern_compare(
-                subject_place,
-                subject_type,
-                MIROperand.Constant(MIRConstant.Integer("-\(value)", subject_type)),
+                matched_place,
+                matched_type,
+                MIROperand.Constant(MIRConstant.Integer("-\(value)", matched_type)),
                 ComparisonOperator.Equal(),
             ),
             .FloatLiteral(value) then self.pattern_compare(
-                subject_place,
-                subject_type,
-                self.pattern_literal_constant(value, subject_type),
+                matched_place,
+                matched_type,
+                self.pattern_literal_constant(value, matched_type),
                 ComparisonOperator.Equal(),
             ),
             .EnumCase(case_name, tag_index, elements) then self.lower_enum_case_pattern_condition(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 case_name,
                 tag_index,
                 elements,
             ),
             .StructPattern(_, elements) then self.lower_struct_pattern_condition(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 elements,
             ),
             .ComparisonPattern(op, value) then {
@@ -2391,7 +2412,7 @@ given MIRFunctionBuilder {
                 // A rune subject compares through its `value` field, the way a
                 // rune equality pattern matches; the value is already a code
                 // point. Everything else compares against its own domain.
-                when self.rune_pattern_value_access(subject_place, subject_type) in {
+                when self.rune_pattern_value_access(matched_place, matched_type) in {
                     .Some(access) then self.pattern_compare(
                         access.first,
                         access.second,
@@ -2399,23 +2420,23 @@ given MIRFunctionBuilder {
                         comparison_op,
                     ),
                     .None() then self.pattern_compare(
-                        subject_place,
-                        subject_type,
-                        self.pattern_literal_constant(value, subject_type),
+                        matched_place,
+                        matched_type,
+                        self.pattern_literal_constant(value, matched_type),
                         comparison_op,
                     ),
                 }
             },
             .AndPattern(left, right) then {
                 let left_condition = self.lower_pattern_condition(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     left,
                     false,
                 );
                 let right_condition = self.lower_pattern_condition(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     right,
                     false,
                 );
@@ -2427,14 +2448,14 @@ given MIRFunctionBuilder {
             },
             .OrPattern(left, right) then {
                 let left_condition = self.lower_pattern_condition(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     left,
                     false,
                 );
                 let right_condition = self.lower_pattern_condition(
-                    subject_place,
-                    subject_type,
+                    matched_place,
+                    matched_type,
                     right,
                     false,
                 );
@@ -2445,18 +2466,18 @@ given MIRFunctionBuilder {
                 )
             },
             .TraitObjectType(target_type) then self.lower_trait_object_type_pattern_condition(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 target_type,
             ),
             .TraitObjectTypeBinding(_, target_type) then self.lower_trait_object_type_pattern_condition(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 target_type,
             ),
             .StringLiteral(value, equals_symbol) then self.pattern_string_compare(
-                subject_place,
-                subject_type,
+                matched_place,
+                matched_type,
                 value,
                 equals_symbol,
             ),
@@ -3244,6 +3265,41 @@ given MIRFunctionBuilder {
         };
     };
 
+    /// The subject place/type a pattern test reads: one level of indirection
+    /// off -- managed references, weak handles and raw pointers alike --
+    /// exactly when the type checker auto-dereffed the subject for this
+    /// pattern. A `null` or trait-object test keeps the RAW subject: the null
+    /// pattern compares the pointer itself and the trait-object match runs on
+    /// the handle.
+    file_private pattern_match_subject_place(
+        self,
+        place MIRPlace,
+        subject_type Type,
+        pattern TypedPattern,
+    ) Pair[MIRPlace, Type] = {
+        if typed_pattern_requires_raw_subject(pattern) then {
+            return Pair[MIRPlace, Type](place, subject_type);
+        };
+        let matched = self.pattern_match_place(place, subject_type);
+        return when matched.second in {
+            .PointerType(inner) then Pair[MIRPlace, Type](
+                MIRPlace.Deref(
+                    MIRValue.PlaceRead(matched.first, MIROwnershipUse.Borrow()),
+                    inner,
+                ),
+                inner,
+            ),
+            .MutablePointerType(inner) then Pair[MIRPlace, Type](
+                MIRPlace.Deref(
+                    MIRValue.PlaceRead(matched.first, MIROwnershipUse.Borrow()),
+                    inner,
+                ),
+                inner,
+            ),
+            _ then matched,
+        };
+    };
+
     file_private goes_through_deref(self, place MIRPlace) Bool = {
         let _ = self;
         return when place in {
@@ -3282,7 +3338,7 @@ given MIRFunctionBuilder {
         subject_type Type,
         mode PatternBindMode,
     ) Void = {
-        let matched = self.pattern_match_place(subject_place, subject_type);
+        let matched = self.pattern_match_subject_place(subject_place, subject_type, pattern);
         let matched_place = matched.first;
         let matched_type = matched.second;
         when pattern in {

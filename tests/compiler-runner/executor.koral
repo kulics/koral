@@ -702,15 +702,60 @@ file_private let observe_case(
         },
     };
 
-    let compile_text = normalize_output(compile_output.stdout + compile_output.stderr);
-    let accepted = infer_exit_code(compile_output.status) == 0;
+    let mutable compile_text = normalize_output(compile_output.stdout + compile_output.stderr);
+    let mutable accepted = infer_exit_code(compile_output.status) == 0;
+    let mutable ran_check_only = check_only;
+
+    // The check-only shortcut is an optimization, not the contract. One class
+    // of wanted compile errors does not surface in `check`: C-name collision
+    // detection reports after C name assignment (codegen), so a `check` accepts
+    // the program. When that happens, fall back to a full build before
+    // concluding -- the wanted error may live there.
+    if check_only and accepted and expectations.expect_error.count() > 0 then {
+        let fallback_args = when build_command_args_for_case(config, info, output_dir) in {
+            .Ok(args) then args,
+            .Error(err) then {
+                return .Infra(
+                    label + " side: failed to prepare build fallback arguments: " + err.message(),
+                );
+            },
+        };
+        let fallback_output = when execute_command_with_timeout(
+            config,
+            compiler_bin.to_string(),
+            fallback_args,
+            output_dir,
+            "build",
+            timeout_secs,
+            "failed to spawn compiler",
+            stop_requested,
+        ) in {
+            .Finished(output, _) then output,
+            .TimedOut(_) then {
+                return .DidNotFinish("compile timed out");
+            },
+            .Aborted(_) then {
+                return .DidNotFinish("aborted after another case exceeded the memory limit");
+            },
+            .MemoryExceeded(_, _) then {
+                return .DidNotFinish("compile exceeded the memory limit");
+            },
+            .InfrastructureError(message) then {
+                return .Infra(label + " side: " + message);
+            },
+        };
+        compile_text = normalize_output(fallback_output.stdout + fallback_output.stderr);
+        accepted = infer_exit_code(fallback_output.status) == 0;
+        ran_check_only = false;
+    };
+
     if not accepted then {
         return .Observed(label, false, compile_text, Option[ProgramRun].None());
     };
 
     // A `check`-only case never produces a binary; treat "accepted, nothing to
     // run" as agreeing with the other side doing the same.
-    if check_only then {
+    if ran_check_only then {
         return .Observed(label, true, compile_text, Option[ProgramRun].None());
     };
 
@@ -1167,6 +1212,74 @@ public let run_single_case(
             },
         };
 
+        build_combined = normalize_output(build_output.stdout + build_output.stderr);
+        build_lines = output_lines_trimmed(build_combined);
+        build_exit_code = infer_exit_code(build_output.status);
+    };
+
+    // The check-only shortcut is an optimization, not the contract. One class
+    // of wanted compile errors does not surface in `check`: C-name collision
+    // detection reports after C name assignment (codegen), so `check` accepts
+    // the program. When a case that wants a compile error is accepted by the
+    // check, fall back to a full build before concluding -- the wanted error
+    // may live there.
+    if check_only_expect_error and build_exit_code == 0 then {
+        let fallback_output_dir = create_case_output_dir(config, info) or else as e in {
+            let duration_ms = start.elapsed().as_milliseconds();
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to create build fallback temp output dir: \(e.message())",
+                build_exit_code,
+                duration_ms,
+            );
+        };
+        active_output_dir = fallback_output_dir;
+        build_args = build_command_args_for_case(config, info, active_output_dir) or else as e in {
+            let duration_ms = start.elapsed().as_milliseconds();
+            return failure_result(
+                info,
+                "failed",
+                "infrastructure_error",
+                "failed to prepare build fallback compiler arguments: \(e.message())",
+                build_exit_code,
+                duration_ms,
+            );
+        };
+        compile_command_name = "build";
+        build_output = when execute_command_with_timeout(
+            config,
+            config.compiler_bin.to_string(),
+            build_args,
+            active_output_dir,
+            compile_command_name,
+            timeout_secs,
+            "failed to spawn compiler",
+            stop_requested,
+        ) in {
+            .Finished(output, _) then output,
+            .TimedOut(exit_code) then {
+                return timeout_case_result(config, info, start, exit_code);
+            },
+            .Aborted(exit_code) then {
+                return aborted_case_result(info, start, exit_code);
+            },
+            .MemoryExceeded(exit_code, peak_bytes) then {
+                return memory_exceeded_case_result(config, info, start, exit_code, peak_bytes);
+            },
+            .InfrastructureError(message) then {
+                let duration_ms = start.elapsed().as_milliseconds();
+                return failure_result(
+                    info,
+                    "failed",
+                    "infrastructure_error",
+                    message,
+                    -1,
+                    duration_ms,
+                );
+            },
+        };
         build_combined = normalize_output(build_output.stdout + build_output.stderr);
         build_lines = output_lines_trimmed(build_combined);
         build_exit_code = infer_exit_code(build_output.status);

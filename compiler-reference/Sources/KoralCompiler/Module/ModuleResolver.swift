@@ -247,6 +247,11 @@ public class ModuleInfo {
     /// 模块的全名段（包名 + 子路径），用于限定顶层符号
     public let path: [String]
 
+    /// The derived C symbol prefix (§5.3.1) -- (package source, entry
+    /// position), never the consumer's spelling. Empty for modules whose spec
+    /// never carried one; the derivation sites fall back to `path`.
+    public let symbolKey: String
+
     /// 入口文件路径（绝对路径）
     public let entryFile: String
 
@@ -279,11 +284,13 @@ public class ModuleInfo {
     public init(
         path: [String],
         entryFile: String,
-        isExternal: Bool = false
+        isExternal: Bool = false,
+        symbolKey: String = ""
     ) {
         self.path = path
         self.entryFile = entryFile
         self.isExternal = isExternal
+        self.symbolKey = symbolKey
     }
 
     /// 模块的完整路径字符串
@@ -430,10 +437,19 @@ public class ModuleResolver {
         let rootModulePath = rootModulePath ?? [moduleFileNameToIdentifier(filename)]
 
         // 创建根模块，path 包含文件名
+        //
+        // A bare entry has no package behind it; its identity source is the
+        // fixed `single:` tag and its position is the entry's own name (§5.3.1
+        // degenerate case).
         let rootModule = ModuleInfo(
             path: rootModulePath,
             entryFile: absolutePath,
-            isExternal: false
+            isExternal: false,
+            symbolKey: moduleSymbolKey(
+                sourceTag: "single",
+                entryFile: absolutePath,
+                packageRoot: URL(fileURLWithPath: absolutePath).deletingLastPathComponent().path
+            )
         )
 
         let unit = CompilationUnit()
@@ -464,7 +480,8 @@ public class ModuleResolver {
         let module = ModuleInfo(
             path: spec.pathSegments,
             entryFile: spec.entryFile,
-            isExternal: false
+            isExternal: false,
+            symbolKey: spec.symbolKey
         )
         module.spec = spec
         module.owner = spec.owner
@@ -755,8 +772,10 @@ public class ModuleResolver {
 
     /// Import from a local module named by its entry file (§3.1). A local path
     /// with braces needs no manifest entry: the entry file IS the module, and
-    /// its identity is the entry file's stem -- the same derivation the
-    /// resolver uses when no manifest names it.
+    /// its identity is the entry's position inside its package (§5.3.1) -- the
+    /// same derivation a registered module gets, stem included only as one
+    /// path segment. Two local modules sharing a stem in different directories
+    /// are two modules.
     private func recordLocalModuleUsing(
         using: UsingDeclaration,
         module: ModuleInfo,
@@ -778,20 +797,28 @@ public class ModuleResolver {
             throw ModuleError.fileNotFound(using.specifier, searchPath: currentDir)
         }
 
-        let stem = URL(fileURLWithPath: entryAbs).deletingPathExtension().lastPathComponent
-        let stemId = moduleFileNameToIdentifier(stem)
-        let targetPath = [stemId]
-
         // Load the target as its own module so its declarations exist under
         // `targetPath` and the boundary stays (§3.1).
         guard let owner = module.owner ?? rootPackage else {
             throw ModuleError.fileNotFound(using.specifier, searchPath: currentDir)
         }
+        // Identity = (package source, entry position). The path segments keep
+        // the entry's position inside the package, so `util/util.koral` and
+        // `helpers/util.koral` never share a unit slot, a name key, or a
+        // symbol prefix again.
+        let packageRoot = owner.manifest.packageRoot
+        let rel = entryRelativePath(entryFile: entryAbs, packageRoot: packageRoot)
+        let segments = symbolKeySegments(relativeEntryPath: rel)
         let spec = ResolvedModuleSpec(
-            fullName: stemId,
-            pathSegments: targetPath,
-            key: stemId,
-            subpath: stemId,
+            fullName: segments.joined(separator: "/"),
+            pathSegments: segments,
+            symbolKey: moduleSymbolKey(
+                sourceTag: packageSourceTag(for: owner),
+                entryFile: entryAbs,
+                packageRoot: packageRoot
+            ),
+            key: rel,
+            subpath: rel,
             entryFile: entryAbs,
             links: [],
             packageIdentity: owner.identity,

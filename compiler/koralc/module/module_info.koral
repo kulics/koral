@@ -233,6 +233,10 @@ module_private type mutable ModuleInfoStorage(
     full_name String,
     // "std:std" / "root:x" / "dependency:key", set from the owning package.
     package_id String,
+    // The derived C symbol prefix (§5.3.1) -- (package source, entry
+    // position), never the consumer's spelling. Empty for modules whose spec
+    // never carried one; the derivation sites fall back to `path`.
+    symbol_key String,
     mutable merged_submodules List[String],
     mutable global_nodes List[LoadedNode],
 );
@@ -241,7 +245,7 @@ public type mutable ModuleInfo(module_private mutable storage ModuleInfoStorage)
 
 given ModuleInfo {
     public new(path List[String], entry_file String, is_external Bool) ModuleInfo =
-        ModuleInfo.named(path, entry_file, is_external, join_path(path, "."), "");
+        ModuleInfo.named(path, entry_file, is_external, join_path(path, "."), "", "");
 
     public named(
         path List[String],
@@ -249,6 +253,7 @@ given ModuleInfo {
         is_external Bool,
         full_name String,
         package_id String,
+        symbol_key String,
     ) ModuleInfo = {
         let s = ModuleInfoStorage(
             path,
@@ -256,6 +261,7 @@ given ModuleInfo {
             is_external,
             full_name,
             package_id,
+            symbol_key,
             [],
             [],
         );
@@ -267,6 +273,7 @@ given ModuleInfo {
     public is_external(self) Bool = self.storage.is_external;
     public full_name(self) String = self.storage.full_name;
     public package_id(self) String = self.storage.package_id;
+    public symbol_key(self) String = self.storage.symbol_key;
     public merged_submodules(self) List[String] = self.storage.merged_submodules;
     public global_nodes(self) List[LoadedNode] = self.storage.global_nodes;
 
@@ -435,6 +442,25 @@ given CompilationUnit {
             i += 1;
         };
         return Option[ModuleInfo].None();
+    };
+
+    /// Module path (dotted) -> derived symbol key (§5.3.1) for every module in
+    /// the unit. The key is what C symbol prefixes are derived from; the path
+    /// is what `using` and diagnostics spell.
+    public module_symbol_keys(self) Dict[String, String] = {
+        let mutable out = Dict[String, String].new();
+        for module in self.storage.loaded_modules then {
+            let path_key = module.path_string();
+            if path_key.is_empty() then {
+                continue;
+            };
+            out.insert(
+                path_key,
+                if module.symbol_key().is_empty() then join_path(module.path(), "_")
+                else module.symbol_key(),
+            );
+        };
+        return out;
     };
 
     // Collect all global nodes in dependency order.

@@ -395,6 +395,7 @@ file_private let make_prepared_compilation(
     linked_libraries List[String],
     default_output_dir Path,
     root_module_path String,
+    module_symbol_keys Dict[String, String],
 ) PreparedCompilation = {
     let mutable all_pairs = List[Pair[LoadedNode, List[String]]].new();
     for pair in std_pairs then {
@@ -433,6 +434,7 @@ file_private let make_prepared_compilation(
         node_source_paths,
         collect_unique_module_paths_from_pairs(all_pairs),
         collect_unique_source_paths_from_pairs(all_pairs),
+        module_symbol_keys,
     );
 
     return PreparedCompilation(
@@ -627,6 +629,7 @@ file_private let prepare_package_compilation(
             linked_libraries,
             default_output_dir,
             target_spec.path_segments.join_to_string("."),
+            unit.module_symbol_keys(),
         ),
     );
 };
@@ -681,6 +684,11 @@ file_private let prepare_single_file_compilation(
         false,
         stem,
         "root:user",
+        module_symbol_key(
+            "single",
+            absolute_entry,
+            absolute_entry.into_path().dir_name().to_string(),
+        ),
     );
     unit.add_module(root_module);
     resolver.resolve_single_file(root_module, unit) or return;
@@ -697,6 +705,7 @@ file_private let prepare_single_file_compilation(
             linked_libraries_of(resolver),
             default_output_dir,
             root_module.path_string(),
+            unit.module_symbol_keys(),
         ),
     );
 };
@@ -1001,6 +1010,23 @@ file_private let lower_mir_after_typecheck(
             Option[MIRProgram].Some(mir_program),
             context,
             diagnostics,
+        );
+    };
+
+    // C 名字分配之后的碰撞检测（「C 标识符唯一性」的碰撞消解面；检测不改
+    // 名）：两个不同拼写折叠进同一个 C 名字时报告。与 Swift
+    // `CodeGen.checkCNameCollisions` 同一判定、同一消息。
+    let mutable collision_diagnostics = DiagnosticCollector.new();
+    for diagnostic in c_name_collision_diagnostics(mir_program, context) then {
+        collision_diagnostics.push(diagnostic);
+    };
+    if collision_diagnostics.has_errors() then {
+        context.drop_concrete_bodies();
+        context.drop_codegen_unused_metadata();
+        return MIRLoweringOutput(
+            Option[MIRProgram].Some(mir_program),
+            context,
+            collision_diagnostics,
         );
     };
 

@@ -409,6 +409,19 @@ public class Driver {
     return result
   }
 
+  /// Module path (dotted) -> derived symbol key (§5.3.1) for every module in
+  /// the unit. The key is what C symbol prefixes are derived from; the path is
+  /// what `using` and diagnostics spell.
+  private func moduleSymbolKeys(in unit: CompilationUnit) -> [String: String] {
+    var result: [String: String] = [:]
+    for module in unit.loadedModules.values {
+      let pathKey = module.path.joined(separator: ".")
+      guard !pathKey.isEmpty else { continue }
+      result[pathKey] = module.symbolKey.isEmpty ? module.path.joined(separator: "_") : module.symbolKey
+    }
+    return result
+  }
+
   /// Whether a `.koral` file under the package root belongs to any module is a
   /// question about the PROJECT, not about the program: a file outside this
   /// target's closure is not being compiled and the compiler has no opinion on
@@ -563,7 +576,8 @@ public class Driver {
       allGlobalNodes: parts.stdGlobalNodes + parts.userGlobalNodes,
       nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
       importGraph: unit.importGraph,
-      extraLinkedLibraries: linkedLibraries(in: unit)
+      extraLinkedLibraries: linkedLibraries(in: unit),
+      moduleSymbolKeys: moduleSymbolKeys(in: unit)
     )
   }
 
@@ -595,7 +609,12 @@ public class Driver {
 
     let entryModule = ModuleInfo(
       path: [moduleFileNameToIdentifier(entryURL.deletingPathExtension().lastPathComponent)],
-      entryFile: entryURL.path
+      entryFile: entryURL.path,
+      symbolKey: moduleSymbolKey(
+        sourceTag: "single",
+        entryFile: entryURL.path,
+        packageRoot: entryURL.deletingLastPathComponent().path
+      )
     )
     if let registry = resolver.registry {
       try loadPrelude(registry: registry, resolver: resolver, unit: unit)
@@ -631,7 +650,8 @@ public class Driver {
       allGlobalNodes: parts.stdGlobalNodes + parts.userGlobalNodes,
       nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
       importGraph: unit.importGraph,
-      extraLinkedLibraries: linkedLibraries(in: unit)
+      extraLinkedLibraries: linkedLibraries(in: unit),
+      moduleSymbolKeys: moduleSymbolKeys(in: unit)
     )
   }
 
@@ -645,7 +665,8 @@ public class Driver {
     allGlobalNodes: [GlobalNode],
     nodeSourceInfoList: [GlobalNodeSourceInfo],
     importGraph: ImportGraph,
-    extraLinkedLibraries: [String]
+    extraLinkedLibraries: [String],
+    moduleSymbolKeys: [String: String] = [:]
   ) throws {
     let fileManager = FileManager.default
     // Shared ambient for name resolution: a spelling resolves through the
@@ -653,6 +674,10 @@ public class Driver {
     // here so every pass sees it regardless of which `DefIdMap` instance it
     // holds -- see `DefIdMap.sharedImportGraph`.
     DefIdMap.sharedImportGraph = importGraph
+    // Symbol prefixes derive from (package source, entry position), not from
+    // the consumer's module spelling (§5.3.1). Shared ambient for the same
+    // reason the import graph is: per-pass `DefIdMap` instances come and go.
+    DefIdMap.sharedModuleSymbolKeys = moduleSymbolKeys
     let combinedAST: ASTNode = .program(globalNodes: allGlobalNodes)
     let phasePrefix = mode.rawValue
     let totalStart = DispatchTime.now()
@@ -726,7 +751,7 @@ public class Driver {
       mirProgram: mirProgram,
       context: monomorphizer.context
     )
-    let cSource = codeGen.generate()
+    let cSource = try codeGen.generate()
     profilePhase("\(phasePrefix): codegen", start: codegenStart)
 
     if !fileManager.fileExists(atPath: outputDirectory.path) {

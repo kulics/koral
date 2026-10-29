@@ -416,6 +416,17 @@ public class DefIdMap {
     /// 导入记录映射（导入后的 DefId -> ImportRecord）
     private var importRecords: [UInt64: ImportRecord] = [:]
 
+    /// Module path (dotted) -> derived symbol key (§5.3.1). C symbol prefixes
+    /// come from (package source, entry position); a module PATH carries the
+    /// consumer's spelling and changes when a dependency key is renamed, so it
+    /// is name/display material only.
+    ///
+    /// SHARED AMBIENT, like `sharedImportGraph`: `DefIdMap` instances are
+    /// minted and replaced per pass (the NameCollector makes a fresh one), so
+    /// a per-instance table would not survive to the derivations. Installed
+    /// once by the Driver before any pass runs.
+    public nonisolated(unsafe) static var sharedModuleSymbolKeys: [String: String] = [:]
+
     /// 泛型模板映射（名称 -> DefId）
     private var genericStructTemplates: [String: DefId] = [:]
     private var genericEnumTemplates: [String: DefId] = [:]
@@ -711,12 +722,30 @@ public class DefIdMap {
             return nil
         }
         let isPrivate = metadata.access == .file_private
+        // An empty module path stays prefix-less -- wrapping it would mint
+        // `_name` instead of `name`.
+        let prefix: [String] = metadata.modulePath.isEmpty
+            ? []
+            : [moduleSymbolKey(for: metadata.modulePath)]
         return generateCIdentifier(
-            modulePath: metadata.modulePath,
+            modulePath: prefix,
             name: metadata.name,
             isPrivate: isPrivate,
             sourceFile: metadata.sourceFile
         )
+    }
+
+    // MARK: - Module symbol keys (§5.3.1)
+
+    /// The C symbol prefix for symbols declared in `modulePath`: the derived
+    /// identity key (§5.3.1) when the compile installed one, otherwise the
+    /// module path itself (the bare-file shape).
+    public func moduleSymbolKey(for modulePath: [String]) -> String {
+        guard !modulePath.isEmpty else { return "" }
+        if let key = DefIdMap.sharedModuleSymbolKeys[modulePath.joined(separator: ".")] {
+            return key
+        }
+        return modulePath.joined(separator: "_")
     }
 
     // MARK: - Typed Definition Queries/Updates
@@ -999,23 +1028,48 @@ public class DefIdMap {
     /// This is NOT how a name is resolved to a declaration -- that is
     /// `importedTemplateDefId` above -- and it must never win over it.
     private func unimportedTemplateDefId(_ spelling: String, table: [String: DefId]) -> DefId? {
-        return table[spelling]
+        // The unqualified key first (a real empty-path symbol of this
+        // spelling), then the name index (`bareKey`). The two are separate key
+        // spaces -- see `bareKey`.
+        return table[spelling] ?? table[DefIdMap.bareKey(spelling)]
+    }
+
+    /// The key of the unqualified, last-wins NAME INDEX -- the entry kept only
+    /// so "X is defined in module 'M'. Import it explicitly" can name a module
+    /// for a spelling this module neither declares nor imports.
+    ///
+    /// It is NOT a resolution: it answers "whichever module registered the name
+    /// last". It lives in its own key space (the `\u{1}` prefix cannot occur in
+    /// a source identifier, the same trick `makeMethodKey` uses) because
+    /// `makeKey(modulePath: [], name:)` is just `name` -- without the tag a
+    /// name-index entry and a legitimate empty-module-path symbol of the same
+    /// name share one slot and clobber each other.
+    static func bareKey(_ name: String) -> String {
+        "\u{1}bare." + name
     }
 
     public func registerGenericStructTemplate(name: String, defId: DefId, info: GenericStructTemplateInfo) {
         genericStructTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
-        genericStructTemplates[name] = defId
+        if !currentModulePath.isEmpty {
+            genericStructTemplates[DefIdMap.bareKey(name)] = defId
+        }
         genericStructTemplateInfo[defId.id] = info
     }
 
     public func registerGenericEnumTemplate(name: String, defId: DefId, info: GenericEnumTemplateInfo) {
         genericEnumTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
-        genericEnumTemplates[name] = defId
+        if !currentModulePath.isEmpty {
+            genericEnumTemplates[DefIdMap.bareKey(name)] = defId
+        }
         genericEnumTemplateInfo[defId.id] = info
     }
 
     public func registerGenericFunctionTemplate(name: String, defId: DefId, info: GenericFunctionTemplateInfo) {
-        if let existingDefId = genericFunctionTemplates[name], existingDefId != defId {
+        let indexKey = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
+        let existingDefId = genericFunctionTemplates[indexKey]
+            ?? genericFunctionTemplates[name]
+            ?? genericFunctionTemplates[DefIdMap.bareKey(name)]
+        if let existingDefId, existingDefId != defId {
             let existingInfo = genericFunctionTemplateInfo[existingDefId.id]
             // Keep mapping to the already checked template when the new one is only a placeholder.
             if existingInfo?.checkedBody != nil, info.checkedBody == nil {
@@ -1023,7 +1077,10 @@ public class DefIdMap {
                 return
             }
         }
-        genericFunctionTemplates[name] = defId
+        genericFunctionTemplates[indexKey] = defId
+        if !currentModulePath.isEmpty {
+            genericFunctionTemplates[DefIdMap.bareKey(name)] = defId
+        }
         genericFunctionTemplateInfo[defId.id] = info
     }
 
@@ -1078,7 +1135,9 @@ public class DefIdMap {
     /// `given[T Any] Box[T]` extensions would share one owner.
     public func lookupGenericStructTemplateDefIdStrict(modulePath: [String], name: String) -> DefId? {
         if modulePath.isEmpty {
-            return genericStructTemplates[name]
+            // The unqualified key first (a real empty-path symbol), then the
+            // name index (`bareKey`) -- before the split these were one slot.
+            return genericStructTemplates[name] ?? genericStructTemplates[DefIdMap.bareKey(name)]
         }
         return genericStructTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
     }
@@ -1086,14 +1145,14 @@ public class DefIdMap {
     /// Same, for generic enum templates.
     public func lookupGenericEnumTemplateDefIdStrict(modulePath: [String], name: String) -> DefId? {
         if modulePath.isEmpty {
-            return genericEnumTemplates[name]
+            return genericEnumTemplates[name] ?? genericEnumTemplates[DefIdMap.bareKey(name)]
         }
         return genericEnumTemplates[makeKey(modulePath: modulePath, name: name, sourceFile: nil)]
     }
 
 
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
-        return genericFunctionTemplates[name]
+        return genericFunctionTemplates[name] ?? genericFunctionTemplates[DefIdMap.bareKey(name)]
     }
 
     public func getGenericStructTemplateInfo(_ defId: DefId) -> GenericStructTemplateInfo? {

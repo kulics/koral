@@ -1,6 +1,121 @@
 using "std/os" { IntoPath, env, read_text_file };
 
 given TypeChecker {
+    /// The resolved type of a `Base[Args]` instantiation -- the spelling the
+    /// type-as-value message names. `List[Foo]`, `Dict[String, Int]`, nested
+    /// `List[List[Int]]`: the resolved-type printer, not the source spelling.
+    module_private generic_instantiation_resolved_type(
+        self,
+        base String,
+        resolved_args List[Type],
+    ) Type = {
+        let struct_def_id = self.storage.generic_templates.lookup_struct_def_id(base);
+        if struct_def_id.is_valid() then {
+            return Type.GenericStruct(struct_def_id, resolved_args);
+        };
+        let enum_def_id = self.storage.generic_templates.lookup_enum_def_id(base);
+        if enum_def_id.is_valid() then {
+            return Type.GenericEnum(enum_def_id, resolved_args);
+        };
+        when self.trait_def_id_of(base) in {
+            .Some(trait_def_id) then {
+                return Type.TraitObject(trait_def_id, resolved_args);
+            },
+            .None() then {},
+        };
+        return Type.Unknown();
+    };
+
+    /// `Base[Args]` in CALLEE position -- `G[Int8](5)`. The instantiation is a
+    /// namespace here, not a value: it names the parameters the construction
+    /// or generic call is checked against, so no type-as-value objection
+    /// applies. Value position never reaches this helper.
+    module_private lower_generic_instantiation_callee_ref(
+        self,
+        base String,
+        type_args List[TypeNode],
+        inst_span SourceSpan,
+        scope Scope,
+    ) TypedExpr = {
+        let mutable resolved_args = List[Type].new();
+        for ta in type_args then {
+            resolved_args.push(self.resolve_type_in_scope(ta, scope));
+        };
+        // A type parameter first: `T.zero()` inside `[T Zero]` names the
+        // parameter, not a global that happens to be called `T`. Module
+        // names still resolve through the qualified tables below.
+        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+            base,
+        ) in {
+            .Some(t) then Option[Type].Some(t),
+            .None() then when self.lookup_current_file_type_symbol(base) in {
+                .Some(t) then Option[Type].Some(t),
+                .None() then self.storage.global_scope.lookup_type(base),
+            },
+        };
+        if base_type_opt is .Some(base_type) then {
+            let is_enum = when base_type in {
+                .EnumType(_) then true,
+                _ then false,
+            };
+            let mutable type_refs_u = List[Type].new();
+            let mutable type_refs_s = List[Type].new();
+            for t in resolved_args then {
+                type_refs_u.push(t);
+                type_refs_s.push(t);
+            };
+            let template_def_id = when base_type in {
+                .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
+                    let linked_def_id = self.context().get_template_def_id(
+                        def_id,
+                    );
+                    if linked_def_id.is_valid() then linked_def_id else def_id
+                },
+                .GenericStruct(tpl_def_id, _) or .GenericEnum(tpl_def_id, _) then tpl_def_id,
+                _ then def_id_invalid(),
+            };
+            let generic_type = if is_enum then Type.GenericEnum(
+                template_def_id,
+                type_refs_u,
+            ) else Type.GenericStruct(template_def_id, type_refs_s);
+            if template_def_id.is_valid() then {
+                self.validate_template_bounds(
+                    template_def_id,
+                    resolved_args,
+                    inst_span,
+                    true,
+                );
+            };
+            return make_typed_expr(
+                TypedExprKind.GenericInstantiation(base_type, resolved_args),
+                generic_type,
+            );
+        };
+
+        if self.lookup_current_file_symbol(base) is .Some(_) or self.storage.global_scope.lookup(
+            base,
+        ) is .Some(_) then {
+            self.push_diagnostic(
+                "Invalid operation use type as value between types \(base) and ",
+                inst_span,
+            );
+        } else {
+            self.push_diagnostic("Undefined type: \(base)", inst_span);
+        };
+        return make_typed_expr(
+            TypedExprKind.GenericInstantiation(
+                Type.GenericStruct(
+                    self.storage.generic_templates.lookup_struct_def_id(
+                        base,
+                    ),
+                    List[Type].new(),
+                ),
+                resolved_args,
+            ),
+            Type.Unknown(),
+        );
+    };
+
     module_private typed_generic_function_callee_for_call(
         self,
         callee Expr,
@@ -15,7 +130,7 @@ given TypeChecker {
 
                 let fn_lookup = when self.lookup_current_file_symbol(base) in {
                     .Some(sym) then Option[Symbol].Some(sym),
-                    .None() then self.storage.global_scope.lookup(base),
+                    .None() then self.lookup_shared_symbol(base),
                 };
                 when fn_lookup in {
                     .Some(sym) then Option[TypedExpr].Some(
@@ -1240,9 +1355,24 @@ given TypeChecker {
                     .Some(constructor_type) then self.struct_constructor_param_specs(
                         constructor_type,
                     ),
-                    .None() then self.positional_param_specs_for_function_type(
-                        typed_callee.expr_type,
-                    ),
+                    .None() then {
+                        // A generic FUNCTION instantiation -- `f[Int](p: 5)`.
+                        // The callee resolves to the function's symbol, whose
+                        // registered param specs carry the labels; the seed
+                        // threads those through and takes named arguments
+                        // here exactly as on a bare call.
+                        if typed_callee.expr_kind is .Variable(sym) then {
+                            when self.context().get_param_specs(sym.def_id) in {
+                                .Some(specs) then {
+                                    return specs;
+                                },
+                                .None() then {},
+                            };
+                        };
+                        self.positional_param_specs_for_function_type(
+                            typed_callee.expr_type,
+                        )
+                    },
                 };
             },
             .MemberPath(base_expr, path, _) then {
@@ -1311,6 +1441,7 @@ given TypeChecker {
     module_private call_description_for_expr(self, callee Expr) String = {
         return when callee in {
             .Identifier(name, _) then name,
+            .GenericInstantiation(base, _, _) then base,
             .MemberPath(_, path, _) then if path.is_empty() then "function expression"
             else path[path.count() - UInt(1)],
             .StaticMethodCall(_, _, method_name, _, _) then method_name,

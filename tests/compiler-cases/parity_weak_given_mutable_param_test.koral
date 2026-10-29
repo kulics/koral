@@ -1,0 +1,44 @@
+// EXPECT: 7
+// EXPECT: PASS
+// The bounded form of the weak given is accepted and its method is callable
+// through the weak handle: `given[T mutable] ?T as LocalTrait` passes the
+// referent gate because the generic parameter's own bound says 'type mutable'.
+// A weak handle has no methods of its own (calling one is its own error), so
+// the method is reached by generic dispatch -- the conformance the weak given
+// declares is what satisfies `X LocalTrait` for `X = ?Box` -- and the handle is
+// constructed and upgraded alongside.
+
+trait LocalTrait {
+    peek(self) Int;
+};
+
+given[T mutable] ?T as LocalTrait {
+    peek(self) Int = 7;
+};
+
+type mutable Box(mutable value Int);
+
+let use[X LocalTrait](x X) Int = {
+    return x.peek();
+};
+
+let main() Int = {
+    let b = Box(42);
+    let w = b as ?Box;
+    let peeked = use(w);
+    println(peeked);
+    if peeked != 7 then {
+        eprintln("FAIL: expected 7 from peek through the weak");
+        return 1;
+    };
+    let r = when ?w in {
+        .Some(v) then v.value,
+        .None() then -1,
+    };
+    if r != 42 then {
+        eprintln("FAIL: expected 42");
+        return 1;
+    };
+    println("PASS");
+    return 0;
+};

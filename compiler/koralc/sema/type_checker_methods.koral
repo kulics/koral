@@ -470,6 +470,45 @@ given TypeChecker {
         return false;
     };
 
+    /// Traits that provide `method_name` on `owner` through the GENERIC-TEMPLATE
+    /// registry (`given X as T { m }` registered as an extension template).
+    ///
+    /// Template registration never stamps the method table's provenance, so a
+    /// method delivered this way would have no trait to name in the hint. The
+    /// template carries its own `conformance_trait_def_id`; that is the same
+    /// identity the face gate (`face_allows_trait`) refused on.
+    module_private template_providing_traits(
+        self,
+        owner MethodOwner,
+        method_name String,
+    ) List[DefId] = {
+        let mutable out = List[DefId].new();
+        when self.storage.generic_templates.lookup_extension_methods(owner) in {
+            .Some(templates) then {
+                for template in templates then {
+                    if template.method.name == method_name then {
+                        when template.conformance_trait_def_id in {
+                            .Some(trait_def_id) then {
+                                let mutable known = false;
+                                for existing in out then {
+                                    if existing == trait_def_id then {
+                                        known = true;
+                                    };
+                                };
+                                if not known then {
+                                    out.push(trait_def_id);
+                                };
+                            },
+                            .None() then {},
+                        };
+                    };
+                };
+            },
+            .None() then {},
+        };
+        return out;
+    };
+
     /// Why a method that exists on `owner` is not callable here, as a sentence
     /// to append to `Member '…' not found`. Rust prints the same thing at
     /// E0599 ("trait `Read` which provides `read` is implemented but not in
@@ -483,7 +522,14 @@ given TypeChecker {
         if self.storage.method_table.is_inherent(owner, method_name) then {
             return Option[String].None();
         };
-        let traits = self.storage.method_table.providing_traits(owner, method_name);
+        // The method table records provenance for the methods it holds. A
+        // template-registered method (`given X as T { m }` on a generic target)
+        // never lands there, so its provenance falls back to the extension
+        // template's own conformance trait.
+        let mutable traits = self.storage.method_table.providing_traits(owner, method_name);
+        if traits.is_empty() then {
+            traits = self.template_providing_traits(owner, method_name);
+        };
         if traits.is_empty() then {
             return Option[String].None();
         };

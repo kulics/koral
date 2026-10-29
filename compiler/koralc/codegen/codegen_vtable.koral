@@ -700,10 +700,23 @@ given CodeGen {
         preferred_module_path List[String],
     ) Option[TraitDeclInfo] = {
         // The unqualified index is NOT consulted: it is last-wins across
-        // modules and cannot say which `Tag`.
-        return self.program.traits.get(
+        // modules and cannot say which `Tag`. (An EMPTY preferred path also
+        // falls back to it: before the name index was split into its own key
+        // space, `qualified_symbol_key([], name)` and the index were one slot
+        // and this lookup found both kinds of entries. The qualified key
+        // answers first.)
+        when self.program.traits.get(
             qualified_symbol_key(preferred_module_path, trait_name),
-        );
+        ) in {
+            .Some(decl) then {
+                return Option[TraitDeclInfo].Some(decl);
+            },
+            .None() then {},
+        };
+        if preferred_module_path.is_empty() then {
+            return self.program.traits.get(bare_symbol_key(trait_name));
+        };
+        return Option[TraitDeclInfo].None();
     };
 
     /// Resolves a trait spelling to the declaration identity it names, preferring

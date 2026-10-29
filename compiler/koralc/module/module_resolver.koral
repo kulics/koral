@@ -132,6 +132,9 @@ public type ResolvedModuleGraph(
     node_source_paths List[String],
     module_paths List[List[String]],
     source_files List[String],
+    // Module path (dotted) -> derived symbol key (§5.3.1): what C symbol
+    // prefixes derive from, kept beside the name-based `module_paths`.
+    module_symbol_keys Dict[String, String],
 );
 
 given ModuleResolver {
@@ -180,6 +183,7 @@ given ModuleResolver {
             false,
             spec.full_name,
             package_id_for_kind(spec.package_kind),
+            spec.symbol_key,
         );
         unit.add_module(module);
         let key = spec.full_name;
@@ -587,7 +591,10 @@ given ModuleResolver {
 
     /// Import from a local module named by its entry file (§3.1). A local path
     /// with braces needs no manifest entry: the entry file IS the module, and
-    /// its identity is the entry's position inside the package (§5.3.1).
+    /// its identity is the entry's position inside its package (§5.3.1) -- the
+    /// same rule a registered module gets, unregistered or not. The symbol
+    /// prefix is the derived identity key `module_symbol_key`, which is why
+    /// renaming a dependency key moves no ABI symbol.
     ///
     /// The target module is created on first reference if nothing claimed it.
     /// Once it exists it is a module like any other -- it can also be merged
@@ -635,15 +642,10 @@ given ModuleResolver {
         };
         imported_this_file.insert(entry_abs);
 
-        // The module's identity for an unregistered local module is its entry
-        // file's stem -- the same derivation `resolve_module_with_path` uses
-        // when no manifest names it. Two local modules sharing a stem would
-        // share an identity; name them distinctly or register them.
-        let stem = entry_abs.into_path().with_ext_name("").base_name();
-        let target_path = List[String].new();
-        let stem_id = module_file_name_to_identifier(stem);
-        target_path.push(stem_id);
-
+        // Identity = (package source, entry position) (§5.3.1). The path
+        // segments keep the entry's position inside the package, so
+        // `util/util.koral` and `helpers/util.koral` never share a unit slot,
+        // a name key, or a symbol prefix again.
         // Load the target as its own module so its declarations exist under
         // `target_path` and the boundary stays (§3.1). `resolve_module_spec`
         // is idempotent on the unit key, so a second `using` of the same entry
@@ -655,11 +657,15 @@ given ModuleResolver {
                 ),
             );
         };
+        let package_root = owner.manifest.package_root;
+        let rel = entry_relative_path(entry_abs, package_root);
+        let target_path = symbol_key_segments(rel);
         let spec = ResolvedModuleSpec(
-            stem_id,
+            target_path.join_to_string("/"),
             target_path,
-            stem_id,
-            stem_id,
+            module_symbol_key(package_source_tag(owner), entry_abs, package_root),
+            rel,
+            rel,
             entry_abs,
             List[String].new(),
             owner.identity,
@@ -936,7 +942,21 @@ given ModuleResolver {
                 default_path
             },
         };
-        let root = ModuleInfo.new(root_path, abs_path, false);
+        // A bare entry has no package behind it; its identity source is the
+        // fixed `single:` tag and its position is the entry's own name (§5.3.1
+        // degenerate case).
+        let root = ModuleInfo.named(
+            root_path,
+            abs_path,
+            false,
+            join_path(root_path, "."),
+            "",
+            module_symbol_key(
+                "single",
+                abs_path,
+                abs_path.into_path().dir_name().to_string(),
+            ),
+        );
         let unit = CompilationUnit.new(root);
 
         let _ = self.resolve_file(abs_path, root, unit) or return;
@@ -973,7 +993,18 @@ given ModuleResolver {
         let filename = abs_path.into_path().with_ext_name("").base_name();
         let root_path = List[String].new();
         root_path.push(module_file_name_to_identifier(filename));
-        let root = ModuleInfo.named(root_path, abs_path, false, filename, "root:user");
+        let root = ModuleInfo.named(
+            root_path,
+            abs_path,
+            false,
+            filename,
+            "root:user",
+            module_symbol_key(
+                "single",
+                abs_path,
+                abs_path.into_path().dir_name().to_string(),
+            ),
+        );
 
         // ONE unit: the prelude and the file's own `using` may name the same
         // module, and compiling it twice would define its symbols twice.
@@ -1021,6 +1052,7 @@ given ModuleResolver {
                 node_source_paths,
                 self.collect_unique_module_paths(all_pairs),
                 self.collect_unique_sources(loaded_nodes),
+                unit.module_symbol_keys(),
             ),
         );
     };

@@ -2596,7 +2596,20 @@ extension TypeChecker {
         expectedType: expectedType
       )
 
-    case .genericInstantiation(let base, _, _):
+    case .genericInstantiation(let base, let typeArgs, let span):
+      // A generic instantiation standing alone is a type used as a value:
+      // `let x = List[Foo];`. Types have no value -- the same objection the
+      // bare spelling gets -- and the message names the resolved type. A
+      // generic FUNCTION instantiation (`let f = wrap[String];`) is not a
+      // type standing in for a value and keeps its own objection.
+      if currentScope.lookupGenericStructTemplate(base) != nil
+        || currentScope.lookupGenericEnumTemplate(base) != nil
+        || visibleTraitInfo(base) != nil {
+        let resolvedType = try resolveTypeNode(.generic(base: base, args: typeArgs, span: span))
+        throw SemanticError(.generic(
+          "Type '\(resolvedType)' cannot be used as an expression: types have no value"
+        ), span: span)
+      }
       throw SemanticError.invalidOperation(op: "use type as value", type1: base, type2: "")
       
     case .lambdaExpression(let parameters, let returnType, let body, let span):
@@ -6705,7 +6718,9 @@ extension TypeChecker {
     if case .genericStruct(let tplDefId, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[context.methodOwner(of: typeToLookup)] {
         for ext in extensions {
-          if ext.method.name == memberName {
+          // METHOD FACE (§3.4): a template with a conformance trait is that
+          // trait's method -- invisible unless the trait is in scope here.
+          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) {
             guard ext.method.parameters.first?.name == "self" else {
               continue
             }
@@ -6720,12 +6735,12 @@ extension TypeChecker {
         }
       }
     }
-    
+
     // Handle genericEnum types
     if case .genericEnum(let tplDefId, let typeArgs) = typeToLookup {
       if let extensions = genericExtensionMethods[context.methodOwner(of: typeToLookup)] {
         for ext in extensions {
-          if ext.method.name == memberName {
+          if ext.method.name == memberName && extensionTemplateFaceAllows(ext) {
             guard ext.method.parameters.first?.name == "self" else {
               continue
             }

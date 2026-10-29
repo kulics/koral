@@ -835,10 +835,18 @@ given TypeChecker {
         result_type Type,
         scope Scope,
     ) TypedExpr = {
+        // Auto-deref the subject for pattern matching, as the `is` form the
+        // desugaring stands for: `if p is 5 then` on a `*Int` sees the
+        // pointee, and `null` keeps the pointer itself.
+        let pattern_subject_t = if self.pattern_requires_raw_subject(pattern) then {
+            typed_subj.expr_type
+        } else {
+            self.peel_pointer_pattern_subject(typed_subj.expr_type)
+        };
         let mutable arms = List[TypedWhenArm].new();
         arms.push(
             TypedWhenArm(
-                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), Option[TypedExpr].None(),
+                self.lower_typed_pattern(pattern, pattern_subject_t, scope), Option[TypedExpr].None(),
                 typed_then,
                 typed_then.expr_type,
             ),
@@ -880,10 +888,17 @@ given TypeChecker {
         typed_guard Option[TypedExpr],
         scope Scope,
     ) TypedStatement = {
+        // Auto-deref the subject for pattern matching, as the `is` form the
+        // desugaring stands for.
+        let pattern_subject_t = if self.pattern_requires_raw_subject(pattern) then {
+            typed_subj.expr_type
+        } else {
+            self.peel_pointer_pattern_subject(typed_subj.expr_type)
+        };
         let mutable arms = List[TypedWhenArm].new();
         arms.push(
             TypedWhenArm(
-                self.lower_typed_pattern(pattern, typed_subj.expr_type, scope), typed_guard,
+                self.lower_typed_pattern(pattern, pattern_subject_t, scope), typed_guard,
                 typed_body,
                 typed_body.expr_type,
             ),
@@ -919,7 +934,7 @@ given TypeChecker {
                 TypedWhenArm(
                     self.lower_typed_pattern(
                         skip_pattern_node,
-                        typed_subj.expr_type,
+                        pattern_subject_t,
                         scope,
                     ),
                     Option[TypedExpr].None(),
@@ -1220,8 +1235,20 @@ given TypeChecker {
         else Option[Type].None();
     };
 
-    module_private lower_empty_literal_expr(self, expected Option[Type]) TypedExpr = {
-        when expected in {
+    module_private lower_empty_literal_expr(
+        self,
+        expected Option[Type],
+        span SourceSpan,
+    ) TypedExpr = {
+        // An expected type that never resolved is no expected at all: the
+        // literal is as uninferable as a bare `[]`, and the seed says so on
+        // the literal's own span.
+        let resolved_expected = when expected in {
+            .Some(et) then if self.is_unresolved_expr_type(et) then Option[Type].None()
+            else expected,
+            .None() then expected,
+        };
+        when resolved_expected in {
             .Some(et) then {
                 let range_elem = self.extract_range_element_type(et);
                 if range_elem is .Some(_) then {
@@ -1253,7 +1280,7 @@ given TypeChecker {
                 };
                 self.push_diagnostic(
                     self.collection_literal_target_error(et),
-                    unknown_span(),
+                    span,
                 );
                 return self.empty_typed_block(Type.Unknown());
             },
@@ -1262,7 +1289,7 @@ given TypeChecker {
 
         self.push_diagnostic(
             "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.",
-            unknown_span(),
+            span,
         );
         return self.empty_typed_block(Type.Unknown());
     };

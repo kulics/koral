@@ -68,13 +68,48 @@ extension TypeChecker {
     return sym
   }
 
+  /// Traits that provide `name` on `owner` through the GENERIC-TEMPLATE
+  /// registry (`given X as T { m }` registered as an extension template).
+  ///
+  /// Template registration never stamps the method table's provenance, so a
+  /// method delivered this way would have no trait to name in the hint. The
+  /// template carries its own `conformanceTraitDefId`; that is the same
+  /// identity the face gate refuses on. Mirrors koralc
+  /// `template_providing_traits`.
+  func templateProvidingTraits(owner: MethodOwner, name: String) -> [DefId] {
+    var out: [DefId] = []
+    for template in genericExtensionMethods[owner] ?? [] where template.method.name == name {
+      if let traitDefId = template.conformanceTraitDefId, !out.contains(traitDefId) {
+        out.append(traitDefId)
+      }
+    }
+    return out
+  }
+
+  /// METHOD FACE (§3.4) for a template-registry method: a template with a
+  /// conformance trait is that trait's method, and is callable only when the
+  /// trait is in scope here. An inherent template (no conformance trait) has
+  /// no gate. Mirrors koralc `resolve_extension_template_signature`'s
+  /// `face_allows_trait(template.conformance_trait_def_id)`.
+  func extensionTemplateFaceAllows(_ ext: GenericExtensionMethodTemplate) -> Bool {
+    guard let traitDefId = ext.conformanceTraitDefId else { return true }
+    return traitInScope(traitDefId)
+  }
+
   /// Why `owner.name` is not callable here, as a sentence to append to
   /// `Member '…' not found`. Rust prints the same at E0599.
   func methodFaceHint(owner: MethodOwner, name: String) -> String? {
     if inherentMethodNames[owner]?.contains(name) == true {
       return nil
     }
-    let traits = methodProviderTraits[owner]?[name] ?? []
+    // The method table records provenance for the methods it holds. A
+    // template-registered method (`given X as T { m }` on a generic target)
+    // never lands there, so its provenance falls back to the extension
+    // template's own conformance trait.
+    var traits = methodProviderTraits[owner]?[name] ?? []
+    if traits.isEmpty {
+      traits = templateProvidingTraits(owner: owner, name: name)
+    }
     if traits.isEmpty {
       return nil
     }
@@ -206,8 +241,12 @@ extension TypeChecker {
       if let sym = visibleDeclaredMethod(on: selfType, name: name) {
         return sym
       }
+      // METHOD FACE (§3.4): an extension template with a conformance trait is
+      // that trait's method and is invisible when the trait is not in scope
+      // here -- the same gate koralc's `resolve_extension_template_signature`
+      // applies.
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -219,7 +258,7 @@ extension TypeChecker {
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
          let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -236,7 +275,7 @@ extension TypeChecker {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -248,7 +287,7 @@ extension TypeChecker {
       if let templateName = context.getTemplateName(defId),
          let typeArgs = context.getTypeArguments(defId),
          let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -261,7 +300,7 @@ extension TypeChecker {
 
     case .genericStruct(let tplDefId, let args):
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -274,7 +313,7 @@ extension TypeChecker {
 
     case .genericEnum(let tplDefId, let args):
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,
@@ -406,7 +445,7 @@ extension TypeChecker {
         return sym
       }
       if let extensions = genericExtensionMethods[context.methodOwner(of: selfType)],
-         let ext = extensions.first(where: { $0.method.name == name })
+         let ext = extensions.first(where: { $0.method.name == name && extensionTemplateFaceAllows($0) })
       {
         return try resolveGenericExtensionMethod(
           baseType: selfType,

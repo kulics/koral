@@ -339,6 +339,70 @@ given TypeChecker {
                 Type.NeverType(),
             );
         };
+        // A rune literal beside a `UInt8` joins it as a byte: the seed's
+        // `coerceLiteral` turns an ASCII rune construction into a `UInt8`
+        // literal there (and ONLY there -- any other width is no join), so
+        // `'0' + UInt8(n)` is a byte sum rather than a trait dispatch.
+        if left_t is .UInt8Type() and self.is_rune_type(right_t) and typed_right.expr_kind is .TypeConstruction(...) then {
+            when typed_right.expr_kind in {
+                .TypeConstruction(_, _, rune_args) then {
+                    if rune_args.count() > UInt(0) then {
+                        when rune_args[UInt(0)].expr_kind in {
+                            .IntegerLiteral(cp_text) then {
+                                when Int.parse(cp_text) in {
+                                    .Ok(cp) then {
+                                        if cp >= 0 and cp <= 127 then {
+                                            return self.combine_arithmetic_operands(
+                                                typed_left,
+                                                op,
+                                                make_typed_expr(
+                                                    TypedExprKind.IntegerLiteral(cp_text),
+                                                    Type.UInt8Type(),
+                                                ),
+                                                blame_span,
+                                            );
+                                        };
+                                    },
+                                    _ then {},
+                                };
+                            },
+                            _ then {},
+                        };
+                    };
+                },
+                _ then {},
+            };
+        };
+        if right_t is .UInt8Type() and self.is_rune_type(left_t) and typed_left.expr_kind is .TypeConstruction(...) then {
+            when typed_left.expr_kind in {
+                .TypeConstruction(_, _, rune_args) then {
+                    if rune_args.count() > UInt(0) then {
+                        when rune_args[UInt(0)].expr_kind in {
+                            .IntegerLiteral(cp_text) then {
+                                when Int.parse(cp_text) in {
+                                    .Ok(cp) then {
+                                        if cp >= 0 and cp <= 127 then {
+                                            return self.combine_arithmetic_operands(
+                                                make_typed_expr(
+                                                    TypedExprKind.IntegerLiteral(cp_text),
+                                                    Type.UInt8Type(),
+                                                ),
+                                                op,
+                                                typed_right,
+                                                blame_span,
+                                            );
+                                        };
+                                    },
+                                    _ then {},
+                                };
+                            },
+                            _ then {},
+                        };
+                    };
+                },
+                _ then {},
+            };
+        };
         let mutable same_type = self.same_expr_type(left_t, right_t);
         let left_is_pointer = when left_t in {
             .MutablePointerType(_) then true,
@@ -1872,6 +1936,19 @@ given TypeChecker {
                             scope,
                         );
                     };
+                    // The right-hand rune literal joins the neighbour's
+                    // integer width (or its rune type) exactly as the
+                    // left-hand one does: `b >= 'a'` on a `UInt8` is a byte
+                    // comparison, not a rune one.
+                    if right_expr is .RuneLiteral(...) and (self.is_integer_type(
+                        typed_left.expr_type,
+                    ) or self.is_rune_type(typed_left.expr_type)) then {
+                        typed_right = self.check_expr_scoped_ref(
+                            right_expr,
+                            .Some(typed_left.expr_type),
+                            scope,
+                        );
+                    };
                 },
                 .None() then {},
             };
@@ -1926,19 +2003,12 @@ given TypeChecker {
         if same_type and is_eq_op and not self.is_builtin_equality_comparable(
             typed_left.expr_type,
         ) then {
-            if not self.enforce_explicit_trait_requirement_with_context(
-                typed_left.expr_type,
-                self.lang_trait_def_id("Eq"),
-                "Eq",
-                "",
-                "operator 'equals'",
-                span,
-            ) then {
-                return make_typed_expr(
-                    TypedExprKind.ComparisonExpr(typed_left, op, typed_right),
-                    Type.BoolType(),
-                );
-            };
+            // The trait complaint is recorded INSIDE `build_equals_call` and
+            // the seed keeps going from there: the method lookup that follows
+            // is what decides whether the call can be built, and a missing
+            // `equals` adds its own `Member ... not found` line. A pre-check
+            // here would both double the conformance line and cut the
+            // follow-on off.
             let equals_call = self.build_equals_call(typed_left, typed_right, span);
             let result = when op in {
                 .NotEqual() then make_typed_expr(
@@ -1953,19 +2023,9 @@ given TypeChecker {
         if same_type and is_ord_op and not self.is_builtin_ordering_comparable(
             typed_left.expr_type,
         ) then {
-            if not self.enforce_explicit_trait_requirement_with_context(
-                typed_left.expr_type,
-                self.lang_trait_def_id("Ord"),
-                "Ord",
-                "",
-                "operator 'compare'",
-                span,
-            ) then {
-                return make_typed_expr(
-                    TypedExprKind.ComparisonExpr(typed_left, op, typed_right),
-                    Type.BoolType(),
-                );
-            };
+            // Same record-and-continue as the `==` family above: the
+            // complaint lands inside `build_compare_call` and the `compare`
+            // lookup follows it.
             let compare_call = self.build_compare_call(typed_left, typed_right, span);
             let zero = make_typed_expr(TypedExprKind.IntegerLiteral("0"), Type.IntType());
             let result = make_typed_expr(
@@ -2005,8 +2065,14 @@ given TypeChecker {
                         .MutablePointerType(_) then Option[Type].Some(left_expr.expr_type),
                         _ then Option[Type].None(),
                     }
-                } else {
+                } else if self.is_integer_literal_operand(right_source_ref) and self.is_integer_type(
+                    left_expr.expr_type,
+                ) then {
+                    // The width join is the only aim the seed gives a plain
+                    // operand; everything else is checked unaimed.
                     Option[Type].Some(left_expr.expr_type)
+                } else {
+                    Option[Type].None()
                 }
             },
         };
@@ -2188,9 +2254,19 @@ given TypeChecker {
             typed_left = self.check_expr_core_ref(left, left_expected, scope);
         } else {
             typed_left = self.check_expr_core_ref(left, .None(), scope);
+            // The seed aims a comparison operand at its neighbour ONLY for
+            // the width join (an integer literal beside an integer value)
+            // and the null join above. Anything else is checked unaimed: an
+            // empty collection literal beside a typed one stays
+            // uninferable, and an implicit member beside a value has no type
+            // context -- aiming here swallowed both complaints.
+            let right_joins_width = self.is_integer_literal_operand(right) and self.is_integer_type(
+                typed_left.expr_type,
+            );
             typed_right = self.check_expr_scoped_ref(
                 right,
-                .Some(typed_left.expr_type),
+                if right_joins_width then Option[Type].Some(typed_left.expr_type)
+                else Option[Type].None(),
                 scope,
             );
         };
@@ -2287,19 +2363,18 @@ given TypeChecker {
         rhs TypedExpr,
         span SourceSpan,
     ) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(
+        // The seed's record-and-continue: a missing conformance is one line
+        // and the method lookup below still runs -- a receiver without
+        // `equals` to call adds `Member 'equals' not found in type '<T>'` on
+        // the same span. Returning here kept only the first line.
+        let _ = self.enforce_explicit_trait_requirement_with_context(
             lhs.expr_type,
             self.lang_trait_def_id("Eq"),
             "Eq",
             "",
             "operator 'equals'",
             span,
-        ) then {
-            return make_typed_expr(
-                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
-                Type.Unknown(),
-            );
-        };
+        );
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
             self.maybe_record_trait_method_instantiation(
                 lhs.expr_type,
@@ -2325,6 +2400,19 @@ given TypeChecker {
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.BoolType());
+        };
+        // The seed looks the method up after the complaint and says so when
+        // it is not there. Same follow-on shape as
+        // `arithmetic_operator_method_followon`.
+        if self.resolve_method_signature(lhs.expr_type, "equals") is .None() then {
+            self.push_diagnostic(
+                "Member 'equals' not found in type '\(self.context().type_display_name(lhs.expr_type))'",
+                span,
+            );
+            return make_typed_expr(
+                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
+                Type.Unknown(),
+            );
         };
         self.maybe_record_extension_method_instantiation(
             lhs.expr_type,
@@ -2364,19 +2452,15 @@ given TypeChecker {
         rhs TypedExpr,
         span SourceSpan,
     ) TypedExpr = {
-        if not self.enforce_explicit_trait_requirement_with_context(
+        // Record-and-continue, exactly as `build_equals_call`.
+        let _ = self.enforce_explicit_trait_requirement_with_context(
             lhs.expr_type,
             self.lang_trait_def_id("Ord"),
             "Ord",
             "",
             "operator 'compare'",
             span,
-        ) then {
-            return make_typed_expr(
-                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
-                Type.Unknown(),
-            );
-        };
+        );
         if self.should_use_trait_placeholder_for_eq_ord_receiver(lhs.expr_type) then {
             self.maybe_record_trait_method_instantiation(
                 lhs.expr_type,
@@ -2402,6 +2486,17 @@ given TypeChecker {
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.IntType());
+        };
+        // Same follow-on as the `equals` family: a missing `compare` says so.
+        if self.resolve_method_signature(lhs.expr_type, "compare") is .None() then {
+            self.push_diagnostic(
+                "Member 'compare' not found in type '\(self.context().type_display_name(lhs.expr_type))'",
+                span,
+            );
+            return make_typed_expr(
+                TypedExprKind.Block(List[TypedStatement].new(), Option[TypedExpr].None()),
+                Type.Unknown(),
+            );
         };
         self.maybe_record_extension_method_instantiation(
             lhs.expr_type,

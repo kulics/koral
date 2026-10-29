@@ -108,6 +108,18 @@ stamp DefIds into C symbol names under different numbering rules, so a textual
 diff of the generated C would be pure noise; behaviour is the thing to hold them
 to.
 
+### Diagnostic discipline: one error site per declaration
+
+The two compilers differ in error recovery BY DESIGN: the seed abandons a
+declaration at its first error, koralc keeps checking. A program with two
+independent mistakes in one declaration therefore produces different diagnostic
+STREAMS (the seed reports the first, koralc reports both) even though every
+individual line agrees. The oracle compares lines in order, so cases must keep
+**one error site per declaration** — extra mistakes go in separate declarations
+or separate cases. This split is documented in the project's
+error-recovery rule ("keep the caller's shape, neutralise only the cascade") and
+is not a bug to fix.
+
 ## Focused regression buckets
 
 The shared suite remains flat under `tests/compiler-cases/`, but a few high-value semantic buckets are worth rerunning together when touching parser visibility, raw pointers, weak references, or `self` behavior.

@@ -435,18 +435,86 @@ extension PatternSpace {
                 result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
             }
             return result
-            
-        case .genericEnum(let templateDefId, _):
-            // The type carries the template's DECLARATION; the spelling is not read.
+
+        case .genericEnum(let templateDefId, let typeArgs):
+            // The type carries the template's DECLARATION; the instance's type
+            // arguments substitute into the payload field types, so `Wrap(v T)`
+            // in `G2[Bool]` is `Wrap(v Bool)` -- the same reading the
+            // generic-enum SUBJECT path gives its cases. Reading the
+            // declaration's unsubstituted fields here made a nested
+            // generic-enum payload subtract nothing and the next arm look
+            // unreachable.
             guard templateDefId.isValid, let defId = Optional(templateDefId) else {
                 return nil
             }
+            let paramNames: [String]
+            if let info = context.defIdMap.getGenericEnumTemplateInfo(templateDefId) {
+                paramNames = info.typeParameters.map { $0.name }
+            } else {
+                paramNames = []
+            }
             var result: [String: [PatternSpace]] = [:]
             for c in context.getEnumCases(defId) ?? [] {
-                result[c.name] = c.parameters.map { PatternSpace.full($0.type) }
+                result[c.name] = c.parameters.map {
+                    PatternSpace.full(
+                        PatternSpace.substituteInstanceTypeArgs($0.type, paramNames: paramNames, args: typeArgs))
+                }
             }
             return result
-            
+
+        default:
+            return nil
+        }
+    }
+
+    /// Substitute a generic instance's type arguments for its parameter names
+    /// inside a declared payload type: `T` becomes `Bool` in `G2[Bool]`'s
+    /// `Wrap(v T)`.
+    private static func substituteInstanceTypeArgs(
+        _ type: Type,
+        paramNames: [String],
+        args: [Type]
+    ) -> Type {
+        switch type {
+        case .genericParameter(let name):
+            if let index = paramNames.firstIndex(of: name), index < args.count {
+                return args[index]
+            }
+            return type
+        case .genericStruct(let templateDefId, let innerArgs):
+            return .genericStruct(
+                templateDefId: templateDefId,
+                args: innerArgs.map { substituteInstanceTypeArgs($0, paramNames: paramNames, args: args) })
+        case .genericEnum(let templateDefId, let innerArgs):
+            return .genericEnum(
+                templateDefId: templateDefId,
+                args: innerArgs.map { substituteInstanceTypeArgs($0, paramNames: paramNames, args: args) })
+        case .pointer(let inner):
+            return .pointer(element: substituteInstanceTypeArgs(inner, paramNames: paramNames, args: args))
+        case .mutablePointer(let inner):
+            return .mutablePointer(element: substituteInstanceTypeArgs(inner, paramNames: paramNames, args: args))
+        case .reference(let inner):
+            return .reference(inner: substituteInstanceTypeArgs(inner, paramNames: paramNames, args: args))
+        case .mutableReference(let inner):
+            return .mutableReference(inner: substituteInstanceTypeArgs(inner, paramNames: paramNames, args: args))
+        default:
+            return type
+        }
+    }
+
+    /// The declared field spaces of one case -- the lookup `subtract` performs
+    /// -- so the unreachable scan can ask the same question before it trusts a
+    /// subtraction.
+    func caseFieldSpaces(
+        for caseName: String,
+        type: Type,
+        context: CompilerContext
+    ) -> [PatternSpace]? {
+        switch self {
+        case .full(let t):
+            return getEnumCases(from: t, context: context)?[caseName]
+        case .enumCases(_, let cases):
+            return cases[caseName]
         default:
             return nil
         }

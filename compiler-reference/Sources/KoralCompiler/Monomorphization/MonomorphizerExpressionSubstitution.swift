@@ -200,7 +200,7 @@ extension Monomorphizer {
                case .function(_, _) = identifier.type,
                !substitution.isEmpty {
                 // Check if this is a generic function template
-                if let template = input.genericTemplates.functionTemplates[identifierName] {
+                if let template = input.genericTemplates.functionTemplate(named: identifierName) {
                     // Build the specialized symbol name using substituted type arguments.
                     let typeArgs = template.typeParameters.compactMap { param -> Type? in
                         substitution[param.name]
@@ -443,7 +443,7 @@ extension Monomorphizer {
             }
             
             // Convert to regular call by instantiating the function
-            if let template = input.genericTemplates.functionTemplates[functionName] {
+            if let template = input.genericTemplates.functionTemplate(named: functionName) {
                 // Ensure the function is instantiated
                 let key = InstantiationKey.function(templateDefId: template.defId, args: substitutedTypeArgs)
                 if !input.genericTemplates.intrinsicGenericFunctions.contains(functionName)

@@ -184,7 +184,25 @@ public struct GenericTemplateRegistry {
     /// Receiver-style method dispatch metadata, keyed by method DefId.
     /// This keeps method lookup structural and avoids name parsing in monomorphization.
     public var receiverMethodDispatch: [DefId: ReceiverMethodDispatchInfo]
-    
+
+    /// Unqualified template lookup by SPELLING: the plain key first (a module
+    /// qualified key of an empty-path module), then the name index
+    /// (`DefIdMap.bareKey`). Before the two key spaces were split these were
+    /// one slot and a bare read found both kinds of entries.
+    public func structTemplate(named name: String) -> GenericStructTemplate? {
+        structTemplates[name] ?? structTemplates[DefIdMap.bareKey(name)]
+    }
+
+    /// Same, for generic enum templates.
+    public func enumTemplate(named name: String) -> GenericEnumTemplate? {
+        enumTemplates[name] ?? enumTemplates[DefIdMap.bareKey(name)]
+    }
+
+    /// Same, for generic function templates.
+    public func functionTemplate(named name: String) -> GenericFunctionTemplate? {
+        functionTemplates[name] ?? functionTemplates[DefIdMap.bareKey(name)]
+    }
+
     /// Creates an empty generic template registry.
     public init() {
         self.structTemplates = [:]

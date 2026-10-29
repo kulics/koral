@@ -142,7 +142,7 @@ extension Monomorphizer {
                 $0.defId == template.defId && $0.checkedBody != nil
             }) {
                 resolvedTemplate = latestByDefId
-            } else if let latestByName = input.genericTemplates.functionTemplates[templateName],
+            } else if let latestByName = input.genericTemplates.functionTemplate(named: templateName),
                       latestByName.checkedBody != nil {
                 resolvedTemplate = latestByName
             } else {
@@ -1379,10 +1379,10 @@ extension Monomorphizer {
     /// declaration, resolved once here (rustc_resolve). A call site that already
     /// has a `Type` must use `context.methodOwner(of:)` and never this.
     private func ownerOfGenericTemplate(_ name: String) -> MethodOwner {
-        if let t = input.genericTemplates.structTemplates[name] {
+        if let t = input.genericTemplates.structTemplate(named: name) {
             return .decl(t.defId)
         }
-        if let t = input.genericTemplates.enumTemplates[name] {
+        if let t = input.genericTemplates.enumTemplate(named: name) {
             return .decl(t.defId)
         }
         return .builtin(name)

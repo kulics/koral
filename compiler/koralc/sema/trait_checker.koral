@@ -60,8 +60,14 @@ given TraitRegistry {
     };
 
     public register(self, info TraitInfo) Void = {
-        self.traits.insert(info.name, info);
         self.traits.insert(qualified_symbol_key(info.module_path, info.name), info);
+        // The unqualified name index (`bare_symbol_key`) -- its own key space so
+        // a last-wins index entry cannot clobber a real empty-path symbol of
+        // the same name. Skipped when the qualified key already IS the plain
+        // name (empty module path).
+        if not info.module_path.is_empty() then {
+            self.traits.insert(bare_symbol_key(info.name), info);
+        };
         self.traits_by_def_id.insert(info.def_id.id, info);
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
         self.object_safety_cache = Dict[String, List[String]].new();
@@ -86,7 +92,9 @@ given TraitRegistry {
         info TraitInfo,
     ) Void = {
         self.traits.insert(qualified_symbol_key(module_path, local_name), info);
-        self.traits.insert(local_name, info);
+        if not module_path.is_empty() then {
+            self.traits.insert(bare_symbol_key(local_name), info);
+        };
         self.flattened_cache = Dict[String, Dict[String, TypedTraitMember]].new();
         self.object_safety_cache = Dict[String, List[String]].new();
     };
@@ -96,7 +104,13 @@ given TraitRegistry {
     };
 
     public get(self, name String) Option[TraitInfo] = {
-        return self.traits.get(name);
+        // By spelling: the unqualified key first (a real empty-path symbol),
+        // then the name index (`bare_symbol_key`). The two are separate key
+        // spaces; see `bare_symbol_key`.
+        return when self.traits.get(name) in {
+            .Some(info) then Option[TraitInfo].Some(info),
+            .None() then self.traits.get(bare_symbol_key(name)),
+        };
     };
 
     /// The trait `name` denotes in `module_path`: its own declaration, or one
@@ -108,7 +122,20 @@ given TraitRegistry {
     /// That index exists only to name the declaring module in the
     /// "Import it explicitly" diagnostic; see `declared_somewhere`.
     public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
-        return self.traits.get(qualified_symbol_key(module_path, name));
+        // An EMPTY `module_path` also consults the name index: before the two
+        // key spaces were split, `qualified_symbol_key([], name)` and the index
+        // were one slot and this lookup found both kinds of entries. The
+        // qualified key answers first.
+        when self.traits.get(qualified_symbol_key(module_path, name)) in {
+            .Some(info) then {
+                return Option[TraitInfo].Some(info);
+            },
+            .None() then {},
+        };
+        if module_path.is_empty() then {
+            return self.traits.get(bare_symbol_key(name));
+        };
+        return Option[TraitInfo].None();
     };
 
     /// A trait declared SOMEWHERE under this spelling, imported here or not.
@@ -117,7 +144,10 @@ given TraitRegistry {
     /// "Import it explicitly", exactly like `unimportedTemplateDefId` on the
     /// generic-template side -- it must never win over `get_in_module`.
     public declared_somewhere(self, name String) Option[TraitInfo] = {
-        return self.traits.get(name);
+        return when self.traits.get(name) in {
+            .Some(info) then Option[TraitInfo].Some(info),
+            .None() then self.traits.get(bare_symbol_key(name)),
+        };
     };
 
     public validate_inheritance_graph(self, trait_name String) Result[Void] = {
@@ -143,8 +173,11 @@ given TraitRegistry {
         stack List[UInt],
         stack_names List[String],
     ) Result[Void] = {
-        let info = self.traits.get(trait_name) or else {
-            return Result[Void].Ok({});
+        let info = when self.get(trait_name) in {
+            .Some(found) then found,
+            .None() then {
+                return Result[Void].Ok({});
+            },
         };
         if stack.contains(info.def_id.id) then {
             let mutable cycle = StringBuilder.new();

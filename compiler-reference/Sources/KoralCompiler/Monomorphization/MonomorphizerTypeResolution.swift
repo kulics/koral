@@ -31,6 +31,15 @@ extension Monomorphizer {
         return base.type
     }
 
+    private func isWeakHandleType(_ type: Type) -> Bool {
+        switch type {
+        case .weakReference, .mutableWeakReference:
+            return true
+        default:
+            return false
+        }
+    }
+
     func normalizedTraitPlaceholderExpectedMethodType(_ methodType: Type, for lookupBaseType: Type) -> Type {
         guard case .function(let params, let returns) = methodType,
               let first = params.first else {
@@ -48,9 +57,16 @@ extension Monomorphizer {
         case .mutableBorrowedReference(_):
             normalizedReceiver = .mutableBorrowedReference(inner: lookupBaseType)
         case .weakReference:
-            normalizedReceiver = .weakReference(inner: lookupBaseType)
+            // A lookup base that is already a weak HANDLE is the receiver
+            // whole (`?Box` for a `?Box` variable); re-wrapping it produced
+            // `??Box`, a weak-of-weak receiver no representation has.
+            normalizedReceiver = isWeakHandleType(lookupBaseType)
+                ? lookupBaseType
+                : .weakReference(inner: lookupBaseType)
         case .mutableWeakReference:
-            normalizedReceiver = .mutableWeakReference(inner: lookupBaseType)
+            normalizedReceiver = isWeakHandleType(lookupBaseType)
+                ? lookupBaseType
+                : .mutableWeakReference(inner: lookupBaseType)
         default:
             normalizedReceiver = lookupBaseType
         }
@@ -146,7 +162,7 @@ extension Monomorphizer {
                 return concreteType
             }
             // Check if it's a known struct template (non-generic reference)
-            if let template = input.genericTemplates.structTemplates[name] {
+            if let template = input.genericTemplates.structTemplate(named: name) {
                 // Non-generic struct reference
                 if template.typeParameters.isEmpty {
                     let defId = getOrAllocateTypeDefId(name: name, kind: .structure)
@@ -155,7 +171,7 @@ extension Monomorphizer {
                 }
             }
             // Check if it's a known enum template (non-generic reference)
-            if let template = input.genericTemplates.enumTemplates[name] {
+            if let template = input.genericTemplates.enumTemplate(named: name) {
                 // Non-generic enum reference
                 if template.typeParameters.isEmpty {
                     let defId = getOrAllocateTypeDefId(name: name, kind: .`enum`)
@@ -185,14 +201,14 @@ extension Monomorphizer {
             let resolvedArgs = try args.map { try resolveTypeNode($0, substitution: substitution) }
             
             // Check if it's a struct template
-            if let template = input.genericTemplates.structTemplates[base] {
+            if let template = input.genericTemplates.structTemplate(named: base) {
                 // Directly instantiate - no need to add to pendingRequests since we're handling it now
                 // The instantiateStruct method has its own caching to avoid duplicate work
                 return try instantiateStruct(template: template, args: resolvedArgs)
             }
             
             // Check if it's a enum template
-            if let template = input.genericTemplates.enumTemplates[base] {
+            if let template = input.genericTemplates.enumTemplate(named: base) {
                 // Directly instantiate - no need to add to pendingRequests since we're handling it now
                 return try instantiateEnum(template: template, args: resolvedArgs)
             }
@@ -988,7 +1004,7 @@ extension Monomorphizer {
             }
             
             // Look up the function template and instantiate
-            if let template = input.genericTemplates.functionTemplates[functionName] {
+            if let template = input.genericTemplates.functionTemplate(named: functionName) {
                 // Ensure the function is instantiated
                 let key = InstantiationKey.function(templateDefId: template.defId, args: resolvedTypeArgs)
                 if !input.genericTemplates.intrinsicGenericFunctions.contains(functionName)

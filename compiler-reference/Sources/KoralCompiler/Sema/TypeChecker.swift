@@ -225,10 +225,12 @@ public class TypeChecker {
   var genericConstraintCache: Set<String> = []
 
   // Cache for blanket given constraints on type modifiers.
-  // Key format: "Ref:Eq" → ["Eq"]
-  // Meaning: to satisfy trait "Eq" via "T ref", the inner type T must satisfy ["Eq"].
+  // Key format: "Ref:<Eq's DefId>" → [Bound]
+  // Meaning: to satisfy trait "Eq" via "T ref", the inner type T must satisfy
+  // the listed bounds. The bounds keep their KIND (Bound.swift): `mutable` and
+  // `foreign` are shapes on the inner type, not traits it could implement.
   // Populated in Pass 2 when a generic given with a type modifier is registered.
-  var blanketGivenConstraints: [String: [String]] = [:]
+  var blanketGivenConstraints: [String: [Bound]] = [:]
 
   // When true, generic constraints on type nodes are not enforced during signature collection.
   // This avoids order-dependent false negatives across modules/submodules.

@@ -1924,6 +1924,12 @@ final class MIRFunctionCodeEmitter {
     allocation: MIRReferenceAllocation
   ) -> MIRValueEmission {
     let resultType = resolver.type(of: .ref(place, kind: kind, allocation: allocation)) ?? .void
+    if kind == .weak || kind == .mutableWeak {
+      // A weak "reference" is the runtime's weak HANDLE over the place's
+      // referent -- the same construction `expr as ?T` lowers to
+      // (`__koral_downgrade_ref`). There is no weak pointer value to emit.
+      return emitWeakHandle(place: place, resultType: resultType)
+    }
     guard kind == .shared || kind == .mutable else {
       fatalError("Unsupported MIR reference kind in direct emission: \(kind)")
     }
@@ -1932,6 +1938,21 @@ final class MIRFunctionCodeEmitter {
       return emitHeapReference(place: place, resultType: resultType, allocation: allocation)
     }
     return emitBorrowedReference(place: place, resultType: resultType)
+  }
+
+  private func emitWeakHandle(place: MIRPlace, resultType: Type) -> MIRValueEmission {
+    let access = emitPlaceAccess(place)
+    let pointeeType = resolver.type(of: place) ?? .void
+    let needsWrap = codeGen.usesManagedNominalRepresentation(pointeeType)
+    let refExpr = needsWrap
+      ? "(struct __koral_Ref){\(access.path).ptr}"
+      : access.path
+    let expression = codeGen.nextTempWithInit(
+      cType: codeGen.cTypeName(resultType),
+      initExpr: "__koral_downgrade_ref(\(refExpr))"
+    )
+    emitCleanups(access.cleanups)
+    return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: resultType))
   }
 
   private func emitBorrowedReference(place: MIRPlace, resultType: Type) -> MIRValueEmission {

@@ -136,6 +136,17 @@ given CompilerContext {
         return self.def_id_map.get_c_identifier(def_id);
     };
 
+    /// `module_path` 里声明的符号的 C 前缀——派生身份键（§5.3.1），随消费方
+    /// 拼写不变。编译没提供键表时退回模块路径本身。
+    public symbol_key_for_module_path(self, module_path List[String]) String = {
+        return self.def_id_map.module_symbol_key_for(module_path);
+    };
+
+    /// 安装本编译的 模块路径 -> 派生符号键 表（§5.3.1）。
+    public set_module_symbol_keys(self, keys Dict[String, String]) Void = {
+        self.def_id_map.set_module_symbol_keys(keys);
+    };
+
     public get_symbol_type(self, def_id DefId) Option[Type] = {
         return self.def_id_map.get_symbol_type(def_id);
     };
@@ -1612,7 +1623,7 @@ given CompilerContext {
                 };
                 "TO_\(def_id_spelling(trait_def_id))_\(join_strings(arg_keys, "_"))\(suffix)"
             },
-            .ModuleType(info) then "M_\(join_strings(info.module_path, "_"))",
+            .ModuleType(info) then "M_\(self.symbol_key_for_module_path(info.module_path))",
             .TypeVar(tv) then "TV_\(tv.id)",
             .Unknown() then "Unknown",
         };
@@ -1627,7 +1638,9 @@ given CompilerContext {
         let mutable parts = List[String].new();
 
         if module_opt is .Some(mod_path) and not mod_path.is_empty() then {
-            parts.push(join_strings(mod_path, "_"));
+            // 符号前缀取自派生身份键（§5.3.1），不是模块路径：路径带消费方
+            // 拼写，换依赖 key 就变。
+            parts.push(self.symbol_key_for_module_path(mod_path));
         };
 
         // file_private 符号添加文件哈希

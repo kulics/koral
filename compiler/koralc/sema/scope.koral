@@ -58,11 +58,19 @@ given Scope {
         self.storage.type_entries.insert(name, t);
     };
 
-    /// Register a MODULE-SCOPED type under both its bare name and a
-    /// module-qualified one. Use plain `define_type` for LOCAL bindings.
+    /// Register a MODULE-SCOPED type under its module-qualified key plus the
+    /// unqualified name index. Use plain `define_type` for LOCAL bindings.
+    ///
+    /// The name-index entry lives in its own key space (`bare_symbol_key`)
+    /// because `qualified_symbol_key([], name)` is just `name`: sharing one
+    /// slot let a last-wins name-index entry clobber a real empty-module-path
+    /// symbol of the same name. An empty `module_path` writes only the
+    /// qualified key -- it already IS the plain name.
     public define_scoped_type(self, module_path List[String], name String, t Type) Void = {
-        self.define_type(name, t);
         self.define_type(qualified_symbol_key(module_path, name), t);
+        if not module_path.is_empty() then {
+            self.define_type(bare_symbol_key(name), t);
+        };
     };
 
     /// The type `name` denotes in `module_path` through its IMPORTS.
@@ -163,7 +171,19 @@ given Scope {
                 },
                 .None() then {},
             };
+            // The unqualified key first (a LOCAL binding or an empty-path
+            // symbol of this spelling), then the name index proper -- which is
+            // last-wins across modules and so cannot answer "which `Box`?",
+            // kept only for the "Import it explicitly" diagnostic. The two are
+            // separate key spaces (`bare_symbol_key`) so neither clobbers the
+            // other.
             when current.storage.type_entries.get(name) in {
+                .Some(t) then {
+                    return Option[Type].Some(t);
+                },
+                .None() then {},
+            };
+            when current.storage.type_entries.get(bare_symbol_key(name)) in {
                 .Some(t) then {
                     return Option[Type].Some(t);
                 },
@@ -226,7 +246,16 @@ given Scope {
                 };
             };
 
+            // The unqualified key first (local bindings, empty-path symbols),
+            // then the name index (bare_symbol_key) -- see
+            // `lookup_type_in_module` for why the two are separate slots.
             when current.storage.type_entries.get(name) in {
+                .Some(t) then {
+                    return .Some(t);
+                },
+                .None() then {},
+            };
+            when current.storage.type_entries.get(bare_symbol_key(name)) in {
                 .Some(t) then {
                     return .Some(t);
                 },

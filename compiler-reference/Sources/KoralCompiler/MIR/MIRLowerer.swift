@@ -900,7 +900,7 @@ private final class MIRFunctionBuilder {
         }
         return lowerSimpleWhenExpression(subject: subject, cases: cases, type: type)
       }
-      fatalError("Unsupported when expression reached MIR lowering: subject=\(subject.type) matched=\(patternMatchType(subject.type)) caseCount=\(cases.count)")
+      fatalError("Unsupported when expression reached MIR lowering: subject=\(subject.type) caseCount=\(cases.count)")
     case .lambdaExpression(let parameters, let captures, let body, let type):
       let captureSources = captures.map { capturePlace(for: $0.symbol) }
       let value = MIRValue.lambda(
@@ -1537,10 +1537,10 @@ private final class MIRFunctionBuilder {
     pattern: TypedPattern,
     negated: Bool
   ) -> MIROperand? {
-    let matchedSubject = patternMatchSubject(value: subjectValue, type: subjectType)
+    let matchedSubject = patternMatchSubject(value: subjectValue, type: subjectType, pattern: pattern)
     let matchedValue = matchedSubject.value
     let matchedType = matchedSubject.type
-    let matchedPlace = subjectPlace.map { patternMatchPlace(place: $0, type: subjectType).place }
+    let matchedPlace = subjectPlace.map { patternMatchPlace(place: $0, type: subjectType, pattern: pattern).place }
 
     switch pattern {
     case .wildcard, .variable:
@@ -2138,11 +2138,40 @@ private final class MIRFunctionBuilder {
     return .local(resultLocal.id)
   }
 
-  private func patternMatchPlace(place: MIRPlace, type: Type) -> (place: MIRPlace, type: Type) {
-    if let inner = type.indirectionCompatibilityInfo?.inner {
-      return (.deref(base: .placeRead(place, ownership: .borrow), pointee: inner), inner)
+  private func patternMatchPlace(place: MIRPlace, type: Type, pattern: TypedPattern) -> (place: MIRPlace, type: Type) {
+    guard let info = type.indirectionCompatibilityInfo else {
+      return (place, type)
     }
-    return (place, type)
+    // A raw pointer peels exactly when the type checker auto-dereffed the
+    // subject for this pattern; a `null` or trait-object test keeps it.
+    if info.family == .rawPointer, typedPatternRequiresRawSubject(pattern) {
+      return (place, type)
+    }
+    return (.deref(base: .placeRead(place, ownership: .borrow), pointee: info.inner), info.inner)
+  }
+
+  /// The patterns whose test reads the RAW subject: a `null` pattern compares
+  /// the pointer itself and a trait-object pattern matches the wrapper. The
+  /// type checker keeps the subject un-dereferenced for these and derefs one
+  /// level for every other pattern, so MIR must see the same subject the
+  /// pattern was checked against (Sema's `untypedPatternRequiresRawSubject`).
+  private func typedPatternRequiresRawSubject(_ pattern: TypedPattern) -> Bool {
+    switch pattern {
+    case .nullLiteral, .traitObjectType, .traitObjectTypeBinding:
+      return true
+    case .enumCase(_, _, let elements),
+         .structPattern(_, let elements):
+      return elements.contains { typedPatternRequiresRawSubject($0) }
+    case .listPattern(let elements, _):
+      return elements.contains { typedPatternRequiresRawSubject($0) }
+    case .andPattern(let left, let right),
+         .orPattern(let left, let right):
+      return typedPatternRequiresRawSubject(left) || typedPatternRequiresRawSubject(right)
+    case .notPattern(let inner):
+      return typedPatternRequiresRawSubject(inner)
+    default:
+      return false
+    }
   }
 
   private func resolveWrappedPatternType(
@@ -2523,7 +2552,7 @@ private final class MIRFunctionBuilder {
     return resolvedCases
   }
 
-  private func patternMatchSubject(value: MIRValue, type: Type) -> (value: MIRValue, type: Type) {
+  private func patternMatchSubject(value: MIRValue, type: Type, pattern: TypedPattern) -> (value: MIRValue, type: Type) {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
@@ -2532,12 +2561,19 @@ private final class MIRFunctionBuilder {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return (.placeRead(.deref(base: value, pointee: inner), ownership: .borrow), inner)
+    case .pointer(let inner), .mutablePointer(let inner):
+      // One pointer indirection, exactly when the type checker auto-dereffed
+      // the subject for this pattern (a `null` test keeps the raw subject).
+      guard !typedPatternRequiresRawSubject(pattern) else {
+        return (value, type)
+      }
+      return (.placeRead(.deref(base: value, pointee: inner), ownership: .borrow), inner)
     default:
       return (value, type)
     }
   }
 
-  private func patternMatchType(_ type: Type) -> Type {
+  private func patternMatchType(_ type: Type, pattern: TypedPattern) -> Type {
     switch type {
     case .reference(let inner),
          .mutableReference(let inner),
@@ -2546,13 +2582,18 @@ private final class MIRFunctionBuilder {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return resolveConcretePatternNominalType(inner)
+    case .pointer(let inner), .mutablePointer(let inner):
+      guard !typedPatternRequiresRawSubject(pattern) else {
+        return resolveConcretePatternNominalType(type)
+      }
+      return resolveConcretePatternNominalType(inner)
     default:
       return resolveConcretePatternNominalType(type)
     }
   }
 
   private func canLowerSimplePattern(_ pattern: TypedPattern, subjectType: Type) -> Bool {
-    let matchedType = patternMatchType(subjectType)
+    let matchedType = patternMatchType(subjectType, pattern: pattern)
     switch pattern {
     case .wildcard:
       return true
@@ -2618,7 +2659,7 @@ private final class MIRFunctionBuilder {
       return true
     }
 
-    let matchedType = patternMatchType(subjectType)
+    let matchedType = patternMatchType(subjectType, pattern: pattern)
     guard !context.containsGenericParameter(matchedType) else { return false }
     switch pattern {
     case .variable, .weakBinding:
@@ -2669,7 +2710,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func bindPatternVariables(pattern: TypedPattern, subjectPlace: MIRPlace, subjectType: Type) {
-    let matchedSubject = patternMatchPlace(place: subjectPlace, type: subjectType)
+    let matchedSubject = patternMatchPlace(place: subjectPlace, type: subjectType, pattern: pattern)
     let matchedPlace = matchedSubject.place
     let matchedType = resolveConcretePatternNominalType(matchedSubject.type)
 
@@ -2835,7 +2876,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func assignPatternBindingLocals(pattern: TypedPattern, subjectPlace: MIRPlace, subjectType: Type) {
-    let matchedSubject = patternMatchPlace(place: subjectPlace, type: subjectType)
+    let matchedSubject = patternMatchPlace(place: subjectPlace, type: subjectType, pattern: pattern)
     let matchedPlace = matchedSubject.place
     let matchedType = matchedSubject.type
 
@@ -3272,7 +3313,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func canLowerSimpleWhen(subject: TypedExpressionNode, cases: [TypedMatchCase]) -> Bool {
-    guard !context.containsGenericParameter(patternMatchType(subject.type)) else { return false }
+    guard !context.containsGenericParameter(patternMatchType(subject.type, pattern: cases.first?.pattern ?? .wildcard)) else { return false }
     guard cases.allSatisfy({ canLowerPatternWithBindings($0.pattern, subjectType: subject.type) }) else { return false }
     return true
   }
@@ -3554,7 +3595,10 @@ private final class MIRFunctionBuilder {
     // Handle reference types by dereferencing (matching patternMatchSubject logic)
     let switchOperand: MIROperand
     let subjectRead = MIRValue.placeRead(subjectPlace, ownership: .borrow)
-    let (matchedValue, matchedType) = patternMatchSubject(value: subjectRead, type: subject.type)
+    // Every arm the switch path accepts (literal / enum-case / catchall) keeps
+    // the auto-dereffed subject, so any arm's pattern gives the same peel.
+    let (matchedValue, matchedType) = patternMatchSubject(
+      value: subjectRead, type: subject.type, pattern: cases.first?.pattern ?? .wildcard)
 
     switch matchedType {
     case .enum:
@@ -3904,15 +3948,24 @@ private final class MIRFunctionBuilder {
         return lowerValue(argument)
       }
     case .weakReference(let inner):
-      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
-        return .ref(place, kind: .weak, allocation: .stackBorrow)
+      // A value that is already a weak handle is the expected kind of value
+      // and passes through untouched (the wrap branch below must not rebuild
+      // the handle as a weak REFERENCE of its place -- a template-spelled
+      // expectation `?T` with a concrete `?Box` argument is what used to land
+      // there). Anything else the borrow rule accepts is weak-wrapped through
+      // the runtime's downgrade -- the same construction `expr as ?T` uses --
+      // not through a reference.
+      if !isWeakHandleType(argument.type),
+         canBorrowArgument(argument.type, as: inner) {
+        return .intrinsic(.downgradeRef(value: lowerValue(argument), resultType: expectedType))
       }
       if argument.type == expectedType {
         return lowerValue(argument)
       }
     case .mutableWeakReference(let inner):
-      if canBorrowArgument(argument.type, as: inner), let place = lowerPlace(argument) {
-        return .ref(place, kind: .mutableWeak, allocation: .stackBorrow)
+      if !isWeakHandleType(argument.type),
+         canBorrowArgument(argument.type, as: inner) {
+        return .intrinsic(.downgradeRef(value: lowerValue(argument), resultType: expectedType))
       }
       if argument.type == expectedType {
         return lowerValue(argument)
@@ -4036,6 +4089,15 @@ private final class MIRFunctionBuilder {
     }
 
     return symbolType
+  }
+
+  private func isWeakHandleType(_ type: Type) -> Bool {
+    switch type {
+    case .weakReference, .mutableWeakReference:
+      return true
+    default:
+      return false
+    }
   }
 
   private func canBorrowArgument(_ actualType: Type, as expectedInner: Type) -> Bool {

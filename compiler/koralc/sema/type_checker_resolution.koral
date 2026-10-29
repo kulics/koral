@@ -490,10 +490,23 @@ given TypeChecker {
             },
             .None() then {},
         };
-        return self.storage.global_scope.lookup_type_in_module(
+        let resolved = self.storage.global_scope.lookup_type_in_module(
             name,
             self.storage.module_path,
         );
+        // A `file_private` declaration of another file is not nameable here
+        // (§3.3) -- see `is_foreign_file_private`.
+        when resolved in {
+            .Some(t) then {
+                if self.is_foreign_private_type(t) then {
+                    return Option[Type].None();
+                };
+                return Option[Type].Some(t);
+            },
+            .None() then {
+                return Option[Type].None();
+            },
+        };
     };
 
     module_private try_resolve_named_type_in_scope_without_diag(
@@ -519,8 +532,15 @@ given TypeChecker {
         // The module being checked owns the name first. Going through the raw
         // declaration table instead would hand back a TYPE ALIAS's own
         // placeholder DefId and skip the alias target entirely.
-        if scope.lookup_type_in_module(name, self.storage.module_path) is .Some(t) then {
-            return Option[Type].Some(t);
+        when scope.lookup_type_in_module(name, self.storage.module_path) in {
+            .Some(t) then {
+                // A `file_private` declaration of another file is not nameable
+                // here (§3.3) -- see `is_foreign_file_private`.
+                if not self.is_foreign_private_type(t) then {
+                    return Option[Type].Some(t);
+                };
+            },
+            .None() then {},
         };
         return self.try_resolve_named_type_without_diag(name);
     };
@@ -693,7 +713,24 @@ given TypeChecker {
         return if is_mutable then VariableKind.MutableValue() else VariableKind.Value();
     };
 
+    /// `try_resolve_named_type_unchecked`, minus declarations that belong to
+    /// another file (`file_private` names are their file's alone, §3.3).
     module_private try_resolve_named_type_without_diag(self, name String) Option[Type] = {
+        let resolved = self.try_resolve_named_type_unchecked(name);
+        when resolved in {
+            .Some(t) then {
+                if self.is_foreign_private_type(t) then {
+                    return Option[Type].None();
+                };
+                return Option[Type].Some(t);
+            },
+            .None() then {
+                return Option[Type].None();
+            },
+        };
+    };
+
+    module_private try_resolve_named_type_unchecked(self, name String) Option[Type] = {
         if name == "Int" then {
             return Option[Type].Some(Type.IntType());
         };

@@ -287,7 +287,9 @@ extension Parser {
       }
       return try parseGivenDeclaration(span: startSpan)
     } else if currentToken === .traitKeyword {
-      return try parseTraitDeclaration(access: access, span: startSpan)
+      // The trait declaration's span starts at the `trait` keyword, not at the
+      // access modifier -- the same head koralc's `span_from_start` covers.
+      return try parseTraitDeclaration(access: access, span: currentSpan)
     } else {
       throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
     }

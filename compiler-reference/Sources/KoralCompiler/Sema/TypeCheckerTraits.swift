@@ -67,9 +67,13 @@ extension TypeChecker {
     return try SemaUtils.resolveTraitName(from: node)
   }
 
-  func validateTraitName(_ name: String) throws {
+  func validateTraitName(_ name: String, span blameSpan: SourceSpan? = nil) throws {
     guard let traitInfo = visibleTraitInfo(name) else {
-      let span = SourceSpan(location: SourceLocation(line: currentLine, column: 1))
+      // Callers that hold a span for where the name is being used pass it (the
+      // trait-parent path passes the trait declaration's head, where koralc
+      // blames it). Callers with no span fall back to the line-first-column
+      // shape the other sites still use.
+      let span = blameSpan ?? SourceSpan(location: SourceLocation(line: currentLine, column: 1))
       throw SemanticError(.generic("Undefined trait: \(name)"), span: span)
     }
 

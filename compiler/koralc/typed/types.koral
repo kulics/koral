@@ -51,6 +51,24 @@ public let qualified_symbol_key(module_path List[String], name String) String = 
     return out.to_string();
 };
 
+/// The key of the unqualified, last-wins NAME INDEX -- the entry kept only so
+/// "X is defined in module 'M'. Import it explicitly" can name a module for a
+/// spelling this module neither declares nor imports.
+///
+/// It is NOT a resolution: it answers "whichever module registered the name
+/// last", so it must never decide what a spelling means. It lives in its OWN
+/// key space (the `\u{1}` prefix cannot occur in a source identifier, the same
+/// trick `makeMethodKey` uses in the Swift compiler) because
+/// `qualified_symbol_key([], name)` is just `name` -- without the tag a
+/// bare-index entry and a legitimate empty-module-path symbol of the same name
+/// share one slot and clobber each other.
+public let bare_symbol_key(name String) String = {
+    let mutable out = StringBuilder.new();
+    out.push_string("\u{1}bare.");
+    out.push_string(name);
+    return out.to_string();
+};
+
 // keywords, not declarations. They impose no requirements and have no methods,
 
 given DefId as Eq {
@@ -303,6 +321,10 @@ public type mutable DefIdMap(
 
     // std 泛型枚举的声明身份（lang items：and then / or else 用的 Option、Result）
     mutable std_flow_enum_ids Dict[String, DefId],
+
+    // 模块路径（点分）-> 派生符号键（§5.3.1）。C 符号前缀取自（包来源，入口
+    // 位置），而模块 PATH 是消费方的拼写——换依赖 key 就变，只能当名字用。
+    mutable module_symbol_keys Dict[String, String],
 );
 
 given DefIdMap {
@@ -340,6 +362,7 @@ given DefIdMap {
             Set[UInt].new(),
             Option[DefId].None(),
             Dict[String, DefId].new(),
+            Dict[String, String].new(),
         );
     };
 
@@ -349,9 +372,19 @@ given DefIdMap {
         self.names.insert(id, name);
         self.kinds.insert(id, kind);
         let def_id = DefId(id);
-        // 注册到名称索引
-        self.name_to_def_id.insert(name, def_id);
+        // 注册到名称索引 -- the UNQUALIFIED key space (see `bare_symbol_key`):
+        // `allocate` takes no module path, so the entry can only be found by its
+        // bare spelling and must not share `qualified_symbol_key([], name)`.
+        self.name_to_def_id.insert(bare_symbol_key(name), def_id);
         return def_id;
+    };
+
+    /// The unqualified, last-wins index entry for `name` -- the pair of
+    /// `allocate`'s write. Kept apart from `lookup`'s empty-module-path slot:
+    /// a bare-index entry and a real empty-path symbol of the same name are
+    /// different things and must not clobber each other.
+    public lookup_bare(self, name String) Option[DefId] = {
+        return self.name_to_def_id.get(bare_symbol_key(name));
     };
 
     public allocate_unindexed(self, name String, kind DefKind) DefId = {
@@ -521,6 +554,14 @@ given DefIdMap {
     // ── 名称查找 ──────────────────────────────────────────────────────────
 
     /// 根据模块路径和名称查找 DefId
+    ///
+    /// An EMPTY `module_path` also falls back to the unqualified index
+    /// (`bare_symbol_key`) -- before the two key spaces were split, that index
+    /// and `make_key([], name)` were one slot, and readers like the layout-name
+    /// lookup relied on finding both kinds of entries there. The qualified key
+    /// answers first, so a real empty-path symbol is never shadowed by a
+    /// bare-index entry; the fallback only restores what the merged slot used
+    /// to hand back.
     public lookup(
         self,
         module_path List[String],
@@ -536,7 +577,13 @@ given DefIdMap {
         };
         // 尝试不带文件路径的键
         let key_without_file = self.make_key(module_path, name, Option[String].None());
-        return self.name_to_def_id.get(key_without_file);
+        if self.name_to_def_id.get(key_without_file) is .Some(def_id) then {
+            return Option[DefId].Some(def_id);
+        };
+        if module_path.is_empty() then {
+            return self.lookup_bare(name);
+        };
+        return Option[DefId].None();
     };
 
     public lookup_exact(
@@ -605,6 +652,29 @@ given DefIdMap {
         return Option[String].None();
     };
 
+    // ── 模块符号键（§5.3.1） ──────────────────────────────────────────────
+
+    /// 安装本编译的 模块路径(点分) -> 派生符号键 表。
+    public set_module_symbol_keys(self, keys Dict[String, String]) Void = {
+        self.module_symbol_keys = keys;
+    };
+
+    /// `module_path` 里声明的符号的 C 前缀：派生身份键（§5.3.1）；编译没有
+    /// 提供时退回模块路径本身（单文件编译的形态）。
+    public module_symbol_key_for(self, module_path List[String]) String = {
+        if module_path.is_empty() then {
+            return "";
+        };
+        let path_key = join_path(module_path, ".");
+        when self.module_symbol_keys.get(path_key) in {
+            .Some(key) then {
+                return key;
+            },
+            .None() then {},
+        };
+        return join_path(module_path, "_");
+    };
+
     /// 获取 C 标识符
     public get_c_identifier(self, id DefId) Option[String] = {
         if self.names.get(id.id) is .Some(name) then {
@@ -622,13 +692,10 @@ given DefIdMap {
             let mutable result = StringBuilder.new();
             let mutable needs_separator = false;
             if not module_path.is_empty() then {
-                for part in module_path then {
-                    if needs_separator then {
-                        result.push_byte('_');
-                    };
-                    result.push_string(part);
-                    needs_separator = true;
-                };
+                // 符号前缀取自派生身份键，不是模块路径（§5.3.1）：路径是
+                // 消费方拼写，换依赖 key 就变。
+                result.push_string(self.module_symbol_key_for(module_path));
+                needs_separator = true;
             };
             if is_private and not source_file.is_empty() then {
                 // 简单文件哈希
@@ -647,7 +714,9 @@ given DefIdMap {
             if needs_separator then {
                 result.push_byte('_');
             };
-            result.push_string(name);
+            // 名字分量按 C 标识符规则清理（`generateCIdentifier` 的正本）：
+            // 未清理的非 ASCII 名字会把 `α` 这类字符原样吐进 C 输出。
+            result.push_string(fold_c_identifier_name(name));
 
             return Option[String].Some(result.to_string());
         };

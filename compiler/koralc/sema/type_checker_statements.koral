@@ -505,6 +505,11 @@ given TypeChecker {
                     .MutableBorrowedReferenceType(inner) then inner,
                     .WeakReferenceType(inner) then inner,
                     .MutableWeakReferenceType(inner) then inner,
+                    // The seed's when-STATEMENT reads through a pointer
+                    // subject -- `when p in { 5 }` on a `*Int` matches the
+                    // pointee -- one indirection, exactly like a reference.
+                    .PointerType(inner) then inner,
+                    .MutablePointerType(inner) then inner,
                     _ then typed_subj.expr_type,
                 };
                 let mutable exhaustiveness_subject_type = self.concretize_default_literal_type(
@@ -546,7 +551,8 @@ given TypeChecker {
                     );
                     let lowered_pattern_ref = self.lower_typed_pattern(
                         arm_pattern_ref,
-                        typed_subj.expr_type,
+                        if needs_raw_subject then typed_subj.expr_type
+                        else self.peel_pointer_pattern_subject(typed_subj.expr_type),
                         arm_scope,
                     );
                     // A guarded arm covers nothing for exhaustiveness.
@@ -1973,7 +1979,7 @@ given TypeChecker {
         if local_sym_opt is .Some(_) then {
             return local_sym_opt;
         };
-        return self.storage.global_scope.lookup(name);
+        return self.lookup_shared_symbol(name);
     };
 
     module_private assignment_target_traverses_ref_like_link(self, target TypedExpr) Bool = {

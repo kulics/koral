@@ -1,0 +1,70 @@
+// EXPECT: lit5: true
+// EXPECT: lit_not6: true
+// EXPECT: lit6: false
+// EXPECT: struct_match: true
+// EXPECT: struct_bind: 3 4
+// EXPECT: when_five: five
+// EXPECT: when_other: other
+// EXPECT: null_raw_live: false
+// EXPECT: null_raw_dead: true
+// EXPECT: q_pointee: true
+// A literal or struct pattern against a `*T` / `*mutable T` subject matches
+// the POINTEE: the pattern subject auto-derefs one indirection, so `p is 5`
+// compares `p`'s target and `p is Point(x, y)` destructures it (bindings
+// included). A `null` pattern is the one exception -- it tests the POINTER
+// itself and keeps the raw subject. The `when` STATEMENT form peels the same
+// way; the `when` EXPRESSION form does not (kept as-is).
+
+type Point(x Int, y Int);
+
+let lit_through_pointer(p *Int) Bool = {
+    return p is 5 and p is not 6 and not (p is 6);
+};
+
+let struct_through_pointer(p *Point) Bool = {
+    return p is Point(3, 4);
+};
+
+let bind_through_pointer(p *Point) String = {
+    if p is Point(x, y) then {
+        return x.to_string() + " " + y.to_string();
+    };
+    return "no bind";
+};
+
+let main() Int = {
+    let x = 5;
+    let p = &x;
+    println("lit5: \(lit_through_pointer(p))");
+
+    let y = 7;
+    let q = &y;
+    println("lit_not6: \(q is not 6)");
+    println("lit6: \(q is 6)");
+
+    let s = Point(3, 4);
+    let sp = &s;
+    println("struct_match: \(struct_through_pointer(sp))");
+    println("struct_bind: \(bind_through_pointer(sp))");
+
+    // Statement form: the subject peels, so the literal arm sees the pointee.
+    when p in {
+        5 then println("when_five: five"),
+        _ then println("when_other: other"),
+    };
+    when q in {
+        5 then println("when_five: five"),
+        _ then println("when_other: other"),
+    };
+
+    // `null` keeps the raw subject: a live pointer is not null, a null one is.
+    println("null_raw_live: \(p is null)");
+    let n *Int = null;
+    println("null_raw_dead: \(n is null)");
+
+    let heap = alloc_memory[Int](1);
+    init_memory(heap, 7);
+    println("q_pointee: \(heap is 7)");
+    dealloc_memory(heap);
+    return 0;
+};

@@ -730,6 +730,57 @@ given TypeChecker {
         };
     };
 
+    /// Whether `def_id` is a `file_private` declaration from a DIFFERENT file.
+    ///
+    /// `file_private` names belong to their declaring file alone (§3.3): any
+    /// other file -- even one of the same module -- must resolve them as if
+    /// undeclared ("Undefined ..."), exactly like Swift's file-keyed
+    /// `privateNames`/`privateTypeNames`. Own-file access keeps working through
+    /// the file-qualified declaration keys (`lookup_current_file_def_id`).
+    module_private is_foreign_file_private(self, def_id DefId) Bool = {
+        let is_private = when self.context().get_access(def_id) in {
+            .Some(access) then when access in {
+                .FilePrivate() then true,
+                _ then false,
+            },
+            .None() then false,
+        };
+        if not is_private then {
+            return false;
+        };
+        let decl_file = when self.context().get_source_file(def_id) in {
+            .Some(f) then f,
+            .None() then "",
+        };
+        return decl_file != self.storage.file_path;
+    };
+
+    /// The same rule for a resolved TYPE's declaration.
+    module_private is_foreign_private_type(self, t Type) Bool = {
+        return when t in {
+            .StructureType(def_id) then self.is_foreign_file_private(def_id),
+            .EnumType(def_id) then self.is_foreign_file_private(def_id),
+            .OpaqueType(def_id) then self.is_foreign_file_private(def_id),
+            .TraitObject(def_id, _) then self.is_foreign_file_private(def_id),
+            _ then false,
+        };
+    };
+
+    /// `global_scope.lookup`, minus declarations that belong to another file.
+    module_private lookup_shared_symbol(self, name String) Option[Symbol] = {
+        when self.storage.global_scope.lookup(name) in {
+            .Some(sym) then {
+                if self.is_foreign_file_private(sym.def_id) then {
+                    return Option[Symbol].None();
+                };
+                return Option[Symbol].Some(sym);
+            },
+            .None() then {
+                return Option[Symbol].None();
+            },
+        };
+    };
+
     /// The `Type` a DECLARATION denotes, built from its recorded kind.
     ///
     /// An imported generic TEMPLATE has no `symbol_type` -- it is a declaration
@@ -1680,7 +1731,33 @@ given TypeChecker {
                                     );
                                 };
                             },
-                            .Mutable() or .Foreign() then {},
+                            // A shape bound is a real requirement on the
+                            // binding, not a formality: `given[T mutable] *T`
+                            // with `T = Int` (never `type mutable`) is a
+                            // failed conformance, said the way the blanket
+                            // given's inner-type rule says it.
+                            .Mutable() then {
+                                if not self.satisfies_mutable_constraint(bound_type) then {
+                                    return Option[GenericTraitConformanceStatus].Some(
+                                        GenericTraitConformanceStatus.MissingConstraint(
+                                            bound_type,
+                                            tp.name,
+                                            "mutable",
+                                        ),
+                                    );
+                                };
+                            },
+                            .Foreign() then {
+                                if not self.satisfies_foreign_constraint(bound_type) then {
+                                    return Option[GenericTraitConformanceStatus].Some(
+                                        GenericTraitConformanceStatus.MissingConstraint(
+                                            bound_type,
+                                            tp.name,
+                                            "foreign",
+                                        ),
+                                    );
+                                };
+                            },
                         };
                     };
                 };

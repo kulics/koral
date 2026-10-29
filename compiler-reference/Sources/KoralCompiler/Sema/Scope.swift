@@ -68,7 +68,7 @@ public class UnifiedScope {
   }
 
   public func markMoved(_ name: String) {
-    if names[name] != nil {
+    if names[name] != nil || names[DefIdMap.bareKey(name)] != nil {
       movedVariables.insert(name)
     } else {
       parent?.markMoved(name)
@@ -76,7 +76,7 @@ public class UnifiedScope {
   }
 
   public func isMoved(_ name: String) -> Bool {
-    if names[name] != nil {
+    if names[name] != nil || names[DefIdMap.bareKey(name)] != nil {
       return movedVariables.contains(name)
     }
     return parent?.isMoved(name) ?? false
@@ -175,14 +175,19 @@ public class UnifiedScope {
     guard let map = defIdMap else {
       return
     }
-    let defId = map.allocate(
-      modulePath: modulePath,
-      name: name,
-      kind: .function,
-      sourceFile: "",
-      access: access,
-      span: .unknown
-    )
+    // Reuse the declaration's own DefId when NameCollector already allocated
+    // one: that record carries the source file and span. Allocating a fresh one
+    // here shadows it and leaves every later reader (including C-name collision
+    // detection) with a record that has neither.
+    let defId = map.lookup(modulePath: modulePath, name: name, sourceFile: nil, isMethod: false)
+      ?? map.allocate(
+        modulePath: modulePath,
+        name: name,
+        kind: .function,
+        sourceFile: "",
+        access: access,
+        span: .unknown
+      )
     map.addSymbolInfo(
       defId: defId,
       type: type,
@@ -364,12 +369,22 @@ public class UnifiedScope {
     return nil
   }
 
-  /// Records a module-scoped binding under both its bare and qualified keys.
+  /// Records a module-scoped binding under its module-qualified key plus the
+  /// unqualified name index. Use plain `define`/`defineLocal` for LOCAL
+  /// bindings.
+  ///
+  /// The name-index entry lives in its own key space (`DefIdMap.bareKey`)
+  /// because `symbolKey(modulePath: [], name:)` is just `name`: sharing one
+  /// slot let a last-wins name-index entry clobber a real empty-module-path
+  /// symbol of the same name. An empty module path writes only the plain key --
+  /// it already IS the unqualified spelling.
   private func defineScoped(_ name: String, _ defId: DefId) {
-    names[name] = defId
     if let map = defIdMap, let modulePath = map.getModulePath(defId), !modulePath.isEmpty {
       names[map.symbolKey(modulePath: modulePath, name: name)] = defId
+      names[DefIdMap.bareKey(name)] = defId
+      return
     }
+    names[name] = defId
   }
 
   public func isGenericParameter(_ name: String) -> Bool {
@@ -436,7 +451,7 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile) ?? names[name],
+    if let defId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile) ?? names[name] ?? names[DefIdMap.bareKey(name)],
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
@@ -471,7 +486,7 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = bindingInCurrentModule(name) ?? names[name],
+    if let defId = bindingInCurrentModule(name) ?? names[name] ?? names[DefIdMap.bareKey(name)],
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
@@ -492,14 +507,14 @@ public class UnifiedScope {
         return map.isSymbolMutable(defId) ?? false
       }
     }
-    if let defId = names[name], let map = defIdMap {
+    if let defId = names[name] ?? names[DefIdMap.bareKey(name)], let map = defIdMap {
       return map.isSymbolMutable(defId) ?? false
     }
     return parent?.isMutable(name, sourceFile: sourceFile) ?? false
   }
 
   public func hasFunctionDefinition(_ name: String) -> Bool {
-    return names[name] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
+    return names[name] != nil || names[DefIdMap.bareKey(name)] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
   }
 
   public func defineType(_ name: String, type: Type, span: SourceSpan = .unknown) throws {
@@ -537,10 +552,14 @@ public class UnifiedScope {
   }
 
   private func defineScopedType(_ name: String, _ defId: DefId, modulePath: [String]) {
-    typeNames[name] = defId
+    // The name-index entry goes to its own key space (`DefIdMap.bareKey`) --
+    // see `defineScoped`.
     if !modulePath.isEmpty {
       typeNames[typeKey(name, modulePath: modulePath)] = defId
+      typeNames[DefIdMap.bareKey(name)] = defId
+      return
     }
+    typeNames[name] = defId
   }
 
   /// The type `module_path` itself declares under `name`, if any.
@@ -568,7 +587,7 @@ public class UnifiedScope {
       return typeNames[name] != nil
     }
     let declaredLocally: Bool = map.currentModulePath.isEmpty
-      ? typeNames[name] != nil
+      ? (typeNames[name] != nil || typeNames[DefIdMap.bareKey(name)] != nil)
       : typeNames[map.symbolKey(modulePath: map.currentModulePath, name: name)] != nil
     return declaredLocally ||
       defIdMap?.lookupGenericStructTemplateDefId(name) != nil ||
@@ -689,7 +708,7 @@ public class UnifiedScope {
       return map.getSymbolType(defId)
     }
 
-    if let defId = typeNames[name], let map = defIdMap {
+    if let defId = typeNames[name] ?? typeNames[DefIdMap.bareKey(name)], let map = defIdMap {
       return map.getSymbolType(defId)
     }
 
@@ -757,7 +776,7 @@ public class UnifiedScope {
 
   public func isLocalTypeBinding(_ name: String) -> Bool {
     guard parent != nil else { return false }
-    return typeNames[name] != nil
+    return typeNames[name] != nil || typeNames[DefIdMap.bareKey(name)] != nil
   }
 
   public func defineTypeAsDirectlyAccessible(_ name: String, type: Type, span: SourceSpan = .unknown) throws {
@@ -928,9 +947,15 @@ public class UnifiedScope {
   public func getAllConcreteTypes() -> [String: Type] {
     var result = parent?.getAllConcreteTypes() ?? [:]
     if let map = defIdMap {
-      for (name, defId) in typeNames {
+      // The name-index entries live under `DefIdMap.bareKey`; the concrete-type
+      // table is keyed by the DISPLAY spelling (mono looks the name up as
+      // written in source), so the tag comes back off here. Qualified keys pass
+      // through unchanged.
+      let barePrefix = DefIdMap.bareKey("")
+      for (key, defId) in typeNames {
         if let type = map.getSymbolType(defId) {
           if case .genericParameter = type { continue }
+          let name = key.hasPrefix(barePrefix) ? String(key.dropFirst(barePrefix.count)) : key
           if name == "Self" { continue }
           result[name] = type
         }

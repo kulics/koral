@@ -420,6 +420,11 @@ extension TypeChecker {
     // module's public-symbol table.
     for symbolImport in importGraph.symbolImports {
       guard let decl = traitDeclared(in: symbolImport.target, named: symbolImport.originalSymbol) else { continue }
+      // An explicit list is not a hole in the access rule (§3.3): only
+      // `public` and `package_private` traits travel, exactly like the batch
+      // path below. A name that cannot be imported is not in the file's scope
+      // to begin with, so its use is refused just like an un-imported one.
+      guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .package_private else { continue }
       registerImportedTraitName(localName: symbolImport.symbol, defId: decl.defId, modulePath: symbolImport.module)
     }
 
@@ -526,7 +531,13 @@ extension TypeChecker {
         // found nothing), so an imported trait could not be named at all.
         // Register the same declaration under the local spelling -- the DefId
         // is unchanged, so a rename is a spelling and identity is unaffected.
-        registerImportedTraitName(localName: localName, defId: nominalTypeId(importedType) ?? importedTraitDefId(importedType), modulePath: symbolImport.module)
+        //
+        // The access rule still applies (§3.3): only `public` and
+        // `package_private` declarations travel, exactly like the batch loop.
+        let boundDefId = nominalTypeId(importedType) ?? importedTraitDefId(importedType)
+        if let boundAccess = defIdMap.getAccess(boundDefId), boundAccess == .public || boundAccess == .package_private {
+          registerImportedTraitName(localName: localName, defId: boundDefId, modulePath: symbolImport.module)
+        }
       }
 
       if let importedSymbol = moduleInfo.publicSymbols[originalName] {
@@ -1638,6 +1649,11 @@ extension TypeChecker {
             expected: "\(typeParams.count) generic params", got: "\(args.count)")
         }
 
+        // A weak self -- `given[T ...] ?T { ... }` -- needs its referent gate
+        // before anything else weighs in on this given: the referent objection
+        // is the one diagnostic, not a prelude to the locality one.
+        try enforceGivenSelfTypeWeakReferent(typeNode, typeParams: typeParams)
+
         if let baseOwner = givenGenericBaseOwner(named: baseName), enforceTypeDeclarationModuleLocality {
           // Rule 1 is the INHERENT `given T { }` rule. A `given T as Trait`
           // re-enters this path through the recursion below to register its
@@ -1910,6 +1926,10 @@ extension TypeChecker {
               op: "generic given specialization not supported", type1: String(describing: arg), type2: "")
           }
         }
+        // A weak self -- `given[T ...] ?T as Trait` -- needs its referent gate
+        // before anything else weighs in on this given: the referent objection
+        // is the one diagnostic, not a prelude to the locality one.
+        try enforceGivenSelfTypeWeakReferent(typeNode, typeParams: typeParams)
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
         if let modifierSelfType = genericSelfTypeForGivenBaseName(baseName, genericArgs: genericSelfArgs) {
           selfType = modifierSelfType
@@ -1995,22 +2015,23 @@ extension TypeChecker {
       ))
 
       // Populate blanketGivenConstraints cache for type modifier given declarations.
-      // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:<Eq's DefId>"] = ["Eq"]
+      // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:<Eq's DefId>"] = [Eq]
       //
       // The key carries the trait's DECLARATION identity; `traitName` is
       // display-only and two same-named traits from different modules would
-      // otherwise share one slot. The constraint names in the value stay
-      // spellings -- that is where they get resolved and what the diagnostic
-      // prints.
+      // otherwise share one slot. The constraints are stored as BOUNDS, not
+      // names: a consumer must dispatch on the kind (`mutable` is a shape on
+      // the inner type, not a trait called "mutable"), and the name alone
+      // cannot say which.
       if !typeParams.isEmpty {
         let modifierName = modifierBaseName(for: typeNode) ?? ""
         if !modifierName.isEmpty {
-          let constraintNames = typeParams.flatMap { param in
-            param.constraints.map { $0.baseName }
+          let constraints = typeParams.flatMap { param in
+            param.constraints
           }
           let traitDefId = visibleTraitInfo(traitName)?.defId ?? .invalid
           let blanketKey = "\(modifierName):\(traitDefId.id)"
-          blanketGivenConstraints[blanketKey] = constraintNames
+          blanketGivenConstraints[blanketKey] = constraints
         }
       }
 
@@ -2567,7 +2588,10 @@ extension TypeChecker {
 
         for parent in superTraits {
           let constraint = try SemaUtils.resolveTraitConstraint(from: parent)
-          try validateTraitName(constraint.baseName)
+          // An unresolved parent is blamed on the trait declaration -- the
+          // `trait` keyword its span starts at -- the same anchor koralc's
+          // `validate_trait_parent_existence` pushes.
+          try validateTraitName(constraint.baseName, span: span)
           // Arity is checked only when type arguments were WRITTEN. A bare
           // parent name (`trait Child Mul`, where `Mul` takes one argument) is
           // accepted without them -- bootstrap's `validate_trait_parent_arity`

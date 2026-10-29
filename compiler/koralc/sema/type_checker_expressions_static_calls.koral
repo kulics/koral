@@ -94,6 +94,7 @@ given TypeChecker {
         args List[Expr],
         constructed_type Type,
         scope Scope,
+        blame_span SourceSpan,
     ) List[TypedExpr] = {
         let expected_types = self.type_construction_arg_types(constructed_type);
         let mutable typed_args = List[TypedExpr].new();
@@ -102,14 +103,41 @@ given TypeChecker {
             let mutable expected_type = if index < expected_types.count() then Option[Type].Some(
                 expected_types[index],
             ) else Option[Type].None();
+            // The reference compiler fits construction arguments after they
+            // are checked and blames the CALL for what does not fit -- a
+            // literal's range violation included.
+            let saved_range_blame = self.storage.range_blame_span;
+            if arg is .IntegerLiteral(...) then {
+                self.storage.range_blame_span = Option[SourceSpan].Some(blame_span);
+            };
             let typed_arg = self.check_expr_scoped_ref(arg, expected_type, scope);
-            typed_args.push(
-                self.adapt_expr_to_expected_type_at(
-                    typed_arg,
-                    expected_type,
-                    Option[SourceSpan].Some(expr_span(arg)),
-                ),
+            let adapted = self.adapt_expr_to_expected_type_at(
+                typed_arg,
+                expected_type,
+                Option[SourceSpan].Some(blame_span),
             );
+            self.storage.range_blame_span = saved_range_blame;
+            // The seed's post-coerce row: an argument whose coerced type still
+            // disagrees with its field is a conflict at the call.
+            if expected_type is .Some(expected_t) then {
+                if not self.same_expr_type(adapted.expr_type, expected_t) and not self.type_matches_expected_pattern(
+                    expected_t,
+                    adapted.expr_type,
+                ) and not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(
+                    expected_t,
+                ) and not self.is_unresolved_expr_type(adapted.expr_type) then {
+                    self.push_diagnostic(
+                        self.format_call_type_mismatch_message(
+                            Expr.IntegerLiteral("", blame_span),
+                            args,
+                            expected_t,
+                            adapted.expr_type,
+                        ),
+                        blame_span,
+                    );
+                };
+            };
+            typed_args.push(adapted);
             index += 1;
         };
         return typed_args;
@@ -767,6 +795,93 @@ given TypeChecker {
         };
     };
 
+    /// The seed's owner type-argument rule for a static call spelled without
+    /// type arguments: every owner parameter must be pinned by the call's OWN
+    /// arguments (or already concrete in the resolved receiver). `List.new()`
+    /// alone is the complaint "expected 1 type arguments, got 0" -- an
+    /// expected type never names the owner's parameters.
+    module_private reject_unpinned_owner_type_arguments(
+        self,
+        effective_type_name String,
+        receiver_type_args List[Type],
+        declared_receiver_type Type,
+        sig Symbol,
+        method_type_args List[Type],
+        typed_args List[TypedExpr],
+        call_span SourceSpan,
+    ) Void = {
+        if not receiver_type_args.is_empty() then {
+            return;
+        };
+        let mutable owner_params = List[String].new();
+        let mutable declared_args = List[Type].new();
+        when declared_receiver_type in {
+            .GenericStruct(tpl_def_id, args) then {
+                owner_params = self.generic_struct_type_parameter_names(tpl_def_id);
+                for arg in args then {
+                    declared_args.push(arg);
+                };
+            },
+            .GenericEnum(tpl_def_id, args) then {
+                when self.storage.generic_templates.enum_by_def_id(tpl_def_id) in {
+                    .Some(template) then {
+                        for parameter in template.type_parameters then {
+                            owner_params.push(parameter.name);
+                        };
+                    },
+                    .None() then {},
+                };
+                for arg in args then {
+                    declared_args.push(arg);
+                };
+            },
+            _ then {},
+        };
+        if owner_params.is_empty() then {
+            return;
+        };
+        // Pin from the call's own arguments alone -- the same inference the
+        // seed does before it resolves the extension method.
+        let bindings = self.resolve_static_call_type_bindings(
+            effective_type_name,
+            receiver_type_args,
+            sig,
+            typed_args,
+            method_type_args,
+            Option[Type].None(),
+        );
+        let mutable index UInt = 0;
+        while index < owner_params.count() then {
+            let mutable pinned = false;
+            when declared_args.get(index) in {
+                .Some(arg_type) then {
+                    if not (arg_type is .GenericParameter(_)) and not self.contains_generic_parameter(arg_type) and not self.is_unresolved_expr_type(arg_type) then {
+                        pinned = true;
+                    };
+                },
+                .None() then {},
+            };
+            if not pinned then {
+                when bindings.get(owner_params[index]) in {
+                    .Some(bound_type) then {
+                        if not self.is_unresolved_expr_type(bound_type) and not self.contains_generic_parameter(bound_type) then {
+                            pinned = true;
+                        };
+                    },
+                    .None() then {},
+                };
+            };
+            if not pinned then {
+                self.push_diagnostic(
+                    "Type mismatch: expected \(owner_params.count()) type arguments, got \(receiver_type_args.count())",
+                    call_span,
+                );
+                return;
+            };
+            index += 1;
+        };
+    };
+
     module_private check_static_method_call_ref(
         self,
         type_name String,
@@ -1209,6 +1324,18 @@ given TypeChecker {
                         .None() then {},
                     };
                     mismatch_i += 1;
+                };
+                when static_sig_opt in {
+                    .Some(sig) then self.reject_unpinned_owner_type_arguments(
+                        effective_type_name,
+                        receiver_type_args,
+                        declared_receiver_type,
+                        sig,
+                        method_type_args,
+                        typed_args,
+                        type_name_span,
+                    ),
+                    .None() then {},
                 };
                 let resolved_method_type_args = when static_sig_opt in {
                     .Some(sig) then self.resolve_static_method_type_args_for_call(
@@ -1696,10 +1823,17 @@ given TypeChecker {
         target_type Type,
         span SourceSpan,
     ) Bool = {
+        // A construction blames its CALL for an argument's range violation
+        // (the reference compiler coerces after checking and names the
+        // construct it is inside); every other path names the literal.
+        let blame = when self.storage.range_blame_span in {
+            .Some(blame_span) then blame_span,
+            .None() then span,
+        };
         // Several paths ask about the same literal (the literal itself, then
         // the declaration that gives it a type). One diagnostic per span: the
         // seed reports it once and the two must agree verbatim.
-        if self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+        if self.storage.diagnostics.has_error_at(self.storage.file_path, blame) then {
             return true;
         };
         let i64max = UInt64(9223372036854775807);
@@ -1776,7 +1910,7 @@ given TypeChecker {
             let display = if overflow then s else sign + magnitude.to_string();
             self.push_diagnostic_at_span(
                 "Integer literal \(display) is out of range for \(type_to_string(plain_width_counterpart(target_type)))",
-                span,
+                blame,
             );
             return false;
         };
@@ -2718,11 +2852,18 @@ given TypeChecker {
             let constructor_field_types = self.type_construction_arg_types(
                 constructor_plan_type,
             );
+            // The seed names a construction by the callee's base name -- `G`
+            // for `G[Int8](...)` -- never by the instantiated spelling.
+            let ctor_description = when callee in {
+                .Identifier(name, _) then name,
+                .GenericInstantiation(base, _, _) then base,
+                _ then self.context().type_display_name(constructor_plan_type),
+            };
             call_args = self.normalize_constructor_call_args(
                 call_args,
                 constructor_param_specs,
                 constructor_field_types,
-                self.context().type_display_name(constructor_plan_type),
+                ctor_description,
             ) or else {
                 return make_typed_expr(
                     TypedExprKind.Call(
@@ -2809,6 +2950,7 @@ given TypeChecker {
                                             call_args,
                                             field_types,
                                             scope,
+                                            Option[SourceSpan].Some(expr_span(callee)),
                                         );
                                         self.reject_enum_constructor_arg_mismatches(
                                             member_name,
@@ -2894,6 +3036,7 @@ given TypeChecker {
                                                 call_args,
                                                 field_types,
                                                 scope,
+                                                Option[SourceSpan].Some(expr_span(callee)),
                                             );
                                             return self.lower_enum_constructor_expr(
                                                 enum_type,
@@ -3421,12 +3564,27 @@ given TypeChecker {
             };
             // An argument's aim: a bare type parameter is no expectation at
             // all -- the argument is what infers it -- and an implicit generic
-            // construction infers its type arguments before any expected type
-            // exists, so its arguments must not be aimed at the very parameter
-            // being inferred. Explicit type arguments name the parameter and
-            // aim as usual.
+            // construction infers its type arguments from the arguments alone.
+            // The seed aims NONE of its arguments: not at the expected type's
+            // fields and not at the declared ones either. Explicit type
+            // arguments name the parameters and aim as usual.
             let callee_is_implicit_type_ctor = when typed_callee.expr_kind in {
                 .Variable(sym) then sym.kind is .TypeSymbol(),
+                _ then false,
+            };
+            let ctor_probe_def_id = when constructor_plan_type in {
+                .StructureType(def_id) then def_id,
+                .GenericStruct(tpl_def_id, _) then tpl_def_id,
+                _ then when constructor_type_probe in {
+                    .StructureType(def_id) then def_id,
+                    .GenericStruct(tpl_def_id, _) then tpl_def_id,
+                    _ then def_id_invalid(),
+                },
+            };
+            let callee_is_implicit_generic_ctor = when typed_callee.expr_kind in {
+                .Variable(sym) then sym.kind is .TypeSymbol() and not self.generic_struct_type_parameter_names(
+                    ctor_probe_def_id,
+                ).is_empty(),
                 _ then false,
             };
             let param_expected = when raw_param_expected in {
@@ -3435,10 +3593,19 @@ given TypeChecker {
                     let inferred_construction_param = callee_is_implicit_type_ctor and expected_constructor_param_types.get(
                         arg_idx,
                     ) is .Some(_) and self.contains_generic_parameter(pt);
-                    if bare_type_param or inferred_construction_param then Option[Type].None()
+                    if bare_type_param or inferred_construction_param or callee_is_implicit_generic_ctor then Option[Type].None()
                     else Option[Type].Some(pt)
                 },
                 .None() then Option[Type].None(),
+            };
+            // A construction blames its CALL for an argument literal's range
+            // violation -- the reference compiler coerces construction
+            // arguments after they are checked and names the construct it is
+            // inside. Only the argument's OWN literal is redirected; literals
+            // inside a nested call keep their own spans.
+            let saved_range_blame = self.storage.range_blame_span;
+            if (constructor_plan_type is .StructureType(_) or is .GenericStruct(...)) and a is .IntegerLiteral(...) then {
+                self.storage.range_blame_span = Option[SourceSpan].Some(expr_span(callee));
             };
             let typed_arg = when a in {
                 .Identifier(name, span) then self.check_identifier_expr_at(
@@ -3626,6 +3793,7 @@ given TypeChecker {
                     .None() then {},
                 };
             };
+            self.storage.range_blame_span = saved_range_blame;
             typed_args.push(adjusted_arg);
             arg_idx += 1;
         };
@@ -3907,13 +4075,32 @@ given TypeChecker {
             .None() then Option[Type].None(),
         };
         let mutable generic_struct_constructor_return_type = Option[Type].None();
+        let callee_is_implicit_ctor_for_result = when typed_callee.expr_kind in {
+            .Variable(sym) then sym.kind is .TypeSymbol(),
+            _ then false,
+        };
         generic_struct_constructor_return_type = when constructor_plan_type in {
             .StructureType(def_id) then self.infer_generic_struct_constructor_return_type_for_def_id(
                 def_id,
                 typed_args,
                 expr_span(callee),
             ),
-            .GenericStruct(...) then Option[Type].Some(constructor_plan_type),
+            .GenericStruct(tpl_def_id, _) then {
+                if callee_is_implicit_ctor_for_result then {
+                    // The seed's implicit generic construction infers its type
+                    // arguments from the arguments alone; the expected type
+                    // never names them. `let g G[Int8] = G(5)` really is
+                    // `G[Int]` delivered against `G[Int8]`, and the mismatch
+                    // is the whole point.
+                    self.infer_generic_struct_constructor_return_type_for_def_id(
+                        tpl_def_id,
+                        typed_args,
+                        expr_span(callee),
+                    )
+                } else {
+                    Option[Type].Some(constructor_plan_type)
+                }
+            },
             _ then self.infer_generic_struct_constructor_return_type(callee, typed_args),
         };
         let mutable has_direct_generic_instantiation_return_type = false;
@@ -3998,6 +4185,7 @@ given TypeChecker {
                         normalized_args,
                         ret_type,
                         scope,
+                        expr_span(callee),
                     );
                     return make_typed_expr(
                         TypedExprKind.TypeConstruction(
@@ -4031,11 +4219,76 @@ given TypeChecker {
                                 Type.Unknown(),
                             );
                         };
-                        let constructor_args = self.recheck_type_construction_args(
-                            normalized_args,
-                            ret_type,
-                            scope,
-                        );
+                        // The seed's construction re-fit: the arguments land
+                        // on the substituted field types at the CALL's span.
+                        // An implicit generic construction whose type
+                        // arguments never inferred has no fields to fit -- the
+                        // missing-inference complaint stands alone -- and an
+                        // argument that already failed is left alone: its own
+                        // complaint stands for the row.
+                        let recheck_fields = self.type_construction_arg_types(ret_type);
+                        let ctor_probe_def_id = when constructor_plan_type in {
+                            .StructureType(def_id) then def_id,
+                            .GenericStruct(tpl_def_id, _) then tpl_def_id,
+                            _ then when constructor_type_probe in {
+                                .StructureType(def_id) then def_id,
+                                .GenericStruct(tpl_def_id, _) then tpl_def_id,
+                                _ then def_id_invalid(),
+                            },
+                        };
+                        let ctor_is_implicit_generic = not self.generic_struct_type_parameter_names(
+                            ctor_probe_def_id,
+                        ).is_empty();
+                        let mutable constructor_args = List[TypedExpr].new();
+                        if ctor_is_implicit_generic and generic_struct_constructor_return_type is .None() then {
+                            constructor_args = typed_args;
+                        } else if ctor_is_implicit_generic and constructor_already_normalized then {
+                            let mutable fit_idx UInt = 0;
+                            while fit_idx < typed_args.count() then {
+                                let arg_node = typed_args[fit_idx];
+                                if fit_idx < recheck_fields.count() and not self.is_unresolved_expr_type(
+                                    arg_node.expr_type,
+                                ) then {
+                                    let expected_fit = recheck_fields[fit_idx];
+                                    let fitted = self.adapt_expr_to_expected_type_at(
+                                        arg_node,
+                                        Option[Type].Some(expected_fit),
+                                        Option[SourceSpan].Some(expr_span(callee)),
+                                    );
+                                    // The seed's post-coerce row: an argument
+                                    // whose coerced type still disagrees with
+                                    // its substituted field type is a conflict
+                                    // at the call.
+                                    if not self.same_expr_type(fitted.expr_type, expected_fit) and not self.type_matches_expected_pattern(
+                                        expected_fit,
+                                        fitted.expr_type,
+                                    ) and not self.contains_generic_parameter(expected_fit) and not self.is_unresolved_expr_type(
+                                        expected_fit,
+                                    ) and not self.is_unresolved_expr_type(fitted.expr_type) then {
+                                        self.push_diagnostic(
+                                            self.format_call_type_mismatch_message(
+                                                Expr.IntegerLiteral("", expr_span(callee)),
+                                                args,
+                                                expected_fit,
+                                                fitted.expr_type,
+                                            ),
+                                            expr_span(callee),
+                                        );
+                                    };
+                                    constructor_args.push(fitted);
+                                } else {
+                                    constructor_args.push(arg_node);
+                                };
+                                fit_idx += 1;
+                            };
+                        } else {
+                            constructor_args = self.recheck_type_construction_args(
+                                normalized_args,
+                                ret_type,
+                                scope,
+                                expr_span(callee),
+                            );
+                        };
                         return make_typed_expr(
                             TypedExprKind.TypeConstruction(
                                 identifier,

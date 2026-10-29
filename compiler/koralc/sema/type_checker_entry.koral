@@ -76,6 +76,7 @@ file_private let build_module_resolver_output(
         graph.loaded_nodes,
         graph.loaded_nodes_with_path,
         graph.node_source_paths,
+        graph.module_symbol_keys,
     );
 };
 
@@ -89,6 +90,10 @@ file_private let run_name_collector_pass(input NameCollectorInput) NameCollector
         List[String].new(),
         input.user_file_path,
     );
+    // Symbol prefixes derive from (package source, entry position) (§5.3.1).
+    // Install the table before anything derives a name, so every pass and the
+    // codegen behind it read one answer.
+    collector.context.set_module_symbol_keys(input.resolver_output.module_symbol_keys);
     collector.collect_loaded_nodes_with_path(
         input.resolver_output.loaded_nodes_with_path,
     );
@@ -388,9 +393,17 @@ file_private let check_import_name_collisions(
 
                 let mutable names = List[String].new();
                 for entry in theirs then {
-                    if decl_importable(entry.second, their_package, importer_package) then {
-                        names.push(entry.first);
+                    if not decl_importable(entry.second, their_package, importer_package) then {
+                        continue;
                     };
+                    // `{ !a, ... }` drops a name and `{ a as b, ... }` re-spells
+                    // it (§3.3): the name never arrives under its own spelling,
+                    // so it cannot collide under it either. The re-spelling is
+                    // recorded by its own symbol edge below.
+                    if not batch_filter_allows(edge.filter, entry.first) then {
+                        continue;
+                    };
+                    names.push(entry.first);
                 };
                 // Sorted so the report order cannot depend on hash iteration.
                 // Type names are uppercase and value names lowercase (the

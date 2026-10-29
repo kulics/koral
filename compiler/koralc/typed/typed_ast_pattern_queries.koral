@@ -361,3 +361,48 @@ file_private let typed_pattern_list_combinations(
     };
     return combos;
 };
+
+/// The patterns whose test reads the RAW subject: a `null` pattern compares
+/// the pointer itself and a trait-object pattern matches the wrapper. The
+/// type checker keeps the subject un-dereferenced for these
+/// (`pattern_requires_raw_subject`) and derefs one level for every other
+/// pattern, so MIR must see the same subject the pattern was checked against.
+public let typed_pattern_requires_raw_subject(pattern TypedPattern) Bool = {
+    return when pattern in {
+        .NullLiteral(_) then true,
+        .TraitObjectType(_) then true,
+        .TraitObjectTypeBinding(_, _) then true,
+        .EnumCase(_, _, elements) then {
+            for element in elements then {
+                if typed_pattern_requires_raw_subject(element.pattern) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .StructPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_requires_raw_subject(element.pattern) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .ListPattern(_, elements) then {
+            for element in elements then {
+                if typed_pattern_requires_raw_subject(element) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .AndPattern(left, right) then typed_pattern_requires_raw_subject(left) or typed_pattern_requires_raw_subject(
+            right,
+        ),
+        .OrPattern(left, right) then typed_pattern_requires_raw_subject(left) or typed_pattern_requires_raw_subject(
+            right,
+        ),
+        .NotPattern(inner) then typed_pattern_requires_raw_subject(inner),
+        _ then false,
+    };
+};

@@ -252,6 +252,11 @@ extension TypeChecker {
     templateDefId: DefId,
     span: SourceSpan = .unknown
   ) throws {
+    // Blame the type name, not the enclosing statement -- the reader has to
+    // find the name that is not theirs to use.
+    func invisible() -> SemanticError {
+      SemanticError(.undefinedType(templateName), span: span.isKnown ? span : currentSpan)
+    }
     let modulePath = context.getModulePath(templateDefId) ?? []
     let access = context.getAccess(templateDefId) ?? .module_private
 
@@ -259,16 +264,16 @@ extension TypeChecker {
     case .file_private:
       let defSourceFile = context.getSourceFile(templateDefId) ?? ""
       guard isSameSourceFile(defSourceFile, currentSourceFile) else {
-        throw SemanticError.undefinedType(templateName)
+        throw invisible()
       }
     case .module_private:
       guard modulePath == currentModulePath else {
-        throw SemanticError.undefinedType(templateName)
+        throw invisible()
       }
     case .package_private:
       guard !currentPackageID.isEmpty,
             context.getPackageID(templateDefId) == currentPackageID else {
-        throw SemanticError.undefinedType(templateName)
+        throw invisible()
       }
     case .public:
       break
@@ -612,14 +617,14 @@ extension TypeChecker {
   }
 
   /// Looks up the blanket given constraints for a type modifier + trait combination.
-  /// Returns the list of trait constraints the inner type must satisfy, or nil if no blanket given exists.
+  /// Returns the list of constraints the inner type must satisfy, or nil if no blanket given exists.
   ///
   /// Keyed by the trait's DECLARATION identity: `traitName` is display-only, and
   /// two same-named traits from different modules would otherwise share one
-  /// slot (rustc: `Res::Def(DefKind::Trait, DefId)`). The returned constraint
-  /// names are still spellings because that is the boundary where they are
-  /// resolved and what the diagnostic prints.
-  private func findBlanketGivenConstraints(baseName: String, traitDefId: DefId) -> [String]? {
+  /// slot (rustc: `Res::Def(DefKind::Trait, DefId)`). The returned bounds keep
+  /// their kind (Bound.swift): `mutable` / `foreign` are shapes on the inner
+  /// type and must not be looked up as trait names.
+  private func findBlanketGivenConstraints(baseName: String, traitDefId: DefId) -> [Bound]? {
     let cacheKey = "\(baseName):\(traitDefId.id)"
     return blanketGivenConstraints[cacheKey]
   }
@@ -703,6 +708,25 @@ extension TypeChecker {
         "'?\(inner)' requires a 'type mutable' referent, but '\(inner)' is not declared as 'type mutable'"
       ), span: span)
     }
+  }
+
+  /// A generic given's self type is assembled by hand -- `?T` decomposes to the
+  /// "WeakRef" modifier name and `genericSelfTypeForGivenBaseName` rebuilds it
+  /// -- so it never passes through `resolveTypeNode`, and the weak-referent gate
+  /// every other `?T` spelling passes never fired here. Give the given's own
+  /// self type the same gate, with the given's bounds in scope:
+  /// `given[T mutable] ?T ...` passes, `given[T Any] ?T ...` does not.
+  func enforceGivenSelfTypeWeakReferent(_ typeNode: TypeNode, typeParams: [TypeParameterDecl]) throws {
+    guard case .weakReference(let referentNode, _, let span) = typeNode,
+      case .identifier(let name, _) = referentNode,
+      typeParams.contains(where: { $0.name == name })
+    else {
+      return
+    }
+    let outerBounds = genericTraitBounds
+    defer { genericTraitBounds = outerBounds }
+    try recordGenericTraitBounds(typeParams)
+    try enforceWeakReferenceReferent(.genericParameter(name: name), span: span)
   }
 
   /// Whether `type`'s representation is fixed outside Koral's layout freedom and
@@ -796,11 +820,21 @@ extension TypeChecker {
       if let constraints = findBlanketGivenConstraints(baseName: modifierBaseName, traitDefId: traitRef.traitDefId) {
         for constraint in constraints {
           do {
-            try enforceTraitConformance(innerType, traitName: constraint)
+            // A bound is a KIND (Bound.swift): `mutable` and `foreign` are
+            // shapes on the inner type, not traits called "mutable"/"foreign"
+            // that it could implement.
+            switch constraint {
+            case .mutable:
+              try enforceMutableConstraint(innerType)
+            case .foreign:
+              try enforceForeignConstraint(innerType)
+            case .trait:
+              try enforceTraitConformance(innerType, traitName: constraint.baseName)
+            }
           } catch {
             traitConformanceCache[cacheKey] = false
             throw SemanticError(.generic(
-              "Type '\(selfType)' does not satisfy trait '\(traitRef)' because inner type '\(innerType)' does not implement '\(constraint)'"
+              "Type '\(selfType)' does not satisfy trait '\(traitRef)' because inner type '\(innerType)' does not implement '\(constraint.baseName)'"
             ), span: currentSpan)
           }
         }

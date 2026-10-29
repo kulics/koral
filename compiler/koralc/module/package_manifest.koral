@@ -162,17 +162,192 @@ given PackageRegistry {
     };
 };
 
+// ── module identity (§5.3.1) ─────────────────────────────────────────────────
+//
+// A module's identity is (package source, the entry file's normalized position
+// inside the package). The C symbol prefix is DERIVED from that identity and
+// from nothing else: renaming a dependency key must not change one ABI symbol,
+// and two packages whose modules sit at the same subpath must not collide (the
+// source side of the identity separates them). `std` is special-cased: its
+// identity is the toolchain version, and the std manifest's `version` is the
+// spelling of that version available here.
+
+/// The identity input hashed into a module's symbol key: WHICH package this is
+/// (its acquisition source), never what any consumer happens to call it.
+public let package_source_tag(package LoadedPackage) String = when package.kind in {
+    .Std() then "std:" + package.manifest.version,
+    .Root() then "root:" + package.identity,
+    .Dependency(key) then "source:" + package.identity,
+};
+
+file_private let fnv1a32(text String, basis WrappingUInt32, prime WrappingUInt32) WrappingUInt32 = {
+    let mutable hash WrappingUInt32 = basis;
+    for byte in text.bytes() then {
+        hash = hash ^ WrappingUInt32(byte);
+        hash = hash * prime;
+    };
+    return hash;
+};
+
+file_private let hex32_padded(value WrappingUInt32) String = {
+    let digits = "0123456789abcdef";
+    let mutable v UInt = UInt(value);
+    let mutable nibbles = List[UInt].new();
+    let mutable i = 0;
+    while i < 8 then {
+        nibbles.push(v % 16);
+        v = v / 16;
+        i += 1;
+    };
+    let mutable out = StringBuilder.new();
+    let mutable k UInt = nibbles.count();
+    while k > UInt(0) then {
+        k -= UInt(1);
+        out.push_byte(digits[nibbles[k]]);
+    };
+    return out.to_string();
+};
+
+/// The stable hash half of a symbol key: two independent FNV-1a 32 passes
+/// (different basis and prime) concatenated -- 64 bits of separation over only
+/// 32-bit arithmetic, and the same spelling Swift's `moduleIdentityHash`
+/// computes. Basis/prime pairs: 0x811c9dc5/0x01000193 and 0x9e3779b9/0x85ebca6b.
+public let module_identity_hash(text String) String = {
+    let h1 = fnv1a32(text, 2166136261, 16777619);
+    let h2 = fnv1a32(text, 2654435769, 2246822507);
+    return hex32_padded(h1) + hex32_padded(h2);
+};
+
+file_private let normalized_abs_for_key(path String) String = {
+    let normalized = when absolute_path(path.into_path()) in {
+        .Ok(p) then p.to_string(),
+        .Error(_) then path,
+    };
+    return normalized.replace_all("\\", with: "/");
+};
+
+/// The entry file's position inside its package: the normalized path relative
+/// to the package root, forward slashes. When the entry sits outside its
+/// package (a local module pulled in from beyond the root) the walk is lexical
+/// and `..` segments are kept -- deterministic either way.
+public let entry_relative_path(entry_file String, package_root String) String = {
+    let entry = normalized_abs_for_key(entry_file);
+    let root = normalized_abs_for_key(package_root);
+    let entry_parts = List[String].new();
+    for part in entry.split("/") then {
+        entry_parts.push(part);
+    };
+    let root_parts = List[String].new();
+    for part in root.split("/") then {
+        root_parts.push(part);
+    };
+    let mutable common UInt = 0;
+    while common < entry_parts.count() and common < root_parts.count() and entry_parts[common]
+        == root_parts[common]
+    then {
+        common += UInt(1);
+    };
+    let mutable parts = List[String].new();
+    let mutable up UInt = common;
+    while up < root_parts.count() then {
+        parts.push("..");
+        up += UInt(1);
+    };
+    let mutable rest UInt = common;
+    while rest < entry_parts.count() then {
+        parts.push(entry_parts[rest]);
+        rest += UInt(1);
+    };
+    return parts.join_to_string("/");
+};
+
+file_private let drop_last_extension(segment String) String = {
+    let pieces = List[String].new();
+    for piece in segment.split(".") then {
+        pieces.push(piece);
+    };
+    if pieces.count() <= 1 then {
+        return segment;
+    };
+    let mutable kept = List[String].new();
+    let mutable i UInt = 0;
+    while i + UInt(1) < pieces.count() then {
+        kept.push(pieces[i]);
+        i += UInt(1);
+    };
+    return kept.join_to_string(".");
+};
+
+file_private let symbol_key_segment(raw String) String = {
+    let spelled = if raw == ".." then "up" else raw;
+    let camel = module_file_name_to_identifier(spelled);
+    let mutable out = StringBuilder.new();
+    for ch in camel.to_runes() then {
+        let is_alpha = (ch >= 'a' and ch <= 'z') or (ch >= 'A' and ch <= 'Z');
+        let is_digit = ch >= '0' and ch <= '9';
+        if is_alpha or is_digit or ch == '_' then {
+            out.push_rune(ch);
+        } else {
+            out.push_byte('_');
+        };
+    };
+    let result = out.to_string();
+    if result.is_empty() then {
+        return "M";
+    };
+    let first = result[UInt(0)];
+    if first >= '0' and first <= '9' then {
+        return "M" + result;
+    };
+    return result;
+};
+
+/// C-identifier-safe PascalCase segments of a relative entry path, extension
+/// dropped. Directory segments keep their position, so `util/util.koral` and
+/// `helpers/util.koral` stay distinct -- the stem-collision fix. `..` walks up
+/// as `Up`, so an out-of-package entry still names a stable position.
+public let symbol_key_segments(relative_entry_path String) List[String] = {
+    let mutable parts = List[String].new();
+    for part in relative_entry_path.split("/") then {
+        parts.push(part);
+    };
+    if not parts.is_empty() then {
+        let last_index = parts.count() - UInt(1);
+        parts[last_index] = drop_last_extension(parts[last_index]);
+    };
+    let mutable out = List[String].new();
+    for part in parts then {
+        out.push(symbol_key_segment(part));
+    };
+    return out;
+};
+
+/// The derived symbol key of one module (§5.3.1): the entry's position inside
+/// the package, plus a short stable hash of the package identity source. The
+/// symbol-derivation sites prefix names with THIS, never with a module path --
+/// module paths carry the consumer's spelling and change when a dependency is
+/// renamed.
+public let module_symbol_key(source_tag String, entry_file String, package_root String) String = {
+    let rel = entry_relative_path(entry_file, package_root);
+    let segments = symbol_key_segments(rel);
+    return segments.join_to_string("_") + "_" + module_identity_hash(source_tag + "\n" + rel);
+};
+
 // ── resolved module ───────────────────────────────────────────────────────────
 
 /// A module as the rest of the compiler sees it.
 ///
 /// `full_name` is the name as written from the ROOT package's point of view and
-/// is display only -- identity is `(package identity, subpath)`. `path_segments`
-/// qualifies top-level symbols; `docs/design/module-design.md` "风险与未决"
-/// item 4 records why that is still name-based and open.
+/// is display only -- identity is `(package identity, entry position)` (§5.3.1).
+/// `path_segments` qualifies top-level symbols; `docs/design/module-design.md`
+/// "风险与未决" item 4 records why that is still name-based and open.
+/// `symbol_key` is the derived C symbol prefix -- a function of (package
+/// source, entry position) only, so renaming a dependency key leaves it
+/// untouched.
 public type ResolvedModuleSpec(
     full_name String,
     path_segments List[String],
+    symbol_key String,
     key String,
     subpath String,
     entry_file String,
@@ -285,6 +460,11 @@ public let make_resolved_module_spec(
     return ResolvedModuleSpec(
         full_name,
         segments,
+        module_symbol_key(
+            package_source_tag(owner),
+            config.entry_path,
+            owner.manifest.package_root,
+        ),
         key,
         config.subpath,
         config.entry_path,

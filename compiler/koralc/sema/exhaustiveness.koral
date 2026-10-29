@@ -926,18 +926,50 @@ given ExhaustivenessChecker {
                 ),
                 .None() then Option[PatternSpace].None(),
             },
-            .GenericEnum(tplDefId, _) then {
-                let maybe_cases = when self.generic_templates.enum_by_def_id(tplDefId) in {
+            .GenericEnum(tplDefId, type_args) then {
+                let maybe_tmpl = self.generic_templates.enum_by_def_id(tplDefId);
+                let maybe_cases = when maybe_tmpl in {
                     .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
                     .None() then Option[List[EnumCaseInfo]].None(),
                 };
                 when maybe_cases in {
-                    .Some(cases) then Option[PatternSpace].Some(
-                        self.enum_pattern_space(
-                            def_id_spelling(tplDefId),
-                            Option[List[EnumCaseInfo]].Some(cases),
-                        ),
-                    ),
+                    .Some(all_cases) then {
+                        // The instance's type arguments substitute into the
+                        // case parameter types -- the seed resolves the cases
+                        // against the instance, not the declaration -- and
+                        // each field gets the seed's recursive full space, so
+                        // a bool payload is a bool space and a nested enum
+                        // payload is a case space.
+                        let param_names = when maybe_tmpl in {
+                            .Some(tmpl) then {
+                                let mutable names = List[String].new();
+                                for p in tmpl.type_parameters then {
+                                    names.push(p.name);
+                                };
+                                names
+                            },
+                            .None() then List[String].new(),
+                        };
+                        let mutable cases = Dict[String, List[PatternSpace]].new();
+                        for case_info in all_cases then {
+                            let mutable fields = List[PatternSpace].new();
+                            for param in case_info.params then {
+                                fields.push(
+                                    self.full_space_for_type(
+                                        self.substitute_type_args(
+                                            param.param_type,
+                                            param_names,
+                                            type_args,
+                                        ),
+                                    ),
+                                );
+                            };
+                            cases.insert(case_info.name, fields);
+                        };
+                        Option[PatternSpace].Some(
+                            PatternSpace.EnumCases(def_id_spelling(tplDefId), cases),
+                        )
+                    },
                     .None() then Option[PatternSpace].None(),
                 }
             },
@@ -1016,6 +1048,9 @@ given ExhaustivenessChecker {
         return PatternSpace.EnumCases(type_name, cases);
     };
 
+    /// The seed's `PatternSpace.fullSpace`: a bool is a bool space, an enum is
+    /// its case map, and everything else (a generic enum included -- its
+    /// fields are the DECLARATION's, unsubstituted) stays a flat `Full`.
     file_private full_space_for_type(self, t Type) PatternSpace = {
         return when t in {
             .BoolType() then PatternSpace.BoolValues(true, true),
@@ -1023,14 +1058,57 @@ given ExhaustivenessChecker {
                 self.context.type_display_name(t),
                 self.context.get_enum_cases(def_id),
             ),
-            .GenericEnum(tplDefId, _) then {
-                let maybe_cases = when self.generic_templates.enum_by_def_id(tplDefId) in {
-                    .Some(tmpl) then self.context.get_enum_cases(tmpl.def_id),
-                    .None() then Option[List[EnumCaseInfo]].None(),
-                };
-                self.enum_pattern_space(def_id_spelling(tplDefId), maybe_cases)
-            },
             _ then PatternSpace.Full(t),
+        };
+    };
+
+    /// Substitute a generic instance's type arguments for its parameter
+    /// names inside a declared field type -- `T` becomes `Int` in
+    /// `Wrap[Inner]`'s `inner T`.
+    file_private substitute_type_args(
+        self,
+        t Type,
+        param_names List[String],
+        args List[Type],
+    ) Type = {
+        return when t in {
+            .GenericParameter(name) then {
+                let mutable idx UInt = 0;
+                while idx < param_names.count() then {
+                    if param_names[idx] == name and idx < args.count() then {
+                        return args[idx];
+                    };
+                    idx += 1;
+                };
+                t
+            },
+            .GenericStruct(tpl, inner_args) then {
+                let mutable new_args = List[Type].new();
+                for a in inner_args then {
+                    new_args.push(self.substitute_type_args(a, param_names, args));
+                };
+                Type.GenericStruct(tpl, new_args)
+            },
+            .GenericEnum(tpl, inner_args) then {
+                let mutable new_args = List[Type].new();
+                for a in inner_args then {
+                    new_args.push(self.substitute_type_args(a, param_names, args));
+                };
+                Type.GenericEnum(tpl, new_args)
+            },
+            .PointerType(inner) then Type.PointerType(
+                self.substitute_type_args(inner, param_names, args),
+            ),
+            .MutablePointerType(inner) then Type.MutablePointerType(
+                self.substitute_type_args(inner, param_names, args),
+            ),
+            .ReferenceType(inner) then Type.ReferenceType(
+                self.substitute_type_args(inner, param_names, args),
+            ),
+            .MutableReferenceType(inner) then Type.MutableReferenceType(
+                self.substitute_type_args(inner, param_names, args),
+            ),
+            _ then t,
         };
     };
 
@@ -1420,6 +1498,19 @@ given ExhaustivenessChecker {
                 if not next_true and not next_false then PatternSpace.Empty()
                 else PatternSpace.BoolValues(next_true, next_false)
             },
+            // A flat full-bool field: the seed removes the value and hands
+            // back the narrowed bool space, so `On(true)` then `On(false)`
+            // really does close the case.
+            .Full(t) then {
+                if t is .BoolType() then {
+                    let next_true = not value;
+                    let next_false = value;
+                    if not next_true and not next_false then PatternSpace.Empty()
+                    else PatternSpace.BoolValues(next_true, next_false)
+                } else {
+                    space
+                }
+            },
             _ then space,
         };
     };
@@ -1493,9 +1584,21 @@ given ExhaustivenessChecker {
         elements List[TypedPatternElement],
         subject_type Type,
     ) PatternSpace = {
-        let mutable cases = when space in {
-            .Full(_) then self.enum_case_map_for_type(subject_type),
-            .EnumCases(_, existing) then existing,
+        // A COPY of the case map: a managed `Dict` aliases on assignment, and
+        // mutating the space's own map here would make the "unchanged means
+        // covered" reading fire against a space that already moved.
+        let mutable cases = Dict[String, List[PatternSpace]].new();
+        when space in {
+            .Full(_) then {
+                for entry in self.enum_case_map_for_type(subject_type).iterator() then {
+                    cases.insert(entry.first, entry.second);
+                };
+            },
+            .EnumCases(_, existing) then {
+                for entry in existing.iterator() then {
+                    cases.insert(entry.first, entry.second);
+                };
+            },
             _ then {
                 return space;
             },

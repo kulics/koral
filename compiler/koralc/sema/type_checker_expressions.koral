@@ -460,7 +460,7 @@ given TypeChecker {
         else self.lookup_current_file_symbol(name);
         let file_sym_opt = raw_file_sym_opt;
         let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) then Option[Symbol].None(
-        ) else self.storage.global_scope.lookup(name);
+        ) else self.lookup_shared_symbol(name);
         let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then Option[Symbol].None(
         ) else self.resolve_imported_alias_symbol(name);
         let sym = if local_sym_opt is .Some(s) then s
@@ -1430,6 +1430,15 @@ given TypeChecker {
                     .None() then self.check_expr_core_ref(callee, .None(), scope),
                 }
             },
+            // `Base[Args]` in callee position -- `G[Int8](5)` -- is a
+            // namespace for the construction or generic call, never a value,
+            // so the type-as-value objection does not apply to it.
+            .GenericInstantiation(base, type_args, inst_span) then self.lower_generic_instantiation_callee_ref(
+                base,
+                type_args,
+                inst_span,
+                scope,
+            ),
             _ then self.check_expr_core_ref(callee, .None(), scope),
         };
     };

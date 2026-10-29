@@ -428,7 +428,11 @@ given GenericTemplateRegistry {
             },
             .None() then {},
         };
+        // The unqualified key first (a real empty-path symbol of this
+        // spelling), then the name index (`bare_symbol_key`). The two are
+        // separate key spaces -- see `bare_symbol_key`.
         keys.push(spelling);
+        keys.push(bare_symbol_key(spelling));
         return keys;
     };
 
@@ -548,7 +552,10 @@ given GenericTemplateRegistry {
 
     // Look up a generic function template by name.
     public lookup_function(self, name String) Option[GenericFunctionTemplate] = {
-        return self.function_templates.get(name);
+        return when self.function_templates.get(name) in {
+            .Some(template) then Option[GenericFunctionTemplate].Some(template),
+            .None() then self.function_templates.get(bare_symbol_key(name)),
+        };
     };
 
     public lookup_function_in_module(
@@ -559,7 +566,7 @@ given GenericTemplateRegistry {
         let qualified = qualified_symbol_key(module_path, name);
         return when self.function_templates.get(qualified) in {
             .Some(template) then Option[GenericFunctionTemplate].Some(template),
-            .None() then self.function_templates.get(name),
+            .None() then self.lookup_function(name),
         };
     };
 
@@ -583,7 +590,18 @@ given GenericTemplateRegistry {
         name String,
         module_path List[String],
     ) Option[TraitDeclInfo] = {
-        return self.traits.get(qualified_symbol_key(module_path, name));
+        // An EMPTY `module_path` also consults the name index -- see
+        // `TraitRegistry.get_in_module`.
+        when self.traits.get(qualified_symbol_key(module_path, name)) in {
+            .Some(decl) then {
+                return Option[TraitDeclInfo].Some(decl);
+            },
+            .None() then {},
+        };
+        if module_path.is_empty() then {
+            return self.traits.get(bare_symbol_key(name));
+        };
+        return Option[TraitDeclInfo].None();
     };
 
     // Look up a generic function template by DECLARATION. Uses the DefId index;

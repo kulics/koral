@@ -220,13 +220,10 @@ given CodeGen {
         let mutable needs_separator = false;
 
         if not module_path.is_empty() then {
-            for seg in module_path then {
-                if needs_separator then {
-                    result.push_rune('_');
-                };
-                result.push_string(seg);
-                needs_separator = true;
-            };
+            // 符号前缀取自派生身份键（§5.3.1），不是模块路径：路径带消费方
+            // 拼写，换依赖 key 就变。
+            result.push_string(self.context.symbol_key_for_module_path(module_path));
+            needs_separator = true;
         };
 
         if is_private and not source_file.is_empty() then {
@@ -353,7 +350,14 @@ given CodeGen {
     trait_object_type_from_name(self, trait_name String) Type = {
         let mutable trait_type_args = List[Type].new();
         let mutable trait_def_id = def_id_invalid();
-        when self.program.traits.get(trait_name) in {
+        // By spelling: the unqualified key first (a real empty-path symbol),
+        // then the name index (`bare_symbol_key`) -- the two key spaces are
+        // separate so neither clobbers the other.
+        let info_opt = when self.program.traits.get(trait_name) in {
+            .Some(info) then Option[TraitDeclInfo].Some(info),
+            .None() then self.program.traits.get(bare_symbol_key(trait_name)),
+        };
+        when info_opt in {
             .Some(info) then {
                 trait_def_id = info.def_id;
                 for type_param in info.type_params then {
@@ -2154,13 +2158,10 @@ given CodeGen {
         let mutable out = StringBuilder.new();
         let mutable needs_separator = false;
         if not module_path.is_empty() then {
-            for seg in module_path then {
-                if needs_separator then {
-                    out.push_byte('_');
-                };
-                out.push_string(seg);
-                needs_separator = true;
-            };
+            // 符号前缀取自派生身份键（§5.3.1），不是模块路径：路径带消费方
+            // 拼写，换依赖 key 就变。
+            out.push_string(self.context.symbol_key_for_module_path(module_path));
+            needs_separator = true;
         };
         if is_private and not source_file.is_empty() then {
             let mutable hash WrappingUInt32 = 0;
