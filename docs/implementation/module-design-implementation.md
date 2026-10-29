@@ -187,7 +187,7 @@ Swift 的 `extensionMethods` 读点分散，关键一处在 `inferMethodOnType`�
 
 形态层重做时「合并只在包内」漏了实现——裸形态与路径形态都会把**别的包的**目标并进来。
 后果实测是拼运气：`using "std/hex";` 能跑（目标恰好不碰原包私有），`using "std/text";`
-死在 `package_private String.data` 上，且报错指向 std 源码行号。根因是合并让被并文件
+死在 `package_private String.data`（旧拼写，今 `protected`）上，且报错指向 std 源码行号。根因是合并让被并文件
 换上本包身份，可见性按新包判定。
 
 - **裁定**：合并目标必须是本包模块/文件。裸形态按 `package_id` 判同包；路径形态按

@@ -129,18 +129,32 @@ The shared suite remains flat under `tests/compiler-cases/`, but a few high-valu
 Use this bucket when changing declaration parsing, package visibility, import rules, or generic template lookup.
 
 - `access_modifier_order_error`
-- `protected_method_visibility_error_test`
-- `protected_public_method_same_package_test`
-- `protected_public_method_cross_package_error_test`
+- `internal_method_visibility_error_test`
+- `protected_method_same_package_test`
+- `protected_method_cross_package_error_test`
 - `module_private_method_access_error_test`
 - `package_private_method_same_package_test`
 - `package_private_method_cross_package_error_test`
-- `protected_public_type_same_package_test`
-- `public_signature_protected_public_type_error_test`
+- `protected_type_same_package_test`
+- `public_signature_protected_type_error_test`
 - `using_batch_with_named_import_error`
-- `using_empty_import_list_error`
+- `using_empty_import_list_placeholder_test`
 - `generic_template_requires_import_error_test`
 - `generic_template_import_test`
+
+### Default visibility and legacy spellings
+
+Use this bucket when changing default access levels, the legacy-spelling migration hints, the trait/given access slots, or helper-method visibility.
+
+- `defaults_unmarked_field_cross_module_construct_error`
+- `defaults_unmarked_field_same_module_ok`
+- `conformance_helper_method_cross_module_error`
+- `trait_requirement_access_modifier_error`
+- `trait_requirement_follows_trait_level_ok`
+- `given_head_access_modifier_error`
+- `legacy_file_private_error`
+- `legacy_module_private_error`
+- `legacy_package_private_error`
 
 ### Identifier case discipline
 

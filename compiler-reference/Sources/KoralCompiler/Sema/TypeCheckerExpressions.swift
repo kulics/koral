@@ -2143,7 +2143,7 @@ extension TypeChecker {
         name: name,
         kind: fallbackDefKind,
         sourceFile: symbolSourceFile,
-        access: info.isPrivate ? .file_private : .module_private,
+        access: info.isPrivate ? .private : .internal,
         packageID: currentPackageID,
         span: currentSpan
       )
@@ -6422,15 +6422,15 @@ extension TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .file_private:
-      // file_private: only accessible from the same file
+    case .private:
+      // private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return defSourceFile == currentSourceFile
-    case .module_private:
-      // Protected: accessible from the same logical module only.
+    case .internal:
+      // internal: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .package_private:
+    case .protected:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }
@@ -6454,13 +6454,13 @@ extension TypeChecker {
     switch methodAccess {
     case .public:
       return true
-    case .file_private:
+    case .private:
       let defSourceFile = context.getSourceFile(method.defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
-    case .module_private:
+    case .internal:
       let defModulePath = context.getModulePath(method.defId) ?? []
       return defModulePath == currentModulePath
-    case .package_private:
+    case .protected:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(method.defId) == currentPackageID
     }
@@ -6860,7 +6860,7 @@ extension TypeChecker {
         let methodSym = makeMethodSymbol(
           name: memberName,
           type: expectedType,
-          access: .module_private,
+          access: .internal,
           ownerKey: methodLabelKey(traitObjType)
         )
 

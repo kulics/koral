@@ -77,15 +77,15 @@ extension TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .file_private:
-      // Private: only accessible from the same file
+    case .private:
+      // private: only accessible from the same file
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
-    case .module_private:
-      // Protected: accessible from the same logical module only.
+    case .internal:
+      // internal: accessible from the same logical module only.
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .package_private:
+    case .protected:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }

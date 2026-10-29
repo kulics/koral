@@ -6,7 +6,7 @@ public struct GlobalNodeSourceInfo {
   public let sourceFile: String
   /// 模块路径
   public let modulePath: [String]
-  /// Package identity used by package-scoped access (`protected public`).
+  /// Package identity used by package-scoped access (`protected`).
   public let packageID: String
   /// 全局节点
   public let node: GlobalNode
@@ -1338,7 +1338,7 @@ public class TypeChecker {
     let defId = getOrAllocateTypeDefId(
       name: "String",
       kind: .structure,
-      access: .module_private,
+      access: .internal,
       modulePath: [],
       sourceFile: ""
     )
@@ -1578,7 +1578,7 @@ public class TypeChecker {
     modulePath: [String],
     sourceFile: String
   ) -> DefId {
-    let lookupSourceFile = access == .file_private ? sourceFile : nil
+    let lookupSourceFile = access == .private ? sourceFile : nil
     if let existing = defIdMap.lookup(
       modulePath: modulePath,
       name: name,
@@ -1637,7 +1637,7 @@ public class TypeChecker {
       name: name,
       kind: defKind,
       sourceFile: "",
-      access: .module_private,
+      access: .internal,
       span: .unknown
     )
     defIdMap.addSymbolInfo(
@@ -1682,13 +1682,13 @@ public class TypeChecker {
     switch fieldAccess {
     case .public:
       return true
-    case .file_private:
+    case .private:
       let defSourceFile = context.getSourceFile(defId) ?? ""
       return isSameSourceFile(defSourceFile, currentSourceFile)
-    case .module_private:
+    case .internal:
       let defModulePath = context.getModulePath(defId) ?? []
       return defModulePath == currentModulePath
-    case .package_private:
+    case .protected:
       guard !currentPackageID.isEmpty else { return false }
       return context.getPackageID(defId) == currentPackageID
     }

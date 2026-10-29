@@ -486,7 +486,7 @@ public class DefIdMap {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .module_private,
+        access: AccessModifier = .internal,
         packageID: String = "",
         span: SourceSpan = .unknown,
         isMethod: Bool = false
@@ -500,7 +500,7 @@ public class DefIdMap {
         }
 
         // Reuse existing DefId for non-local symbols when possible
-        if access == .file_private {
+        if access == .private {
             let keyWithFile = key(sourceFile)
             if let existing = nameToDefId[keyWithFile],
                let metadata = idToMetadata[existing.id],
@@ -528,7 +528,7 @@ public class DefIdMap {
             let keyWithFile = key(sourceFile)
             nameToDefId[keyWithFile] = defId
 
-            if access != .file_private {
+            if access != .private {
                 nameToDefId[key(nil)] = defId
             }
         }
@@ -547,7 +547,7 @@ public class DefIdMap {
         let keyWithFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: metadata.sourceFile)
         nameToDefId[keyWithFile] = defId
 
-        if metadata.access != .file_private {
+        if metadata.access != .private {
             let keyWithoutFile = makeKey(modulePath: metadata.modulePath, name: metadata.name, sourceFile: nil)
             nameToDefId[keyWithoutFile] = defId
         }
@@ -721,7 +721,7 @@ public class DefIdMap {
         guard let metadata = idToMetadata[defId.id] else {
             return nil
         }
-        let isPrivate = metadata.access == .file_private
+        let isPrivate = metadata.access == .private
         // An empty module path stays prefix-less -- wrapping it would mint
         // `_name` instead of `name`.
         let prefix: [String] = metadata.modulePath.isEmpty

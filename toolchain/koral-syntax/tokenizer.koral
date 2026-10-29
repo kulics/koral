@@ -41,8 +41,8 @@ public type Token {
     KwWeakref(),
     KwPublic(),
     KwPrivate(),
+    KwInternal(),
     KwProtected(),
-    KwProtectedPublic(),
 
     // Literals
     BoolTrue(),
@@ -178,9 +178,9 @@ given Token {
         .Bang() then "!",
         .KwWeakref() then "?",
         .KwPublic() then "public",
-        .KwPrivate() then "file_private",
-        .KwProtected() then "module_private",
-        .KwProtectedPublic() then "package_private",
+        .KwPrivate() then "private",
+        .KwInternal() then "internal",
+        .KwProtected() then "protected",
         .BoolTrue() then "true",
         .BoolFalse() then "false",
         .NullLit() then "null",
@@ -244,7 +244,7 @@ given Token {
     };
 
     public is_keyword(self) Bool = when self in {
-        .KwLet() or .KwMut() or .KwIf() or .KwThen() or .KwElse() or .KwWhile() or .KwFor() or .KwUnsafe() or .KwWhen() or .KwIn() or .KwIs() or .KwAnd() or .KwOr() or .KwNot() or .KwType() or .KwTrait() or .KwGiven() or .KwAs() or .KwUsing() or .KwForeign() or .KwIntrinsic() or .KwSelf() or .KwSelfType() or .KwReturn() or .KwBreak() or .KwContinue() or .KwDefer() or .KwWhere() or .KwPtr() or .KwWeakref() or .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then true,
+        .KwLet() or .KwMut() or .KwIf() or .KwThen() or .KwElse() or .KwWhile() or .KwFor() or .KwUnsafe() or .KwWhen() or .KwIn() or .KwIs() or .KwAnd() or .KwOr() or .KwNot() or .KwType() or .KwTrait() or .KwGiven() or .KwAs() or .KwUsing() or .KwForeign() or .KwIntrinsic() or .KwSelf() or .KwSelfType() or .KwReturn() or .KwBreak() or .KwContinue() or .KwDefer() or .KwWhere() or .KwPtr() or .KwWeakref() or .KwPublic() or .KwPrivate() or .KwInternal() or .KwProtected() then true,
         _ then false,
     };
 
@@ -308,8 +308,8 @@ given Token {
         .KwWeakref() then 100,
         .KwPublic() then 30,
         .KwPrivate() then 31,
-        .KwProtected() then 32,
-        .KwProtectedPublic() then 101,
+        .KwInternal() then 32,
+        .KwProtected() then 101,
         .BoolTrue() then 34,
         .BoolFalse() then 35,
         .NullLit() then 107,
@@ -384,27 +384,27 @@ given Tokenizer {
     public new(source String) Tokenizer = Tokenizer(source.to_runes(), 0);
 
     // Peek at current rune without consuming
-    file_private peek(self) Option[Rune] = if self.pos >= self.runes.count() then .None()
+    private peek(self) Option[Rune] = if self.pos >= self.runes.count() then .None()
     else .Some(self.runes[self.pos]);
 
     // Peek at rune at offset from current position
-    file_private peek_at(self, offset UInt) Option[Rune] = {
+    private peek_at(self, offset UInt) Option[Rune] = {
         let idx = self.pos + offset;
         return if idx >= self.runes.count() then .None() else .Some(self.runes[idx]);
     };
 
     // Advance and return current rune
-    file_private advance(self) Rune = {
+    private advance(self) Rune = {
         let r = self.runes[self.pos];
         self.pos += 1;
         return r;
     };
 
     // Check if at end
-    file_private is_eof(self) Bool = self.pos >= self.runes.count();
+    private is_eof(self) Bool = self.pos >= self.runes.count();
 
     // Check if rune equals a specific character
-    file_private rune_eq(r Rune, ch Rune) Bool = r == ch;
+    private rune_eq(r Rune, ch Rune) Bool = r == ch;
 
     // ========================================================================
     // Main tokenize entry point
@@ -512,7 +512,7 @@ given Tokenizer {
     // Line comment: // ...
     // ========================================================================
 
-    file_private scan_line_comment(self) Token = {
+    private scan_line_comment(self) Token = {
         let mutable text = StringBuilder.new();
         // Consume // and rest of line, but don't consume the newline
         while not self.is_eof() then {
@@ -532,7 +532,7 @@ given Tokenizer {
 
     // Comments do not nest -- the first `*/` ends the comment, and one that
     // never closes is an error, exactly as koralc lexes it.
-    file_private scan_block_comment(self) Result[Token] = {
+    private scan_block_comment(self) Result[Token] = {
         let mutable text = StringBuilder.new();
         text.push_string("/*");
         self.pos += 2;
@@ -557,7 +557,7 @@ given Tokenizer {
     // String literal: "..." or "\(...)" interpolation
     // ========================================================================
 
-    file_private scan_string(self) Result[Token] = {
+    private scan_string(self) Result[Token] = {
         if self.peek_at(1) is .Some(q1) and Tokenizer.rune_eq(q1, '"') then {
             if self.peek_at(2) is .Some(q2) and Tokenizer.rune_eq(q2, '"') then {
                 return self.scan_multiline_string();
@@ -626,7 +626,7 @@ given Tokenizer {
         return Result[Token].Error("unterminated string literal");
     };
 
-    file_private scan_multiline_string(self) Result[Token] = {
+    private scan_multiline_string(self) Result[Token] = {
         let mutable text = StringBuilder.new();
         text.push_string("\"\"\"");
         self.pos += 3;
@@ -698,7 +698,7 @@ given Tokenizer {
     //   - Only lowercase `e` opens an exponent, and only before a digit or
     //     [sign] digit (`1exp` is `1` then `exp`).
     //   - Duration suffixes are `s` / `ms` / `us` / `ns`, integers only.
-    file_private scan_number(self) Result[Token] = {
+    private scan_number(self) Result[Token] = {
         if Tokenizer.rune_eq(self.runes[self.pos], '0') and self.peek_at(1) is .Some(p) then {
             if Tokenizer.rune_eq(p, 'b') then {
                 return self.scan_base_number("0b", "01");
@@ -715,7 +715,7 @@ given Tokenizer {
 
     // `0b12` blames the stray digit, `0x1.a` is a fraction attempt, and a
     // prefix with no digits at all is an error -- `0body` is `0b` + `ody`.
-    file_private scan_base_number(self, prefix String, valid String) Result[Token] = {
+    private scan_base_number(self, prefix String, valid String) Result[Token] = {
         let mutable text = StringBuilder.new();
         text.push_string(prefix);
         self.pos += 2;
@@ -763,7 +763,7 @@ given Tokenizer {
         return .Ok(.IntLit(text.to_string()));
     };
 
-    file_private scan_decimal_number(self) Result[Token] = {
+    private scan_decimal_number(self) Result[Token] = {
         let mutable text = StringBuilder.new();
         let mutable is_float = false;
         let mutable last_was_digit Bool = false;
@@ -887,7 +887,7 @@ given Tokenizer {
     // follows: `10s2` is `10` then `s2`, not a duration. The suffix is
     // appended to `text` only on a match, so a failure leaves `self.pos` (and
     // the literal text) untouched.
-    file_private scan_duration_suffix(self, text StringBuilder) Bool = {
+    private scan_duration_suffix(self, text StringBuilder) Bool = {
         let start = self.pos;
         let mutable letters = StringBuilder.new();
         while not self.is_eof() and self.runes[self.pos].is_ascii_alphabetic() then {
@@ -913,7 +913,7 @@ given Tokenizer {
     // Identifier or keyword
     // ========================================================================
 
-    file_private scan_identifier(self) Token = {
+    private scan_identifier(self) Token = {
         let mutable text = StringBuilder.new();
         while not self.is_eof() then {
             let r = self.runes[self.pos];
@@ -956,9 +956,9 @@ given Tokenizer {
             "unsafe" then .KwUnsafe(),
             "where" then .KwWhere(),
             "public" then .KwPublic(),
-            "file_private" then .KwPrivate(),
-            "module_private" then .KwProtected(),
-            "package_private" then .KwProtectedPublic(),
+            "private" then .KwPrivate(),
+            "internal" then .KwInternal(),
+            "protected" then .KwProtected(),
             "true" then .BoolTrue(),
             "false" then .BoolFalse(),
             "null" then .NullLit(),
@@ -970,7 +970,7 @@ given Tokenizer {
     // Operators and punctuation
     // ========================================================================
 
-    file_private scan_operator(self) Option[Token] = {
+    private scan_operator(self) Option[Token] = {
         let r = self.runes[self.pos];
         let cp = r.to_uint32();
 
@@ -1264,7 +1264,7 @@ given Tokenizer {
     // Character literal: '...'
     // ========================================================================
 
-    file_private scan_char_literal(self) Token = {
+    private scan_char_literal(self) Token = {
         let mutable text = StringBuilder.new();
         text.push_byte('\'');
         self.pos += 1; // skip opening '

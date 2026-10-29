@@ -1,7 +1,7 @@
 using "std/os" { ... };
 using "std/proc" { ... };
 
-file_private type InvocationOptions(
+private type InvocationOptions(
     command String,
     package_config_path Option[String],
     entry_file_path Option[String],
@@ -15,7 +15,7 @@ file_private type InvocationOptions(
     optimize_args List[String],
 );
 
-file_private type PreparedCompilation(
+private type PreparedCompilation(
     graph ResolvedModuleGraph,
     display_name String,
     artifact_base_name String,
@@ -23,12 +23,12 @@ file_private type PreparedCompilation(
     default_output_dir Path,
 );
 
-file_private let phase_trace_enabled() Bool = {
+private let phase_trace_enabled() Bool = {
     return if env("KORAL_DEBUG_PHASE") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
     else false;
 };
 
-file_private let trace_phase(label String) Void = {
+private let trace_phase(label String) Void = {
     if phase_trace_enabled() then {
         eprintln(label);
     };
@@ -195,7 +195,7 @@ public let run_driver() Int = {
     };
 };
 
-file_private let print_usage() Void = {
+private let print_usage() Void = {
     println(
         "Usage: koralc [command] [--package-config <koral.json> | <file.koral>] [--target-module <module>] [options]",
     );
@@ -226,7 +226,7 @@ file_private let print_usage() Void = {
 };
 
 // Shared: read file from disk.
-file_private let read_source(file_path String) Option[String] = {
+private let read_source(file_path String) Option[String] = {
     let source = read_text_file(file_path.into_path()) or else {
         eprintln("Error: Failed to read file: \(file_path)");
         return Option[String].None();
@@ -234,11 +234,11 @@ file_private let read_source(file_path String) Option[String] = {
     return Option[String].Some(source);
 };
 
-file_private let normalize_path_for_match(path String) String =
+private let normalize_path_for_match(path String) String =
     path.into_path().normalize().to_string().replace_all("\\", with: "/").to_ascii_lowercase(
     );
 
-file_private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
+private let path_matches_user_file(diag_path String, user_file_path String) Bool = {
     let diag_norm = normalize_path_for_match(diag_path);
     let user_norm = normalize_path_for_match(user_file_path);
     if diag_norm == user_norm then {
@@ -261,7 +261,7 @@ file_private let path_matches_user_file(diag_path String, user_file_path String)
     return false;
 };
 
-file_private let diagnostic_record_severity_label(severity DiagnosticSeverity) String = {
+private let diagnostic_record_severity_label(severity DiagnosticSeverity) String = {
     return when severity in {
         .Error() then "error",
         .Warning() then "warning",
@@ -269,7 +269,7 @@ file_private let diagnostic_record_severity_label(severity DiagnosticSeverity) S
     };
 };
 
-file_private let format_cli_diagnostic_record(
+private let format_cli_diagnostic_record(
     record DiagnosticRecord,
     user_file_path String,
 ) String = {
@@ -294,7 +294,7 @@ file_private let format_cli_diagnostic_record(
     return header.to_string();
 };
 
-file_private let print_user_focused_diagnostic_records(
+private let print_user_focused_diagnostic_records(
     diagnostics DiagnosticCollector,
     user_file_path String,
 ) Void = {
@@ -309,7 +309,7 @@ file_private let print_user_focused_diagnostic_records(
     };
 };
 
-file_private let diagnostic_stage_label(stage DiagnosticStage) String = {
+private let diagnostic_stage_label(stage DiagnosticStage) String = {
     return when stage in {
         .Lexer() then "lexer error",
         .Parser() then "syntax error",
@@ -318,7 +318,7 @@ file_private let diagnostic_stage_label(stage DiagnosticStage) String = {
     };
 };
 
-file_private let sanitize_module_artifact_name(module_name String) String = {
+private let sanitize_module_artifact_name(module_name String) String = {
     let mutable out = StringBuilder.new();
     let mutable i UInt = 0;
     let mutable pending_sep = false;
@@ -338,7 +338,7 @@ file_private let sanitize_module_artifact_name(module_name String) String = {
     return out.to_string();
 };
 
-file_private let contains_string(values List[String], target String) Bool = {
+private let contains_string(values List[String], target String) Bool = {
     for value in values then {
         if value == target then {
             return true;
@@ -347,7 +347,7 @@ file_private let contains_string(values List[String], target String) Bool = {
     return false;
 };
 
-file_private let contains_module_path(paths List[List[String]], target List[String]) Bool = {
+private let contains_module_path(paths List[List[String]], target List[String]) Bool = {
     for path in paths then {
         if string_list_eq(path, target) then {
             return true;
@@ -356,7 +356,7 @@ file_private let contains_module_path(paths List[List[String]], target List[Stri
     return false;
 };
 
-file_private let collect_unique_module_paths_from_pairs(
+private let collect_unique_module_paths_from_pairs(
     pairs List[Pair[LoadedNode, List[String]]],
 ) List[List[String]] = {
     let mutable seen = Set[String].new();
@@ -371,7 +371,7 @@ file_private let collect_unique_module_paths_from_pairs(
     return out;
 };
 
-file_private let collect_unique_source_paths_from_pairs(
+private let collect_unique_source_paths_from_pairs(
     pairs List[Pair[LoadedNode, List[String]]],
 ) List[String] = {
     let mutable seen = Set[String].new();
@@ -386,7 +386,7 @@ file_private let collect_unique_source_paths_from_pairs(
     return out;
 };
 
-file_private let make_prepared_compilation(
+private let make_prepared_compilation(
     std_pairs List[Pair[LoadedNode, List[String]]],
     user_pairs List[Pair[LoadedNode, List[String]]],
     merged_graph ImportGraph,
@@ -449,7 +449,7 @@ file_private let make_prepared_compilation(
 /// The standard library's main module is the prelude: it is compiled in and in
 /// scope in every non-std module without being named. It is therefore NOT part
 /// of the `using` graph -- it is the base the graph sits on (§6.4's "主模块是基础层").
-file_private let load_prelude_into(
+private let load_prelude_into(
     resolver ModuleResolver,
     registry PackageRegistry,
     unit CompilationUnit,
@@ -466,7 +466,7 @@ file_private let load_prelude_into(
 /// Load the target module and everything its `using` statements reach. The
 /// module graph is exactly those edges (§5.4) -- nothing is loaded that no
 /// `using` asked for, and nothing that IS asked for is skipped.
-file_private let load_target_unit(
+private let load_target_unit(
     resolver ModuleResolver,
     registry PackageRegistry,
     root LoadedPackage,
@@ -481,7 +481,7 @@ file_private let load_target_unit(
 
 /// `links` follow the code (§5.4): a module that needs `-lm` says so, and
 /// anything that imports that module inherits the requirement.
-file_private let linked_libraries_of(resolver ModuleResolver) List[String] = {
+private let linked_libraries_of(resolver ModuleResolver) List[String] = {
     let mutable out = List[String].new();
     for spec in resolver.loaded_module_specs() then {
         for link in spec.links then {
@@ -493,7 +493,7 @@ file_private let linked_libraries_of(resolver ModuleResolver) List[String] = {
 
 /// Split loaded nodes into standard-library and everything else, emitting in
 /// full-name order so the tables do not depend on which `using` was seen first.
-file_private let split_pairs_by_package(
+private let split_pairs_by_package(
     pairs List[Pair[LoadedNode, List[String]]],
 ) Pair[List[Pair[LoadedNode, List[String]]], List[Pair[LoadedNode, List[String]]]] = {
     let mutable std_pairs = List[Pair[LoadedNode, List[String]]].new();
@@ -513,7 +513,7 @@ file_private let split_pairs_by_package(
 
 /// Turn a module full name written the way source writes it
 /// (`package[/subpath]`) into the module it names, looked up in `root`'s table.
-file_private let resolve_target_spec(
+private let resolve_target_spec(
     raw_name String,
     root LoadedPackage,
     registry PackageRegistry,
@@ -562,7 +562,7 @@ file_private let resolve_target_spec(
     );
 };
 
-file_private let prepare_package_compilation(
+private let prepare_package_compilation(
     options InvocationOptions,
 ) Result[PreparedCompilation] = {
     let package_config_path = options.package_config_path or else {
@@ -634,7 +634,7 @@ file_private let prepare_package_compilation(
     );
 };
 
-file_private let prepare_single_file_compilation(
+private let prepare_single_file_compilation(
     options InvocationOptions,
 ) Result[PreparedCompilation] = {
     let entry_file_path = options.entry_file_path or else {
@@ -710,7 +710,7 @@ file_private let prepare_single_file_compilation(
     );
 };
 
-file_private let prepare_compilation(
+private let prepare_compilation(
     options InvocationOptions,
 ) Result[PreparedCompilation] = {
     return when options.package_config_path in {
@@ -719,7 +719,7 @@ file_private let prepare_compilation(
     };
 };
 
-file_private let run_check(options InvocationOptions) Int = {
+private let run_check(options InvocationOptions) Int = {
 
     let prepared = prepare_compilation(options) or else as e in {
         eprintln(e.message());
@@ -736,7 +736,7 @@ file_private let run_check(options InvocationOptions) Int = {
     return 0;
 };
 
-file_private let run_emit_typed_ast(options InvocationOptions) Int = {
+private let run_emit_typed_ast(options InvocationOptions) Int = {
 
     let prepared = prepare_compilation(options) or else as e in {
         eprintln(e.message());
@@ -759,7 +759,7 @@ file_private let run_emit_typed_ast(options InvocationOptions) Int = {
     return 0;
 };
 
-file_private let run_resolve_module(options InvocationOptions) Int = {
+private let run_resolve_module(options InvocationOptions) Int = {
     let prepared = prepare_compilation(options) or else as e in {
         eprintln("module resolution failed: \(e.message())");
         return 1;
@@ -783,7 +783,7 @@ file_private let run_resolve_module(options InvocationOptions) Int = {
 // ── build command ─────────────────────────────────────────────────────────────
 
 // Find clang by searching PATH, mirroring Swift Driver.findExecutable("clang").
-file_private let find_clang() String = {
+private let find_clang() String = {
     let path_env = if env("PATH") is .Some(path) then path
     else if env("Path") is .Some(path) then path
     else {
@@ -809,7 +809,7 @@ file_private let find_clang() String = {
 // Invoke clang to compile a .c file to an executable.
 // Uses Inherit stdio (no pipe) to avoid buffer deadlock, mirroring Swift runSubprocess.
 // Returns true on success.
-file_private let run_clang(
+private let run_clang(
     c_file String,
     exe_file String,
     linked_libraries List[String],
@@ -879,7 +879,7 @@ file_private let run_clang(
     return true;
 };
 
-file_private let build_c_output_path(
+private let build_c_output_path(
     artifact_base_name String,
     default_output_dir Path,
     out_dir Option[String],
@@ -902,11 +902,11 @@ type MonomorphizationOutput(
     diagnostics DiagnosticCollector,
 );
 
-file_private let empty_typed_program() TypedProgram = {
+private let empty_typed_program() TypedProgram = {
     return TypedProgram(List[TypedDecl].new(), Dict[UInt, String].new());
 };
 
-file_private let empty_body_checker_output() BodyCheckerOutput = {
+private let empty_body_checker_output() BodyCheckerOutput = {
     return BodyCheckerOutput(
         Option[TypedProgram].None(),
         CompilerContext.new(),
@@ -922,7 +922,7 @@ file_private let empty_body_checker_output() BodyCheckerOutput = {
     );
 };
 
-file_private let monomorphize_after_typecheck(
+private let monomorphize_after_typecheck(
     mutable result BodyCheckerOutput,
     mutable typed_program TypedProgram,
     context CompilerContext,
@@ -957,7 +957,7 @@ file_private let monomorphize_after_typecheck(
     );
 };
 
-file_private let lower_mir_after_typecheck(
+private let lower_mir_after_typecheck(
     mutable result BodyCheckerOutput,
     mutable typed_program TypedProgram,
     display_name String,
@@ -1056,7 +1056,7 @@ type PreparedEmitTypecheck(
     result BodyCheckerOutput,
 );
 
-file_private let prepare_emit_c_typecheck(
+private let prepare_emit_c_typecheck(
     options InvocationOptions,
     phase_prefix String,
 ) Option[PreparedEmitTypecheck] = {
@@ -1080,7 +1080,7 @@ file_private let prepare_emit_c_typecheck(
     );
 };
 
-file_private let prepare_emit_c_generation_input(
+private let prepare_emit_c_generation_input(
     options InvocationOptions,
     phase_prefix String,
 ) Option[EmitCGenerationInput] = {
@@ -1129,7 +1129,7 @@ file_private let prepare_emit_c_generation_input(
     );
 };
 
-file_private let generate_c_from_mir(
+private let generate_c_from_mir(
     mir_program MIRProgram,
     context CompilerContext,
     phase_prefix String,
@@ -1147,7 +1147,7 @@ file_private let generate_c_from_mir(
     return generated_c;
 };
 
-file_private let emit_c(
+private let emit_c(
     options InvocationOptions,
     phase_prefix String,
 ) Option[Pair[Path, List[String]]] = {
@@ -1177,14 +1177,14 @@ file_private let emit_c(
     );
 };
 
-file_private let run_emit_c(options InvocationOptions) Int = {
+private let run_emit_c(options InvocationOptions) Int = {
     return when emit_c(options, "emit-c") in {
         .Some(_) then 0,
         .None() then 1,
     };
 };
 
-file_private let run_build(options InvocationOptions) Int = {
+private let run_build(options InvocationOptions) Int = {
     let output = emit_c(options, "build") or else {
         return 1;
     };
@@ -1208,7 +1208,7 @@ file_private let run_build(options InvocationOptions) Int = {
     return 0;
 };
 
-file_private let run_run(options InvocationOptions) Int = {
+private let run_run(options InvocationOptions) Int = {
     let output = emit_c(options, "run") or else {
         return 1;
     };

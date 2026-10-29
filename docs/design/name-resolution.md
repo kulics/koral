@@ -153,11 +153,11 @@ Koral 选前者，并把「不留兜底」写成硬性约束。
 
 | Declaration | Default Access |
 |-------------|----------------|
-| global `let`/variable, function, type, trait | `module_private` |
-| struct field | `public` |
-| trait method | `public` |
-| given method | `module_private` |
-| enum case & case fields | no per-item modifier; visible with the enum type |
+| global `let`/variable, function, type, trait, type alias | `internal` |
+| struct field | `internal` |
+| trait requirement | the trait declaration's level (interface item follows container) |
+| given method | `internal` |
+| enum case & case fields | the enum declaration's level (no per-item modifier) |
 | using declaration | file-local (imported bindings are not re-exported) |
 
 > **这张表在 `../guide/document.md` / `document-zh.md` 的「Default Access Levels」里各有一份

@@ -5,7 +5,7 @@ using "std/time" { ... };
 using "std/async" { ... };
 using "std/sync" { ... };
 
-file_private let failure_result(
+private let failure_result(
     info CaseInfo,
     status String,
     failure_type String,
@@ -16,11 +16,11 @@ file_private let failure_result(
     return CaseResult(info, false, status, failure_type, message, exit_code, duration_ms);
 };
 
-file_private let pass_result(info CaseInfo, duration_ms Int64, exit_code Int) CaseResult = {
+private let pass_result(info CaseInfo, duration_ms Int64, exit_code Int) CaseResult = {
     return CaseResult(info, true, "passed", "", "", exit_code, duration_ms);
 };
 
-file_private let infer_exit_code(status ExitStatus) Int = {
+private let infer_exit_code(status ExitStatus) Int = {
     return when status.code() in {
         .Some(c) then c,
         .None() then when status.signal() in {
@@ -30,7 +30,7 @@ file_private let infer_exit_code(status ExitStatus) Int = {
     };
 };
 
-file_private type CommandExecution {
+private type CommandExecution {
     Finished(output CommandOutput, peak_bytes UInt),
     TimedOut(exit_code Int),
     Aborted(exit_code Int),
@@ -38,7 +38,7 @@ file_private type CommandExecution {
     InfrastructureError(message String),
 };
 
-file_private let timeout_case_result(
+private let timeout_case_result(
     config RunnerConfig,
     info CaseInfo,
     start MonoTime,
@@ -55,11 +55,11 @@ file_private let timeout_case_result(
     );
 };
 
-file_private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
+private let memory_limit_failure_message(config RunnerConfig, peak_bytes UInt) String = {
     return "case exceeded memory limit (peak \(peak_bytes / UInt(1024) / UInt(1024)) MB, limit \(config.memory_limit_mb) MB)";
 };
 
-file_private let memory_exceeded_case_result(
+private let memory_exceeded_case_result(
     config RunnerConfig,
     info CaseInfo,
     start MonoTime,
@@ -77,7 +77,7 @@ file_private let memory_exceeded_case_result(
     );
 };
 
-file_private let aborted_case_result(
+private let aborted_case_result(
     info CaseInfo,
     start MonoTime,
     exit_code Int,
@@ -93,7 +93,7 @@ file_private let aborted_case_result(
     );
 };
 
-file_private let build_command_args_for_case(
+private let build_command_args_for_case(
     config RunnerConfig,
     info CaseInfo,
     output_dir Path,
@@ -120,7 +120,7 @@ file_private let build_command_args_for_case(
     return Result[List[String]].Ok(args);
 };
 
-file_private let check_command_args_for_case(
+private let check_command_args_for_case(
     config RunnerConfig,
     info CaseInfo,
     output_dir Path,
@@ -146,7 +146,7 @@ file_private let check_command_args_for_case(
     return Result[List[String]].Ok(args);
 };
 
-file_private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
+private let executable_path_for_case(info CaseInfo, output_dir Path) Path = {
     let base = info.absolute_path.base_name();
     let ext = info.absolute_path.ext_name();
     let stem = if ext.is_empty() then base
@@ -155,7 +155,7 @@ file_private let executable_path_for_case(info CaseInfo, output_dir Path) Path =
     return output_dir.join(exe_name);
 };
 
-file_private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
+private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[Path] = {
     let cases_root = config.cases_root.normalize();
     let mutable current = info.absolute_path.dir_name().normalize();
     while true then {
@@ -175,7 +175,7 @@ file_private let find_case_manifest(config RunnerConfig, info CaseInfo) Option[P
     return Option[Path].None();
 };
 
-file_private let find_case_requires_root(manifest_path Path) Option[Path] = {
+private let find_case_requires_root(manifest_path Path) Option[Path] = {
     let requires_root = manifest_path.dir_name().join("requires").normalize();
     if path_exist(requires_root) then {
         return Option[Path].Some(requires_root);
@@ -183,7 +183,7 @@ file_private let find_case_requires_root(manifest_path Path) Option[Path] = {
     return Option[Path].None();
 };
 
-file_private let find_built_executable(output_dir Path) Result[Path] = {
+private let find_built_executable(output_dir Path) Result[Path] = {
     let is_windows = is_windows_host();
     let mutable iter = read_dir(output_dir) or else as e in {
         return Result[Path].Error(e);
@@ -216,7 +216,7 @@ file_private let find_built_executable(output_dir Path) Result[Path] = {
     return Result[Path].Error("multiple executable candidates produced");
 };
 
-file_private let prepared_run_executable_path(
+private let prepared_run_executable_path(
     info CaseInfo,
     output_dir Path,
     launch_attempt UInt,
@@ -259,16 +259,16 @@ file_private let prepared_run_executable_path(
     return Result[Path].Error("failed to create launch executable copy");
 };
 
-file_private let run_command_args_for_case() List[String] = List[String].new();
+private let run_command_args_for_case() List[String] = List[String].new();
 
-file_private let read_text_file_or_empty(path Path) String = {
+private let read_text_file_or_empty(path Path) String = {
     return when read_text_file(path) in {
         .Ok(content) then content,
         .Error(_) then String.new(),
     };
 };
 
-file_private let has_runtime_expect_error(expect_error List[String]) Bool = {
+private let has_runtime_expect_error(expect_error List[String]) Bool = {
     for line in expect_error then {
         if line.trim_ascii().starts_with("Panic:") then {
             return true;
@@ -277,7 +277,7 @@ file_private let has_runtime_expect_error(expect_error List[String]) Bool = {
     return false;
 };
 
-file_private let non_empty_lines(lines List[String]) List[String] = {
+private let non_empty_lines(lines List[String]) List[String] = {
     let mutable out = List[String].new();
     for line in lines then {
         if not line.is_empty() then {
@@ -287,7 +287,7 @@ file_private let non_empty_lines(lines List[String]) List[String] = {
     return out;
 };
 
-file_private let match_exact_lines(
+private let match_exact_lines(
     actual List[String],
     expected List[String],
 ) Pair[Bool, String] = {
@@ -313,7 +313,7 @@ file_private let match_exact_lines(
     return Pair[Bool, String](true, "");
 };
 
-file_private let build_captured_command(
+private let build_captured_command(
     config RunnerConfig,
     program String,
     args List[String],
@@ -339,7 +339,7 @@ file_private let build_captured_command(
     );
 };
 
-file_private let execute_command_with_timeout(
+private let execute_command_with_timeout(
     config RunnerConfig,
     program String,
     args List[String],
@@ -448,7 +448,7 @@ file_private let execute_command_with_timeout(
     };
 };
 
-file_private let execute_built_executable_with_retry(
+private let execute_built_executable_with_retry(
     config RunnerConfig,
     info CaseInfo,
     output_dir Path,
@@ -519,7 +519,7 @@ file_private let execute_built_executable_with_retry(
     };
 };
 
-file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
+private let create_case_output_dir(config RunnerConfig, info CaseInfo) Result[Path] = {
     let root = config.output_root;
     when create_dir_all(root) in {
         .Ok(_) then {},
@@ -586,7 +586,7 @@ file_private let create_case_output_dir(config RunnerConfig, info CaseInfo) Resu
 // flag.
 // ---------------------------------------------------------------------------
 
-file_private let first_output_line(text String) String = {
+private let first_output_line(text String) String = {
     for line in output_lines_trimmed(text) then {
         if not line.is_empty() then {
             return line;
@@ -595,7 +595,7 @@ file_private let first_output_line(text String) String = {
     return "<no output>";
 };
 
-file_private let output_lines_equal(a String, b String) Bool = {
+private let output_lines_equal(a String, b String) Bool = {
     let a_lines = output_lines_trimmed(a);
     let b_lines = output_lines_trimmed(b);
     if a_lines.count() != b_lines.count() then {
@@ -613,7 +613,7 @@ file_private let output_lines_equal(a String, b String) Bool = {
 
 /// Name the first place two outputs part company, so the report points at a
 /// line rather than at "these are different".
-file_private let first_output_difference(
+private let first_output_difference(
     a_label String,
     a String,
     b_label String,
@@ -644,7 +644,7 @@ file_private let first_output_difference(
 
 /// Run one case under one compiler and keep what it ACTUALLY did, not whether
 /// that matched the hand-written expectations.
-file_private let observe_case(
+private let observe_case(
     config RunnerConfig,
     compiler_bin Path,
     label String,
@@ -794,7 +794,7 @@ file_private let observe_case(
     );
 };
 
-file_private let run_single_case_differential(
+private let run_single_case_differential(
     config RunnerConfig,
     info CaseInfo,
     stop_requested AtomicInt,

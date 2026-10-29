@@ -7,7 +7,7 @@ using "std/os" { ... };
 /// The trait DECLARATION a method belongs to. Nothing may decide membership
 /// from the spelling (`ReceiverMethodDispatchInfo.conformance_trait_name`,
 /// `ConcreteCallableInfo.trait_conformance`) -- those are display-only.
-file_private let method_trait_conformance_def_id(
+private let method_trait_conformance_def_id(
     mono Monomorphizer,
     method Symbol,
 ) Option[DefId] = {
@@ -23,14 +23,14 @@ file_private let method_trait_conformance_def_id(
     };
 };
 
-file_private let generic_struct_def_id(mono Monomorphizer, name String) DefId = {
+private let generic_struct_def_id(mono Monomorphizer, name String) DefId = {
     return when mono.storage.generic_templates.lookup_struct(name) in {
         .Some(template) then template.def_id,
         .None() then def_id_invalid(),
     };
 };
 
-file_private let generic_enum_def_id(mono Monomorphizer, name String) DefId = {
+private let generic_enum_def_id(mono Monomorphizer, name String) DefId = {
     return when mono.storage.generic_templates.lookup_enum(name) in {
         .Some(template) then template.def_id,
         .None() then def_id_invalid(),
@@ -42,7 +42,7 @@ file_private let generic_enum_def_id(mono Monomorphizer, name String) DefId = {
 /// the bare spelling. Going straight at `traits.get(name)` reads the bare
 /// index, which is last-wins across modules and cannot say which `Tag` a name
 /// means -- so a match there can be another module's trait.
-file_private let trait_info_from_registry(
+private let trait_info_from_registry(
     mono Monomorphizer,
     name String,
 ) Option[TraitDeclInfo] = {
@@ -54,7 +54,7 @@ file_private let trait_info_from_registry(
     };
 };
 
-file_private let trait_def_id_from_registry(mono Monomorphizer, name String) DefId = {
+private let trait_def_id_from_registry(mono Monomorphizer, name String) DefId = {
     return when trait_info_from_registry(mono, name) in {
         .Some(info) then info.def_id,
         .None() then def_id_invalid(),
@@ -267,7 +267,7 @@ public let lookup_extension_method_def_id(
     return Option[DefId].None();
 };
 
-file_private type ParameterizedTypeWrapperKind {
+private type ParameterizedTypeWrapperKind {
     Reference(),
     MutableReference(),
     BorrowedReference(),
@@ -278,12 +278,12 @@ file_private type ParameterizedTypeWrapperKind {
     MutableWeakReference(),
 };
 
-file_private type ParameterizedTypeWrapperChain(
+private type ParameterizedTypeWrapperChain(
     wrappers List[ParameterizedTypeWrapperKind],
     inner Type,
 );
 
-file_private let split_parameterized_type_wrappers(t Type) ParameterizedTypeWrapperChain = {
+private let split_parameterized_type_wrappers(t Type) ParameterizedTypeWrapperChain = {
     let mutable wrappers = List[ParameterizedTypeWrapperKind].new();
     let mutable current = t;
     while true then {
@@ -328,7 +328,7 @@ file_private let split_parameterized_type_wrappers(t Type) ParameterizedTypeWrap
     return ParameterizedTypeWrapperChain(wrappers, current);
 };
 
-file_private let apply_parameterized_type_wrapper(
+private let apply_parameterized_type_wrapper(
     kind ParameterizedTypeWrapperKind,
     inner Type,
 ) Type = {
@@ -344,7 +344,7 @@ file_private let apply_parameterized_type_wrapper(
     };
 };
 
-file_private let rebuild_parameterized_type_wrappers(
+private let rebuild_parameterized_type_wrappers(
     inner Type,
     wrappers List[ParameterizedTypeWrapperKind],
 ) Type = {
@@ -357,7 +357,7 @@ file_private let rebuild_parameterized_type_wrappers(
     return rebuilt;
 };
 
-file_private let normalize_trait_placeholder_type(mono Monomorphizer, t Type) Type = {
+private let normalize_trait_placeholder_type(mono Monomorphizer, t Type) Type = {
     let chain = split_parameterized_type_wrappers(t);
     let normalized_inner = when chain.inner in {
         .GenericStruct(template_def_id, args) then {
@@ -421,7 +421,7 @@ file_private let normalize_trait_placeholder_type(mono Monomorphizer, t Type) Ty
     else rebuild_parameterized_type_wrappers(normalized_inner, chain.wrappers);
 };
 
-file_private let trait_object_type_from_registry(
+private let trait_object_type_from_registry(
     mono Monomorphizer,
     trait_name String,
 ) Type = {
@@ -439,7 +439,7 @@ file_private let trait_object_type_from_registry(
     return Type.TraitObject(trait_def_id, trait_type_args);
 };
 
-file_private let resolve_def_id_backed_type(
+private let resolve_def_id_backed_type(
     mono Monomorphizer,
     def_id DefId,
     fallback Type,
@@ -513,7 +513,7 @@ file_private let resolve_def_id_backed_type(
     return fallback;
 };
 
-file_private let resolve_types_in_pattern(
+private let resolve_types_in_pattern(
     mono Monomorphizer,
     pattern TypedPattern,
 ) TypedPattern = {
@@ -667,7 +667,7 @@ public let refresh_list_pattern_ops(
 // Collect child types that must be resolved before the parent type.
 // Used by the iterative worklist in resolve_parameterized_type to avoid
 // deep call-stack recursion on nested generic types.
-file_private let collect_resolve_children(mono Monomorphizer, t Type) List[Type] = {
+private let collect_resolve_children(mono Monomorphizer, t Type) List[Type] = {
     let mutable children = List[Type].new();
 
     // Wrapper types: peel all wrappers and return the inner type.
@@ -763,7 +763,7 @@ file_private let collect_resolve_children(mono Monomorphizer, t Type) List[Type]
 // Cache-first resolution helper: returns from cache if available, otherwise
 // calls resolve_parameterized_type_single. This avoids re-entering the worklist
 // wrapper in resolve_parameterized_type when children are already cached.
-file_private let resolve_parameterized_type_cached(mono Monomorphizer, t Type) Type = {
+private let resolve_parameterized_type_cached(mono Monomorphizer, t Type) Type = {
     when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then {
             return cached;
@@ -775,7 +775,7 @@ file_private let resolve_parameterized_type_cached(mono Monomorphizer, t Type) T
 
 // resolve_parameterized_type_single: resolves a single type using the original logic.
 // Called by the worklist pre-resolution pass. Children should already be in the cache.
-file_private let resolve_parameterized_type_single(mono Monomorphizer, t Type) Type = {
+private let resolve_parameterized_type_single(mono Monomorphizer, t Type) Type = {
     let chain = split_parameterized_type_wrappers(t);
     if not chain.wrappers.is_empty() then {
         let resolved_inner = resolve_parameterized_type_cached(mono, chain.inner);
@@ -1664,7 +1664,7 @@ public let resolve_type_node(
 // same tables in the same order. A non-generic nominal is registered in the
 // concrete-type tables and a generic one in the template registry, so neither
 // table alone answers.
-file_private let mono_nominal_from_declared_name(mono Monomorphizer, name String) Type = {
+private let mono_nominal_from_declared_name(mono Monomorphizer, name String) Type = {
     when resolve_builtin_type(name) in {
         .Some(t) then {
             return t;
@@ -1712,7 +1712,7 @@ file_private let mono_nominal_from_declared_name(mono Monomorphizer, name String
 
 /// The DECLARATION a resolved nominal type stands for. Builtins and type
 /// parameters have none, so they report the invalid DefId.
-file_private let mono_nominal_decl_def_id(t Type) DefId = {
+private let mono_nominal_decl_def_id(t Type) DefId = {
     return when t in {
         .StructureType(def_id) then def_id,
         .EnumType(def_id) then def_id,
@@ -1802,7 +1802,7 @@ public let resolve_type_node_identity(
 
 // Dict a type name string to a built-in Type variant.
 // Returns None if the name is not a built-in type.
-file_private let resolve_builtin_type(name String) Option[Type] = {
+private let resolve_builtin_type(name String) Option[Type] = {
     return when name in {
         "Int" then Option[Type].Some(Type.IntType()),
         "Int8" then Option[Type].Some(Type.Int8Type()),
@@ -1835,7 +1835,7 @@ file_private let resolve_builtin_type(name String) Option[Type] = {
 
 // ── collect_vtable_request_if_needed ─────────────────────────────────────────
 
-file_private let normalize_vtable_conformance_actual_type(
+private let normalize_vtable_conformance_actual_type(
     mono Monomorphizer,
     actual Type,
 ) Type = {
@@ -1940,7 +1940,7 @@ file_private let normalize_vtable_conformance_actual_type(
     };
 };
 
-file_private let collect_vtable_conformance_bindings(
+private let collect_vtable_conformance_bindings(
     mono Monomorphizer,
     pattern Type,
     actual Type,
@@ -2068,7 +2068,7 @@ file_private let collect_vtable_conformance_bindings(
     };
 };
 
-file_private let resolve_vtable_trait_args(
+private let resolve_vtable_trait_args(
     mono Monomorphizer,
     concrete_type Type,
     trait_name String,
@@ -2117,7 +2117,7 @@ file_private let resolve_vtable_trait_args(
 /// slots carry is substituted with the bindings that turn the declared target
 /// into it. rustc keeps the same split -- the `impl` is a declaration, the
 /// witness belongs to `Instance { def, args }`.
-file_private let specialize_conformance_witness(
+private let specialize_conformance_witness(
     mono Monomorphizer,
     witness ConformanceWitness,
     instance_trait_ref CanonicalTraitRef,
@@ -2354,7 +2354,7 @@ let collect_concrete_vtable_request(
     };
 };
 
-file_private let concrete_trait_receiver_type(mono Monomorphizer, expr TypedExpr) Type = {
+private let concrete_trait_receiver_type(mono Monomorphizer, expr TypedExpr) Type = {
     return when expr.expr_kind in {
         .TraitObjectConversion(inner, _, concrete_type) then {
             let mutable stored_type = resolve_parameterized_type(mono, concrete_type);
@@ -2365,7 +2365,7 @@ file_private let concrete_trait_receiver_type(mono Monomorphizer, expr TypedExpr
     };
 };
 
-file_private let ordered_trait_method_names_helper(
+private let ordered_trait_method_names_helper(
     mono Monomorphizer,
     trait_name String,
     module_path List[String],
@@ -2384,7 +2384,7 @@ file_private let ordered_trait_method_names_helper(
 
 /// Walk the trait DECLARATION and its parents. Two same-named traits from
 /// different modules are different declarations and must not share a visit slot.
-file_private let ordered_trait_method_names_helper_from_def(
+private let ordered_trait_method_names_helper_from_def(
     mono Monomorphizer,
     trait_def_id DefId,
     visited Set[UInt],
@@ -2415,7 +2415,7 @@ file_private let ordered_trait_method_names_helper_from_def(
     };
 };
 
-file_private let vtable_method_index(
+private let vtable_method_index(
     mono Monomorphizer,
     trait_name String,
     method_name String,
@@ -2441,7 +2441,7 @@ file_private let vtable_method_index(
     return -1;
 };
 
-file_private let vtable_method_index_for_trait_type(
+private let vtable_method_index_for_trait_type(
     mono Monomorphizer,
     trait_type Type,
     method_name String,
@@ -2496,14 +2496,14 @@ file_private let vtable_method_index_for_trait_type(
     return -1;
 };
 
-file_private let expr_is_type_symbol(expr TypedExpr) Bool = {
+private let expr_is_type_symbol(expr TypedExpr) Bool = {
     return when expr.expr_kind in {
         .Variable(sym) then sym.kind is .TypeSymbol(),
         _ then false,
     };
 };
 
-file_private let method_lookup_base_type(mono Monomorphizer, base TypedExpr) Type = {
+private let method_lookup_base_type(mono Monomorphizer, base TypedExpr) Type = {
     when base.expr_kind in {
         .Variable(_) then {
             return base.expr_type;
@@ -2524,7 +2524,7 @@ file_private let method_lookup_base_type(mono Monomorphizer, base TypedExpr) Typ
     };
 };
 
-file_private let type_resolution_trait_object_type(t Type) Option[Type] = {
+private let type_resolution_trait_object_type(t Type) Option[Type] = {
     return when t in {
         .TraitObject(trait_def_id, type_args) then Option[Type].Some(
             Type.TraitObject(trait_def_id, type_args),
@@ -2557,7 +2557,7 @@ file_private let type_resolution_trait_object_type(t Type) Option[Type] = {
     };
 };
 
-file_private let normalize_type_resolution_trait_placeholder_expected_method_type(
+private let normalize_type_resolution_trait_placeholder_expected_method_type(
     mono Monomorphizer,
     method_type Type,
     lookup_base_type Type,
@@ -2604,7 +2604,7 @@ file_private let normalize_type_resolution_trait_placeholder_expected_method_typ
     };
 };
 
-file_private let push_static_method_receiver_alias(
+private let push_static_method_receiver_alias(
     alias_list List[String],
     alias String,
 ) List[String] = {
@@ -2621,7 +2621,7 @@ file_private let push_static_method_receiver_alias(
     return updated;
 };
 
-file_private let strict_wrapper_receiver_aliases(t Type) List[String] = {
+private let strict_wrapper_receiver_aliases(t Type) List[String] = {
     let mutable aliases = List[String].new();
     when t in {
         .ReferenceType(_) then {
@@ -2660,7 +2660,7 @@ file_private let strict_wrapper_receiver_aliases(t Type) List[String] = {
     return aliases;
 };
 
-file_private let static_dispatch_receiver_expr(expr TypedExpr) TypedExpr = {
+private let static_dispatch_receiver_expr(expr TypedExpr) TypedExpr = {
     return when expr.expr_kind in {
         .TraitObjectConversion(inner, _, _) then inner,
         .RefExpr(inner) then when inner.expr_type in {
@@ -2693,7 +2693,7 @@ file_private let static_dispatch_receiver_expr(expr TypedExpr) TypedExpr = {
 /// `DefId -> name -> DefId` round-trip happens. A concrete impl
 /// (`given UInt as Hash { hash }`) materializes with a concrete self, so this
 /// returns None there and no boxing is wanted.
-module_private let register_given_decl_method_identities(
+let register_given_decl_method_identities(
     mono Monomorphizer,
     target_type Type,
     members List[TypedGivenMember],
@@ -2810,7 +2810,7 @@ module_private let register_given_decl_method_identities(
     return out;
 };
 
-file_private let param_types_from_typed_params(params List[TypedParam]) List[Type] = {
+private let param_types_from_typed_params(params List[TypedParam]) List[Type] = {
     let mutable out = List[Type].new();
     for p in params then {
         out.push(p.param_type);
@@ -2819,7 +2819,7 @@ file_private let param_types_from_typed_params(params List[TypedParam]) List[Typ
 };
 
 
-file_private let trait_tool_expected_self_type(
+private let trait_tool_expected_self_type(
     mono Monomorphizer,
     method_def_id DefId,
 ) Option[Type] = {
@@ -2905,7 +2905,7 @@ file_private let trait_tool_expected_self_type(
     };
 };
 
-file_private let adapt_receiver_expr_for_method(
+private let adapt_receiver_expr_for_method(
     mono Monomorphizer,
     receiver_expr TypedExpr,
     method Symbol,
@@ -3233,7 +3233,7 @@ file_private let adapt_receiver_expr_for_method(
     };
 };
 
-file_private let adapt_call_arg_for_expected_param(
+private let adapt_call_arg_for_expected_param(
     mono Monomorphizer,
     arg TypedExpr,
     expected_param_type Type,
@@ -3262,7 +3262,7 @@ file_private let adapt_call_arg_for_expected_param(
     };
 };
 
-file_private let adapt_call_args_for_method(
+private let adapt_call_args_for_method(
     mono Monomorphizer,
     method Symbol,
     args List[TypedExpr],
@@ -3295,7 +3295,7 @@ file_private let adapt_call_args_for_method(
     return adapted_args;
 };
 
-file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) Type = {
+private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) Type = {
     let resolved = resolve_parameterized_type(mono, t);
     return when resolved in {
         .StructureType(def_id) then when mono.storage.context.lookup_type(def_id) in {
@@ -3382,13 +3382,13 @@ file_private let resolve_alias_receiver_match_type(mono Monomorphizer, t Type) T
     };
 };
 
-file_private let receiver_match_layout_key(mono Monomorphizer, t Type) String = {
+private let receiver_match_layout_key(mono Monomorphizer, t Type) String = {
     return mono.storage.context.get_layout_key(
         resolve_alias_receiver_match_type(mono, t),
     );
 };
 
-file_private let receiver_match_keys_equal(
+private let receiver_match_keys_equal(
     mono Monomorphizer,
     left Type,
     right Type,
@@ -3399,7 +3399,7 @@ file_private let receiver_match_keys_equal(
     );
 };
 
-file_private let receiver_param_matches_actual_receiver(
+private let receiver_param_matches_actual_receiver(
     mono Monomorphizer,
     receiver_param_type Type,
     actual_receiver_type Type,
@@ -3504,7 +3504,7 @@ file_private let receiver_param_matches_actual_receiver(
     };
 };
 
-file_private let method_def_id_matches_receiver_exactly(
+private let method_def_id_matches_receiver_exactly(
     mono Monomorphizer,
     method_def_id DefId,
     receiver_type Type,
@@ -3532,7 +3532,7 @@ file_private let method_def_id_matches_receiver_exactly(
     };
 };
 
-file_private let method_symbol_receiver_matches(
+private let method_symbol_receiver_matches(
     mono Monomorphizer,
     method Symbol,
     receiver_type Type,
@@ -3586,7 +3586,7 @@ file_private let method_symbol_receiver_matches(
     };
 };
 
-file_private let normalize_trait_object_expected_type(mono Monomorphizer, t Type) Type = {
+private let normalize_trait_object_expected_type(mono Monomorphizer, t Type) Type = {
     return when resolve_parameterized_type(mono, t) in {
         .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped) then normalize_trait_object_expected_type(mono, mapped),
@@ -3608,7 +3608,7 @@ file_private let normalize_trait_object_expected_type(mono Monomorphizer, t Type
     };
 };
 
-file_private let resolve_concrete_qualified_trait_member(
+private let resolve_concrete_qualified_trait_member(
     mono Monomorphizer,
     concrete_type Type,
     trait_name String,
@@ -3681,7 +3681,7 @@ file_private let resolve_concrete_qualified_trait_member(
     };
 };
 
-file_private let mono_resolve_qualified_method_return_type(
+private let mono_resolve_qualified_method_return_type(
     mono Monomorphizer,
     concrete_type Type,
     trait_name String,
@@ -3704,7 +3704,7 @@ file_private let mono_resolve_qualified_method_return_type(
     };
 };
 
-file_private let method_signature_matches_receiver_type(
+private let method_signature_matches_receiver_type(
     mono Monomorphizer,
     method Symbol,
     receiver_type Type,
@@ -3756,7 +3756,7 @@ file_private let method_signature_matches_receiver_type(
     };
 };
 
-file_private let ensure_receiver_dispatch_callsite(
+private let ensure_receiver_dispatch_callsite(
     mono Monomorphizer,
     dispatch_callsite Option[DefId],
     receiver_type Type,
@@ -3800,7 +3800,7 @@ file_private let ensure_receiver_dispatch_callsite(
     return Option[DefId].Some(callsite_def_id);
 };
 
-file_private let resolve_symbol_type(mono Monomorphizer, symbol Symbol) Symbol = {
+private let resolve_symbol_type(mono Monomorphizer, symbol Symbol) Symbol = {
     let resolved = resolve_parameterized_type(mono, symbol.symbol_type);
     let registered = when mono.storage.context.get_symbol_type(symbol.def_id) in {
         .Some(t) then resolve_parameterized_type(mono, t),
@@ -3818,7 +3818,7 @@ file_private let resolve_symbol_type(mono Monomorphizer, symbol Symbol) Symbol =
     return Symbol(symbol.def_id, chosen, symbol.kind);
 };
 
-file_private let resolve_symbol_list(
+private let resolve_symbol_list(
     mono Monomorphizer,
     symbols List[Symbol],
 ) List[Symbol] = {
@@ -3829,7 +3829,7 @@ file_private let resolve_symbol_list(
     return resolved;
 };
 
-file_private let recover_type_construction_type(
+private let recover_type_construction_type(
     mono Monomorphizer,
     identifier_type Type,
     identifier_def_id DefId,
@@ -3905,7 +3905,7 @@ file_private let recover_type_construction_type(
     return resolved_identifier_type;
 };
 
-file_private let resolve_type_construction_symbol(
+private let resolve_type_construction_symbol(
     mono Monomorphizer,
     identifier Symbol,
     type_args List[Type],
@@ -3925,7 +3925,7 @@ file_private let resolve_type_construction_symbol(
     };
 };
 
-file_private let infer_type_construction_type_from_args(
+private let infer_type_construction_type_from_args(
     mono Monomorphizer,
     identifier_def_id DefId,
     args List[TypedExpr],
@@ -4010,7 +4010,7 @@ file_private let infer_type_construction_type_from_args(
     };
 };
 
-file_private let infer_type_bindings_from_constructor_pattern(
+private let infer_type_bindings_from_constructor_pattern(
     mono Monomorphizer,
     pattern Type,
     concrete Type,
@@ -4161,7 +4161,7 @@ file_private let infer_type_bindings_from_constructor_pattern(
     }
 };
 
-file_private let mono_is_unresolved_expr_type(mono Monomorphizer, t Type) Bool = {
+private let mono_is_unresolved_expr_type(mono Monomorphizer, t Type) Bool = {
     return when t in {
         .VoidType() then true,
         .GenericStruct(_, args) then {
@@ -4220,7 +4220,7 @@ file_private let mono_is_unresolved_expr_type(mono Monomorphizer, t Type) Bool =
     };
 };
 
-file_private let is_concrete_integer_type(t Type) Bool = {
+private let is_concrete_integer_type(t Type) Bool = {
     return when t in {
         .IntType() then true,
         .Int8Type() then true,
@@ -4246,7 +4246,7 @@ file_private let is_concrete_integer_type(t Type) Bool = {
     };
 };
 
-file_private let is_concrete_float_type(t Type) Bool = {
+private let is_concrete_float_type(t Type) Bool = {
     return when t in {
         .Float32Type() then true,
         .Float64Type() then true,
@@ -4254,18 +4254,18 @@ file_private let is_concrete_float_type(t Type) Bool = {
     };
 };
 
-file_private let is_concrete_numeric_type(t Type) Bool = {
+private let is_concrete_numeric_type(t Type) Bool = {
     return is_concrete_integer_type(t) or is_concrete_float_type(t);
 };
 
-file_private let method_semantic_name_from_dispatch(
+private let method_semantic_name_from_dispatch(
     mono Monomorphizer,
     method Symbol,
 ) Option[String] = {
     return Option[String].Some(get_semantic_method_name(mono, method));
 };
 
-file_private let method_semantic_name_from_callsite(
+private let method_semantic_name_from_callsite(
     mono Monomorphizer,
     dispatch_callsite Option[DefId],
 ) Option[String] = {
@@ -4280,7 +4280,7 @@ file_private let method_semantic_name_from_callsite(
     };
 };
 
-file_private let make_zero_integer_literal_expr(t Type) TypedExpr = {
+private let make_zero_integer_literal_expr(t Type) TypedExpr = {
     return TypedExpr(TypedExprKind.IntegerLiteral("0"), t, unknown_span());
 };
 
@@ -4471,7 +4471,7 @@ public let collect_receiver_owners(
     };
 };
 
-file_private let prefer_more_concrete_type(
+private let prefer_more_concrete_type(
     mono Monomorphizer,
     primary Type,
     fallback Type,
@@ -4541,7 +4541,7 @@ file_private let prefer_more_concrete_type(
     return primary;
 };
 
-file_private let resolved_method_return_type(
+private let resolved_method_return_type(
     mono Monomorphizer,
     method Symbol,
     fallback Type,
@@ -4557,7 +4557,7 @@ file_private let resolved_method_return_type(
     return prefer_more_concrete_type(mono, method_return_type, fallback_type);
 };
 
-file_private let resolved_callsite_result_type(
+private let resolved_callsite_result_type(
     mono Monomorphizer,
     declared_type Type,
     method Symbol,
@@ -4571,7 +4571,7 @@ file_private let resolved_callsite_result_type(
     return prefer_more_concrete_type(mono, concrete_declared_type, method_return_type);
 };
 
-file_private let resolved_method_symbol_type(
+private let resolved_method_symbol_type(
     mono Monomorphizer,
     def_id DefId,
     fallback Type,
@@ -4582,7 +4582,7 @@ file_private let resolved_method_symbol_type(
     };
 };
 
-file_private let resolved_method_symbol(
+private let resolved_method_symbol(
     mono Monomorphizer,
     def_id DefId,
     fallback_name String,
@@ -4597,7 +4597,7 @@ file_private let resolved_method_symbol(
     return result;
 };
 
-file_private let method_has_compatible_ref_like_receiver(
+private let method_has_compatible_ref_like_receiver(
     mono Monomorphizer,
     method_type Type,
     base_type Type,
@@ -4623,7 +4623,7 @@ file_private let method_has_compatible_ref_like_receiver(
     };
 };
 
-file_private let should_preserve_resolved_method_reference(
+private let should_preserve_resolved_method_reference(
     mono Monomorphizer,
     method Symbol,
     base_type Type,
@@ -4650,14 +4650,14 @@ file_private let should_preserve_resolved_method_reference(
     };
 };
 
-file_private let is_ref_wrapper_owner_method(mono Monomorphizer, method Symbol) Bool = {
+private let is_ref_wrapper_owner_method(mono Monomorphizer, method Symbol) Bool = {
     return when mono.receiver_method_dispatch_info(method.def_id) in {
         .Some(info) then is_ref_wrapper_owner(info.owner),
         .None() then false,
     };
 };
 
-file_private let unwrap_ref_like_receiver_type_for_value_lookup(
+private let unwrap_ref_like_receiver_type_for_value_lookup(
     mono Monomorphizer,
     receiver_type Type,
 ) Option[Type] = {
@@ -4679,7 +4679,7 @@ file_private let unwrap_ref_like_receiver_type_for_value_lookup(
     };
 };
 
-file_private let resolve_types_in_statement(
+private let resolve_types_in_statement(
     mono Monomorphizer,
     stmt TypedStatement,
 ) TypedStatement = {
@@ -4857,7 +4857,7 @@ file_private let resolve_types_in_statement(
 //   3. Generic method rebind
 //   4. Receiver method symbol rebind (with 3 expected-type variants)
 // Final selection prefers concrete > instantiated > generic rebound > rebound.
-file_private let method_symbol_matches_expected_return(
+private let method_symbol_matches_expected_return(
     mono Monomorphizer,
     method_symbol Symbol,
     expected_return Type,
@@ -4892,7 +4892,7 @@ file_private let method_symbol_matches_expected_return(
 // Returns None when the DefId is missing or the result is still generic -- the
 // caller keeps its node and a later stage reports it, rather than inventing an
 // identity from a name.
-file_private let identity_method_instance_option(
+private let identity_method_instance_option(
     mono Monomorphizer,
     definition_method Symbol,
     receiver_type Type,
@@ -4907,7 +4907,7 @@ file_private let identity_method_instance_option(
     );
 };
 
-file_private let identity_def_id_instance_option(
+private let identity_def_id_instance_option(
     mono Monomorphizer,
     definition_method_def_id DefId,
     definition_method_type Type,
@@ -4941,7 +4941,7 @@ file_private let identity_def_id_instance_option(
     };
 };
 
-file_private let resolve_concrete_method_call(
+private let resolve_concrete_method_call(
     mono Monomorphizer,
     effective_receiver_type Type,
     method Symbol,
@@ -5469,7 +5469,7 @@ file_private let resolve_concrete_method_call(
     return preferred_value_method;
 };
 
-                    file_private let normalize_resolved_call_callee(
+                    private let normalize_resolved_call_callee(
                     mono Monomorphizer,
                     original_callee TypedExpr,
                     resolved_callee TypedExpr,
@@ -5497,7 +5497,7 @@ file_private let resolve_concrete_method_call(
                     };
                     };
 
-file_private let resolve_trait_placeholder_call_callee(
+private let resolve_trait_placeholder_call_callee(
     mono Monomorphizer,
     expr TypedExpr,
     base_expr TypedExpr,
@@ -5722,7 +5722,7 @@ file_private let resolve_trait_placeholder_call_callee(
     return Option[TypedExpr].None();
 };
 
-file_private let resolve_method_reference_call_callee(
+private let resolve_method_reference_call_callee(
     mono Monomorphizer,
     expr TypedExpr,
     new_callee TypedExpr,
@@ -6408,7 +6408,7 @@ file_private let resolve_method_reference_call_callee(
     );
 };
 
-file_private let resolve_member_path_call_callee(
+private let resolve_member_path_call_callee(
     mono Monomorphizer,
     expr TypedExpr,
     resolved_base TypedExpr,
@@ -6536,7 +6536,7 @@ file_private let resolve_member_path_call_callee(
                 };
 };
 
-file_private let resolve_special_call_callee(
+private let resolve_special_call_callee(
     mono Monomorphizer,
     expr TypedExpr,
     new_callee TypedExpr,
@@ -7078,7 +7078,7 @@ public let resolve_types_in_expression(mono Monomorphizer, expr TypedExpr) Typed
     return TypedExpr(resolved_kind, resolved_type, expr.span);
 };
 
-file_private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String = {
+private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String = {
     return when expr.expr_kind in {
         .Variable(symbol) then "variable:\(symbol.def_id.id):\(mono.storage.context.get_layout_key(symbol.symbol_type))",
         .MethodReference(base, _, method, _, _, _) then "method-ref:\(method.def_id.id):base=\(mono.storage.context.get_layout_key(base.expr_type))",
@@ -7129,7 +7129,7 @@ file_private let mono_debug_expr_kind(mono Monomorphizer, expr TypedExpr) String
     };
 };
 
-file_private let instantiated_extension_method_type_matches_expected_pattern(
+private let instantiated_extension_method_type_matches_expected_pattern(
     mono Monomorphizer,
     actual Type,
     expected Type,
@@ -7271,7 +7271,7 @@ file_private let instantiated_extension_method_type_matches_expected_pattern(
 /// The instantiated extension method for `method_def_id` on `base_type`.
 /// Identity answers; the old version collected candidates by NAME and then
 /// picked one by RETURN TYPE, which §B10 forbids ("禁止遍历候选、禁止按返回类型选择").
-file_private let lookup_instantiated_extension_method_symbol(
+private let lookup_instantiated_extension_method_symbol(
     mono Monomorphizer,
     base_type Type,
     method_def_id DefId,
@@ -7297,7 +7297,7 @@ file_private let lookup_instantiated_extension_method_symbol(
     };
 };
 
-file_private let resolve_member_field_type(
+private let resolve_member_field_type(
     mono Monomorphizer,
     base_type Type,
     member_name String,
@@ -7383,7 +7383,7 @@ file_private let resolve_member_field_type(
     return resolve_parameterized_type(mono, fallback);
 };
 
-file_private let resolve_member_path_type(
+private let resolve_member_path_type(
     mono Monomorphizer,
     base_type Type,
     path List[Symbol],
@@ -7400,7 +7400,7 @@ file_private let resolve_member_path_type(
     };
 };
 
-file_private let mono_enum_case_name_matches(
+private let mono_enum_case_name_matches(
     pattern_case_name String,
     enum_case_name String,
 ) Bool = {
@@ -7429,7 +7429,7 @@ file_private let mono_enum_case_name_matches(
     return enum_tail == pattern_tail;
 };
 
-file_private let mono_get_enum_case_field_types(
+private let mono_get_enum_case_field_types(
     mono Monomorphizer,
     subject_type Type,
     tag_index UInt,
@@ -7522,18 +7522,18 @@ file_private let mono_get_enum_case_field_types(
 /// The DECLARATION a struct pattern names, resolved once from its source
 /// spelling. See `TypeChecker.struct_pattern_def_id` -- mono has no imports of
 /// its own to consult, so the registry's own resolution answers here.
-file_private let mono_struct_pattern_def_id(mono Monomorphizer, type_name String) DefId = {
+private let mono_struct_pattern_def_id(mono Monomorphizer, type_name String) DefId = {
     return mono_nominal_decl_def_id(mono_nominal_from_declared_name(mono, type_name));
 };
 
 /// The declaration a `Type.StructureType` stands for: the template it was
 /// instantiated from, or the struct itself when it was never generic.
-file_private let mono_struct_pattern_decl_def_id(mono Monomorphizer, def_id DefId) DefId = {
+private let mono_struct_pattern_decl_def_id(mono Monomorphizer, def_id DefId) DefId = {
     let template_def_id = mono.storage.context.get_template_def_id(def_id);
     if template_def_id == def_id_invalid() then def_id else template_def_id
 };
 
-file_private let mono_get_struct_pattern_field_types(
+private let mono_get_struct_pattern_field_types(
     mono Monomorphizer,
     subject_type Type,
     pattern_def_id DefId,
@@ -7604,7 +7604,7 @@ file_private let mono_get_struct_pattern_field_types(
     };
 };
 
-file_private let mono_collect_pattern_binding_types(
+private let mono_collect_pattern_binding_types(
     mono Monomorphizer,
     pattern TypedPattern,
     subject_type Type,
@@ -7690,7 +7690,7 @@ file_private let mono_collect_pattern_binding_types(
     };
 };
 
-file_private let mono_register_pattern_binding_symbol_type(
+private let mono_register_pattern_binding_symbol_type(
     mono Monomorphizer,
     symbol Symbol,
     bindings Dict[UInt, Type],
@@ -7734,7 +7734,7 @@ file_private let mono_register_pattern_binding_symbol_type(
     };
 };
 
-file_private let mono_register_pattern_binding_types_in_statement(
+private let mono_register_pattern_binding_types_in_statement(
     mono Monomorphizer,
     stmt TypedStatement,
     bindings Dict[UInt, Type],
@@ -7798,7 +7798,7 @@ file_private let mono_register_pattern_binding_types_in_statement(
     }
 };
 
-file_private let mono_register_pattern_binding_types_in_expr(
+private let mono_register_pattern_binding_types_in_expr(
     mono Monomorphizer,
     expr TypedExpr,
     bindings Dict[UInt, Type],
@@ -7991,7 +7991,7 @@ file_private let mono_register_pattern_binding_types_in_expr(
 
 // Try to bind a generic top-level function call callee to a concrete instantiated
 // function symbol using call-site argument types.
-file_private let bind_generic_function_call_callee(
+private let bind_generic_function_call_callee(
     mono Monomorphizer,
     callee TypedExpr,
     args List[TypedExpr],
@@ -8453,7 +8453,7 @@ file_private let bind_generic_function_call_callee(
     return callee;
 };
 
-file_private let infer_generic_function_call_argument_type(
+private let infer_generic_function_call_argument_type(
     mono Monomorphizer,
     arg TypedExpr,
 ) Type = {
@@ -8473,7 +8473,7 @@ file_private let infer_generic_function_call_argument_type(
 //
 // The TypeNode is turned into a SHAPE first (see `resolve_type_node_identity`),
 // so the matcher below compares DECLARATION DefIds and never sees a name.
-file_private let collect_generic_bindings_from_type_node(
+private let collect_generic_bindings_from_type_node(
     mono Monomorphizer,
     expected_node TypeNode,
     actual Type,
@@ -8489,7 +8489,7 @@ file_private let collect_generic_bindings_from_type_node(
     );
 };
 
-file_private let collect_generic_bindings_from_shape_args(
+private let collect_generic_bindings_from_shape_args(
     mono Monomorphizer,
     pattern_args List[Type],
     actual_args List[Type],
@@ -8509,7 +8509,7 @@ file_private let collect_generic_bindings_from_shape_args(
     };
 };
 
-file_private let collect_generic_bindings_from_shape(
+private let collect_generic_bindings_from_shape(
     mono Monomorphizer,
     pattern Type,
     actual Type,
@@ -8700,7 +8700,7 @@ file_private let collect_generic_bindings_from_shape(
 
 // The actual kinds a declared reference accepts. Its own mutability does not
 // narrow them: see `collect_generic_bindings_from_shape`.
-file_private let collect_generic_bindings_from_any_reference(
+private let collect_generic_bindings_from_any_reference(
     mono Monomorphizer,
     inner Type,
     actual Type,
@@ -8740,7 +8740,7 @@ file_private let collect_generic_bindings_from_any_reference(
     };
 };
 
-file_private let collect_generic_bindings_from_borrowed_reference(
+private let collect_generic_bindings_from_borrowed_reference(
     mono Monomorphizer,
     inner Type,
     actual Type,
@@ -8766,7 +8766,7 @@ file_private let collect_generic_bindings_from_borrowed_reference(
     };
 };
 
-file_private let collect_generic_bindings_from_pointer(
+private let collect_generic_bindings_from_pointer(
     mono Monomorphizer,
     inner Type,
     actual Type,
@@ -8792,7 +8792,7 @@ file_private let collect_generic_bindings_from_pointer(
     };
 };
 
-file_private let collect_generic_bindings_from_weak_reference(
+private let collect_generic_bindings_from_weak_reference(
     mono Monomorphizer,
     inner Type,
     actual Type,
@@ -8818,7 +8818,7 @@ file_private let collect_generic_bindings_from_weak_reference(
     };
 };
 
-file_private let is_type_parameter_name(
+private let is_type_parameter_name(
     name String,
     type_params List[TypeParameterDecl],
 ) Bool = {
@@ -8830,7 +8830,7 @@ file_private let is_type_parameter_name(
     return false;
 };
 
-file_private let type_node_mentions_type_parameter(
+private let type_node_mentions_type_parameter(
     node TypeNode,
     type_param_name String,
 ) Bool = {
@@ -8872,7 +8872,7 @@ file_private let type_node_mentions_type_parameter(
     };
 };
 
-file_private let template_type_parameter_constrained_by_parameters(
+private let template_type_parameter_constrained_by_parameters(
     template GenericFunctionTemplate,
     type_param_name String,
 ) Bool = {
@@ -8893,7 +8893,7 @@ let is_placeholder_inferred_type(t Type) Bool = {
     };
 };
 
-file_private let canonical_type_for_generic_binding(mono Monomorphizer, t Type) Type = {
+private let canonical_type_for_generic_binding(mono Monomorphizer, t Type) Type = {
     return when t in {
         .StructureType(def_id) then {
             let reconstructed = when mono.storage.context.get_template_name(def_id) in {
@@ -9058,7 +9058,7 @@ file_private let canonical_type_for_generic_binding(mono Monomorphizer, t Type) 
     };
 };
 
-file_private let is_generic_type_param_name(
+private let is_generic_type_param_name(
     name String,
     type_param_names List[String],
 ) Bool = {
@@ -9435,7 +9435,7 @@ public let unify_generic_type_pattern(
 
 // Collect GenericParameter -> concrete Type bindings by structurally matching an
 // expected template type against an actual call-site type.
-file_private let collect_generic_type_bindings(
+private let collect_generic_type_bindings(
     expected Type,
     actual Type,
     bindings Dict[String, Type],
@@ -9573,7 +9573,7 @@ file_private let collect_generic_type_bindings(
     };
 };
 
-file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExprKind = {
+private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExprKind = {
     return when expr.expr_kind in {
         .Variable(symbol) then TypedExprKind.Variable(resolve_symbol_type(mono, symbol)),
         .IntegerLiteral(value) then TypedExprKind.IntegerLiteral(value),
@@ -10436,7 +10436,7 @@ file_private let resolve_expr_kind(mono Monomorphizer, expr TypedExpr) TypedExpr
 // inferred_extension_method_actual_arg_type has been deleted.
 // resolve_parameterized_type(mono, arg.expr_type) is now used directly.
 
-file_private let extension_method_has_receiver_param(
+private let extension_method_has_receiver_param(
     ext GenericExtensionMethodTemplate,
 ) Bool = {
     let _ = ext.checked_parameters;
@@ -10444,7 +10444,7 @@ file_private let extension_method_has_receiver_param(
     else ext.method.params[UInt(0)].name == "self";
 };
 
-file_private let type_mentions_method_type_params(
+private let type_mentions_method_type_params(
     pattern Type,
     type_param_names List[String],
 ) Bool = {
@@ -10510,7 +10510,7 @@ file_private let type_mentions_method_type_params(
     };
 };
 
-file_private let infer_extension_method_type_args(
+private let infer_extension_method_type_args(
     mono Monomorphizer,
     ext GenericExtensionMethodTemplate,
     base_type Type,
@@ -10685,7 +10685,7 @@ file_private let infer_extension_method_type_args(
     return Option[List[Type]].Some(method_type_args);
 };
 
-file_private let infer_method_type_args_from_symbol_type(
+private let infer_method_type_args_from_symbol_type(
     mono Monomorphizer,
     method_type Type,
     actual_receiver_type Type,
@@ -10790,7 +10790,7 @@ file_private let infer_method_type_args_from_symbol_type(
     return Option[List[Type]].Some(method_type_args);
 };
 
-file_private let patched_extension_template_for_type_resolution(
+private let patched_extension_template_for_type_resolution(
     template GenericExtensionMethodTemplate,
     donor GenericExtensionMethodTemplate,
 ) GenericExtensionMethodTemplate = {
@@ -10814,7 +10814,7 @@ file_private let patched_extension_template_for_type_resolution(
     );
 };
 
-file_private let make_trait_method_symbol(
+private let make_trait_method_symbol(
     mono Monomorphizer,
     method_name String,
     return_type Type,
@@ -10830,7 +10830,7 @@ file_private let make_trait_method_symbol(
 // Get the semantic method name for a symbol, using structured defId lookup
 // instead of brute-force registry search.
 // Mirrors Swift's receiverMethodDispatch[method.defId]?.methodName.
-file_private let get_semantic_method_name(mono Monomorphizer, method Symbol) String = {
+private let get_semantic_method_name(mono Monomorphizer, method Symbol) String = {
     // 1. Try receiver_method_dispatch (from sema)
     if method.def_id.id > 0 then {
         when mono.receiver_method_dispatch_info(method.def_id) in {
@@ -10861,7 +10861,7 @@ file_private let get_semantic_method_name(mono Monomorphizer, method Symbol) Str
     return mono.storage.context.symbol_name(method);
 };
 
-file_private let normalize_receiver_call_method_name(raw_name String) String = {
+private let normalize_receiver_call_method_name(raw_name String) String = {
     let mutable name = raw_name;
     if name.contains(".") then {
         let mutable last_segment = StringBuilder.new();
@@ -10935,7 +10935,7 @@ public let try_bind_generic_method_call(
 
         // ── StaticMethodCall resolution helpers ───────────────────────────────────────
 
-        file_private let static_method_receiver_key_for_type_resolution(
+        private let static_method_receiver_key_for_type_resolution(
         mono Monomorphizer,
         t Type,
         ) String = {
@@ -10976,7 +10976,7 @@ public let try_bind_generic_method_call(
         };
         };
 
-        file_private let push_static_method_receiver_alias_for_type_resolution(
+        private let push_static_method_receiver_alias_for_type_resolution(
         alias_list List[String],
         alias String,
         ) List[String] = {
@@ -10996,14 +10996,14 @@ public let try_bind_generic_method_call(
         /// Owner identity of the type a static call is dispatched on. Identity twin of
         /// `resolve_static_call_template_name`, which returns a SPELLING for display and
         /// mangling; anything keyed by identity must use this instead.
-        file_private let resolve_static_call_owner(mono Monomorphizer, t Type) MethodOwner = {
+        private let resolve_static_call_owner(mono Monomorphizer, t Type) MethodOwner = {
         return mono.storage.context.method_owner_of(resolve_parameterized_type(mono, t));
         };
 
         /// Owner identities whose methods answer for a static-call receiver. Twin of
         /// `static_method_receiver_aliases_for_type_resolution` -- see
         /// `collect_receiver_owners` for why a wrapper contributes more than one.
-        file_private let static_method_receiver_owners(
+        private let static_method_receiver_owners(
         mono Monomorphizer,
         t Type,
         ) List[MethodOwner] = {
@@ -11012,7 +11012,7 @@ public let try_bind_generic_method_call(
         return owners;
         };
 
-        file_private let static_method_receiver_aliases_for_type_resolution(
+        private let static_method_receiver_aliases_for_type_resolution(
         mono Monomorphizer,
         t Type,
         ) List[String] = {
@@ -11145,7 +11145,7 @@ public let try_bind_generic_method_call(
     return aliases;
 };
 
-file_private let bind_static_method_symbol_for_type_resolution(
+private let bind_static_method_symbol_for_type_resolution(
     mono Monomorphizer,
     receiver_type Type,
     method Symbol,
@@ -11174,7 +11174,7 @@ file_private let bind_static_method_symbol_for_type_resolution(
 
 // Resolve a StaticMethodCall to a Call(Variable(...)) expression, matching the
 // Swift compiler's behavior. This is the main entry point called from resolve_expr_kind.
-file_private let resolve_static_method_call_to_call(
+private let resolve_static_method_call_to_call(
     mono Monomorphizer,
     expr TypedExpr,
     receiver_type Type,
@@ -11657,7 +11657,7 @@ file_private let resolve_static_method_call_to_call(
 // For StructureType/EnumType, uses the template name if available (for generic
 // instantiations), otherwise the concrete name. For built-in types, uses the
 // type mutable name directly (e.g. "String", "Int").
-file_private let resolve_static_call_template_name(mono Monomorphizer, t Type) String = {
+private let resolve_static_call_template_name(mono Monomorphizer, t Type) String = {
     return when t in {
         .StructureType(def_id) then {
             let nominal_name = when mono.storage.context.get_name(def_id) in {
@@ -11733,7 +11733,7 @@ file_private let resolve_static_call_template_name(mono Monomorphizer, t Type) S
     };
 };
 
-file_private let resolve_static_call_emitted_scope_name(
+private let resolve_static_call_emitted_scope_name(
     mono Monomorphizer,
     t Type,
 ) String = {
@@ -11766,7 +11766,7 @@ file_private let resolve_static_call_emitted_scope_name(
     };
 };
 
-file_private let specialized_static_method_symbol_name(
+private let specialized_static_method_symbol_name(
     mono Monomorphizer,
     receiver_type Type,
     method_name String,
@@ -11795,7 +11795,7 @@ file_private let specialized_static_method_symbol_name(
     return out.to_string();
 };
 
-file_private let join_strings(values List[String], separator String) String = {
+private let join_strings(values List[String], separator String) String = {
     let mutable out = StringBuilder.new();
     let mutable first = true;
     for value in values then {
@@ -11808,7 +11808,7 @@ file_private let join_strings(values List[String], separator String) String = {
     return out.to_string();
 };
 
-file_private let instantiate_trait_target_static_method(
+private let instantiate_trait_target_static_method(
     mono Monomorphizer,
     base_type Type,
     method_name String,
@@ -12029,7 +12029,7 @@ file_private let instantiate_trait_target_static_method(
     return Option[Symbol].None();
 };
 
-file_private let trait_target_static_candidate_given_decls(
+private let trait_target_static_candidate_given_decls(
     mono Monomorphizer,
     dispatch_trait_def_id_opt Option[DefId],
 ) List[TypedDecl] = {
@@ -12071,7 +12071,7 @@ file_private let trait_target_static_candidate_given_decls(
     };
 };
 
-file_private let trait_target_static_lookup_cache_key(
+private let trait_target_static_lookup_cache_key(
     mono Monomorphizer,
     base_type Type,
     method_name String,
@@ -12126,7 +12126,7 @@ file_private let trait_target_static_lookup_cache_key(
     return key.to_string();
 };
 
-file_private let concrete_method_lookup_cache_key(
+private let concrete_method_lookup_cache_key(
     mono Monomorphizer,
     base_type Type,
     method_name String,
@@ -12173,7 +12173,7 @@ file_private let concrete_method_lookup_cache_key(
     return key.to_string();
 };
 
-file_private let cache_concrete_method_lookup_hit(
+private let cache_concrete_method_lookup_hit(
     mono Monomorphizer,
     cache_key String,
     symbol Symbol,
@@ -12182,7 +12182,7 @@ file_private let cache_concrete_method_lookup_hit(
     return Option[Symbol].Some(symbol);
 };
 
-file_private let cache_concrete_method_lookup_miss(
+private let cache_concrete_method_lookup_miss(
     mono Monomorphizer,
     cache_key String,
 ) Option[Symbol] = {
@@ -12191,7 +12191,7 @@ file_private let cache_concrete_method_lookup_miss(
 };
 
 
-file_private let find_declared_static_receiver_method(
+private let find_declared_static_receiver_method(
     mono Monomorphizer,
     base_type Type,
     method_name String,
@@ -12296,7 +12296,7 @@ file_private let find_declared_static_receiver_method(
     return Option[Symbol].None();
 };
 
-file_private let declared_static_receiver_method_is_materialized(
+private let declared_static_receiver_method_is_materialized(
     mono Monomorphizer,
     def_id DefId,
 ) Bool = {
@@ -12304,7 +12304,7 @@ file_private let declared_static_receiver_method_is_materialized(
     return mono.storage.materialized_function_def_ids.contains(def_id.id);
 };
 
-file_private let refresh_declared_static_receiver_lookup_index(mono Monomorphizer) Void = {
+private let refresh_declared_static_receiver_lookup_index(mono Monomorphizer) Void = {
     let start_index = mono.storage.declared_static_receiver_indexed_node_count;
     if start_index >= mono.storage.generated_nodes.count() then {
         return;
@@ -12335,7 +12335,7 @@ file_private let refresh_declared_static_receiver_lookup_index(mono Monomorphize
     );
 };
 
-file_private let index_declared_static_receiver_members(
+private let index_declared_static_receiver_members(
     mono Monomorphizer,
     target_type Type,
     members List[TypedGivenMember],
@@ -12401,7 +12401,7 @@ file_private let index_declared_static_receiver_members(
 
 // Enqueue an extension method instantiation request for a static method call
 // if the extension method template exists in the registry.
-file_private let enqueue_extension_method_for_static_call(
+private let enqueue_extension_method_for_static_call(
     mono Monomorphizer,
     base_type Type,
     method_name String,
@@ -12711,7 +12711,7 @@ file_private let enqueue_extension_method_for_static_call(
 
 // ── resolve_types_in_global_node ──────────────────────────────────────────────
 
-file_private let resolve_global_node_source_params(
+private let resolve_global_node_source_params(
     mono Monomorphizer,
     def_id DefId,
     fallback List[TypedParam],
@@ -12744,7 +12744,7 @@ file_private let resolve_global_node_source_params(
     };
 };
 
-file_private let resolve_global_node_source_return_type(
+private let resolve_global_node_source_return_type(
     mono Monomorphizer,
     def_id DefId,
     fallback Type,
@@ -12752,7 +12752,7 @@ file_private let resolve_global_node_source_return_type(
     return mono.storage.context.get_function_return_type(def_id) or else fallback;
 };
 
-file_private let mono_all_given_member_bodies_resolved(
+private let mono_all_given_member_bodies_resolved(
     mono Monomorphizer,
     members List[TypedGivenMember],
 ) Bool = {

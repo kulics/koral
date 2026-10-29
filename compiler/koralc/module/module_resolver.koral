@@ -98,7 +98,7 @@ given ModuleError as Error {
     };
 };
 
-file_private type PendingUsing {
+private type PendingUsing {
     Module(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
     LocalModule(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
     File(specifier String, span SourceSpan),
@@ -106,7 +106,7 @@ file_private type PendingUsing {
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
-module_private type mutable ModuleResolverStorage(
+type mutable ModuleResolverStorage(
     mutable resolving_files List[String],
     // The packages a `using` name can name. Absent for a bare-file compile,
     // where `using` can only merge files.
@@ -122,7 +122,7 @@ module_private type mutable ModuleResolverStorage(
     mutable claimed_files Dict[String, String],
 );
 
-public type mutable ModuleResolver(module_private mutable storage ModuleResolverStorage);
+public type mutable ModuleResolver(mutable storage ModuleResolverStorage);
 
 public type ResolvedModuleGraph(
     root_module_path String,
@@ -202,7 +202,7 @@ given ModuleResolver {
     };
 
     /// Parse and process a single file into a module.
-    file_private resolve_file(
+    private resolve_file(
         self,
         file String,
         module ModuleInfo,
@@ -313,7 +313,7 @@ given ModuleResolver {
         return Result[Void].Ok({});
     };
 
-    file_private collect_pending_usings(
+    private collect_pending_usings(
         self,
         normalized_file String,
         module ModuleInfo,
@@ -376,7 +376,7 @@ given ModuleResolver {
     /// Turn the specifier written in `using` into a declared module and load
     /// it. The first segment names a package in the OWNING package's table --
     /// a dependency's source names its own packages, not the consumer's (§4).
-    file_private resolve_module_import(
+    private resolve_module_import(
         self,
         specifier String,
         specifier_span SourceSpan,
@@ -483,7 +483,7 @@ given ModuleResolver {
         return Result[ResolvedModuleSpec].Ok(spec);
     };
 
-    file_private record_module_using(
+    private record_module_using(
         self,
         specifier String,
         specifier_span SourceSpan,
@@ -599,7 +599,7 @@ given ModuleResolver {
     /// The target module is created on first reference if nothing claimed it.
     /// Once it exists it is a module like any other -- it can also be merged
     /// (bare form) or imported by name if a manifest entry names it.
-    file_private record_local_module_using(
+    private record_local_module_using(
         self,
         specifier String,
         specifier_span SourceSpan,
@@ -726,7 +726,7 @@ given ModuleResolver {
     /// The `package_root` of the registered package whose source tree contains
     /// `file_path` -- longest match wins, since a path dependency may sit inside
     /// the root package's tree. `None` when no package claims the file.
-    file_private package_root_containing(self, file_path String) Option[String] = {
+    private package_root_containing(self, file_path String) Option[String] = {
         let entry_path = (when absolute_path(file_path.into_path()) in {
             .Ok(p) then p,
             .Error(_) then file_path.into_path(),
@@ -767,10 +767,10 @@ given ModuleResolver {
     /// for a local entry file -- a specifier says where the target is, the
     /// braces say whether its boundary survives.
     ///
-    /// The target's boundary is gone afterwards: its `module_private` names are
-    /// this module's `module_private` names. It may therefore be merged into at
+    /// The target's boundary is gone afterwards: its `internal` names are
+    /// this module's `internal` names. It may therefore be merged into at
     /// most one module, and once merged it can no longer be imported (§7).
-    file_private merge_module_into(
+    private merge_module_into(
         self,
         spec ResolvedModuleSpec,
         specifier String,
@@ -779,7 +779,7 @@ given ModuleResolver {
         unit CompilationUnit,
     ) Result[Void] = {
         // Merge dissolves the target's boundary, so it stays inside one package
-        // (§3.2): the target's `module_private` names become this module's and
+        // (§3.2): the target's `internal` names become this module's and
         // its declarations join this package's identity. Another package's
         // module can only be imported, never merged.
         if package_id_for_kind(spec.package_kind) != module.package_id() then {
@@ -809,7 +809,7 @@ given ModuleResolver {
 
     // Resolve file merge: using "file_name"
     // Resolves a normalized relative source path against the current file's directory and merges it.
-    file_private resolve_file_merge(
+    private resolve_file_merge(
         self,
         file_name String,
         using_span SourceSpan,
@@ -1066,7 +1066,7 @@ given ModuleResolver {
         return specs;
     };
 
-    file_private collect_unique_module_paths(
+    private collect_unique_module_paths(
         self,
         loaded_nodes_with_path List[Pair[LoadedNode, List[String]]],
     ) List[List[String]] = {
@@ -1084,7 +1084,7 @@ given ModuleResolver {
         return module_paths;
     };
 
-    file_private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
+    private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
         let mutable seen = Set[String].new();
         let mutable source_files = List[String].new();
         for node in loaded_nodes.iterator() then {
@@ -1118,7 +1118,7 @@ public let is_std_package_id(package_id String) Bool = {
 /// Sorted, comma-joined -- or `<none>` when there is nothing to list. Order
 /// must not depend on hash iteration, because the text is compared across
 /// compilers.
-file_private let join_sorted(values List[String]) String = {
+private let join_sorted(values List[String]) String = {
     if values.is_empty() then {
         return "<none>";
     };
@@ -1191,7 +1191,7 @@ public let module_file_name_to_identifier(filename String) String = {
     return result.to_string();
 };
 
-file_private let module_debug(message String) Void = {
+private let module_debug(message String) Void = {
     if env("KORAL_DEBUG_MODULE") is .Some(v) and (v == "1" or v == "true" or v == "TRUE") then {
         eprintln(message);
     };

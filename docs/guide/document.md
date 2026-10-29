@@ -23,7 +23,7 @@ This manual is ordered the way the language is learned: **language basics**, the
 - Trait-based polymorphism with trait objects for runtime dispatch.
 - First-class functions, lambdas, and closures.
 - Multi-paradigm programming (combining functional and imperative).
-- Module system with access control (`public` / `package_private` / `module_private` / `file_private`).
+- Module system with access control (`private` / `internal` / `protected` / `public`).
 - Foreign function interface (FFI) for seamless C interop.
 - C backend for broad platform compatibility.
 
@@ -1550,7 +1550,7 @@ Type aliases support access modifiers:
 
 ```koral
 public type Meters = Int;       // Public
-file_private type InternalId = Int;  // File-scoped only
+private type InternalId = Int;  // File-scoped only
 ```
 
 Restrictions:
@@ -2796,7 +2796,7 @@ using "./util.koral";          // a module that itself merges others
 ```
 
 The target's whole closure joins the current module and its boundary is gone:
-its `module_private` names become this module's `module_private` names.
+its `internal` names become this module's `internal` names.
 
 1. A local path must end in `.koral` and is resolved against the directory of
    the current file; `.` / `..` may appear;
@@ -2955,26 +2955,49 @@ Koral provides four access levels to control symbol visibility:
 
 | Modifier | Visibility |
 |----------|------------|
+| `private` | Accessible only within the same file |
+| `internal` | Accessible within the current logical module (the default) |
+| `protected` | Accessible from any module in the same package |
 | `public` | Accessible from anywhere |
-| `package_private` | Accessible from any module in the same package |
-| `module_private` | Accessible within the current logical module |
-| `file_private` | Accessible only within the same file |
 
 Package scope follows the manifest graph: the root package, `std`, and each dependency package are separate package boundaries.
 
+> **`protected` means package-visible, not subclass-visible.** In Java, C++,
+> C# and Kotlin `protected` grants access to subclasses; Koral's `protected`
+> grants access to every module in the same package -- the distribution
+> boundary. Koral has no inheritance, so the subclass reading does not apply.
+> (Readers of early Koral material: `protected` used to be the module-level
+> spelling; that role is now `internal`.)
+
 ##### Default Access Levels
+
+An unannotated declaration is `internal` (module-visible). Write an access
+modifier only to mark a deviation from that default: `private` narrows it,
+`protected` and `public` widen it.
 
 | Declaration | Default |
 |-------------|---------|
-| Global `let`/variables, functions, types, traits | `module_private` |
-| Struct fields | `public` |
-| Trait methods | `public` |
-| Member functions (in `given` blocks) | `module_private` |
-| Enum cases & case fields | no per-item modifier; visible with the enum type |
+| Global `let`/variables, functions, types, traits, type aliases | `internal` |
+| Struct fields | `internal` |
+| Member functions (in `given` blocks) | `internal` |
+| Trait requirements | the trait declaration's level |
+| Enum cases & case fields | the enum declaration's level |
 | `using` declaration | file-local (imported bindings are not re-exported) |
 
-Direct struct construction `Type(...)` is only allowed when all referenced fields are visible at the call site.
-If a type has inaccessible `file_private`/`module_private`/`package_private` fields, use an exposed public factory method.
+Trait requirements and enum cases are interface items: they take no access
+modifier of their own (`Access modifier on trait method is not supported`) and
+inherit the visibility of the declaration that contains them. A `given`
+declaration itself takes no access modifier either
+(`Access modifier on given declaration is not supported`); its member
+methods may.
+
+Direct struct construction `Type(...)` is only allowed when all referenced
+fields are visible at the call site. Since fields default to `internal`,
+constructing a type from another module fails with
+`Cannot directly construct type 'X' because field 'a' is internal. Use a public factory method instead.`
+Expose a public factory method instead -- or, for value-carrier types such as
+std's `Pair`, declare the fields `public` so callers may construct them
+directly.
 
 ### Project Structure Example
 

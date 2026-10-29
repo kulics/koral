@@ -370,7 +370,7 @@ public class NameCollector: CompilerPass {
         isStdLib: Bool,
         isMutableType: Bool = false
     ) throws {
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
@@ -452,7 +452,7 @@ public class NameCollector: CompilerPass {
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
@@ -547,7 +547,7 @@ public class NameCollector: CompilerPass {
         )
 
         // 收集函数信息
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
 
@@ -643,7 +643,7 @@ public class NameCollector: CompilerPass {
             name: name,
             kind: defKind,
             sourceFile: currentSourceFile,
-            access: .module_private,
+            access: .internal,
             packageID: currentPackageID,
             span: span
         )
@@ -655,14 +655,14 @@ public class NameCollector: CompilerPass {
                 name: name,
                 kind: .structure,
                 typeParameters: typeParameters,
-                access: .module_private
+                access: .internal
             )
         } else {
             collectedTypes[qualifiedName] = CollectedTypeInfo(
                 defId: defId,
                 name: name,
                 kind: .structure,
-                access: .module_private,
+                access: .internal,
                 isPrivate: false,
                 sourceFile: currentSourceFile,
                 modulePath: currentModulePath
@@ -682,7 +682,7 @@ public class NameCollector: CompilerPass {
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
@@ -726,7 +726,7 @@ public class NameCollector: CompilerPass {
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
 
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
@@ -792,7 +792,7 @@ public class NameCollector: CompilerPass {
             name: name,
             kind: defKind,
             sourceFile: currentSourceFile,
-            access: .module_private,
+            access: .internal,
             packageID: currentPackageID,
             span: span
         )
@@ -806,7 +806,7 @@ public class NameCollector: CompilerPass {
             defId: defId,
             name: name,
             isGeneric: !typeParameters.isEmpty,
-            access: .module_private,
+            access: .internal,
             isPrivate: false,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath

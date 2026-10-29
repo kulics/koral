@@ -294,9 +294,9 @@ public type mutable StringBytesIterator;
 
 public type mutable StringRunesIterator;
 
-public type Pair[T Any, U Any](first T, second U);
+public type Pair[T Any, U Any](public first T, public second U);
 
-public type mutable Cell[T Any](mutable value T);
+public type mutable Cell[T Any](public mutable value T);
 ```
 
 ## Given Implementations

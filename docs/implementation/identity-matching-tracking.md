@@ -88,7 +88,7 @@ rustc 把 inherent impl 与 trait impl 都按 **`DefId`** 索引（`inherent_imp
 
 ### 7.3 踩过的坑
 
-- `file_private` 是**文件作用域**，不是模块作用域。
+- `private` 是**文件作用域**，不是模块作用域。
 - **enum variant 的模式不是字符串字面量**：`when x in { .Ok(v) then ... }` 是模式，
   不能拿字符串比。
 - `Dict` 的键类型必须有 `Eq` 与 `Hash`，否则编译期就报。

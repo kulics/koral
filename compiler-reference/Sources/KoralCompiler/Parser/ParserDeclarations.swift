@@ -276,8 +276,9 @@ extension Parser {
       )
     } else if currentToken === .givenKeyword {
       if explicitAccess != nil {
-        throw ParserError.unexpectedToken(
-          span: currentSpan, got: "Access modifier on given declaration")
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Access modifier on given declaration is not supported")
       }
       let keywordSpan = currentSpan
       try match(.givenKeyword)
@@ -333,7 +334,16 @@ extension Parser {
 
     var methods: [TraitMethodSignature] = []
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier(default: .public)
+      // A trait requirement has no access modifier slot: its visibility IS the
+      // trait declaration's, stamped onto every signature below. A legacy
+      // spelling in this slot still gets the migration hint.
+      try rejectLegacyAccessSpellingIfNeeded()
+      if isCurrentAccessModifierToken() {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Access modifier on trait method is not supported")
+      }
+      let methodAccess = access
 
       guard case .identifier(let methodName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait member")
@@ -451,7 +461,7 @@ extension Parser {
     var methods: [IntrinsicMethodDeclaration] = []
 
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier(default: .module_private)
+      let methodAccess = try parseAccessModifier(default: .internal)
 
       // Intrinsic methods inside intrinsic given are implicitly intrinsic, so no need for keyword check?
       // Or do we disallow nested modifiers?
@@ -569,7 +579,7 @@ extension Parser {
     try match(.leftBrace)
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
-      let methodAccess = try parseAccessModifier(default: .module_private)
+      let methodAccess = try parseAccessModifier(default: .internal)
 
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "given member")
@@ -679,7 +689,7 @@ extension Parser {
   }
 
   private func isCurrentAccessModifierToken() -> Bool {
-    currentToken === .publicKeyword || currentToken === .filePrivateKeyword || currentToken === .modulePrivateKeyword || currentToken === .packagePrivateKeyword
+    currentToken === .publicKeyword || currentToken === .privateKeyword || currentToken === .internalKeyword || currentToken === .protectedKeyword
   }
 
   /// Reads the leading access modifier only. `foreign` / `intrinsic` are NOT
@@ -688,9 +698,15 @@ extension Parser {
   /// `let mutable` established -- where `parseDeclQualifiers` reads them.
   private func parseTopLevelDeclFlags() throws -> TopLevelDeclFlags {
     var explicitAccess: AccessModifier? = nil
-    var access: AccessModifier = .module_private
+    var access: AccessModifier = .internal
 
     while true {
+      // An identifier in this slot is never a name -- a global declaration
+      // opens with `let`/`type`/`given`/`trait` -- so a legacy spelling here is
+      // an attempted modifier and gets the migration hint (the follower test
+      // inside the check decides, matching the bootstrap parser). This must run
+      // before the keyword gate below, which would otherwise fall through.
+      try rejectLegacyAccessSpellingIfNeeded()
       if isCurrentAccessModifierToken() {
         if let existingAccess = explicitAccess {
           throw ParserError.invalidAccessModifierOrder(
@@ -699,7 +715,7 @@ extension Parser {
           )
         }
         explicitAccess = try parseExplicitAccessModifier()
-        access = explicitAccess ?? .module_private
+        access = explicitAccess ?? .internal
         continue
       }
 
@@ -751,7 +767,7 @@ extension Parser {
   }
 
   private func ensureNoTrailingAccessModifier(after accessText: String) throws {
-    if currentToken === .publicKeyword || currentToken === .filePrivateKeyword || currentToken === .modulePrivateKeyword || currentToken === .packagePrivateKeyword {
+    if currentToken === .publicKeyword || currentToken === .privateKeyword || currentToken === .internalKeyword || currentToken === .protectedKeyword {
       let next = currentToken.description
       throw ParserError.invalidAccessModifierOrder(
         span: currentSpan,
@@ -760,16 +776,60 @@ extension Parser {
     }
   }
 
+  /// The removed access spellings are ordinary identifiers now, so written in
+  /// a modifier slot they read as a name and the user gets a bare "Unexpected
+  /// token". Recognise the three legacy words here -- only where an access
+  /// modifier is read -- and point at the current spelling. A name slot is
+  /// protected by the follower test below: `let file_private = 1` and
+  /// `type T(file_private Int)` name their declarations and keep working.
+  private func rejectLegacyAccessSpellingIfNeeded() throws {
+    guard case .identifier(let text) = currentToken else { return }
+    let message: String
+    switch text {
+    case "file_private":
+      message = "Access modifier is 'private', not legacy 'file_private'"
+    case "module_private":
+      message = "Access modifier is 'internal', not legacy 'module_private'"
+    case "package_private":
+      message = "Access modifier is 'protected', not legacy 'package_private'"
+    default:
+      return
+    }
+    guard nextTokenOpensDeclarationItem() else { return }
+    throw ParserError.rejectedConstruct(span: currentSpan, message: message)
+  }
+
+  /// The next token starts what a modifier slot modifies: another modifier, a
+  /// declaration keyword, or the declared NAME. When the next token instead
+  /// completes the current identifier AS a name (`:`, `(`, `[`, a type after a
+  /// positional field name, ...) the identifier is a name, not a modifier.
+  /// Mirrors the bootstrap parser's `next_token_opens_declaration_item`.
+  private func nextTokenOpensDeclarationItem() -> Bool {
+    switch lexer.peekNextToken() {
+    case .letKeyword, .mutableKeyword, .typeKeyword, .usingKeyword, .traitKeyword,
+         .givenKeyword, .foreignKeyword, .intrinsicKeyword,
+         .privateKeyword, .internalKeyword, .protectedKeyword, .publicKeyword:
+      return true
+    case .identifier(let name):
+      if !name.isEmpty, name.allSatisfy({ $0 == "_" }) { return true }
+      if let first = name.first, first.isLowercase { return true }
+      return false
+    default:
+      return false
+    }
+  }
+
   func parseExplicitAccessModifier() throws -> AccessModifier? {
-    if currentToken === .filePrivateKeyword {
-      try match(.filePrivateKeyword)
-      return .file_private
-    } else if currentToken === .modulePrivateKeyword {
-      try match(.modulePrivateKeyword)
-      return .module_private
-    } else if currentToken === .packagePrivateKeyword {
-      try match(.packagePrivateKeyword)
-      return .package_private
+    try rejectLegacyAccessSpellingIfNeeded()
+    if currentToken === .privateKeyword {
+      try match(.privateKeyword)
+      return .private
+    } else if currentToken === .internalKeyword {
+      try match(.internalKeyword)
+      return .internal
+    } else if currentToken === .protectedKeyword {
+      try match(.protectedKeyword)
+      return .protected
     } else if currentToken === .publicKeyword {
       try match(.publicKeyword)
       return .public
@@ -1102,7 +1162,7 @@ extension Parser {
     var seenNamedField = false
 
     while currentToken !== .rightParen {
-      let fieldAccess = try parseAccessModifier(default: .public)
+      let fieldAccess = try parseAccessModifier(default: .internal)
 
       // Check for mutable keyword for the field
       var fieldMutable = false

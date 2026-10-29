@@ -20,7 +20,7 @@ given CstParser {
     // Token helpers
     // ========================================================================
 
-    file_private peek(self) Token = {
+    private peek(self) Token = {
         let mutable i = self.pos;
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -36,14 +36,14 @@ given CstParser {
         return Token.EOF();
     };
 
-    file_private peek_raw(self) Token = {
+    private peek_raw(self) Token = {
         if self.pos >= self.tokens.count() then {
             return .EOF();
         };
         return self.tokens[self.pos];
     };
 
-    file_private advance(self) Token = {
+    private advance(self) Token = {
         if self.pos >= self.tokens.count() then {
             return .EOF();
         };
@@ -52,7 +52,7 @@ given CstParser {
         return tok;
     };
 
-    file_private skip_newlines(self) Void = {
+    private skip_newlines(self) Void = {
         while self.pos < self.tokens.count() then {
             when self.tokens[self.pos] in {
                 .Newline() then {
@@ -65,24 +65,24 @@ given CstParser {
         };
     };
 
-    file_private expected_error(self, expected String) String = {
+    private expected_error(self, expected String) String = {
         let got = self.peek();
         return "Parse error: expected \(expected), got '\(got.to_string())' at token #\(self.pos.to_string())";
     };
 
-    file_private is_eof(self) Bool = self.peek() is .EOF();
+    private is_eof(self) Bool = self.peek() is .EOF();
 
-    file_private check(self, expected Token) Bool =
+    private check(self, expected Token) Bool =
         Token.tag(self.peek()) == Token.tag(expected);
 
-    file_private expect(self, expected Token, expected_name String) Result[Token] = {
+    private expect(self, expected Token, expected_name String) Result[Token] = {
         if self.check(expected) then {
             return .Ok(self.eat());
         };
         return .Error(self.expected_error(expected_name));
     };
 
-    file_private expect_ident(self, what String) Result[Token] = when self.peek() in {
+    private expect_ident(self, what String) Result[Token] = when self.peek() in {
         .Ident(_) then .Ok(self.eat()),
         _ then .Error(self.expected_error(what)),
     };
@@ -99,7 +99,7 @@ given CstParser {
     /// The index of the first token at or after `i` that is not a newline.
     /// The parser's `peek()` skips newlines; the scanner must too, or a
     /// multi-line call argument makes it see `Newline` where the parser sees `(`.
-    file_private sig_index_at(self, i UInt) UInt = {
+    private sig_index_at(self, i UInt) UInt = {
         let mutable j = i;
         while j < self.tokens.count() and self.tokens[j] is .Newline() then {
             j += 1;
@@ -111,7 +111,7 @@ given CstParser {
     /// can begin a type. Mirrors `is_type_start`, except that `*` only starts
     /// a type when followed by a type head: `f(*p)` dereferences, it does not
     /// cast.
-    file_private token_starts_type_at(self, raw_i UInt) Bool = {
+    private token_starts_type_at(self, raw_i UInt) Bool = {
         let i = self.sig_index_at(raw_i);
         if i >= self.tokens.count() then {
             return false;
@@ -129,7 +129,7 @@ given CstParser {
 
     /// Whether a token can start a type head (after `*`).
     /// Type heads are `mutable`, `Self`, and uppercase identifiers.
-    file_private token_is_type_head(self, token Token) Bool = {
+    private token_is_type_head(self, token Token) Bool = {
         return when token in {
             .KwMut() or .KwSelfType() then true,
             .Ident(name) then self.is_type_start(.Ident(name)),
@@ -138,7 +138,7 @@ given CstParser {
     };
 
     /// The index just past one type starting at `start_index`, or `None`.
-    file_private scan_type_shape_at(self, raw_start UInt) Option[UInt] = {
+    private scan_type_shape_at(self, raw_start UInt) Option[UInt] = {
         let mutable i = self.sig_index_at(raw_start);
         let mutable more_prefixes = true;
         while more_prefixes then {
@@ -204,7 +204,7 @@ given CstParser {
 
     /// The index just past a `[` `<type-list>` `]` (or `(` `<type-list>` `)`)
     /// run starting at `start_index`, or `None`.
-    file_private scan_type_list_at(self, raw_start UInt) Option[UInt] = {
+    private scan_type_list_at(self, raw_start UInt) Option[UInt] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return Option[UInt].None();
@@ -250,7 +250,7 @@ given CstParser {
     /// closing `)`: an empty `()` is not a type, a trailing comma disqualifies
     /// (`(T,)`), and a type LIST is only a type with the `->` that turns it
     /// into a function type.
-    file_private scan_single_type_group_at(self, raw_start UInt) Option[UInt] = {
+    private scan_single_type_group_at(self, raw_start UInt) Option[UInt] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() or self.tokens[start_index] is not .LParen() then {
             return Option[UInt].None();
@@ -272,7 +272,7 @@ given CstParser {
     /// Whether `expr` is written as a TYPE NAME: a bare upper-first identifier
     /// or a generic instantiation of one. That is what lets `Type(expr)` be a
     /// cast rather than an ordinary call.
-    file_private expr_is_type_name(self, expr CstExpr) Bool = {
+    private expr_is_type_name(self, expr CstExpr) Bool = {
         return when expr in {
             .Ident(tok) then when tok in {
                 .Ident(name) then self.is_type_start(.Ident(name)),
@@ -286,7 +286,7 @@ given CstParser {
     /// The target type of a `Type(expr)` cast, read off the callee when that
     /// callee is written as a type name. `Int(x)` gives `Int`, `Box[T](x)` gives
     /// `Box[T]`. `None` when the expression is not a type name.
-    file_private expr_as_cast_type(self, expr CstExpr) Option[CstType] = {
+    private expr_as_cast_type(self, expr CstExpr) Option[CstType] = {
         when expr in {
             .Ident(tok) then {
                 when tok in {
@@ -322,7 +322,7 @@ given CstParser {
     /// `)`, or after an optional return type written there. Reads the buffer
     /// only. This replaces a trial that parsed the whole lambda (body included)
     /// speculatively and rolled back on any failure.
-    file_private shape_is_lambda_at(self, raw_start UInt) Bool = {
+    private shape_is_lambda_at(self, raw_start UInt) Bool = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return false;
@@ -383,7 +383,7 @@ given CstParser {
     };
 
     /// After a lambda's parameter list: `=>`, or `<type> =>`.
-    file_private lambda_return_clause_follows_at(self, raw_start UInt) Bool = {
+    private lambda_return_clause_follows_at(self, raw_start UInt) Bool = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return false;
@@ -402,7 +402,7 @@ given CstParser {
     /// `None`. This is the SHAPE of the qualification prefix `base(Trait)` of a
     /// composite qualified call -- the prefix is only legal as part of
     /// `base(Trait).method(...)`.
-    file_private scan_paren_type_suffix_at(self, raw_start UInt) Option[UInt] = {
+    private scan_paren_type_suffix_at(self, raw_start UInt) Option[UInt] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return Option[UInt].None();
@@ -423,7 +423,7 @@ given CstParser {
         return Option[UInt].Some(rp_index + 1);
     };
 
-    file_private is_type_start(self, t Token) Bool = when t in {
+    private is_type_start(self, t Token) Bool = when t in {
         .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         // A function type opens with its parameter list: `(T1, T2) -> R`.
         .LParen() then true,
@@ -449,7 +449,7 @@ given CstParser {
     /// buffer with a depth walk; nothing is parsed. The `->` is what separates
     /// a function type from the parenthesized shapes a signature or a value
     /// can write.
-    file_private paren_closes_before_arrow_at(self, raw_start UInt) Bool = {
+    private paren_closes_before_arrow_at(self, raw_start UInt) Bool = {
         let start = self.sig_index_at(raw_start);
         if start >= self.tokens.count() or self.tokens[start] is not .LParen() then {
             return false;
@@ -482,7 +482,7 @@ given CstParser {
     /// as a type list ending exactly at `)` (a grouping `(T)`, or a multi-type
     /// list the type parser will then reject). A signature's parameters start
     /// with `name Type` / `mutable`, never with a bare type head.
-    file_private paren_opens_type_at(self, raw_start UInt) Bool = {
+    private paren_opens_type_at(self, raw_start UInt) Bool = {
         if self.paren_closes_before_arrow_at(raw_start) then {
             return true;
         };
@@ -500,7 +500,7 @@ given CstParser {
 
     /// Whether `name` is a value name: lowercase-first after underscores, or
     /// underscore-only. Mirrors the compilers' `is_valid_value_name`.
-    file_private is_value_name(self, name String) Bool = {
+    private is_value_name(self, name String) Bool = {
         let runes = name.to_runes();
         if runes.count() == 0 then {
             return false;
@@ -516,7 +516,7 @@ given CstParser {
         first >= 97 and first <= 122
     };
 
-    file_private eat(self) Token = {
+    private eat(self) Token = {
         self.skip_newlines();
         return self.advance();
     };
@@ -525,7 +525,7 @@ given CstParser {
     /// declares (`grammar.bnf` "Top-level declarations ... must end with `;`").
     /// Never supply one: a formatter that fills in a missing `;` rewrites source
     /// into a shape the compiler will then refuse.
-    file_private eat_decl_semi(self) Result[Token] = {
+    private eat_decl_semi(self) Result[Token] = {
         if self.peek() is not .Semi() then {
             return .Error("Parse error: expected ';' after declaration");
         };
@@ -535,7 +535,7 @@ given CstParser {
     /// Close a parsed declaration: collect the comments that trail it before
     /// its terminating `;` -- `let x = 1 /* c */;` -- consume the `;`, then
     /// wrap it. A line comment before the `;` pushes the `;` to its own line.
-    file_private finish_decl_item(self, d CstDecl) Result[CstItem] = {
+    private finish_decl_item(self, d CstDecl) Result[CstItem] = {
         let mutable comments = List[Token].new();
         while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
@@ -557,7 +557,7 @@ given CstParser {
     /// source wrote one. Comments before a closing delimiter arrive here with
     /// no comma and still travel with the item they trail: `f(a /* c */)`.
     /// A formatter may not drop them.
-    file_private eat_comma(self) Option[CstComma] = {
+    private eat_comma(self) Option[CstComma] = {
         let mutable comments = List[Token].new();
         while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
@@ -573,14 +573,14 @@ given CstParser {
 
     /// Whether a separator slot actually carries a comma (a slot of comments
     /// alone is the last item's trail before a closing delimiter).
-    file_private sep_has_comma(self, sep Option[CstComma]) Bool = {
+    private sep_has_comma(self, sep Option[CstComma]) Bool = {
         return when sep in {
             .Some(s) then s.token is .Some(_),
             .None() then false,
         };
     };
 
-    file_private count_newlines(self) UInt = {
+    private count_newlines(self) UInt = {
         let mutable count UInt = 0;
         let mutable i = self.pos;
         while i < self.tokens.count() then {
@@ -597,7 +597,7 @@ given CstParser {
         return count;
     };
 
-    file_private peek_at_skip_nl(self, offset UInt) Token = {
+    private peek_at_skip_nl(self, offset UInt) Token = {
         let mutable count UInt = 0;
         let mutable i = self.pos;
         while i < self.tokens.count() then {
@@ -618,14 +618,16 @@ given CstParser {
         return Token.EOF();
     };
 
-    file_private is_access_mod(self) Bool =
-        self.peek() is .KwPublic() or is .KwPrivate() or is .KwProtected() or is .KwProtectedPublic();
+    private is_access_mod(self) Bool =
+        self.peek() is .KwPublic() or is .KwPrivate() or is .KwInternal() or is .KwProtected();
 
     /// Eats one access modifier. Each of the four is a single token, so there is
-    /// nothing to merge here -- an older spelling treated `module_private public`
-    /// as one modifier and would have rewritten it to `package_private`, silently
-    /// turning a rejected program into an accepted one with different visibility.
-    file_private eat_vis(self) Option[Token] = {
+    /// nothing to merge here. History: under the pre-rename spellings, an older
+    /// revision treated the written pair `module_private public` as one modifier
+    /// and rewrote it to the old `package_private` spelling, silently turning a
+    /// rejected program into an accepted one with different visibility. The merge
+    /// is gone; the note stays as a warning against reintroducing it.
+    private eat_vis(self) Option[Token] = {
         if self.is_access_mod() then {
             return .Some(self.eat());
         };
@@ -641,7 +643,7 @@ given CstParser {
     /// Printing `vis`, then the keyword, then `mods` must reproduce the source
     /// order exactly; nothing is reordered or dropped on the way through the
     /// CST.
-    file_private eat_kind_modifiers(self) List[Token] = {
+    private eat_kind_modifiers(self) List[Token] = {
         let mutable mods = List[Token].new();
         while true then {
             if self.check(.KwForeign()) or self.check(.KwIntrinsic()) then {
@@ -656,11 +658,11 @@ given CstParser {
     /// How many leading tokens are access modifiers, before the declaration
     /// keyword. `foreign` / `intrinsic` are not prefix modifiers -- they sit
     /// after the keyword and are read by `eat_kind_modifiers` there.
-    file_private modifier_token_count(self) UInt = {
+    private modifier_token_count(self) UInt = {
         let mutable offset UInt = 0;
         while true then {
             when self.peek_at_skip_nl(offset) in {
-                .KwPublic() or .KwPrivate() or .KwProtected() or .KwProtectedPublic() then {
+                .KwPublic() or .KwPrivate() or .KwInternal() or .KwProtected() then {
                     offset += 1;
                 },
                 _ then {
@@ -671,12 +673,12 @@ given CstParser {
         return offset;
     };
 
-    file_private is_code_item(item CstItem) Bool = when item in {
+    private is_code_item(item CstItem) Bool = when item in {
         .Decl(_) or .Stmt(_) or .DeclPreSemi(_, _) or .StmtPreSemi(_, _) then true,
         _ then false,
     };
 
-    file_private last_item_is_code(self, items List[CstItem]) Bool = {
+    private last_item_is_code(self, items List[CstItem]) Bool = {
         if items.count() == 0 then {
             return false;
         };
@@ -684,7 +686,7 @@ given CstParser {
         return CstParser.is_code_item(prev);
     };
 
-    file_private item_is_using_decl(item CstItem) Bool = when item in {
+    private item_is_using_decl(item CstItem) Bool = when item in {
         .Decl(decl) or .DeclPreSemi(_, decl) then when decl in {
             .Using(_) then true,
             _ then false,
@@ -692,7 +694,7 @@ given CstParser {
         _ then false,
     };
 
-    file_private item_is_non_using_top_level_code(item CstItem) Bool = when item in {
+    private item_is_non_using_top_level_code(item CstItem) Bool = when item in {
         .Decl(decl) or .DeclPreSemi(_, decl) then when decl in {
             .Using(_) then false,
             _ then true,
@@ -717,7 +719,7 @@ given CstParser {
     /// type whose `(` is already consumed. `arrow_required` is true for the
     /// `(T1, T2) -> R` spelling and false for the legacy `Func(T1, T2) R`
     /// spelling, which carries no arrow at all.
-    file_private parse_function_type_tail(
+    private parse_function_type_tail(
         self,
         lp Token,
         arrow_required Bool,
@@ -760,7 +762,7 @@ given CstParser {
         return .Ok(.Function(lp, args, rp, return_type));
     };
 
-    file_private parse_type_node(self) Result[CstType] = {
+    private parse_type_node(self) Result[CstType] = {
         if self.check(.Star()) then {
             let kw = self.eat();
             let mutable mut_kw = Option[Token].None();
@@ -922,7 +924,7 @@ given CstParser {
         return .Ok(t);
     };
 
-    file_private parse_type_suffix(self, base CstType) CstType = {
+    private parse_type_suffix(self, base CstType) CstType = {
         return base;
     };
 
@@ -936,7 +938,7 @@ given CstParser {
     ///
     /// Rune literals scan as `IntLit` tokens carrying their quoted spelling
     /// (see `scan_char_literal`), so the literal case already covers them.
-    file_private parse_default_value(self) Result[Option[CstDefault]] = {
+    private parse_default_value(self) Result[Option[CstDefault]] = {
         if not self.check(.Eq()) then {
             return .Ok(.None());
         };
@@ -984,7 +986,7 @@ given CstParser {
         return .Ok(.Some(CstDefault(eq, value_tokens)));
     };
 
-    file_private parse_generic_params(self) Result[Option[CstGenericParams]] = {
+    private parse_generic_params(self) Result[Option[CstGenericParams]] = {
         if not self.check(.LBracket()) then {
             return .Ok(.None());
         };
@@ -1043,7 +1045,7 @@ given CstParser {
     // Parameters: (name Type, name2 Type2)
     // ========================================================================
 
-    file_private parse_params(self) Result[List[CstParam]] = {
+    private parse_params(self) Result[List[CstParam]] = {
         let mutable params = List[CstParam].new();
         let mutable first UInt = 1;
         // Positional params must come before named params (grammar.bnf
@@ -1167,13 +1169,13 @@ given CstParser {
     // same one the compilers enforce, so a file the formatter accepts is a
     // file the compilers accept.
 
-    file_private parse_expr_node(self) Result[CstExpr] = {
+    private parse_expr_node(self) Result[CstExpr] = {
         let operand = self.parse_not() or return;
         return self.parse_layered_tail(operand);
     };
 
     /// Continue `operand` in whichever layer its next operator belongs to.
-    file_private parse_layered_tail(self, operand CstExpr) Result[CstExpr] = {
+    private parse_layered_tail(self, operand CstExpr) Result[CstExpr] = {
         if self.starts_flow_chain() then {
             let flowed = self.parse_flow_tail(operand) or return;
             return self.reject_logical_at_flow_layer(flowed);
@@ -1186,7 +1188,7 @@ given CstParser {
     };
 
     /// Whether the operator at the cursor is a flow operator.
-    file_private starts_flow_chain(self) Bool = {
+    private starts_flow_chain(self) Bool = {
         return when self.peek() in {
             .KwAnd() then self.peek_at_skip_nl(1) is .KwThen(),
             .KwOr() then self.peek_at_skip_nl(1) is .KwElse() or is .KwReturn(),
@@ -1195,7 +1197,7 @@ given CstParser {
     };
 
     /// Whether the operator at the cursor is a logical operator.
-    file_private starts_logical_chain(self) Bool = {
+    private starts_logical_chain(self) Bool = {
         return when self.peek() in {
             .KwAnd() then self.peek_at_skip_nl(1) is not .KwThen(),
             .KwOr() then self.peek_at_skip_nl(1) is not .KwElse() and is not .KwReturn(),
@@ -1209,7 +1211,7 @@ given CstParser {
     //   anything else  -- a plain layer operand (legacy; goes away with `it`)
     //
     // A leading dot here is the chain, never an implicit member.
-    file_private parse_and_then_operand(self) Result[CstExpr] = {
+    private parse_and_then_operand(self) Result[CstExpr] = {
         if self.check(.Dot()) then {
             // The leading `.` is consumed by the dot suffix, which the postfix
             // loop runs on the elided receiver.
@@ -1229,7 +1231,7 @@ given CstParser {
     // The right operand of `or else`. `as e in body` names the error payload
     // (Result only -- `None` has no payload); anything else is the fallback
     // value itself, where a leading dot stays an implicit member.
-    file_private parse_or_else_operand(self) Result[CstExpr] = {
+    private parse_or_else_operand(self) Result[CstExpr] = {
         if self.check(.KwAs()) then {
             return self.parse_flow_bind();
         };
@@ -1239,7 +1241,7 @@ given CstParser {
     // `as name in body`. The body stops at a layer operand, so an `or else`
     // written after it belongs to the enclosing flow chain and the binder's
     // scope stays tight.
-    file_private parse_flow_bind(self) Result[CstExpr] = {
+    private parse_flow_bind(self) Result[CstExpr] = {
         let as_kw = self.eat();
         let name = when self.expect_ident("flow binding name") in {
             .Ok(t) then t,
@@ -1256,7 +1258,7 @@ given CstParser {
     };
 
     // `and then` binds tightest of the flow operators.
-    file_private parse_and_then_chain(self, operand CstExpr) Result[CstExpr] = {
+    private parse_and_then_chain(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = operand;
         while self.check(.KwAnd()) and self.peek_at_skip_nl(1) is .KwThen() then {
             let and_kw = self.eat();
@@ -1269,7 +1271,7 @@ given CstParser {
 
     // `or else` / `or return` sit between `and then` and the end of the layer:
     // `f() and then as v in g(v) or else h()` groups as `(f() and then as v in g(v)) or else h()`.
-    file_private parse_flow_tail(self, operand CstExpr) Result[CstExpr] = {
+    private parse_flow_tail(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = self.parse_and_then_chain(operand) or return;
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1);
@@ -1294,7 +1296,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_logical_and_chain(self, operand CstExpr) Result[CstExpr] = {
+    private parse_logical_and_chain(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = operand;
         while self.check(.KwAnd()) and self.peek_at_skip_nl(1) is not .KwThen() then {
             let op = self.eat();
@@ -1304,7 +1306,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_logical_tail(self, operand CstExpr) Result[CstExpr] = {
+    private parse_logical_tail(self, operand CstExpr) Result[CstExpr] = {
         let mutable left = self.parse_logical_and_chain(operand) or return;
         while self.check(.KwOr()) and self.peek_at_skip_nl(1) is not .KwElse() and is not .KwReturn() then {
             let op = self.eat();
@@ -1316,7 +1318,7 @@ given CstParser {
     };
 
     /// A logical operator arriving after a flow chain.
-    file_private reject_logical_at_flow_layer(self, expr CstExpr) Result[CstExpr] = {
+    private reject_logical_at_flow_layer(self, expr CstExpr) Result[CstExpr] = {
         if self.peek() is .KwAnd() and self.peek_at_skip_nl(1) is not .KwThen() then {
             return .Error(
                 "Parse error: 'and' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses",
@@ -1331,7 +1333,7 @@ given CstParser {
     };
 
     /// A flow operator arriving after a logical chain.
-    file_private reject_flow_at_logical_layer(self, expr CstExpr) Result[CstExpr] = {
+    private reject_flow_at_logical_layer(self, expr CstExpr) Result[CstExpr] = {
         if self.peek() is .KwAnd() and self.peek_at_skip_nl(1) is .KwThen() then {
             return .Error(
                 "Parse error: 'and then' cannot be mixed with logical 'and' / 'or' without parentheses",
@@ -1350,11 +1352,11 @@ given CstParser {
         return .Ok(expr);
     };
 
-    file_private parse_single_pattern(self) Result[CstPattern] = {
+    private parse_single_pattern(self) Result[CstPattern] = {
         return self.parse_primary_pattern();
     };
 
-    file_private parse_is(self) Result[CstExpr] = {
+    private parse_is(self) Result[CstExpr] = {
         let left = when self.parse_range() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1402,7 +1404,7 @@ given CstParser {
         return .Ok(.IsExpr(left, is_kw, not_kw, pattern));
     };
 
-    file_private parse_not(self) Result[CstExpr] = {
+    private parse_not(self) Result[CstExpr] = {
         if self.check(.KwNot()) then {
             let op = self.eat();
             let operand = when self.parse_is() in {
@@ -1416,7 +1418,7 @@ given CstParser {
         return self.parse_is();
     };
 
-    file_private parse_bitwise_or(self) Result[CstExpr] = {
+    private parse_bitwise_or(self) Result[CstExpr] = {
         let mutable left = when self.parse_bitwise_xor() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1436,7 +1438,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_bitwise_xor(self) Result[CstExpr] = {
+    private parse_bitwise_xor(self) Result[CstExpr] = {
         let mutable left = when self.parse_bitwise_and() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1456,7 +1458,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_bitwise_and(self) Result[CstExpr] = {
+    private parse_bitwise_and(self) Result[CstExpr] = {
         let mutable left = when self.parse_shift() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1476,7 +1478,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_range(self) Result[CstExpr] = {
+    private parse_range(self) Result[CstExpr] = {
         // Prefix ranges: `...b`, `...<b`, `...`. `<...` is postfix-only: its
         // `<` hugs the left bound. The `..` family is always closed (both
         // bounds written); a missing bound is spelled with `...`.
@@ -1585,7 +1587,7 @@ given CstParser {
         };
     };
 
-    file_private can_start_range_bound(self) Bool = when self.peek() in {
+    private can_start_range_bound(self) Bool = when self.peek() in {
         .KwIf() or .KwWhile() or .KwWhen() or .KwFor() then true,
         .Minus() or .Tilde() or .Amp() or .Star() then true,
         .Ident(_) or .KwSelf() or .KwSelfType() or .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() or .NullLit() then true,
@@ -1593,7 +1595,7 @@ given CstParser {
         _ then false,
     };
 
-    file_private parse_comparison(self) Result[CstExpr] = {
+    private parse_comparison(self) Result[CstExpr] = {
         let mutable left = when self.parse_bitwise_or() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1620,7 +1622,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_shift(self) Result[CstExpr] = {
+    private parse_shift(self) Result[CstExpr] = {
         let mutable left = when self.parse_additive() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1647,7 +1649,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_additive(self) Result[CstExpr] = {
+    private parse_additive(self) Result[CstExpr] = {
         let mutable left = when self.parse_multiplicative() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1684,7 +1686,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_multiplicative(self) Result[CstExpr] = {
+    private parse_multiplicative(self) Result[CstExpr] = {
         let mutable left = when self.parse_cast() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1728,7 +1730,7 @@ given CstParser {
     /// an alias. The cast result takes no postfix suffixes -- a method call on
     /// one takes parentheses, `(self as *T).equals(...)`, and `x as *T.m()`
     /// leaves `.m()` a stray token.
-    file_private parse_cast(self) Result[CstExpr] = {
+    private parse_cast(self) Result[CstExpr] = {
         let mutable left = when self.parse_prefix() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1752,7 +1754,7 @@ given CstParser {
     // Prefix expressions
     // ========================================================================
 
-    file_private parse_prefix(self) Result[CstExpr] = {
+    private parse_prefix(self) Result[CstExpr] = {
         let mutable leading_comments = List[Token].new();
         while self.peek() is .LineComment(_) or is .BlockComment(_) or is .Semi() then {
             if self.peek() is .Semi() then {
@@ -1871,7 +1873,7 @@ given CstParser {
     /// `Type(Trait).method`, and any other expression for the receiver-qualified
     /// form `expr(Trait).method`. The result is the full
     /// `Call(FieldAccess(QualifiedTrait(...), method), args)`.
-    file_private parse_qualified_call_suffix(self, base CstExpr) Result[CstExpr] = {
+    private parse_qualified_call_suffix(self, base CstExpr) Result[CstExpr] = {
         let lp = self.eat();
         let trait_type = self.parse_type_node() or return;
         let rp = when self.expect(.RParen(), "')'") in {
@@ -1940,7 +1942,7 @@ given CstParser {
         return .Ok(.Call(field, call_lp, args, call_rp));
     };
 
-    file_private parse_postfix(self) Result[CstExpr] = {
+    private parse_postfix(self) Result[CstExpr] = {
         let expr = when self.parse_primary() in {
             .Ok(e) then e,
             .Error(e) then {
@@ -1952,7 +1954,7 @@ given CstParser {
 
     /// Postfix suffixes (calls, subscripts, member access, qualified calls)
     /// applied to an already-parsed expression.
-    file_private parse_postfix_suffixes(self, start CstExpr) Result[CstExpr] = {
+    private parse_postfix_suffixes(self, start CstExpr) Result[CstExpr] = {
         let mutable expr = start;
         while true then {
             // Field access: expr.field
@@ -2140,7 +2142,7 @@ given CstParser {
         return .Ok(expr);
     };
 
-    file_private parse_call_args(self) Result[List[CstCallArg]] = {
+    private parse_call_args(self) Result[List[CstCallArg]] = {
         let mutable args = List[CstCallArg].new();
         // Positional arguments must not appear after named arguments
         // (grammar.bnf <argument-list>).
@@ -2188,7 +2190,7 @@ given CstParser {
     // Primary expressions
     // ========================================================================
 
-    file_private parse_primary(self) Result[CstExpr] = {
+    private parse_primary(self) Result[CstExpr] = {
         when self.peek() in {
             .KwIf() then {
                 return self.parse_if_expr();
@@ -2308,7 +2310,7 @@ given CstParser {
         );
     };
 
-    file_private parse_collection_literal(self) Result[CstExpr] = {
+    private parse_collection_literal(self) Result[CstExpr] = {
         let lb = when self.expect(.LBracket(), "'['") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2404,7 +2406,7 @@ given CstParser {
     // Block expression: { statements [tail-expression] }
     // ========================================================================
 
-    file_private parse_block_expr(self) Result[CstExpr] = {
+    private parse_block_expr(self) Result[CstExpr] = {
         let lb = when self.expect(.LBrace(), "'{'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2501,7 +2503,7 @@ given CstParser {
         return .Ok(.Block(lb, items, tail_expr, tail_comments, rb));
     };
 
-    file_private parse_block_item(self) Result[CstItem] = {
+    private parse_block_item(self) Result[CstItem] = {
         // Variable declaration: let [mutable] name [Type] = expr
         if self.peek() is .KwLet() then {
             return self.parse_var_decl_stmt();
@@ -2521,7 +2523,7 @@ given CstParser {
     /// expression spelling at all, so it travels as one opaque token whose
     /// text is the type itself -- the round trip is the contract, and the
     /// compilers reject these at sema anyway.
-    file_private type_as_expr(self, t CstType) CstExpr = when t in {
+    private type_as_expr(self, t CstType) CstExpr = when t in {
         .Named(name) then .Ident(name),
         .SelfType(kw) then .SelfExpr(kw),
         .Generic(lb, args, rb, base) then .GenericInst(.Ident(base), lb, args, rb),
@@ -2540,7 +2542,7 @@ given CstParser {
         .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
     };
 
-    file_private parse_paren_or_lambda(self) Result[CstExpr] = {
+    private parse_paren_or_lambda(self) Result[CstExpr] = {
         // `(` opens a lambda, a parenthesized TYPE head, or a parenthesized
         // expression. The shape classifier decides BEFORE anything is built --
         // a lambda is `(params) [Type] => ...`, so the `=>` is the tell; a type
@@ -2636,7 +2638,7 @@ given CstParser {
 
     /// Parses a lambda whose SHAPE `shape_is_lambda_at` has already confirmed.
     /// Errors are real errors -- there is no alternative to fall back to.
-    file_private parse_lambda_node(self) Result[CstExpr] = {
+    private parse_lambda_node(self) Result[CstExpr] = {
         let lp = when self.expect(.LParen(), "'('") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2701,7 +2703,7 @@ given CstParser {
     // Control flow expressions
     // ========================================================================
 
-    file_private parse_if_expr(self) Result[CstExpr] = {
+    private parse_if_expr(self) Result[CstExpr] = {
         let kw = when self.expect(.KwIf(), "'if'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2742,7 +2744,7 @@ given CstParser {
         return .Ok(.If(kw, cond, then_kw, then_body, .None(), .None()));
     };
 
-    file_private parse_while_expr(self) Result[CstExpr] = {
+    private parse_while_expr(self) Result[CstExpr] = {
         let kw = when self.expect(.KwWhile(), "'while'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2785,7 +2787,7 @@ given CstParser {
     /// The binding is a full match pattern -- the same one a `when` arm takes.
     /// The CST records what was written; whether the pattern can fail is the
     /// compiler's call, not this parser's.
-    file_private parse_for_expr(self) Result[CstExpr] = {
+    private parse_for_expr(self) Result[CstExpr] = {
         let kw = when self.expect(.KwFor(), "'for'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2845,7 +2847,7 @@ given CstParser {
         return .Ok(.For(kw, binding, in_kw, iterable, where_kw, guard, then_kw, body));
     };
 
-    file_private parse_when_expr(self) Result[CstExpr] = {
+    private parse_when_expr(self) Result[CstExpr] = {
         let kw = when self.expect(.KwWhen(), "'when'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -2917,7 +2919,7 @@ given CstParser {
         return .Ok(.When(kw, subject, in_kw, lb, arms, rb));
     };
 
-    file_private parse_when_arm(self) Result[CstWhenArm] = {
+    private parse_when_arm(self) Result[CstWhenArm] = {
         let pattern = when self.parse_pattern_node() in {
             .Ok(p) then p,
             .Error(e) then {
@@ -2989,7 +2991,7 @@ given CstParser {
     /// A pattern bound: an integer, float, or rune literal. Rune literals scan
     /// as `IntLit` tokens carrying their quoted spelling, so the integer case
     /// already covers them.
-    file_private expect_pattern_value(self, what String) Result[Token] = {
+    private expect_pattern_value(self, what String) Result[Token] = {
         return when self.peek() in {
             .IntLit(_) then .Ok(self.eat()),
             .FloatLit(_) then .Ok(self.eat()),
@@ -3005,11 +3007,11 @@ given CstParser {
         return self.parse_pattern_node();
     };
 
-    file_private parse_pattern_node(self) Result[CstPattern] = {
+    private parse_pattern_node(self) Result[CstPattern] = {
         return self.parse_or_pattern();
     };
 
-    file_private parse_or_pattern(self) Result[CstPattern] = {
+    private parse_or_pattern(self) Result[CstPattern] = {
         let mutable left = when self.parse_and_pattern() in {
             .Ok(p) then p,
             .Error(e) then {
@@ -3033,7 +3035,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_and_pattern(self) Result[CstPattern] = {
+    private parse_and_pattern(self) Result[CstPattern] = {
         let mutable left = when self.parse_not_pattern() in {
             .Ok(p) then p,
             .Error(e) then {
@@ -3057,7 +3059,7 @@ given CstParser {
         return .Ok(left);
     };
 
-    file_private parse_not_pattern(self) Result[CstPattern] = {
+    private parse_not_pattern(self) Result[CstPattern] = {
         if self.check(.KwNot()) then {
             let op = self.eat();
             let inner = when self.parse_not_pattern() in {
@@ -3071,7 +3073,7 @@ given CstParser {
         return self.parse_primary_pattern();
     };
 
-    file_private parse_primary_pattern(self) Result[CstPattern] = {
+    private parse_primary_pattern(self) Result[CstPattern] = {
         // Comparison patterns: > n, < n, >= n, <= n (n optionally negative)
         when self.peek() in {
             .Gt() or .Lt() or .GtEq() or .LtEq() then {
@@ -3383,7 +3385,7 @@ given CstParser {
 
     /// The comments between a statement and its `;`, and the `;` when the
     /// source wrote one.
-    file_private eat_stmt_terminator(self) CstComma = {
+    private eat_stmt_terminator(self) CstComma = {
         let mutable comments = List[Token].new();
         while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
@@ -3395,7 +3397,7 @@ given CstParser {
     };
 
     /// A statement item, carrying the comments that trail it before its `;`.
-    file_private stmt_item(self, terminator CstComma, s CstStmt) CstItem = {
+    private stmt_item(self, terminator CstComma, s CstStmt) CstItem = {
         if terminator.comments.count() > 0 then {
             return CstItem.StmtPreSemi(terminator.comments, s);
         };
@@ -3405,7 +3407,7 @@ given CstParser {
     /// The next token that is not a comment. Newlines are layout and comments
     /// stay in place -- this only answers what FOLLOWS them, so a bare
     /// `return /* c */;` can be told from `return /* c */ 0;`.
-    file_private peek_past_comments(self) Token = {
+    private peek_past_comments(self) Token = {
         let mutable i = self.pos;
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -3420,7 +3422,7 @@ given CstParser {
         return Token.EOF();
     };
 
-    file_private parse_stmt(self) Result[CstItem] = {
+    private parse_stmt(self) Result[CstItem] = {
         when self.peek() in {
             .KwDefer() then {
                 let kw = self.eat();
@@ -3503,7 +3505,7 @@ given CstParser {
         return .Ok(self.stmt_item(term, .ExprStmt(expr, semi)));
     };
 
-    file_private parse_var_decl_stmt(self) Result[CstItem] = {
+    private parse_var_decl_stmt(self) Result[CstItem] = {
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -3608,7 +3610,7 @@ given CstParser {
         return .Ok(self.stmt_item(term, .VarDecl(let_kw, mut_kw, name, var_type, eq, value)));
     };
 
-    file_private parse_pair_binding(self) Result[CstPairBinding] = {
+    private parse_pair_binding(self) Result[CstPairBinding] = {
         // Nested tuple binding: `(a, (b, c))`. A nested slot is a full
         // `<tuple-binding>`, so nesting is allowed wherever a binding element
         // is -- `let (a, (b, c)) = ...` and `for (a, (b, c)) in ...` alike.
@@ -3675,7 +3677,7 @@ given CstParser {
     /// binding element (so the slots nest). Mirrors the compilers'
     /// `parse_pair_binding_element`, which refuses a parenthesized run of
     /// fewer than two slots.
-    file_private parse_nested_tuple_binding(self) Result[CstPairBinding] = {
+    private parse_nested_tuple_binding(self) Result[CstPairBinding] = {
         let lp = self.eat();
         let first = when self.parse_pair_binding() in {
             .Ok(binding) then binding,
@@ -3772,7 +3774,7 @@ given CstParser {
         return .Ok(CstFile(items));
     };
 
-    file_private parse_top_item(self) Result[CstItem] = {
+    private parse_top_item(self) Result[CstItem] = {
         // Using declaration. Its `;` is collected inside the declaration's own
         // token list, and the compiler does not require one at all -- so it
         // does not go through `finish_decl_item`. Matching the compiler here
@@ -3860,7 +3862,7 @@ given CstParser {
     /// layout, comments, and the one `;` that ends the declaration. The `;` is
     /// collected into `tokens` rather than consumed by the caller, so it is
     /// required here instead of by `finish_decl_item`.
-    file_private validate_using_trailing_tokens(
+    private validate_using_trailing_tokens(
         self,
         tokens List[Token],
         start UInt,
@@ -3892,7 +3894,7 @@ given CstParser {
     };
 
     /// The contents of a `StrLit` token, quotes stripped.
-    file_private using_specifier_text(self, token Token) String = {
+    private using_specifier_text(self, token Token) String = {
         let raw = when token in {
             .StrLit(t) then t,
             _ then "",
@@ -3906,7 +3908,7 @@ given CstParser {
     /// module-design §3.1: a specifier beginning `./` or `../` merges a file,
     /// anything else imports `package[/subpath]`. The formatter checks SHAPE
     /// only -- whether the package exists is the compiler's business.
-    file_private is_file_merge_specifier(self, spec String) Bool = {
+    private is_file_merge_specifier(self, spec String) Bool = {
         return spec.starts_with("./") or spec.starts_with("../") or spec.starts_with(
             ".\\",
         ) or spec.starts_with("..\\");
@@ -3925,7 +3927,7 @@ given CstParser {
     /// renames (positive) or exclusions (`!`), never both; a positive item
     /// without `as` next to `...` is redundant and rejected. The list may span
     /// lines, so newlines are skipped as whitespace here.
-    file_private validate_import_list_tokens(
+    private validate_import_list_tokens(
         self,
         tokens List[Token],
         start UInt,
@@ -4071,7 +4073,7 @@ given CstParser {
     /// Validate one import list's shape once its items and base set are known
     /// (§3.3). Shared by both exits of the token loop so the two paths cannot
     /// drift apart.
-    file_private finish_import_list_tokens(
+    private finish_import_list_tokens(
         self,
         tokens List[Token],
         next UInt,
@@ -4096,7 +4098,7 @@ given CstParser {
         );
     };
 
-    file_private skip_newline_tokens(tokens List[Token], start UInt) UInt = {
+    private skip_newline_tokens(tokens List[Token], start UInt) UInt = {
         let mutable i = start;
         while i < tokens.count() and tokens[i] is .Newline() then {
             i += 1;
@@ -4104,7 +4106,7 @@ given CstParser {
         return i;
     };
 
-    file_private validate_using_decl_tokens(self, tokens List[Token]) Result[Void] = {
+    private validate_using_decl_tokens(self, tokens List[Token]) Result[Void] = {
         if tokens.count() == 0 or tokens[0] is not .KwUsing() then {
             return .Error("Parse error: expected 'using' declaration");
         };
@@ -4144,7 +4146,7 @@ given CstParser {
     /// list may span lines (`{ a,\n b }`), so collection only stops at a newline
     /// that is outside the braces. Interior newlines stay in the list -- the
     /// sequence is printed back with the same line breaks it came with.
-    file_private parse_using_decl(self) Result[CstDecl] = {
+    private parse_using_decl(self) Result[CstDecl] = {
         let tokens = self.collect_using_tokens();
         when self.validate_using_decl_tokens(tokens) in {
             .Ok(_) then {},
@@ -4155,7 +4157,7 @@ given CstParser {
         return .Ok(.Using(tokens));
     };
 
-    file_private collect_using_tokens(self) List[Token] = {
+    private collect_using_tokens(self) List[Token] = {
         let mutable tokens = List[Token].new();
         let mutable depth UInt = 0;
         while not self.is_eof() then {
@@ -4191,7 +4193,7 @@ given CstParser {
     // Let declaration (function or variable)
     // ========================================================================
 
-    file_private parse_let_decl(self) Result[CstDecl] = {
+    private parse_let_decl(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         let let_kw = when self.expect(.KwLet(), "'let'") in {
             .Ok(t) then t,
@@ -4209,7 +4211,7 @@ given CstParser {
         return self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false);
     };
 
-    file_private finish_func_or_var(
+    private finish_func_or_var(
         self,
         vis Option[Token],
         mods List[Token],
@@ -4320,7 +4322,7 @@ given CstParser {
     // Type declaration
     // ========================================================================
 
-    file_private parse_type_decl(self) Result[CstDecl] = {
+    private parse_type_decl(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         let kw = when self.expect(.KwType(), "'type'") in {
             .Ok(t) then t,
@@ -4536,7 +4538,7 @@ given CstParser {
         return .Ok(.Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Empty()));
     };
 
-    file_private parse_enum_variant_expr(self) Result[CstExpr] = {
+    private parse_enum_variant_expr(self) Result[CstExpr] = {
         let name = when self.expect_ident("enum variant name") in {
             .Ok(t) then t,
             .Error(e) then {
@@ -4626,7 +4628,7 @@ given CstParser {
     // Trait declaration
     // ========================================================================
 
-    file_private parse_trait_decl(self) Result[CstDecl] = {
+    private parse_trait_decl(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         let kw = when self.expect(.KwTrait(), "'trait'") in {
             .Ok(t) then t,
@@ -4695,7 +4697,7 @@ given CstParser {
     // Trait members
     // ========================================================================
 
-    file_private parse_trait_members(self) Result[List[CstItem]] = {
+    private parse_trait_members(self) Result[List[CstItem]] = {
         let mutable members = List[CstItem].new();
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines();
@@ -4740,7 +4742,7 @@ given CstParser {
         return .Ok(members);
     };
 
-    file_private parse_trait_method_sig(self) Result[CstDecl] = {
+    private parse_trait_method_sig(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         let name = when self.expect_ident("method name") in {
             .Ok(t) then t,
@@ -4849,7 +4851,7 @@ given CstParser {
     // Given declaration
     // ========================================================================
 
-    file_private parse_given_decl(self) Result[CstDecl] = {
+    private parse_given_decl(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         let kw = when self.expect(.KwGiven(), "'given'") in {
             .Ok(t) then t,
@@ -4918,7 +4920,7 @@ given CstParser {
     // Member items (shared by trait/given)
     // ========================================================================
 
-    file_private parse_member_items(self) Result[List[CstItem]] = {
+    private parse_member_items(self) Result[List[CstItem]] = {
         let mutable members = List[CstItem].new();
         while not self.check(.RBrace()) and not self.is_eof() then {
             let nl_count = self.count_newlines();
@@ -4988,7 +4990,7 @@ given CstParser {
         return .Ok(members);
     };
 
-    file_private parse_member_no_let(self) Result[CstDecl] = {
+    private parse_member_no_let(self) Result[CstDecl] = {
         let vis = self.eat_vis();
         // Generic params and name are handled by finish_func_or_var. Members
         // carry no `foreign` / `intrinsic` qualifiers.

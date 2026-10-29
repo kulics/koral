@@ -85,9 +85,9 @@ public enum Token: CustomStringConvertible {
   case pipe  // '|' - bitwise OR
   case caret  // '^' - bitwise XOR
   case tilde  // '~' - bitwise NOT
-  case filePrivateKeyword // 'private' keyword
-  case modulePrivateKeyword
-  case packagePrivateKeyword // 'protected' keyword
+  case privateKeyword // 'private' keyword
+  case internalKeyword // 'internal' keyword
+  case protectedKeyword // 'protected' keyword
   case publicKeyword  // 'public' keyword
   case leftShift  // '<<' - left shift
   case rightShift  // '>>' - right shift
@@ -171,7 +171,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.leftShift, .leftShift), (.rightShift, .rightShift):
       return true
-    case (.filePrivateKeyword, .filePrivateKeyword), (.modulePrivateKeyword, .modulePrivateKeyword), (.packagePrivateKeyword, .packagePrivateKeyword), (.publicKeyword, .publicKeyword):
+    case (.privateKeyword, .privateKeyword), (.internalKeyword, .internalKeyword), (.protectedKeyword, .protectedKeyword), (.publicKeyword, .publicKeyword):
       return true
     case (.plusEqual, .plusEqual), (.minusEqual, .minusEqual), (.multiplyEqual, .multiplyEqual), (.divideEqual, .divideEqual), (.remainderEqual, .remainderEqual):
       return true
@@ -335,12 +335,12 @@ public enum Token: CustomStringConvertible {
       return "^"
     case .tilde:
       return "~"
-    case .filePrivateKeyword:
-      return "file_private"
-    case .modulePrivateKeyword:
-      return "module_private"
-    case .packagePrivateKeyword:
-      return "package_private"
+    case .privateKeyword:
+      return "private"
+    case .internalKeyword:
+      return "internal"
+    case .protectedKeyword:
+      return "protected"
     case .publicKeyword:
       return "public"
     case .leftShift:
@@ -1638,9 +1638,9 @@ public class Lexer {
       case "when": .whenKeyword
       case "intrinsic": .intrinsicKeyword
       case "foreign": .foreignKeyword
-      case "file_private": .filePrivateKeyword
-      case "module_private": .modulePrivateKeyword
-      case "package_private": .packagePrivateKeyword
+      case "private": .privateKeyword
+      case "internal": .internalKeyword
+      case "protected": .protectedKeyword
       case "public": .publicKeyword
       case "self": .selfKeyword
       case "Self": .selfTypeKeyword

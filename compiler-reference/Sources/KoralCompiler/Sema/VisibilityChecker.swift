@@ -16,7 +16,7 @@ extension ImportKind {
 public enum VisibilityError: Error, CustomStringConvertible {
     /// 符号未通过当前文件的 using 声明导入
     case symbolNotImported(symbol: String, modulePath: [String])
-    /// 符号不可访问（private 或 protected 限制）
+    /// 符号不可访问（private、internal 或 protected 限制）
     case notAccessible(symbol: String, reason: String)
     /// 泛型参数不需要模块导入
     case genericParameterNoPrefix(name: String)

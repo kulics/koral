@@ -20,15 +20,15 @@ extension TypeChecker {
       let access: AccessModifier
       switch type {
       case .structure(let defId), .enum(let defId), .opaque(let defId):
-        access = defIdMap.getAccess(defId) ?? .module_private
+        access = defIdMap.getAccess(defId) ?? .internal
       default:
         access = .public
       }
 
       switch access {
-      case .file_private, .module_private:
+      case .private, .internal:
         continue
-      case .package_private:
+      case .protected:
         let packageMatches: Bool = {
           switch type {
           case .structure(let defId), .enum(let defId), .opaque(let defId):
@@ -83,11 +83,11 @@ extension TypeChecker {
         continue
       }
 
-      let access = defIdMap.getAccess(defId) ?? .module_private
+      let access = defIdMap.getAccess(defId) ?? .internal
       switch access {
-      case .file_private, .module_private:
+      case .private, .internal:
         continue
-      case .package_private:
+      case .protected:
         guard !currentPackageID.isEmpty,
               defIdMap.getPackageID(defId) == currentPackageID else {
           continue
@@ -238,8 +238,8 @@ extension TypeChecker {
       )
     }
 
-    let access = defIdMap.getAccess(templateDefId) ?? .module_private
-    if access == .file_private {
+    let access = defIdMap.getAccess(templateDefId) ?? .internal
+    if access == .private {
       throw SemanticError(
         .generic("Type '\(templateName)' is not a public type of module '\(moduleName)'"),
         span: currentSpan
@@ -258,19 +258,19 @@ extension TypeChecker {
       SemanticError(.undefinedType(templateName), span: span.isKnown ? span : currentSpan)
     }
     let modulePath = context.getModulePath(templateDefId) ?? []
-    let access = context.getAccess(templateDefId) ?? .module_private
+    let access = context.getAccess(templateDefId) ?? .internal
 
     switch access {
-    case .file_private:
+    case .private:
       let defSourceFile = context.getSourceFile(templateDefId) ?? ""
       guard isSameSourceFile(defSourceFile, currentSourceFile) else {
         throw invisible()
       }
-    case .module_private:
+    case .internal:
       guard modulePath == currentModulePath else {
         throw invisible()
       }
-    case .package_private:
+    case .protected:
       guard !currentPackageID.isEmpty,
             context.getPackageID(templateDefId) == currentPackageID else {
         throw invisible()

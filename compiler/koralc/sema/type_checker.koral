@@ -7,7 +7,7 @@ using "std/os" { env };
 // All mutable checker state lives in storage so TypeChecker can be passed by
 // value without losing mutations (mirrors the List/storage ref pattern).
 
-module_private type mutable TypeCheckerStorage(
+type mutable TypeCheckerStorage(
     mutable global_scope Scope,
     mutable context CompilerContext,
     mutable method_table MethodTable,
@@ -101,11 +101,11 @@ module_private type mutable TypeCheckerStorage(
     mutable in_global_init Bool,
 );
 
-public type mutable TypeChecker(module_private mutable storage TypeCheckerStorage);
+public type mutable TypeChecker(mutable storage TypeCheckerStorage);
 
-module_private type IfChain(arms List[Pair[Expr, Expr]], final_else Option[Expr]);
+type IfChain(arms List[Pair[Expr, Expr]], final_else Option[Expr]);
 
-module_private type mutable FunctionReturnContext(
+type mutable FunctionReturnContext(
     mutable expected_return_type Option[Type],
     mutable inferred_return_type Option[Type],
     mutable is_inferring Bool,
@@ -124,7 +124,7 @@ public type GenericConstraintBound(
     type_args List[Type],
 );
 
-module_private type GenericConstraintSnapshot(
+type GenericConstraintSnapshot(
     previous_constraints Dict[String, Option[List[GenericConstraintBound]]],
     previous_shape_bounds Dict[String, Option[List[Bound]]],
 );
@@ -133,7 +133,7 @@ module_private type GenericConstraintSnapshot(
 /// DECLARATION's identity and is what every match compares; `trait_name` is
 /// display-only. Two same-named traits from different modules must never share
 /// a template match.
-module_private type GenericTraitConformanceTemplate(
+type GenericTraitConformanceTemplate(
     target_type Type,
     owner_type_params List[TypeParameterDecl],
     trait_name String,
@@ -146,7 +146,7 @@ module_private type GenericTraitConformanceTemplate(
 /// `trait_name` is kept only so diagnostics can print it; `trait_def_id` is what
 /// `equals`/`hash` use. Two same-named traits in different modules must not
 /// alias, and renaming a trait must not invalidate the conformance set.
-module_private type ExplicitTraitConformanceKey(
+type ExplicitTraitConformanceKey(
     target_type Type,
     trait_def_id DefId,
     trait_name String,
@@ -248,7 +248,7 @@ given ExplicitTraitConformanceKey as Hash {
     };
 };
 
-module_private type GenericTraitConformanceStatus {
+type GenericTraitConformanceStatus {
     Satisfied(),
     MissingConstraint(target_type Type, constraint_param String, trait_name String),
     MissingBlanketGiven(modifier_name String),
@@ -308,7 +308,7 @@ given TypeChecker {
     /// name table -- see `GenericTemplateRegistry.candidate_keys`. Identity
     /// still travels on the `DefId`; this only decides which declaration a
     /// spelling denotes.
-    module_private install_name_resolution_context(self) Void = {
+    install_name_resolution_context(self) Void = {
         let source_file = Option[String].Some(self.storage.file_path);
         self.storage.generic_templates.current_module_path = self.storage.module_path;
         self.storage.generic_templates.current_source_file = source_file;
@@ -319,7 +319,7 @@ given TypeChecker {
         );
     };
 
-    module_private clone_function_return_context(self) FunctionReturnContext = {
+    clone_function_return_context(self) FunctionReturnContext = {
         let current = self.storage.function_return_context;
         return FunctionReturnContext(
             current.expected_return_type,
@@ -334,7 +334,7 @@ given TypeChecker {
         return self.context();
     };
 
-    module_private register_receiver_dispatch_for_given_members(
+    register_receiver_dispatch_for_given_members(
         self,
         target_type Type,
         trait_name Option[String],
@@ -387,7 +387,7 @@ given TypeChecker {
         };
     };
 
-    module_private duplicate_definition_message(self, name String) String = {
+    duplicate_definition_message(self, name String) String = {
         let _ = self;
         let mutable message = StringBuilder.new();
         message.push_string("Duplicate definition: ");
@@ -395,7 +395,7 @@ given TypeChecker {
         return message.to_string();
     };
 
-    module_private invalidate_trait_requirement_caches(self) Void = {
+    invalidate_trait_requirement_caches(self) Void = {
         self.storage.trait_requirement_in_progress = Set[ExplicitTraitConformanceKey].new(
         );
         self.storage.generic_trait_status_in_progress = Set[ExplicitTraitConformanceKey].new(
@@ -417,7 +417,7 @@ given TypeChecker {
     /// again for the same expression -- a second generic instantiation attempt,
     /// a receiver rewrite, a re-check of the same binding -- must not multiply
     /// its message.
-    module_private push_diagnostic(self, message String, span SourceSpan) Void = {
+    push_diagnostic(self, message String, span SourceSpan) Void = {
         // A message that arrives without a location is a problem at whatever
         // construct the walker is inside -- see `current_span`. A message that
         // arrives with one keeps it: the call site knows better than the cursor
@@ -436,7 +436,7 @@ given TypeChecker {
         );
     };
 
-    module_private report_pass2_decl_consistency_error(
+    report_pass2_decl_consistency_error(
         self,
         decl_kind String,
         name String,
@@ -455,7 +455,7 @@ given TypeChecker {
         self.push_diagnostic(message.to_string(), unknown_span());
     };
 
-    module_private sema_progress_debug_enabled(self) Bool = {
+    sema_progress_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SEMA_PROGRESS") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -463,7 +463,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_given_body_debug_enabled(self) Bool = {
+    skip_given_body_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_GIVEN_BODY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -471,7 +471,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_decl_check_debug_enabled(self) Bool = {
+    skip_decl_check_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -479,7 +479,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_function_decl_check_debug_enabled(self) Bool = {
+    skip_function_decl_check_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_FUNCTION_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -487,7 +487,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_let_decl_check_debug_enabled(self) Bool = {
+    skip_let_decl_check_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_LET_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -495,7 +495,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_given_decl_check_debug_enabled(self) Bool = {
+    skip_given_decl_check_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_GIVEN_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -503,7 +503,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private reset_constraint_solver_each_decl_debug_enabled(self) Bool = {
+    reset_constraint_solver_each_decl_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_RESET_CONSTRAINT_SOLVER_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -511,7 +511,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private clear_variable_symbol_types_each_decl_debug_enabled(self) Bool = {
+    clear_variable_symbol_types_each_decl_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_CLEAR_VARIABLE_SYMBOL_TYPES_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -519,7 +519,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_typed_decl_retention_debug_enabled(self) Bool = {
+    skip_typed_decl_retention_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TYPED_DECL_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -527,7 +527,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_trait_tool_template_backfill_debug_enabled(self) Bool = {
+    skip_trait_tool_template_backfill_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TRAIT_TOOL_TEMPLATE_BACKFILL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -535,7 +535,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_checked_decl_substitution_debug_enabled(self) Bool = {
+    skip_checked_decl_substitution_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CHECKED_DECL_SUBSTITUTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -543,7 +543,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_template_typed_body_boxing_debug_enabled(self) Bool = {
+    skip_template_typed_body_boxing_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TEMPLATE_TYPED_BODY_BOXING") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -551,7 +551,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_concrete_given_program_body_retention_debug_enabled(self) Bool = {
+    skip_concrete_given_program_body_retention_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CONCRETE_GIVEN_PROGRAM_BODY_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -559,7 +559,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private drop_template_body_debug_enabled(self) Bool = {
+    drop_template_body_debug_enabled(self) Bool = {
         let file_filter = env("KORAL_DEBUG_DROP_TEMPLATE_BODY_FILE_CONTAINS");
         return when file_filter in {
             .Some(value) then self.storage.file_path.contains(value),
@@ -567,7 +567,7 @@ given TypeChecker {
         };
     };
 
-    module_private skip_call_family_debug_enabled(self) Bool = {
+    skip_call_family_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CALL_FAMILY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -575,7 +575,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private skip_member_path_debug_enabled(self) Bool = {
+    skip_member_path_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_MEMBER_PATH") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -583,7 +583,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private template_retain_debug_enabled(self) Bool = {
+    template_retain_debug_enabled(self) Bool = {
         let _ = self;
         if env("KORAL_DEBUG_TEMPLATE_RETAIN") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -591,7 +591,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
+    log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
         let pending_constraints = self.storage.constraint_solver.constraints.count();
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count(
         );
@@ -627,7 +627,7 @@ given TypeChecker {
         );
     };
 
-    module_private decl_debug_label(self, decl Decl) String = {
+    decl_debug_label(self, decl Decl) String = {
         let _ = self;
         return when decl in {
             .LetDecl(_, name, _, _, _, _, _) then "let \(name)",
@@ -648,7 +648,7 @@ given TypeChecker {
         };
     };
 
-    module_private record_instantiation_request(self, request InstantiationRequest) Void = {
+    record_instantiation_request(self, request InstantiationRequest) Void = {
         self.storage.instantiation_requests.insert(request);
     };
 
@@ -666,7 +666,7 @@ given TypeChecker {
     /// - **`using`**. An explicit list binds those names; a batch import
     ///   (`using "std" { ... };`) has no symbol edges and binds every importable trait
     ///   the target declares.
-    module_private register_imported_trait_names(
+    register_imported_trait_names(
         self,
         nodes List[Pair[LoadedNode, List[String]]],
     ) Void = {
@@ -690,7 +690,7 @@ given TypeChecker {
                 },
             };
             // An explicit list is not a hole in the access rule (§3.3): only
-            // `public` and `package_private` traits travel, exactly like the
+            // `public` and `protected` traits travel, exactly like the
             // batch path below. A name that cannot be imported is not in the
             // file's scope to begin with, so its use is refused just like an
             // un-imported one.
@@ -729,7 +729,7 @@ given TypeChecker {
 
     /// std's root traits, bound into `importing_module`. The prelude is a real
     /// import -- just one the language writes for you.
-    module_private bind_prelude_trait_names(self, importing_module List[String]) Void = {
+    bind_prelude_trait_names(self, importing_module List[String]) Void = {
         for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
             let info = entry.second;
             if not self.is_std_root_module_decl(info.def_id, info.module_path) then {
@@ -749,7 +749,7 @@ given TypeChecker {
     /// Root-ness is the module's shape: std's root is the single-segment module
     /// in that package, the one its manifest names as the main module. Submodules
     /// (`std::io` and friends) are imported explicitly and are not prelude.
-    module_private is_std_root_module_decl(
+    is_std_root_module_decl(
         self,
         def_id DefId,
         module_path List[String],
@@ -763,14 +763,14 @@ given TypeChecker {
         };
     };
 
-    /// Whether a batch import may bring this trait in. `module_private` /
-    /// `file_private` never travel; `package_private` travels within a package
+    /// Whether a batch import may bring this trait in. `internal` /
+    /// `private` never travel; `protected` travels within a package
     /// and is re-checked at use by the visibility checker.
-    module_private importable_trait_access(self, def_id DefId) Bool = {
+    importable_trait_access(self, def_id DefId) Bool = {
         return when self.storage.context.get_access(def_id) in {
             .Some(access) then when access in {
-                .Public() or .PackagePrivate() then true,
-                .ModulePrivate() or .FilePrivate() then false,
+                .Public() or .Protected() then true,
+                .Internal() or .Private() then false,
             },
             .None() then true,
         };
@@ -779,7 +779,7 @@ given TypeChecker {
     /// Bind `local_name` to the trait declared at `trait_def_id`, in the module
     /// that IMPORTED it. Both name tables need it: sema resolves through
     /// `trait_registry`, monomorphization through `generic_templates.traits`.
-    module_private bind_imported_trait_name(
+    bind_imported_trait_name(
         self,
         local_name String,
         importing_module List[String],
@@ -814,7 +814,7 @@ given TypeChecker {
         };
     };
 
-    module_private register_trait_metadata(
+    register_trait_metadata(
         self,
         name String,
         trait_def_id DefId,
@@ -884,7 +884,7 @@ given TypeChecker {
     /// declaration's identity here, once; every later comparison uses the
     /// identity, not the spelling. An unresolvable spelling carries
     /// `def_id_invalid()`, which is always on its way to a diagnostic.
-    module_private canonical_trait_ref(
+    canonical_trait_ref(
         self,
         trait_name String,
         trait_type_args List[Type],
@@ -897,7 +897,7 @@ given TypeChecker {
     };
 
     /// Same, when the caller already holds the declaration identity.
-    module_private canonical_trait_ref_with_def_id(
+    canonical_trait_ref_with_def_id(
         self,
         trait_name String,
         trait_def_id DefId,
@@ -908,7 +908,7 @@ given TypeChecker {
         return CanonicalTraitRef(trait_name, resolved, trait_type_args);
     };
 
-    module_private trait_extension_self_type(self, resolved_target Type) Type = {
+    trait_extension_self_type(self, resolved_target Type) Type = {
         return when resolved_target in {
             .TraitObject(...) then Type.GenericParameter("Self"),
             .ReferenceType(inner) then when inner in {
@@ -931,7 +931,7 @@ given TypeChecker {
         };
     };
 
-    module_private trait_type_substitution(
+    trait_type_substitution(
         self,
         trait_ref CanonicalTraitRef,
         self_type Type,
@@ -958,7 +958,7 @@ given TypeChecker {
         return substitution;
     };
 
-    module_private direct_parent_trait_refs(
+    direct_parent_trait_refs(
         self,
         trait_ref CanonicalTraitRef,
         self_type Type,
@@ -1002,7 +1002,7 @@ given TypeChecker {
     /// object reaches one by its offset. A witness filed in any other order
     /// dispatches to the wrong method -- a child trait with both its own methods
     /// and a parent's used to send `show` to `base`.
-    module_private requirement_slots(
+    requirement_slots(
         self,
         trait_ref CanonicalTraitRef,
         self_type Type,
@@ -1024,7 +1024,7 @@ given TypeChecker {
     /// matching `ordered_trait_method_names_helper_from_def` on the mono side.
     /// Two same-named traits from different modules are different declarations
     /// and must not share a visit slot.
-    module_private collect_requirement_slots(
+    collect_requirement_slots(
         self,
         trait_ref CanonicalTraitRef,
         self_type Type,
@@ -1106,7 +1106,7 @@ given TypeChecker {
         };
     };
 
-    module_private record_conformance_witness(
+    record_conformance_witness(
         self,
         self_type Type,
         trait_name String,
@@ -1146,7 +1146,7 @@ given TypeChecker {
         self.storage.conformance_witnesses.insert(witness.key(), witness);
     };
 
-    module_private template_checked_body(
+    template_checked_body(
         self,
         body Option[TypedExpr],
         retain_checked_template_bodies Bool,
@@ -1160,22 +1160,22 @@ given TypeChecker {
         } else Option[TypedExpr].None();
     };
 
-    module_private push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
+    push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
         self.push_diagnostic(message, span);
     };
 
-    module_private push_expr_diagnostic(self, expr Expr, message String) Void = {
+    push_expr_diagnostic(self, expr Expr, message String) Void = {
         self.push_diagnostic_at_span(message, expr_span(expr));
     };
 
-    module_private push_pattern_diagnostic(self, pattern PatternNode, message String) Void = {
+    push_pattern_diagnostic(self, pattern PatternNode, message String) Void = {
         self.push_diagnostic_at_span(message, pattern_span(pattern));
     };
 
     /// Whether one lowered pattern covers every value of its subject type --
     /// the `for`-binding question, judged by the exhaustiveness checker's own
     /// coverage machinery rather than the syntactic irrefutability shortcut.
-    module_private pattern_covers_full_space(
+    pattern_covers_full_space(
         self,
         pattern TypedPattern,
         subject_type Type,
@@ -1192,23 +1192,23 @@ given TypeChecker {
         return checker.covers_full_space();
     };
 
-    module_private context(self) CompilerContext = {
+    context(self) CompilerContext = {
         return self.storage.context;
     };
 
-    module_private in_function_context(self) Bool = {
+    in_function_context(self) Bool = {
         if self.storage.function_return_context.is_inferring then {
             return true;
         };
         return self.storage.function_return_context.expected_return_type is .Some(_);
     };
 
-    module_private allocate_unindexed_def_id(self, name String, kind DefKind) DefId = {
+    allocate_unindexed_def_id(self, name String, kind DefKind) DefId = {
         let mutable context = self.context();
         return context.allocate_unindexed(name, kind);
     };
 
-    module_private make_member_path_symbol(
+    make_member_path_symbol(
         self,
         name String,
         member_type Type,
@@ -1226,7 +1226,7 @@ given TypeChecker {
 
     // Reuse the pass1 DefId for top-level declarations, matching Swift's
     // makeGlobalSymbol/getOrAllocateTypeDefId flow instead of allocating fallback ids.
-    module_private get_or_allocate_top_level_def_id(
+    get_or_allocate_top_level_def_id(
         self,
         name String,
         kind DefKind,
@@ -1235,7 +1235,7 @@ given TypeChecker {
     ) DefId = {
         let mutable context = self.context();
         return when access in {
-            .FilePrivate() then when context.lookup_def_id(
+            .Private() then when context.lookup_def_id(
                 self.storage.module_path,
                 name,
                 Option[String].Some(self.storage.file_path),
@@ -1270,7 +1270,7 @@ given TypeChecker {
         };
     };
 
-    module_private make_top_level_symbol(
+    make_top_level_symbol(
         self,
         name String,
         symbol_type Type,
@@ -1309,7 +1309,7 @@ given TypeChecker {
         return symbol;
     };
 
-    module_private make_top_level_type_symbol(
+    make_top_level_type_symbol(
         self,
         name String,
         type_kind TypeDefKind,
@@ -1332,7 +1332,7 @@ given TypeChecker {
         return symbol;
     };
 
-    module_private fresh_type_variable(
+    fresh_type_variable(
         self,
         name Option[String],
         span SourceSpan,
@@ -1340,7 +1340,7 @@ given TypeChecker {
         return self.storage.constraint_solver.fresh_type_variable(name, span);
     };
 
-    module_private fresh_literal_type_variable(
+    fresh_literal_type_variable(
         self,
         kind LiteralDefaultKind,
         span SourceSpan,
@@ -1354,7 +1354,7 @@ given TypeChecker {
     /// construction sites that have not yet been migrated to
     /// `make_typed_expr_at`: it only ever succeeds by borrowing a span from a
     /// child, which is exactly the case the recorded span exists to fix.
-    module_private typed_expr_span(self, expr TypedExpr) SourceSpan = {
+    typed_expr_span(self, expr TypedExpr) SourceSpan = {
         if is_known_span(expr.span) then {
             return expr.span;
         };
@@ -1459,11 +1459,11 @@ given TypeChecker {
         };
     };
 
-    module_private push_typed_expr_diagnostic(self, expr TypedExpr, message String) Void = {
+    push_typed_expr_diagnostic(self, expr TypedExpr, message String) Void = {
         self.push_diagnostic_at_span(message, self.typed_expr_span(expr));
     };
 
-    module_private statement_span(self, stmt Statement) SourceSpan = {
+    statement_span(self, stmt Statement) SourceSpan = {
         return when stmt in {
             .LetStmt(_, _, _, _, span) then span,
             .TupleLetStmt(_, _, span) then span,
@@ -1480,7 +1480,7 @@ given TypeChecker {
     ///
     /// Every declaration carries its span; this just names which field that
     /// is, so `check_decl` can record it as the place a diagnostic belongs to.
-    module_private decl_span(self, decl Decl) SourceSpan = {
+    decl_span(self, decl Decl) SourceSpan = {
         return when decl in {
             .LetDecl(_, _, _, _, _, span, _) then span,
             .FunctionDecl(_, _, _, _, _, _, span, _) then span,
@@ -1509,7 +1509,7 @@ given TypeChecker {
     /// location behind for whatever is checked next.
     ///
     /// Returns the location to hand back to `leave_current_span`.
-    module_private enter_current_span(self, span SourceSpan) SourceSpan = {
+    enter_current_span(self, span SourceSpan) SourceSpan = {
         let outer = self.storage.current_span;
         if is_known_span(span) then {
             self.storage.current_span = span;
@@ -1517,15 +1517,15 @@ given TypeChecker {
         return outer;
     };
 
-    module_private leave_current_span(self, outer SourceSpan) Void = {
+    leave_current_span(self, outer SourceSpan) Void = {
         self.storage.current_span = outer;
     };
 
-    module_private push_statement_diagnostic(self, stmt Statement, message String) Void = {
+    push_statement_diagnostic(self, stmt Statement, message String) Void = {
         self.push_diagnostic_at_span(message, self.statement_span(stmt));
     };
 
-    module_private trait_def_id_by_name(self, trait_name String) DefId = {
+    trait_def_id_by_name(self, trait_name String) DefId = {
         when self.storage.generic_templates.traits.get(
             qualified_symbol_key(self.storage.module_path, trait_name),
         ) in {
@@ -1559,7 +1559,7 @@ given TypeChecker {
         return def_id_invalid();
     };
 
-    module_private make_trait_object_type(
+    make_trait_object_type(
         self,
         trait_name String,
         type_args List[Type],
@@ -1567,7 +1567,7 @@ given TypeChecker {
         return Type.TraitObject(self.trait_def_id_by_name(trait_name), type_args);
     };
 
-    module_private canonical_trait_object_type(self, trait_name String) Type = {
+    canonical_trait_object_type(self, trait_name String) Type = {
         when self.lookup_current_file_type_symbol(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
                 .TraitObject(trait_object_def_id, _) then {
@@ -1593,19 +1593,19 @@ given TypeChecker {
     };
 
     // Treat both Unknown and TypeVar as unresolved so they do not leak into codegen.
-    module_private is_unresolved_expr_type(self, t Type) Bool = when t in {
+    is_unresolved_expr_type(self, t Type) Bool = when t in {
         .Unknown() then true,
         .TypeVar(_) then true,
         _ then false,
     };
 
-    module_private is_value_expr_type(self, t Type) Bool = when t in {
+    is_value_expr_type(self, t Type) Bool = when t in {
         .VoidType() then false,
         .NeverType() then false,
         _ then not self.is_unresolved_expr_type(t),
     };
 
-    module_private is_ffi_compatible_type(self, t Type) Bool = {
+    is_ffi_compatible_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -1639,7 +1639,7 @@ given TypeChecker {
         };
     };
 
-    module_private contains_borrowed_reference_type(self, t Type) Bool = {
+    contains_borrowed_reference_type(self, t Type) Bool = {
         return when t in {
             .BorrowedReferenceType(_) then true,
             .MutableBorrowedReferenceType(_) then true,
@@ -1689,7 +1689,7 @@ given TypeChecker {
         };
     };
 
-    module_private contains_never_type(self, t Type) Bool = {
+    contains_never_type(self, t Type) Bool = {
         return when t in {
             .NeverType() then true,
             .ReferenceType(inner) then self.contains_never_type(inner),
@@ -1734,7 +1734,7 @@ given TypeChecker {
         };
     };
 
-    module_private ffi_type_error(self, t Type) String = {
+    ffi_type_error(self, t Type) String = {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
@@ -1747,7 +1747,7 @@ given TypeChecker {
         };
     };
 
-    module_private same_expr_type(self, left Type, right Type) Bool = {
+    same_expr_type(self, left Type, right Type) Bool = {
         let normalized_left = self.canonicalize_alias_type(
             self.concretize_default_literal_type(left),
         );
@@ -1766,7 +1766,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private nominal_instantiation_matches_generic(
+    nominal_instantiation_matches_generic(
         self,
         nominal Type,
         generic_candidate Type,
@@ -1829,7 +1829,7 @@ given TypeChecker {
         };
     };
 
-    module_private canonicalize_alias_type(self, t Type) Type = {
+    canonicalize_alias_type(self, t Type) Type = {
         return when t in {
             .StructureType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
@@ -1889,7 +1889,7 @@ given TypeChecker {
         };
     };
 
-    module_private concretize_default_literal_type(self, t Type) Type = {
+    concretize_default_literal_type(self, t Type) Type = {
         let resolved = self.storage.constraint_solver.resolve(t);
         return when resolved in {
             .TypeVar(tv) then when tv.literal_default_kind in {
@@ -1953,7 +1953,7 @@ given TypeChecker {
         };
     };
 
-    module_private display_type_name(self, t Type) String = {
+    display_type_name(self, t Type) String = {
         let resolved = self.canonicalize_alias_type(
             self.concretize_default_literal_type(t),
         );
@@ -1967,7 +1967,7 @@ given TypeChecker {
 
     /// The innermost type's name. Alias and default-literal preprocessing have
     /// already happened in `display_type_name`; this names what is left.
-    module_private display_type_base_name(self, resolved Type) String = {
+    display_type_base_name(self, resolved Type) String = {
         return when resolved in {
             .StructureType(def_id) then when self.context().get_name(def_id) in {
                 .Some(name) then name,
@@ -2049,7 +2049,7 @@ given TypeChecker {
         };
     };
 
-    module_private choose_conditional_result_type(
+    choose_conditional_result_type(
         self,
         expected Option[Type],
         then_type Type,
@@ -2188,26 +2188,26 @@ given TypeChecker {
         return then_type;
     };
 
-    module_private is_enum_decl_type(self, t Type) Bool = when t in {
+    is_enum_decl_type(self, t Type) Bool = when t in {
         .EnumType(_) then true,
         _ then false,
     };
 
-    module_private is_enum_base_name(self, base String) Bool = {
+    is_enum_base_name(self, base String) Bool = {
         if self.resolve_type_name_binding(base) is .Some(t) then {
             return self.is_enum_decl_type(t);
         };
         return false;
     };
 
-    module_private is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
+    is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
         if self.try_resolve_named_type_in_scope_without_diag(base, scope) is .Some(t) then {
             return self.is_enum_decl_type(t);
         };
         return false;
     };
 
-    module_private retained_given_member_skeleton(
+    retained_given_member_skeleton(
         self,
         member TypedGivenMember,
     ) TypedGivenMember = {
@@ -2222,7 +2222,7 @@ given TypeChecker {
         );
     };
 
-    module_private retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
+    retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
         return when typed_decl in {
             .FunctionDecl(access, name, _, _, body, span, id) then {
                 TypedDecl.FunctionDecl(
@@ -2299,7 +2299,7 @@ given TypeChecker {
         };
     };
 
-    module_private decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
+    decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
         let _ = self;
         return when decl in {
             .LetDecl(_, _, _, _, _, _, _) then true,
@@ -2538,7 +2538,7 @@ given TypeChecker {
         return TypedProgram(typed_decls, self.context().get_names());
     };
 
-    module_private finalize_checked_decl_constraints(
+    finalize_checked_decl_constraints(
         self,
         typed_decl Option[TypedDecl],
     ) Option[TypedDecl] = {
@@ -2596,7 +2596,7 @@ given TypeChecker {
         };
     };
 
-    module_private refresh_concrete_stored_exprs(
+    refresh_concrete_stored_exprs(
         self,
         subst TypeSubstitution,
         typed_decl TypedDecl,
@@ -2639,7 +2639,7 @@ given TypeChecker {
         };
     };
 
-    module_private refresh_concrete_given_member_body_list(
+    refresh_concrete_given_member_body_list(
         self,
         subst TypeSubstitution,
         members List[TypedGivenMember],
@@ -2678,7 +2678,7 @@ given TypeChecker {
     /// `given[T] Iterator[T]` tools onto every iterator drags the whole adapter
     /// family into every binary — ~21k lines of C for a program that sorts a
     /// list.
-    module_private trait_tool_target_name(
+    trait_tool_target_name(
         self,
         target_type TypeNode,
         type_params List[TypeParameter],
@@ -2724,7 +2724,7 @@ given TypeChecker {
         };
     };
 
-    module_private register_trait_tool_block(
+    register_trait_tool_block(
         self,
         trait_name String,
         type_params List[TypeParameter],
@@ -2832,7 +2832,7 @@ given TypeChecker {
 
     // Swift `ownRequirements` — methods a trait declares as requirements, as opposed
     // to trait-tool entity methods. Parent requirements are inherited, so recurse.
-    module_private trait_declares_requirement(
+    trait_declares_requirement(
         self,
         trait_name String,
         method_name String,
@@ -2849,7 +2849,7 @@ given TypeChecker {
 
     /// Walks the DECLARATION and its parents. Two same-named traits from
     /// different modules are different nodes and must not share a visit slot.
-    module_private trait_declares_requirement_in_trait(
+    trait_declares_requirement_in_trait(
         self,
         trait_def_id DefId,
         method_name String,
@@ -2882,7 +2882,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private flattened_trait_tool_methods(
+    flattened_trait_tool_methods(
         self,
         trait_name String,
     ) Result[Dict[String, TraitToolMethodEntry]] = {
@@ -2899,7 +2899,7 @@ given TypeChecker {
     /// Walks the DECLARATION and its parents. Two same-named traits from
     /// different modules are different nodes and must not share a visit slot.
     /// `trait_name` survives only to print diagnostics.
-    module_private flattened_trait_tool_methods_in_trait(
+    flattened_trait_tool_methods_in_trait(
         self,
         trait_def_id DefId,
         trait_name String,
@@ -2991,11 +2991,11 @@ given TypeChecker {
         return Result[Dict[String, TraitToolMethodEntry]].Ok(result);
     };
 
-    module_private trait_tool_method_is_receiver_style(self, method GivenMember) Bool = {
+    trait_tool_method_is_receiver_style(self, method GivenMember) Bool = {
         return not method.params.is_empty() and method.params[UInt(0)].name == "self";
     };
 
-    module_private collect_signatures(self, program Program) Void = {
+    collect_signatures(self, program Program) Void = {
         for decl in program.declarations then {
             when decl in {
                 .TraitDecl(_, _, _, _, _, _, _) then self.collect_decl_signature(decl),
@@ -3029,7 +3029,7 @@ given TypeChecker {
     /// already registered. Resolving during construction would depend on
     /// declaration order and leave a forward reference unbound; this back-fills
     /// those so nothing downstream has to re-resolve a spelling.
-    module_private link_parent_trait_def_ids(self) Void = {
+    link_parent_trait_def_ids(self) Void = {
         let mutable pending = List[TraitInfo].new();
         for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
             pending.push(entry.second);
@@ -3122,7 +3122,7 @@ given TypeChecker {
     /// `span` is the trait declaration whose parent list is wrong -- this runs
     /// outside `collect_decl_signature`, so the walker is not inside the trait
     /// and the declaration has to be named.
-    module_private validate_trait_parent_existence(
+    validate_trait_parent_existence(
         self,
         parents List[TypeNode],
         span SourceSpan,
@@ -3148,7 +3148,7 @@ given TypeChecker {
         };
     };
 
-    module_private collect_decl_signature(self, decl Decl) Void = {
+    collect_decl_signature(self, decl Decl) Void = {
         let outer_span = self.enter_current_span(self.decl_span(decl));
         defer {
             self.leave_current_span(outer_span);
@@ -3942,7 +3942,16 @@ given TypeChecker {
                                 continue;
                             };
                             let method_name = member.name;
-                            let method_access = member.access;
+                            // Swift `registeredMethodDeclaration(..., access:
+                            // requirementAccess)`: a trait requirement is
+                            // registered at the requirement's level; the access
+                            // spelling on the impl is not a symbol-visibility
+                            // input. Non-requirement helpers keep their own.
+                            let method_access = self.conformance_member_registration_access(
+                                self.trait_def_id_of(trait_name),
+                                method_name,
+                                member.access,
+                            );
                             let method_type_params = member.type_params;
                             let method_params = member.params;
                             let method_return_type_node = member.return_type;
@@ -4163,7 +4172,7 @@ given TypeChecker {
     /// bound to one could not find a table keyed by the other. The map keys on
     /// (owner, member name) -- one given block, one name per member -- and is
     /// read before allocating, so the second pass reuses the first's answer.
-    module_private members_with_def_ids(
+    members_with_def_ids(
         self,
         members List[GivenMember],
         target_type Type,
@@ -4218,7 +4227,7 @@ given TypeChecker {
         return out;
     };
 
-    module_private collect_given_signatures(
+    collect_given_signatures(
         self,
         members List[GivenMember],
         target_type Type,
@@ -4328,7 +4337,7 @@ given TypeChecker {
         };
     };
 
-    module_private string_list_contains(self, values List[String], target String) Bool = {
+    string_list_contains(self, values List[String], target String) Bool = {
         let mutable index = UInt(0);
         while index < values.count() then {
             if values[index] == target then {
@@ -4339,7 +4348,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private to_template_type_params(
+    to_template_type_params(
         self,
         type_params List[TypeParameter],
     ) List[TypeParameterDecl] = {
@@ -4359,7 +4368,7 @@ given TypeChecker {
         return out;
     };
 
-    module_private generic_type_param_bindings(
+    generic_type_param_bindings(
         self,
         type_params List[TypeParameter],
     ) Dict[String, Type] = {
@@ -4370,7 +4379,7 @@ given TypeChecker {
         return bindings;
     };
 
-    module_private merged_type_param_bindings(
+    merged_type_param_bindings(
         self,
         owner_params List[TypeParameter],
         method_params List[TypeParameter],
@@ -4385,7 +4394,7 @@ given TypeChecker {
         return bindings;
     };
 
-    module_private to_template_params(self, params List[Param]) List[TemplateParam] = {
+    to_template_params(self, params List[Param]) List[TemplateParam] = {
         let mutable out = List[TemplateParam].new();
         for p in params then {
             out.push(
@@ -4400,11 +4409,11 @@ given TypeChecker {
         return out;
     };
 
-    module_private copy_type_node_ref(self, type_node TypeNode) TypeNode = {
+    copy_type_node_ref(self, type_node TypeNode) TypeNode = {
         return self.copy_type_node(type_node);
     };
 
-    module_private copy_type_node_ref_list(self, type_nodes List[TypeNode]) List[TypeNode] = {
+    copy_type_node_ref_list(self, type_nodes List[TypeNode]) List[TypeNode] = {
         let mutable copied = List[TypeNode].with_capacity(type_nodes.count());
         for type_node in type_nodes then {
             copied.push(self.copy_type_node_ref(type_node));
@@ -4412,7 +4421,7 @@ given TypeChecker {
         return copied;
     };
 
-    module_private copy_type_node(self, type_node TypeNode) TypeNode = {
+    copy_type_node(self, type_node TypeNode) TypeNode = {
         return when type_node in {
             .Identifier(name, span) then TypeNode.Identifier(name, span),
             .Reference(inner, is_mutable, span) then TypeNode.Reference(
@@ -4449,7 +4458,7 @@ given TypeChecker {
         };
     };
 
-    module_private to_type_ref_list(self, types List[Type]) List[Type] = {
+    to_type_ref_list(self, types List[Type]) List[Type] = {
         let mutable out = List[Type].new();
         for t in types then {
             out.push(t);
@@ -4457,7 +4466,7 @@ given TypeChecker {
         return out;
     };
 
-    module_private from_template_type_params(
+    from_template_type_params(
         self,
         type_params List[TypeParameterDecl],
     ) List[TypeParameter] = {
@@ -4472,7 +4481,7 @@ given TypeChecker {
         return out;
     };
 
-    module_private constraint_bounds_for_type_param(
+    constraint_bounds_for_type_param(
         self,
         tp TypeParameter,
         param_names List[String],
@@ -4489,7 +4498,7 @@ given TypeChecker {
     /// forward-referenced generic params (e.g. T in [R Iterator[T], T]) fall back
     /// to GenericParameter. Shape bounds carry their canonical name here because
     /// GenericConstraintBound is still name-keyed; that collapses in the identity step.
-    module_private resolve_constraint_bound(
+    resolve_constraint_bound(
         self,
         b Bound,
         param_names List[String],
@@ -4523,7 +4532,7 @@ given TypeChecker {
     };
 
     /// Lightweight type arg resolution for constraint bounds — no diagnostics on miss.
-    module_private resolve_constraint_type_arg(
+    resolve_constraint_type_arg(
         self,
         node TypeNode,
         param_names List[String],
@@ -4553,7 +4562,7 @@ given TypeChecker {
     /// Iterator[T], T Any]` names the `T` being declared, and a global type that
     /// happens to be called `T` is a different thing entirely. Only when the
     /// name is not one of those does it become an ordinary type reference.
-    module_private resolve_constraint_identifier(
+    resolve_constraint_identifier(
         self,
         name String,
         param_names List[String],
@@ -4575,7 +4584,7 @@ given TypeChecker {
     /// before any signature is resolved -- so the identity cannot depend on
     /// declaration order. The template registry is the fallback, for names the
     /// symbol table does not hold. Never returns a name-only match.
-    module_private generic_template_def_id(self, base String) DefId = {
+    generic_template_def_id(self, base String) DefId = {
         let from_global = when self.resolve_type_name_binding(base) in {
             .Some(t) then when t in {
                 .StructureType(def_id) then def_id,
@@ -4603,7 +4612,7 @@ given TypeChecker {
         else self.storage.generic_templates.lookup_enum_def_id(base);
     };
 
-    module_private resolve_constraint_generic_type(
+    resolve_constraint_generic_type(
         self,
         base String,
         args List[TypeNode],
@@ -4626,7 +4635,7 @@ given TypeChecker {
         );
     };
 
-    module_private resolve_constraint_ref_type(
+    resolve_constraint_ref_type(
         self,
         inner TypeNode,
         is_mutable Bool,
@@ -4639,7 +4648,7 @@ given TypeChecker {
         return Type.ReferenceType(resolved_inner);
     };
 
-    module_private snapshot_generic_constraints(
+    snapshot_generic_constraints(
         self,
         type_params List[TypeParameter],
     ) GenericConstraintSnapshot = {
@@ -4677,7 +4686,7 @@ given TypeChecker {
         return GenericConstraintSnapshot(previous_constraints, previous_shape_bounds);
     };
 
-    module_private register_generic_constraints(
+    register_generic_constraints(
         self,
         type_params List[TypeParameter],
     ) Void = {
@@ -4708,7 +4717,7 @@ given TypeChecker {
         };
     };
 
-    module_private restore_generic_constraints(
+    restore_generic_constraints(
         self,
         snapshot GenericConstraintSnapshot,
     ) Void = {
@@ -4735,7 +4744,7 @@ given TypeChecker {
         };
     };
 
-    module_private nominal_def_id_for_type(self, t Type) Option[DefId] = {
+    nominal_def_id_for_type(self, t Type) Option[DefId] = {
         return when t in {
             .StructureType(def_id) then .Some(def_id),
             .EnumType(def_id) then .Some(def_id),

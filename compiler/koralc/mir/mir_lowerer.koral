@@ -8,7 +8,7 @@ public type mutable MIRLowerer(
     mutable diagnostics DiagnosticCollector,
 );
 
-file_private type PreparedMIRLowering(
+private type PreparedMIRLowering(
     metadata_program MIRProgram,
     work_items List[MIRFunctionWorkItem],
     builder_program MonomorphizedProgram,
@@ -16,7 +16,7 @@ file_private type PreparedMIRLowering(
 
 public type LoweredMIRProgram(mir_program MIRProgram, diagnostics DiagnosticCollector);
 
-file_private let empty_monomorphized_program() MonomorphizedProgram = {
+private let empty_monomorphized_program() MonomorphizedProgram = {
     return MonomorphizedProgram(
         List[TypedDecl].new(),
         Dict[String, TraitDeclInfo].new(),
@@ -37,7 +37,7 @@ file_private let empty_monomorphized_program() MonomorphizedProgram = {
     );
 };
 
-file_private let make_builder_program_view(
+private let make_builder_program_view(
     program MonomorphizedProgram,
 ) MonomorphizedProgram = {
     return MonomorphizedProgram(
@@ -60,7 +60,7 @@ file_private let make_builder_program_view(
     );
 };
 
-file_private let prepare_mir_lowering(
+private let prepare_mir_lowering(
     program MonomorphizedProgram,
     context CompilerContext,
 ) PreparedMIRLowering = {
@@ -91,12 +91,12 @@ file_private let prepare_mir_lowering(
     );
 };
 
-file_private let mir_progress_enabled() Bool = {
+private let mir_progress_enabled() Bool = {
     return if env("KORAL_DEBUG_MIR_PROGRESS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
     else false;
 };
 
-file_private let trace_mir_progress(label String) Void = {
+private let trace_mir_progress(label String) Void = {
     if mir_progress_enabled() then {
         eprintln(label);
     };
@@ -162,7 +162,7 @@ given MIRLowerer {
             DiagnosticCollector.new(),
         );
 
-    module_private unique_vtable_requests(self) List[VtableRequest] = {
+    unique_vtable_requests(self) List[VtableRequest] = {
         let _ = self;
         let mutable seen = Set[String].new();
         let mutable unique = List[VtableRequest].new();
@@ -388,7 +388,7 @@ given MIRLowerer {
         return Option[MIRFunction].None();
     };
 
-    module_private prepare_streaming_nodes(self) Void = {
+    prepare_streaming_nodes(self) Void = {
         if self.streaming_nodes_prepared then {
             return;
         };
@@ -401,7 +401,7 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true;
     };
 
-    module_private enqueue_node_work_items(self, node_ref TypedDecl) Void = {
+    enqueue_node_work_items(self, node_ref TypedDecl) Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier);
@@ -801,7 +801,7 @@ given MIRLowerer {
         );
     };
 
-    module_private make_function(
+    make_function(
         self,
         identifier Symbol,
         params List[TypedParam],
@@ -856,12 +856,12 @@ given MIRLowerer {
         return function;
     };
 
-    module_private should_lower_function(self, identifier Symbol) Bool = {
+    should_lower_function(self, identifier Symbol) Bool = {
         let _ = self;
         return not self.context.contains_generic_parameter(identifier.symbol_type);
     };
 
-    module_private make_global_initializer_symbol(self, identifier Symbol) Symbol = {
+    make_global_initializer_symbol(self, identifier Symbol) Symbol = {
         let mutable function_type = Type.FunctionType(
             List[FunctionParamEntry].new(),
             identifier.symbol_type,
@@ -874,13 +874,13 @@ given MIRLowerer {
             function_type,
             SymbolKind.Function(),
             MethodKind.Normal(),
-            AccessModifier.FilePrivate(),
+            AccessModifier.Private(),
             unknown_span(),
             false,
         );
     };
 
-    module_private make_given_member_symbol(self, member TypedGivenMember) Symbol = {
+    make_given_member_symbol(self, member TypedGivenMember) Symbol = {
         let drop_trait_def_id = when self.program.receiver_method_dispatch.get(
             member.def_id,
         ) in {
@@ -918,7 +918,7 @@ given MIRLowerer {
         return Symbol(member.def_id, function_type, SymbolKind.Function());
     };
 
-    module_private make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
+    make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
         return MIRTraitVTable(
             request.concrete_type,
             request.trait_name,
@@ -928,7 +928,7 @@ given MIRLowerer {
         );
     };
 
-    module_private copy_type_ref_list(self, values List[Type]) List[Type] = {
+    copy_type_ref_list(self, values List[Type]) List[Type] = {
         let mutable out = List[Type].new();
         for value in values then {
             out.push(value);
@@ -936,7 +936,7 @@ given MIRLowerer {
         return out;
     };
 
-    module_private make_trait_vtable_methods(
+    make_trait_vtable_methods(
         self,
         request VtableRequest,
     ) List[MIRTraitVTableMethod] = {
@@ -971,7 +971,7 @@ given MIRLowerer {
         return methods;
     };
 
-    module_private make_trait_vtable_method_from_requirement_slot(
+    make_trait_vtable_method_from_requirement_slot(
         self,
         slot RequirementSlot,
     ) MIRTraitVTableMethod = {
@@ -994,7 +994,7 @@ given MIRLowerer {
         );
     };
 
-    module_private requirement_slot_self_by_value(self, slot RequirementSlot) Bool = {
+    requirement_slot_self_by_value(self, slot RequirementSlot) Bool = {
         if slot.parameters.is_empty() then {
             return false;
         };
@@ -1015,7 +1015,7 @@ given MIRLowerer {
         };
     };
 
-    module_private type_module_path(self, t Type) List[String] = {
+    type_module_path(self, t Type) List[String] = {
         return when t in {
             .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
@@ -1032,7 +1032,7 @@ given MIRLowerer {
     /// holds a name and nothing else (parent-trait walks); anything that already
     /// carries the identity must pass it through instead of re-resolving.
 
-    module_private collect_instantiated_trait_members(
+    collect_instantiated_trait_members(
         self,
         trait_def_id DefId,
         concrete_type Type,
@@ -1086,7 +1086,7 @@ given MIRLowerer {
         };
     };
 
-    module_private trait_binding_visit_key(
+    trait_binding_visit_key(
         self,
         trait_def_id DefId,
         bindings Dict[String, Type],
@@ -1114,7 +1114,7 @@ given MIRLowerer {
         return key.to_string();
     };
 
-    module_private parent_trait_bindings(
+    parent_trait_bindings(
         self,
         parent ParentTraitConstraint,
         preferred_module_path List[String],
@@ -1148,7 +1148,7 @@ given MIRLowerer {
         return result;
     };
 
-    module_private resolve_trait_type_node_with_bindings(
+    resolve_trait_type_node_with_bindings(
         self,
         node TypeNode,
         bindings Dict[String, Type],
@@ -1253,7 +1253,7 @@ given MIRLowerer {
         };
     };
 
-    module_private trait_member_has_receiver(self, member TypedTraitMember) Bool = {
+    trait_member_has_receiver(self, member TypedTraitMember) Bool = {
         let _ = self;
         if member.params.is_empty() then {
             return false;
@@ -1262,7 +1262,7 @@ given MIRLowerer {
         return first_param.name == "self";
     };
 
-    module_private trait_member_type_bindings(
+    trait_member_type_bindings(
         self,
         request VtableRequest,
     ) Dict[String, Type] = {
@@ -1285,7 +1285,7 @@ given MIRLowerer {
         return bindings;
     };
 
-    module_private apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+    apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
         let _ = self;
         if bindings.is_empty() then {
             return t;
@@ -1356,7 +1356,7 @@ given MIRLowerer {
         };
     };
 
-    module_private apply_type_bindings_to_trait_member(
+    apply_type_bindings_to_trait_member(
         self,
         member TypedTraitMember,
         bindings Dict[String, Type],
@@ -1381,7 +1381,7 @@ given MIRLowerer {
         );
     };
 
-    module_private make_trait_vtable_method(
+    make_trait_vtable_method(
         self,
         member TypedTraitMember,
     ) MIRTraitVTableMethod = {

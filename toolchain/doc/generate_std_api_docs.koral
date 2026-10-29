@@ -297,28 +297,30 @@ let render_all(source String) Result[String] = {
 let run_self_test() Void = {
     let mutable t = SelfTest.new();
 
-    // Non-public fields stay off the page; the public ones do not.
+    // Non-public fields stay off the page; the public ones do not. An
+    // unmarked field is module-internal by default and stays off too.
     let mixed = render_all(
-        "public type Mixed(public_name String, module_private hidden Int, package_private token Int, file_private cache Int);\n",
+        "public type Mixed(public visible String, internal hidden Int, protected token Int, private cache Int, bare Int);\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render mixed type: \(e.message())");
         exit(1);
     };
-    t.contains("type keeps public fields", mixed, "public_name");
-    t.not_contains("type drops module_private fields", mixed, "hidden");
-    t.not_contains("type drops package_private fields", mixed, "token");
-    t.not_contains("type drops file_private fields", mixed, "cache");
+    t.contains("type keeps public fields", mixed, "visible");
+    t.not_contains("type drops internal fields", mixed, "hidden");
+    t.not_contains("type drops protected fields", mixed, "token");
+    t.not_contains("type drops private fields", mixed, "cache");
+    t.not_contains("type drops unmarked fields (default internal)", mixed, "bare");
 
     // A `given` shows only its public methods; a trait shows all of them,
     // because a trait's whole body is its interface.
     let given_text = render_all(
-        "type mutable Box[R Any](value R);\n" + "given[R Any] Box[R] {\n" + "    public new(value R) Box[R] = Box[R](value);\n" + "    file_private peek(self) R = self.value;\n" + "    get(self) R = self.value;\n" + "};\n",
+        "type mutable Box[R Any](value R);\n" + "given[R Any] Box[R] {\n" + "    public new(value R) Box[R] = Box[R](value);\n" + "    private peek(self) R = self.value;\n" + "    get(self) R = self.value;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render given: \(e.message())");
         exit(1);
     };
     t.contains("given shows public methods", given_text, "public new(value R) Box[R]");
-    t.not_contains("given drops file_private methods", given_text, "peek");
+    t.not_contains("given drops private methods", given_text, "peek");
     t.not_contains("given drops unexported methods", given_text, "get(self)");
 
     let trait_text = render_all(
@@ -355,7 +357,7 @@ let run_self_test() Void = {
     // Comments and multiline strings live inside tokens; a line scanner
     // mis-reads them, the parser does not.
     let comment_text = render_all(
-        "public type Span(\n" + "    // how far it reaches\n" + "    length UInt,\n" + ");\n",
+        "public type Span(\n" + "    // how far it reaches\n" + "    public length UInt,\n" + ");\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render commented type: \(e.message())");
         exit(1);
@@ -374,7 +376,7 @@ let run_self_test() Void = {
     t.contains("weak parameter type", weak_text, "upgrade[T mutable](val ?T) Option[T];");
 
     let default_text = render_all(
-        "public trait Reader {\n" + "    read(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];\n" + "};\n" + "public type Span(length: UInt = 0, label: String = \"x\");\n",
+        "public trait Reader {\n" + "    read(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];\n" + "};\n" + "public type Span(public length: UInt = 0, public label: String = \"x\");\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render defaults: \(e.message())");
         exit(1);

@@ -19,7 +19,7 @@ public type InferenceMode {
 
 given TypeChecker {
     // 数值类型判断辅助方法
-    module_private is_numeric_type(self, t Type) Bool = {
+    is_numeric_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -50,7 +50,7 @@ given TypeChecker {
     /// The plain (checked) integer family only. The wrapping family is
     /// excluded: its operation surface is a separate delivery, and a plain
     /// checked operator must not silently stand in for it.
-    module_private is_plain_integer_type(self, t Type) Bool = {
+    is_plain_integer_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -66,7 +66,7 @@ given TypeChecker {
         };
     };
 
-    module_private is_wrapping_integer_type(self, t Type) Bool = {
+    is_wrapping_integer_type(self, t Type) Bool = {
         return when t in {
             .WrappingIntType() then true,
             .WrappingInt8Type() then true,
@@ -82,7 +82,7 @@ given TypeChecker {
         };
     };
 
-    module_private is_integer_type(self, t Type) Bool = {
+    is_integer_type(self, t Type) Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -108,7 +108,7 @@ given TypeChecker {
         };
     };
 
-    module_private is_float_type(self, t Type) Bool = {
+    is_float_type(self, t Type) Bool = {
         return when t in {
             .Float32Type() then true,
             .Float64Type() then true,
@@ -117,7 +117,7 @@ given TypeChecker {
     };
 
     // 双向推断入口：根据是否有期望类型选择合成或检查模式。
-    module_private bidirectional_check(
+    bidirectional_check(
         self,
         expr Expr,
         expected Option[Type],
@@ -130,7 +130,7 @@ given TypeChecker {
     };
 
     // 合成模式：从表达式推断类型（Γ ⊢ e ⇒ τ）
-    module_private bidi_synthesize_mode(self, expr Expr, scope Scope) TypedExpr = {
+    bidi_synthesize_mode(self, expr Expr, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then {
                 let tv = self.fresh_literal_type_variable(
@@ -169,10 +169,10 @@ given TypeChecker {
     };
 
     // 检查模式：验证表达式匹配期望类型（Γ ⊢ e ⇐ τ）
-    module_private typed_empty_literal(self, expected Type) TypedExpr =
+    typed_empty_literal(self, expected Type) TypedExpr =
         self.lower_empty_literal_expr(Option[Type].Some(expected), unknown_span());
 
-    module_private typed_dict_literal(
+    typed_dict_literal(
         self,
         entries List[ExprPair],
         expected Type,
@@ -181,7 +181,7 @@ given TypeChecker {
         return self.lower_dict_literal_expr(entries, Option[Type].Some(expected), scope);
     };
 
-    module_private typed_collection_literal(
+    typed_collection_literal(
         self,
         elements List[Expr],
         expected Type,
@@ -194,7 +194,7 @@ given TypeChecker {
         );
     };
 
-    module_private typed_block_expr(
+    typed_block_expr(
         self,
         statements List[Statement],
         tail_expression Option[Expr],
@@ -211,7 +211,7 @@ given TypeChecker {
         );
     };
 
-    module_private typed_cast_expr(
+    typed_cast_expr(
         self,
         type_node TypeNode,
         inner Expr,
@@ -222,7 +222,7 @@ given TypeChecker {
         return self.lower_as_cast_target(target, inner, cast_span, scope, true);
     };
 
-    module_private typed_float_literal(
+    typed_float_literal(
         self,
         expr Expr,
         value String,
@@ -237,7 +237,7 @@ given TypeChecker {
         return self.bidi_synthesize_mode(expr, scope);
     };
 
-    module_private typed_integer_literal(
+    typed_integer_literal(
         self,
         expr Expr,
         value String,
@@ -255,7 +255,7 @@ given TypeChecker {
         return self.bidi_synthesize_mode(expr, scope);
     };
 
-    module_private bidi_check_mode(self, expr Expr, expected Type, scope Scope) TypedExpr = {
+    bidi_check_mode(self, expr Expr, expected Type, scope Scope) TypedExpr = {
         return when expr in {
             .IntegerLiteral(value, _) then self.typed_integer_literal(
                 expr,
@@ -308,7 +308,7 @@ given TypeChecker {
         };
     };
 
-    module_private bidi_check_mode_fallback(
+    bidi_check_mode_fallback(
         self,
         expr Expr,
         expected Type,
@@ -329,7 +329,7 @@ given TypeChecker {
     };
 
     // Lambda 表达式的双向检查
-    module_private bidi_check_lambda(
+    bidi_check_lambda(
         self,
         params List[LambdaParam],
         return_type Option[TypeNode],
@@ -436,7 +436,7 @@ given TypeChecker {
     };
 
     // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
-    module_private build_lambda_function_type(self, expr TypedExpr) Type = {
+    build_lambda_function_type(self, expr TypedExpr) Type = {
         return when expr.expr_kind in {
             .LambdaExpr(params, ret, _) then {
                 self.build_function_type_from_params(params, ret)
@@ -446,7 +446,7 @@ given TypeChecker {
     };
 
     // 从 TypedParam 列表和返回类型构造 FunctionType。
-    module_private build_function_type_from_params(
+    build_function_type_from_params(
         self,
         params List[TypedParam],
         ret Type,
@@ -475,7 +475,7 @@ given TypeChecker {
         return make_function_type(param_type_refs, ret);
     };
 
-    module_private collection_literal_target_error(self, t Type) String = {
+    collection_literal_target_error(self, t Type) String = {
         return if self.is_std_type(t, "Dict") then "Collection literal without ':' cannot be inferred as Dict"
         else "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range";
     };
@@ -484,7 +484,7 @@ given TypeChecker {
     // 例如 [T]List -> Some(T), [T]Set -> Some(T)
     // 身份判定 -- 集合字面量只对 std 的 List/Set 生效，用户自定义的同名类型
     // 不会被当成集合字面量的目标。
-    module_private extract_collection_element_type(self, t Type) Option[Type] = {
+    extract_collection_element_type(self, t Type) Option[Type] = {
         if not (self.is_std_type(t, "List") or self.is_std_type(t, "Set")) then {
             return Option[Type].None();
         };
@@ -495,7 +495,7 @@ given TypeChecker {
 
     // 从 Dict 类型中提取 key/value 类型。
     // 例如 [K, V]Dict -> (Some(K), Some(V))。身份判定，同上。
-    module_private extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
+    extract_dict_kv_types(self, t Type) Pair[Option[Type], Option[Type]] = {
         if not self.is_std_type(t, "Dict") then {
             return Pair[Option[Type], Option[Type]](
                 Option[Type].None(),

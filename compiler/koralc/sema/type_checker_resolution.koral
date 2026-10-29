@@ -1,5 +1,5 @@
 given TypeChecker {
-    module_private surface_named_type(self, t Type) Type = {
+    surface_named_type(self, t Type) Type = {
         return when t in {
             .TraitObject(...) then Type.ReferenceType(t),
             _ then t,
@@ -12,7 +12,7 @@ given TypeChecker {
     // unaffected by the internal `ReferenceType(TraitObject)` layout wrap that
     // surface_named_type adds. Matching on a bare `.TraitObject` shape instead
     // silently skipped every wrapped case.
-    module_private as_trait_object_type(self, t Type) Option[Type] = {
+    as_trait_object_type(self, t Type) Option[Type] = {
         return when t in {
             .TraitObject(tplDefId, _) then Option[Type].Some(t),
             .ReferenceType(inner) then self.as_trait_object_type(inner),
@@ -25,7 +25,7 @@ given TypeChecker {
         };
     };
 
-    module_private to_type_ref_list_in_resolution(self, args List[Type]) List[Type] = {
+    to_type_ref_list_in_resolution(self, args List[Type]) List[Type] = {
         let mutable refs = List[Type].new();
         for arg in args then {
             refs.push(arg);
@@ -33,7 +33,7 @@ given TypeChecker {
         return refs;
     };
 
-    module_private trait_object_safety_name(self, t Type) Option[String] = {
+    trait_object_safety_name(self, t Type) Option[String] = {
         return when t in {
             .TraitObject(trait_def_id, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
@@ -50,7 +50,7 @@ given TypeChecker {
         };
     };
 
-    module_private resolve_visible_generic_template_type(
+    resolve_visible_generic_template_type(
         self,
         base String,
         resolved_args List[Type],
@@ -95,7 +95,7 @@ given TypeChecker {
     /// materialized is what made koralc reject its own `Set[InstantiationRequest]`
     /// fields. Names are validated either way: an unimported `RandomSource` is
     /// `Undefined trait` wherever it is spelled.
-    module_private validate_template_bounds(
+    validate_template_bounds(
         self,
         def_id DefId,
         resolved_args List[Type],
@@ -155,7 +155,7 @@ given TypeChecker {
     /// Report why a trait cannot be a trait object, naming the offending
     /// methods. "is not object-safe" alone leaves the reader to find which
     /// method is responsible.
-    module_private check_trait_object_safety(
+    check_trait_object_safety(
         self,
         trait_name String,
         span SourceSpan,
@@ -177,7 +177,7 @@ given TypeChecker {
         };
     };
 
-    module_private trait_object_safety_message(
+    trait_object_safety_message(
         self,
         trait_name String,
         reasons List[String],
@@ -197,7 +197,7 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    module_private resolve_type(self, node TypeNode) Type = {
+    resolve_type(self, node TypeNode) Type = {
         return when node in {
             .Identifier(name, span) then {
                 // Swift `resolveTypeNode` (TypeCheckerTypeResolution.swift:295)
@@ -322,7 +322,7 @@ given TypeChecker {
         };
     };
 
-    module_private resolve_type_with_bindings(
+    resolve_type_with_bindings(
         self,
         node TypeNode,
         bindings Dict[String, Type],
@@ -482,7 +482,7 @@ given TypeChecker {
     /// what keeps a user's `type T` from capturing std's `[T ...]` parameters.
     /// Everything else goes through the ordinary chain, which keys module-level
     /// declarations by (module, name).
-    module_private resolve_type_name_binding(self, name String) Option[Type] = {
+    resolve_type_name_binding(self, name String) Option[Type] = {
         let gp = self.storage.current_scope.lookup_generic_param_type(name);
         when gp in {
             .Some(t) then {
@@ -494,8 +494,8 @@ given TypeChecker {
             name,
             self.storage.module_path,
         );
-        // A `file_private` declaration of another file is not nameable here
-        // (§3.3) -- see `is_foreign_file_private`.
+        // A `private` declaration of another file is not nameable here
+        // (§3.3) -- see `is_foreign_private`.
         when resolved in {
             .Some(t) then {
                 if self.is_foreign_private_type(t) then {
@@ -509,7 +509,7 @@ given TypeChecker {
         };
     };
 
-    module_private try_resolve_named_type_in_scope_without_diag(
+    try_resolve_named_type_in_scope_without_diag(
         self,
         name String,
         scope Scope,
@@ -534,8 +534,8 @@ given TypeChecker {
         // placeholder DefId and skip the alias target entirely.
         when scope.lookup_type_in_module(name, self.storage.module_path) in {
             .Some(t) then {
-                // A `file_private` declaration of another file is not nameable
-                // here (§3.3) -- see `is_foreign_file_private`.
+                // A `private` declaration of another file is not nameable
+                // here (§3.3) -- see `is_foreign_private`.
                 if not self.is_foreign_private_type(t) then {
                     return Option[Type].Some(t);
                 };
@@ -547,7 +547,7 @@ given TypeChecker {
 
     /// `span` is the spelling being resolved: a diagnostic about the name
     /// belongs at the name.
-    module_private resolve_named_type_in_scope(
+    resolve_named_type_in_scope(
         self,
         name String,
         scope Scope,
@@ -562,7 +562,7 @@ given TypeChecker {
         return Type.Unknown();
     };
 
-    module_private resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
+    resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
         return when node in {
             .Identifier(name, span) then {
                 let resolved = self.resolve_named_type_in_scope(name, scope, span);
@@ -685,7 +685,7 @@ given TypeChecker {
         };
     };
 
-    module_private variable_kind_for_param_type(
+    variable_kind_for_param_type(
         self,
         param_type Type,
         is_mutable Bool,
@@ -714,8 +714,8 @@ given TypeChecker {
     };
 
     /// `try_resolve_named_type_unchecked`, minus declarations that belong to
-    /// another file (`file_private` names are their file's alone, §3.3).
-    module_private try_resolve_named_type_without_diag(self, name String) Option[Type] = {
+    /// another file (`private` names are their file's alone, §3.3).
+    try_resolve_named_type_without_diag(self, name String) Option[Type] = {
         let resolved = self.try_resolve_named_type_unchecked(name);
         when resolved in {
             .Some(t) then {
@@ -730,7 +730,7 @@ given TypeChecker {
         };
     };
 
-    module_private try_resolve_named_type_unchecked(self, name String) Option[Type] = {
+    try_resolve_named_type_unchecked(self, name String) Option[Type] = {
         if name == "Int" then {
             return Option[Type].Some(Type.IntType());
         };
@@ -850,7 +850,7 @@ given TypeChecker {
         return Option[Type].None();
     };
 
-    module_private builtin_string_type(self) Type = {
+    builtin_string_type(self) Type = {
         return when self.storage.global_scope.lookup_type_in_module(
             "String",
             self.storage.module_path,
@@ -860,7 +860,7 @@ given TypeChecker {
         };
     };
 
-    module_private builtin_rune_type(self) Type = {
+    builtin_rune_type(self) Type = {
         return when self.storage.global_scope.lookup_type_in_module(
             "Rune",
             self.storage.module_path,
@@ -870,7 +870,7 @@ given TypeChecker {
         };
     };
 
-    module_private rune_literal_scalar_value(self, value String) String = {
+    rune_literal_scalar_value(self, value String) String = {
         let bytes = value.to_bytes();
         if bytes.is_empty() then {
             return "0";
@@ -904,7 +904,7 @@ given TypeChecker {
         return "0";
     };
 
-    module_private build_rune_constructor_expr(
+    build_rune_constructor_expr(
         self,
         scalar_value String,
         rune_type Type,
@@ -937,7 +937,7 @@ given TypeChecker {
     /// else -- an empty literal, or one holding several code points -- has no
     /// value to carry, so say so here rather than let the first code point
     /// silently win.
-    module_private validate_rune_literal_value(self, value String) Bool = {
+    validate_rune_literal_value(self, value String) Bool = {
         let rune_count = value.to_runes().count();
         if rune_count == UInt(0) then {
             self.push_diagnostic("Rune literal cannot be empty", unknown_span());
@@ -953,7 +953,7 @@ given TypeChecker {
         return true;
     };
 
-    module_private validate_rune_literal_ascii_for_uint8(self, value String) Bool = {
+    validate_rune_literal_ascii_for_uint8(self, value String) Bool = {
         if value.to_runes().count() == UInt(1) then {
             let bytes = value.to_bytes();
             if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
@@ -967,7 +967,7 @@ given TypeChecker {
         return false;
     };
 
-    module_private lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
+    lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
         when expected in {
             .Some(target_type) then {
                 if target_type is .UInt8Type() then {
@@ -1016,7 +1016,7 @@ given TypeChecker {
         };
     };
 
-    module_private lower_rune_literal_for_cast(
+    lower_rune_literal_for_cast(
         self,
         value String,
         target_type Type,
@@ -1039,11 +1039,11 @@ given TypeChecker {
 
     /// Std's `String`, by declaration identity -- a user type also named
     /// `String` is a different type and gets none of the built-in behaviour.
-    module_private is_string_type(self, t Type) Bool =
+    is_string_type(self, t Type) Bool =
         self.is_std_type(self.canonicalize_alias_type(t), "String");
 
     /// Std's `Rune`, by declaration identity.
-    module_private is_rune_type(self, t Type) Bool =
+    is_rune_type(self, t Type) Bool =
         self.is_std_type(self.canonicalize_alias_type(t), "Rune");
 
     /// Reference / weak-reference / raw-pointer shapes, mutable or not.
@@ -1051,7 +1051,7 @@ given TypeChecker {
     /// set, and it is not the same family as the MIR builder's
     /// `is_ref_like_type` -- that one also covers borrowed references and
     /// excludes raw pointers.
-    module_private is_ref_or_pointer_type(self, t Type) Bool = {
+    is_ref_or_pointer_type(self, t Type) Bool = {
         return when t in {
             .ReferenceType(_)
                 or .MutableReferenceType(_)
@@ -1066,7 +1066,7 @@ given TypeChecker {
 
     /// A user-declared aggregate: struct or enum, generic or concrete.
     /// `Unknown` is deliberately absent -- it is unresolved, not nominal.
-    module_private is_nominal_type(self, t Type) Bool = {
+    is_nominal_type(self, t Type) Bool = {
         return when t in {
             .StructureType(_) or .GenericStruct(...) or .EnumType(_) or .GenericEnum(...)
             then true,
@@ -1074,7 +1074,7 @@ given TypeChecker {
         };
     };
 
-    module_private type_module_path(self, t Type) Option[List[String]] = {
+    type_module_path(self, t Type) Option[List[String]] = {
         return when t in {
             .StructureType(def_id) then self.context().get_module_path(def_id),
             .EnumType(def_id) then self.context().get_module_path(def_id),
@@ -1092,7 +1092,7 @@ given TypeChecker {
 
     /// `span` is the spelling being resolved: a diagnostic about the name
     /// belongs at the name.
-    module_private resolve_named_type(self, name String, span SourceSpan) Type = {
+    resolve_named_type(self, name String, span SourceSpan) Type = {
         // Declaration identity wins over the global textual type scope. This keeps
         // same-named traits/types from different modules distinct while preserving
         // local generic-parameter lookup through current_scope below.

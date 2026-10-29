@@ -180,7 +180,7 @@ using "mypkg/util";             // 名字拼写：合并本包的已登记模块
 约束：
 
 - **合并只在包内。** 目标必须是**本包**的模块：被并文件换上本包的身份，其
-  `module_private` 成为本模块的——这套封装只对**自己包里的代码**合法。别的包的模块
+  `internal` 名字成为本模块的——这套封装只对**自己包里的代码**合法。别的包的模块
   只能导入（`{ … }`），永远不能合并；包边界就是合并停下的地方（§1「悬崖在包边界」）。
   无所属包的裸文件编译没有包边界，目标是已登记模块时同样拒绝。
 - 路径拼写按当前文件所在目录解析，必须以 `.koral` 结尾；名字拼写写已登记模块的全名。
@@ -423,7 +423,7 @@ resolve(spec):
 | 要对外可命名 | `modules` 里给它一个 key | 是 |
 | 要 `links` | `modules` 里写 | 是 |
 
-与 `public` / `package_private` 是同一条边界上的两层，概念一致：manifest 说的不再是
+与 `public` / `protected` 是同一条边界上的两层，概念一致：manifest 说的不再是
 「我有哪些模块」，而是「我对外露出哪些名字」。
 
 `modules` 的 key 是模块在**包内**的名字：
@@ -872,7 +872,7 @@ using "std" { ... };
 
 **这不是假想方案，是实际跑过的一代，被拿掉了。** 留在 `tests/compiler-cases/` 的化石
 （`using Super.A().*`、`Use 'C.bar' to access it`、`models_User` 模块路径前缀 mangling、
-`child is imported as file_private by the parent`）与编译器现报的
+`child is imported as file_private by the parent`，均为旧拼写）与编译器现报的
 `Module-prefixed access is not supported` 是它的痕迹。
 
 | 上一代 | 现在 | 为什么删 |
@@ -881,7 +881,7 @@ using "std" { ... };
 | **`using "x" as X` 整模块改名** | 只能给单个名字 `as` | 模块名不是命名空间，改它没有所指 |
 | **`using Super.A().*`**（父相对 + 批量） | `using "pkg/sub" { … }` | `Super` 引入模块父子关系，而主模块不是「根」——父子是被明确否掉的模型 |
 | **`...` / `{ .. }` 批量省略** | 省略 `{ }` 即全部 | 同一语义多个拼写，违反单一拼写纪律 |
-| **父模块用 `file_private using` 控制子模块可见性** | 模块之间无父子、无 re-export | re-export 让「谁能看到什么」要沿模块图回溯，局部判不了 |
+| **父模块用 `file_private using`（旧拼写）控制子模块可见性** | 模块之间无父子、无 re-export | re-export 让「谁能看到什么」要沿模块图回溯，局部判不了 |
 | **C 符号带模块路径前缀**（`models_User`） | 身份 =（`source`，入口位置） | 前缀取本地源码名，换依赖 key 就改符号 |
 
 **为什么记在这里**：这套东西被替换过一次（公理 7「替换不叠加」），而替代方案里没记，
@@ -1008,7 +1008,7 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 7. **移动入口文件会改模块身份**（§5.3.1）。包内可控，但工具应当在 `entry` 变更时提示
    「模块身份已变」——这是实现侧的看护点，不是设计留白。
 8. **扁平命名的撞名压力**：全局函数是自由函数（`read_file` 不是 `fs::read_file`），
-   `std/os` 已导出 50 个名字。今天靠命名约定（`IoError` 不叫 `Error`）+ 默认 `module_private`
+   `std/os` 已导出 50 个名字。今天靠命名约定（`IoError` 不叫 `Error`）+ 默认 `internal`
    拦住，**约定无机制**。若撞名成为常态，备选是**限定访问替换 `{ ... }`**（公理 7，不是叠加）
    ——现在不做，但答案先写死，免得将来重开。
 

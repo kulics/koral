@@ -13,21 +13,21 @@ This page lists the public API of module `Std.Text` (declaration-only syntax), o
 ## Traits
 ```koral
 public trait Parseable {
-    public parse(s String) Result[Self];
+    parse(s String) Result[Self];
 };
 
 public trait RadixParseable Parseable {
-    public parse_radix(s String, radix UInt) Result[Self];
+    parse_radix(s String, radix UInt) Result[Self];
 };
 
 public trait Formattable ToString {
-    public format(self, spec String) String;
+    format(self, spec String) String;
 };
 ```
 
 ## Types
 ```koral
-public type RegexFlag(value UInt);
+public type RegexFlag;
 
 public type Regex;
 

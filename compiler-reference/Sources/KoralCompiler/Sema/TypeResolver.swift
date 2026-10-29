@@ -545,7 +545,7 @@ public class TypeResolver: CompilerPass {
                 )
             },
             returnTypeNode: returnType,
-            access: .module_private,
+            access: .internal,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath,
             isIntrinsic: true
@@ -605,7 +605,7 @@ public class TypeResolver: CompilerPass {
             if let symbols = symbolsByModule[moduleKey] {
                 for symbol in symbols {
                     // 只包含公开符号
-                    if symbol.access != .file_private {
+                    if symbol.access != .private {
                         publicSymbols[symbol.name] = symbol
                     }
                 }
@@ -709,7 +709,7 @@ public class TypeResolver: CompilerPass {
             if let defId = defIdMap.lookup(
                 modulePath: signature.modulePath,
                 name: signature.name,
-                sourceFile: signature.access == .file_private ? signature.sourceFile : nil
+                sourceFile: signature.access == .private ? signature.sourceFile : nil
             ) {
                 // 创建占位类型（实际类型解析在 TypeChecker 中完成）
                 let placeholderType: Type
@@ -738,7 +738,7 @@ public class TypeResolver: CompilerPass {
             if let defId = defIdMap.lookup(
                 modulePath: signature.modulePath,
                 name: signature.name,
-                sourceFile: signature.access == .file_private ? signature.sourceFile : nil
+                sourceFile: signature.access == .private ? signature.sourceFile : nil
             ) {
                 // 创建函数签名
                 let funcSignature = FunctionSignature(

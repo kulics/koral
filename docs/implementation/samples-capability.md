@@ -50,7 +50,7 @@
 
 | 缺口 | 影响 |
 |---|---|
-| **常量表没有不可变集合类型** | 模块级 `let` 能放数据常量（2026-10-14 起），但 `List` 是 `type mutable` 共享对象，`let` 保护绑定不保护内容——常量表只能靠 `file_private` + 不改动的纪律（`sha256sum` 的 K 表即此） |
+| **常量表没有不可变集合类型** | 模块级 `let` 能放数据常量（2026-10-14 起），但 `List` 是 `type mutable` 共享对象，`let` 保护绑定不保护内容——常量表只能靠 `private` + 不改动的纪律（`sha256sum` 的 K 表即此） |
 | **无 `Send` / `Sync`** | `run_task` 能捕获任意 `type mutable`，`strong_count` 是 relaxed；并行样本没法表达「只能在线程间转移」 |
 | **stdin / stdout 不是流** | 流式样本（`cat` / `grep`）只能整块读 |
 | **无非阻塞 / poll** | 网络样本（`http`）的并发 I/O 模型表达不了 |
@@ -61,9 +61,9 @@
 
 字节 / 位运算 / 流式。黄金参照是 NIST 向量。
 
-K 表是模块级共享绑定（`file_private let round_constants`），**只读纪律**看住——
+K 表是模块级共享绑定（`private let round_constants`），**只读纪律**看住——
 `List` 是 `type mutable`，误 `push` 会静默毁掉之后所有摘要。H 初值表是模块级模板
-（`file_private let initial_state`），被 `state` 原地改写，所以每个 hasher 从
+（`private let initial_state`），被 `state` 原地改写，所以每个 hasher 从
 `initial_state.clone()` 起步，不共享。
 
 ### `cat`（已落地）

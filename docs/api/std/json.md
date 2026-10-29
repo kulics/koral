@@ -15,7 +15,7 @@ This page lists the public API of module `Std.Json` (declaration-only syntax), o
 
 ## Types
 ```koral
-public type JsonError(msg String, position UInt);
+public type JsonError(public msg String, public position UInt);
 
 public type JsonValue {
     Null(),

@@ -23,7 +23,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 - 基于 trait 的多态，trait object 提供运行期分发。
 - 一等函数、lambda 与闭包。
 - 多范式编程（函数式与命令式结合）。
-- 带访问控制的模块系统（`public` / `package_private` / `module_private` / `file_private`）。
+- 带访问控制的模块系统（`private` / `internal` / `protected` / `public`）。
 - 外部函数接口（FFI），与 C 平滑互操作。
 - C 后端，具备广泛的平台兼容性。
 
@@ -1527,7 +1527,7 @@ type Distance = Meters;  // Distance 最终解析为 Int
 
 ```koral
 public type Meters = Int;       // 公开
-file_private type InternalId = Int;  // 仅文件内
+private type InternalId = Int;  // 仅文件内
 ```
 
 限制：
@@ -2701,7 +2701,7 @@ using "./helpers.koral";
 using "./util.koral";          // 一个自己还合并了别的模块
 ```
 
-目标的整个闭包并进当前模块，边界消失：它的 `module_private` 名字变成当前模块的。
+目标的整个闭包并进当前模块，边界消失：它的 `internal` 名字变成当前模块的。
 
 1. 本地路径必须以 `.koral` 结尾，按当前文件所在目录解析，允许 `.` / `..`；
 2. 一个被合并的模块最多被合并进一个模块，且合并后不得再被导入——
@@ -2835,26 +2835,42 @@ Koral 提供四个访问级别控制符号可见性：
 
 | 修饰符 | 可见性 |
 |----------|------------|
+| `private` | 仅同一文件内可访问 |
+| `internal` | 当前逻辑模块内可访问（缺省值） |
+| `protected` | 同一包内任意模块可访问 |
 | `public` | 任何位置可访问 |
-| `package_private` | 同一包内任意模块可访问 |
-| `module_private` | 当前逻辑模块内可访问 |
-| `file_private` | 仅同一文件内可访问 |
 
 包作用域跟随 manifest 图：root 包、`std` 和每个依赖包是彼此独立的包边界。
 
+> **`protected` 是「包内可见」，不是「子类可见」。** Java、C++、C#、Kotlin 的
+> `protected` 给子类放行；Koral 的 `protected` 给同一包内的所有模块放行——那是
+> 分发边界。Koral 没有继承，子类的读法在这里不成立。（早期 Koral 材料的读者注意：
+> `protected` 在本语言早期曾是模块级拼写；那个角色现在叫 `internal`。）
+
 ##### 默认访问级别
+
+未标注的声明一律是 `internal`（模块可见）。访问修饰符只用来标注偏离缺省的声明：
+`private` 收窄缺省，`protected` / `public` 放宽缺省。
 
 | 声明 | 默认 |
 |-------------|---------|
-| 全局 `let`/变量、函数、类型、trait | `module_private` |
-| 结构体字段 | `public` |
-| Trait 方法 | `public` |
-| 成员函数（`given` 块中） | `module_private` |
-| 枚举 case 与 case 字段 | 无逐项修饰符；随枚举类型可见 |
+| 全局 `let`/变量、函数、类型、trait、类型别名 | `internal` |
+| 结构体字段 | `internal` |
+| 成员函数（`given` 块中） | `internal` |
+| Trait 需求 | trait 声明的级别 |
+| 枚举 case 与 case 字段 | enum 声明的级别 |
 | `using` 声明 | 文件局部（导入的绑定不会被再导出） |
 
-直接的结构体构造 `Type(...)` 只有在调用点所有被引用字段都可见时才允许。
-如果类型含有不可访问的 `file_private`/`module_private`/`package_private` 字段，请使用公开的工厂方法。
+Trait 需求与枚举 case 是接口件：它们自己不接受访问修饰符（写了报
+`Access modifier on trait method is not supported`），有效可见性随包含它们的声明。
+`given` 头本身也不接受访问修饰符（写了报
+`Access modifier on given declaration is not supported`），但它的成员方法可以标。
+
+直接的结构体构造 `Type(...)` 只有在调用点所有被引用字段都可见时才允许。字段缺省是
+`internal`，跨模块直接构造会报
+`Cannot directly construct type 'X' because field 'a' is internal. Use a public factory method instead.`
+请改用公开的工厂方法——或者像 std 的 `Pair` 这类值载体类型那样，把字段显式标成
+`public`，让调用方可以直接构造。
 
 ### 项目结构示例
 

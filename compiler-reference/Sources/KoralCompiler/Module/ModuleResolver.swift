@@ -613,7 +613,7 @@ public class ModuleResolver {
         }
         // Import edges are scoped to the FILE the `using` is written in:
         // a `using` in one file of a module does not silently apply to its
-        // siblings. That is what makes `file_private`-style isolation of
+        // siblings. That is what makes `private`-style isolation of
         // imports meaningful in a multi-file module.
         recordImportToGraph(using: using, module: module, unit: unit, target: spec, sourceFile: currentFile)
     }
@@ -857,7 +857,7 @@ public class ModuleResolver {
     }
 
     /// Merge a whole module into the current one (§3.2). The target's boundary
-    /// is gone afterwards: its `module_private` names are this module's own, so
+    /// is gone afterwards: its `internal` names are this module's own, so
     /// it may be merged into at most one module and, once merged, can no longer
     /// be imported (§7). `resolveFile` walks the target's own merge closure, so
     /// entry plus everything it merges join this module together.
@@ -869,7 +869,7 @@ public class ModuleResolver {
         unit: CompilationUnit
     ) throws {
         // Merge dissolves the target's boundary, so it stays inside one package
-        // (§3.2): the target's `module_private` names become this module's and
+        // (§3.2): the target's `internal` names become this module's and
         // its declarations join this package's identity. Another package's
         // module can only be imported, never merged. A bare file has no package
         // of its own, so any registered target is another package's.

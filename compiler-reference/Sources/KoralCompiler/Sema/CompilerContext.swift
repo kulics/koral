@@ -82,7 +82,7 @@ public final class CompilerContext: @unchecked Sendable {
         name: String,
         kind: DefKind,
         sourceFile: String,
-        access: AccessModifier = .module_private,
+        access: AccessModifier = .internal,
         packageID: String = "",
         span: SourceSpan = .unknown,
         isMethod: Bool = false
@@ -105,7 +105,7 @@ public final class CompilerContext: @unchecked Sendable {
         sourceFile: String,
         type: Type,
         kind: SymbolKind,
-        access: AccessModifier = .module_private,
+        access: AccessModifier = .internal,
         span: SourceSpan = .unknown,
         packageID: String = "",
         isMutable: Bool = false,
@@ -131,7 +131,7 @@ public final class CompilerContext: @unchecked Sendable {
         let defId: DefId
         if let preferredDefId, preferredDefId.isValid {
             defId = preferredDefId
-        } else if access == .file_private {
+        } else if access == .private {
             defId = defIdMap.lookupExact(
                 modulePath: modulePath,
                 name: name,
@@ -803,7 +803,7 @@ public final class CompilerContext: @unchecked Sendable {
         if !metadata.modulePath.isEmpty {
             parts.append(defIdMap.moduleSymbolKey(for: metadata.modulePath))
         }
-        if metadata.access == .file_private {
+        if metadata.access == .private {
             var hash: UInt32 = 0
             for char in metadata.sourceFile.utf8 {
                 hash = hash &* 31 &+ UInt32(char)

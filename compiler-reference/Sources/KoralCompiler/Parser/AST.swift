@@ -4,9 +4,9 @@
 
 public enum AccessModifier: String, Sendable {
   case `public`
-  case `file_private`
-  case `module_private`
-  case `package_private`
+  case `private`
+  case `internal`
+  case `protected`
 }
 
 extension AccessModifier: CustomStringConvertible {
@@ -143,6 +143,8 @@ public struct TraitMethodSignature {
   public let typeParameters: [TypeParameterDecl]  // 方法级泛型参数
   public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
+  /// The trait DECLARATION's access level. A trait requirement has no
+  /// visibility of its own -- it is visible exactly where its trait is.
   public let access: AccessModifier
   
   public init(

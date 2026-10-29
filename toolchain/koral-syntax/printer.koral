@@ -59,7 +59,7 @@ given Printer {
     // Low-level output
     // ========================================================================
 
-    file_private write_indent(self) Void = {
+    private write_indent(self) Void = {
         for _ in 0..<self.indent then {
             self.line.push_string("    ");
         };
@@ -67,7 +67,7 @@ given Printer {
 
     /// Whitespace between the last token and the end of the line is layout, so
     /// it goes. Everything from `strip_limit` back is token content and stays.
-    file_private flush_line(self) Void = {
+    private flush_line(self) Void = {
         let runes = self.line.to_string().to_runes();
         let mutable end UInt = runes.count();
         while end > self.strip_limit then {
@@ -87,36 +87,36 @@ given Printer {
         self.strip_limit = 0;
     };
 
-    file_private write_newline(self) Void = {
+    private write_newline(self) Void = {
         self.pending_space = false;
         self.flush_line();
         self.output.push_byte('\n');
         self.at_line_start = true;
     };
 
-    file_private write_space(self) Void = {
+    private write_space(self) Void = {
         self.pending_space = false;
         self.line.push_byte(' ');
     };
 
     /// `)` `]` `}` -- what a separating space must not be written before.
-    file_private is_closer(s String) Bool = s == ")" or s == "]" or s == "}";
+    private is_closer(s String) Bool = s == ")" or s == "]" or s == "}";
 
     /// `)` and `]` close comma-separated lists, where the trailing comma is a
     /// punctuation choice the line shape makes. `}` is deliberately excluded: it
     /// closes blocks and bodies too, and after one a comma can be a required
     /// separator -- `when x in { 1 then { a(); }, _ then 0, }` loses the arm
     /// boundary if that comma goes.
-    file_private is_list_closer(s String) Bool = s == ")" or s == "]";
+    private is_list_closer(s String) Bool = s == ")" or s == "]";
 
-    file_private write_separator(self, comma Token) Void = {
+    private write_separator(self, comma Token) Void = {
         self.write_token(comma);
         self.pending_space = true;
     };
 
     /// Comments between a statement / declaration and its `;`. A line comment
     /// ends its line, so the `;` that follows lands on the next one.
-    file_private print_pre_semi_comments(self, comments List[Token]) Void = {
+    private print_pre_semi_comments(self, comments List[Token]) Void = {
         for c in comments then {
             if not self.at_line_start then {
                 self.write_space();
@@ -135,7 +135,7 @@ given Printer {
     /// first -- they sit before the comma in source -- then the comma itself
     /// when the source wrote one. A line comment moves the comma to the next
     /// line, the same way it moves anything else that follows it.
-    file_private print_sep(self, sep CstComma) Void = {
+    private print_sep(self, sep CstComma) Void = {
         for c in sep.comments then {
             if not self.at_line_start then {
                 self.write_space();
@@ -157,7 +157,7 @@ given Printer {
     /// `[1, 2,]`. A list the formatter exploded always does, so its last line
     /// ends in a comma and the closer sits on the next line: the two shapes are
     /// told apart by whether the comma and the closer share a line.
-    file_private drop_trailing_comma(self) Void = {
+    private drop_trailing_comma(self) Void = {
         let runes = self.line.to_string().to_runes();
         let mutable end UInt = runes.count();
         if end == 0 then {
@@ -179,7 +179,7 @@ given Printer {
         };
     };
 
-    file_private write(self, s String) Void = {
+    private write(self, s String) Void = {
         if self.pending_space then {
             self.pending_space = false;
             if not Printer.is_closer(s) then {
@@ -207,7 +207,7 @@ given Printer {
     /// strings span lines, and their interior is author text: it is written
     /// exactly as it came, so its own column layout is never touched. Only the
     /// first line picks up the surrounding indent.
-    file_private write_token(self, t Token) Void = {
+    private write_token(self, t Token) Void = {
         let text = t.to_string();
         if not text.contains("\n") then {
             self.write(text);
@@ -238,7 +238,7 @@ given Printer {
     // Type printing
     // ========================================================================
 
-    file_private print_type(self, t CstType) Void = when t in {
+    private print_type(self, t CstType) Void = when t in {
         .Named(name) then self.write_token(name),
         .SelfType(kw) then self.write_token(kw),
         .ConstraintKeyword(kw) then self.write_token(kw),
@@ -310,7 +310,7 @@ given Printer {
     // Generic params printing: [T Any, U Eq]
     // ========================================================================
 
-    file_private print_generic_params(self, gp CstGenericParams) Void = {
+    private print_generic_params(self, gp CstGenericParams) Void = {
         self.write_token(gp.lbracket);
         for i in 0..<gp.params.count() then {
             let p = gp.params[i];
@@ -334,7 +334,7 @@ given Printer {
     // Pattern printing
     // ========================================================================
 
-    file_private print_pattern(self, p CstPattern) Void = when p in {
+    private print_pattern(self, p CstPattern) Void = when p in {
         .Wildcard(t) then self.write_token(t),
         .Variable(name) then self.write_token(name),
         .MutVariable(mut_kw, name) then {
@@ -876,7 +876,7 @@ given Printer {
         },
     };
 
-    file_private enum_variant_needs_multiline(self, fields List[CstEnumField]) Bool = {
+    private enum_variant_needs_multiline(self, fields List[CstEnumField]) Bool = {
         for f in fields then {
             if not f.comments.is_empty() then {
                 return true;
@@ -885,7 +885,7 @@ given Printer {
         return false;
     };
 
-    file_private print_call_args(
+    private print_call_args(
         self,
         args List[CstCallArg],
         allow_trailing_comma Bool,
@@ -909,7 +909,7 @@ given Printer {
 
     /// One argument per line, each line ending in a comma -- including the last,
     /// so adding an argument is a one-line diff.
-    file_private print_call_arg_multiline(
+    private print_call_arg_multiline(
         self,
         arg CstCallArg,
         allow_trailing_comma Bool,
@@ -931,7 +931,7 @@ given Printer {
         },
     };
 
-    file_private print_call_arg_inline(self, arg CstCallArg) Void = when arg in {
+    private print_call_arg_inline(self, arg CstCallArg) Void = when arg in {
         .Value(label, colon, value, comma) then {
             if label is .Some(arg_label) then {
                 self.write_token(arg_label);
@@ -950,7 +950,7 @@ given Printer {
     /// Arguments go on one line when they fit, and one per line when they do
     /// not. A comment inside the argument list always forces the second shape --
     /// there is no room for it on a single line.
-    file_private call_args_need_multiline(self, args List[CstCallArg]) Bool = {
+    private call_args_need_multiline(self, args List[CstCallArg]) Bool = {
         for arg in args then {
             when arg in {
                 .Value(_, _, value, _) then when value in {
@@ -977,7 +977,7 @@ given Printer {
     /// rather than estimated: a guess that runs a couple of columns short is
     /// enough to make one pass break a call and the next pass not, and the
     /// formatter stops being idempotent.
-    file_private flat_length(self, e CstExpr) UInt = {
+    private flat_length(self, e CstExpr) UInt = {
         let mutable measure = Printer.new();
         measure.force_flat = true;
         measure.print_expr(e);
@@ -986,16 +986,16 @@ given Printer {
 
     /// Whether the rest of the current line can take `width` more columns.
     /// `line` already holds the indent, so its length is the column.
-    file_private line_fits(self, width UInt) Bool =
+    private line_fits(self, width UInt) Bool =
         self.line.count() + width + self.reserve <= Printer.line_width();
 
-    file_private line_width() UInt = 90;
+    private line_width() UInt = 90;
 
     // ========================================================================
     // Block printing: { items }
     // ========================================================================
 
-    file_private print_block(
+    private print_block(
         self,
         lb Token,
         items List[CstItem],
@@ -1011,7 +1011,7 @@ given Printer {
         self.print_block_items_multiline(items, tail_expr, tail_comments, rb);
     };
 
-    file_private print_block_multiline(
+    private print_block_multiline(
         self,
         lb Token,
         items List[CstItem],
@@ -1027,7 +1027,7 @@ given Printer {
         self.print_block_items_multiline(items, tail_expr, tail_comments, rb);
     };
 
-    file_private print_block_items_multiline(
+    private print_block_items_multiline(
         self,
         items List[CstItem],
         tail_expr Option[CstExpr],
@@ -1067,7 +1067,7 @@ given Printer {
     // If expression printing
     // ========================================================================
 
-    file_private print_if(
+    private print_if(
         self,
         kw Token,
         cond CstExpr,
@@ -1145,7 +1145,7 @@ given Printer {
     // When expression printing
     // ========================================================================
 
-    file_private print_when(
+    private print_when(
         self,
         kw Token,
         subject CstExpr,
@@ -1207,7 +1207,7 @@ given Printer {
     // Statement printing
     // ========================================================================
 
-    file_private print_stmt(self, s CstStmt) Void = when s in {
+    private print_stmt(self, s CstStmt) Void = when s in {
         .VarDecl(let_kw, mut_kw, name, var_type, eq, value) then {
             self.write_token(let_kw);
             self.write_space();
@@ -1269,7 +1269,7 @@ given Printer {
         .Continue(kw) then self.write_token(kw),
     };
 
-    file_private print_pair_binding(self, binding CstPairBinding) Void = when binding in {
+    private print_pair_binding(self, binding CstPairBinding) Void = when binding in {
         .Leaf(mut_kw, name, binding_type, _) then {
             if mut_kw is .Some(mk) then {
                 self.write_token(mk);
@@ -1361,7 +1361,7 @@ given Printer {
     // Declaration printing
     // ========================================================================
 
-    file_private print_decl(self, d CstDecl) Void = when d in {
+    private print_decl(self, d CstDecl) Void = when d in {
         .Using(tokens) then {
             self.print_token_sequence(tokens);
         },
@@ -1487,13 +1487,13 @@ given Printer {
     // text. Newlines inside the list are real line breaks and are preserved --
     // an import list written across lines stays across lines.
 
-    file_private print_token_sequence(self, tokens List[Token]) Void = {
+    private print_token_sequence(self, tokens List[Token]) Void = {
         for i in 0..<tokens.count() then {
             self.print_sequence_token(tokens, i);
         };
     };
 
-    file_private print_sequence_token(self, tokens List[Token], i UInt) Void = {
+    private print_sequence_token(self, tokens List[Token], i UInt) Void = {
         let cur = tokens[i];
         if cur is .Newline() then {
             self.write_newline();
@@ -1509,7 +1509,7 @@ given Printer {
         self.write_token(cur);
     };
 
-    file_private should_space_between_tokens(self, prev Token, cur Token) Bool = {
+    private should_space_between_tokens(self, prev Token, cur Token) Bool = {
         when prev in {
             .Colon() or .Dot() then {
                 return false;
@@ -1540,7 +1540,7 @@ given Printer {
     // Func declaration
     // ========================================================================
 
-    file_private print_func_decl(
+    private print_func_decl(
         self,
         vis Option[Token],
         mods List[Token],
@@ -1660,7 +1660,7 @@ given Printer {
     // Foreign declaration (no body)
     // ========================================================================
 
-    file_private print_foreign_decl(
+    private print_foreign_decl(
         self,
         vis Option[Token],
         mods List[Token],
@@ -1735,13 +1735,13 @@ given Printer {
     // Params printing
     // ========================================================================
 
-    file_private print_params(self, params List[CstParam]) Void = {
+    private print_params(self, params List[CstParam]) Void = {
         for param in params then {
             self.print_param(param);
         };
     };
 
-    file_private print_params_multiline(self, params List[CstParam]) Void = {
+    private print_params_multiline(self, params List[CstParam]) Void = {
         self.write_newline();
         self.indent += 1;
         for param in params then {
@@ -1753,7 +1753,7 @@ given Printer {
         self.indent -= 1;
     };
 
-    file_private print_param_multiline(self, param CstParam) Void = {
+    private print_param_multiline(self, param CstParam) Void = {
         when param in {
             .SelfParam(kw, mut_kw, _) then {
                 self.print_self_param(kw, mut_kw, .None());
@@ -1780,7 +1780,7 @@ given Printer {
 
     // `self` is the only receiver form; there is no `*self` spelling left to
     // print (grammar.bnf <method-first-param>).
-    file_private print_self_param(
+    private print_self_param(
         self,
         kw Token,
         mut_kw Option[Token],
@@ -1801,7 +1801,7 @@ given Printer {
     /// kept on one line has none, one exploded across lines has one per line --
     /// so counting it here would let the decision depend on its own output and
     /// the formatter would stop settling.
-    file_private estimate_call_arg_length(self, arg CstCallArg) UInt = when arg in {
+    private estimate_call_arg_length(self, arg CstCallArg) UInt = when arg in {
         .Value(label, colon, value, _) then {
             let mutable len = self.flat_length(value);
             if label is .Some(arg_label) then {
@@ -1814,7 +1814,7 @@ given Printer {
         },
     };
 
-    file_private print_param(self, param CstParam) Void = {
+    private print_param(self, param CstParam) Void = {
         when param in {
             .SelfParam(kw, mut_kw, comma) then {
                 self.print_self_param(kw, mut_kw, comma);
@@ -1844,7 +1844,7 @@ given Printer {
     // Type declaration
     // ========================================================================
 
-    file_private print_type_decl(
+    private print_type_decl(
         self,
         vis Option[Token],
         mods List[Token],
@@ -1919,7 +1919,7 @@ given Printer {
         };
     };
 
-    file_private estimate_default_length(self, d Option[CstDefault]) UInt = {
+    private estimate_default_length(self, d Option[CstDefault]) UInt = {
         return when d in {
             .Some(default) then {
                 let mutable len UInt = 2;
@@ -1932,7 +1932,7 @@ given Printer {
         };
     };
 
-    file_private print_default_value(self, d Option[CstDefault]) Void = {
+    private print_default_value(self, d Option[CstDefault]) Void = {
         when d in {
             .Some(default) then {
                 self.write_space();
@@ -1946,7 +1946,7 @@ given Printer {
         };
     };
 
-    file_private print_struct_field(self, f CstStructField) Void = {
+    private print_struct_field(self, f CstStructField) Void = {
         if f.access is .Some(a) then {
             self.write_token(a);
             self.write_space();
@@ -1969,7 +1969,7 @@ given Printer {
         };
     };
 
-    file_private print_struct_field_multiline(self, f CstStructField) Void = {
+    private print_struct_field_multiline(self, f CstStructField) Void = {
         if f.access is .Some(a) then {
             self.write_token(a);
             self.write_space();
@@ -1990,7 +1990,7 @@ given Printer {
         self.write(",");
     };
 
-    file_private print_struct_body_multiline(
+    private print_struct_body_multiline(
         self,
         items List[CstStructBodyItem],
         rp Token,
@@ -2046,7 +2046,7 @@ given Printer {
         self.write_token(rp);
     };
 
-    file_private print_enum_body(self, lb Token, cases List[CstItem], rb Token) Void = {
+    private print_enum_body(self, lb Token, cases List[CstItem], rb Token) Void = {
         self.write_token(lb);
         if cases.count() == 0 then {
             self.write_token(rb);
@@ -2151,7 +2151,7 @@ given Printer {
     // Trait declaration
     // ========================================================================
 
-    file_private print_trait_decl(
+    private print_trait_decl(
         self,
         vis Option[Token],
         kw Token,
@@ -2188,7 +2188,7 @@ given Printer {
     // Given declaration
     // ========================================================================
 
-    file_private print_given_decl(
+    private print_given_decl(
         self,
         vis Option[Token],
         mods List[Token],
@@ -2235,7 +2235,7 @@ given Printer {
     // Member block (shared by trait/given)
     // ========================================================================
 
-    file_private print_member_block(self, lb Token, members List[CstItem], rb Token) Void = {
+    private print_member_block(self, lb Token, members List[CstItem], rb Token) Void = {
         self.write_token(lb);
         if members.count() == 0 then {
             self.write_token(rb);
@@ -2294,7 +2294,7 @@ given Printer {
     // Item classification helpers
     // ========================================================================
 
-    file_private next_is_trailing_comment(self, items List[CstItem], index UInt) Bool = {
+    private next_is_trailing_comment(self, items List[CstItem], index UInt) Bool = {
         if index + 1 >= items.count() then {
             return false;
         };
@@ -2305,7 +2305,7 @@ given Printer {
     // Length estimation (for line wrapping)
     // ========================================================================
 
-    file_private estimate_expr_length(self, e CstExpr) UInt = when e in {
+    private estimate_expr_length(self, e CstExpr) UInt = when e in {
         .IntLit(tok) then tok.to_string().count(),
         .FloatLit(tok) then tok.to_string().count(),
         .StrLit(tok) then tok.to_string().count(),
@@ -2408,7 +2408,7 @@ given Printer {
         _ then 10,
     };
 
-    file_private estimate_type_length(self, t CstType) UInt = when t in {
+    private estimate_type_length(self, t CstType) UInt = when t in {
         .Named(name) then name.to_string().count(),
         .ConstraintKeyword(kw) then kw.to_string().count(),
         .SelfType(_) then 4,
@@ -2444,7 +2444,7 @@ given Printer {
         .Weakref(inner, _) then self.estimate_type_length(inner) + 2,
     };
 
-    file_private estimate_head_length(
+    private estimate_head_length(
         self,
         vis Option[Token],
         mods List[Token],
@@ -2526,7 +2526,7 @@ given Printer {
         return len;
     };
 
-    file_private estimate_struct_decl_length(
+    private estimate_struct_decl_length(
         self,
         vis Option[Token],
         mods List[Token],
@@ -2591,7 +2591,7 @@ given Printer {
         return len;
     };
 
-    file_private count_params(self, params List[CstParam]) UInt = {
+    private count_params(self, params List[CstParam]) UInt = {
         let mutable count UInt = 0;
         for _ in params then {
             count += 1;
@@ -2599,7 +2599,7 @@ given Printer {
         return count;
     };
 
-    file_private count_struct_fields(self, items List[CstStructBodyItem]) UInt = {
+    private count_struct_fields(self, items List[CstStructBodyItem]) UInt = {
         let mutable count UInt = 0;
         for item in items then {
             when item in {
@@ -2612,7 +2612,7 @@ given Printer {
         return count;
     };
 
-    file_private struct_items_are_simple(self, items List[CstStructBodyItem]) Bool = {
+    private struct_items_are_simple(self, items List[CstStructBodyItem]) Bool = {
         for item in items then {
             when item in {
                 .Field(_) then {},
@@ -2784,7 +2784,7 @@ given Printer {
     };
 
     /// Everything before the `=` of a function declaration.
-    file_private print_decl_head(
+    private print_decl_head(
         self,
         vis Option[Token],
         mods List[Token],
@@ -2835,7 +2835,7 @@ given Printer {
 
     /// A struct whose fields are all non-public has nothing to show -- `type
     /// mutable BufReader[R Reader]`, not `... ()`.
-    file_private print_type_body_signature(self, body CstTypeBody) Void = when body in {
+    private print_type_body_signature(self, body CstTypeBody) Void = when body in {
         .Struct(lp, items, rp) then {
             let mutable visible UInt = 0;
             for item in items then {
@@ -2884,7 +2884,7 @@ given Printer {
     /// Members of a trait or `given`, as signatures on their own lines.
     /// `public_only` is the `given` rule: a method a consumer cannot call is not
     /// part of the API surface, however interesting it is to the implementor.
-    file_private print_member_signatures(
+    private print_member_signatures(
         self,
         lb Token,
         members List[CstItem],
@@ -2941,10 +2941,11 @@ given Printer {
         .None() then false,
     };
 
-    /// A struct field is part of the API unless it says otherwise.
-    file_private field_is_visible(f CstStructField) Bool = when f.access in {
+    /// A struct field is part of the API only if it says so: unmarked fields
+    /// default to module visibility, like every other declaration.
+    private field_is_visible(f CstStructField) Bool = when f.access in {
         .Some(tok) then tok is .KwPublic(),
-        .None() then true,
+        .None() then false,
     };
 
     /// The access modifier on a declaration. It sits in the prefix slot only;
@@ -3000,7 +3001,7 @@ given Printer {
 // Top-level format_source function
 // ============================================================================
 
-file_private let validate_optional_expr_usage(
+private let validate_optional_expr_usage(
     expr Option[CstExpr],
     statement_context Bool,
 ) Result[Void] = when expr in {
@@ -3008,7 +3009,7 @@ file_private let validate_optional_expr_usage(
     .None() then .Ok({}),
 };
 
-file_private let validate_call_args(args List[CstCallArg]) Result[Void] = {
+private let validate_call_args(args List[CstCallArg]) Result[Void] = {
     for arg in args then {
         when arg in {
             .Value(_, _, value, _) then {
@@ -3019,7 +3020,7 @@ file_private let validate_call_args(args List[CstCallArg]) Result[Void] = {
     return .Ok({});
 };
 
-file_private let validate_item_list(items List[CstItem]) Result[Void] = {
+private let validate_item_list(items List[CstItem]) Result[Void] = {
     for item in items then {
         when validate_item(item) in {
             .Ok(_) then {},
@@ -3031,12 +3032,12 @@ file_private let validate_item_list(items List[CstItem]) Result[Void] = {
     return .Ok({});
 };
 
-file_private let validate_type_body(body CstTypeBody) Result[Void] = when body in {
+private let validate_type_body(body CstTypeBody) Result[Void] = when body in {
     .Enum(_, cases, _) then validate_item_list(cases),
     _ then .Ok({}),
 };
 
-file_private let validate_decl(decl CstDecl) Result[Void] = when decl in {
+private let validate_decl(decl CstDecl) Result[Void] = when decl in {
     .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
     .Type(_, _, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, members, _) then validate_item_list(members),
@@ -3046,7 +3047,7 @@ file_private let validate_decl(decl CstDecl) Result[Void] = when decl in {
     ),
 };
 
-file_private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
+private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
     .VarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
     .TupleVarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
     .Assignment(target, _, value) then {
@@ -3060,13 +3061,13 @@ file_private let validate_stmt(stmt CstStmt) Result[Void] = when stmt in {
     .Continue(_) then .Ok({}),
 };
 
-file_private let validate_item(item CstItem) Result[Void] = when item in {
+private let validate_item(item CstItem) Result[Void] = when item in {
     .Decl(decl) or .DeclPreSemi(_, decl) then validate_decl(decl),
     .Stmt(stmt) or .StmtPreSemi(_, stmt) then validate_stmt(stmt),
     .Comment(_) or .TrailingComment(_) or .BlankLine() then .Ok({}),
 };
 
-file_private let validate_expr_usage(expr CstExpr, statement_context Bool) Result[Void] = when expr in {
+private let validate_expr_usage(expr CstExpr, statement_context Bool) Result[Void] = when expr in {
     .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolLit(_) or .NullLit(_) or .Ident(_) or .SelfExpr(_) or .UnderscoreExpr(_) or .EnumVariant(_, _, _, _) then .Ok(
         {},
     ),

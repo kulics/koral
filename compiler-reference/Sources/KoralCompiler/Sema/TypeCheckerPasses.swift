@@ -125,11 +125,11 @@ extension TypeChecker {
 
   private func signatureVisibilityLevel(_ access: AccessModifier) -> Int {
     switch access {
-    case .file_private:
+    case .private:
       return 0
-    case .module_private:
+    case .internal:
       return 1
-    case .package_private:
+    case .protected:
       return 2
     case .public:
       return 3
@@ -182,7 +182,7 @@ extension TypeChecker {
     signatureTypes: [Type],
     span: SourceSpan
   ) throws {
-    guard symbolAccess != .file_private else {
+    guard symbolAccess != .private else {
       return
     }
 
@@ -197,7 +197,7 @@ extension TypeChecker {
   }
 
   private func declaredDefIdForCurrentGlobal(name: String, access: AccessModifier) -> DefId? {
-    let lookupSourceFile = access == .file_private ? currentSourceFile : nil
+    let lookupSourceFile = access == .private ? currentSourceFile : nil
     return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
   }
 
@@ -205,7 +205,7 @@ extension TypeChecker {
     name: String,
     access: AccessModifier
   ) -> DefId? {
-    let lookupSourceFile = access == .file_private ? currentSourceFile : nil
+    let lookupSourceFile = access == .private ? currentSourceFile : nil
     return defIdMap.lookup(modulePath: currentModulePath, name: name, sourceFile: lookupSourceFile)
   }
 
@@ -224,7 +224,7 @@ extension TypeChecker {
       return false
     }
 
-    if access == .file_private {
+    if access == .private {
       return defIdMap.getSourceFile(existingDefId) == sourceFile
     }
 
@@ -236,7 +236,7 @@ extension TypeChecker {
     access: AccessModifier,
     sourceFile: String
   ) -> Bool {
-    if access == .file_private {
+    if access == .private {
       return currentScope.lookup(name, sourceFile: sourceFile) != nil
     }
 
@@ -421,10 +421,10 @@ extension TypeChecker {
     for symbolImport in importGraph.symbolImports {
       guard let decl = traitDeclared(in: symbolImport.target, named: symbolImport.originalSymbol) else { continue }
       // An explicit list is not a hole in the access rule (§3.3): only
-      // `public` and `package_private` traits travel, exactly like the batch
+      // `public` and `protected` traits travel, exactly like the batch
       // path below. A name that cannot be imported is not in the file's scope
       // to begin with, so its use is refused just like an un-imported one.
-      guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .package_private else { continue }
+      guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .protected else { continue }
       registerImportedTraitName(localName: symbolImport.symbol, defId: decl.defId, modulePath: symbolImport.module)
     }
 
@@ -435,7 +435,7 @@ extension TypeChecker {
     for edge in importGraph.edges where edge.kind == .batchImport {
       for decl in traitDeclsByDefId.values {
         guard decl.modulePath == edge.target else { continue }
-        guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .package_private else { continue }
+        guard let access = defIdMap.getAccess(decl.defId), access == .public || access == .protected else { continue }
         // `{ !a, ... }` drops a name and `{ a as b, ... }` re-spells it (§3.3).
         guard let localName = batchFilterLocalName(edge.filter, name: decl.name) else { continue }
         registerImportedTraitName(localName: localName, defId: decl.defId, modulePath: edge.source)
@@ -533,9 +533,9 @@ extension TypeChecker {
         // is unchanged, so a rename is a spelling and identity is unaffected.
         //
         // The access rule still applies (§3.3): only `public` and
-        // `package_private` declarations travel, exactly like the batch loop.
+        // `protected` declarations travel, exactly like the batch loop.
         let boundDefId = nominalTypeId(importedType) ?? importedTraitDefId(importedType)
-        if let boundAccess = defIdMap.getAccess(boundDefId), boundAccess == .public || boundAccess == .package_private {
+        if let boundAccess = defIdMap.getAccess(boundDefId), boundAccess == .public || boundAccess == .protected {
           registerImportedTraitName(localName: localName, defId: boundDefId, modulePath: symbolImport.module)
         }
       }
@@ -693,14 +693,14 @@ extension TypeChecker {
   }
 
   private func canImportSymbol(_ symbol: Symbol, intoPackageID packageID: String) -> Bool {
-    let access = defIdMap.getAccess(symbol.defId) ?? .module_private
+    let access = defIdMap.getAccess(symbol.defId) ?? .internal
     switch access {
     case .public:
       return true
-    case .package_private:
+    case .protected:
       guard !packageID.isEmpty else { return false }
       return defIdMap.getPackageID(symbol.defId) == packageID
-    case .file_private, .module_private:
+    case .private, .internal:
       return false
     }
   }
@@ -713,14 +713,14 @@ extension TypeChecker {
     default:
       return true
     }
-    let access = defIdMap.getAccess(defId) ?? .module_private
+    let access = defIdMap.getAccess(defId) ?? .internal
     switch access {
     case .public:
       return true
-    case .package_private:
+    case .protected:
       guard !packageID.isEmpty else { return false }
       return defIdMap.getPackageID(defId) == packageID
-    case .file_private, .module_private:
+    case .private, .internal:
       return false
     }
   }
@@ -895,8 +895,8 @@ extension TypeChecker {
       if let symbols = symbolsByModule[moduleKey] {
         for (name, symbol, type) in symbols {
           // Only include public symbols (for now, include all non-private)
-          let access = defIdMap.getAccess(symbol.defId) ?? .module_private
-          if access != .file_private {
+          let access = defIdMap.getAccess(symbol.defId) ?? .internal
+          if access != .private {
             publicSymbols[name] = symbol
             if let t = type {
               publicTypes[name] = t
@@ -1025,7 +1025,7 @@ extension TypeChecker {
       return nil
 
     case .foreignTypeDeclaration(let name, _, let access, _, _):
-      let type = access == .file_private
+      let type = access == .private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
       if let type {
@@ -1250,7 +1250,7 @@ extension TypeChecker {
     case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
       self.currentSpan = span
       // For private types, allow same name in different files
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       if !typeParameters.isEmpty {
         if !isPrivate,
            defIdMap.hasGenericEnumTemplate(name: name, modulePath: currentModulePath)
@@ -1306,7 +1306,7 @@ extension TypeChecker {
         span: span
       )
       // For private types, allow same name in different files
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       if !typeParameters.isEmpty {
         // Generic templates are identified per module: the same name in a
         // different user module is a distinct declaration. Standard library
@@ -1358,7 +1358,7 @@ extension TypeChecker {
       
     case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
@@ -1450,7 +1450,7 @@ extension TypeChecker {
           name: name,
           kind: .genericTemplate(.structure),
           sourceFile: currentSourceFile,
-          access: .module_private,
+          access: .internal,
           packageID: currentPackageID,
           span: currentSpan
         )
@@ -1490,7 +1490,7 @@ extension TypeChecker {
           let defId = getOrAllocateTypeDefId(
             name: name,
             kind: .structure,
-            access: .module_private,
+            access: .internal,
             modulePath: currentModulePath,
             sourceFile: currentSourceFile
           )
@@ -1527,7 +1527,7 @@ extension TypeChecker {
 
     case .typeAliasDeclaration(let name, let targetType, let access, let span, _):
       self.currentSpan = span
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       
       // Circular type alias detection
       if resolvingTypeAliases.contains(name) {
@@ -2273,7 +2273,7 @@ extension TypeChecker {
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic struct: resolve member types and finalize the type definition
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         let placeholder = isPrivate 
           ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
           : currentScope.lookupType(name)!
@@ -2317,7 +2317,7 @@ extension TypeChecker {
       guard let fields else {
         break
       }
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       let placeholder = isPrivate
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
         : currentScope.lookupType(name)!
@@ -2359,7 +2359,7 @@ extension TypeChecker {
       // Resolve non-generic enum types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic enum: resolve case types and finalize the type definition
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         let placeholder = isPrivate
           ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
           : currentScope.lookupType(name)!
@@ -2438,7 +2438,7 @@ extension TypeChecker {
         let namedParamInfo = parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) }
 
         // For private functions, use file-isolated registration
-        let isPrivate = (access == .file_private)
+        let isPrivate = (access == .private)
         if isPrivate {
           currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
         } else {
@@ -2480,7 +2480,7 @@ extension TypeChecker {
 
     case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span, let nameSpan):
       self.currentSpan = span
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
@@ -2650,7 +2650,7 @@ extension TypeChecker {
 
       // Non-generic enum: already resolved in Pass 2
       // Just return the typed declaration
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       let type = isPrivate
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
         : currentScope.lookupType(name)!
@@ -2666,7 +2666,7 @@ extension TypeChecker {
     case .globalVariableDeclaration(let name, let typeNode, let value, let isMut, let access, let span, let nameSpan):
       self.currentSpan = span
       // For private variables, allow same name in different files
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
 
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
@@ -2734,7 +2734,7 @@ extension TypeChecker {
 
     case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
       self.currentSpan = span
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       let type: Type
       if let existing = isPrivate
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)
@@ -2773,7 +2773,7 @@ extension TypeChecker {
       // Both messages name the SYMBOL, so both point at its name.
       try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
 
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
@@ -2807,7 +2807,7 @@ extension TypeChecker {
 
       // For non-generic functions, allow the same declaration pre-registered in Pass 2.
       // Only report duplicates when the conflicting definition is also in current module/file.
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       let existingLookup = isPrivate 
         ? currentScope.lookup(name, sourceFile: currentSourceFile) 
         : currentScope.lookup(name)
@@ -4365,7 +4365,7 @@ extension TypeChecker {
 
       // Non-generic struct: already resolved in Pass 2
       // Just return the typed declaration
-      let isPrivate = (access == .file_private)
+      let isPrivate = (access == .private)
       let typeType = isPrivate 
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
         : currentScope.lookupType(name)!

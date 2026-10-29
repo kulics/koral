@@ -11,16 +11,16 @@
 // directly addressable by pointer — enabling */*subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
-module_private type DictBucket[K Hash, V Any](tag UInt, key K, value V);
+type DictBucket[K Hash, V Any](tag UInt, key K, value V);
 
 // Bucket tag constants (inlined as UInt(0), UInt(1), UInt(2))
 
-file_private let bucket_tag_ptr[K Hash, V Any](
+private let bucket_tag_ptr[K Hash, V Any](
     bucket_ptr *mutable DictBucket[K, V],
 ) *mutable UInt =
     bucket_ptr as *mutable UInt;
 
-file_private let bucket_set_tag[K Hash, V Any](
+private let bucket_set_tag[K Hash, V Any](
     bucket_ptr *mutable DictBucket[K, V],
     tag UInt,
 ) Void = {
@@ -29,9 +29,9 @@ file_private let bucket_set_tag[K Hash, V Any](
 };
 
 public type mutable Dict[K Hash, V Any](
-    module_private mutable buckets *mutable DictBucket[K, V],
-    module_private mutable size UInt,
-    module_private mutable capacity UInt,
+    mutable buckets *mutable DictBucket[K, V],
+    mutable size UInt,
+    mutable capacity UInt,
 );
 
 given[K Hash, V Any] Dict[K, V] as Drop {
@@ -47,8 +47,8 @@ given[K Hash, V Any] Dict[K, V] as Drop {
 };
 
 public type mutable DictIterator[K Hash, V Any](
-    module_private source Dict[K, V],
-    module_private mutable index UInt,
+    source Dict[K, V],
+    mutable index UInt,
 );
 
 // ============================================================================
@@ -82,7 +82,7 @@ given[K Hash, V Any] Dict[K, V] {
 
     // Using when for bucket handling
     // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
-    file_private find_slot(self, key K) Option[UInt] = {
+    private find_slot(self, key K) Option[UInt] = {
         // 尚未分配桶数组（空表）：没有可命中的槽位。
         if self.capacity == UInt(0) then {
             return Option[UInt].None();
@@ -122,7 +122,7 @@ given[K Hash, V Any] Dict[K, V] {
         return first_deleted;
     };
 
-    file_private rehash(self) Void = {
+    private rehash(self) Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 空表首次分配；已有桶数组时翻倍。
@@ -148,7 +148,7 @@ given[K Hash, V Any] Dict[K, V] {
     };
 
     // Internal insert used by rehash - doesn't return old value
-    file_private insert_internal(self, key K, value V) Void = {
+    private insert_internal(self, key K, value V) Void = {
         when self.find_slot(key) in {
             .None() then {
                 panic("Dict insert failed");
@@ -306,7 +306,7 @@ given[K Hash, V Any] Dict[K, V] {
     };
 
     // Builtin subscript helpers for d[key] syntax
-    file_private __index_get(self, key K) V = {
+    private __index_get(self, key K) V = {
         when self.get(key) in {
             .Some(v) then {
                 return v;
@@ -317,7 +317,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    file_private __index_set(self, key K, value V) Void = {
+    private __index_set(self, key K, value V) Void = {
         when self.get(key) in {
             .None() then {
                 panic("Dict key not found");
@@ -381,8 +381,8 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
 
 // DictKeysIterator - iterates over keys only
 public type mutable DictKeysIterator[K Hash, V Any](
-    module_private source Dict[K, V],
-    module_private mutable index UInt,
+    source Dict[K, V],
+    mutable index UInt,
 );
 
 given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
@@ -401,8 +401,8 @@ given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
 
 // DictValuesIterator - iterates over values only
 public type mutable DictValuesIterator[K Hash, V Any](
-    module_private source Dict[K, V],
-    module_private mutable index UInt,
+    source Dict[K, V],
+    mutable index UInt,
 );
 
 given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {

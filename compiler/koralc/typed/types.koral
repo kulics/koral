@@ -424,7 +424,7 @@ given DefIdMap {
         );
         self.name_to_def_id.insert(key_with_file, def_id);
         when access in {
-            .FilePrivate() then {},
+            .Private() then {},
             _ then {
                 let key_without_file = self.make_key(
                     module_path,
@@ -527,7 +527,7 @@ given DefIdMap {
     };
 
     /// The innermost type's name, resolved through the declaration name table.
-    file_private type_base_name(self, inner Type) String = {
+    private type_base_name(self, inner Type) String = {
         return when inner in {
             .StructureType(def_id) then when self.names.get(def_id.id) in {
                 .Some(name) then name,
@@ -601,7 +601,7 @@ given DefIdMap {
     };
 
     /// 生成查找键
-    file_private make_key(
+    private make_key(
         self,
         module_path List[String],
         name String,
@@ -678,7 +678,7 @@ given DefIdMap {
     /// 获取 C 标识符
     public get_c_identifier(self, id DefId) Option[String] = {
         if self.names.get(id.id) is .Some(name) then {
-            let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .FilePrivate()
+            let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .Private()
             else false;
             let source_file = when self.source_files.get(id.id) in {
                 .Some(sf) then sf,
@@ -978,7 +978,7 @@ given DefIdMap {
     };
 
     /// 检查类型是否包含需要 Drop 的子类型
-    file_private type_has_nontrivial_drop(self, t Type) Bool = {
+    private type_has_nontrivial_drop(self, t Type) Bool = {
         return when t in {
             .StructureType(def_id) then self.has_nontrivial_nominal_drop(def_id),
             .EnumType(def_id) then self.has_nontrivial_nominal_drop(def_id),
@@ -1071,7 +1071,7 @@ public type Type {
     Unknown(),
 };
 
-module_private type TypeStringWrapperKind {
+type TypeStringWrapperKind {
     Reference(),
     MutableReference(),
     BorrowedReference(),
@@ -1082,12 +1082,12 @@ module_private type TypeStringWrapperKind {
     MutableWeakReference(),
 };
 
-module_private type TypeStringWrapperChain(
+type TypeStringWrapperChain(
     wrappers List[TypeStringWrapperKind],
     inner Type,
 );
 
-module_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
+let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
     let mutable wrappers = List[TypeStringWrapperKind].new();
     let mutable current = t;
     while true then {
@@ -1140,7 +1140,7 @@ module_private let split_type_string_wrappers(t Type) TypeStringWrapperChain = {
 /// object or a `type mutable` value. Neither exposes a wrapper in the surface
 /// -- a trait object is written as the trait name alone (document.md "Trait
 /// Objects") and a `type mutable` as its own name -- so they contribute nothing.
-module_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
+let type_string_wrapper_prefix(kind TypeStringWrapperKind) String = {
     return when kind in {
         .Reference() then "",
         .MutableReference() then "",
@@ -1161,7 +1161,7 @@ module_private let type_string_wrapper_prefix(kind TypeStringWrapperKind) String
 /// `TypeChecker.display_type_name` (declaration names) -- peels with
 /// `split_type_string_wrappers` and prefixes with this, then renders the base
 /// its own way. Three tables meant three answers to "how is `?T` spelled".
-module_private let type_string_prefixes(chain TypeStringWrapperChain) String = {
+let type_string_prefixes(chain TypeStringWrapperChain) String = {
     let mutable out = StringBuilder.new();
     for wrapper in chain.wrappers then {
         out.push_string(type_string_wrapper_prefix(wrapper));
@@ -1169,7 +1169,7 @@ module_private let type_string_prefixes(chain TypeStringWrapperChain) String = {
     return out.to_string();
 };
 
-file_private let join_type_ref_list(types List[Type]) String = {
+private let join_type_ref_list(types List[Type]) String = {
     let mutable out = StringBuilder.new();
     let mutable first = true;
     for item in types then {
@@ -1182,7 +1182,7 @@ file_private let join_type_ref_list(types List[Type]) String = {
     return out.to_string();
 };
 
-file_private let join_param_entry_list(entries List[FunctionParamEntry]) String = {
+private let join_param_entry_list(entries List[FunctionParamEntry]) String = {
     let mutable out = StringBuilder.new();
     let mutable first = true;
     for entry in entries then {
@@ -1195,7 +1195,7 @@ file_private let join_param_entry_list(entries List[FunctionParamEntry]) String 
     return out.to_string();
 };
 
-file_private let join_type_ref_key_list(types List[Type]) String = {
+private let join_type_ref_key_list(types List[Type]) String = {
     let mutable out = StringBuilder.new();
     let mutable first = true;
     for item in types then {
@@ -1208,7 +1208,7 @@ file_private let join_type_ref_key_list(types List[Type]) String = {
     return out.to_string();
 };
 
-file_private let join_param_entry_key_list(entries List[FunctionParamEntry]) String = {
+private let join_param_entry_key_list(entries List[FunctionParamEntry]) String = {
     let mutable out = StringBuilder.new();
     let mutable first = true;
     for entry in entries then {
@@ -1305,7 +1305,7 @@ public let plain_width_counterpart(t Type) Type = {
 
 // Iterative-safe type_to_string with depth limit to prevent stack overflow
 // on deeply nested generic types in the bootstrap binary.
-file_private let type_to_string_impl(t Type, depth UInt) String = {
+private let type_to_string_impl(t Type, depth UInt) String = {
     let chain = split_type_string_wrappers(t);
     let inner = chain.inner;
     let inner_string = when inner in {
@@ -1498,7 +1498,7 @@ public let stable_hash_combine_string(seed UInt, text String) UInt = {
     return stable_hash_combine_value(hash, UInt(255));
 };
 
-file_private let stable_type_hash_parameter(entry FunctionParamEntry) UInt = {
+private let stable_type_hash_parameter(entry FunctionParamEntry) UInt = {
     let mutable hash = UInt(14695981039346656037);
     hash = stable_hash_combine_value(hash, UInt(1));
     hash = stable_hash_combine_value(hash, stable_type_hash(entry.param_type));
