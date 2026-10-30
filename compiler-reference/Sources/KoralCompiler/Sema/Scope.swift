@@ -430,18 +430,26 @@ public class UnifiedScope {
     return parent?.isDirectlyAccessible(name) ?? false
   }
 
+  /// Resolves `name` to its binding AND that binding's DefId.
+  ///
+  /// The DefId travels with the info because the two MUST be one binding: a
+  /// caller that takes the type from here but re-derives the identity
+  /// elsewhere can end up with the type of one declaration and a minted
+  /// identity of its own -- one fresh DefId per USE of the same name, which is
+  /// how a foreign callee's call sites stopped matching its declaration.
   public func lookupWithInfo(
     _ name: String,
     sourceFile: String? = nil
-  ) -> (type: Type, mutable: Bool, isPrivate: Bool, sourceFile: String?, modulePath: [String])? {
+  ) -> (defId: DefId, type: Type, mutable: Bool, isPrivate: Bool, sourceFile: String?, modulePath: [String])? {
     if let defId = genericParameters[name], let map = defIdMap, let type = map.getSymbolType(defId) {
-      return (type: type, mutable: false, isPrivate: false, sourceFile: nil, modulePath: [])
+      return (defId: defId, type: type, mutable: false, isPrivate: false, sourceFile: nil, modulePath: [])
     }
 
     if let sourceFile {
       let key = "\(name)@\(sourceFile)"
       if let defId = privateNames[key], let map = defIdMap, let type = map.getSymbolType(defId) {
         return (
+          defId: defId,
           type: type,
           mutable: map.isSymbolMutable(defId) ?? false,
           isPrivate: true,
@@ -454,6 +462,7 @@ public class UnifiedScope {
     if let defId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile) ?? names[name] ?? names[DefIdMap.bareKey(name)],
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
+        defId: defId,
         type: type,
         mutable: map.isSymbolMutable(defId) ?? false,
         isPrivate: map.getAccess(defId) == .private,

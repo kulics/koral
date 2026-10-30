@@ -1,0 +1,38 @@
+// helper module for foreign_symbol_reference_test.
+//
+// This file batch-imports a std SUBMODULE (`std/os`), the import face that
+// does not bind std root's `exit` into the file's import table -- the name
+// resolves through the unqualified index instead. Every foreign call in this
+// module must still land on the one declaration DefId that owns the bare C
+// name; the seed used to mint a fresh DefId per USE here and emit
+// `Std_<hash>_exit` for all but the last-typed call site.
+using "std/os" { ... };
+
+// Plain-function call site.
+public let helper_die(code Int) Void = {
+    if code != 0 then {
+        exit(1);
+    };
+};
+
+// Generic body: the call is cloned per instantiation (mono path).
+public let generic_die[T Any](v T, code Int) Void = {
+    if code != 0 then {
+        exit(1);
+    };
+};
+
+public type mutable Counter(mutable hits UInt);
+
+// Given method: emitted as a `__mono_method_...` clone. Its methods travel
+// with the type's own access (a `given` carries none).
+given Counter {
+    public new() Counter = Counter(0);
+
+    public bump(self) Void = {
+        self.hits += 1;
+        if self.hits > 1000000 then {
+            exit(1);
+        };
+    };
+};

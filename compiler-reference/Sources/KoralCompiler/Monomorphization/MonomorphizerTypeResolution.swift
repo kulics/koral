@@ -441,16 +441,23 @@ extension Monomorphizer {
     
     /// Resolves all genericStruct/genericEnum types in a global node.
     /// This ensures no parameterized types reach CodeGen.
+    ///
+    /// A `foreign*` node keeps its DefId through this rewrite: a foreign
+    /// declaration's identity IS its DefId (CodeGen decides the bare C name by
+    /// the declaration DefId's presence in `foreignFunctionDefIds`), and call
+    /// sites hold the identity they resolved at. `copySymbolWithNewDefId` only
+    /// accidentally preserved it -- via a (module, name) lookup-reuse that a
+    /// re-minted sibling could steal. Identity is now structural.
     internal func resolveTypesInGlobalNode(_ node: TypedGlobalNode) throws -> TypedGlobalNode {
         switch node {
         case .foreignType(let identifier):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
             return .foreignType(identifier: newIdentifier)
         case .foreignStruct(let identifier, let fields):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
@@ -459,18 +466,18 @@ extension Monomorphizer {
             }
             return .foreignStruct(identifier: newIdentifier, fields: newFields)
         case .foreignGlobalVariable(let identifier, let mutable):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
             return .foreignGlobalVariable(identifier: newIdentifier, mutable: mutable)
         case .foreignFunction(let identifier, let parameters):
-            let newIdentifier = copySymbolWithNewDefId(
+            let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
             let newParams = parameters.map { param in
-                copySymbolWithNewDefId(param, newType: resolveParameterizedType(param.type))
+                copySymbolPreservingDefId(param, newType: resolveParameterizedType(param.type))
             }
             return .foreignFunction(identifier: newIdentifier, parameters: newParams)
         case .globalStructDeclaration(let identifier, let parameters):

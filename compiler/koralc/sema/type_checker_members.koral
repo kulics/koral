@@ -1071,10 +1071,38 @@ given TypeChecker {
         return out;
     };
 
+    /// The declaration identity of a trait requirement, MEMOIZED per
+    /// (trait declaration, member name). Mirrors `members_with_def_ids` for
+    /// given members: the SAME requirement always yields the same DefId across
+    /// passes, so a call site bound in pass 2 and the instance table seeded in
+    /// pass 3 agree. Minting a fresh DefId per `check_trait_members` call (it
+    /// runs in both pass 2 and pass 3) left two identities for one requirement;
+    /// a cross-module call captured the pass-2 mint while mono seeded the pass-3
+    /// re-mint and the lookup missed.
+    trait_member_def_id(
+        self,
+        trait_def_id DefId,
+        member_name String,
+    ) DefId = {
+        let map_key = "trait#\(trait_def_id.id)#\(member_name)";
+        return when self.storage.given_member_def_ids.get(map_key) in {
+            .Some(existing) then existing,
+            .None() then {
+                let allocated = self.allocate_unindexed_def_id(
+                    member_name,
+                    DefKind.Function(),
+                );
+                self.storage.given_member_def_ids.insert(map_key, allocated);
+                allocated
+            },
+        };
+    };
+
     check_trait_members(
         self,
         members List[TraitMember],
         type_params List[TypeParameter],
+        trait_def_id DefId,
     ) List[TypedTraitMember] = {
         let owner_constraint_snapshot = self.snapshot_generic_constraints(type_params);
         self.register_generic_constraints(type_params);
@@ -1121,12 +1149,18 @@ given TypeChecker {
                     ),
                 );
             };
+            // ONE declaration identity for this member. Call sites and later
+            // registration share it; minting a fresh one per lookup is what made
+            // one method look like several. The mint is MEMOIZED per (trait
+            // declaration, member name): a trait's members are typed in pass 2
+            // and re-typed in pass 3, and a fresh DefId per call left the pass-2
+            // call site carrying one identity while mono seeded another (the
+            // pass-3 re-mint) -- a cross-module static-requirement call then
+            // resolved to a DefId no instance table answered for.
+            let member_def_id = self.trait_member_def_id(trait_def_id, m.name);
             out.push(
                 TypedTraitMember(
-                    // ONE declaration identity for this member. Call sites and
-                    // later registration share it; minting a fresh one per lookup
-                    // is what made one method look like several.
-                    self.allocate_unindexed_def_id(m.name, DefKind.Function()),
+                    member_def_id,
                     m.name,
                     not m.type_params.is_empty(),
                     typed_params,

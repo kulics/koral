@@ -2123,7 +2123,6 @@ extension TypeChecker {
       // 全局符号：有 modulePath 或有 sourceFile（private 符号）
       let isGlobalSymbol = !info.modulePath.isEmpty || info.isPrivate || info.sourceFile != nil
       let symbolModulePath = isGlobalSymbol ? (info.modulePath.isEmpty ? currentModulePath : info.modulePath) : []
-      let symbolSourceFile = info.isPrivate ? (info.sourceFile ?? currentSourceFile) : ""
       
       // 模块可见性检查：其它模块的符号必须在当前文件通过 using 显式导入。
       if !symbolModulePath.isEmpty && !currentModulePath.isEmpty {
@@ -2137,16 +2136,15 @@ extension TypeChecker {
       }
       
       let fallbackDefKind: DefKind = (!hasLocal && currentScope.isFunction(name, sourceFile: currentSourceFile)) ? .function : .variable
-      let defId = currentScope.lookup(name, sourceFile: currentSourceFile)
-        ?? defIdMap.allocate(
-        modulePath: symbolModulePath,
-        name: name,
-        kind: fallbackDefKind,
-        sourceFile: symbolSourceFile,
-        access: info.isPrivate ? .private : .internal,
-        packageID: currentPackageID,
-        span: currentSpan
-      )
+      // The identity of the use is the identity of the binding `lookupWithInfo`
+      // just resolved. It used to fall back to `defIdMap.allocate(...)`, which
+      // MINTED a fresh DefId for a global whose name `lookup` could not reach
+      // (a cross-module name visible through the unqualified index): every use
+      // of `exit` became a new declaration, and a foreign callee's call sites
+      // stopped matching the one `.foreignFunction` global that carries the
+      // bare C name. The allocate is gone; a resolved binding always has a
+      // DefId, so no use can re-mint one.
+      let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? info.defId
 
       let resolvedDefKind = defIdMap.getKind(defId) ?? fallbackDefKind
       let symbolKind: SymbolKind

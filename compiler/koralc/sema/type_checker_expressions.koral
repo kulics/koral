@@ -396,13 +396,18 @@ given TypeChecker {
         };
         return when raw_method_signature in {
             .Some(method) then {
+                // RESOLUTION and VISIBILITY are separate. A method the raw
+                // lookup FOUND but that is NOT accessible here is reported as
+                // such by the caller (`reject_inaccessible_method_from_current_context`),
+                // NOT silently rescued by a conformance lookup. The old `else
+                // if resolve_conformance_method_signature(...) is .Some(_)`
+                // branch pulled an invisible method back in: resolution
+                // fallback (find-by-conformance when the raw lookup found
+                // nothing) is a different path and lives upstream; this branch
+                // only runs AFTER `is_method_accessible_from_current_context`
+                // already said no. Returning `None` keeps the caller's shape and
+                // lets it emit exactly one access diagnostic -- no cascade.
                 if self.is_method_accessible_from_current_context(method) then {
-                    Option[Symbol].Some(method)
-                } else if self.resolve_conformance_method_signature(
-                    base_type,
-                    method_name,
-                    unknown_span(),
-                ) is .Some(_) then {
                     Option[Symbol].Some(method)
                 } else {
                     Option[Symbol].None()

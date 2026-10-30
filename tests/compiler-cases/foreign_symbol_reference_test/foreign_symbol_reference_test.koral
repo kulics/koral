@@ -1,0 +1,32 @@
+// EXPECT: foreign symbol reference ok 7
+// EXIT: 0
+//
+// Regression for foreign symbol identity: `foreign` declarations (std's
+// `exit` here) reference a bare C name (libc's `exit`), and every call site
+// must carry the DECLARATION's DefId -- the one the `.foreignFunction` global
+// registers. The seed minted a fresh DefId per USE of an imported name whose
+// binding `Scope.lookup` could not reach (a name visible through the
+// unqualified index, e.g. after `using "std/os" { ... }`), so all but the
+// last-typed call site emitted `Std_<hash>_exit` and the package failed to
+// LINK (`Undefined symbol _Std_..._exit`). A package build with several call
+// sites -- plain, generic-clone, and given-method-clone -- is the trigger
+// shape; one call site alone hides the bug behind the (module, name) reuse.
+using "std/os" { ... };
+using "foreign_symbol_reference_test/helper" { ... };
+
+public let main() Void = {
+    helper_die(0);
+
+    generic_die(1, 0);
+    generic_die("two", 0);
+
+    let mutable counter = Counter.new();
+    counter.bump();
+
+    // `or else` desugars to a when-expression: one more emission path for the
+    // handler's foreign call.
+    let value = Option[UInt].Some(7) or else { exit(1); };
+
+    println("foreign symbol reference ok \(value)");
+    exit(0);
+};

@@ -4147,9 +4147,9 @@ given TypeChecker {
                         ),
                     );
                 };
-                let typed_members = self.check_trait_members(members, type_params);
                 let trait_def_id = self.lookup_current_file_def_id(name) or else def_id_invalid(
                 );
+                let typed_members = self.check_trait_members(members, type_params, trait_def_id);
                 self.register_trait_metadata(
                     name,
                     trait_def_id,
@@ -4306,6 +4306,77 @@ given TypeChecker {
                 );
             };
             if not should_register_as_inherent then {
+                // Only CONCRETE-TYPE CONFORMANCE members are registered here
+                // (the gap: a cross-module static-requirement call must resolve
+                // to the impl). Generic targets (`given List[T] { … }`) and
+                // generic conformances route through extension templates
+                // elsewhere; non-conformance helpers keep their own annotation
+                // and must NOT be stamped here (stamping a private generic
+                // helper's access without its home made it read as denied).
+                if conformance_trait_name is .Some(_) and owner_type_params.is_empty() then {
+                // PASS-2 CONFORMANCE REGISTRATION (mirror of
+                // `register_conformance_method_signatures_for_concrete_type`,
+                // which otherwise runs in pass 3). A `given X as T { m }` member
+                // is registered NOW so a cross-module static-requirement call
+                // resolves to the IMPL at any module ordering -- the pass-3
+                // registration lands after the root module's check when a
+                // submodule sorts later, and the call then bound a DefId no
+                // instance table answered for. Resolving to the impl routes
+                // visibility to its requirement-level stamp
+                // (`conformance_member_registration_access`), so an internal
+                // trait's requirement is denied cross-module and a public
+                // trait's is allowed -- matching Swift, which resolves the method
+                // then judges `effectiveMethodAccessForMemberAccess`. Static
+                // calls reach this via `lookup_named_method_signature` (no method
+                // face gate) = "resolve, then judge visibility"; the receiver
+                // face gate is applied at lookup and is untouched here.
+                //
+                // ONLY when the slot is EMPTY: a second, distinct declaration
+                // reaching one slot must stay visible to pass 3's ambiguity
+                // report, so this never consumes that collision.
+                if self.lookup_method_signature(type_key, m.name) is .None() then {
+                    let conformance_symbol = Symbol(
+                        m.def_id,
+                        make_function_type(param_types, ret),
+                        SymbolKind.Function(),
+                    );
+                    let source_def_id = self.context().get_original_def_id(m.def_id) or else m.def_id;
+                    let _ = self.storage.method_table.register_with_source(
+                        type_key,
+                        m.name,
+                        conformance_symbol,
+                        source_def_id,
+                    );
+                    let conformance_trait_def_id = when conformance_trait_name in {
+                        .Some(trait_name) then self.trait_def_id_of(trait_name),
+                        .None() then Option[DefId].None(),
+                    };
+                    // STAMP the impl's effective ACCESS (requirement level) here
+                    // too -- the pass-3 stamp in `check_given_members_for_type`
+                    // lands after a submodule sorts later than the root, so a
+                    // cross-module call saw an un-stamped (permissive) DefId and
+                    // admitted an internal trait's requirement. The requirement
+                    // level comes from `conformance_member_registration_access`
+                    // (the trait's declaration level), NOT an ambient home -- so
+                    // this is the impl-stamp route and never touches
+                    // `storage.module_path`. The impl's home stays as the existing
+                    // pass-3 stamp sets it.
+                    let stamp_access = self.conformance_member_registration_access(
+                        conformance_trait_def_id,
+                        m.name,
+                        m.access,
+                    );
+                    self.context().set_access(m.def_id, stamp_access);
+                    when conformance_trait_def_id in {
+                        .Some(tid) then self.storage.method_table.register_providing_trait(
+                            type_key,
+                            m.name,
+                            tid,
+                        ),
+                        .None() then {},
+                    };
+                };
+                };
                 continue;
             };
             if self.sema_progress_debug_enabled() then {
