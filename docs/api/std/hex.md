@@ -9,9 +9,9 @@ This page lists the public API of module `Std.Hex` (declaration-only syntax), or
 
 ## Free Functions
 ```koral
-public let encode_hex(bytes List[UInt8]) String;
+public let encode_hex(bytes: List[UInt8]): String;
 
-public let decode_hex(s String) Result[List[UInt8]];
+public let decode_hex(s: String): Result[List[UInt8]];
 ```
 
 ## Traits

@@ -13,22 +13,22 @@ using "std" { ... };
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-let foreign __koral_mutex_create() *UInt8;
-let foreign __koral_mutex_destroy(mutex *UInt8) Void;
-let foreign __koral_mutex_lock(mutex *UInt8) Void;
-let foreign __koral_mutex_try_lock(mutex *UInt8) Int32;
-let foreign __koral_mutex_unlock(mutex *UInt8) Void;
-let foreign __koral_condvar_create() *UInt8;
-let foreign __koral_condvar_destroy(cv *UInt8) Void;
-let foreign __koral_condvar_wait(cv *UInt8, mutex *UInt8) Void;
-let foreign __koral_condvar_signal(cv *UInt8) Void;
-let foreign __koral_condvar_broadcast(cv *UInt8) Void;
+let foreign __koral_mutex_create(): *UInt8;
+let foreign __koral_mutex_destroy(mutex: *UInt8): Void;
+let foreign __koral_mutex_lock(mutex: *UInt8): Void;
+let foreign __koral_mutex_try_lock(mutex: *UInt8): Int32;
+let foreign __koral_mutex_unlock(mutex: *UInt8): Void;
+let foreign __koral_condvar_create(): *UInt8;
+let foreign __koral_condvar_destroy(cv: *UInt8): Void;
+let foreign __koral_condvar_wait(cv: *UInt8, mutex: *UInt8): Void;
+let foreign __koral_condvar_signal(cv: *UInt8): Void;
+let foreign __koral_condvar_broadcast(cv: *UInt8): Void;
 
-public type mutable Mutex(private handle *UInt8);
+public type mutable Mutex(private handle: *UInt8);
 
-given Mutex as Drop {
+given Mutex: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         __koral_mutex_destroy(self.handle);
     };
 };
@@ -36,37 +36,34 @@ given Mutex as Drop {
 given Mutex {
 
     /// 创建互斥锁
-    public new() Mutex = Mutex(__koral_mutex_create());
+    public new(): Mutex = Mutex(__koral_mutex_create());
 
     /// 获取锁（阻塞直到成功）
-    public lock(self) Void = {
+    public lock(self): Void = {
         __koral_mutex_lock(self.handle);
     };
 
     /// 尝试获取锁（非阻塞），成功返回 true，锁被占用返回 false
-    public try_lock(self) Bool = __koral_mutex_try_lock(self.handle) == 1;
+    public try_lock(self): Bool = __koral_mutex_try_lock(self.handle) == 1;
 
     /// 释放锁
-    public unlock(self) Void = {
+    public unlock(self): Void = {
         __koral_mutex_unlock(self.handle);
     };
 
     /// 创建绑定到此互斥锁的条件变量
-    public condvar(self) MutexCondvar = MutexCondvar(__koral_condvar_create(), self);
+    public condvar(self): MutexCondvar = MutexCondvar(__koral_condvar_create(), self);
 };
 
 // ============================================================================
 // MutexCondvar Type (Condition Variable bound to Mutex)
 // ============================================================================
 
-public type mutable MutexCondvar(
-    private handle *UInt8,
-    private mutex Mutex,
-);
+public type mutable MutexCondvar(private handle: *UInt8, private mutex: Mutex);
 
-given MutexCondvar as Drop {
+given MutexCondvar: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         __koral_condvar_destroy(self.handle);
     };
 };
@@ -76,17 +73,17 @@ given MutexCondvar {
     /// 释放绑定的 Mutex 并等待通知，被唤醒后重新获取 Mutex
     /// 调用前必须持有绑定的 Mutex，否则行为未定义
     /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
-    public wait(self) Void = {
+    public wait(self): Void = {
         __koral_condvar_wait(self.handle, self.mutex.handle);
     };
 
     /// 唤醒一个等待中的线程
-    public notify(self) Void = {
+    public notify(self): Void = {
         __koral_condvar_signal(self.handle);
     };
 
     /// 唤醒所有等待中的线程
-    public notify_all(self) Void = {
+    public notify_all(self): Void = {
         __koral_condvar_broadcast(self.handle);
     };
 };

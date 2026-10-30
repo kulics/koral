@@ -13,12 +13,12 @@ using "std" { ... };
 /// UDP socket type.
 /// Holds a socket file descriptor. Automatically closed on drop.
 /// Supports both connectionless (send_to/recv_from) and connected (send/recv) modes.
-public type mutable UdpSocket(private fd Int64);
+public type mutable UdpSocket(private fd: Int64);
 
-given UdpSocket as Drop {
+given UdpSocket: Drop {
 
     /// Automatically close the socket when UdpSocket is dropped.
-    drop(self) Void = {
+    drop(self): Void = {
         if self.fd >= 0 then {
             __koral_socket_close(self.fd);
         };
@@ -31,12 +31,12 @@ given UdpSocket as Drop {
 given UdpSocket {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self) Int = Int(self.fd);
+    public fd(self): Int = Int(self.fd);
 
     /// Bind to a socket address.
     /// Flow: create socket (SOCK_DGRAM) → bind
     /// On any failure, closes the fd and returns Error.
-    public bind[T IntoSocketAddr](addr T) Result[UdpSocket] = {
+    public bind[T: IntoSocketAddr](addr: T): Result[UdpSocket] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
@@ -44,10 +44,10 @@ given UdpSocket {
             },
         };
         // Determine address family from SocketAddr
-        let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET()
+        let domain: Int32 = if addr.is_ipv4() then __koral_const_AF_INET()
         else __koral_const_AF_INET6();
-        let sock_type Int32 = __koral_const_SOCK_DGRAM();
-        let protocol Int32 = 0;
+        let sock_type: Int32 = __koral_const_SOCK_DGRAM();
+        let protocol: Int32 = 0;
 
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol);
@@ -74,12 +74,12 @@ given UdpSocket {
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
     // `span` defaults to the whole buffer, like `UdpSocket.send`.
-    public send_to[T IntoSocketAddr](
+    public send_to[T: IntoSocketAddr](
         self,
-        addr T,
-        from: List[UInt8],
+        addr: T,
+        from: List[UInt8] =,
         span: Range[UInt] = ...,
-    ) Result[UInt] = {
+    ): Result[UInt] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
@@ -113,9 +113,9 @@ given UdpSocket {
     // `span` defaults to the whole buffer, like `UdpSocket.recv`.
     public recv_from(
         self,
-        into: List[UInt8],
+        into: List[UInt8] =,
         span: Range[UInt] = ...,
-    ) Result[Pair[UInt, SocketAddr]] = {
+    ): Result[Pair[UInt, SocketAddr]] = {
         let spec = into.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
@@ -133,7 +133,7 @@ given UdpSocket {
         for i in UInt(0)..<UInt(128) then {
             init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = UInt32(128);
+        let mutable addr_len: UInt32 = UInt32(128);
 
         let data_ptr = into.borrow_mut_ptr() + start;
         let n = __koral_socket_recvfrom(
@@ -173,7 +173,7 @@ given UdpSocket {
 
     /// Associate this socket with a remote socket address (connected mode).
     /// After calling connect, use send/recv instead of send_to/recv_from.
-    public connect[T IntoSocketAddr](self, addr T) Result[Void] = {
+    public connect[T: IntoSocketAddr](self, addr: T): Result[Void] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
@@ -193,7 +193,7 @@ given UdpSocket {
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
     // `span` defaults to the whole buffer, like `Writer.write`.
-    public send(self, from: List[UInt8], span: Range[UInt] = ...) Result[UInt] = {
+    public send(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt] = {
         let spec = from.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
@@ -212,7 +212,7 @@ given UdpSocket {
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
     // `span` defaults to the whole buffer, like `Reader.read`.
-    public recv(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt] = {
+    public recv(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt] = {
         let spec = into.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
@@ -232,13 +232,13 @@ given UdpSocket {
     // ========================================================================
 
     /// Get the local address this socket is bound to.
-    public local_addr(self) Result[SocketAddr] = {
+    public local_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
         for i in UInt(0)..<UInt(128) then {
             init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = UInt32(128);
+        let mutable addr_len: UInt32 = UInt32(128);
 
         let result = __koral_socket_getsockname(self.fd, addr_buf, &addr_len);
         if result != 0 then {
@@ -256,13 +256,13 @@ given UdpSocket {
 
     /// Get the peer address of this socket (connected mode only).
     /// Returns Error if the socket is not connected.
-    public peer_addr(self) Result[SocketAddr] = {
+    public peer_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
         for i in UInt(0)..<UInt(128) then {
             init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = UInt32(128);
+        let mutable addr_len: UInt32 = UInt32(128);
 
         let result = __koral_socket_getpeername(self.fd, addr_buf, &addr_len);
         if result != 0 then {
@@ -284,10 +284,10 @@ given UdpSocket {
 
     /// Set SO_BROADCAST option.
     /// level=1 (SOL_SOCKET), optname=6 (SO_BROADCAST)
-    public set_broadcast(self, broadcast Bool) Result[Void] = {
+    public set_broadcast(self, broadcast: Bool): Result[Void] = {
         let opt_buf = alloc_memory[UInt8](4);
         defer dealloc_memory(opt_buf);
-        let value UInt8 = if broadcast then UInt8(1) else UInt8(0);
+        let value: UInt8 = if broadcast then UInt8(1) else UInt8(0);
         init_memory(opt_buf + 0, value);
         init_memory(opt_buf + 1, UInt8(0));
         init_memory(opt_buf + 2, UInt8(0));
@@ -307,14 +307,14 @@ given UdpSocket {
 
     /// Get SO_BROADCAST option.
     /// level=1 (SOL_SOCKET), optname=6 (SO_BROADCAST)
-    public broadcast(self) Result[Bool] = {
+    public broadcast(self): Result[Bool] = {
         let opt_buf = alloc_memory[UInt8](4);
         defer dealloc_memory(opt_buf);
         init_memory(opt_buf + 0, UInt8(0));
         init_memory(opt_buf + 1, UInt8(0));
         init_memory(opt_buf + 2, UInt8(0));
         init_memory(opt_buf + 3, UInt8(0));
-        let mutable opt_len UInt32 = UInt32(4);
+        let mutable opt_len: UInt32 = UInt32(4);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_SOL_SOCKET(),
@@ -336,7 +336,7 @@ given UdpSocket {
     /// Set read timeout. None clears the timeout.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
     /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
-    public set_read_timeout(self, timeout Option[Duration]) Result[Void] = {
+    public set_read_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         when timeout in {
@@ -365,7 +365,7 @@ given UdpSocket {
 
     /// Set write timeout. None clears the timeout.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public set_write_timeout(self, timeout Option[Duration]) Result[Void] = {
+    public set_write_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         when timeout in {
@@ -393,13 +393,13 @@ given UdpSocket {
 
     /// Get read timeout. Returns None if no timeout is set.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    public read_timeout(self) Result[Option[Duration]] = {
+    public read_timeout(self): Result[Option[Duration]] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len UInt32 = UInt32(16);
+        let mutable opt_len: UInt32 = UInt32(16);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_SOL_SOCKET(),
@@ -416,13 +416,13 @@ given UdpSocket {
 
     /// Get write timeout. Returns None if no timeout is set.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public write_timeout(self) Result[Option[Duration]] = {
+    public write_timeout(self): Result[Option[Duration]] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len UInt32 = UInt32(16);
+        let mutable opt_len: UInt32 = UInt32(16);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_SOL_SOCKET(),
@@ -443,7 +443,7 @@ given UdpSocket {
 
     /// Convert a Duration to a struct timeval (16 bytes) in a raw buffer.
     /// timeval layout: tv_sec (Int64, 8 bytes LE) + tv_usec (Int64, 8 bytes LE)
-    private duration_to_timeval(duration Duration, buf *mutable UInt8) Void = {
+    private duration_to_timeval(duration: Duration, buf: *mutable UInt8): Void = {
         let secs = duration.secs;
         let usec = duration.nanos / 1000;
 
@@ -470,7 +470,7 @@ given UdpSocket {
 
     /// Convert a struct timeval (16 bytes) from a raw buffer to a [Duration]Option.
     /// Returns None if both tv_sec and tv_usec are zero (no timeout set).
-    private timeval_to_duration(buf *UInt8) Option[Duration] = {
+    private timeval_to_duration(buf: *UInt8): Option[Duration] = {
         // Read tv_sec as little-endian Int64 (bytes 0..7)
         let secs = (Int64(UInt(buf[0])) + (Int64(UInt(buf[1])) << 8) + (Int64(
             UInt(buf[2]),

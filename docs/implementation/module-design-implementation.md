@@ -114,9 +114,9 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
   **试过，已回退。** 判据写成「点名 trait，或点名类型且该 `given` 与类型同模块」，
   结果把 `List.push`、`Option.is_none` 一起挡掉了——一个模板可能给多个类型供方法。
   正解是**逐个方法**记来源（§9 的 `method_traits`），不是查找处加个 if。
-- **「同模块的 `given X as T` 白送」。** 否掉，理由见设计正本「替代方案」——
+- **「同模块的 `given X: T` 白送」。** 否掉，理由见设计正本「替代方案」——
   Rust 里 `impl Read for File` 就在 `File` 的文件里，`f.read()` 照样要 `use std::io::Read;`。
-- **按模板（`conformance_trait_def_id`）一刀切判方法面。** 不够：`given X as Leaf` 经
+- **按模板（`conformance_trait_def_id`）一刀切判方法面。** 不够：`given X: Leaf` 经
   `Leaf` 的**扁平方法表**能摸到超 trait `Root` 的方法，按 `Leaf` 判就把它放行了——
   而命名子 trait 不该打开超 trait（Rust：`use a::Sub;` 后 `x.b()` 仍 E0599）。
   改成**接收者方法表记的来源说了算**，无记录时才退回 conformance 自己的 trait。
@@ -162,7 +162,7 @@ koralfmt 侧：六形态各一条往返断言——**形态是载荷**，逐字�
 
 **来源记在方法表上**（`MethodTable.method_traits: Dict[MethodOwner, Dict[String, List[DefId]]]`），
 不是模板上。`register_conformance_method_signatures_for_concrete_type` 已经分得清
-`mark_inherent`（`given X { }` / `given intrinsic X { }`）与 `trait_def_id`（`given X as T`、
+`mark_inherent`（`given X { }` / `given intrinsic X { }`）与 `trait_def_id`（`given X: T`、
 工具块物化），顺着它记一条「哪个 trait 提供的」即可。**一个方法可以被多个 trait 提供，
 任一在作用域内即放行。**
 

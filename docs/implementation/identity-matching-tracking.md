@@ -93,7 +93,7 @@ rustc 把 inherent impl 与 trait impl 都按 **`DefId`** 索引（`inherent_imp
   不能拿字符串比。
 - `Dict` 的键类型必须有 `Eq` 与 `Hash`，否则编译期就报。
 - **位置构造实参不带标签，命名构造实参必须带标签**：`Foo(1, 2)` 对 positional 字段；
-  命名字段的构造器必须写成 `Foo(a: 1, b: 2)`——「一律不带标签」是错的，规则是
+  命名字段的构造器必须写成 `Foo(a = 1, b = 2)`——「一律不带标签」是错的，规则是
   「声明决定了每个参数的调用形状」（见 `../guide/document.md`「Parameters」）。
 
 ### 7.4 方法 DefId 是稳定的 `(owner, name)` 身份
@@ -134,7 +134,7 @@ trait 调用照样 miss。
 wrapper 发的是**实例**的 C 名。拿 trait requirement 的 `DefId` 去拼名，会拼出声明形
 （`Item_Param_T_..._base`）去调用实例形（`Item_I_..._base`）。
 
-**继承需求**要特别注意：`trait Extra Base` 把 `Base.base` 放进 `Extra` 的 vtable，
+**继承需求**要特别注意：`trait Extra: Base` 把 `Base.base` 放进 `Extra` 的 vtable，
 而实现注册在 `Base` 名下。按 `(trait, name)` 找实现会把它筛掉。
 判别靠**唯一性**三级匹配 `(owner, trait, name)` → `(owner, name)` → `name`，
 不是签名挑选——签名比对拿未绑定的 `List[T]` 去比实例的 `List[Int]`，必然误判。

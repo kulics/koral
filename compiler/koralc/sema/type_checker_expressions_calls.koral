@@ -6,9 +6,9 @@ given TypeChecker {
     /// `List[List[Int]]`: the resolved-type printer, not the source spelling.
     generic_instantiation_resolved_type(
         self,
-        base String,
-        resolved_args List[Type],
-    ) Type = {
+        base: String,
+        resolved_args: List[Type],
+    ): Type = {
         let struct_def_id = self.storage.generic_templates.lookup_struct_def_id(base);
         if struct_def_id.is_valid() then {
             return Type.GenericStruct(struct_def_id, resolved_args);
@@ -32,11 +32,11 @@ given TypeChecker {
     /// applies. Value position never reaches this helper.
     lower_generic_instantiation_callee_ref(
         self,
-        base String,
-        type_args List[TypeNode],
-        inst_span SourceSpan,
-        scope Scope,
-    ) TypedExpr = {
+        base: String,
+        type_args: List[TypeNode],
+        inst_span: SourceSpan,
+        scope: Scope,
+    ): TypedExpr = {
         let mutable resolved_args = List[Type].new();
         for ta in type_args then {
             resolved_args.push(self.resolve_type_in_scope(ta, scope));
@@ -66,9 +66,7 @@ given TypeChecker {
             };
             let template_def_id = when base_type in {
                 .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
-                    let linked_def_id = self.context().get_template_def_id(
-                        def_id,
-                    );
+                    let linked_def_id = self.context().get_template_def_id(def_id);
                     if linked_def_id.is_valid() then linked_def_id else def_id
                 },
                 .GenericStruct(tpl_def_id, _) or .GenericEnum(tpl_def_id, _) then tpl_def_id,
@@ -105,9 +103,7 @@ given TypeChecker {
         return make_typed_expr(
             TypedExprKind.GenericInstantiation(
                 Type.GenericStruct(
-                    self.storage.generic_templates.lookup_struct_def_id(
-                        base,
-                    ),
+                    self.storage.generic_templates.lookup_struct_def_id(base),
                     List[Type].new(),
                 ),
                 resolved_args,
@@ -116,10 +112,7 @@ given TypeChecker {
         );
     };
 
-    typed_generic_function_callee_for_call(
-        self,
-        callee Expr,
-    ) Option[TypedExpr] = {
+    typed_generic_function_callee_for_call(self, callee: Expr): Option[TypedExpr] = {
         return when callee in {
             .GenericInstantiation(base, _, _) then {
                 if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(
@@ -145,8 +138,8 @@ given TypeChecker {
 
     generic_function_template_for_callee(
         self,
-        callee TypedExpr,
-    ) Option[GenericFunctionTemplate] = {
+        callee: TypedExpr,
+    ): Option[GenericFunctionTemplate] = {
         return when callee.expr_kind in {
             .Variable(sym) then {
                 if self.storage.generic_templates.lookup_function_by_def_id(sym.def_id) is .Some(template) then {
@@ -158,11 +151,7 @@ given TypeChecker {
         };
     };
 
-    explicit_generic_function_type_args(
-        self,
-        callee Expr,
-        scope Scope,
-    ) List[Type] = {
+    explicit_generic_function_type_args(self, callee: Expr, scope: Scope): List[Type] = {
         return when callee in {
             .GenericInstantiation(base, type_args, _) then {
                 if self.lookup_current_file_type_symbol(base) is .Some(_) or self.storage.global_scope.lookup_type(
@@ -182,9 +171,9 @@ given TypeChecker {
 
     raw_generic_function_param_type(
         self,
-        template GenericFunctionTemplate,
-        param_index UInt,
-    ) Option[Type] = {
+        template: GenericFunctionTemplate,
+        param_index: UInt,
+    ): Option[Type] = {
         if param_index >= template.parameters.count() then {
             return Option[Type].None();
         };
@@ -205,10 +194,10 @@ given TypeChecker {
 
     initial_generic_function_bindings(
         self,
-        callee Expr,
-        typed_callee TypedExpr,
-        scope Scope,
-    ) Option[Dict[String, Type]] = {
+        callee: Expr,
+        typed_callee: TypedExpr,
+        scope: Scope,
+    ): Option[Dict[String, Type]] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Dict[String, Type]].None();
         };
@@ -226,7 +215,7 @@ given TypeChecker {
                 );
                 return Option[Dict[String, Type]].None();
             };
-            let mutable idx UInt = 0;
+            let mutable idx: UInt = 0;
             while idx < template.type_parameters.count() then {
                 bindings.insert(
                     template.type_parameters[idx].name,
@@ -238,7 +227,7 @@ given TypeChecker {
         return Option[Dict[String, Type]].Some(bindings);
     };
 
-    constructor_direct_param_types(self, constructor_type Type) List[Type] = {
+    constructor_direct_param_types(self, constructor_type: Type): List[Type] = {
         return when constructor_type in {
             .StructureType(def_id) then when self.context().get_struct_fields(def_id) in {
                 .Some(fields) then {
@@ -259,7 +248,7 @@ given TypeChecker {
                 ) in {
                     .Some(fields) then {
                         let mutable bindings = Dict[String, Type].new();
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         let param_count = struct_template.type_parameters.count();
                         let arg_count = args.count();
                         let n = if param_count < arg_count then param_count
@@ -287,9 +276,9 @@ given TypeChecker {
 
     constructor_matches_expected_type(
         self,
-        constructor_type Type,
-        expected_type Type,
-    ) Bool = {
+        constructor_type: Type,
+        expected_type: Type,
+    ): Bool = {
         // Identity: compare DECLARATIONS. An instance points at its template, so
         // a nominal and a generic match when they share one template. Nothing
         // here reads a spelling -- two same-named types from different modules
@@ -313,11 +302,7 @@ given TypeChecker {
         };
     };
 
-    resolved_constructor_type_or_unknown(
-        self,
-        callee Expr,
-        scope Scope,
-    ) Type = {
+    resolved_constructor_type_or_unknown(self, callee: Expr, scope: Scope): Type = {
         return when callee in {
             .Identifier(name, _) then when self.try_resolve_named_type_in_scope_without_diag(
                 name,
@@ -371,7 +356,7 @@ given TypeChecker {
         };
     };
 
-    option_type_or_unknown(self, value Option[Type]) Type = {
+    option_type_or_unknown(self, value: Option[Type]): Type = {
         return when value in {
             .Some(t) then t,
             .None() then Type.Unknown(),
@@ -380,10 +365,10 @@ given TypeChecker {
 
     resolve_expected_constructor_param_types(
         self,
-        callee Expr,
-        expected Option[Type],
-        scope Scope,
-    ) List[Type] = {
+        callee: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): List[Type] = {
         if expected is .Some(expected_type) then {
             when callee in {
                 .MemberPath(_, path, _) then {
@@ -440,10 +425,10 @@ given TypeChecker {
     /// `f[T]` with a `*mutable T` value) keeps the name meaningful and stands.
     report_unbound_generic_params(
         self,
-        template GenericFunctionTemplate,
-        bindings Dict[String, Type],
-        callee Expr,
-    ) Bool = {
+        template: GenericFunctionTemplate,
+        bindings: Dict[String, Type],
+        callee: Expr,
+    ): Bool = {
         for tp in template.type_parameters then {
             let bound_ok = when bindings.get(tp.name) in {
                 .None() then false,
@@ -474,11 +459,11 @@ given TypeChecker {
 
     infer_generic_function_bindings(
         self,
-        callee Expr,
-        typed_callee TypedExpr,
-        typed_args List[TypedExpr],
-        scope Scope,
-    ) Option[Dict[String, Type]] = {
+        callee: Expr,
+        typed_callee: TypedExpr,
+        typed_args: List[TypedExpr],
+        scope: Scope,
+    ): Option[Dict[String, Type]] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Dict[String, Type]].None();
         };
@@ -497,7 +482,7 @@ given TypeChecker {
                 );
                 return Option[Dict[String, Type]].None();
             };
-            let mutable idx UInt = 0;
+            let mutable idx: UInt = 0;
             while idx < template.type_parameters.count() then {
                 bindings.insert(
                     template.type_parameters[idx].name,
@@ -513,7 +498,7 @@ given TypeChecker {
                 // instead of falling through to a same-named global.
                 generic_scope.define_generic_param(tp.name);
             };
-            let mutable idx UInt = 0;
+            let mutable idx: UInt = 0;
             while idx < template.parameters.count() and idx < typed_args.count() then {
                 let mutable expected_type = self.resolve_type_in_scope(
                     template.parameters[idx].param_type,
@@ -532,11 +517,7 @@ given TypeChecker {
             // the parameter itself -- so it counts as unbound; the nested case
             // (`outer[T]` calling `f[T]` with a `*mutable T` value) keeps the
             // name meaningful and stands.
-            if not self.report_unbound_generic_params(
-                template,
-                bindings,
-                callee,
-            ) then {
+            if not self.report_unbound_generic_params(template, bindings, callee) then {
                 return Option[Dict[String, Type]].None();
             };
         };
@@ -546,13 +527,13 @@ given TypeChecker {
 
     resolve_generic_function_call_return_type(
         self,
-        callee Expr,
-        typed_callee TypedExpr,
-        typed_args List[TypedExpr],
-        expected Option[Type],
-        scope Scope,
-        inferred_bindings Dict[String, Type],
-    ) Option[Type] = {
+        callee: Expr,
+        typed_callee: TypedExpr,
+        typed_args: List[TypedExpr],
+        expected: Option[Type],
+        scope: Scope,
+        inferred_bindings: Dict[String, Type],
+    ): Option[Type] = {
         let template = self.generic_function_template_for_callee(typed_callee) or else {
             return Option[Type].None();
         };
@@ -599,12 +580,12 @@ given TypeChecker {
 
     validate_generic_function_call_constraints(
         self,
-        callee Expr,
-        typed_callee TypedExpr,
-        typed_args List[TypedExpr],
-        scope Scope,
-        inferred_bindings Dict[String, Type],
-    ) Void = {
+        callee: Expr,
+        typed_callee: TypedExpr,
+        typed_args: List[TypedExpr],
+        scope: Scope,
+        inferred_bindings: Dict[String, Type],
+    ): Void = {
         when self.generic_function_template_for_callee(typed_callee) in {
             .Some(template) then {
                 if template.type_parameters.is_empty() then {} else {
@@ -677,7 +658,7 @@ given TypeChecker {
         };
     };
 
-    is_mutable_ref_like_type(self, t Type) Bool = {
+    is_mutable_ref_like_type(self, t: Type): Bool = {
         return when t in {
             .MutableReferenceType(_) then true,
             .MutableBorrowedReferenceType(_) then true,
@@ -687,7 +668,7 @@ given TypeChecker {
         };
     };
 
-    is_read_only_ref_like_type(self, t Type) Bool = {
+    is_read_only_ref_like_type(self, t: Type): Bool = {
         return when t in {
             .ReferenceType(_) then true,
             .BorrowedReferenceType(_) then true,
@@ -697,7 +678,7 @@ given TypeChecker {
         };
     };
 
-    can_take_mutable_ref_of_expr(self, expr TypedExpr) Bool = {
+    can_take_mutable_ref_of_expr(self, expr: TypedExpr): Bool = {
         return when expr.expr_kind in {
             .Variable(sym) then {
                 if self.is_mutable_ref_like_type(sym.symbol_type) then {
@@ -708,7 +689,7 @@ given TypeChecker {
             .MemberPath(base, path) then {
                 let mutable current = base.expr_type;
                 let mutable mutable_path = self.can_take_mutable_ref_of_expr(base);
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < path.count() then {
                     let segment = path[idx];
                     let is_last = idx + UInt(1) == path.count();
@@ -743,7 +724,7 @@ given TypeChecker {
         };
     };
 
-    can_take_ref_of_expr(self, expr TypedExpr) Bool = {
+    can_take_ref_of_expr(self, expr: TypedExpr): Bool = {
         return when expr.expr_kind in {
             .Variable(sym) then {
                 when sym.kind in {
@@ -776,7 +757,7 @@ given TypeChecker {
                     .MutablePointerType(_) then true,
                     _ then self.can_take_ref_of_expr(base),
                 };
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while not can_take and idx < path.count() then {
                     let mutable segment_type = path[idx].symbol_type;
                     can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(
@@ -809,7 +790,7 @@ given TypeChecker {
         };
     };
 
-    render_call_site_expr_text(self, expr Expr) Option[String] = {
+    render_call_site_expr_text(self, expr: Expr): Option[String] = {
         return when expr in {
             .Identifier(name, _) then Option[String].Some(name),
             .StringLiteral(value, _) then Option[String].Some("\"" + value + "\""),
@@ -830,11 +811,7 @@ given TypeChecker {
         };
     };
 
-    call_site_lookup_text(
-        self,
-        callee Expr,
-        args List[Expr],
-    ) Option[String] = {
+    call_site_lookup_text(self, callee: Expr, args: List[Expr]): Option[String] = {
         if self.render_call_site_expr_text(callee) is .Some(callee_text) then {
             let mutable rendered_args = List[String].new();
             let mutable all_args_rendered = true;
@@ -849,7 +826,7 @@ given TypeChecker {
             };
             if all_args_rendered then {
                 let mutable rendered_call = callee_text + "(";
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < rendered_args.count() then {
                     if idx > 0 then {
                         rendered_call = rendered_call + ", ";
@@ -876,18 +853,18 @@ given TypeChecker {
 
     format_call_type_mismatch_message(
         self,
-        callee Expr,
-        args List[Expr],
-        expected_t Type,
-        actual_t Type,
-    ) String = {
+        callee: Expr,
+        args: List[Expr],
+        expected_t: Type,
+        actual_t: Type,
+    ): String = {
         let expected_name = self.display_type_name(expected_t);
         let actual_name = self.display_type_name(actual_t);
         // The location is the diagnostic's span, not part of the message.
         return "Type mismatch: expected \(expected_name), got \(actual_name)";
     };
 
-    function_like_type(self, t Type) Option[Type] = {
+    function_like_type(self, t: Type): Option[Type] = {
         return when t in {
             .FunctionType(...) then Option[Type].Some(t),
             .ReferenceType(inner) then self.function_like_type(inner),
@@ -902,9 +879,9 @@ given TypeChecker {
 
     validate_function_expression_argument_count(
         self,
-        typed_callee TypedExpr,
-        args List[Expr],
-    ) Bool = {
+        typed_callee: TypedExpr,
+        args: List[Expr],
+    ): Bool = {
         // Skip validation for method-like callees — self is implicit, validated separately.
         when typed_callee.expr_kind in {
             .MethodReference(_, _, _, _, _, _) then {
@@ -940,14 +917,16 @@ given TypeChecker {
 
     positional_param_specs_for_function_type(
         self,
-        fn_type Type,
-    ) List[FunctionParamSpec] = {
+        fn_type: Type,
+    ): List[FunctionParamSpec] = {
         return when fn_type in {
             .FunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable specs = List[FunctionParamSpec].new();
                 for _ in param_types then {
-                    specs.push(FunctionParamSpec("", false, false, false, Option[Expr].None()));
+                    specs.push(
+                        FunctionParamSpec("", false, false, false, Option[Expr].None()),
+                    );
                 };
 
                 return specs;
@@ -956,12 +935,9 @@ given TypeChecker {
         };
     };
 
-    positional_param_specs_for_count(
-        self,
-        count UInt,
-    ) List[FunctionParamSpec] = {
+    positional_param_specs_for_count(self, count: UInt): List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new();
-        let mutable index UInt = 0;
+        let mutable index: UInt = 0;
         while index < count then {
             specs.push(FunctionParamSpec("", false, false, false, Option[Expr].None()));
             index += 1;
@@ -971,10 +947,10 @@ given TypeChecker {
 
     drop_first_param_specs(
         self,
-        specs List[FunctionParamSpec],
-    ) List[FunctionParamSpec] = {
+        specs: List[FunctionParamSpec],
+    ): List[FunctionParamSpec] = {
         let mutable out = List[FunctionParamSpec].new();
-        let mutable index UInt = 1;
+        let mutable index: UInt = 1;
         while index < specs.count() then {
             out.push(specs[index]);
             index += 1;
@@ -984,9 +960,9 @@ given TypeChecker {
 
     normalize_param_specs_for_count(
         self,
-        specs List[FunctionParamSpec],
-        expected_count UInt,
-    ) List[FunctionParamSpec] = {
+        specs: List[FunctionParamSpec],
+        expected_count: UInt,
+    ): List[FunctionParamSpec] = {
         if specs.count() == expected_count + UInt(1) and not specs.is_empty() and specs[
             UInt(0)
         ].name == "self" then {
@@ -998,14 +974,14 @@ given TypeChecker {
         return self.positional_param_specs_for_count(expected_count);
     };
 
-    declared_call_param_count(self, specs List[FunctionParamSpec]) UInt = {
+    declared_call_param_count(self, specs: List[FunctionParamSpec]): UInt = {
         if not specs.is_empty() and specs[UInt(0)].name == "self" then {
             return if specs.count() <= UInt(1) then UInt(0) else specs.count() - UInt(1);
         };
         return specs.count();
     };
 
-    drop_receiver_param_specs(self, method Symbol) List[FunctionParamSpec] = {
+    drop_receiver_param_specs(self, method: Symbol): List[FunctionParamSpec] = {
         let param_specs = self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(
         );
         let expected_count = if self.method_param_count(method) == UInt(0) then UInt(0)
@@ -1013,7 +989,7 @@ given TypeChecker {
         return self.normalize_param_specs_for_count(param_specs, expected_count);
     };
 
-    owner_type_name_for_type(self, owner_type Type) Option[String] = {
+    owner_type_name_for_type(self, owner_type: Type): Option[String] = {
         return when owner_type in {
             .StructureType(def_id) then self.context().get_name(def_id),
             .EnumType(def_id) then self.context().get_name(def_id),
@@ -1037,7 +1013,7 @@ given TypeChecker {
         };
     };
 
-    trait_name_for_type(self, trait_type Type) String = {
+    trait_name_for_type(self, trait_type: Type): String = {
         return when trait_type in {
             // Display only: the spelling is read from the declaration.
             .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
@@ -1047,8 +1023,8 @@ given TypeChecker {
 
     struct_constructor_param_specs(
         self,
-        constructor_type Type,
-    ) List[FunctionParamSpec] = {
+        constructor_type: Type,
+    ): List[FunctionParamSpec] = {
         let inner_type = when constructor_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1106,9 +1082,9 @@ given TypeChecker {
 
     enum_case_param_specs(
         self,
-        enum_type Type,
-        case_name String,
-    ) List[FunctionParamSpec] = {
+        enum_type: Type,
+        case_name: String,
+    ): List[FunctionParamSpec] = {
         let inner_type = when enum_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1136,11 +1112,7 @@ given TypeChecker {
         };
     };
 
-    static_member_is_enum_case(
-        self,
-        receiver_type Type,
-        member_name String,
-    ) Bool = {
+    static_member_is_enum_case(self, receiver_type: Type, member_name: String): Bool = {
         let inner_type = when receiver_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1171,9 +1143,9 @@ given TypeChecker {
 
     resolve_static_call_param_specs(
         self,
-        type_name String,
-        method_name String,
-    ) List[FunctionParamSpec] = {
+        type_name: String,
+        method_name: String,
+    ): List[FunctionParamSpec] = {
         let bound_specs = self.resolve_generic_bound_method_param_specs(
             type_name,
             method_name,
@@ -1208,14 +1180,14 @@ given TypeChecker {
 
     resolve_qualified_method_param_specs(
         self,
-        trait_def_id DefId,
-        method_name String,
-    ) List[FunctionParamSpec] = {
+        trait_def_id: DefId,
+        method_name: String,
+    ): List[FunctionParamSpec] = {
         when self.storage.trait_registry.flatten_methods_for_def(trait_def_id) in {
             .Ok(methods) then {
                 if methods.get(method_name) is .Some(member) then {
                     let mutable specs = List[FunctionParamSpec].new();
-                    let mutable idx UInt = if member.params.is_empty() or member.params[
+                    let mutable idx: UInt = if member.params.is_empty() or member.params[
                         UInt(0)
                     ].name != "self" then UInt(0) else UInt(1);
                     while idx < member.params.count() then {
@@ -1245,9 +1217,9 @@ given TypeChecker {
 
     resolve_generic_bound_method_param_specs(
         self,
-        type_name String,
-        method_name String,
-    ) List[FunctionParamSpec] = {
+        type_name: String,
+        method_name: String,
+    ): List[FunctionParamSpec] = {
         when self.storage.generic_param_constraints.get(type_name) in {
             .Some(bounds) then {
                 for bound in bounds then {
@@ -1267,9 +1239,9 @@ given TypeChecker {
 
     resolve_identifier_call_param_specs(
         self,
-        name String,
-        typed_callee TypedExpr,
-    ) List[FunctionParamSpec] = {
+        name: String,
+        typed_callee: TypedExpr,
+    ): List[FunctionParamSpec] = {
         if typed_callee.expr_kind is .Variable(sym) then {
             if sym.kind is .TypeSymbol() then {
                 return self.struct_constructor_param_specs(sym.symbol_type);
@@ -1288,10 +1260,10 @@ given TypeChecker {
 
     resolve_method_call_param_specs(
         self,
-        base_type Type,
-        method Symbol,
-        callee_type Type,
-    ) List[FunctionParamSpec] = {
+        base_type: Type,
+        method: Symbol,
+        callee_type: Type,
+    ): List[FunctionParamSpec] = {
         let method_name = self.context().symbol_name(method);
         when self.find_trait_constraint_for_method(base_type, method_name) in {
             .Some(trait_name) then {
@@ -1339,10 +1311,10 @@ given TypeChecker {
 
     resolve_call_param_specs(
         self,
-        callee Expr,
-        typed_callee TypedExpr,
-        scope Scope,
-    ) List[FunctionParamSpec] = {
+        callee: Expr,
+        typed_callee: TypedExpr,
+        scope: Scope,
+    ): List[FunctionParamSpec] = {
         when callee in {
             .Identifier(name, _) then {
                 return self.resolve_identifier_call_param_specs(name, typed_callee);
@@ -1438,7 +1410,7 @@ given TypeChecker {
         return self.positional_param_specs_for_function_type(typed_callee.expr_type);
     };
 
-    call_description_for_expr(self, callee Expr) String = {
+    call_description_for_expr(self, callee: Expr): String = {
         return when callee in {
             .Identifier(name, _) then name,
             .GenericInstantiation(base, _, _) then base,
@@ -1451,7 +1423,7 @@ given TypeChecker {
         };
     };
 
-    call_argument_expr(self, arg Expr) Expr = {
+    call_argument_expr(self, arg: Expr): Expr = {
         return when arg in {
             .NamedArgument(_, inner, _) then inner,
             _ then arg,
@@ -1460,21 +1432,21 @@ given TypeChecker {
 
     plan_call_argument_exprs(
         self,
-        args List[Expr],
-        param_specs List[FunctionParamSpec],
-        call_description String,
-    ) Option[List[Expr]] = {
+        args: List[Expr],
+        param_specs: List[FunctionParamSpec],
+        call_description: String,
+    ): Option[List[Expr]] = {
         let mutable ordered = List[Option[Expr]].new();
         for _ in param_specs then {
             ordered.push(Option[Expr].None());
         };
-        let mutable positional_index UInt = 0;
+        let mutable positional_index: UInt = 0;
         let mutable seen_named = false;
         for arg in args then {
             when arg in {
                 .NamedArgument(label, _, _) then {
                     seen_named = true;
-                    let mutable field_index UInt = 0;
+                    let mutable field_index: UInt = 0;
                     let mutable found = false;
                     while field_index < param_specs.count() then {
                         if param_specs[field_index].name == label then {
@@ -1522,7 +1494,7 @@ given TypeChecker {
                         positional_index += 1;
                     };
                     if positional_index >= param_specs.count() then {
-                        let mutable required_index UInt = 0;
+                        let mutable required_index: UInt = 0;
                         let mutable reported = false;
                         while required_index < param_specs.count() then {
                             if param_specs[required_index].named and ordered[
@@ -1554,7 +1526,7 @@ given TypeChecker {
         };
 
         let mutable expressions = List[Expr].new();
-        let mutable index UInt = 0;
+        let mutable index: UInt = 0;
         while index < param_specs.count() then {
             let spec = param_specs[index];
             when ordered[index] in {
@@ -1582,7 +1554,7 @@ given TypeChecker {
         return Option[List[Expr]].Some(expressions);
     };
 
-    validate_call_argument_order(self, args List[Expr]) Bool = {
+    validate_call_argument_order(self, args: List[Expr]): Bool = {
         let mutable seen_named = false;
         for arg in args then {
             when arg in {
@@ -1605,10 +1577,10 @@ given TypeChecker {
 
     validate_named_param_call_labels(
         self,
-        args List[Expr],
-        param_specs List[FunctionParamSpec],
-    ) Bool = {
-        let mutable arg_idx UInt = 0;
+        args: List[Expr],
+        param_specs: List[FunctionParamSpec],
+    ): Bool = {
+        let mutable arg_idx: UInt = 0;
         for arg in args then {
             if arg_idx < param_specs.count() then {
                 let spec = param_specs[arg_idx];

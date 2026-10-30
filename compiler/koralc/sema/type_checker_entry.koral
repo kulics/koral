@@ -1,6 +1,6 @@
 using "std/os" { env };
 
-public let type_check(program Program, file_path String) BodyCheckerOutput = {
+public let type_check(program: Program, file_path: String): BodyCheckerOutput = {
     let mutable collector = NameCollector.new_with_context(List[String].new(), file_path);
     collector.collect(program);
 
@@ -63,8 +63,8 @@ public let type_check(program Program, file_path String) BodyCheckerOutput = {
 };
 
 private let build_module_resolver_output(
-    graph ResolvedModuleGraph,
-) ModuleResolverOutput = {
+    graph: ResolvedModuleGraph,
+): ModuleResolverOutput = {
     return ModuleResolverOutput(
         ModuleTree(
             graph.root_module_path,
@@ -81,11 +81,11 @@ private let build_module_resolver_output(
 };
 
 private type NameCollectorPassResult(
-    output Option[NameCollectorOutput],
-    diagnostics DiagnosticCollector,
+    output: Option[NameCollectorOutput],
+    diagnostics: DiagnosticCollector,
 );
 
-private let run_name_collector_pass(input NameCollectorInput) NameCollectorPassResult = {
+private let run_name_collector_pass(input: NameCollectorInput): NameCollectorPassResult = {
     let mutable collector = NameCollector.new_with_context(
         List[String].new(),
         input.user_file_path,
@@ -113,15 +113,15 @@ private let run_name_collector_pass(input NameCollectorInput) NameCollectorPassR
     );
 };
 
-private let run_type_resolver_pass(input TypeResolverInput) TypeResolverOutput = {
+private let run_type_resolver_pass(input: TypeResolverInput): TypeResolverOutput = {
     let _ = input.user_file_path;
     return TypeResolverOutput(input.collector_output, input.resolver_output);
 };
 
 private let run_body_checker_pass(
-    input BodyCheckerInput,
-    retain_checked_template_bodies Bool,
-) BodyCheckerOutput = {
+    input: BodyCheckerInput,
+    retain_checked_template_bodies: Bool,
+): BodyCheckerOutput = {
     let mutable checker = TypeChecker.new(
         input.type_resolver_output.collector_output.global_scope,
         input.type_resolver_output.collector_output.context,
@@ -206,10 +206,10 @@ private let run_body_checker_pass(
 /// one spelling that a single file now has. The prelude counts as one of the
 /// modules: it is a real import, just one the language writes for you.
 private let import_collision_message(
-    name String,
-    target List[String],
-    is_import_all Bool,
-) String = {
+    name: String,
+    target: List[String],
+    is_import_all: Bool,
+): String = {
     let module_path = module_path_to_using_specifier(target);
     if is_import_all then {
         return "Import of '\(name)' from '\(module_path)' collides with a name already in scope; an import-all cannot be renamed, so use an explicit list";
@@ -224,10 +224,10 @@ private let import_collision_message(
 /// scope to begin with, so it cannot collide with anything -- reporting it
 /// would blame the reader for a rule they cannot act on.
 private let decl_importable(
-    access AccessModifier,
-    decl_package String,
-    importer_package String,
-) Bool = {
+    access: AccessModifier,
+    decl_package: String,
+    importer_package: String,
+): Bool = {
     return when access in {
         .Public() then true,
         .Protected() then not decl_package.is_empty() and decl_package == importer_package,
@@ -245,18 +245,18 @@ private let decl_importable(
 /// Read-only about which binding wins: this reports and then lets the existing
 /// registration decide what the name means.
 private let record_import_binding(
-    out List[DiagnosticError],
-    declared Dict[String, Dict[String, AccessModifier]],
-    owner Dict[String, Dict[String, Pair[List[String], String]]],
-    prelude_path Option[List[String]],
-    file String,
-    importer_module_key String,
-    local String,
-    identity Pair[List[String], String],
-    target List[String],
-    is_import_all Bool,
-    span SourceSpan,
-) Void = {
+    out: List[DiagnosticError],
+    declared: Dict[String, Dict[String, AccessModifier]],
+    owner: Dict[String, Dict[String, Pair[List[String], String]]],
+    prelude_path: Option[List[String]],
+    file: String,
+    importer_module_key: String,
+    local: String,
+    identity: Pair[List[String], String],
+    target: List[String],
+    is_import_all: Bool,
+    span: SourceSpan,
+): Void = {
     let mutable file_owners = owner.get(file) or else Dict[String, Pair[List[String], String]].new(
     );
 
@@ -289,8 +289,7 @@ private let record_import_binding(
         let pre = declared.get(prelude_key) or else Dict[String, AccessModifier].new();
         if pre.get(local) is .Some(_) then {
             let pre_id = Pair[List[String], String](pp, local);
-            if not string_list_eq(pre_id.first, identity.first) or pre_id.second != identity.second
-            then {
+            if not string_list_eq(pre_id.first, identity.first) or pre_id.second != identity.second then {
                 out.push(
                     DiagnosticError(
                         .Semantic(),
@@ -327,9 +326,9 @@ private let record_import_binding(
 };
 
 private let check_import_name_collisions(
-    import_graph ImportGraph,
-    loaded_nodes List[Pair[LoadedNode, List[String]]],
-) List[DiagnosticError] = {
+    import_graph: ImportGraph,
+    loaded_nodes: List[Pair[LoadedNode, List[String]]],
+): List[DiagnosticError] = {
     let mutable out = List[DiagnosticError].new();
 
     // module key -> name -> the level it is declared at
@@ -470,10 +469,10 @@ private let check_import_name_collisions(
 };
 
 private let type_check_resolver_output(
-    resolver_output ModuleResolverOutput,
-    user_file_path String,
-    retain_checked_template_bodies Bool,
-) BodyCheckerOutput = {
+    resolver_output: ModuleResolverOutput,
+    user_file_path: String,
+    retain_checked_template_bodies: Bool,
+): BodyCheckerOutput = {
     let name_input = NameCollectorInput(resolver_output, user_file_path);
     let name_pass = run_name_collector_pass(name_input);
 
@@ -523,9 +522,9 @@ private let type_check_resolver_output(
 };
 
 public let type_check_resolved_graph(
-    resolved_graph ResolvedModuleGraph,
-    user_file_path String,
-) BodyCheckerOutput = {
+    resolved_graph: ResolvedModuleGraph,
+    user_file_path: String,
+): BodyCheckerOutput = {
     return type_check_resolver_output(
         build_module_resolver_output(resolved_graph),
         user_file_path,
@@ -534,9 +533,9 @@ public let type_check_resolved_graph(
 };
 
 public let check_resolved_graph(
-    resolved_graph ResolvedModuleGraph,
-    user_file_path String,
-) BodyCheckerOutput = {
+    resolved_graph: ResolvedModuleGraph,
+    user_file_path: String,
+): BodyCheckerOutput = {
     return type_check_resolver_output(
         build_module_resolver_output(resolved_graph),
         user_file_path,
@@ -544,7 +543,7 @@ public let check_resolved_graph(
     );
 };
 
-public let type_check_entry_file(user_file_path String, no_std Bool) BodyCheckerOutput = {
+public let type_check_entry_file(user_file_path: String, no_std: Bool): BodyCheckerOutput = {
     let mutable resolver = ModuleResolver.new();
     let resolved_graph = when resolver.resolve_for_typecheck(user_file_path, no_std) in {
         .Ok(graph) then graph,

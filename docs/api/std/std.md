@@ -9,193 +9,193 @@ This page lists the public API of module `Std` (declaration-only syntax), organi
 
 ## Free Functions
 ```koral
-public let sleep(d Duration) Void;
+public let sleep(d: Duration): Void;
 
-public let make_bytes(count UInt) List[UInt8];
+public let make_bytes(count: UInt): List[UInt8];
 
-public let make_uninitialized_bytes(count UInt) List[UInt8];
+public let make_uninitialized_bytes(count: UInt): List[UInt8];
 
-public let intrinsic alloc_memory[T Any](capacity UInt) *mutable T;
+public let intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
 
-public let intrinsic dealloc_memory[T Any](p *T) Void;
+public let intrinsic dealloc_memory[T: Any](p: *T): Void;
 
-public let intrinsic copy_memory[T Any](dest *mutable T, source *T, count UInt) Void;
+public let intrinsic copy_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
-public let intrinsic move_memory[T Any](dest *mutable T, source *T, count UInt) Void;
+public let intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
-public let intrinsic init_memory[T Any](p *mutable T, value T) Void;
+public let intrinsic init_memory[T: Any](p: *mutable T, value: T): Void;
 
-public let intrinsic deinit_memory[T Any](p *mutable T) Void;
+public let intrinsic deinit_memory[T: Any](p: *mutable T): Void;
 
-public let intrinsic take_memory[T Any](p *mutable T) T;
+public let intrinsic take_memory[T: Any](p: *mutable T): T;
 
-public let intrinsic spawn_thread(out_handle *mutable *mutable UInt8, out_tid *mutable UInt64, f () -> Void, stack_size UInt64) Int32;
+public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: () -> Void, stack_size: UInt64): Int32;
 
-public let max[T Ord](a T, b T) T;
+public let max[T: Ord](a: T, b: T): T;
 
-public let min[T Ord](a T, b T) T;
+public let min[T: Ord](a: T, b: T): T;
 
-public let foreign exit(code Int) Never;
+public let foreign exit(code: Int): Never;
 
-public let foreign abort() Never;
+public let foreign abort(): Never;
 
-public let last_error_message() String;
+public let last_error_message(): String;
 
-public let args() List[String];
+public let args(): List[String];
 
-public let panic(message String) Never;
+public let panic(message: String): Never;
 
-public let assert(condition Bool, message String) Void;
+public let assert(condition: Bool, message: String): Void;
 
-public let print[T ToString](value T) Void;
+public let print[T: ToString](value: T): Void;
 
-public let println[T ToString](value T) Void;
+public let println[T: ToString](value: T): Void;
 
-public let eprint[T ToString](value T) Void;
+public let eprint[T: ToString](value: T): Void;
 
-public let eprintln[T ToString](value T) Void;
+public let eprintln[T: ToString](value: T): Void;
 
-public let scanln() Option[String];
+public let scanln(): Option[String];
 ```
 
 ## Traits
 ```koral
 public trait Zero {
-    zero() Self;
+    zero(): Self;
 };
 
 public trait One {
-    one() Self;
+    one(): Self;
 };
 
-public trait Add[R Any] {
-    add(self, other R) Self;
+public trait Add[R: Any] {
+    add(self, other: R): Self;
 };
 
-public trait Sub[R Any] {
-    sub(self, other R) Self;
+public trait Sub[R: Any] {
+    sub(self, other: R): Self;
 };
 
 public trait Neg {
-    neg(self) Self;
+    neg(self): Self;
 };
 
-public trait Mul[R Any] {
-    mul(self, other R) Self;
+public trait Mul[R: Any] {
+    mul(self, other: R): Self;
 };
 
-public trait Div[R Any] {
-    div(self, other R) Self;
+public trait Div[R: Any] {
+    div(self, other: R): Self;
 };
 
-public trait Rem[R Any] {
-    rem(self, other R) Self;
+public trait Rem[R: Any] {
+    rem(self, other: R): Self;
 };
 
 public trait Eq {
-    equals(self, other Self) Bool;
+    equals(self, other: Self): Bool;
 };
 
-public trait Ord Eq {
-    compare(self, other Self) Int;
+public trait Ord: Eq {
+    compare(self, other: Self): Int;
 };
 
-public trait Bounded Ord {
-    max_value() Self;
-    min_value() Self;
+public trait Bounded: Ord {
+    max_value(): Self;
+    min_value(): Self;
 };
 
-public trait Iterator[T Any] {
-    next(self) Option[T];
+public trait Iterator[T: Any] {
+    next(self): Option[T];
 };
 
-public trait Iterable[T Any, R Iterator[T]] {
-    iterator(self) R;
+public trait Iterable[T: Any, R: Iterator[T]] {
+    iterator(self): R;
 };
 
-public trait Step Bounded {
-    succ(self) Option[Self];
-    pred(self) Option[Self];
+public trait Step: Bounded {
+    succ(self): Option[Self];
+    pred(self): Option[Self];
 };
 
 public trait ToString {
-    to_string(self) String;
+    to_string(self): String;
 };
 
-public trait Hash Eq {
-    hash(self) UInt;
+public trait Hash: Eq {
+    hash(self): UInt;
 };
 
 public trait Error {
-    message(self) String;
+    message(self): String;
 };
 
 public trait Drop {
-    drop(self) Void;
+    drop(self): Void;
 };
 
 public trait Default {
-    default() Self;
+    default(): Self;
 };
 
 public trait Clone {
-    clone(self) Self;
+    clone(self): Self;
 };
 ```
 
 ## Types
 ```koral
-public type mutable Deque[T Any];
+public type mutable Deque[T: Any];
 
-public type mutable DequeIterator[T Any];
+public type mutable DequeIterator[T: Any];
 
-public type mutable Dict[K Hash, V Any];
+public type mutable Dict[K: Hash, V: Any];
 
-public type mutable DictIterator[K Hash, V Any];
+public type mutable DictIterator[K: Hash, V: Any];
 
-public type mutable DictKeysIterator[K Hash, V Any];
+public type mutable DictKeysIterator[K: Hash, V: Any];
 
-public type mutable DictValuesIterator[K Hash, V Any];
+public type mutable DictValuesIterator[K: Hash, V: Any];
 
 public type Duration;
 
-public type mutable FilterIterator[T Any, R Iterator[T]];
+public type mutable FilterIterator[T: Any, R: Iterator[T]];
 
-public type mutable MapIterator[T Any, U Any, R Iterator[T]];
+public type mutable MapIterator[T: Any, U: Any, R: Iterator[T]];
 
-public type mutable FilterMapIterator[T Any, U Any, R Iterator[T]];
+public type mutable FilterMapIterator[T: Any, U: Any, R: Iterator[T]];
 
-public type mutable TakeIterator[T Any, R Iterator[T]];
+public type mutable TakeIterator[T: Any, R: Iterator[T]];
 
-public type mutable SkipIterator[T Any, R Iterator[T]];
+public type mutable SkipIterator[T: Any, R: Iterator[T]];
 
-public type mutable StepIterator[T Any, R Iterator[T]];
+public type mutable StepIterator[T: Any, R: Iterator[T]];
 
-public type mutable EnumerateIterator[T Any, R Iterator[T]];
+public type mutable EnumerateIterator[T: Any, R: Iterator[T]];
 
-public type mutable InspectIterator[T Any, R Iterator[T]];
+public type mutable InspectIterator[T: Any, R: Iterator[T]];
 
-public type mutable IntersperseIterator[T Any, R Iterator[T]];
+public type mutable IntersperseIterator[T: Any, R: Iterator[T]];
 
-public type mutable TakeWhileIterator[T Any, R Iterator[T]];
+public type mutable TakeWhileIterator[T: Any, R: Iterator[T]];
 
-public type mutable SkipWhileIterator[T Any, R Iterator[T]];
+public type mutable SkipWhileIterator[T: Any, R: Iterator[T]];
 
-public type mutable ChainIterator[T Any, R1 Iterator[T], R2 Iterator[T]];
+public type mutable ChainIterator[T: Any, R1: Iterator[T], R2: Iterator[T]];
 
-public type mutable ZipIterator[A Any, B Any, R1 Iterator[A], R2 Iterator[B]];
+public type mutable ZipIterator[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]];
 
-public type mutable FlatMapIterator[T Any, U Any, R Iterator[T], InnerR Iterator[U]];
+public type mutable FlatMapIterator[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]];
 
-public type LazyView[T Any, R Iterator[T]];
+public type LazyView[T: Any, R: Iterator[T]];
 
-public type mutable List[T Any];
+public type mutable List[T: Any];
 
-public type mutable ListIterator[T Any];
+public type mutable ListIterator[T: Any];
 
-public type Option[T Any] {
+public type Option[T: Any] {
     None(),
-    Some(value T),
+    Some(value: T),
 };
 
 public type intrinsic Bool;
@@ -246,20 +246,20 @@ public type intrinsic Float32;
 
 public type intrinsic Float64;
 
-public type Range[T Ord] {
+public type Range[T: Ord] {
     // Bound ranges (4 kinds)
-    Closed(start T, end T), // a..b   : start <= x <= end
-    ClosedOpen(start T, end T), // a..<b  : start <= x < end
-    OpenClosed(start T, end T), // a<..b  : start < x <= end
-    Open(start T, end T), // a<..<b : start < x < end
+    Closed(start: T, end: T), // a..b   : start <= x <= end
+    ClosedOpen(start: T, end: T), // a..<b  : start <= x < end
+    OpenClosed(start: T, end: T), // a<..b  : start < x <= end
+    Open(start: T, end: T), // a<..<b : start < x < end
 
     // From ranges (2 kinds)
-    From(start T), // a..    : start <= x <= max
-    After(start T), // a<..   : start < x <= max
+    From(start: T), // a..    : start <= x <= max
+    After(start: T), // a<..   : start < x <= max
 
     // To ranges (2 kinds)
-    To(end T), // ..b    : min <= x <= end
-    Until(end T), // ..<b   : min <= x < end
+    To(end: T), // ..b    : min <= x <= end
+    Until(end: T), // ..<b   : min <= x < end
 
     // Full range (1 kind)
     Full(), // ..     : min <= x <= max
@@ -267,18 +267,18 @@ public type Range[T Ord] {
 
 public type SliceSpec;
 
-public type mutable RangeIterator[T Step];
+public type mutable RangeIterator[T: Step];
 
-public type Result[T Any] {
-    Ok(value T),
-    Error(error Error),
+public type Result[T: Any] {
+    Ok(value: T),
+    Error(error: Error),
 };
 
 public type Rune;
 
-public type mutable Set[T Hash];
+public type mutable Set[T: Hash];
 
-public type mutable SetIterator[T Hash];
+public type mutable SetIterator[T: Hash];
 
 public type String;
 
@@ -294,1249 +294,1249 @@ public type mutable StringBytesIterator;
 
 public type mutable StringRunesIterator;
 
-public type Pair[T Any, U Any](public first T, public second U);
+public type Pair[T: Any, U: Any](public first: T, public second: U);
 
-public type mutable Cell[T Any](public mutable value T);
+public type mutable Cell[T: Any](public mutable value: T);
 ```
 
 ## Given Implementations
 ```koral
-given Int as Zero {
-    public zero() Int;
+given Int: Zero {
+    public zero(): Int;
 };
 
-given Int as One {
-    public one() Int;
+given Int: One {
+    public one(): Int;
 };
 
-given Int as Add[Int] {
-    public add(self, other Int) Int;
+given Int: Add[Int] {
+    public add(self, other: Int): Int;
 };
 
-given Int as Sub[Int] {
-    public sub(self, other Int) Int;
+given Int: Sub[Int] {
+    public sub(self, other: Int): Int;
 };
 
-given Int as Neg {
-    public neg(self) Int;
+given Int: Neg {
+    public neg(self): Int;
 };
 
-given Int as Mul[Int] {
-    public mul(self, other Int) Int;
+given Int: Mul[Int] {
+    public mul(self, other: Int): Int;
 };
 
-given Int as Div[Int] {
-    public div(self, other Int) Int;
+given Int: Div[Int] {
+    public div(self, other: Int): Int;
 };
 
-given Int as Rem[Int] {
-    public rem(self, other Int) Int;
+given Int: Rem[Int] {
+    public rem(self, other: Int): Int;
 };
 
-given Int8 as Zero {
-    public zero() Int8;
+given Int8: Zero {
+    public zero(): Int8;
 };
 
-given Int8 as One {
-    public one() Int8;
+given Int8: One {
+    public one(): Int8;
 };
 
-given Int8 as Add[Int8] {
-    public add(self, other Int8) Int8;
+given Int8: Add[Int8] {
+    public add(self, other: Int8): Int8;
 };
 
-given Int8 as Sub[Int8] {
-    public sub(self, other Int8) Int8;
+given Int8: Sub[Int8] {
+    public sub(self, other: Int8): Int8;
 };
 
-given Int8 as Neg {
-    public neg(self) Int8;
+given Int8: Neg {
+    public neg(self): Int8;
 };
 
-given Int8 as Mul[Int8] {
-    public mul(self, other Int8) Int8;
+given Int8: Mul[Int8] {
+    public mul(self, other: Int8): Int8;
 };
 
-given Int8 as Div[Int8] {
-    public div(self, other Int8) Int8;
+given Int8: Div[Int8] {
+    public div(self, other: Int8): Int8;
 };
 
-given Int8 as Rem[Int8] {
-    public rem(self, other Int8) Int8;
+given Int8: Rem[Int8] {
+    public rem(self, other: Int8): Int8;
 };
 
-given Int16 as Zero {
-    public zero() Int16;
+given Int16: Zero {
+    public zero(): Int16;
 };
 
-given Int16 as One {
-    public one() Int16;
+given Int16: One {
+    public one(): Int16;
 };
 
-given Int16 as Add[Int16] {
-    public add(self, other Int16) Int16;
+given Int16: Add[Int16] {
+    public add(self, other: Int16): Int16;
 };
 
-given Int16 as Sub[Int16] {
-    public sub(self, other Int16) Int16;
+given Int16: Sub[Int16] {
+    public sub(self, other: Int16): Int16;
 };
 
-given Int16 as Neg {
-    public neg(self) Int16;
+given Int16: Neg {
+    public neg(self): Int16;
 };
 
-given Int16 as Mul[Int16] {
-    public mul(self, other Int16) Int16;
+given Int16: Mul[Int16] {
+    public mul(self, other: Int16): Int16;
 };
 
-given Int16 as Div[Int16] {
-    public div(self, other Int16) Int16;
+given Int16: Div[Int16] {
+    public div(self, other: Int16): Int16;
 };
 
-given Int16 as Rem[Int16] {
-    public rem(self, other Int16) Int16;
+given Int16: Rem[Int16] {
+    public rem(self, other: Int16): Int16;
 };
 
-given Int32 as Zero {
-    public zero() Int32;
+given Int32: Zero {
+    public zero(): Int32;
 };
 
-given Int32 as One {
-    public one() Int32;
+given Int32: One {
+    public one(): Int32;
 };
 
-given Int32 as Add[Int32] {
-    public add(self, other Int32) Int32;
+given Int32: Add[Int32] {
+    public add(self, other: Int32): Int32;
 };
 
-given Int32 as Sub[Int32] {
-    public sub(self, other Int32) Int32;
+given Int32: Sub[Int32] {
+    public sub(self, other: Int32): Int32;
 };
 
-given Int32 as Neg {
-    public neg(self) Int32;
+given Int32: Neg {
+    public neg(self): Int32;
 };
 
-given Int32 as Mul[Int32] {
-    public mul(self, other Int32) Int32;
+given Int32: Mul[Int32] {
+    public mul(self, other: Int32): Int32;
 };
 
-given Int32 as Div[Int32] {
-    public div(self, other Int32) Int32;
+given Int32: Div[Int32] {
+    public div(self, other: Int32): Int32;
 };
 
-given Int32 as Rem[Int32] {
-    public rem(self, other Int32) Int32;
+given Int32: Rem[Int32] {
+    public rem(self, other: Int32): Int32;
 };
 
-given Int64 as Zero {
-    public zero() Int64;
+given Int64: Zero {
+    public zero(): Int64;
 };
 
-given Int64 as One {
-    public one() Int64;
+given Int64: One {
+    public one(): Int64;
 };
 
-given Int64 as Add[Int64] {
-    public add(self, other Int64) Int64;
+given Int64: Add[Int64] {
+    public add(self, other: Int64): Int64;
 };
 
-given Int64 as Sub[Int64] {
-    public sub(self, other Int64) Int64;
+given Int64: Sub[Int64] {
+    public sub(self, other: Int64): Int64;
 };
 
-given Int64 as Neg {
-    public neg(self) Int64;
+given Int64: Neg {
+    public neg(self): Int64;
 };
 
-given Int64 as Mul[Int64] {
-    public mul(self, other Int64) Int64;
+given Int64: Mul[Int64] {
+    public mul(self, other: Int64): Int64;
 };
 
-given Int64 as Div[Int64] {
-    public div(self, other Int64) Int64;
+given Int64: Div[Int64] {
+    public div(self, other: Int64): Int64;
 };
 
-given Int64 as Rem[Int64] {
-    public rem(self, other Int64) Int64;
+given Int64: Rem[Int64] {
+    public rem(self, other: Int64): Int64;
 };
 
-given UInt as Zero {
-    public zero() UInt;
+given UInt: Zero {
+    public zero(): UInt;
 };
 
-given UInt as One {
-    public one() UInt;
+given UInt: One {
+    public one(): UInt;
 };
 
-given UInt as Add[UInt] {
-    public add(self, other UInt) UInt;
+given UInt: Add[UInt] {
+    public add(self, other: UInt): UInt;
 };
 
-given UInt as Sub[UInt] {
-    public sub(self, other UInt) UInt;
+given UInt: Sub[UInt] {
+    public sub(self, other: UInt): UInt;
 };
 
-given UInt as Mul[UInt] {
-    public mul(self, other UInt) UInt;
+given UInt: Mul[UInt] {
+    public mul(self, other: UInt): UInt;
 };
 
-given UInt as Div[UInt] {
-    public div(self, other UInt) UInt;
+given UInt: Div[UInt] {
+    public div(self, other: UInt): UInt;
 };
 
-given UInt as Rem[UInt] {
-    public rem(self, other UInt) UInt;
+given UInt: Rem[UInt] {
+    public rem(self, other: UInt): UInt;
 };
 
-given UInt8 as Zero {
-    public zero() UInt8;
+given UInt8: Zero {
+    public zero(): UInt8;
 };
 
-given UInt8 as One {
-    public one() UInt8;
+given UInt8: One {
+    public one(): UInt8;
 };
 
-given UInt8 as Add[UInt8] {
-    public add(self, other UInt8) UInt8;
+given UInt8: Add[UInt8] {
+    public add(self, other: UInt8): UInt8;
 };
 
-given UInt8 as Sub[UInt8] {
-    public sub(self, other UInt8) UInt8;
+given UInt8: Sub[UInt8] {
+    public sub(self, other: UInt8): UInt8;
 };
 
-given UInt8 as Mul[UInt8] {
-    public mul(self, other UInt8) UInt8;
+given UInt8: Mul[UInt8] {
+    public mul(self, other: UInt8): UInt8;
 };
 
-given UInt8 as Div[UInt8] {
-    public div(self, other UInt8) UInt8;
+given UInt8: Div[UInt8] {
+    public div(self, other: UInt8): UInt8;
 };
 
-given UInt8 as Rem[UInt8] {
-    public rem(self, other UInt8) UInt8;
+given UInt8: Rem[UInt8] {
+    public rem(self, other: UInt8): UInt8;
 };
 
-given UInt16 as Zero {
-    public zero() UInt16;
+given UInt16: Zero {
+    public zero(): UInt16;
 };
 
-given UInt16 as One {
-    public one() UInt16;
+given UInt16: One {
+    public one(): UInt16;
 };
 
-given UInt16 as Add[UInt16] {
-    public add(self, other UInt16) UInt16;
+given UInt16: Add[UInt16] {
+    public add(self, other: UInt16): UInt16;
 };
 
-given UInt16 as Sub[UInt16] {
-    public sub(self, other UInt16) UInt16;
+given UInt16: Sub[UInt16] {
+    public sub(self, other: UInt16): UInt16;
 };
 
-given UInt16 as Mul[UInt16] {
-    public mul(self, other UInt16) UInt16;
+given UInt16: Mul[UInt16] {
+    public mul(self, other: UInt16): UInt16;
 };
 
-given UInt16 as Div[UInt16] {
-    public div(self, other UInt16) UInt16;
+given UInt16: Div[UInt16] {
+    public div(self, other: UInt16): UInt16;
 };
 
-given UInt16 as Rem[UInt16] {
-    public rem(self, other UInt16) UInt16;
+given UInt16: Rem[UInt16] {
+    public rem(self, other: UInt16): UInt16;
 };
 
-given UInt32 as Zero {
-    public zero() UInt32;
+given UInt32: Zero {
+    public zero(): UInt32;
 };
 
-given UInt32 as One {
-    public one() UInt32;
+given UInt32: One {
+    public one(): UInt32;
 };
 
-given UInt32 as Add[UInt32] {
-    public add(self, other UInt32) UInt32;
+given UInt32: Add[UInt32] {
+    public add(self, other: UInt32): UInt32;
 };
 
-given UInt32 as Sub[UInt32] {
-    public sub(self, other UInt32) UInt32;
+given UInt32: Sub[UInt32] {
+    public sub(self, other: UInt32): UInt32;
 };
 
-given UInt32 as Mul[UInt32] {
-    public mul(self, other UInt32) UInt32;
+given UInt32: Mul[UInt32] {
+    public mul(self, other: UInt32): UInt32;
 };
 
-given UInt32 as Div[UInt32] {
-    public div(self, other UInt32) UInt32;
+given UInt32: Div[UInt32] {
+    public div(self, other: UInt32): UInt32;
 };
 
-given UInt32 as Rem[UInt32] {
-    public rem(self, other UInt32) UInt32;
+given UInt32: Rem[UInt32] {
+    public rem(self, other: UInt32): UInt32;
 };
 
-given UInt64 as Zero {
-    public zero() UInt64;
+given UInt64: Zero {
+    public zero(): UInt64;
 };
 
-given UInt64 as One {
-    public one() UInt64;
+given UInt64: One {
+    public one(): UInt64;
 };
 
-given UInt64 as Add[UInt64] {
-    public add(self, other UInt64) UInt64;
+given UInt64: Add[UInt64] {
+    public add(self, other: UInt64): UInt64;
 };
 
-given UInt64 as Sub[UInt64] {
-    public sub(self, other UInt64) UInt64;
+given UInt64: Sub[UInt64] {
+    public sub(self, other: UInt64): UInt64;
 };
 
-given UInt64 as Mul[UInt64] {
-    public mul(self, other UInt64) UInt64;
+given UInt64: Mul[UInt64] {
+    public mul(self, other: UInt64): UInt64;
 };
 
-given UInt64 as Div[UInt64] {
-    public div(self, other UInt64) UInt64;
+given UInt64: Div[UInt64] {
+    public div(self, other: UInt64): UInt64;
 };
 
-given UInt64 as Rem[UInt64] {
-    public rem(self, other UInt64) UInt64;
+given UInt64: Rem[UInt64] {
+    public rem(self, other: UInt64): UInt64;
 };
 
-given Float32 as Zero {
-    public zero() Float32;
+given Float32: Zero {
+    public zero(): Float32;
 };
 
-given Float32 as One {
-    public one() Float32;
+given Float32: One {
+    public one(): Float32;
 };
 
-given Float32 as Add[Float32] {
-    public add(self, other Float32) Float32;
+given Float32: Add[Float32] {
+    public add(self, other: Float32): Float32;
 };
 
-given Float32 as Sub[Float32] {
-    public sub(self, other Float32) Float32;
+given Float32: Sub[Float32] {
+    public sub(self, other: Float32): Float32;
 };
 
-given Float32 as Neg {
-    public neg(self) Float32;
+given Float32: Neg {
+    public neg(self): Float32;
 };
 
-given Float32 as Mul[Float32] {
-    public mul(self, other Float32) Float32;
+given Float32: Mul[Float32] {
+    public mul(self, other: Float32): Float32;
 };
 
-given Float32 as Div[Float32] {
-    public div(self, other Float32) Float32;
+given Float32: Div[Float32] {
+    public div(self, other: Float32): Float32;
 };
 
-given Float64 as Zero {
-    public zero() Float64;
+given Float64: Zero {
+    public zero(): Float64;
 };
 
-given Float64 as One {
-    public one() Float64;
+given Float64: One {
+    public one(): Float64;
 };
 
-given Float64 as Add[Float64] {
-    public add(self, other Float64) Float64;
+given Float64: Add[Float64] {
+    public add(self, other: Float64): Float64;
 };
 
-given Float64 as Sub[Float64] {
-    public sub(self, other Float64) Float64;
+given Float64: Sub[Float64] {
+    public sub(self, other: Float64): Float64;
 };
 
-given Float64 as Neg {
-    public neg(self) Float64;
+given Float64: Neg {
+    public neg(self): Float64;
 };
 
-given Float64 as Mul[Float64] {
-    public mul(self, other Float64) Float64;
+given Float64: Mul[Float64] {
+    public mul(self, other: Float64): Float64;
 };
 
-given Float64 as Div[Float64] {
-    public div(self, other Float64) Float64;
+given Float64: Div[Float64] {
+    public div(self, other: Float64): Float64;
 };
 
-given String as Add[String] {
-    public add(self, other String) String;
+given String: Add[String] {
+    public add(self, other: String): String;
 };
 
-given Duration as Zero {
-    public zero() Duration;
+given Duration: Zero {
+    public zero(): Duration;
 };
 
-given Duration as Add[Duration] {
-    public add(self, other Duration) Duration;
+given Duration: Add[Duration] {
+    public add(self, other: Duration): Duration;
 };
 
-given Duration as Sub[Duration] {
-    public sub(self, other Duration) Duration;
+given Duration: Sub[Duration] {
+    public sub(self, other: Duration): Duration;
 };
 
-given Duration as Neg {
-    public neg(self) Duration;
+given Duration: Neg {
+    public neg(self): Duration;
 };
 
-given Duration as Mul[Int] {
-    public mul(self, k Int) Duration;
+given Duration: Mul[Int] {
+    public mul(self, k: Int): Duration;
 };
 
-given Duration as Div[Int] {
-    public div(self, k Int) Duration;
+given Duration: Div[Int] {
+    public div(self, k: Int): Duration;
 };
 
-given WrappingInt8 as Add[WrappingInt8] {
-    public add(self, other WrappingInt8) WrappingInt8;
+given WrappingInt8: Add[WrappingInt8] {
+    public add(self, other: WrappingInt8): WrappingInt8;
 };
 
-given WrappingInt8 as Sub[WrappingInt8] {
-    public sub(self, other WrappingInt8) WrappingInt8;
+given WrappingInt8: Sub[WrappingInt8] {
+    public sub(self, other: WrappingInt8): WrappingInt8;
 };
 
-given WrappingInt8 as Mul[WrappingInt8] {
-    public mul(self, other WrappingInt8) WrappingInt8;
+given WrappingInt8: Mul[WrappingInt8] {
+    public mul(self, other: WrappingInt8): WrappingInt8;
 };
 
-given WrappingInt8 as Div[WrappingInt8] {
-    public div(self, other WrappingInt8) WrappingInt8;
+given WrappingInt8: Div[WrappingInt8] {
+    public div(self, other: WrappingInt8): WrappingInt8;
 };
 
-given WrappingInt8 as Rem[WrappingInt8] {
-    public rem(self, other WrappingInt8) WrappingInt8;
+given WrappingInt8: Rem[WrappingInt8] {
+    public rem(self, other: WrappingInt8): WrappingInt8;
 };
 
-given WrappingInt16 as Add[WrappingInt16] {
-    public add(self, other WrappingInt16) WrappingInt16;
+given WrappingInt16: Add[WrappingInt16] {
+    public add(self, other: WrappingInt16): WrappingInt16;
 };
 
-given WrappingInt16 as Sub[WrappingInt16] {
-    public sub(self, other WrappingInt16) WrappingInt16;
+given WrappingInt16: Sub[WrappingInt16] {
+    public sub(self, other: WrappingInt16): WrappingInt16;
 };
 
-given WrappingInt16 as Mul[WrappingInt16] {
-    public mul(self, other WrappingInt16) WrappingInt16;
+given WrappingInt16: Mul[WrappingInt16] {
+    public mul(self, other: WrappingInt16): WrappingInt16;
 };
 
-given WrappingInt16 as Div[WrappingInt16] {
-    public div(self, other WrappingInt16) WrappingInt16;
+given WrappingInt16: Div[WrappingInt16] {
+    public div(self, other: WrappingInt16): WrappingInt16;
 };
 
-given WrappingInt16 as Rem[WrappingInt16] {
-    public rem(self, other WrappingInt16) WrappingInt16;
+given WrappingInt16: Rem[WrappingInt16] {
+    public rem(self, other: WrappingInt16): WrappingInt16;
 };
 
-given WrappingInt32 as Add[WrappingInt32] {
-    public add(self, other WrappingInt32) WrappingInt32;
+given WrappingInt32: Add[WrappingInt32] {
+    public add(self, other: WrappingInt32): WrappingInt32;
 };
 
-given WrappingInt32 as Sub[WrappingInt32] {
-    public sub(self, other WrappingInt32) WrappingInt32;
+given WrappingInt32: Sub[WrappingInt32] {
+    public sub(self, other: WrappingInt32): WrappingInt32;
 };
 
-given WrappingInt32 as Mul[WrappingInt32] {
-    public mul(self, other WrappingInt32) WrappingInt32;
+given WrappingInt32: Mul[WrappingInt32] {
+    public mul(self, other: WrappingInt32): WrappingInt32;
 };
 
-given WrappingInt32 as Div[WrappingInt32] {
-    public div(self, other WrappingInt32) WrappingInt32;
+given WrappingInt32: Div[WrappingInt32] {
+    public div(self, other: WrappingInt32): WrappingInt32;
 };
 
-given WrappingInt32 as Rem[WrappingInt32] {
-    public rem(self, other WrappingInt32) WrappingInt32;
+given WrappingInt32: Rem[WrappingInt32] {
+    public rem(self, other: WrappingInt32): WrappingInt32;
 };
 
-given WrappingInt64 as Add[WrappingInt64] {
-    public add(self, other WrappingInt64) WrappingInt64;
+given WrappingInt64: Add[WrappingInt64] {
+    public add(self, other: WrappingInt64): WrappingInt64;
 };
 
-given WrappingInt64 as Sub[WrappingInt64] {
-    public sub(self, other WrappingInt64) WrappingInt64;
+given WrappingInt64: Sub[WrappingInt64] {
+    public sub(self, other: WrappingInt64): WrappingInt64;
 };
 
-given WrappingInt64 as Mul[WrappingInt64] {
-    public mul(self, other WrappingInt64) WrappingInt64;
+given WrappingInt64: Mul[WrappingInt64] {
+    public mul(self, other: WrappingInt64): WrappingInt64;
 };
 
-given WrappingInt64 as Div[WrappingInt64] {
-    public div(self, other WrappingInt64) WrappingInt64;
+given WrappingInt64: Div[WrappingInt64] {
+    public div(self, other: WrappingInt64): WrappingInt64;
 };
 
-given WrappingInt64 as Rem[WrappingInt64] {
-    public rem(self, other WrappingInt64) WrappingInt64;
+given WrappingInt64: Rem[WrappingInt64] {
+    public rem(self, other: WrappingInt64): WrappingInt64;
 };
 
-given WrappingUInt8 as Add[WrappingUInt8] {
-    public add(self, other WrappingUInt8) WrappingUInt8;
+given WrappingUInt8: Add[WrappingUInt8] {
+    public add(self, other: WrappingUInt8): WrappingUInt8;
 };
 
-given WrappingUInt8 as Sub[WrappingUInt8] {
-    public sub(self, other WrappingUInt8) WrappingUInt8;
+given WrappingUInt8: Sub[WrappingUInt8] {
+    public sub(self, other: WrappingUInt8): WrappingUInt8;
 };
 
-given WrappingUInt8 as Mul[WrappingUInt8] {
-    public mul(self, other WrappingUInt8) WrappingUInt8;
+given WrappingUInt8: Mul[WrappingUInt8] {
+    public mul(self, other: WrappingUInt8): WrappingUInt8;
 };
 
-given WrappingUInt8 as Div[WrappingUInt8] {
-    public div(self, other WrappingUInt8) WrappingUInt8;
+given WrappingUInt8: Div[WrappingUInt8] {
+    public div(self, other: WrappingUInt8): WrappingUInt8;
 };
 
-given WrappingUInt8 as Rem[WrappingUInt8] {
-    public rem(self, other WrappingUInt8) WrappingUInt8;
+given WrappingUInt8: Rem[WrappingUInt8] {
+    public rem(self, other: WrappingUInt8): WrappingUInt8;
 };
 
-given WrappingUInt16 as Add[WrappingUInt16] {
-    public add(self, other WrappingUInt16) WrappingUInt16;
+given WrappingUInt16: Add[WrappingUInt16] {
+    public add(self, other: WrappingUInt16): WrappingUInt16;
 };
 
-given WrappingUInt16 as Sub[WrappingUInt16] {
-    public sub(self, other WrappingUInt16) WrappingUInt16;
+given WrappingUInt16: Sub[WrappingUInt16] {
+    public sub(self, other: WrappingUInt16): WrappingUInt16;
 };
 
-given WrappingUInt16 as Mul[WrappingUInt16] {
-    public mul(self, other WrappingUInt16) WrappingUInt16;
+given WrappingUInt16: Mul[WrappingUInt16] {
+    public mul(self, other: WrappingUInt16): WrappingUInt16;
 };
 
-given WrappingUInt16 as Div[WrappingUInt16] {
-    public div(self, other WrappingUInt16) WrappingUInt16;
+given WrappingUInt16: Div[WrappingUInt16] {
+    public div(self, other: WrappingUInt16): WrappingUInt16;
 };
 
-given WrappingUInt16 as Rem[WrappingUInt16] {
-    public rem(self, other WrappingUInt16) WrappingUInt16;
+given WrappingUInt16: Rem[WrappingUInt16] {
+    public rem(self, other: WrappingUInt16): WrappingUInt16;
 };
 
-given WrappingUInt32 as Add[WrappingUInt32] {
-    public add(self, other WrappingUInt32) WrappingUInt32;
+given WrappingUInt32: Add[WrappingUInt32] {
+    public add(self, other: WrappingUInt32): WrappingUInt32;
 };
 
-given WrappingUInt32 as Sub[WrappingUInt32] {
-    public sub(self, other WrappingUInt32) WrappingUInt32;
+given WrappingUInt32: Sub[WrappingUInt32] {
+    public sub(self, other: WrappingUInt32): WrappingUInt32;
 };
 
-given WrappingUInt32 as Mul[WrappingUInt32] {
-    public mul(self, other WrappingUInt32) WrappingUInt32;
+given WrappingUInt32: Mul[WrappingUInt32] {
+    public mul(self, other: WrappingUInt32): WrappingUInt32;
 };
 
-given WrappingUInt32 as Div[WrappingUInt32] {
-    public div(self, other WrappingUInt32) WrappingUInt32;
+given WrappingUInt32: Div[WrappingUInt32] {
+    public div(self, other: WrappingUInt32): WrappingUInt32;
 };
 
-given WrappingUInt32 as Rem[WrappingUInt32] {
-    public rem(self, other WrappingUInt32) WrappingUInt32;
+given WrappingUInt32: Rem[WrappingUInt32] {
+    public rem(self, other: WrappingUInt32): WrappingUInt32;
 };
 
-given WrappingUInt64 as Add[WrappingUInt64] {
-    public add(self, other WrappingUInt64) WrappingUInt64;
+given WrappingUInt64: Add[WrappingUInt64] {
+    public add(self, other: WrappingUInt64): WrappingUInt64;
 };
 
-given WrappingUInt64 as Sub[WrappingUInt64] {
-    public sub(self, other WrappingUInt64) WrappingUInt64;
+given WrappingUInt64: Sub[WrappingUInt64] {
+    public sub(self, other: WrappingUInt64): WrappingUInt64;
 };
 
-given WrappingUInt64 as Mul[WrappingUInt64] {
-    public mul(self, other WrappingUInt64) WrappingUInt64;
+given WrappingUInt64: Mul[WrappingUInt64] {
+    public mul(self, other: WrappingUInt64): WrappingUInt64;
 };
 
-given WrappingUInt64 as Div[WrappingUInt64] {
-    public div(self, other WrappingUInt64) WrappingUInt64;
+given WrappingUInt64: Div[WrappingUInt64] {
+    public div(self, other: WrappingUInt64): WrappingUInt64;
 };
 
-given WrappingUInt64 as Rem[WrappingUInt64] {
-    public rem(self, other WrappingUInt64) WrappingUInt64;
+given WrappingUInt64: Rem[WrappingUInt64] {
+    public rem(self, other: WrappingUInt64): WrappingUInt64;
 };
 
-given WrappingInt as Add[WrappingInt] {
-    public add(self, other WrappingInt) WrappingInt;
+given WrappingInt: Add[WrappingInt] {
+    public add(self, other: WrappingInt): WrappingInt;
 };
 
-given WrappingInt as Sub[WrappingInt] {
-    public sub(self, other WrappingInt) WrappingInt;
+given WrappingInt: Sub[WrappingInt] {
+    public sub(self, other: WrappingInt): WrappingInt;
 };
 
-given WrappingInt as Mul[WrappingInt] {
-    public mul(self, other WrappingInt) WrappingInt;
+given WrappingInt: Mul[WrappingInt] {
+    public mul(self, other: WrappingInt): WrappingInt;
 };
 
-given WrappingInt as Div[WrappingInt] {
-    public div(self, other WrappingInt) WrappingInt;
+given WrappingInt: Div[WrappingInt] {
+    public div(self, other: WrappingInt): WrappingInt;
 };
 
-given WrappingInt as Rem[WrappingInt] {
-    public rem(self, other WrappingInt) WrappingInt;
+given WrappingInt: Rem[WrappingInt] {
+    public rem(self, other: WrappingInt): WrappingInt;
 };
 
-given WrappingUInt as Add[WrappingUInt] {
-    public add(self, other WrappingUInt) WrappingUInt;
+given WrappingUInt: Add[WrappingUInt] {
+    public add(self, other: WrappingUInt): WrappingUInt;
 };
 
-given WrappingUInt as Sub[WrappingUInt] {
-    public sub(self, other WrappingUInt) WrappingUInt;
+given WrappingUInt: Sub[WrappingUInt] {
+    public sub(self, other: WrappingUInt): WrappingUInt;
 };
 
-given WrappingUInt as Mul[WrappingUInt] {
-    public mul(self, other WrappingUInt) WrappingUInt;
+given WrappingUInt: Mul[WrappingUInt] {
+    public mul(self, other: WrappingUInt): WrappingUInt;
 };
 
-given WrappingUInt as Div[WrappingUInt] {
-    public div(self, other WrappingUInt) WrappingUInt;
+given WrappingUInt: Div[WrappingUInt] {
+    public div(self, other: WrappingUInt): WrappingUInt;
 };
 
-given WrappingUInt as Rem[WrappingUInt] {
-    public rem(self, other WrappingUInt) WrappingUInt;
+given WrappingUInt: Rem[WrappingUInt] {
+    public rem(self, other: WrappingUInt): WrappingUInt;
 };
 
-given Bool as Eq {
-    public equals(self, other Bool) Bool;
+given Bool: Eq {
+    public equals(self, other: Bool): Bool;
 };
 
-given Bool as Ord {
-    public compare(self, other Bool) Int;
+given Bool: Ord {
+    public compare(self, other: Bool): Int;
 };
 
-given Int as Eq {
-    public equals(self, other Int) Bool;
+given Int: Eq {
+    public equals(self, other: Int): Bool;
 };
 
-given Int as Ord {
-    public compare(self, other Int) Int;
+given Int: Ord {
+    public compare(self, other: Int): Int;
 };
 
-given Int as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Int: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Int8 as Eq {
-    public equals(self, other Int8) Bool;
+given Int8: Eq {
+    public equals(self, other: Int8): Bool;
 };
 
-given Int8 as Ord {
-    public compare(self, other Int8) Int;
+given Int8: Ord {
+    public compare(self, other: Int8): Int;
 };
 
-given Int8 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Int8: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Int16 as Eq {
-    public equals(self, other Int16) Bool;
+given Int16: Eq {
+    public equals(self, other: Int16): Bool;
 };
 
-given Int16 as Ord {
-    public compare(self, other Int16) Int;
+given Int16: Ord {
+    public compare(self, other: Int16): Int;
 };
 
-given Int16 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Int16: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Int32 as Eq {
-    public equals(self, other Int32) Bool;
+given Int32: Eq {
+    public equals(self, other: Int32): Bool;
 };
 
-given Int32 as Ord {
-    public compare(self, other Int32) Int;
+given Int32: Ord {
+    public compare(self, other: Int32): Int;
 };
 
-given Int32 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Int32: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Int64 as Eq {
-    public equals(self, other Int64) Bool;
+given Int64: Eq {
+    public equals(self, other: Int64): Bool;
 };
 
-given Int64 as Ord {
-    public compare(self, other Int64) Int;
+given Int64: Ord {
+    public compare(self, other: Int64): Int;
 };
 
-given Int64 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Int64: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given UInt as Eq {
-    public equals(self, other UInt) Bool;
+given UInt: Eq {
+    public equals(self, other: UInt): Bool;
 };
 
-given UInt as Ord {
-    public compare(self, other UInt) Int;
+given UInt: Ord {
+    public compare(self, other: UInt): Int;
 };
 
-given UInt as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given UInt: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given UInt8 as Eq {
-    public equals(self, other UInt8) Bool;
+given UInt8: Eq {
+    public equals(self, other: UInt8): Bool;
 };
 
-given UInt8 as Ord {
-    public compare(self, other UInt8) Int;
+given UInt8: Ord {
+    public compare(self, other: UInt8): Int;
 };
 
-given UInt8 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given UInt8: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given UInt16 as Eq {
-    public equals(self, other UInt16) Bool;
+given UInt16: Eq {
+    public equals(self, other: UInt16): Bool;
 };
 
-given UInt16 as Ord {
-    public compare(self, other UInt16) Int;
+given UInt16: Ord {
+    public compare(self, other: UInt16): Int;
 };
 
-given UInt16 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given UInt16: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given UInt32 as Eq {
-    public equals(self, other UInt32) Bool;
+given UInt32: Eq {
+    public equals(self, other: UInt32): Bool;
 };
 
-given UInt32 as Ord {
-    public compare(self, other UInt32) Int;
+given UInt32: Ord {
+    public compare(self, other: UInt32): Int;
 };
 
-given UInt32 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given UInt32: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given UInt64 as Eq {
-    public equals(self, other UInt64) Bool;
+given UInt64: Eq {
+    public equals(self, other: UInt64): Bool;
 };
 
-given UInt64 as Ord {
-    public compare(self, other UInt64) Int;
+given UInt64: Ord {
+    public compare(self, other: UInt64): Int;
 };
 
-given UInt64 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given UInt64: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Float32 as Eq {
-    public equals(self, other Float32) Bool;
+given Float32: Eq {
+    public equals(self, other: Float32): Bool;
 };
 
-given Float32 as Ord {
-    public compare(self, other Float32) Int;
+given Float32: Ord {
+    public compare(self, other: Float32): Int;
 };
 
-given Float32 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Float32: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given Float64 as Eq {
-    public equals(self, other Float64) Bool;
+given Float64: Eq {
+    public equals(self, other: Float64): Bool;
 };
 
-given Float64 as Ord {
-    public compare(self, other Float64) Int;
+given Float64: Ord {
+    public compare(self, other: Float64): Int;
 };
 
-given Float64 as Bounded {
-    public max_value() Self;
-    public min_value() Self;
+given Float64: Bounded {
+    public max_value(): Self;
+    public min_value(): Self;
 };
 
-given WrappingInt as Eq {
-    public equals(self, other WrappingInt) Bool;
+given WrappingInt: Eq {
+    public equals(self, other: WrappingInt): Bool;
 };
 
-given WrappingInt as Ord {
-    public compare(self, other WrappingInt) Int;
+given WrappingInt: Ord {
+    public compare(self, other: WrappingInt): Int;
 };
 
-given WrappingInt8 as Eq {
-    public equals(self, other WrappingInt8) Bool;
+given WrappingInt8: Eq {
+    public equals(self, other: WrappingInt8): Bool;
 };
 
-given WrappingInt8 as Ord {
-    public compare(self, other WrappingInt8) Int;
+given WrappingInt8: Ord {
+    public compare(self, other: WrappingInt8): Int;
 };
 
-given WrappingInt16 as Eq {
-    public equals(self, other WrappingInt16) Bool;
+given WrappingInt16: Eq {
+    public equals(self, other: WrappingInt16): Bool;
 };
 
-given WrappingInt16 as Ord {
-    public compare(self, other WrappingInt16) Int;
+given WrappingInt16: Ord {
+    public compare(self, other: WrappingInt16): Int;
 };
 
-given WrappingInt32 as Eq {
-    public equals(self, other WrappingInt32) Bool;
+given WrappingInt32: Eq {
+    public equals(self, other: WrappingInt32): Bool;
 };
 
-given WrappingInt32 as Ord {
-    public compare(self, other WrappingInt32) Int;
+given WrappingInt32: Ord {
+    public compare(self, other: WrappingInt32): Int;
 };
 
-given WrappingInt64 as Eq {
-    public equals(self, other WrappingInt64) Bool;
+given WrappingInt64: Eq {
+    public equals(self, other: WrappingInt64): Bool;
 };
 
-given WrappingInt64 as Ord {
-    public compare(self, other WrappingInt64) Int;
+given WrappingInt64: Ord {
+    public compare(self, other: WrappingInt64): Int;
 };
 
-given WrappingUInt as Eq {
-    public equals(self, other WrappingUInt) Bool;
+given WrappingUInt: Eq {
+    public equals(self, other: WrappingUInt): Bool;
 };
 
-given WrappingUInt as Ord {
-    public compare(self, other WrappingUInt) Int;
+given WrappingUInt: Ord {
+    public compare(self, other: WrappingUInt): Int;
 };
 
-given WrappingUInt8 as Eq {
-    public equals(self, other WrappingUInt8) Bool;
+given WrappingUInt8: Eq {
+    public equals(self, other: WrappingUInt8): Bool;
 };
 
-given WrappingUInt8 as Ord {
-    public compare(self, other WrappingUInt8) Int;
+given WrappingUInt8: Ord {
+    public compare(self, other: WrappingUInt8): Int;
 };
 
-given WrappingUInt16 as Eq {
-    public equals(self, other WrappingUInt16) Bool;
+given WrappingUInt16: Eq {
+    public equals(self, other: WrappingUInt16): Bool;
 };
 
-given WrappingUInt16 as Ord {
-    public compare(self, other WrappingUInt16) Int;
+given WrappingUInt16: Ord {
+    public compare(self, other: WrappingUInt16): Int;
 };
 
-given WrappingUInt32 as Eq {
-    public equals(self, other WrappingUInt32) Bool;
+given WrappingUInt32: Eq {
+    public equals(self, other: WrappingUInt32): Bool;
 };
 
-given WrappingUInt32 as Ord {
-    public compare(self, other WrappingUInt32) Int;
+given WrappingUInt32: Ord {
+    public compare(self, other: WrappingUInt32): Int;
 };
 
-given WrappingUInt64 as Eq {
-    public equals(self, other WrappingUInt64) Bool;
+given WrappingUInt64: Eq {
+    public equals(self, other: WrappingUInt64): Bool;
 };
 
-given WrappingUInt64 as Ord {
-    public compare(self, other WrappingUInt64) Int;
+given WrappingUInt64: Ord {
+    public compare(self, other: WrappingUInt64): Int;
 };
 
-given[T Any] Deque[T] as Drop {};
+given[T: Any] Deque[T]: Drop {};
 
-given[T Any] Deque[T] {
-    public new() Self;
-    public with_capacity(capacity UInt) Self;
-    public count(self) UInt;
-    public reserve(self, additional UInt) Void;
-    public is_empty(self) Bool;
-    public push_back(self, value T) Void;
-    public push_front(self, value T) Void;
-    public pop_front(self) Option[T];
-    public pop_back(self) Option[T];
-    public first(self) Option[T];
-    public last(self) Option[T];
-    public get(self, index UInt) Option[T];
-    public clear(self) Void;
-    public reverse(self) Void;
-    public retain(self, predicate (T) -> Bool) Void;
+given[T: Any] Deque[T] {
+    public new(): Self;
+    public with_capacity(capacity: UInt): Self;
+    public count(self): UInt;
+    public reserve(self, additional: UInt): Void;
+    public is_empty(self): Bool;
+    public push_back(self, value: T): Void;
+    public push_front(self, value: T): Void;
+    public pop_front(self): Option[T];
+    public pop_back(self): Option[T];
+    public first(self): Option[T];
+    public last(self): Option[T];
+    public get(self, index: UInt): Option[T];
+    public clear(self): Void;
+    public reverse(self): Void;
+    public retain(self, predicate: (T) -> Bool): Void;
 };
 
-given[T Any] Deque[T] as Clone {
-    public clone(self) Self;
+given[T: Any] Deque[T]: Clone {
+    public clone(self): Self;
 };
 
-given[T Any] Deque[T] as Default {
-    public default() Self;
+given[T: Any] Deque[T]: Default {
+    public default(): Self;
 };
 
-given[T Eq] Deque[T] {
-    public contains(self, value T) Bool;
+given[T: Eq] Deque[T] {
+    public contains(self, value: T): Bool;
 };
 
-given[T Any] Deque[T] as Iterable[T, DequeIterator[T]] {
-    public iterator(self) DequeIterator[T];
+given[T: Any] Deque[T]: Iterable[T, DequeIterator[T]] {
+    public iterator(self): DequeIterator[T];
 };
 
-given[T Any] DequeIterator[T] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any] DequeIterator[T]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[K Hash, V Any] Dict[K, V] as Drop {};
+given[K: Hash, V: Any] Dict[K, V]: Drop {};
 
-given[K Hash, V Any] Dict[K, V] {
-    public new() Self;
-    public with_capacity(capacity UInt) Self;
-    public count(self) UInt;
-    public insert(self, key K, value V) Void;
-    public try_insert(self, key K, value V) Bool;
-    public insert_dict(self, other Dict[K, V]) Void;
-    public get(self, key K) Option[V];
-    public get_or_insert(self, key K, value V) V;
-    public contains_key(self, key K) Bool;
-    public remove(self, key K) Void;
-    public try_remove(self, key K) Bool;
-    public take(self, key K) Option[V];
-    public is_empty(self) Bool;
-    public clear(self) Void;
-    public retain(self, predicate (K, V) -> Bool) Void;
+given[K: Hash, V: Any] Dict[K, V] {
+    public new(): Self;
+    public with_capacity(capacity: UInt): Self;
+    public count(self): UInt;
+    public insert(self, key: K, value: V): Void;
+    public try_insert(self, key: K, value: V): Bool;
+    public insert_dict(self, other: Dict[K, V]): Void;
+    public get(self, key: K): Option[V];
+    public get_or_insert(self, key: K, value: V): V;
+    public contains_key(self, key: K): Bool;
+    public remove(self, key: K): Void;
+    public try_remove(self, key: K): Bool;
+    public take(self, key: K): Option[V];
+    public is_empty(self): Bool;
+    public clear(self): Void;
+    public retain(self, predicate: (K, V) -> Bool): Void;
 };
 
-given[K Hash, V Any] Dict[K, V] as Clone {
-    public clone(self) Self;
+given[K: Hash, V: Any] Dict[K, V]: Clone {
+    public clone(self): Self;
 };
 
-given[K Hash, V Any] Dict[K, V] as Default {
-    public default() Self;
+given[K: Hash, V: Any] Dict[K, V]: Default {
+    public default(): Self;
 };
 
-given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
-    public next(self) Option[Pair[K, V]];
+given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
+    public next(self): Option[Pair[K, V]];
 };
 
-given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
-    public next(self) Option[K];
+given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
+    public next(self): Option[K];
 };
 
-given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
-    public next(self) Option[V];
+given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
+    public next(self): Option[V];
 };
 
-given[K Hash, V Any] Dict[K, V] {
-    public keys(self) DictKeysIterator[K, V];
-    public values(self) DictValuesIterator[K, V];
+given[K: Hash, V: Any] Dict[K, V] {
+    public keys(self): DictKeysIterator[K, V];
+    public values(self): DictValuesIterator[K, V];
 };
 
-given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
-    public iterator(self) DictIterator[K, V];
+given[K: Hash, V: Any] Dict[K, V]: Iterable[Pair[K, V], DictIterator[K, V]] {
+    public iterator(self): DictIterator[K, V];
 };
 
-given[T Any] List[T] {
-    public group_by[K Hash](self, key (T) -> K) Dict[K, List[T]];
+given[T: Any] List[T] {
+    public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]];
 };
 
 given Duration {
-    public new(seconds: Int64, nanoseconds: Int64) Result[Duration];
-    public as_nanoseconds(self) Int64;
-    public as_microseconds(self) Int64;
-    public as_milliseconds(self) Int64;
-    public as_seconds(self) Int64;
-    public as_minutes(self) Int64;
-    public as_hours(self) Int64;
-    public ratio(self, other Duration) Float64;
+    public new(seconds: Int64 =, nanoseconds: Int64 =): Result[Duration];
+    public as_nanoseconds(self): Int64;
+    public as_microseconds(self): Int64;
+    public as_milliseconds(self): Int64;
+    public as_seconds(self): Int64;
+    public as_minutes(self): Int64;
+    public as_hours(self): Int64;
+    public ratio(self, other: Duration): Float64;
 };
 
-given Duration as Default {
-    public default() Self;
+given Duration: Default {
+    public default(): Self;
 };
 
-given Duration as Eq {
-    public equals(self, other Duration) Bool;
+given Duration: Eq {
+    public equals(self, other: Duration): Bool;
 };
 
-given Duration as Ord {
-    public compare(self, other Duration) Int;
+given Duration: Ord {
+    public compare(self, other: Duration): Int;
 };
 
-given[T Any, R Iterator[T]] FilterIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] FilterIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, U Any, R Iterator[T]] MapIterator[T, U, R] as Iterator[U] {
-    public next(self) Option[U];
+given[T: Any, U: Any, R: Iterator[T]] MapIterator[T, U, R]: Iterator[U] {
+    public next(self): Option[U];
 };
 
-given[T Any, U Any, R Iterator[T]] FilterMapIterator[T, U, R] as Iterator[U] {
-    public next(self) Option[U];
+given[T: Any, U: Any, R: Iterator[T]] FilterMapIterator[T, U, R]: Iterator[U] {
+    public next(self): Option[U];
 };
 
-given[T Any, R Iterator[T]] TakeIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] TakeIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] SkipIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] SkipIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] StepIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] StepIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] EnumerateIterator[T, R] as Iterator[Pair[UInt, T]] {
-    public next(self) Option[Pair[UInt, T]];
+given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[UInt, T]] {
+    public next(self): Option[Pair[UInt, T]];
 };
 
-given[T Any, R Iterator[T]] InspectIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] InspectIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] IntersperseIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] IntersperseIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] TakeWhileIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] TakeWhileIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] SkipWhileIterator[T, R] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R: Iterator[T]] SkipWhileIterator[T, R]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any, R1 Iterator[T], R2 Iterator[T]] ChainIterator[T, R1, R2] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any, R1: Iterator[T], R2: Iterator[T]] ChainIterator[T, R1, R2]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[A Any, B Any, R1 Iterator[A], R2 Iterator[B]] ZipIterator[A, B, R1, R2] as Iterator[Pair[A, B]] {
-    public next(self) Option[Pair[A, B]];
+given[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]] ZipIterator[A, B, R1, R2]: Iterator[Pair[A, B]] {
+    public next(self): Option[Pair[A, B]];
 };
 
-given[T Any, U Any, R Iterator[T], InnerR Iterator[U]] FlatMapIterator[T, U, R, InnerR] as Iterator[U] {
-    public next(self) Option[U];
+given[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]] FlatMapIterator[T, U, R, InnerR]: Iterator[U] {
+    public next(self): Option[U];
 };
 
-given[T Any, R Iterator[T]] LazyView[T, R] as Iterable[T, R] {
-    public iterator(self) R;
+given[T: Any, R: Iterator[T]] LazyView[T, R]: Iterable[T, R] {
+    public iterator(self): R;
 };
 
-given[T Any, R Iterator[T]] LazyView[T, R] {
-    public lazy(self) LazyView[T, R];
-    public filter(self, fn (T) -> Bool) LazyView[T, FilterIterator[T, R]];
-    public map[U Any](self, fn (T) -> U) LazyView[U, MapIterator[T, U, R]];
-    public filter_map[U Any](self, fn (T) -> Option[U]) LazyView[U, FilterMapIterator[T, U, R]];
-    public take(self, n UInt) LazyView[T, TakeIterator[T, R]];
-    public skip(self, n UInt) LazyView[T, SkipIterator[T, R]];
-    public step_by(self, n UInt) LazyView[T, StepIterator[T, R]];
-    public enumerate(self) LazyView[Pair[UInt, T], EnumerateIterator[T, R]];
-    public inspect(self, fn (T) -> Void) LazyView[T, InspectIterator[T, R]];
-    public intersperse(self, v T) LazyView[T, IntersperseIterator[T, R]];
-    public take_while(self, fn (T) -> Bool) LazyView[T, TakeWhileIterator[T, R]];
-    public skip_while(self, fn (T) -> Bool) LazyView[T, SkipWhileIterator[T, R]];
-    public chain[R2 Iterator[T], S2 Iterable[T, R2]](self, other S2) LazyView[T, ChainIterator[T, R, R2]];
-    public zip[U Any, R2 Iterator[U], S2 Iterable[U, R2]](self, other S2) LazyView[Pair[T, U], ZipIterator[T, U, R, R2]];
-    public flat_map[U Any, InnerR Iterator[U], InnerS Iterable[U, InnerR]](self, fn (T) -> InnerS) LazyView[U, FlatMapIterator[T, U, R, InnerR]];
-    public fold[U Any](self, initial U, fn (U, T) -> U) U;
-    public reduce(self, fn (T, T) -> T) Option[T];
-    public into_list(self) List[T];
-    public for_each(self, fn (T) -> Void) Void;
-    public count(self) UInt;
-    public first(self) Option[T];
-    public last(self) Option[T];
-    public nth(self, n UInt) Option[T];
-    public position(self, fn (T) -> Bool) Option[UInt];
-    public find(self, fn (T) -> Bool) Option[T];
-    public find_map[U Any](self, fn (T) -> Option[U]) Option[U];
-    public any(self, fn (T) -> Bool) Bool;
-    public all(self, fn (T) -> Bool) Bool;
-    public is_empty(self) Bool;
-    public max_by[K Ord](self, fn (T) -> K) Option[T];
-    public min_by[K Ord](self, fn (T) -> K) Option[T];
+given[T: Any, R: Iterator[T]] LazyView[T, R] {
+    public lazy(self): LazyView[T, R];
+    public filter(self, fn: (T) -> Bool): LazyView[T, FilterIterator[T, R]];
+    public map[U: Any](self, fn: (T) -> U): LazyView[U, MapIterator[T, U, R]];
+    public filter_map[U: Any](self, fn: (T) -> Option[U]): LazyView[U, FilterMapIterator[T, U, R]];
+    public take(self, n: UInt): LazyView[T, TakeIterator[T, R]];
+    public skip(self, n: UInt): LazyView[T, SkipIterator[T, R]];
+    public step_by(self, n: UInt): LazyView[T, StepIterator[T, R]];
+    public enumerate(self): LazyView[Pair[UInt, T], EnumerateIterator[T, R]];
+    public inspect(self, fn: (T) -> Void): LazyView[T, InspectIterator[T, R]];
+    public intersperse(self, v: T): LazyView[T, IntersperseIterator[T, R]];
+    public take_while(self, fn: (T) -> Bool): LazyView[T, TakeWhileIterator[T, R]];
+    public skip_while(self, fn: (T) -> Bool): LazyView[T, SkipWhileIterator[T, R]];
+    public chain[R2: Iterator[T], S2: Iterable[T, R2]](self, other: S2): LazyView[T, ChainIterator[T, R, R2]];
+    public zip[U: Any, R2: Iterator[U], S2: Iterable[U, R2]](self, other: S2): LazyView[Pair[T, U], ZipIterator[T, U, R, R2]];
+    public flat_map[U: Any, InnerR: Iterator[U], InnerS: Iterable[U, InnerR]](self, fn: (T) -> InnerS): LazyView[U, FlatMapIterator[T, U, R, InnerR]];
+    public fold[U: Any](self, initial: U, fn: (U, T) -> U): U;
+    public reduce(self, fn: (T, T) -> T): Option[T];
+    public into_list(self): List[T];
+    public for_each(self, fn: (T) -> Void): Void;
+    public count(self): UInt;
+    public first(self): Option[T];
+    public last(self): Option[T];
+    public nth(self, n: UInt): Option[T];
+    public position(self, fn: (T) -> Bool): Option[UInt];
+    public find(self, fn: (T) -> Bool): Option[T];
+    public find_map[U: Any](self, fn: (T) -> Option[U]): Option[U];
+    public any(self, fn: (T) -> Bool): Bool;
+    public all(self, fn: (T) -> Bool): Bool;
+    public is_empty(self): Bool;
+    public max_by[K: Ord](self, fn: (T) -> K): Option[T];
+    public min_by[K: Ord](self, fn: (T) -> K): Option[T];
 };
 
-given[T Eq, R Iterator[T]] LazyView[T, R] {
-    public contains(self, value T) Bool;
+given[T: Eq, R: Iterator[T]] LazyView[T, R] {
+    public contains(self, value: T): Bool;
 };
 
-given[T Ord, R Iterator[T]] LazyView[T, R] {
-    public max(self) Option[T];
-    public min(self) Option[T];
+given[T: Ord, R: Iterator[T]] LazyView[T, R] {
+    public max(self): Option[T];
+    public min(self): Option[T];
 };
 
-given[T Hash, R Iterator[T]] LazyView[T, R] {
-    public into_set(self) Set[T];
+given[T: Hash, R: Iterator[T]] LazyView[T, R] {
+    public into_set(self): Set[T];
 };
 
-given[T Add[T] and Zero, R Iterator[T]] LazyView[T, R] {
-    public sum(self) T;
+given[T: Add[T] and Zero, R: Iterator[T]] LazyView[T, R] {
+    public sum(self): T;
 };
 
-given[T Mul[T] and One, R Iterator[T]] LazyView[T, R] {
-    public product(self) T;
+given[T: Mul[T] and One, R: Iterator[T]] LazyView[T, R] {
+    public product(self): T;
 };
 
-given[T Add[T] and Div[T] and Zero and One, R Iterator[T]] LazyView[T, R] {
-    public average(self) Option[T];
+given[T: Add[T] and Div[T] and Zero and One, R: Iterator[T]] LazyView[T, R] {
+    public average(self): Option[T];
 };
 
-given[T Any, R Iterator[T]] Iterable[T, R] {
-    public lazy(self) LazyView[T, R];
+given[T: Any, R: Iterator[T]] Iterable[T, R] {
+    public lazy(self): LazyView[T, R];
 };
 
-given[T Any] List[T] as Drop {};
+given[T: Any] List[T]: Drop {};
 
-given[T Any] List[T] {
-    public new() Self;
-    public with_capacity(capacity UInt) Self;
-    public count(self) UInt;
-    public reserve(self, additional UInt) Void;
-    public push(self, value T) Void;
-    public push_list(self, other List[T], span: Range[UInt] = ...) Void;
-    public pop(self) Option[T];
-    public insert_list_at(self, index UInt, other List[T], span: Range[UInt] = ...) Void;
-    public insert_at(self, index UInt, value T) Void;
-    public remove_at(self, index UInt) Void;
-    public take_at(self, index UInt) T;
-    public get(self, index UInt) Option[T];
-    public first(self) Option[T];
-    public last(self) Option[T];
-    public is_empty(self) Bool;
-    public clear(self) Void;
-    public fill(self, value T) Void;
-    public map[U Any](self, fn (T) -> U) List[U];
-    public reverse(self) Void;
-    public slice_spec(self, range Range[UInt]) SliceSpec;
-    public sublist(self, range Range[UInt]) List[T];
-    public concat(self, other List[T]) List[T];
-    public retain(self, predicate (T) -> Bool) Void;
-    public sort_by[K Ord](self, key (T) -> K) Void;
-    public binary_search_by[K Ord](self, key (T) -> K, target K) Pair[UInt, Bool];
+given[T: Any] List[T] {
+    public new(): Self;
+    public with_capacity(capacity: UInt): Self;
+    public count(self): UInt;
+    public reserve(self, additional: UInt): Void;
+    public push(self, value: T): Void;
+    public push_list(self, other: List[T], span: Range[UInt] = ...): Void;
+    public pop(self): Option[T];
+    public insert_list_at(self, index: UInt, other: List[T], span: Range[UInt] = ...): Void;
+    public insert_at(self, index: UInt, value: T): Void;
+    public remove_at(self, index: UInt): Void;
+    public take_at(self, index: UInt): T;
+    public get(self, index: UInt): Option[T];
+    public first(self): Option[T];
+    public last(self): Option[T];
+    public is_empty(self): Bool;
+    public clear(self): Void;
+    public fill(self, value: T): Void;
+    public map[U: Any](self, fn: (T) -> U): List[U];
+    public reverse(self): Void;
+    public slice_spec(self, range: Range[UInt]): SliceSpec;
+    public sublist(self, range: Range[UInt]): List[T];
+    public concat(self, other: List[T]): List[T];
+    public retain(self, predicate: (T) -> Bool): Void;
+    public sort_by[K: Ord](self, key: (T) -> K): Void;
+    public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[UInt, Bool];
 };
 
-given[T foreign] List[T] {
-    public borrow_ptr(self) *T;
-    public borrow_mut_ptr(self) *mutable T;
+given[T: foreign] List[T] {
+    public borrow_ptr(self): *T;
+    public borrow_mut_ptr(self): *mutable T;
 };
 
-given[T Any] List[T] as Clone {
-    public clone(self) Self;
+given[T: Any] List[T]: Clone {
+    public clone(self): Self;
 };
 
-given[T Any] List[T] as Default {
-    public default() Self;
+given[T: Any] List[T]: Default {
+    public default(): Self;
 };
 
-given[T Eq] List[T] as Eq {
-    public equals(self, other List[T]) Bool;
+given[T: Eq] List[T]: Eq {
+    public equals(self, other: List[T]): Bool;
 };
 
-given[T Hash] List[T] as Hash {
-    public hash(self) UInt;
+given[T: Hash] List[T]: Hash {
+    public hash(self): UInt;
 };
 
-given[T Ord] List[T] as Ord {
-    public compare(self, other List[T]) Int;
+given[T: Ord] List[T]: Ord {
+    public compare(self, other: List[T]): Int;
 };
 
-given[T Eq] List[T] {
-    public contains(self, value T) Bool;
-    public dedup(self) Void;
+given[T: Eq] List[T] {
+    public contains(self, value: T): Bool;
+    public dedup(self): Void;
 };
 
-given[T Any] ListIterator[T] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Any] ListIterator[T]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Any] List[T] as Iterable[T, ListIterator[T]] {
-    public iterator(self) ListIterator[T];
+given[T: Any] List[T]: Iterable[T, ListIterator[T]] {
+    public iterator(self): ListIterator[T];
 };
 
-given[T Any] List[T] {};
+given[T: Any] List[T] {};
 
-given[T Ord] List[T] {
-    public binary_search(self, target T) Pair[UInt, Bool];
-    public sort(self) Void;
+given[T: Ord] List[T] {
+    public binary_search(self, target: T): Pair[UInt, Bool];
+    public sort(self): Void;
 };
 
-given[T Any] Option[T] {
-    public is_some(self) Bool;
-    public is_none(self) Bool;
-    public unwrap(self) T;
-    public expect(self, message String) T;
-    public unwrap_or(self, default T) T;
-    public map[U Any](self, f (T) -> U) Option[U];
-    public filter(self, predicate (T) -> Bool) Option[T];
+given[T: Any] Option[T] {
+    public is_some(self): Bool;
+    public is_none(self): Bool;
+    public unwrap(self): T;
+    public expect(self, message: String): T;
+    public unwrap_or(self, default: T): T;
+    public map[U: Any](self, f: (T) -> U): Option[U];
+    public filter(self, predicate: (T) -> Bool): Option[T];
 };
 
-given[T Any] Option[T] as Default {
-    public default() Self;
+given[T: Any] Option[T]: Default {
+    public default(): Self;
 };
 
-given[T Eq] Option[T] as Eq {
-    public equals(self, other Option[T]) Bool;
-};
-
-given Float32 {
-    public to_bits(self) UInt32;
-    public from_bits(bits UInt32) Float32;
-};
-
-given Float64 {
-    public to_bits(self) UInt64;
-    public from_bits(bits UInt64) Float64;
+given[T: Eq] Option[T]: Eq {
+    public equals(self, other: Option[T]): Bool;
 };
 
 given Float32 {
-    public inf() Float32;
-    public nan() Float32;
-    public min_normal() Float32;
-    public min_denormal() Float32;
-    public is_nan(self) Bool;
-    public is_inf(self) Bool;
-    public is_normal(self) Bool;
+    public to_bits(self): UInt32;
+    public from_bits(bits: UInt32): Float32;
 };
 
 given Float64 {
-    public inf() Float64;
-    public nan() Float64;
-    public min_normal() Float64;
-    public min_denormal() Float64;
-    public is_nan(self) Bool;
-    public is_inf(self) Bool;
-    public is_normal(self) Bool;
-};
-
-given Float64 {
-    public is_finite(self) Bool;
-    public is_sign_positive(self) Bool;
-    public is_sign_negative(self) Bool;
+    public to_bits(self): UInt64;
+    public from_bits(bits: UInt64): Float64;
 };
 
 given Float32 {
-    public is_finite(self) Bool;
-    public is_sign_positive(self) Bool;
-    public is_sign_negative(self) Bool;
+    public inf(): Float32;
+    public nan(): Float32;
+    public min_normal(): Float32;
+    public min_denormal(): Float32;
+    public is_nan(self): Bool;
+    public is_inf(self): Bool;
+    public is_normal(self): Bool;
+};
+
+given Float64 {
+    public inf(): Float64;
+    public nan(): Float64;
+    public min_normal(): Float64;
+    public min_denormal(): Float64;
+    public is_nan(self): Bool;
+    public is_inf(self): Bool;
+    public is_normal(self): Bool;
+};
+
+given Float64 {
+    public is_finite(self): Bool;
+    public is_sign_positive(self): Bool;
+    public is_sign_negative(self): Bool;
+};
+
+given Float32 {
+    public is_finite(self): Bool;
+    public is_sign_positive(self): Bool;
+    public is_sign_negative(self): Bool;
 };
 
 given UInt {
-    public is_power_of_two(self) Bool;
-    public next_power_of_two(self) Self;
+    public is_power_of_two(self): Bool;
+    public next_power_of_two(self): Self;
 };
 
 given UInt64 {
-    public is_power_of_two(self) Bool;
-    public next_power_of_two(self) Self;
+    public is_power_of_two(self): Bool;
+    public next_power_of_two(self): Self;
 };
 
 given UInt32 {
-    public is_power_of_two(self) Bool;
-    public next_power_of_two(self) Self;
+    public is_power_of_two(self): Bool;
+    public next_power_of_two(self): Self;
 };
 
 given UInt16 {
-    public is_power_of_two(self) Bool;
-    public next_power_of_two(self) Self;
+    public is_power_of_two(self): Bool;
+    public next_power_of_two(self): Self;
 };
 
 given UInt8 {
-    public is_ascii(self) Bool;
-    public is_ascii_alphabetic(self) Bool;
-    public is_ascii_alphanumeric(self) Bool;
-    public is_ascii_digit(self) Bool;
-    public is_ascii_hexdigit(self) Bool;
-    public is_ascii_whitespace(self) Bool;
-    public is_ascii_uppercase(self) Bool;
-    public is_ascii_lowercase(self) Bool;
-    public to_ascii_lowercase(self) UInt8;
-    public to_ascii_uppercase(self) UInt8;
-    public equals_ascii_ignore_case(self, other UInt8) Bool;
-    public is_power_of_two(self) Bool;
-    public next_power_of_two(self) Self;
+    public is_ascii(self): Bool;
+    public is_ascii_alphabetic(self): Bool;
+    public is_ascii_alphanumeric(self): Bool;
+    public is_ascii_digit(self): Bool;
+    public is_ascii_hexdigit(self): Bool;
+    public is_ascii_whitespace(self): Bool;
+    public is_ascii_uppercase(self): Bool;
+    public is_ascii_lowercase(self): Bool;
+    public to_ascii_lowercase(self): UInt8;
+    public to_ascii_uppercase(self): UInt8;
+    public equals_ascii_ignore_case(self, other: UInt8): Bool;
+    public is_power_of_two(self): Bool;
+    public next_power_of_two(self): Self;
 };
 
 given Int {};
@@ -1550,640 +1550,640 @@ given Int16 {};
 given Int8 {};
 
 given SliceSpec {
-    public new(offset: UInt, len: UInt) SliceSpec;
-    public start(self) UInt;
-    public end(self) UInt;
-    public len(self) UInt;
+    public new(offset: UInt =, len: UInt =): SliceSpec;
+    public start(self): UInt;
+    public end(self): UInt;
+    public len(self): UInt;
 };
 
-given[T Ord] Range[T] {
-    public contains(self, value T) Bool;
-    public is_empty(self) Bool;
+given[T: Ord] Range[T] {
+    public contains(self, value: T): Bool;
+    public is_empty(self): Bool;
 };
 
-given Int as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given Int: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given Int8 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given Int8: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given Int16 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given Int16: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given Int32 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given Int32: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given Int64 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given Int64: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given UInt as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given UInt: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given UInt8 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given UInt8: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given UInt16 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given UInt16: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given UInt32 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given UInt32: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given UInt64 as Step {
-    public succ(self) Option[Self];
-    public pred(self) Option[Self];
+given UInt64: Step {
+    public succ(self): Option[Self];
+    public pred(self): Option[Self];
 };
 
-given[T Step] RangeIterator[T] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Step] RangeIterator[T]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given[T Step] Range[T] as Iterable[T, RangeIterator[T]] {
-    public iterator(self) RangeIterator[T];
+given[T: Step] Range[T]: Iterable[T, RangeIterator[T]] {
+    public iterator(self): RangeIterator[T];
 };
 
-given[T Any] Result[T] {
-    public is_ok(self) Bool;
-    public is_error(self) Bool;
-    public unwrap(self) T;
-    public expect(self, message String) T;
-    public unwrap_error(self) Error;
-    public unwrap_or(self, default T) T;
-    public map[U Any](self, f (T) -> U) Result[U];
+given[T: Any] Result[T] {
+    public is_ok(self): Bool;
+    public is_error(self): Bool;
+    public unwrap(self): T;
+    public expect(self, message: String): T;
+    public unwrap_error(self): Error;
+    public unwrap_or(self, default: T): T;
+    public map[U: Any](self, f: (T) -> U): Result[U];
 };
 
 given Rune {
-    public replacement_char() Rune;
-    public from_uint32(value UInt32) Result[Rune];
-    public from_uint32_unchecked(value UInt32) Rune;
-    public to_uint32(self) UInt32;
-    public is_ascii(self) Bool;
-    public is_ascii_digit(self) Bool;
-    public is_ascii_hexdigit(self) Bool;
-    public is_ascii_whitespace(self) Bool;
-    public is_ascii_alphabetic(self) Bool;
-    public is_ascii_alphanumeric(self) Bool;
-    public is_ascii_uppercase(self) Bool;
-    public is_ascii_lowercase(self) Bool;
-    public to_ascii_lowercase(self) Rune;
-    public to_ascii_uppercase(self) Rune;
-    public is_valid(self) Bool;
-    public byte_count(self) UInt;
-    public is_newline(self) Bool;
-    public equals_ascii_ignore_case(self, other Rune) Bool;
-    public is_identifier_start(self) Bool;
-    public is_identifier_continue(self) Bool;
+    public replacement_char(): Rune;
+    public from_uint32(value: UInt32): Result[Rune];
+    public from_uint32_unchecked(value: UInt32): Rune;
+    public to_uint32(self): UInt32;
+    public is_ascii(self): Bool;
+    public is_ascii_digit(self): Bool;
+    public is_ascii_hexdigit(self): Bool;
+    public is_ascii_whitespace(self): Bool;
+    public is_ascii_alphabetic(self): Bool;
+    public is_ascii_alphanumeric(self): Bool;
+    public is_ascii_uppercase(self): Bool;
+    public is_ascii_lowercase(self): Bool;
+    public to_ascii_lowercase(self): Rune;
+    public to_ascii_uppercase(self): Rune;
+    public is_valid(self): Bool;
+    public byte_count(self): UInt;
+    public is_newline(self): Bool;
+    public equals_ascii_ignore_case(self, other: Rune): Bool;
+    public is_identifier_start(self): Bool;
+    public is_identifier_continue(self): Bool;
 };
 
-given Rune as Eq {
-    public equals(self, other Rune) Bool;
+given Rune: Eq {
+    public equals(self, other: Rune): Bool;
 };
 
-given Rune as Ord {
-    public compare(self, other Rune) Int;
+given Rune: Ord {
+    public compare(self, other: Rune): Int;
 };
 
-given Rune as ToString {
-    public to_string(self) String;
+given Rune: ToString {
+    public to_string(self): String;
 };
 
-given[T Hash] Set[T] as Drop {};
+given[T: Hash] Set[T]: Drop {};
 
-given[T Hash] Set[T] {
-    public new() Self;
-    public with_capacity(capacity UInt) Self;
-    public count(self) UInt;
-    public insert(self, value T) Void;
-    public try_insert(self, value T) Bool;
-    public insert_set(self, other Set[T]) Void;
-    public contains(self, value T) Bool;
-    public remove(self, value T) Void;
-    public try_remove(self, value T) Bool;
-    public is_empty(self) Bool;
-    public is_subset_of(self, other Set[T]) Bool;
-    public is_superset_of(self, other Set[T]) Bool;
-    public clear(self) Void;
-    public retain(self, predicate (T) -> Bool) Void;
-    public union(self, other Set[T]) Set[T];
-    public intersection(self, other Set[T]) Set[T];
-    public difference(self, other Set[T]) Set[T];
-    public symmetric_difference(self, other Set[T]) Set[T];
+given[T: Hash] Set[T] {
+    public new(): Self;
+    public with_capacity(capacity: UInt): Self;
+    public count(self): UInt;
+    public insert(self, value: T): Void;
+    public try_insert(self, value: T): Bool;
+    public insert_set(self, other: Set[T]): Void;
+    public contains(self, value: T): Bool;
+    public remove(self, value: T): Void;
+    public try_remove(self, value: T): Bool;
+    public is_empty(self): Bool;
+    public is_subset_of(self, other: Set[T]): Bool;
+    public is_superset_of(self, other: Set[T]): Bool;
+    public clear(self): Void;
+    public retain(self, predicate: (T) -> Bool): Void;
+    public union(self, other: Set[T]): Set[T];
+    public intersection(self, other: Set[T]): Set[T];
+    public difference(self, other: Set[T]): Set[T];
+    public symmetric_difference(self, other: Set[T]): Set[T];
 };
 
-given[T Hash] Set[T] as Clone {
-    public clone(self) Self;
+given[T: Hash] Set[T]: Clone {
+    public clone(self): Self;
 };
 
-given[T Hash] Set[T] as Default {
-    public default() Self;
+given[T: Hash] Set[T]: Default {
+    public default(): Self;
 };
 
-given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
-    public iterator(self) SetIterator[T];
+given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
+    public iterator(self): SetIterator[T];
 };
 
-given[T Hash] SetIterator[T] as Iterator[T] {
-    public next(self) Option[T];
+given[T: Hash] SetIterator[T]: Iterator[T] {
+    public next(self): Option[T];
 };
 
-given String as Drop {
-    public drop(self) Void;
+given String: Drop {
+    public drop(self): Void;
 };
 
-given StringBuilder as Drop {
-    public drop(self) Void;
+given StringBuilder: Drop {
+    public drop(self): Void;
 };
 
 given StringBuilder {
-    public new() StringBuilder;
-    public with_capacity(capacity UInt) StringBuilder;
-    public count(self) UInt;
-    public is_empty(self) Bool;
-    public push_byte(self, value UInt8) Void;
-    public push_string(self, other String, span: Range[UInt] = ...) Void;
-    public push_rune(self, rune Rune) Void;
-    public clear(self) Void;
-    public to_string(self) String;
+    public new(): StringBuilder;
+    public with_capacity(capacity: UInt): StringBuilder;
+    public count(self): UInt;
+    public is_empty(self): Bool;
+    public push_byte(self, value: UInt8): Void;
+    public push_string(self, other: String, span: Range[UInt] = ...): Void;
+    public push_rune(self, rune: Rune): Void;
+    public clear(self): Void;
+    public to_string(self): String;
 };
 
 given String {
-    public from_utf8_ptr_unchecked(bytes *UInt8, len UInt) String;
-    public from_utf8_ptr(bytes *UInt8, len UInt) Result[String];
-    public from_bytes(bytes List[UInt8]) Result[String];
-    public from_bytes_unchecked(bytes List[UInt8]) String;
-    public from_cstring(cstr *UInt8) Result[String];
-    public from_cstring_unchecked(cstr *UInt8) String;
-    public new() String;
-    public count(self) UInt;
-    public is_empty(self) Bool;
-    public borrow_ptr(self) *UInt8;
-    public to_bytes(self) List[UInt8];
-    public get(self, index UInt) Option[UInt8];
-    public starts_with(self, prefix String) Bool;
-    public ends_with(self, suffix String) Bool;
-    public find(self, pat String) Option[UInt];
-    public find_last(self, pat String) Option[UInt];
-    public is_rune_boundary(self, byte_index UInt) Bool;
-    public slice_spec(self, range Range[UInt]) SliceSpec;
-    public substring(self, range Range[UInt]) String;
-    public trim_ascii_start(self) String;
-    public trim_ascii_end(self) String;
-    public trim_ascii(self) String;
-    public is_ascii(self) Bool;
-    public is_ascii_whitespace(self) Bool;
-    public to_ascii_lowercase(self) String;
-    public to_ascii_uppercase(self) String;
-    public to_ascii_titlecase(self) String;
-    public find_from(self, start UInt, pat String) Option[UInt];
-    public contains(self, pat String) Bool;
-    public repeat(self, times UInt) String;
-    public replace_n(self, pat String, n UInt, with: String) String;
-    public split_once(self, sep String) Option[Pair[String, String]];
-    public split_last_once(self, sep String) Option[Pair[String, String]];
-    public replace_all(self, pat String, with: String) String;
-    public split_ascii_whitespace(self) StringSplitAsciiWhitespaceIterator;
-    public split(self, sep String) StringSplitIterator;
-    public lines(self) StringLinesIterator;
-    public trim_prefix(self, prefix String) String;
-    public trim_suffix(self, suffix String) String;
-    public strip_prefix(self, prefix String) Option[String];
-    public strip_suffix(self, suffix String) Option[String];
-    public bytes(self) StringBytesIterator;
-    public runes(self) StringRunesIterator;
-    public to_runes(self) List[Rune];
+    public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String;
+    public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String];
+    public from_bytes(bytes: List[UInt8]): Result[String];
+    public from_bytes_unchecked(bytes: List[UInt8]): String;
+    public from_cstring(cstr: *UInt8): Result[String];
+    public from_cstring_unchecked(cstr: *UInt8): String;
+    public new(): String;
+    public count(self): UInt;
+    public is_empty(self): Bool;
+    public borrow_ptr(self): *UInt8;
+    public to_bytes(self): List[UInt8];
+    public get(self, index: UInt): Option[UInt8];
+    public starts_with(self, prefix: String): Bool;
+    public ends_with(self, suffix: String): Bool;
+    public find(self, pat: String): Option[UInt];
+    public find_last(self, pat: String): Option[UInt];
+    public is_rune_boundary(self, byte_index: UInt): Bool;
+    public slice_spec(self, range: Range[UInt]): SliceSpec;
+    public substring(self, range: Range[UInt]): String;
+    public trim_ascii_start(self): String;
+    public trim_ascii_end(self): String;
+    public trim_ascii(self): String;
+    public is_ascii(self): Bool;
+    public is_ascii_whitespace(self): Bool;
+    public to_ascii_lowercase(self): String;
+    public to_ascii_uppercase(self): String;
+    public to_ascii_titlecase(self): String;
+    public find_from(self, start: UInt, pat: String): Option[UInt];
+    public contains(self, pat: String): Bool;
+    public repeat(self, times: UInt): String;
+    public replace_n(self, pat: String, n: UInt, with: String =): String;
+    public split_once(self, sep: String): Option[Pair[String, String]];
+    public split_last_once(self, sep: String): Option[Pair[String, String]];
+    public replace_all(self, pat: String, with: String =): String;
+    public split_ascii_whitespace(self): StringSplitAsciiWhitespaceIterator;
+    public split(self, sep: String): StringSplitIterator;
+    public lines(self): StringLinesIterator;
+    public trim_prefix(self, prefix: String): String;
+    public trim_suffix(self, suffix: String): String;
+    public strip_prefix(self, prefix: String): Option[String];
+    public strip_suffix(self, suffix: String): Option[String];
+    public bytes(self): StringBytesIterator;
+    public runes(self): StringRunesIterator;
+    public to_runes(self): List[Rune];
 };
 
-given String as Default {
-    public default() Self;
+given String: Default {
+    public default(): Self;
 };
 
-given String as Eq {
-    public equals(self, other String) Bool;
+given String: Eq {
+    public equals(self, other: String): Bool;
 };
 
-given String as Ord {
-    public compare(self, other String) Int;
+given String: Ord {
+    public compare(self, other: String): Int;
 };
 
-given String as Hash {
-    public hash(self) UInt;
+given String: Hash {
+    public hash(self): UInt;
 };
 
-given StringSplitAsciiWhitespaceIterator as Iterator[String] {
-    public next(self) Option[String];
+given StringSplitAsciiWhitespaceIterator: Iterator[String] {
+    public next(self): Option[String];
 };
 
-given StringSplitIterator as Iterator[String] {
-    public next(self) Option[String];
+given StringSplitIterator: Iterator[String] {
+    public next(self): Option[String];
 };
 
-given StringLinesIterator as Iterator[String] {
-    public next(self) Option[String];
+given StringLinesIterator: Iterator[String] {
+    public next(self): Option[String];
 };
 
-given StringRunesIterator as Iterator[Rune] {
-    public next(self) Option[Rune];
+given StringRunesIterator: Iterator[Rune] {
+    public next(self): Option[Rune];
 };
 
-given StringBytesIterator as Iterator[UInt8] {
-    public next(self) Option[UInt8];
+given StringBytesIterator: Iterator[UInt8] {
+    public next(self): Option[UInt8];
 };
 
-given String as ToString {
-    public to_string(self) String;
+given String: ToString {
+    public to_string(self): String;
 };
 
-given Bool as ToString {
-    public to_string(self) String;
+given Bool: ToString {
+    public to_string(self): String;
 };
 
-given Int as ToString {
-    public to_string(self) String;
+given Int: ToString {
+    public to_string(self): String;
 };
 
-given Int8 as ToString {
-    public to_string(self) String;
+given Int8: ToString {
+    public to_string(self): String;
 };
 
-given Int16 as ToString {
-    public to_string(self) String;
+given Int16: ToString {
+    public to_string(self): String;
 };
 
-given Int32 as ToString {
-    public to_string(self) String;
+given Int32: ToString {
+    public to_string(self): String;
 };
 
-given Int64 as ToString {
-    public to_string(self) String;
+given Int64: ToString {
+    public to_string(self): String;
 };
 
-given UInt as ToString {
-    public to_string(self) String;
+given UInt: ToString {
+    public to_string(self): String;
 };
 
-given UInt8 as ToString {
-    public to_string(self) String;
+given UInt8: ToString {
+    public to_string(self): String;
 };
 
-given UInt16 as ToString {
-    public to_string(self) String;
+given UInt16: ToString {
+    public to_string(self): String;
 };
 
-given UInt32 as ToString {
-    public to_string(self) String;
+given UInt32: ToString {
+    public to_string(self): String;
 };
 
-given UInt64 as ToString {
-    public to_string(self) String;
+given UInt64: ToString {
+    public to_string(self): String;
 };
 
-given WrappingInt as ToString {
-    public to_string(self) String;
+given WrappingInt: ToString {
+    public to_string(self): String;
 };
 
-given WrappingInt8 as ToString {
-    public to_string(self) String;
+given WrappingInt8: ToString {
+    public to_string(self): String;
 };
 
-given WrappingInt16 as ToString {
-    public to_string(self) String;
+given WrappingInt16: ToString {
+    public to_string(self): String;
 };
 
-given WrappingInt32 as ToString {
-    public to_string(self) String;
+given WrappingInt32: ToString {
+    public to_string(self): String;
 };
 
-given WrappingInt64 as ToString {
-    public to_string(self) String;
+given WrappingInt64: ToString {
+    public to_string(self): String;
 };
 
-given WrappingUInt as ToString {
-    public to_string(self) String;
+given WrappingUInt: ToString {
+    public to_string(self): String;
 };
 
-given WrappingUInt8 as ToString {
-    public to_string(self) String;
+given WrappingUInt8: ToString {
+    public to_string(self): String;
 };
 
-given WrappingUInt16 as ToString {
-    public to_string(self) String;
+given WrappingUInt16: ToString {
+    public to_string(self): String;
 };
 
-given WrappingUInt32 as ToString {
-    public to_string(self) String;
+given WrappingUInt32: ToString {
+    public to_string(self): String;
 };
 
-given WrappingUInt64 as ToString {
-    public to_string(self) String;
+given WrappingUInt64: ToString {
+    public to_string(self): String;
 };
 
-given Float32 as ToString {
-    public to_string(self) String;
+given Float32: ToString {
+    public to_string(self): String;
 };
 
-given Float64 as ToString {
-    public to_string(self) String;
+given Float64: ToString {
+    public to_string(self): String;
 };
 
-given[T ToString, U ToString] Pair[T, U] as ToString {
-    public to_string(self) String;
+given[T: ToString, U: ToString] Pair[T, U]: ToString {
+    public to_string(self): String;
 };
 
-given[T ToString] Option[T] as ToString {
-    public to_string(self) String;
+given[T: ToString] Option[T]: ToString {
+    public to_string(self): String;
 };
 
-given[T ToString] List[T] as ToString {
-    public to_string(self) String;
+given[T: ToString] List[T]: ToString {
+    public to_string(self): String;
 };
 
-given[T ToString, R Iterator[T]] LazyView[T, R] {
-    public join_to_string(self, seperator String) String;
+given[T: ToString, R: Iterator[T]] LazyView[T, R] {
+    public join_to_string(self, seperator: String): String;
 };
 
-given[T ToString] List[T] {
-    public join_to_string(self, seperator String) String;
+given[T: ToString] List[T] {
+    public join_to_string(self, seperator: String): String;
 };
 
-given[K ToString and Hash, V ToString] Dict[K, V] as ToString {
-    public to_string(self) String;
+given[K: ToString and Hash, V: ToString] Dict[K, V]: ToString {
+    public to_string(self): String;
 };
 
-given[T ToString and Hash] Set[T] as ToString {
-    public to_string(self) String;
+given[T: ToString and Hash] Set[T]: ToString {
+    public to_string(self): String;
 };
 
-given Duration as ToString {
-    public to_string(self) String;
+given Duration: ToString {
+    public to_string(self): String;
 };
 
 given Hash {
-    public combine_hash(self, value UInt) UInt;
+    public combine_hash(self, value: UInt): UInt;
 };
 
-given String as Error {
-    public message(self) String;
+given String: Error {
+    public message(self): String;
 };
 
-given Bool as Hash {
-    public hash(self) UInt;
+given Bool: Hash {
+    public hash(self): UInt;
 };
 
-given Bool as Default {
-    public default() Self;
+given Bool: Default {
+    public default(): Self;
 };
 
-given UInt as Hash {
-    public hash(self) UInt;
+given UInt: Hash {
+    public hash(self): UInt;
 };
 
-given UInt as Default {
-    public default() Self;
+given UInt: Default {
+    public default(): Self;
 };
 
-given UInt8 as Hash {
-    public hash(self) UInt;
+given UInt8: Hash {
+    public hash(self): UInt;
 };
 
-given UInt8 as Default {
-    public default() Self;
+given UInt8: Default {
+    public default(): Self;
 };
 
-given UInt16 as Hash {
-    public hash(self) UInt;
+given UInt16: Hash {
+    public hash(self): UInt;
 };
 
-given UInt16 as Default {
-    public default() Self;
+given UInt16: Default {
+    public default(): Self;
 };
 
-given UInt32 as Hash {
-    public hash(self) UInt;
+given UInt32: Hash {
+    public hash(self): UInt;
 };
 
-given UInt32 as Default {
-    public default() Self;
+given UInt32: Default {
+    public default(): Self;
 };
 
-given UInt64 as Hash {
-    public hash(self) UInt;
+given UInt64: Hash {
+    public hash(self): UInt;
 };
 
-given UInt64 as Default {
-    public default() Self;
+given UInt64: Default {
+    public default(): Self;
 };
 
-given Int as Hash {
-    public hash(self) UInt;
+given Int: Hash {
+    public hash(self): UInt;
 };
 
-given Int as Default {
-    public default() Self;
+given Int: Default {
+    public default(): Self;
 };
 
-given Int8 as Hash {
-    public hash(self) UInt;
+given Int8: Hash {
+    public hash(self): UInt;
 };
 
-given Int8 as Default {
-    public default() Self;
+given Int8: Default {
+    public default(): Self;
 };
 
-given Int16 as Hash {
-    public hash(self) UInt;
+given Int16: Hash {
+    public hash(self): UInt;
 };
 
-given Int16 as Default {
-    public default() Self;
+given Int16: Default {
+    public default(): Self;
 };
 
-given Int32 as Hash {
-    public hash(self) UInt;
+given Int32: Hash {
+    public hash(self): UInt;
 };
 
-given Int32 as Default {
-    public default() Self;
+given Int32: Default {
+    public default(): Self;
 };
 
-given Int64 as Hash {
-    public hash(self) UInt;
+given Int64: Hash {
+    public hash(self): UInt;
 };
 
-given Int64 as Default {
-    public default() Self;
+given Int64: Default {
+    public default(): Self;
 };
 
-given WrappingUInt as Hash {
-    public hash(self) UInt;
+given WrappingUInt: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingUInt as Default {
-    public default() Self;
+given WrappingUInt: Default {
+    public default(): Self;
 };
 
-given WrappingUInt as Clone {
-    public clone(self) Self;
+given WrappingUInt: Clone {
+    public clone(self): Self;
 };
 
-given WrappingUInt8 as Hash {
-    public hash(self) UInt;
+given WrappingUInt8: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingUInt8 as Default {
-    public default() Self;
+given WrappingUInt8: Default {
+    public default(): Self;
 };
 
-given WrappingUInt8 as Clone {
-    public clone(self) Self;
+given WrappingUInt8: Clone {
+    public clone(self): Self;
 };
 
-given WrappingUInt16 as Hash {
-    public hash(self) UInt;
+given WrappingUInt16: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingUInt16 as Default {
-    public default() Self;
+given WrappingUInt16: Default {
+    public default(): Self;
 };
 
-given WrappingUInt16 as Clone {
-    public clone(self) Self;
+given WrappingUInt16: Clone {
+    public clone(self): Self;
 };
 
-given WrappingUInt32 as Hash {
-    public hash(self) UInt;
+given WrappingUInt32: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingUInt32 as Default {
-    public default() Self;
+given WrappingUInt32: Default {
+    public default(): Self;
 };
 
-given WrappingUInt32 as Clone {
-    public clone(self) Self;
+given WrappingUInt32: Clone {
+    public clone(self): Self;
 };
 
-given WrappingUInt64 as Hash {
-    public hash(self) UInt;
+given WrappingUInt64: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingUInt64 as Default {
-    public default() Self;
+given WrappingUInt64: Default {
+    public default(): Self;
 };
 
-given WrappingUInt64 as Clone {
-    public clone(self) Self;
+given WrappingUInt64: Clone {
+    public clone(self): Self;
 };
 
-given WrappingInt as Hash {
-    public hash(self) UInt;
+given WrappingInt: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingInt as Default {
-    public default() Self;
+given WrappingInt: Default {
+    public default(): Self;
 };
 
-given WrappingInt as Clone {
-    public clone(self) Self;
+given WrappingInt: Clone {
+    public clone(self): Self;
 };
 
-given WrappingInt8 as Hash {
-    public hash(self) UInt;
+given WrappingInt8: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingInt8 as Default {
-    public default() Self;
+given WrappingInt8: Default {
+    public default(): Self;
 };
 
-given WrappingInt8 as Clone {
-    public clone(self) Self;
+given WrappingInt8: Clone {
+    public clone(self): Self;
 };
 
-given WrappingInt16 as Hash {
-    public hash(self) UInt;
+given WrappingInt16: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingInt16 as Default {
-    public default() Self;
+given WrappingInt16: Default {
+    public default(): Self;
 };
 
-given WrappingInt16 as Clone {
-    public clone(self) Self;
+given WrappingInt16: Clone {
+    public clone(self): Self;
 };
 
-given WrappingInt32 as Hash {
-    public hash(self) UInt;
+given WrappingInt32: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingInt32 as Default {
-    public default() Self;
+given WrappingInt32: Default {
+    public default(): Self;
 };
 
-given WrappingInt32 as Clone {
-    public clone(self) Self;
+given WrappingInt32: Clone {
+    public clone(self): Self;
 };
 
-given WrappingInt64 as Hash {
-    public hash(self) UInt;
+given WrappingInt64: Hash {
+    public hash(self): UInt;
 };
 
-given WrappingInt64 as Default {
-    public default() Self;
+given WrappingInt64: Default {
+    public default(): Self;
 };
 
-given WrappingInt64 as Clone {
-    public clone(self) Self;
+given WrappingInt64: Clone {
+    public clone(self): Self;
 };
 
-given[T Any] *T as Eq {
-    public equals(self, other *T) Bool;
+given[T: Any] *T: Eq {
+    public equals(self, other: *T): Bool;
 };
 
-given[T Any] *T as Hash {
-    public hash(self) UInt;
+given[T: Any] *T: Hash {
+    public hash(self): UInt;
 };
 
-given[T Any] *mutable T as Eq {
-    public equals(self, other *mutable T) Bool;
+given[T: Any] *mutable T: Eq {
+    public equals(self, other: *mutable T): Bool;
 };
 
-given[T Any] *mutable T as Hash {
-    public hash(self) UInt;
+given[T: Any] *mutable T: Hash {
+    public hash(self): UInt;
 };
 
-given[T Eq, U Eq] Pair[T, U] as Eq {
-    public equals(self, other Pair[T, U]) Bool;
+given[T: Eq, U: Eq] Pair[T, U]: Eq {
+    public equals(self, other: Pair[T, U]): Bool;
 };
 
-given[T Hash, U Hash] Pair[T, U] as Hash {
-    public hash(self) UInt;
+given[T: Hash, U: Hash] Pair[T, U]: Hash {
+    public hash(self): UInt;
 };
 
-given[T Ord, U Ord] Pair[T, U] as Ord {
-    public compare(self, other Pair[T, U]) Int;
+given[T: Ord, U: Ord] Pair[T, U]: Ord {
+    public compare(self, other: Pair[T, U]): Int;
 };
 
-given[T Any] Cell[T] {
-    public get(self) T;
-    public set(self, value T) Void;
+given[T: Any] Cell[T] {
+    public get(self): T;
+    public set(self, value: T): Void;
 };
 
 given Ord {
-    public clamp(self, min: Self, max: Self) Self;
+    public clamp(self, min: Self =, max: Self =): Self;
 };
 ```

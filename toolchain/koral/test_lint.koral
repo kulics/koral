@@ -12,12 +12,12 @@
 using "koral/lint" { find_orphan_sources, lint_orphans, render_layout_problem };
 using "std/os" { ... };
 
-type mutable TestRunner(mutable pass_count UInt, mutable fail_count UInt);
+type mutable TestRunner(mutable pass_count: UInt, mutable fail_count: UInt);
 
 given TestRunner {
-    new() TestRunner = TestRunner(0, 0);
+    new(): TestRunner = TestRunner(0, 0);
 
-    check(self, name String, got List[String], expected List[String]) Void = {
+    check(self, name: String, got: List[String], expected: List[String]): Void = {
         let got_text = got.join_to_string(", ");
         let expected_text = expected.join_to_string(", ");
         if got_text == expected_text then {
@@ -30,7 +30,13 @@ given TestRunner {
         };
     };
 
-    check_clean(self, name String, root String, entries List[String], exclude List[String]) Void = {
+    check_clean(
+        self,
+        name: String,
+        root: String,
+        entries: List[String],
+        exclude: List[String],
+    ): Void = {
         when find_orphan_sources(root, entries, exclude) in {
             .Ok(orphans) then {
                 self.check(name, orphans, List[String].new());
@@ -44,12 +50,12 @@ given TestRunner {
 
     check_orphans(
         self,
-        name String,
-        root String,
-        entries List[String],
-        exclude List[String],
-        expected List[String],
-    ) Void = {
+        name: String,
+        root: String,
+        entries: List[String],
+        exclude: List[String],
+        expected: List[String],
+    ): Void = {
         when find_orphan_sources(root, entries, exclude) in {
             .Ok(orphans) then {
                 self.check(name, orphans, expected);
@@ -63,7 +69,7 @@ given TestRunner {
 };
 
 /// A scratch package: a directory of files written exactly as given.
-let make_case(root String, files List[Pair[String, String]]) Void = {
+let make_case(root: String, files: List[Pair[String, String]]): Void = {
     // Setup, not the subject under test: a failure here is a broken harness,
     // so it stops the run rather than becoming a false verdict. The first run
     // has nothing to remove.
@@ -83,34 +89,39 @@ let make_case(root String, files List[Pair[String, String]]) Void = {
             println("setup failed: " + e.message());
             exit(1);
         };
-        write_text_file(path, content: entry.second) or else as e in {
+        write_text_file(path, content = entry.second) or else as e in {
             println("setup failed: " + e.message());
             exit(1);
         };
     };
 };
 
-let main() Void = {
+let main(): Void = {
     let runner = TestRunner.new();
     let scratch = temp_dir().join("koral_project_lint_test").to_string();
 
     // 1. Nothing loose: an entry and the helper it merges.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "using \"./helper.koral\";\npublic let main() Int = 0;\n"),
-            Pair("helper.koral", "public let helper() Int = 1;\n"),
-        ],
+        [Pair("main.koral", "using \"./helper.koral\";\npublic let main() Int = 0;\n"), Pair(
+            "helper.koral",
+            "public let helper() Int = 1;\n",
+        )],
     );
-    runner.check_clean("merge claims the helper", scratch, ["main.koral"], List[String].new());
+    runner.check_clean(
+        "merge claims the helper",
+        scratch,
+        ["main.koral"],
+        List[String].new(),
+    );
 
     // 2. A file dropped beside the module's other files.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "public let main() Int = 0;\n"),
-            Pair("stray.koral", "public let stray() Int = 1;\n"),
-        ],
+        [Pair("main.koral", "public let main() Int = 0;\n"), Pair(
+            "stray.koral",
+            "public let stray() Int = 1;\n",
+        )],
     );
     runner.check_orphans(
         "stray file beside the module is reported",
@@ -125,11 +136,10 @@ let main() Void = {
     //    common one: a new module whose `using` was never written.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "public let main() Int = 0;\n"),
-            Pair("helpers/util.koral", "public let util() Int = 1;\n"),
-            Pair("helpers/more.koral", "public let more() Int = 2;\n"),
-        ],
+        [Pair("main.koral", "public let main() Int = 0;\n"), Pair(
+            "helpers/util.koral",
+            "public let util() Int = 1;\n",
+        ), Pair("helpers/more.koral", "public let more() Int = 2;\n")],
     );
     runner.check_orphans(
         "forgotten directory is reported",
@@ -144,10 +154,10 @@ let main() Void = {
     //    module.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "public let main() Int = 0;\n"),
-            Pair("test/cases/a.koral", "public let a() Int = 1;\n"),
-        ],
+        [Pair("main.koral", "public let main() Int = 0;\n"), Pair(
+            "test/cases/a.koral",
+            "public let a() Int = 1;\n",
+        )],
     );
     runner.check_clean(
         "exclude covers the fixture directory",
@@ -167,31 +177,40 @@ let main() Void = {
     //    makes `util.koral` a module of its own (§3.1).
     make_case(
         scratch,
-        [
-            Pair("main.koral", "using \"./util.koral\" { util };\npublic let main() Int = util();\n"),
-            Pair("util.koral", "public let util() Int = 1;\n"),
-        ],
+        [Pair(
+            "main.koral",
+            "using \"./util.koral\" { util };\npublic let main() Int = util();\n",
+        ), Pair("util.koral", "public let util() Int = 1;\n")],
     );
-    runner.check_clean("local import claims the target", scratch, ["main.koral"], List[String].new());
+    runner.check_clean(
+        "local import claims the target",
+        scratch,
+        ["main.koral"],
+        List[String].new(),
+    );
 
     // 6. Claims are transitive through a merge chain.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "using \"./a.koral\";\npublic let main() Int = 0;\n"),
-            Pair("a.koral", "using \"./b.koral\";\npublic let a() Int = 1;\n"),
-            Pair("b.koral", "public let b() Int = 2;\n"),
-        ],
+        [Pair("main.koral", "using \"./a.koral\";\npublic let main() Int = 0;\n"), Pair(
+            "a.koral",
+            "using \"./b.koral\";\npublic let a() Int = 1;\n",
+        ), Pair("b.koral", "public let b() Int = 2;\n")],
     );
-    runner.check_clean("merge closure is transitive", scratch, ["main.koral"], List[String].new());
+    runner.check_clean(
+        "merge closure is transitive",
+        scratch,
+        ["main.koral"],
+        List[String].new(),
+    );
 
     // 7. A declared entry is a module even when nothing reaches it this build.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "public let main() Int = 0;\n"),
-            Pair("other.koral", "public let other() Int = 1;\n"),
-        ],
+        [Pair("main.koral", "public let main() Int = 0;\n"), Pair(
+            "other.koral",
+            "public let other() Int = 1;\n",
+        )],
     );
     runner.check_clean(
         "a declared entry is never an orphan",
@@ -203,15 +222,17 @@ let main() Void = {
     // 8. The verdict a human reads, not just the paths.
     make_case(
         scratch,
-        [
-            Pair("main.koral", "public let main() Int = 0;\n"),
-            Pair("stray.koral", "public let stray() Int = 1;\n"),
-        ],
+        [Pair("main.koral", "public let main() Int = 0;\n"), Pair(
+            "stray.koral",
+            "public let stray() Int = 1;\n",
+        )],
     );
     when lint_orphans(scratch, ["main.koral"], List[String].new()) in {
         .Some(problem) then {
             let rendered = render_layout_problem(problem);
-            if rendered.contains("belong to no module") and rendered.contains("stray.koral") then {
+            if rendered.contains("belong to no module") and rendered.contains(
+                "stray.koral",
+            ) then {
                 runner.pass_count += 1;
             } else {
                 runner.fail_count += 1;
@@ -221,7 +242,9 @@ let main() Void = {
         },
         .None() then {
             runner.fail_count += 1;
-            println("FAIL: the rendered verdict names the problem - no problem reported");
+            println(
+                "FAIL: the rendered verdict names the problem - no problem reported",
+            );
         },
     };
 

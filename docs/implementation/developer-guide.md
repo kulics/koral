@@ -749,13 +749,13 @@ let debug = context.getDebugName(.genericStruct(template: "List", args: [.int]))
 // my_feature.koral
 // EXPECT: test passed
 
-let main() Void = {
+let main(): Void = {
     println("test passed");
 };
 ```
 
 (`println` comes from the prelude — no `using` needed. If the case needs another module,
-spell the import the current way: `using "std/io";` or `using "std/os" { Path };`.)
+spell the import the current way: `using "std/io" { ... };` or `using "std/os" { Path };`.)
 
 2. Nothing else. The shared runner **discovers cases by walking `tests/compiler-cases/`** — there is
    no registry to update. Rebuild nothing; rerun the runner.
@@ -814,7 +814,7 @@ Notes: the manifest key is `package` (not `name`); there is **no top-level `entr
 **no `requires`** — the module graph is derived from each file's `using` statements. Module
 keys are package-internal names: `"."` for the main module, `child` for a submodule (never
 `pkg::child` — `::` is not a spelling). File merge is spelled `using "./helper.koral";`
-(a bare `using "helper";` would be a **module import**, not a merge).
+(a form with braces — `using "…" { … };` — is a **module import**, not a merge).
 
 ## Debugging Tips
 

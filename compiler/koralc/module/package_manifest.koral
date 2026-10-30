@@ -13,19 +13,19 @@ using "std/os" { ... };
 // ── errors ────────────────────────────────────────────────────────────────────
 
 public type ManifestError {
-    FileNotFound(path String),
-    InvalidField(path String, message String),
-    MissingTargetModule(module String),
-    DuplicateModuleEntry(entry String),
-    UnknownPackageName(name String, context String, known List[String]),
-    UnknownModule(name String, package_name String, declared List[String]),
-    NoMainModule(package_name String, declared List[String]),
-    ReservedName(name String),
-    UnsupportedSource(source String),
-    Message(text String),
+    FileNotFound(path: String),
+    InvalidField(path: String, message: String),
+    MissingTargetModule(module: String),
+    DuplicateModuleEntry(entry: String),
+    UnknownPackageName(name: String, context: String, known: List[String]),
+    UnknownModule(name: String, package_name: String, declared: List[String]),
+    NoMainModule(package_name: String, declared: List[String]),
+    ReservedName(name: String),
+    UnsupportedSource(source: String),
+    Message(text: String),
 };
 
-private let manifest_error_detail(err ManifestError) String = when err in {
+private let manifest_error_detail(err: ManifestError): String = when err in {
     .FileNotFound(path) then "Manifest file not found: \(path)",
     .InvalidField(path, message) then "Invalid manifest field '\(path)': \(message)",
     .MissingTargetModule(module) then "Target module '\(module)' not found in resolved module graph",
@@ -42,7 +42,7 @@ private let manifest_error_detail(err ManifestError) String = when err in {
 
 /// How a manifest failure reaches the reader: `Error: msg`. It is about the
 /// manifest or the command line, not about source, so it carries no location.
-public let manifest_error_text(err ManifestError) String =
+public let manifest_error_text(err: ManifestError): String =
     "Error: " + manifest_error_detail(err);
 
 // ── manifest shape ────────────────────────────────────────────────────────────
@@ -50,16 +50,16 @@ public let manifest_error_text(err ManifestError) String =
 /// The name this package writes for a dependency, where that dependency lives,
 /// and which versions of it are acceptable. `source` is both the fetch location
 /// and the package's identity, and never carries a ref (§5.3).
-public type PackageDependencyConfig(key String, source String, version String);
+public type PackageDependencyConfig(key: String, source: String, version: String);
 
 /// A module as the manifest declares it. `key` is the package-internal name --
 /// `"."` for the main module, otherwise the subpath. A consumer spells the FULL
 /// name, `package[/subpath]`; the manifest only ever describes the inside (§5.2).
 public type PackageModuleConfig(
-    key String,
-    subpath String,
-    entry_path String,
-    links List[String],
+    key: String,
+    subpath: String,
+    entry_path: String,
+    links: List[String],
 );
 
 /// Four fields (§5.1): `package`, `version`, `modules`, `dependencies`.
@@ -67,18 +67,18 @@ public type PackageModuleConfig(
 /// target IS the main module), no `requires` (the module graph comes from
 /// `using`, §5.4), no `module_aliases` (renaming is the dependency key, §5.3).
 public type PackageManifest(
-    manifest_path String,
-    package_root String,
-    package_name String,
-    version String,
-    modules Dict[String, PackageModuleConfig],
-    dependencies Dict[String, PackageDependencyConfig],
+    manifest_path: String,
+    package_root: String,
+    package_name: String,
+    version: String,
+    modules: Dict[String, PackageModuleConfig],
+    dependencies: Dict[String, PackageDependencyConfig],
 );
 
 public type ResolvedPackageKind {
     Root(),
     Std(),
-    Dependency(key String),
+    Dependency(key: String),
 };
 
 // ── loaded packages ───────────────────────────────────────────────────────────
@@ -90,21 +90,21 @@ public type ResolvedPackageKind {
 // is what the two spellings have in common.
 
 public type LoadedPackage(
-    identity String,
-    self_name String,
-    manifest PackageManifest,
-    kind ResolvedPackageKind,
+    identity: String,
+    self_name: String,
+    manifest: PackageManifest,
+    kind: ResolvedPackageKind,
 );
 
 public type mutable PackageRegistry(
-    mutable by_identity Dict[String, LoadedPackage],
-    mutable all List[LoadedPackage],
-    mutable std_package Option[LoadedPackage],
-    mutable root_package Option[LoadedPackage],
+    mutable by_identity: Dict[String, LoadedPackage],
+    mutable all: List[LoadedPackage],
+    mutable std_package: Option[LoadedPackage],
+    mutable root_package: Option[LoadedPackage],
 );
 
 given PackageRegistry {
-    public new() PackageRegistry =
+    public new(): PackageRegistry =
         PackageRegistry(
             Dict[String, LoadedPackage].new(),
             [],
@@ -112,7 +112,7 @@ given PackageRegistry {
             Option[LoadedPackage].None(),
         );
 
-    public register(self, package LoadedPackage) Void = {
+    public register(self, package: LoadedPackage): Void = {
         if self.by_identity.get(package.identity) is .None() then {
             self.by_identity.insert(package.identity, package);
             self.all.push(package);
@@ -128,14 +128,14 @@ given PackageRegistry {
         };
     };
 
-    public package_by_identity(self, identity String) Option[LoadedPackage] =
+    public package_by_identity(self, identity: String): Option[LoadedPackage] =
         self.by_identity.get(identity);
 
     /// Resolve `name` as written in `owner`'s source.
     ///
     /// A package name is one of three things (§4): the package's own `package`,
     /// one of its `dependencies` keys, or the reserved `std`. Nothing else.
-    public resolve_name(self, name String, owner LoadedPackage) Option[LoadedPackage] = {
+    public resolve_name(self, name: String, owner: LoadedPackage): Option[LoadedPackage] = {
         if name == owner.self_name then {
             return Option[LoadedPackage].Some(owner);
         };
@@ -152,8 +152,8 @@ given PackageRegistry {
     };
 
     /// Every name `owner` can write, for error messages.
-    public known_names(self, owner LoadedPackage) List[String] = {
-        let mutable names List[String] = [owner.self_name, "std"];
+    public known_names(self, owner: LoadedPackage): List[String] = {
+        let mutable names: List[String] = [owner.self_name, "std"];
         let mutable iter = owner.manifest.dependencies.iterator();
         while iter.next() is .Some(entry) then {
             names.push(entry.first);
@@ -174,14 +174,18 @@ given PackageRegistry {
 
 /// The identity input hashed into a module's symbol key: WHICH package this is
 /// (its acquisition source), never what any consumer happens to call it.
-public let package_source_tag(package LoadedPackage) String = when package.kind in {
+public let package_source_tag(package: LoadedPackage): String = when package.kind in {
     .Std() then "std:" + package.manifest.version,
     .Root() then "root:" + package.identity,
     .Dependency(key) then "source:" + package.identity,
 };
 
-private let fnv1a32(text String, basis WrappingUInt32, prime WrappingUInt32) WrappingUInt32 = {
-    let mutable hash WrappingUInt32 = basis;
+private let fnv1a32(
+    text: String,
+    basis: WrappingUInt32,
+    prime: WrappingUInt32,
+): WrappingUInt32 = {
+    let mutable hash: WrappingUInt32 = basis;
     for byte in text.bytes() then {
         hash = hash ^ WrappingUInt32(byte);
         hash = hash * prime;
@@ -189,9 +193,9 @@ private let fnv1a32(text String, basis WrappingUInt32, prime WrappingUInt32) Wra
     return hash;
 };
 
-private let hex32_padded(value WrappingUInt32) String = {
+private let hex32_padded(value: WrappingUInt32): String = {
     let digits = "0123456789abcdef";
-    let mutable v UInt = UInt(value);
+    let mutable v: UInt = UInt(value);
     let mutable nibbles = List[UInt].new();
     let mutable i = 0;
     while i < 8 then {
@@ -200,7 +204,7 @@ private let hex32_padded(value WrappingUInt32) String = {
         i += 1;
     };
     let mutable out = StringBuilder.new();
-    let mutable k UInt = nibbles.count();
+    let mutable k: UInt = nibbles.count();
     while k > UInt(0) then {
         k -= UInt(1);
         out.push_byte(digits[nibbles[k]]);
@@ -212,25 +216,25 @@ private let hex32_padded(value WrappingUInt32) String = {
 /// (different basis and prime) concatenated -- 64 bits of separation over only
 /// 32-bit arithmetic, and the same spelling Swift's `moduleIdentityHash`
 /// computes. Basis/prime pairs: 0x811c9dc5/0x01000193 and 0x9e3779b9/0x85ebca6b.
-public let module_identity_hash(text String) String = {
+public let module_identity_hash(text: String): String = {
     let h1 = fnv1a32(text, 2166136261, 16777619);
     let h2 = fnv1a32(text, 2654435769, 2246822507);
     return hex32_padded(h1) + hex32_padded(h2);
 };
 
-private let normalized_abs_for_key(path String) String = {
+private let normalized_abs_for_key(path: String): String = {
     let normalized = when absolute_path(path.into_path()) in {
         .Ok(p) then p.to_string(),
         .Error(_) then path,
     };
-    return normalized.replace_all("\\", with: "/");
+    return normalized.replace_all("\\", with = "/");
 };
 
 /// The entry file's position inside its package: the normalized path relative
 /// to the package root, forward slashes. When the entry sits outside its
 /// package (a local module pulled in from beyond the root) the walk is lexical
 /// and `..` segments are kept -- deterministic either way.
-public let entry_relative_path(entry_file String, package_root String) String = {
+public let entry_relative_path(entry_file: String, package_root: String): String = {
     let entry = normalized_abs_for_key(entry_file);
     let root = normalized_abs_for_key(package_root);
     let entry_parts = List[String].new();
@@ -241,19 +245,19 @@ public let entry_relative_path(entry_file String, package_root String) String = 
     for part in root.split("/") then {
         root_parts.push(part);
     };
-    let mutable common UInt = 0;
-    while common < entry_parts.count() and common < root_parts.count() and entry_parts[common]
-        == root_parts[common]
-    then {
+    let mutable common: UInt = 0;
+    while common < entry_parts.count() and common < root_parts.count() and entry_parts[
+        common
+    ] == root_parts[common] then {
         common += UInt(1);
     };
     let mutable parts = List[String].new();
-    let mutable up UInt = common;
+    let mutable up: UInt = common;
     while up < root_parts.count() then {
         parts.push("..");
         up += UInt(1);
     };
-    let mutable rest UInt = common;
+    let mutable rest: UInt = common;
     while rest < entry_parts.count() then {
         parts.push(entry_parts[rest]);
         rest += UInt(1);
@@ -261,7 +265,7 @@ public let entry_relative_path(entry_file String, package_root String) String = 
     return parts.join_to_string("/");
 };
 
-private let drop_last_extension(segment String) String = {
+private let drop_last_extension(segment: String): String = {
     let pieces = List[String].new();
     for piece in segment.split(".") then {
         pieces.push(piece);
@@ -270,7 +274,7 @@ private let drop_last_extension(segment String) String = {
         return segment;
     };
     let mutable kept = List[String].new();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i + UInt(1) < pieces.count() then {
         kept.push(pieces[i]);
         i += UInt(1);
@@ -278,7 +282,7 @@ private let drop_last_extension(segment String) String = {
     return kept.join_to_string(".");
 };
 
-private let symbol_key_segment(raw String) String = {
+private let symbol_key_segment(raw: String): String = {
     let spelled = if raw == ".." then "up" else raw;
     let camel = module_file_name_to_identifier(spelled);
     let mutable out = StringBuilder.new();
@@ -306,7 +310,7 @@ private let symbol_key_segment(raw String) String = {
 /// dropped. Directory segments keep their position, so `util/util.koral` and
 /// `helpers/util.koral` stay distinct -- the stem-collision fix. `..` walks up
 /// as `Up`, so an out-of-package entry still names a stable position.
-public let symbol_key_segments(relative_entry_path String) List[String] = {
+public let symbol_key_segments(relative_entry_path: String): List[String] = {
     let mutable parts = List[String].new();
     for part in relative_entry_path.split("/") then {
         parts.push(part);
@@ -327,10 +331,16 @@ public let symbol_key_segments(relative_entry_path String) List[String] = {
 /// symbol-derivation sites prefix names with THIS, never with a module path --
 /// module paths carry the consumer's spelling and change when a dependency is
 /// renamed.
-public let module_symbol_key(source_tag String, entry_file String, package_root String) String = {
+public let module_symbol_key(
+    source_tag: String,
+    entry_file: String,
+    package_root: String,
+): String = {
     let rel = entry_relative_path(entry_file, package_root);
     let segments = symbol_key_segments(rel);
-    return segments.join_to_string("_") + "_" + module_identity_hash(source_tag + "\n" + rel);
+    return segments.join_to_string("_") + "_" + module_identity_hash(
+        source_tag + "\n" + rel,
+    );
 };
 
 // ── resolved module ───────────────────────────────────────────────────────────
@@ -345,21 +355,21 @@ public let module_symbol_key(source_tag String, entry_file String, package_root 
 /// source, entry position) only, so renaming a dependency key leaves it
 /// untouched.
 public type ResolvedModuleSpec(
-    full_name String,
-    path_segments List[String],
-    symbol_key String,
-    key String,
-    subpath String,
-    entry_file String,
-    links List[String],
-    package_identity String,
-    package_kind ResolvedPackageKind,
-    owner LoadedPackage,
+    full_name: String,
+    path_segments: List[String],
+    symbol_key: String,
+    key: String,
+    subpath: String,
+    entry_file: String,
+    links: List[String],
+    package_identity: String,
+    package_kind: ResolvedPackageKind,
+    owner: LoadedPackage,
 );
 
 /// Whether `name` is a single lowercase identifier segment -- a package name,
 /// or one segment of a subpath (§2.1).
-public let is_valid_package_or_segment_name(name String) Bool = {
+public let is_valid_package_or_segment_name(name: String): Bool = {
     if name.is_empty() then {
         return false;
     };
@@ -385,7 +395,7 @@ public let is_valid_package_or_segment_name(name String) Bool = {
 ///
 /// Returns the subpath: `""` for the main module, otherwise the key itself.
 /// `None` means the key is not a legal module key at all.
-public let parse_manifest_module_key(key String) Option[String] = {
+public let parse_manifest_module_key(key: String): Option[String] = {
     if key == "." then {
         return Option[String].Some("");
     };
@@ -408,7 +418,7 @@ public let parse_manifest_module_key(key String) Option[String] = {
 /// A semver constraint (§5.3): an optional comparison operator followed by a
 /// dotted numeric version. The exact version is a lockfile's job -- this only
 /// says the constraint is written in a form that means something.
-public let is_valid_version_constraint(text String) Bool = {
+public let is_valid_version_constraint(text: String): Bool = {
     let mutable rest = text;
     for op in ["^", "~", ">=", "<=", ">", "<", "="] then {
         if rest.starts_with(op) then {
@@ -441,11 +451,11 @@ public let is_valid_version_constraint(text String) Bool = {
 /// package uses for the owning package -- its own `package`, a dependency key,
 /// or `"std"`.
 public let make_resolved_module_spec(
-    key String,
-    config PackageModuleConfig,
-    root_name String,
-    owner LoadedPackage,
-) ResolvedModuleSpec = {
+    key: String,
+    config: PackageModuleConfig,
+    root_name: String,
+    owner: LoadedPackage,
+): ResolvedModuleSpec = {
     let full_name = if config.subpath.is_empty() then root_name
     else root_name + "/" + config.subpath;
 
@@ -479,10 +489,10 @@ public let make_resolved_module_spec(
 /// its own `package`; for a dependency it is the root's `dependencies` key; for
 /// std it is `"std"`.
 public let root_view_name(
-    package LoadedPackage,
-    registry PackageRegistry,
-    root LoadedPackage,
-) String = {
+    package: LoadedPackage,
+    registry: PackageRegistry,
+    root: LoadedPackage,
+): String = {
     if package.kind is .Root() or is .Std() then {
         return package.self_name;
     };
@@ -501,7 +511,7 @@ public let root_view_name(
 
 // ── parsing ───────────────────────────────────────────────────────────────────
 
-private let obsolete_field_hint(field String) String = when field in {
+private let obsolete_field_hint(field: String): String = when field in {
     "name" then "renamed to 'package'; 'package' is the name the SOURCE writes, not an identity",
     "entry" then "removed; the default build target is the main module ('modules' key \".\")",
     "requires" then "removed; the module graph is derived from 'using' (§5.4)",
@@ -517,10 +527,10 @@ private let obsolete_field_hint(field String) String = when field in {
 /// silently half-read. The list is per section: `entry` is gone at the top
 /// level but is exactly what a module entry must still declare.
 private let reject_obsolete_fields(
-    json JsonValue,
-    context String,
-    fields List[String],
-) Result[Void] = {
+    json: JsonValue,
+    context: String,
+    fields: List[String],
+): Result[Void] = {
     for field in fields then {
         if json.get_field(field) is .Some(_) then {
             let field_path = if context.is_empty() then field else context + "." + field;
@@ -532,7 +542,7 @@ private let reject_obsolete_fields(
     return Result[Void].Ok({});
 };
 
-private let expect_manifest_string(json JsonValue, path String) Result[String] = {
+private let expect_manifest_string(json: JsonValue, path: String): Result[String] = {
     let value = json.get_field(path) or else {
         return Result[String].Error(
             manifest_error_text(.InvalidField(path, "missing required string")),
@@ -547,15 +557,15 @@ private let expect_manifest_string(json JsonValue, path String) Result[String] =
 };
 
 private let load_manifest_string_array(
-    value JsonValue,
-    path String,
-) Result[List[String]] = {
+    value: JsonValue,
+    path: String,
+): Result[List[String]] = {
     let arr = value.as_array() or else {
         return Result[List[String]].Error(
             manifest_error_text(.InvalidField(path, "expected string array")),
         );
     };
-    let mutable out List[String] = [];
+    let mutable out: List[String] = [];
     for i in 0..<arr.count() then {
         let item = arr[i].as_string() or else {
             return Result[List[String]].Error(
@@ -567,7 +577,7 @@ private let load_manifest_string_array(
     return Result[List[String]].Ok(out);
 };
 
-public let load_package_manifest(manifest_path String) Result[PackageManifest] = {
+public let load_package_manifest(manifest_path: String): Result[PackageManifest] = {
     let absolute_manifest_path = when absolute_path(manifest_path.into_path()) in {
         .Ok(path) then path.to_string(),
         .Error(_) then manifest_path,
@@ -875,10 +885,10 @@ public let load_package_manifest(manifest_path String) Result[PackageManifest] =
 // materializes it and the compiler reads it back from the cache.
 
 public let locate_dependency(
-    dependency PackageDependencyConfig,
-    declaring_manifest PackageManifest,
-    fetch_root Option[String],
-) Result[String] = {
+    dependency: PackageDependencyConfig,
+    declaring_manifest: PackageManifest,
+    fetch_root: Option[String],
+): Result[String] = {
     if dependency.source.starts_with("path:") then {
         let relative = dependency.source.trim_prefix("path:");
         if relative.is_empty() then {
@@ -915,10 +925,10 @@ public let locate_dependency(
 
 /// Load the root package and every package reachable from it, transitively.
 public let load_package_registry(
-    root_manifest_path String,
-    std_manifest_path Option[String],
-    fetch_root Option[String],
-) Result[PackageRegistry] = {
+    root_manifest_path: String,
+    std_manifest_path: Option[String],
+    fetch_root: Option[String],
+): Result[PackageRegistry] = {
     let registry = PackageRegistry.new();
     let root_manifest = load_package_manifest(root_manifest_path) or return;
 
@@ -965,7 +975,7 @@ public let load_package_registry(
     registry.register(root);
 
     // Breadth-first so a package is loaded once no matter how many others name it.
-    let mutable pending List[LoadedPackage] = [root];
+    let mutable pending: List[LoadedPackage] = [root];
     when registry.std_package in {
         .Some(std) then {
             if not root_is_std then {
@@ -974,12 +984,12 @@ public let load_package_registry(
         },
         .None() then {},
     };
-    let mutable next UInt = 0;
+    let mutable next: UInt = 0;
     while next < pending.count() then {
         let owner = pending[next];
         next = next + 1;
 
-        let mutable dep_keys List[String] = [];
+        let mutable dep_keys: List[String] = [];
         let mutable dep_iter = owner.manifest.dependencies.iterator();
         while dep_iter.next() is .Some(entry) then {
             dep_keys.push(entry.first);
@@ -1034,7 +1044,7 @@ public let load_package_registry(
 /// The standard library's main module is the prelude: it is compiled in and in
 /// scope in every non-std module without being named. It is therefore NOT part
 /// of the `using` graph -- it is the base the graph sits on (§6.4's "主模块是基础层").
-public let prelude_module_spec(registry PackageRegistry) Option[ResolvedModuleSpec] = {
+public let prelude_module_spec(registry: PackageRegistry): Option[ResolvedModuleSpec] = {
     when registry.std_package in {
         .Some(std) then {
             when std.manifest.modules.get(".") in {

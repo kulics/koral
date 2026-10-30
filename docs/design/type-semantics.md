@@ -54,9 +54,9 @@ The active model is the simplified, declaration-site mutability design:
 The compiler may still use ARC and hidden storage for implementation, but those choices are not user-visible semantics. The language contract is about shared identity and field mutability, not whether a value happened to be heap-backed or box-optimized.
 
 ```koral
-type Vec(x Int, y Int);
+type Vec(x: Int, y: Int);
 
-type mutable Counter(mutable value Int, id UInt);
+type mutable Counter(mutable value: Int, id: UInt);
 
 let c = Counter(0, 1);
 c.value = 1;    // valid because Counter declares a mutable field
@@ -84,7 +84,7 @@ let v = Vec(1, 2);
 
 ### `Clone` 是浅拷贝
 
-`clone(self) Self` 复制句柄或底仓一层，**不递归深拷贝**。嵌套的 `type mutable` 元素保持共享。
+`clone(self): Self` 复制句柄或底仓一层，**不递归深拷贝**。嵌套的 `type mutable` 元素保持共享。
 
 出处：`std/traits.koral` 的 `Clone` 约定；`../guide/document.md`「`clone()`」一节是用户说明。
 
@@ -92,7 +92,7 @@ let v = Vec(1, 2);
 
 原文出处：`../implementation/developer-guide.md`「Drop Semantics」（已迁出）。
 
-- `Drop` uses `drop(self) Void`.
+- `Drop` uses `drop(self): Void`.
 - `Drop` is a normal trait requirement with a compiler-reserved finalization context; it is not a user-invoked method.
 - A type that implements `Drop` must behave as an ARC-backed object at runtime. The compiler must NOT optimize the sharing away: the destructor runs exactly once, when the last owning handle dies, so the handle count is observable. During a destructor the object is held immortal (`strong_count = -1`), so a `retain`/`release` pair resurrecting it cannot re-enter the destructor; see `std/koral_runtime.c`.
 - `Drop` is separate from weak capability; trait objects are gated by object safety rather than an `Object` marker trait.
@@ -117,7 +117,7 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 
 ### `foreign` 是 FFI 边界
 
-`foreign` 是**类型种类约束**，与 `mutable` 同类（写在约束位：`[T foreign]`），不是 trait，
+`foreign` 是**类型种类约束**，与 `mutable` 同类（写在约束位：`[T: foreign]`），不是 trait，
 也不是 marker trait。它标记**表示由 Koral 的布局自由之外决定、可以跨 FFI 的值**。
 `borrow_ptr` / `borrow_mut_ptr` 这类把托管值变成裸指针的逃生舱**只对 `foreign` 开放**——
 否则就成了「任意类型 → 裸指针」的桥，绕过所有权。
@@ -130,7 +130,7 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 
 **用户声明不能认领 `foreign`。** 这正是它取代 `Pod` 的理由：`Pod` 是空 marker trait，
-用户可以写 `given MyType as Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
+用户可以写 `given MyType: Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
 而 Koral `type` 的布局由编译器选，跨边界的裸指针对它没有意义；要跨 FFI 的结构体应当
 写 `type foreign`。
 

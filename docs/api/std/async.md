@@ -9,13 +9,13 @@ This page lists the public API of module `Std.Async` (declaration-only syntax), 
 
 ## Free Functions
 ```koral
-public let run_task(f () -> Void) Thread;
+public let run_task(f: () -> Void): Thread;
 
-public let current_thread_id() UInt64;
+public let current_thread_id(): UInt64;
 
-public let yield_thread_now() Void;
+public let yield_thread_now(): Void;
 
-public let available_parallelism() UInt;
+public let available_parallelism(): UInt;
 ```
 
 ## Traits
@@ -35,36 +35,36 @@ public type mutable Ticker;
 ## Given Implementations
 ```koral
 given Task {
-    public new(f () -> Void) Task;
-    public set_name(self, name String) Task;
-    public set_stack_size(self, size UInt) Task;
-    public spawn(self) Thread;
+    public new(f: () -> Void): Task;
+    public set_name(self, name: String): Task;
+    public set_stack_size(self, size: UInt): Task;
+    public spawn(self): Thread;
 };
 
-given Thread as Drop {};
+given Thread: Drop {};
 
 given Thread {
-    public wait(self) Result[Void];
-    public detach(self) Void;
-    public id(self) UInt64;
-    public name(self) Option[String];
+    public wait(self): Result[Void];
+    public detach(self): Void;
+    public id(self): UInt64;
+    public name(self): Option[String];
 };
 
-given Timer as Drop {};
+given Timer: Drop {};
 
 given Timer {
-    public new(d Duration) Timer;
-    public wait(self) Void;
-    public reset(self, d Duration) Void;
-    public cancel(self) Void;
+    public new(d: Duration): Timer;
+    public wait(self): Void;
+    public reset(self, d: Duration): Void;
+    public cancel(self): Void;
 };
 
-given Ticker as Drop {};
+given Ticker: Drop {};
 
 given Ticker {
-    public new(interval Duration) Ticker;
-    public wait(self) Void;
-    public reset(self, interval Duration) Void;
-    public cancel(self) Void;
+    public new(interval: Duration): Ticker;
+    public wait(self): Void;
+    public reset(self, interval: Duration): Void;
+    public cancel(self): Void;
 };
 ```

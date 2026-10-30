@@ -1,7 +1,7 @@
 /// Names in a binding list, de-duplicated and sorted. This is the shape the
 /// pattern-binding diagnostics spell them in, and two sorted lists are equal
 /// exactly when the name sets behind them are.
-private let sorted_binding_names(bindings List[Pair[String, Type]]) List[String] = {
+private let sorted_binding_names(bindings: List[Pair[String, Type]]): List[String] = {
     let mutable names = List[String].new();
     let mutable seen = Set[String].new();
     for binding in bindings then {
@@ -14,11 +14,11 @@ private let sorted_binding_names(bindings List[Pair[String, Type]]) List[String]
     return names;
 };
 
-private let binding_names_equal(left List[String], right List[String]) Bool = {
+private let binding_names_equal(left: List[String], right: List[String]): Bool = {
     if not (left.count() == right.count()) then {
         return false;
     };
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < left.count() then {
         if not (left[i] == right[i]) then {
             return false;
@@ -28,9 +28,9 @@ private let binding_names_equal(left List[String], right List[String]) Bool = {
     return true;
 };
 
-private let join_binding_names(names List[String]) String = {
+private let join_binding_names(names: List[String]): String = {
     let mutable out = StringBuilder.new();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < names.count() then {
         if i > UInt(0) then {
             out.push_string(", ");
@@ -44,12 +44,12 @@ private let join_binding_names(names List[String]) String = {
 given TypeChecker {
     pattern_binding_symbol(
         self,
-        name String,
-        is_mutable Bool,
-        subject_type Type,
-        scope Scope,
-        span SourceSpan,
-    ) Symbol = {
+        name: String,
+        is_mutable: Bool,
+        subject_type: Type,
+        scope: Scope,
+        span: SourceSpan,
+    ): Symbol = {
         if name == "_" then {
             let kind = if is_mutable then SymbolKind.Variable(
                 VariableKind.MutableValue(),
@@ -73,8 +73,8 @@ given TypeChecker {
         };
     };
 
-    get_enum_case_tag_index(self, subject_type Type, case_name String) UInt = {
-        let zero UInt = 0;
+    get_enum_case_tag_index(self, subject_type: Type, case_name: String): UInt = {
+        let zero: UInt = 0;
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -103,7 +103,7 @@ given TypeChecker {
         };
     };
 
-    pattern_match_subject_type(self, subject_type Type) Type = {
+    pattern_match_subject_type(self, subject_type: Type): Type = {
         let _ = self;
         return when subject_type in {
             .ReferenceType(inner) then inner,
@@ -121,7 +121,7 @@ given TypeChecker {
     /// POINTEE. A null pattern keeps the RAW subject (it tests the pointer
     /// itself) and says so through `pattern_requires_raw_subject`; the call
     /// sites gate this peel on that predicate.
-    peel_pointer_pattern_subject(self, subject_type Type) Type = {
+    peel_pointer_pattern_subject(self, subject_type: Type): Type = {
         let _ = self;
         return when subject_type in {
             .PointerType(inner) then inner,
@@ -130,7 +130,7 @@ given TypeChecker {
         };
     };
 
-    pattern_requires_raw_subject(self, pattern PatternNode) Bool = {
+    pattern_requires_raw_subject(self, pattern: PatternNode): Bool = {
         return when pattern in {
             .TraitObjectType(_, _) then true,
             .TraitObjectTypeBinding(_, _, _, _) then true,
@@ -176,10 +176,10 @@ given TypeChecker {
 
     resolve_trait_object_pattern_target_type(
         self,
-        target_type_node TypeNode,
-        subject_type Type,
-        span SourceSpan,
-    ) Type = {
+        target_type_node: TypeNode,
+        subject_type: Type,
+        span: SourceSpan,
+    ): Type = {
         let subject_is_mutable = when subject_type in {
             .ReferenceType(inner) then if inner is .TraitObject(...) then Option[Bool].Some(
                 false,
@@ -249,7 +249,7 @@ given TypeChecker {
         };
     };
 
-    is_valid_trait_object_pattern_concrete_type(self, t Type) Bool = {
+    is_valid_trait_object_pattern_concrete_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
             .StructureType(_) then true,
@@ -269,10 +269,10 @@ given TypeChecker {
     /// for a `String`-shaped access against the user's layout.
     lower_string_literal_pattern(
         self,
-        value String,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: String,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         if not self.is_string_type(matched_type) then {
             self.push_diagnostic_at_span(
@@ -283,21 +283,18 @@ given TypeChecker {
         // The `equals` method this pattern compares with is resolved once
         // here, at definition time; pattern lowering reads it and never looks
         // the name up again.
-        let equals_symbol = self.resolve_method_signature(
-            matched_type,
-            "equals",
-        ) or else Symbol(def_id_invalid(), Type.Unknown(), SymbolKind.Function());
+        let equals_symbol = self.resolve_method_signature(matched_type, "equals") or else Symbol(
+            def_id_invalid(),
+            Type.Unknown(),
+            SymbolKind.Function(),
+        );
         return TypedPattern.StringLiteral(value, equals_symbol);
     };
 
     /// The single code point a rune pattern matches on, or nothing when the
     /// spelling is not one rune. Shared by rune equality and rune comparison
     /// patterns so both say the same thing about `'ab'`.
-    rune_pattern_scalar_value(
-        self,
-        value String,
-        span SourceSpan,
-    ) Option[String] = {
+    rune_pattern_scalar_value(self, value: String, span: SourceSpan): Option[String] = {
         let rune_count = value.to_runes().count();
         if rune_count == UInt(0) then {
             self.push_diagnostic_at_span("Rune literal cannot be empty", span);
@@ -317,10 +314,10 @@ given TypeChecker {
     /// for a single ASCII character (a byte holds no other code point).
     rune_pattern_subject_scalar(
         self,
-        value String,
-        matched_type Type,
-        span SourceSpan,
-    ) Option[String] = {
+        value: String,
+        matched_type: Type,
+        span: SourceSpan,
+    ): Option[String] = {
         let scalar_value = self.rune_pattern_scalar_value(value, span) or else {
             return Option[String].None();
         };
@@ -348,10 +345,10 @@ given TypeChecker {
 
     lower_rune_literal_pattern(
         self,
-        value String,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: String,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         return when self.rune_pattern_subject_scalar(value, matched_type, span) in {
             .Some(scalar_value) then TypedPattern.IntegerLiteral(scalar_value),
@@ -362,10 +359,10 @@ given TypeChecker {
     /// A bool literal pattern only matches a `Bool` subject.
     lower_bool_literal_pattern(
         self,
-        value Bool,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: Bool,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         if matched_type is not .BoolType() then {
             self.push_diagnostic_at_span(
@@ -380,11 +377,7 @@ given TypeChecker {
     /// subject is the mismatch row with the literal's spelling on the
     /// got-side. Managed-reference wrappers peel to the pointer underneath; a
     /// pointer itself is the value being tested and never peels further.
-    lower_null_pointer_pattern(
-        self,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+    lower_null_pointer_pattern(self, subject_type: Type, span: SourceSpan): TypedPattern = {
         let peeled = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -408,10 +401,10 @@ given TypeChecker {
     /// An integer literal pattern only matches an integer subject.
     lower_integer_literal_pattern(
         self,
-        value String,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: String,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         if not self.is_integer_type(matched_type) then {
             self.push_diagnostic_at_span(
@@ -426,10 +419,10 @@ given TypeChecker {
     /// subject: there is no such value.
     lower_negative_integer_literal_pattern(
         self,
-        value String,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: String,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         if not self.is_integer_type(matched_type) then {
             self.push_diagnostic_at_span(
@@ -450,10 +443,10 @@ given TypeChecker {
     /// A float literal pattern only matches a float subject.
     lower_float_literal_pattern(
         self,
-        value String,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        value: String,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         if not self.is_float_type(matched_type) then {
             self.push_diagnostic_at_span(
@@ -471,12 +464,12 @@ given TypeChecker {
     /// equality pattern there is no signedness check here.
     lower_comparison_pattern(
         self,
-        op ComparisonPatternOperator,
-        value String,
-        value_kind ComparisonPatternValueKind,
-        subject_type Type,
-        span SourceSpan,
-    ) TypedPattern = {
+        op: ComparisonPatternOperator,
+        value: String,
+        value_kind: ComparisonPatternValueKind,
+        subject_type: Type,
+        span: SourceSpan,
+    ): TypedPattern = {
         let matched_type = self.pattern_match_subject_type(subject_type);
         return when value_kind in {
             .Integer() then {
@@ -500,11 +493,7 @@ given TypeChecker {
             .Rune() then {
                 // Desugar to the code point, the way a rune equality pattern
                 // does; the typed pattern carries no rune spelling.
-                let scalar = self.rune_pattern_subject_scalar(
-                    value,
-                    matched_type,
-                    span,
-                ) or else {
+                let scalar = self.rune_pattern_subject_scalar(value, matched_type, span) or else {
                     return TypedPattern.ComparisonPattern(op, "0");
                 };
                 TypedPattern.ComparisonPattern(op, scalar)
@@ -516,7 +505,7 @@ given TypeChecker {
     /// binding whatever is there. A weak reference is opaque until `upgrade`d --
     /// it carries no fields, no cases and no payload -- so testing one's shape
     /// is not meaningful. Binding the handle whole is fine.
-    private pattern_tests_subject_shape(self, pattern PatternNode) Bool = {
+    private pattern_tests_subject_shape(self, pattern: PatternNode): Bool = {
         let _ = self;
         return when pattern in {
             .Variable(_, _, _) then false,
@@ -529,7 +518,7 @@ given TypeChecker {
     /// Whether `t` is a weak handle. The single place that answers it: every
     /// "may this operation see the referent's shape?" question must ask this
     /// rather than matching on the two weak cases and peeling them by hand.
-    is_weak_reference_type(self, t Type) Bool = {
+    is_weak_reference_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
             .WeakReferenceType(_) then true,
@@ -539,7 +528,7 @@ given TypeChecker {
     };
 
     /// Whether `pattern` is a weak binding (`?name` / `?TypeName(name)`).
-    pattern_is_weak_binding(self, pattern PatternNode) Bool = {
+    pattern_is_weak_binding(self, pattern: PatternNode): Bool = {
         let _ = self;
         return when pattern in {
             .WeakBinding(_, _, _) then true,
@@ -549,10 +538,10 @@ given TypeChecker {
 
     lower_typed_pattern(
         self,
-        pattern PatternNode,
-        subject_type Type,
-        scope Scope,
-    ) TypedPattern = {
+        pattern: PatternNode,
+        subject_type: Type,
+        scope: Scope,
+    ): TypedPattern = {
         // `?name` / `?TypeName(name)` unpacks a weak reference. When the
         // subject has already been upgraded to `Option[T]`, lower to
         // `Option.Some(name)`; when it is still a weak handle, extract the
@@ -663,21 +652,14 @@ given TypeChecker {
                 subject_type,
                 span,
             ),
-            .NullLiteral(span) then self.lower_null_pointer_pattern(
-                subject_type,
-                span,
-            ),
+            .NullLiteral(span) then self.lower_null_pointer_pattern(subject_type, span),
             .IntegerLiteral(value, span) then self.lower_integer_literal_pattern(
                 value,
                 subject_type,
                 span,
             ),
             .NegativeIntegerLiteral(value, span) then {
-                self.lower_negative_integer_literal_pattern(
-                    value,
-                    subject_type,
-                    span,
-                )
+                self.lower_negative_integer_literal_pattern(value, subject_type, span)
             },
             .FloatLiteral(value, span) then self.lower_float_literal_pattern(
                 value,
@@ -695,13 +677,7 @@ given TypeChecker {
                 span,
             ),
             .ComparisonPattern(op, value, value_kind, span) then {
-                self.lower_comparison_pattern(
-                    op,
-                    value,
-                    value_kind,
-                    subject_type,
-                    span,
-                )
+                self.lower_comparison_pattern(op, value, value_kind, subject_type, span)
             },
             .AndPattern(left, right, _) then {
                 TypedPattern.AndPattern(
@@ -754,7 +730,7 @@ given TypeChecker {
                         pattern_def_id,
                     );
                     let mutable typed_elements = List[TypedPatternElement].new();
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     for elem in ordered_elements then {
                         let mutable field_type = when field_types.get(i) in {
                             .Some(t) then t,
@@ -801,7 +777,7 @@ given TypeChecker {
                     );
                     let tag_index = self.get_enum_case_tag_index(subject_type, case_name);
                     let mutable typed_elements = List[TypedPatternElement].new();
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     for elem in ordered_elements then {
                         let mutable field_type = when case_field_types.get(i) in {
                             .Some(t) then t,
@@ -824,13 +800,14 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let expanded_struct = self.expand_rest_slots(
-                    elements,
-                    param_specs,
-                    span,
-                );
+                let expanded_struct = self.expand_rest_slots(elements, param_specs, span);
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(
+                    expanded_struct,
+                    param_specs,
+                    type_name,
+                    span,
+                ) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -845,7 +822,7 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 let mutable typed_elements = List[TypedPatternElement].new();
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for elem in ordered_elements then {
                     let mutable field_type = when field_types.get(i) in {
                         .Some(t) then t,
@@ -936,7 +913,7 @@ given TypeChecker {
                     pattern_def_id,
                 );
                 let mutable typed_elements = List[TypedPatternElement].new();
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for elem in elements then {
                     let field_type = when field_types.get(i) in {
                         .Some(t) then t,
@@ -990,7 +967,10 @@ given TypeChecker {
                     );
                     return TypedPattern.Wildcard();
                 };
-                let index_symbol = self.resolve_method_signature(subject_type, "__index_get") or else {
+                let index_symbol = self.resolve_method_signature(
+                    subject_type,
+                    "__index_get",
+                ) or else {
                     self.push_diagnostic_at_span(
                         "List pattern requires 'count' and '__index_get' on '\(type_to_string(subject_type))'",
                         span,
@@ -1008,12 +988,7 @@ given TypeChecker {
                     );
                 };
                 TypedPattern.ListPattern(
-                    ListPatternOps(
-                        subject_type,
-                        element_type,
-                        count_symbol,
-                        index_symbol,
-                    ),
+                    ListPatternOps(subject_type, element_type, count_symbol, index_symbol),
                     typed_elements,
                 )
             },
@@ -1042,10 +1017,10 @@ given TypeChecker {
     /// pattern is lowered an `or`'s branches already share one symbol per name.
     bind_pattern_vars(
         self,
-        pattern PatternNode,
-        subject_type Type,
-        scope Scope,
-    ) List[Pair[String, Type]] = {
+        pattern: PatternNode,
+        subject_type: Type,
+        scope: Scope,
+    ): List[Pair[String, Type]] = {
         let mutable bound = List[Pair[String, Type]].new();
         when pattern in {
             .Variable(name, is_mutable, span) then {
@@ -1105,11 +1080,7 @@ given TypeChecker {
             },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                let expanded_enum = self.expand_rest_slots(
-                    elements,
-                    param_specs,
-                    span,
-                );
+                let expanded_enum = self.expand_rest_slots(elements, param_specs, span);
                 when self.order_pattern_arguments(
                     expanded_enum,
                     param_specs,
@@ -1121,7 +1092,7 @@ given TypeChecker {
                             subject_type,
                             case_name,
                         );
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         for elem in ordered_elements then {
                             let mutable field_type = when case_field_types.get(i) in {
                                 .Some(t) then t,
@@ -1160,14 +1131,15 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let expanded_struct = self.expand_rest_slots(
-                    elements,
-                    param_specs,
-                    span,
-                );
+                let expanded_struct = self.expand_rest_slots(elements, param_specs, span);
                 let mutable ordered_elements = List[PatternElement].new();
                 let mutable args_ok = true;
-                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(
+                    expanded_struct,
+                    param_specs,
+                    type_name,
+                    span,
+                ) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -1188,7 +1160,7 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for elem in ordered_elements then {
                     // An unordered fallback has no field to point at, so the
                     // name is bound at `Unknown` rather than at a neighbour's
@@ -1226,7 +1198,7 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for elem in elements then {
                     let field_type = when field_types.get(i) in {
                         .Some(t) then t,
@@ -1363,10 +1335,10 @@ given TypeChecker {
 
     ensure_pattern_bindings_present(
         self,
-        pattern PatternNode,
-        subject_type Type,
-        scope Scope,
-    ) Void = {
+        pattern: PatternNode,
+        subject_type: Type,
+        scope: Scope,
+    ): Void = {
         when pattern in {
             .Variable(name, is_mutable, span) then {
                 if not (name == "_") then {
@@ -1439,11 +1411,7 @@ given TypeChecker {
             },
             .EnumCase(case_name, elements, span) then {
                 let param_specs = self.get_enum_case_param_specs(subject_type, case_name);
-                let expanded_enum = self.expand_rest_slots(
-                    elements,
-                    param_specs,
-                    span,
-                );
+                let expanded_enum = self.expand_rest_slots(elements, param_specs, span);
                 when self.order_pattern_arguments(
                     expanded_enum,
                     param_specs,
@@ -1455,7 +1423,7 @@ given TypeChecker {
                             subject_type,
                             case_name,
                         );
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         for elem in ordered_elements then {
                             let mutable field_type = when case_field_types.get(i) in {
                                 .Some(t) then t,
@@ -1478,13 +1446,14 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let expanded_struct = self.expand_rest_slots(
-                    elements,
-                    param_specs,
-                    span,
-                );
+                let expanded_struct = self.expand_rest_slots(elements, param_specs, span);
                 let mutable ordered_elements = List[PatternElement].new();
-                when self.order_pattern_arguments(expanded_struct, param_specs, type_name, span) in {
+                when self.order_pattern_arguments(
+                    expanded_struct,
+                    param_specs,
+                    type_name,
+                    span,
+                ) in {
                     .Some(ordered) then {
                         for elem in ordered then {
                             ordered_elements.push(elem);
@@ -1506,7 +1475,7 @@ given TypeChecker {
                     subject_type,
                     pattern_def_id,
                 );
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for elem in ordered_elements then {
                     let mutable field_type = when field_types.get(i) in {
                         .Some(t) then t,
@@ -1557,10 +1526,10 @@ given TypeChecker {
     /// Without a rest slot the element list is returned unchanged.
     expand_rest_slots(
         self,
-        args List[PatternElement],
-        param_specs List[FunctionParamSpec],
-        pattern_span SourceSpan,
-    ) List[PatternElement] = {
+        args: List[PatternElement],
+        param_specs: List[FunctionParamSpec],
+        pattern_span: SourceSpan,
+    ): List[PatternElement] = {
         let mutable has_rest = false;
         for arg in args then {
             when arg.pattern in {
@@ -1613,11 +1582,11 @@ given TypeChecker {
     /// means the pattern is not a legal match and a diagnostic has been pushed.
     order_pattern_arguments(
         self,
-        elements List[PatternElement],
-        param_specs List[FunctionParamSpec],
-        pattern_description String,
-        span SourceSpan,
-    ) Option[List[PatternElement]] = {
+        elements: List[PatternElement],
+        param_specs: List[FunctionParamSpec],
+        pattern_description: String,
+        span: SourceSpan,
+    ): Option[List[PatternElement]] = {
         // No registered fields means the subject is not the constructor this
         // pattern names. That is a type error, reported by the type check --
         // saying anything about the arguments here would name the wrong fault.
@@ -1628,14 +1597,14 @@ given TypeChecker {
         for _ in param_specs then {
             ordered.push(Option[PatternElement].None());
         };
-        let mutable positional_index UInt = 0;
+        let mutable positional_index: UInt = 0;
         let mutable seen_named = false;
         for element in elements then {
             let arg_span = pattern_span(element.pattern);
             when element.label in {
                 .Some(label) then {
                     seen_named = true;
-                    let mutable field_index UInt = 0;
+                    let mutable field_index: UInt = 0;
                     let mutable found = false;
                     while field_index < param_specs.count() then {
                         if param_specs[field_index].name == label then {
@@ -1681,7 +1650,7 @@ given TypeChecker {
                         positional_index += 1;
                     };
                     if positional_index >= param_specs.count() then {
-                        let mutable required_index UInt = 0;
+                        let mutable required_index: UInt = 0;
                         let mutable reported = false;
                         while required_index < param_specs.count() then {
                             if param_specs[required_index].named and ordered[
@@ -1711,7 +1680,7 @@ given TypeChecker {
         };
 
         let mutable elements_out = List[PatternElement].new();
-        let mutable index UInt = 0;
+        let mutable index: UInt = 0;
         while index < param_specs.count() then {
             when ordered[index] in {
                 .Some(element) then elements_out.push(element),
@@ -1730,9 +1699,9 @@ given TypeChecker {
 
     enum_case_name_matches(
         self,
-        pattern_case_name String,
-        enum_case_name String,
-    ) Bool = {
+        pattern_case_name: String,
+        enum_case_name: String,
+    ): Bool = {
         if enum_case_name == pattern_case_name then {
             return true;
         };
@@ -1758,11 +1727,7 @@ given TypeChecker {
         return enum_tail == pattern_tail;
     };
 
-    get_enum_case_field_types(
-        self,
-        subject_type Type,
-        case_name String,
-    ) List[Type] = {
+    get_enum_case_field_types(self, subject_type: Type, case_name: String): List[Type] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1793,7 +1758,7 @@ given TypeChecker {
         when inner_type in {
             .GenericEnum(template_def_id, args) then {
                 if self.storage.generic_templates.enum_by_def_id(template_def_id) is .Some(enum_template) then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     let param_count = enum_template.type_parameters.count();
                     let arg_count = args.count();
                     let n = if param_count < arg_count then param_count else arg_count;
@@ -1819,9 +1784,9 @@ given TypeChecker {
 
     get_enum_case_param_specs(
         self,
-        subject_type Type,
-        case_name String,
-    ) List[FunctionParamSpec] = {
+        subject_type: Type,
+        case_name: String,
+    ): List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1853,7 +1818,7 @@ given TypeChecker {
     /// The DECLARATION a struct pattern names, resolved once from its source
     /// spelling through this module's imports. Everything below compares this
     /// DefId; the spelling survives only to print diagnostics.
-    struct_pattern_def_id(self, type_name String) DefId = {
+    struct_pattern_def_id(self, type_name: String): DefId = {
         when self.resolve_type_name_binding(type_name) in {
             .Some(t) then {
                 let declared = self.nominal_decl_def_id(t);
@@ -1873,7 +1838,7 @@ given TypeChecker {
 
     /// The declaration a resolved nominal type stands for. Builtins and type
     /// parameters have none, so they report the invalid DefId.
-    nominal_decl_def_id(self, t Type) DefId = {
+    nominal_decl_def_id(self, t: Type): DefId = {
         return when t in {
             .StructureType(def_id) then def_id,
             .EnumType(def_id) then def_id,
@@ -1886,16 +1851,16 @@ given TypeChecker {
 
     /// The declaration a `Type.StructureType` stands for: the template it was
     /// instantiated from, or the struct itself when it was never generic.
-    struct_pattern_decl_def_id(self, def_id DefId) DefId = {
+    struct_pattern_decl_def_id(self, def_id: DefId): DefId = {
         let template_def_id = self.context().get_template_def_id(def_id);
         if template_def_id == def_id_invalid() then def_id else template_def_id
     };
 
     get_struct_pattern_field_types(
         self,
-        subject_type Type,
-        pattern_def_id DefId,
-    ) List[Type] = {
+        subject_type: Type,
+        pattern_def_id: DefId,
+    ): List[Type] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1922,7 +1887,7 @@ given TypeChecker {
                                 ) in {
                                     .Some(fields) then {
                                         let mutable bindings = Dict[String, Type].new();
-                                        let mutable i UInt = 0;
+                                        let mutable i: UInt = 0;
                                         let param_count = struct_template.type_parameters.count(
                                         );
                                         let arg_count = type_args.count();
@@ -1979,7 +1944,7 @@ given TypeChecker {
                         ) in {
                             .Some(fields) then {
                                 let mutable bindings = Dict[String, Type].new();
-                                let mutable i UInt = 0;
+                                let mutable i: UInt = 0;
                                 let param_count = struct_template.type_parameters.count();
                                 let arg_count = args.count();
                                 let n = if param_count < arg_count then param_count
@@ -2011,9 +1976,9 @@ given TypeChecker {
 
     get_struct_pattern_owner_def_id(
         self,
-        subject_type Type,
-        pattern_def_id DefId,
-    ) Option[DefId] = {
+        subject_type: Type,
+        pattern_def_id: DefId,
+    ): Option[DefId] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -2044,9 +2009,9 @@ given TypeChecker {
     /// Identity comes from the SUBJECT's own DECLARATION, never from a name.
     get_struct_pattern_fields(
         self,
-        subject_type Type,
-        pattern_def_id DefId,
-    ) List[StructField] = {
+        subject_type: Type,
+        pattern_def_id: DefId,
+    ): List[StructField] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -2102,15 +2067,15 @@ given TypeChecker {
     /// `order_pattern_arguments` produced; slot i corresponds to field i.
     check_struct_pattern_field_visibility(
         self,
-        subject_type Type,
-        pattern_def_id DefId,
-        type_name String,
-        ordered_elements List[PatternElement],
-    ) Bool = {
+        subject_type: Type,
+        pattern_def_id: DefId,
+        type_name: String,
+        ordered_elements: List[PatternElement],
+    ): Bool = {
         let fields = self.get_struct_pattern_fields(subject_type, pattern_def_id);
         return when self.get_struct_pattern_owner_def_id(subject_type, pattern_def_id) in {
             .Some(def_id) then {
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < ordered_elements.count() and idx < fields.count() then {
                     let field = fields[idx];
                     if not self.is_field_accessible_from_current_context(
@@ -2149,14 +2114,14 @@ given TypeChecker {
     /// `slot_spans[i]` is where that slot is written.
     check_positional_destructuring(
         self,
-        fields List[StructField],
-        owner_def_id Option[DefId],
-        type_name String,
-        binds List[Bool],
-        slot_spans List[SourceSpan],
-        span SourceSpan,
-    ) Bool = {
-        let mutable idx UInt = 0;
+        fields: List[StructField],
+        owner_def_id: Option[DefId],
+        type_name: String,
+        binds: List[Bool],
+        slot_spans: List[SourceSpan],
+        span: SourceSpan,
+    ): Bool = {
+        let mutable idx: UInt = 0;
         while idx < fields.count() then {
             if fields[idx].named then {
                 self.push_diagnostic_at_span(
@@ -2170,7 +2135,7 @@ given TypeChecker {
         return when owner_def_id in {
             .None() then true,
             .Some(owner) then {
-                let mutable slot UInt = 0;
+                let mutable slot: UInt = 0;
                 while slot < fields.count() and slot < binds.count() and slot < slot_spans.count(
                 ) then {
                     let field = fields[slot];
@@ -2193,9 +2158,9 @@ given TypeChecker {
 
     get_struct_pattern_param_specs(
         self,
-        subject_type Type,
-        pattern_def_id DefId,
-    ) List[FunctionParamSpec] = {
+        subject_type: Type,
+        pattern_def_id: DefId,
+    ): List[FunctionParamSpec] = {
         let inner_type = when subject_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -2263,7 +2228,7 @@ given TypeChecker {
         };
     };
 
-    infer_for_pattern_item_type(self, iter_type Type) Type = {
+    infer_for_pattern_item_type(self, iter_type: Type): Type = {
         // A weak handle is NOT peeled: it is opaque until `upgrade`d, so it
         // carries no `next`/`iterator` of the referent and is not iterable.
         // Peeling here is what let `for x in <a ?List[Int]>` type `x` as `Int`

@@ -10,33 +10,33 @@ using "std/proc" { ... };
 
 type TestResult {
     Pass(),
-    Fail(message String),
+    Fail(message: String),
 };
 
-type TestCase(name String, result TestResult);
+type TestCase(name: String, result: TestResult);
 
-type ProcessOutput(stdout String, stderr String, exit_code Int);
+type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
 
-let pass() TestResult = TestResult.Pass();
-let fail(msg String) TestResult = TestResult.Fail(msg);
+let pass(): TestResult = TestResult.Pass();
+let fail(msg: String): TestResult = TestResult.Fail(msg);
 
-let create_temp_text_file(name String, content String) Result[String] = {
+let create_temp_text_file(name: String, content: String): Result[String] = {
     let path = name.into_path();
-    write_text_file(path, content: content) or return;
+    write_text_file(path, content = content) or return;
     return Result[String].Ok(name);
 };
 
-let cleanup_temp_file(path String) Void = {
+let cleanup_temp_file(path: String): Void = {
     let _ = remove_file(path.into_path());
 };
 
-let cleanup_temp_files(paths List[String]) Void = {
+let cleanup_temp_files(paths: List[String]): Void = {
     for path in paths then {
         cleanup_temp_file(path);
     };
 };
 
-let run_sha(args List[String]) Result[ProcessOutput] = {
+let run_sha(args: List[String]): Result[ProcessOutput] = {
     let sha_bin = if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-sha256sum/sha256sum.exe"
     else "./bin/sample-sha256sum/sha256sum";
     let cmd = Command.new(sha_bin).args(args).set_stdin(IoRedirect.Null());
@@ -45,7 +45,7 @@ let run_sha(args List[String]) Result[ProcessOutput] = {
     return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
 };
 
-let assert_eq(actual String, expected String, msg String) TestResult = {
+let assert_eq(actual: String, expected: String, msg: String): TestResult = {
     if actual == expected then {
         return pass();
     };
@@ -58,19 +58,19 @@ let assert_eq(actual String, expected String, msg String) TestResult = {
     return fail(m.to_string());
 };
 
-let assert_true(cond Bool, msg String) TestResult = {
+let assert_true(cond: Bool, msg: String): TestResult = {
     return if cond then pass() else fail(msg);
 };
 
 /// First whitespace-delimited field of the output: the digest itself.
-let digest_of(stdout String) String = {
+let digest_of(stdout: String): String = {
     let trimmed = stdout.trim_ascii();
     let words = trimmed.split_ascii_whitespace();
     return if words.next() is .Some(first) then first else "";
 };
 
-let normalize_newlines(s String) String = {
-    return s.replace_all("\r\n", with: "\n");
+let normalize_newlines(s: String): String = {
+    return s.replace_all("\r\n", with = "\n");
 };
 
 // ============================================================================
@@ -79,15 +79,16 @@ let normalize_newlines(s String) String = {
 // One per natural input class the standard defines: empty, one block,
 // multi-block, and a very long message that crosses many blocks.
 
-let nist_empty() String =
+let nist_empty(): String =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-let nist_abc() String = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
-let nist_two_block() String =
+let nist_abc(): String =
+    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
+let nist_two_block(): String =
     "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1";
-let nist_million_a() String =
+let nist_million_a(): String =
     "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0";
 
-let hash_of_file(path String) TestResult = {
+let hash_of_file(path: String): TestResult = {
     let out = run_sha([path]) or else as e in {
         return fail("failed to run sha256sum: \(e.message())");
     };
@@ -101,7 +102,7 @@ let hash_of_file(path String) TestResult = {
 // Unit: the standard's vectors
 // ---------------------------------------------------------------------------
 
-let test_nist_empty() TestResult = {
+let test_nist_empty(): TestResult = {
     let name = "sha_empty.txt";
     create_temp_text_file(name, "") or else as e in {
         return fail("temp file: \(e.message())");
@@ -115,7 +116,7 @@ let test_nist_empty() TestResult = {
     return r;
 };
 
-let test_nist_abc() TestResult = {
+let test_nist_abc(): TestResult = {
     let name = "sha_abc.txt";
     create_temp_text_file(name, "abc") or else as e in {
         return fail("temp file: \(e.message())");
@@ -128,7 +129,7 @@ let test_nist_abc() TestResult = {
     return assert_eq(digest_of(out.stdout), nist_abc(), "NIST 'abc'");
 };
 
-let test_nist_two_block() TestResult = {
+let test_nist_two_block(): TestResult = {
     let name = "sha_two_block.txt";
     create_temp_text_file(
         name,
@@ -144,10 +145,10 @@ let test_nist_two_block() TestResult = {
     return assert_eq(digest_of(out.stdout), nist_two_block(), "NIST two-block message");
 };
 
-let test_nist_million_a() TestResult = {
+let test_nist_million_a(): TestResult = {
     let name = "sha_million_a.txt";
     let mutable content = StringBuilder.new();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < 1000000 then {
         content.push_string("a");
         i += 1;
@@ -168,7 +169,7 @@ let test_nist_million_a() TestResult = {
 // ---------------------------------------------------------------------------
 
 /// GNU coreutils prints "<digest>  <file>" with two spaces for a text-mode file.
-let test_output_format() TestResult = {
+let test_output_format(): TestResult = {
     let name = "sha_fmt.txt";
     create_temp_text_file(name, "abc") or else as e in {
         return fail("temp file: \(e.message())");
@@ -183,7 +184,7 @@ let test_output_format() TestResult = {
     return assert_eq(normalize_newlines(out.stdout), expected, "output format");
 };
 
-let test_multiple_files() TestResult = {
+let test_multiple_files(): TestResult = {
     let a = "sha_multi_a.txt";
     let b = "sha_multi_b.txt";
     create_temp_text_file(a, "abc") or else as e in {
@@ -204,7 +205,7 @@ let test_multiple_files() TestResult = {
     return assert_eq(normalize_newlines(out.stdout), expected, "multiple files");
 };
 
-let test_missing_file() TestResult = {
+let test_missing_file(): TestResult = {
     let out = run_sha(["sha_no_such_file.txt"]) or else as e in {
         return fail("run: \(e.message())");
     };
@@ -217,21 +218,21 @@ let test_missing_file() TestResult = {
     );
 };
 
-let test_invalid_option() TestResult = {
+let test_invalid_option(): TestResult = {
     let out = run_sha(["--not-an-option"]) or else as e in {
         return fail("run: \(e.message())");
     };
     return assert_true(out.exit_code != 0, "invalid option must not exit 0");
 };
 
-let test_missing_operand() TestResult = {
+let test_missing_operand(): TestResult = {
     let out = run_sha([]) or else as e in {
         return fail("run: \(e.message())");
     };
     return assert_true(out.exit_code != 0, "no operands must not exit 0");
 };
 
-let test_help_and_version() TestResult = {
+let test_help_and_version(): TestResult = {
     let help = run_sha(["--help"]) or else as e in {
         return fail("help: \(e.message())");
     };
@@ -260,7 +261,7 @@ let test_help_and_version() TestResult = {
 
 /// Same bytes under a different file name must hash identically — the digest
 /// may not depend on anything but the content.
-let property_name_independent() TestResult = {
+let property_name_independent(): TestResult = {
     let a = "sha_prop_a.txt";
     let b = "sha_prop_b.txt";
     create_temp_text_file(a, "koral") or else as e in {
@@ -290,7 +291,7 @@ let property_name_independent() TestResult = {
 
 /// Changing a single byte must change the digest. Catches an implementation that
 /// silently stops absorbing input after the first block.
-let property_avalanche() TestResult = {
+let property_avalanche(): TestResult = {
     let a = "sha_aval_a.txt";
     let b = "sha_aval_b.txt";
     create_temp_text_file(a, "aaaaaaaa") or else as e in {
@@ -318,7 +319,7 @@ let property_avalanche() TestResult = {
 };
 
 /// The digest is always 32 bytes, so always 64 lowercase hex characters.
-let property_digest_shape() TestResult = {
+let property_digest_shape(): TestResult = {
     let name = "sha_shape.txt";
     create_temp_text_file(name, "shape check") or else as e in {
         return fail("temp file: \(e.message())");
@@ -347,7 +348,7 @@ let property_digest_shape() TestResult = {
 // Runner
 // ============================================================================
 
-let run_case(name String, r TestResult) TestCase = {
+let run_case(name: String, r: TestResult): TestCase = {
     print(name);
     print(" ... ");
     when r in {
@@ -363,7 +364,7 @@ let run_case(name String, r TestResult) TestCase = {
     return TestCase(name, r);
 };
 
-public let main() Int = {
+public let main(): Int = {
     println("========================================");
     println("koral-sha256sum test suite");
     println("========================================");
@@ -383,8 +384,8 @@ public let main() Int = {
     tests.push(run_case("property: avalanche", property_avalanche()));
     tests.push(run_case("property: digest shape", property_digest_shape()));
 
-    let mutable passed UInt = 0;
-    let mutable failed UInt = 0;
+    let mutable passed: UInt = 0;
+    let mutable failed: UInt = 0;
     for test in tests then {
         when test.result in {
             .Pass() then {

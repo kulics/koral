@@ -1,10 +1,6 @@
 given TypeChecker {
 
-    apply_subst_to_decl(
-        self,
-        subst TypeSubstitution,
-        decl TypedDecl,
-    ) TypedDecl = {
+    apply_subst_to_decl(self, subst: TypeSubstitution, decl: TypedDecl): TypedDecl = {
         if subst.mapping.is_empty() then {
             return decl;
         };
@@ -148,13 +144,19 @@ given TypeChecker {
 
     apply_subst_to_params(
         self,
-        subst TypeSubstitution,
-        params List[TypedParam],
-    ) List[TypedParam] = {
+        subst: TypeSubstitution,
+        params: List[TypedParam],
+    ): List[TypedParam] = {
         let mutable out = List[TypedParam].new();
         for p in params then {
             out.push(
-                TypedParam(p.name, p.is_mutable, subst.apply(p.param_type), p.named, p.default_value),
+                TypedParam(
+                    p.name,
+                    p.is_mutable,
+                    subst.apply(p.param_type),
+                    p.named,
+                    p.default_value,
+                ),
             );
         };
         return out;
@@ -162,9 +164,9 @@ given TypeChecker {
 
     apply_subst_to_fields(
         self,
-        subst TypeSubstitution,
-        fields List[TypedField],
-    ) List[TypedField] = {
+        subst: TypeSubstitution,
+        fields: List[TypedField],
+    ): List[TypedField] = {
         let mutable out = List[TypedField].new();
         for field in fields then {
             out.push(
@@ -173,7 +175,8 @@ given TypeChecker {
                     field.name,
                     field.is_mutable,
                     subst.apply(field.field_type),
-                    field.named, field.default_value
+                    field.named,
+                    field.default_value,
                 ),
             );
         };
@@ -182,9 +185,9 @@ given TypeChecker {
 
     apply_subst_to_enum_cases(
         self,
-        subst TypeSubstitution,
-        cases List[TypedEnumCase],
-    ) List[TypedEnumCase] = {
+        subst: TypeSubstitution,
+        cases: List[TypedEnumCase],
+    ): List[TypedEnumCase] = {
         let mutable out = List[TypedEnumCase].new();
         for case_ in cases then {
             let mutable new_fields = List[TypedEnumCaseField].new();
@@ -193,7 +196,8 @@ given TypeChecker {
                     TypedEnumCaseField(
                         field.name,
                         subst.apply(field.field_type),
-                        field.named, field.default_value
+                        field.named,
+                        field.default_value,
                     ),
                 );
             };
@@ -204,9 +208,9 @@ given TypeChecker {
 
     apply_subst_to_trait_members(
         self,
-        subst TypeSubstitution,
-        members List[TypedTraitMember],
-    ) List[TypedTraitMember] = {
+        subst: TypeSubstitution,
+        members: List[TypedTraitMember],
+    ): List[TypedTraitMember] = {
         let mutable out = List[TypedTraitMember].new();
         for member in members then {
             out.push(
@@ -224,9 +228,9 @@ given TypeChecker {
 
     apply_subst_to_given_members(
         self,
-        subst TypeSubstitution,
-        members List[TypedGivenMember],
-    ) List[TypedGivenMember] = {
+        subst: TypeSubstitution,
+        members: List[TypedGivenMember],
+    ): List[TypedGivenMember] = {
         let mutable out = List[TypedGivenMember].new();
         for m_ref in members then {
             let m = m_ref;
@@ -237,25 +241,28 @@ given TypeChecker {
             let new_params = self.apply_subst_to_params(subst, m.params);
             let new_return_type = subst.apply(m.return_type);
             out.push(
-                TypedGivenMember(m.def_id, m.name, new_params, new_return_type, new_body, m.trait_method_def_id),
+                TypedGivenMember(
+                    m.def_id,
+                    m.name,
+                    new_params,
+                    new_return_type,
+                    new_body,
+                    m.trait_method_def_id,
+                ),
             );
         };
         return out;
     };
 
-    apply_subst_to_symbol(
-        self,
-        subst TypeSubstitution,
-        symbol Symbol,
-    ) Symbol = {
+    apply_subst_to_symbol(self, subst: TypeSubstitution, symbol: Symbol): Symbol = {
         return Symbol(symbol.def_id, subst.apply(symbol.symbol_type), symbol.kind);
     };
 
     apply_subst_to_statement(
         self,
-        subst TypeSubstitution,
-        stmt TypedStatement,
-    ) TypedStatement = {
+        subst: TypeSubstitution,
+        stmt: TypedStatement,
+    ): TypedStatement = {
         return when stmt in {
             .LetStmt(symbol, value, span) then {
                 TypedStatement.LetStmt(
@@ -340,10 +347,10 @@ given TypeChecker {
 
     bind_pair_let_symbol(
         self,
-        binding PairBindingElement,
-        binding_type Type,
-        scope Scope,
-    ) Option[Symbol] = {
+        binding: PairBindingElement,
+        binding_type: Type,
+        scope: Scope,
+    ): Option[Symbol] = {
         if binding.is_discard then {
             return Option[Symbol].None();
         };
@@ -378,11 +385,7 @@ given TypeChecker {
         return Option[Symbol].Some(sym);
     };
 
-    get_pair_binding_type(
-        self,
-        pair_type Type,
-        field_name String,
-    ) Option[Type] = {
+    get_pair_binding_type(self, pair_type: Type, field_name: String): Option[Type] = {
         let field_types = self.get_struct_pattern_field_types(
             pair_type,
             self.struct_pattern_def_id("Pair"),
@@ -396,10 +399,7 @@ given TypeChecker {
         return Option[Type].None();
     };
 
-    pair_binding_type_needs_literal_inference(
-        self,
-        binding_type Option[Type],
-    ) Bool = {
+    pair_binding_type_needs_literal_inference(self, binding_type: Option[Type]): Bool = {
         return when binding_type in {
             .Some(t) then when t in {
                 .GenericParameter(_) then true,
@@ -411,11 +411,11 @@ given TypeChecker {
 
     infer_pair_literal_binding_type(
         self,
-        value Expr,
-        binding PairBindingElement,
-        index UInt,
-        scope Scope,
-    ) Option[Type] = {
+        value: Expr,
+        binding: PairBindingElement,
+        index: UInt,
+        scope: Scope,
+    ): Option[Type] = {
         return when value in {
             .Call(callee, args, _) then when callee in {
                 .Identifier(name, _) then {
@@ -448,7 +448,7 @@ given TypeChecker {
     ///
     /// Used to recognise the tuple-construction desugaring. Name resolution
     /// happens here, once; the caller then only compares the identity.
-    constructs_std_pair(self, name String) Bool = {
+    constructs_std_pair(self, name: String): Bool = {
         return when self.resolve_type_name_binding(name) in {
             .Some(resolved) then self.is_std_type(resolved, "Pair"),
             .None() then false,
@@ -457,10 +457,10 @@ given TypeChecker {
 
     concretize_pair_constructor_binding_type(
         self,
-        binding_type Type,
-        value Expr,
-        scope Scope,
-    ) Type = {
+        binding_type: Type,
+        value: Expr,
+        scope: Scope,
+    ): Type = {
         let mutable pair_template_def_id = Option[DefId].None();
         let needs_pair_args = when binding_type in {
             .StructureType(def_id) then self.is_std_type(binding_type, "Pair"),
@@ -524,9 +524,9 @@ given TypeChecker {
 
     apply_subst_to_when_arms(
         self,
-        subst TypeSubstitution,
-        arms List[TypedWhenArm],
-    ) List[TypedWhenArm] = {
+        subst: TypeSubstitution,
+        arms: List[TypedWhenArm],
+    ): List[TypedWhenArm] = {
         let mutable out = List[TypedWhenArm].new();
         for arm in arms then {
             let new_guard = when arm.guard in {
@@ -542,9 +542,9 @@ given TypeChecker {
 
     apply_subst_to_expr_list(
         self,
-        subst TypeSubstitution,
-        exprs List[TypedExpr],
-    ) List[TypedExpr] = {
+        subst: TypeSubstitution,
+        exprs: List[TypedExpr],
+    ): List[TypedExpr] = {
         let mutable out = List[TypedExpr].new();
         for expr in exprs then {
             out.push(self.apply_subst_to_expr(subst, expr));
@@ -554,9 +554,9 @@ given TypeChecker {
 
     apply_subst_to_symbol_list(
         self,
-        subst TypeSubstitution,
-        symbols List[Symbol],
-    ) List[Symbol] = {
+        subst: TypeSubstitution,
+        symbols: List[Symbol],
+    ): List[Symbol] = {
         let mutable out = List[Symbol].new();
         for symbol in symbols then {
             out.push(self.apply_subst_to_symbol(subst, symbol));
@@ -566,9 +566,9 @@ given TypeChecker {
 
     apply_subst_to_expr_pair_list(
         self,
-        subst TypeSubstitution,
-        entries List[Pair[TypedExpr, TypedExpr]],
-    ) List[Pair[TypedExpr, TypedExpr]] = {
+        subst: TypeSubstitution,
+        entries: List[Pair[TypedExpr, TypedExpr]],
+    ): List[Pair[TypedExpr, TypedExpr]] = {
         let mutable out = List[Pair[TypedExpr, TypedExpr]].new();
         for entry in entries then {
             out.push(
@@ -583,9 +583,9 @@ given TypeChecker {
 
     apply_subst_to_optional_expr(
         self,
-        subst TypeSubstitution,
-        expr Option[TypedExpr],
-    ) Option[TypedExpr] = {
+        subst: TypeSubstitution,
+        expr: Option[TypedExpr],
+    ): Option[TypedExpr] = {
         return when expr in {
             .Some(e) then Option[TypedExpr].Some(self.apply_subst_to_expr(subst, e)),
             .None() then Option[TypedExpr].None(),
@@ -594,9 +594,9 @@ given TypeChecker {
 
     apply_subst_to_expr_kind(
         self,
-        subst TypeSubstitution,
-        kind TypedExprKind,
-    ) TypedExprKind = {
+        subst: TypeSubstitution,
+        kind: TypedExprKind,
+    ): TypedExprKind = {
         return when kind in {
             .Variable(symbol) then TypedExprKind.Variable(
                 self.apply_subst_to_symbol(subst, symbol),
@@ -821,7 +821,8 @@ given TypeChecker {
                     preserved_method,
                     trait_method_def_id,
                     List[Type].new(),
-                    dispatch_callsite)
+                    dispatch_callsite,
+                )
             },
             .TraitObjectConversion(inner, trait_type, concrete_type) then TypedExprKind.TraitObjectConversion(
                 self.apply_subst_to_expr(subst, inner),
@@ -848,11 +849,7 @@ given TypeChecker {
     };
 
     // 将 TypeSubstitution 应用到 TypedExpr，递归替换整个 typed AST 中的类型变量。
-    apply_subst_to_expr(
-        self,
-        subst TypeSubstitution,
-        expr TypedExpr,
-    ) TypedExpr = {
+    apply_subst_to_expr(self, subst: TypeSubstitution, expr: TypedExpr): TypedExpr = {
         if subst.mapping.is_empty() then {
             return expr;
         };

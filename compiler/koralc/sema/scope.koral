@@ -3,22 +3,22 @@
 // 确保 define/lookup 的修改能正确传播，无需到处传 ref。
 
 type mutable ScopeStorage(
-    mutable entries Dict[String, Symbol],
-    mutable entry_list List[Symbol],
-    mutable local_entry_list List[Symbol],
-    mutable type_entries Dict[String, Type],
-    mutable generic_params Set[String],
-    parent Option[Scope],
+    mutable entries: Dict[String, Symbol],
+    mutable entry_list: List[Symbol],
+    mutable local_entry_list: List[Symbol],
+    mutable type_entries: Dict[String, Type],
+    mutable generic_params: Set[String],
+    parent: Option[Scope],
     // Ambient for NAME RESOLUTION (never identity): what this module imports and
     // from which file. See `GenericTemplateRegistry.candidate_keys`.
-    mutable import_graph Option[ImportGraph],
-    mutable source_file Option[String],
+    mutable import_graph: Option[ImportGraph],
+    mutable source_file: Option[String],
 );
 
-public type mutable Scope(mutable storage ScopeStorage);
+public type mutable Scope(mutable storage: ScopeStorage);
 
 given Scope {
-    public new_root() Scope = {
+    public new_root(): Scope = {
         let s = ScopeStorage(
             Dict[String, Symbol].new(),
             List[Symbol].new(),
@@ -32,7 +32,7 @@ given Scope {
         return Scope(s);
     };
 
-    public new_child(parent Scope) Scope = {
+    public new_child(parent: Scope): Scope = {
         let s = ScopeStorage(
             Dict[String, Symbol].new(),
             List[Symbol].new(),
@@ -49,12 +49,12 @@ given Scope {
     // Create a child scope with generic parameters and optional Self binding.
     // Mirrors Swift's pattern: withNewScope { defineGenericParameter(...); defineType("Self", ...) }
     // storage ref 模式：self 值传递，mutations 通过 storage ref 自动传播
-    public define(self, context CompilerContext, symbol Symbol) Void = {
+    public define(self, context: CompilerContext, symbol: Symbol): Void = {
         let name = context.symbol_name(symbol);
         self.storage.entries.insert(name, symbol);
     };
 
-    public define_type(self, name String, t Type) Void = {
+    public define_type(self, name: String, t: Type): Void = {
         self.storage.type_entries.insert(name, t);
     };
 
@@ -66,7 +66,12 @@ given Scope {
     /// slot let a last-wins name-index entry clobber a real empty-module-path
     /// symbol of the same name. An empty `module_path` writes only the
     /// qualified key -- it already IS the plain name.
-    public define_scoped_type(self, module_path List[String], name String, t Type) Void = {
+    public define_scoped_type(
+        self,
+        module_path: List[String],
+        name: String,
+        t: Type,
+    ): Void = {
         self.define_type(qualified_symbol_key(module_path, name), t);
         if not module_path.is_empty() then {
             self.define_type(bare_symbol_key(name), t);
@@ -80,10 +85,10 @@ given Scope {
     ///    creates no symbol edge and keeps the same spelling.
     private imported_type_entry(
         self,
-        current Scope,
-        name String,
-        module_path List[String],
-    ) Option[Type] = {
+        current: Scope,
+        name: String,
+        module_path: List[String],
+    ): Option[Type] = {
         let graph = when current.storage.import_graph in {
             .Some(g) then g,
             .None() then {
@@ -129,19 +134,23 @@ given Scope {
     /// Install the ambient import context used by `lookup_type_in_module`.
     public set_import_context(
         self,
-        import_graph Option[ImportGraph],
-        source_file Option[String],
-    ) Void = {
+        import_graph: Option[ImportGraph],
+        source_file: Option[String],
+    ): Void = {
         self.storage.import_graph = import_graph;
         self.storage.source_file = source_file;
     };
 
     /// The type registered for `name`, preferring the one declared in
     /// `module_path`. Walks the chain so an inner binding still shadows.
-    public lookup_type_in_module(self, name String, module_path List[String]) Option[Type] = {
+    public lookup_type_in_module(
+        self,
+        name: String,
+        module_path: List[String],
+    ): Option[Type] = {
         let qualified = qualified_symbol_key(module_path, name);
         let mutable current_opt = Option[Scope].Some(self);
-        let mutable traversed UInt = 0;
+        let mutable traversed: UInt = 0;
         while current_opt is .Some(_) then {
             let current = when current_opt in {
                 .Some(scope) then scope,
@@ -198,9 +207,9 @@ given Scope {
         return Option[Type].None();
     };
 
-    public lookup(self, name String) Option[Symbol] = {
+    public lookup(self, name: String): Option[Symbol] = {
         let mutable current_opt = Option[Scope].Some(self);
-        let mutable traversed UInt = 0;
+        let mutable traversed: UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
@@ -226,9 +235,9 @@ given Scope {
         return .None();
     };
 
-    public lookup_type(self, name String) Option[Type] = {
+    public lookup_type(self, name: String): Option[Type] = {
         let mutable current_opt = Option[Scope].Some(self);
-        let mutable traversed UInt = 0;
+        let mutable traversed: UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
@@ -274,20 +283,20 @@ given Scope {
     };
 
     // 只查当前层，不递归父链（用于重复定义检查）
-    public lookup_local(self, name String) Option[Symbol] = {
+    public lookup_local(self, name: String): Option[Symbol] = {
         return self.storage.entries.get(name);
     };
 
-    public lookup_local_type(self, name String) Option[Type] = {
+    public lookup_local_type(self, name: String): Option[Type] = {
         return self.storage.type_entries.get(name);
     };
 
-    public parent_scope(self) Option[Scope] = {
+    public parent_scope(self): Option[Scope] = {
         return self.storage.parent;
     };
 
     // 注册泛型参数：同时写入 type_entries 并记录到 generic_params 集合
-    public define_generic_param(self, name String) Void = {
+    public define_generic_param(self, name: String): Void = {
         self.define_type(name, Type.GenericParameter(name));
         self.storage.generic_params.insert(name);
     };
@@ -301,13 +310,13 @@ given Scope {
     /// and the name would fall through to a global of the same spelling -- which
     /// is how a user's `type T` became the meaning of std's `[T ...]` parameter.
     /// See `docs/design/name-resolution.md`.
-    public define_generic_binding(self, name String, t Type) Void = {
+    public define_generic_binding(self, name: String, t: Type): Void = {
         self.define_type(name, t);
         self.storage.generic_params.insert(name);
     };
 
     // 判断名称是否通过 define_generic_param 注册（普通 define_type 不算）
-    public is_generic_param(self, name String) Bool = {
+    public is_generic_param(self, name: String): Bool = {
         return self.storage.generic_params.contains(name);
     };
 
@@ -317,9 +326,9 @@ given Scope {
     /// ordinary type entry. That distinction matters: a type parameter must
     /// shadow a same-named module-level type, while two same-named module-level
     /// types must still be disambiguated by their (module, name) identity.
-    public lookup_generic_param_type(self, name String) Option[Type] = {
+    public lookup_generic_param_type(self, name: String): Option[Type] = {
         let mutable current_opt = Option[Scope].Some(self);
-        let mutable traversed UInt = 0;
+        let mutable traversed: UInt = 0;
         while current_opt is .Some(_) then {
             let current = when current_opt in {
                 .Some(scope) then scope,
@@ -342,7 +351,7 @@ given Scope {
         return Option[Type].None();
     };
 
-    public is_local_type_binding(self, name String) Bool = {
+    public is_local_type_binding(self, name: String): Bool = {
         if self.storage.parent is .None() then {
             return false;
         };
@@ -350,28 +359,28 @@ given Scope {
     };
 
     // 返回当前层的所有类型条目（不递归父链）。
-    public all_types(self) Dict[String, Type] = {
+    public all_types(self): Dict[String, Type] = {
         return self.storage.type_entries;
     };
 
     // 返回当前层注册的泛型参数集合（不递归父链）。
-    public all_generic_params(self) Set[String] = {
+    public all_generic_params(self): Set[String] = {
         return self.storage.generic_params;
     };
 
-    public entry_count(self) UInt = {
+    public entry_count(self): UInt = {
         return self.storage.entries.count();
     };
 
-    public local_entry_count(self) UInt = {
+    public local_entry_count(self): UInt = {
         return self.storage.local_entry_list.count();
     };
 
-    public type_entry_count(self) UInt = {
+    public type_entry_count(self): UInt = {
         return self.storage.type_entries.count();
     };
 
-    public generic_param_count(self) UInt = {
+    public generic_param_count(self): UInt = {
         return self.storage.generic_params.count();
     };
 };

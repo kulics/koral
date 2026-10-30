@@ -7,21 +7,21 @@
 // ============================================================================
 // Set Type Definition
 // ============================================================================
-type SetBucket[T Hash] {
+type SetBucket[T: Hash] {
     Empty(),
-    Occupied(value T),
+    Occupied(value: T),
     Deleted(),
 };
 
-public type mutable Set[T Hash](
-    mutable buckets *mutable SetBucket[T],
-    mutable size UInt,
-    mutable capacity UInt,
+public type mutable Set[T: Hash](
+    mutable buckets: *mutable SetBucket[T],
+    mutable size: UInt,
+    mutable capacity: UInt,
 );
 
-given[T Hash] Set[T] as Drop {
+given[T: Hash] Set[T]: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         for i in 0..<self.capacity then {
             deinit_memory(self.buckets + i);
         };
@@ -29,26 +29,23 @@ given[T Hash] Set[T] as Drop {
     };
 };
 
-public type mutable SetIterator[T Hash](
-    source Set[T],
-    mutable index UInt,
-);
+public type mutable SetIterator[T: Hash](source: Set[T], mutable index: UInt);
 
 // ============================================================================
 // Set Methods
 // ============================================================================
-given[T Hash] Set[T] {
+given[T: Hash] Set[T] {
 
     /// 空集合不分配桶数组，首次 insert（走 rehash）时再分配。
-    public new() Self = {
+    public new(): Self = {
         return Set[T](null, 0, 0);
     };
 
-    public with_capacity(capacity UInt) Self = {
+    public with_capacity(capacity: UInt): Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
-        let requested UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
-        let mutable cap UInt = UInt(4);
+        let requested: UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
+        let mutable cap: UInt = UInt(4);
         while cap < requested then {
             cap = cap * UInt(2);
         };
@@ -59,11 +56,11 @@ given[T Hash] Set[T] {
         return Set[T](buckets, 0, cap);
     };
 
-    public count(self) UInt = self.size;
+    public count(self): UInt = self.size;
 
     // Using when for bucket handling
     // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
-    private find_slot(self, value T) Option[UInt] = {
+    private find_slot(self, value: T): Option[UInt] = {
         // 尚未分配桶数组（空集合）：没有可命中的槽位。
         if self.capacity == UInt(0) then {
             return Option[UInt].None();
@@ -72,7 +69,7 @@ given[T Hash] Set[T] {
         let h = value.hash();
         let mutable idx = h & mask;
         let mutable first_deleted = Option[UInt].None();
-        let mutable probes UInt = 0;
+        let mutable probes: UInt = 0;
         while probes < self.capacity then {
             let bucket = self.buckets[idx];
             when bucket in {
@@ -106,7 +103,7 @@ given[T Hash] Set[T] {
         return first_deleted;
     };
 
-    private rehash(self) Void = {
+    private rehash(self): Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 空集合首次分配；已有桶数组时翻倍。
@@ -130,11 +127,11 @@ given[T Hash] Set[T] {
         dealloc_memory(old_buckets);
     };
 
-    public insert(self, value T) Void = {
+    public insert(self, value: T): Void = {
         let _ = self.try_insert(value);
     };
 
-    public try_insert(self, value T) Bool = {
+    public try_insert(self, value: T): Bool = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
         };
@@ -158,13 +155,13 @@ given[T Hash] Set[T] {
         };
     };
 
-    public insert_set(self, other Set[T]) Void = {
+    public insert_set(self, other: Set[T]): Void = {
         for v in other then {
             self.insert(v);
         };
     };
 
-    public contains(self, value T) Bool = {
+    public contains(self, value: T): Bool = {
         when self.find_slot(value) in {
             .None() then {
                 return false;
@@ -179,11 +176,11 @@ given[T Hash] Set[T] {
         };
     };
 
-    public remove(self, value T) Void = {
+    public remove(self, value: T): Void = {
         let _ = self.try_remove(value);
     };
 
-    public try_remove(self, value T) Bool = {
+    public try_remove(self, value: T): Bool = {
         when self.find_slot(value) in {
             .None() then {
                 return false;
@@ -202,9 +199,9 @@ given[T Hash] Set[T] {
         };
     };
 
-    public is_empty(self) Bool = self.size == 0;
+    public is_empty(self): Bool = self.size == 0;
 
-    public is_subset_of(self, other Set[T]) Bool = {
+    public is_subset_of(self, other: Set[T]): Bool = {
         for v in self then {
             if not other.contains(v) then {
                 return false;
@@ -213,9 +210,9 @@ given[T Hash] Set[T] {
         return true;
     };
 
-    public is_superset_of(self, other Set[T]) Bool = other.is_subset_of(self);
+    public is_superset_of(self, other: Set[T]): Bool = other.is_subset_of(self);
 
-    public clear(self) Void = {
+    public clear(self): Void = {
         for i in 0..<self.capacity then {
             self.buckets[i] = SetBucket[T].Empty();
         };
@@ -223,7 +220,7 @@ given[T Hash] Set[T] {
     };
 
     // Retains only elements satisfying the predicate. O(n).
-    public retain(self, predicate (T) -> Bool) Void = {
+    public retain(self, predicate: (T) -> Bool): Void = {
         for i in 0..<self.capacity then {
             let bucket = self.buckets[i];
             when bucket in {
@@ -239,7 +236,7 @@ given[T Hash] Set[T] {
     };
 
     // Using while is pattern matching for iterator loops
-    public union(self, other Set[T]) Set[T] = {
+    public union(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             result.insert(v);
@@ -250,7 +247,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public intersection(self, other Set[T]) Set[T] = {
+    public intersection(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if other.contains(v) then {
@@ -260,7 +257,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public difference(self, other Set[T]) Set[T] = {
+    public difference(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if not other.contains(v) then {
@@ -270,7 +267,7 @@ given[T Hash] Set[T] {
         return result;
     };
 
-    public symmetric_difference(self, other Set[T]) Set[T] = {
+    public symmetric_difference(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
             if not other.contains(v) then {
@@ -287,10 +284,10 @@ given[T Hash] Set[T] {
     };
 };
 
-given[T Hash] Set[T] as Clone {
+given[T: Hash] Set[T]: Clone {
 
     // Independent shallow copy: new set identity, elements copied one level.
-    public clone(self) Self = {
+    public clone(self): Self = {
         let mutable result = Set[T].with_capacity(self.size);
         for i in 0..<self.capacity then {
             let bucket = self.buckets[i];
@@ -305,22 +302,22 @@ given[T Hash] Set[T] as Clone {
     };
 };
 
-given[T Hash] Set[T] as Default {
+given[T: Hash] Set[T]: Default {
 
-    public default() Self = Set[T].new();
+    public default(): Self = Set[T].new();
 };
 
-given[T Hash] Set[T] as Iterable[T, SetIterator[T]] {
+given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
 
-    public iterator(self) SetIterator[T] = SetIterator[T](self, 0);
+    public iterator(self): SetIterator[T] = SetIterator[T](self, 0);
 };
 
 // ============================================================================
 // Set Iterator
 // ============================================================================
-given[T Hash] SetIterator[T] as Iterator[T] {
+given[T: Hash] SetIterator[T]: Iterator[T] {
 
-    public next(self) Option[T] = {
+    public next(self): Option[T] = {
         while self.index < self.source.capacity then {
             let bucket = self.source.buckets[self.index];
             self.index = self.index + 1;

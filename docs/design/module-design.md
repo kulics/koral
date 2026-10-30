@@ -246,7 +246,7 @@ lexer 里删掉——**「已词法化、无产生式」的中间态是纯负债
 | 调用形态 | 准入 |
 | --- | --- |
 | `x.m(…)`，`m` 来自 `given X { … }` | **无**——有 `X` 的值即可 |
-| `x.m(…)`，`m` 来自 `given X as T { … }` 或 `given T { … }` | **`T` 在作用域内** |
+| `x.m(…)`，`m` 来自 `given X: T { … }` 或 `given T { … }` | **`T` 在作用域内** |
 | `X.m(…)`（关联 / 限定形式） | **`X` 在作用域内** |
 
 > **点名类型不带来任何 trait 方法。点名 trait 在所有实现类型上打开它的方法。**
@@ -259,7 +259,7 @@ lexer 里删掉——**「已词法化、无产生式」的中间态是纯负债
 - 最小反例：`S`、`T`、`impl T for S` **全在同一模块**，外模块拿 `S` 的值不 import `T`，
   `s.m()` 同样 E0599。
 
-**「同模块的 `given X as T` 白送」被明确否掉**（见「替代方案」）：它会让同一个 trait 方法
+**「同模块的 `given X: T` 白送」被明确否掉**（见「替代方案」）：它会让同一个 trait 方法
 在不同接收者上准入不同、让 impl 挪文件改下游、让读清单判不了，而换来的只是省一行
 `using`——那一行编译器会直接写给你。
 
@@ -271,11 +271,11 @@ lexer 里删掉——**「已词法化、无产生式」的中间态是纯负债
    仍允许 `f.read()`）；
 3. 从 `T` 所在模块批导入且未被 `!` 排除（`{ ... }`、`{ !a, ... }`）；
 4. prelude（`std` 主模块的 trait）；
-5. 出现在**当前声明的泛型界**里（`[T IntoPath]`、`[T Ord and Hash]`）——**含该界的超 trait**。
+5. 出现在**当前声明的泛型界**里（`[T: IntoPath]`、`[T: Ord and Hash]`）——**含该界的超 trait**。
 
 **不算的**：`{ }` · 导入了模块里别的名字（`{ env }`）· **导入了类型（`{ Path }`）** · 什么都没写。
 
-第 5 条与其余四条刻意不同：界是写在**当前声明**里的，`fn go[T Leaf](x T) = x.r() + x.l()`
+第 5 条与其余四条刻意不同：界是写在**当前声明**里的，`fn go[T: Leaf](x: T) = x.r() + x.l()`
 在 `Leaf: Root` 下两个方法都能调，而**具体接收者**只导入 `Leaf` 时 `x.r()` 不行——
 Rust 一样（`use a::Sub;` 之后 `x.b()` 仍是 E0599）。界是「我声明了这个约束」，
 导入是「我拿了这个名字」，两件事。
@@ -285,7 +285,7 @@ Rust 一样（`use a::Sub;` 之后 `x.b()` 仍是 E0599）。界是「我声明�
 - **合并 = 方法面全开**。`using "./x.koral";` 之后 x 的 trait 都是同模块，名字与方法一起到。
   合并/导入的对比因此更硬：一个是全开，一个按清单；
 - **impl 全局注册、门在 trait**。只要模块进了构建图，它的 `given` 就是候选；能不能调只看
-  trait 在不在作用域。所以 `std/os` 的 `given String as IntoPath` 被别的文件加载了，
+  trait 在不在作用域。所以 `std/os` 的 `given String: IntoPath` 被别的文件加载了，
   也漏不到没点名 `IntoPath` 的文件里——prelude 泄漏不存在；
 - **诊断必须给补丁**。非 inherent 方法找不到时，报错要写出
   `Trait 'T' provides it but is not in scope; import it with using "…" { T };`。
@@ -726,7 +726,7 @@ using "./rules.koral";        // 合并
 using "std" { ... };
 using "std/text" { ... };
 
-public let make_slug(input String) String = { ... }
+public let make_slug(input: String): String = { ... }
 ```
 
 ```koral
@@ -779,7 +779,7 @@ using "std/json" { Value };
 
 ```koral
 using "koral/compiler/parser" { Parser };   // ✓
-using "koral";                        // ✗ 该包没有主模块
+using "koral" { ... };                  // ✗ 该包没有主模块
 ```
 
 ### 6.4 标准库 `std`
@@ -826,9 +826,9 @@ json → math, text        time → text
 net  → hex, io, text     os   → io, time      proc → io, os
 ```
 
-**子模块依赖主模块，主模块不依赖任何子模块**（主模块的 `using` 不指向任何子模块），所以 `using "std";` 不会拉进 IO / 网络等重模块。这张图是**从各模块的 `using` 派生**出来的，不是手写的。
+**子模块依赖主模块，主模块不依赖任何子模块**（主模块的 `using` 不指向任何子模块），所以 `using "std" { ... };` 不会拉进 IO / 网络等重模块。这张图是**从各模块的 `using` 派生**出来的，不是手写的。
 
-主模块同时是 **prelude**（§5.4.1）：非 `std` 模块不用写 `using "std";` 就能看到它。
+主模块同时是 **prelude**（§5.4.1）：非 `std` 模块不用写 `using "std" { ... };` 就能看到它。
 
 `std` 是 **保留包名**（无 `.`、不写进 `dependencies`、随工具链分发于 `KORAL_HOME/std/`），其余规则与普通包完全一致。
 
@@ -887,15 +887,15 @@ using "std" { ... };
 **为什么记在这里**：这套东西被替换过一次（公理 7「替换不叠加」），而替代方案里没记，
 下一轮评审必然重新问「为什么不给 `io.Reader`」。记下来是一劳永逸的那一步。
 
-### 方法面：不采用「同模块的 `given X as T` 白送」
+### 方法面：不采用「同模块的 `given X: T` 白送」
 
 **否掉。** 初稿 §3.4 写过「点名类型 `X` → `X` 的 inherent 方法 **+ 与 `X` 同模块**声明的
-`given X as T` 方法」，理由是「拿到了 `File` 却不能 `read` 像缺了基本功能」。**实测推翻**：
+`given X: T` 方法」，理由是「拿到了 `File` 却不能 `read` 像缺了基本功能」。**实测推翻**：
 Rust 里 `impl Read for File` 就写在 `File` 自己的文件里，`f.read()` 照样要 `use std::io::Read;`。
 
 | | 「同模块白送」 | **Rust 规则（现行）** |
 | --- | --- | --- |
-| 同一 trait 方法在不同接收者上 | **准入不同**（`given Path as IntoPath` 在 `std/os`，`Path` 也在；`String` 不在） | 一致 |
+| 同一 trait 方法在不同接收者上 | **准入不同**（`given Path: IntoPath` 在 `std/os`，`Path` 也在；`String` 不在） | 一致 |
 | impl 挪个文件 | **下游静默断** | 无影响 |
 | 读 `using "std/os" { Path };` | 判不出 `into_path` 能不能用 | 判得出 |
 | `given T { … }` 工具块 | 与 `given T` 必然同模块 → 工具方法白送、required 方法不送，**同一 trait 内分裂** | 一致 |
@@ -1035,7 +1035,7 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 | --- | --- |
 | **§5.3.1 模块身份 =（`source`，入口位置）** | **有期限。** 今天 C 符号本来就不稳定（两端 DefId 编号不同），咬不到人；但它在为一个还不存在的消费者（稳定 ABI）定契约。**触发条件：`koral.lock` / 分开编译 / 预编译产物 / FFI 插件面中任一落地之前必须先做它**，之后改就是破坏性变更。届时还要定两件：`source` 怎么编码成符号前缀、`path:` 依赖（按设计不是稳定身份）算不算稳定 |
 | §5.2 `modules` 降为对外命名表 | 行为已成立（本地模块不登记就能用，`--target-module` 只收名字正好就是导出表的定义）。只剩措辞。**触发条件：下次动 manifest 时顺手改**，不单独立项 |
-| 方法面诊断的提示缺口 | `given String as IntoPath` 这类走**泛型模板**注册的，两端都只报 `Member 'into_path' not found`、不带「trait 提供但不在作用域」那句（方法表路径的 `Robot.say` / `File.read` 有）。**触发条件：下次动方法查找时补** |
+| 方法面诊断的提示缺口 | `given String: IntoPath` 这类走**泛型模板**注册的，两端都只报 `Member 'into_path' not found`、不带「trait 提供但不在作用域」那句（方法表路径的 `Robot.say` / `File.read` 有）。**触发条件：下次动方法查找时补** |
 | 撞名机制是约定不是机制 | 生产代码里 `as` 别名 0 处、`!` 排除 0 处（唯一真用法在 koralfmt 往返夹具）。今天拦住撞名的是命名约定（`IoError` 不叫 `Error`）。**触发条件：二选一**——补用例让消歧路径跑起来，或承认是约定并把文档里「机制拦住」改口 |
 | 撞名矩阵「不报」那条零测试 | 「同一声明经两条路径到达不算撞名」是整张矩阵唯一一条放行规则，无看护。**触发条件：下次补撞名用例时一起** |
 

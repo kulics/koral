@@ -1,18 +1,18 @@
-public type LexError(message String, line UInt, column UInt);
+public type LexError(message: String, line: UInt, column: UInt);
 
 public type mutable Lexer(
-    source_runes List[Rune],
-    file_path String,
-    mutable index UInt,
-    mutable line UInt,
-    mutable column UInt,
-    continued_line_column UInt,
-    mutable tokens List[Token],
-    mutable has_newline_before Bool,
+    source_runes: List[Rune],
+    file_path: String,
+    mutable index: UInt,
+    mutable line: UInt,
+    mutable column: UInt,
+    continued_line_column: UInt,
+    mutable tokens: List[Token],
+    mutable has_newline_before: Bool,
 );
 
 given Lexer {
-    private format_position(self, line UInt, column UInt) String = {
+    private format_position(self, line: UInt, column: UInt): String = {
         let mutable text = StringBuilder.new();
         text.push_string(line.to_string());
         text.push_byte(':');
@@ -20,13 +20,13 @@ given Lexer {
         return text.to_string();
     };
 
-    private rune_text(self, ch Rune) String = {
+    private rune_text(self, ch: Rune): String = {
         let mutable text = StringBuilder.new();
         text.push_rune(ch);
         return text.to_string();
     };
 
-    private invalid_digit_message(self, ch Rune, prefix String) String = {
+    private invalid_digit_message(self, ch: Rune, prefix: String): String = {
         let _ = self;
         let mutable text = StringBuilder.new();
         text.push_string("Invalid digit '");
@@ -37,9 +37,9 @@ given Lexer {
         return text.to_string();
     };
 
-    private is_utf8_bom(ch Rune) Bool = ch.to_uint32() == 65279;
+    private is_utf8_bom(ch: Rune): Bool = ch.to_uint32() == 65279;
 
-    public new(source String) Lexer = {
+    public new(source: String): Lexer = {
         let runes = source.to_runes();
         let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then UInt(
             1,
@@ -47,7 +47,7 @@ given Lexer {
         return Lexer(runes, "", start_index, 1, 1, 1, List[Token].new(), false);
     };
 
-    public new_in_file(source String, file_path String) Lexer = {
+    public new_in_file(source: String, file_path: String): Lexer = {
         let runes = source.to_runes();
         let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then UInt(
             1,
@@ -56,12 +56,12 @@ given Lexer {
     };
 
     public new_in_file_at(
-        source String,
-        file_path String,
-        start_line UInt,
-        start_column UInt,
-        continued_line_column UInt,
-    ) Lexer = {
+        source: String,
+        file_path: String,
+        start_line: UInt,
+        start_column: UInt,
+        continued_line_column: UInt,
+    ): Lexer = {
         let runes = source.to_runes();
         let start_index = if not runes.is_empty() and Lexer.is_utf8_bom(runes[0]) then UInt(
             1,
@@ -80,30 +80,30 @@ given Lexer {
         );
     };
 
-    private is_at_end(self) Bool = self.index >= self.source_runes.count();
+    private is_at_end(self): Bool = self.index >= self.source_runes.count();
 
-    private peek(self) Option[Rune] = {
+    private peek(self): Option[Rune] = {
         if self.index < self.source_runes.count() then {
             return .Some(self.source_runes[self.index]);
         };
         return .None();
     };
 
-    private peek_next(self) Option[Rune] = {
+    private peek_next(self): Option[Rune] = {
         if self.index + 1 < self.source_runes.count() then {
             return .Some(self.source_runes[self.index + 1]);
         };
         return .None();
     };
 
-    private peek_at(self, offset UInt) Option[Rune] = {
+    private peek_at(self, offset: UInt): Option[Rune] = {
         if self.index + offset < self.source_runes.count() then {
             return .Some(self.source_runes[self.index + offset]);
         };
         return .None();
     };
 
-    private advance(self) Option[Rune] = {
+    private advance(self): Option[Rune] = {
         if self.is_at_end() then {
             return .None();
         };
@@ -132,12 +132,12 @@ given Lexer {
         return .Some(ch);
     };
 
-    private add(self, kind TokenKind, line UInt, column UInt) Void = {
+    private add(self, kind: TokenKind, line: UInt, column: UInt): Void = {
         self.tokens.push(Token(kind, line, column, self.has_newline_before));
         self.has_newline_before = false;
     };
 
-    private fail(self, line UInt, column UInt, message String) Result[List[Token]] = {
+    private fail(self, line: UInt, column: UInt, message: String): Result[List[Token]] = {
         return .Error(
             make_diagnostic(
                 DiagnosticStage.Lexer(),
@@ -148,7 +148,7 @@ given Lexer {
         );
     };
 
-    private fail_at(self, line UInt, column UInt, message String) DiagnosticError = {
+    private fail_at(self, line: UInt, column: UInt, message: String): DiagnosticError = {
         return make_diagnostic(
             DiagnosticStage.Lexer(),
             self.file_path,
@@ -162,9 +162,9 @@ given Lexer {
     /// against `.` are errors -- never a silent token split.
     private invalid_digit_separator_error(
         self,
-        start_line UInt,
-        start_col UInt,
-    ) DiagnosticError = {
+        start_line: UInt,
+        start_col: UInt,
+    ): DiagnosticError = {
         return self.fail_at(
             start_line,
             start_col,
@@ -172,7 +172,7 @@ given Lexer {
         );
     };
 
-    private match_next(self, expected Rune) Bool = {
+    private match_next(self, expected: Rune): Bool = {
         let next = self.peek() or else {
             return false;
         };
@@ -183,15 +183,15 @@ given Lexer {
         return false;
     };
 
-    private is_space(ch Rune) Bool = ch.is_ascii_whitespace();
+    private is_space(ch: Rune): Bool = ch.is_ascii_whitespace();
 
-    private is_digit(ch Rune) Bool = ch.is_ascii_digit();
+    private is_digit(ch: Rune): Bool = ch.is_ascii_digit();
 
-    private is_identifier_start(ch Rune) Bool = ch.is_identifier_start();
+    private is_identifier_start(ch: Rune): Bool = ch.is_identifier_start();
 
-    private is_identifier_continue(ch Rune) Bool = ch.is_identifier_continue();
+    private is_identifier_continue(ch: Rune): Bool = ch.is_identifier_continue();
 
-    private read_identifier(self, start_line UInt, start_col UInt, first Rune) Void = {
+    private read_identifier(self, start_line: UInt, start_col: UInt, first: Rune): Void = {
         let mutable text = StringBuilder.new();
         text.push_rune(first);
 
@@ -212,7 +212,7 @@ given Lexer {
         };
     };
 
-    private read_duration_suffix_if_present(self) Option[String] = {
+    private read_duration_suffix_if_present(self): Option[String] = {
         let first = self.peek() or else {
             return .None();
         };
@@ -264,10 +264,10 @@ given Lexer {
     /// on the base: `0x1.a` is a fraction attempt, `0b101.a` is a member access.
     private reject_base_fraction(
         self,
-        prefix String,
-        start_line UInt,
-        start_col UInt,
-    ) Result[Void] = {
+        prefix: String,
+        start_line: UInt,
+        start_col: UInt,
+    ): Result[Void] = {
         if self.peek() is .Some('.') then {
             when self.peek_next() in {
                 .Some(next) then {
@@ -292,10 +292,10 @@ given Lexer {
 
     private read_number(
         self,
-        start_line UInt,
-        start_col UInt,
-        first Rune,
-    ) Result[Void] = {
+        start_line: UInt,
+        start_col: UInt,
+        first: Rune,
+    ): Result[Void] = {
         let mutable text = StringBuilder.new();
         text.push_rune(first);
 
@@ -305,7 +305,7 @@ given Lexer {
                 .Some(prefix) then {
                     if prefix == 'b' then {
                         text.push_rune(self.advance().unwrap());
-                        let mutable digit_count UInt = 0;
+                        let mutable digit_count: UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if ch == '0' or ch == '1' then {
                                 text.push_rune(self.advance().unwrap());
@@ -363,7 +363,7 @@ given Lexer {
                     };
                     if prefix == 'o' then {
                         text.push_rune(self.advance().unwrap());
-                        let mutable digit_count UInt = 0;
+                        let mutable digit_count: UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if ch >= '0' and ch <= '7' then {
                                 text.push_rune(self.advance().unwrap());
@@ -421,7 +421,7 @@ given Lexer {
                     };
                     if prefix == 'x' then {
                         text.push_rune(self.advance().unwrap());
-                        let mutable digit_count UInt = 0;
+                        let mutable digit_count: UInt = 0;
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_hex_digit(ch) then {
                                 text.push_rune(self.advance().unwrap());
@@ -568,7 +568,7 @@ given Lexer {
         when self.peek() in {
             .Some(e_ch) then {
                 if e_ch == 'e' then {
-                    let mutable starts_exponent Bool = false;
+                    let mutable starts_exponent: Bool = false;
                     when self.peek_at(1) in {
                         .Some(after_e) then {
                             if Lexer.is_digit(after_e) then {
@@ -596,7 +596,7 @@ given Lexer {
                             .None() then {},
                         };
                         // 指数数字（`_` 只能夹在数字之间）
-                        let mutable exp_last_was_digit Bool = false;
+                        let mutable exp_last_was_digit: Bool = false;
                         while self.peek() is .Some(ch) then {
                             if Lexer.is_digit(ch) then {
                                 text.push_rune(self.advance().unwrap());
@@ -655,12 +655,12 @@ given Lexer {
         return .Ok({});
     };
 
-    private is_hex_digit(ch Rune) Bool = {
+    private is_hex_digit(ch: Rune): Bool = {
         return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
     };
 
     // 将单个 hex 字符转为数值 (0-15)
-    private hex_digit_value(ch Rune) UInt32 = {
+    private hex_digit_value(ch: Rune): UInt32 = {
         if ch >= '0' and ch <= '9' then {
             return (ch.to_uint32() - '0'.to_uint32());
         };
@@ -672,12 +672,12 @@ given Lexer {
     };
 
     // 将 hex 字符串转为 UInt32
-    private parse_hex_to_uint32(self, hex String) Result[UInt32] = {
+    private parse_hex_to_uint32(self, hex: String): Result[UInt32] = {
         let runes = hex.to_runes();
         if runes.is_empty() then {
             return .Error(self.fail_at(self.line, self.column, "empty hex string"));
         };
-        let mutable value WrappingUInt32 = 0;
+        let mutable value: WrappingUInt32 = 0;
         for ch in runes then {
             if not Lexer.is_hex_digit(ch) then {
                 return .Error(self.fail_at(self.line, self.column, "invalid hex digit"));
@@ -688,7 +688,7 @@ given Lexer {
     };
 
     // 解析字符串/字符字面量中的转义序列，返回转义后的字符串
-    private read_escape(self, start_line UInt, start_col UInt) Result[String] = {
+    private read_escape(self, start_line: UInt, start_col: UInt): Result[String] = {
         let next = self.peek() or else {
             return .Error(
                 self.fail_at(start_line, start_col, "Unterminated escape sequence"),
@@ -758,7 +758,7 @@ given Lexer {
         // \xHH — 2 hex digits, single byte
         if next == 'x' then {
             let mutable hex = StringBuilder.new();
-            let mutable i UInt = 0;
+            let mutable i: UInt = 0;
             while i < 2 then {
                 let h = self.peek() or else {
                     return .Error(
@@ -870,9 +870,9 @@ given Lexer {
         return .Error(self.fail_at(start_line, start_col, "Unknown escape sequence"));
     };
 
-    private read_string(self, start_line UInt, start_col UInt) Result[Void] = {
+    private read_string(self, start_line: UInt, start_col: UInt): Result[Void] = {
         let mutable raw_content = StringBuilder.new();
-        let mutable pending_backslashes UInt = 0;
+        let mutable pending_backslashes: UInt = 0;
 
         while self.peek() is .Some(ch) then {
             if ch == '"' and pending_backslashes % 2 == 0 then {
@@ -893,7 +893,11 @@ given Lexer {
                         start_line,
                         start_col,
                     ),
-                    _ then self.add(TokenKind.InterpolatedString(parts), start_line, start_col),
+                    _ then self.add(
+                        TokenKind.InterpolatedString(parts),
+                        start_line,
+                        start_col,
+                    ),
                 };
                 return .Ok({});
             };
@@ -930,7 +934,7 @@ given Lexer {
     /// literal `''` therefore consumes the closing quote as CONTENT and runs
     /// on looking for another one -- it reports "unterminated", matching the
     /// seed lexer, rather than producing an empty value.
-    private read_rune(self, start_line UInt, start_col UInt) Result[Void] = {
+    private read_rune(self, start_line: UInt, start_col: UInt): Result[Void] = {
         let first = self.peek() or else {
             return .Error(
                 self.fail_at(start_line, start_col, "unterminated rune literal"),
@@ -990,8 +994,8 @@ given Lexer {
         return .Error(self.fail_at(start_line, start_col, "unterminated rune literal"));
     };
 
-    private consume_backslash_run(self) UInt = {
-        let mutable count UInt = 0;
+    private consume_backslash_run(self): UInt = {
+        let mutable count: UInt = 0;
         while self.peek() is .Some(ch) then {
             if ch != '\\' then {
                 break;
@@ -1002,15 +1006,15 @@ given Lexer {
         return count;
     };
 
-    private append_backslashes(self, text StringBuilder, count UInt) Void = {
-        let mutable i UInt = 0;
+    private append_backslashes(self, text: StringBuilder, count: UInt): Void = {
+        let mutable i: UInt = 0;
         while i < count then {
             text.push_rune('\\');
             i += 1;
         };
     };
 
-    private box_token_list(self, tokens List[Token]) List[Token] = {
+    private box_token_list(self, tokens: List[Token]): List[Token] = {
         let _ = self;
         let mutable boxed = List[Token].new();
         for token in tokens then {
@@ -1021,11 +1025,11 @@ given Lexer {
 
     private lex_interpolation_tokens(
         self,
-        expr_source String,
-        start_line UInt,
-        start_column UInt,
-        continued_line_column UInt,
-    ) Result[List[Token]] = {
+        expr_source: String,
+        start_line: UInt,
+        start_column: UInt,
+        continued_line_column: UInt,
+    ): Result[List[Token]] = {
         let mutable nested = Lexer.new_in_file_at(
             expr_source,
             self.file_path,
@@ -1043,11 +1047,11 @@ given Lexer {
     /// EOF, which tells the reader nothing about which literal is wrong.
     private consume_interpolation_source(
         self,
-        raw_content StringBuilder,
-        start_line UInt,
-        start_col UInt,
-    ) Result[Void] = {
-        let mutable depth UInt = 1;
+        raw_content: StringBuilder,
+        start_line: UInt,
+        start_col: UInt,
+    ): Result[Void] = {
+        let mutable depth: UInt = 1;
         while self.peek() is .Some(cur) then {
             self.advance();
             raw_content.push_rune(cur);
@@ -1107,10 +1111,10 @@ given Lexer {
         );
     };
 
-    private leading_indent(self, line String) String = {
+    private leading_indent(self, line: String): String = {
         let runes = line.to_runes();
         let mutable indent = StringBuilder.new();
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < runes.count() then {
             let ch = runes[i];
             if ch == ' ' or ch == '\t' then {
@@ -1123,7 +1127,7 @@ given Lexer {
         return indent.to_string();
     };
 
-    private strip_indent_prefix(self, line String, indent_count UInt) String = {
+    private strip_indent_prefix(self, line: String, indent_count: UInt): String = {
         if line.is_empty() then {
             return line;
         };
@@ -1136,9 +1140,9 @@ given Lexer {
 
     private read_escape_from_runes(
         self,
-        runes List[Rune],
-        index UInt,
-    ) Result[Pair[String, UInt]] = {
+        runes: List[Rune],
+        index: UInt,
+    ): Result[Pair[String, UInt]] = {
         let mutable cur_index = index;
         if cur_index >= runes.count() then {
             return .Error(
@@ -1206,7 +1210,7 @@ given Lexer {
         };
         if next == 'x' then {
             let mutable hex = StringBuilder.new();
-            let mutable i UInt = 0;
+            let mutable i: UInt = 0;
             while i < 2 then {
                 if cur_index >= runes.count() then {
                     return .Error(
@@ -1313,15 +1317,15 @@ given Lexer {
 
     private process_string_content_parts(
         self,
-        content String,
-        error_line UInt,
-        error_col UInt,
-        content_start_line UInt,
-        line_start_column UInt,
-    ) Result[List[InterpolatedStringTokenPart]] = {
+        content: String,
+        error_line: UInt,
+        error_col: UInt,
+        content_start_line: UInt,
+        line_start_column: UInt,
+    ): Result[List[InterpolatedStringTokenPart]] = {
         let runes = content.to_runes();
         let total = runes.count();
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         let mutable parts = List[InterpolatedStringTokenPart].new();
         let mutable text = StringBuilder.new();
         let mutable current_line = content_start_line;
@@ -1331,7 +1335,7 @@ given Lexer {
             let ch = runes[i];
 
             if ch == '\\' then {
-                let mutable slash_count UInt = 0;
+                let mutable slash_count: UInt = 0;
                 while i + slash_count < total and runes[i + slash_count] == '\\' then {
                     slash_count += 1;
                 };
@@ -1363,7 +1367,7 @@ given Lexer {
                     i += 1;
                     current_column += slash_count + UInt(1);
                     let mutable expr_source = StringBuilder.new();
-                    let mutable depth UInt = 1;
+                    let mutable depth: UInt = 1;
                     let mutable quote_start = Rune.from_uint32(0) or else '\0';
                     while i < total then {
                         let cur = runes[i];
@@ -1499,7 +1503,7 @@ given Lexer {
         return .Ok(parts);
     };
 
-    private read_multiline_string(self, start_line UInt, start_col UInt) Result[Void] = {
+    private read_multiline_string(self, start_line: UInt, start_col: UInt): Result[Void] = {
         // Caller has consumed the first quote; consume the remaining two of opening delimiter.
         self.advance();
         self.advance();
@@ -1657,7 +1661,7 @@ given Lexer {
         return .Ok({});
     };
 
-    private skip_line_comment(self) Void = {
+    private skip_line_comment(self): Void = {
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
                 break;
@@ -1666,7 +1670,7 @@ given Lexer {
         };
     };
 
-    private skip_block_comment(self) Result[Bool] = {
+    private skip_block_comment(self): Result[Bool] = {
         let mutable saw_newline = false;
         while self.peek() is .Some(ch) then {
             if ch.is_newline() then {
@@ -1690,7 +1694,7 @@ given Lexer {
         );
     };
 
-    public run(self) Result[List[Token]] = {
+    public run(self): Result[List[Token]] = {
         while not self.is_at_end() then {
             let start_line = self.line;
             let start_col = self.column;
@@ -2048,7 +2052,7 @@ given Lexer {
     };
 };
 
-private let keyword_kind(text String) Option[TokenKind] = {
+private let keyword_kind(text: String): Option[TokenKind] = {
     return when text in {
         "let" then .Some(TokenKind.KwLet()),
         "mutable" then .Some(TokenKind.KwMut()),
@@ -2089,23 +2093,23 @@ private let keyword_kind(text String) Option[TokenKind] = {
     };
 };
 
-public let lex(source String) Result[List[Token]] = {
+public let lex(source: String): Result[List[Token]] = {
     let mutable lexer = Lexer.new(source);
     return lexer.run();
 };
 
-public let lex_in_file(source String, file_path String) Result[List[Token]] = {
+public let lex_in_file(source: String, file_path: String): Result[List[Token]] = {
     let mutable lexer = Lexer.new_in_file(source, file_path);
     return lexer.run();
 };
 
 public let lex_in_file_at(
-    source String,
-    file_path String,
-    start_line UInt,
-    start_column UInt,
-    continued_line_column UInt,
-) Result[List[Token]] = {
+    source: String,
+    file_path: String,
+    start_line: UInt,
+    start_column: UInt,
+    continued_line_column: UInt,
+): Result[List[Token]] = {
     let mutable lexer = Lexer.new_in_file_at(
         source,
         file_path,

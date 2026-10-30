@@ -54,10 +54,10 @@
 /// `DefId` alone. Method type arguments are kept as `Type`s too, so nothing is
 /// folded into a name string.
 public type MethodInstanceKey(
-    owner MethodOwner,
-    owner_args List[Type],
-    method_name String,
-    method_type_args List[Type],
+    owner: MethodOwner,
+    owner_args: List[Type],
+    method_name: String,
+    method_type_args: List[Type],
 );
 ```
 

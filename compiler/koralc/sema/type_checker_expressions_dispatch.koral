@@ -1,10 +1,10 @@
 // The reserved name the flow payload symbol is bound under inside an
 // `and then .member()` chain. `FlowReceiver` resolves to it, so no user-visible
 // identifier is involved -- a chain's arguments can still name anything else.
-let flow_payload_name String = "__flow_payload";
+let flow_payload_name: String = "__flow_payload";
 
 given TypeChecker {
-    dispatches_via_trait_object(self, receiver_type Type) Bool = {
+    dispatches_via_trait_object(self, receiver_type: Type): Bool = {
         return when receiver_type in {
             .TraitObject(...) then true,
             .ReferenceType(inner) then self.dispatches_via_trait_object(inner),
@@ -17,7 +17,7 @@ given TypeChecker {
         };
     };
 
-    trait_object_dispatch_type(self, receiver_type Type) Option[Type] = {
+    trait_object_dispatch_type(self, receiver_type: Type): Option[Type] = {
         return when receiver_type in {
             .TraitObject(...) then Option[Type].Some(receiver_type),
             .ReferenceType(inner) then self.trait_object_dispatch_type(inner),
@@ -32,17 +32,17 @@ given TypeChecker {
 
     trait_type_declares_dispatch_method(
         self,
-        trait_type Type,
-        method_name String,
-    ) Bool = {
+        trait_type: Type,
+        method_name: String,
+    ): Bool = {
         return self.trait_vtable_method_index_for_type(trait_type, method_name) is .Some(_);
     };
 
     constrained_trait_object_type_for_dispatch(
         self,
-        receiver_type Type,
-        trait_name String,
-    ) Type = {
+        receiver_type: Type,
+        trait_name: String,
+    ): Type = {
         let normalized = when receiver_type in {
             .ReferenceType(inner) then self.trait_object_dispatch_type(inner) or else inner,
             .MutableReferenceType(inner) then self.trait_object_dispatch_type(inner) or else inner,
@@ -66,10 +66,10 @@ given TypeChecker {
 
     check_option_flow_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .OrElseExpr(operand, default_expr, span) then {
                 let typed_op = self.check_expr_scoped_ref(operand, .None(), scope);
@@ -257,10 +257,7 @@ given TypeChecker {
                     // payload symbol created above so a binder's references
                     // resolve to the same DefId.
                     let mutable some_sym = Symbol(
-                        self.allocate_unindexed_def_id(
-                            payload_name,
-                            DefKind.Variable(),
-                        ),
+                        self.allocate_unindexed_def_id(payload_name, DefKind.Variable()),
                         result_type,
                         SymbolKind.Variable(VariableKind.Value()),
                     );
@@ -409,7 +406,11 @@ given TypeChecker {
                         stmts.push(
                             Statement.ReturnStmt(
                                 Option[Expr].Some(
-                                    Expr.ImplicitMemberExpr("None", List[Expr].new(), span),
+                                    Expr.ImplicitMemberExpr(
+                                        "None",
+                                        List[Expr].new(),
+                                        span,
+                                    ),
                                 ),
                                 span,
                             ),
@@ -499,11 +500,8 @@ given TypeChecker {
 
                     let mutable ok_args = List[TypedExpr].new();
                     ok_args.push(typed_tr);
-                    let ok_body = if collapses then typed_tr else self.lower_enum_constructor_expr(
-                        final_type,
-                        "Ok",
-                        ok_args,
-                    );
+                    let ok_body = if collapses then typed_tr
+                    else self.lower_enum_constructor_expr(final_type, "Ok", ok_args);
                     arms.push(
                         TypedWhenArm(
                             self.lower_typed_pattern(
@@ -579,11 +577,8 @@ given TypeChecker {
                     );
                     let mutable some_args = List[TypedExpr].new();
                     some_args.push(typed_tr);
-                    let some_body = if collapses then typed_tr else self.lower_enum_constructor_expr(
-                        final_type,
-                        "Some",
-                        some_args,
-                    );
+                    let some_body = if collapses then typed_tr
+                    else self.lower_enum_constructor_expr(final_type, "Some", some_args);
                     arms.push(
                         TypedWhenArm(
                             self.lower_typed_pattern(
@@ -630,10 +625,10 @@ given TypeChecker {
 
     check_when_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .WhenExpr(subject, arms, span) then {
                 let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
@@ -714,7 +709,7 @@ given TypeChecker {
                 let mutable synthetic_indices = Set[UInt].new();
                 let mutable result_type = Type.Unknown();
                 let mutable running_expected = expected;
-                let mutable arm_index UInt = 0;
+                let mutable arm_index: UInt = 0;
                 let mutable any_arm_complained = false;
                 for arm in arms then {
                     let mutable arm_scope = Scope.new_child(scope);
@@ -918,10 +913,10 @@ given TypeChecker {
 
     check_lambda_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .LambdaExpr(params, return_type, body, _) then {
                 let use_bidi = when expected in {
@@ -953,7 +948,9 @@ given TypeChecker {
                             .Some(ta) then self.resolve_type_in_scope(ta, scope),
                             .None() then Type.Unknown(),
                         };
-                        typed_params.push(TypedParam(p.name, false, pt, false, Option[Expr].None()));
+                        typed_params.push(
+                            TypedParam(p.name, false, pt, false, Option[Expr].None()),
+                        );
                     };
                     self.validate_lambda_parameter_types(params, typed_params);
                     let ret = when return_type in {
@@ -1006,8 +1003,7 @@ given TypeChecker {
                         );
                         self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns;
                     };
-                    let body_expected = if body is .Block(...) then Option[Type].None(
-                    )
+                    let body_expected = if body is .Block(...) then Option[Type].None()
                     else if self.is_unresolved_expr_type(ret) then Option[Type].None()
                     else Option[Type].Some(ret);
                     let typed_body = self.check_value_body_expr(
@@ -1055,9 +1051,9 @@ given TypeChecker {
 
     resolve_implicit_static_receiver_type(
         self,
-        expected Option[Type],
-        member_name String,
-    ) Option[Type] = {
+        expected: Option[Type],
+        member_name: String,
+    ): Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
                 .GenericStruct(tplDefId, type_args) then {
@@ -1130,7 +1126,7 @@ given TypeChecker {
         };
     };
 
-    type_ref_list_to_value_list(self, type_args List[Type]) List[Type] = {
+    type_ref_list_to_value_list(self, type_args: List[Type]): List[Type] = {
         let _ = self;
         let mutable out = List[Type].new();
         for type_arg in type_args then {
@@ -1141,8 +1137,8 @@ given TypeChecker {
 
     implicit_static_receiver_info_for_def_id(
         self,
-        def_id DefId,
-    ) Pair[String, List[Type]] = {
+        def_id: DefId,
+    ): Pair[String, List[Type]] = {
         return when self.context().lookup_type(def_id) in {
             .Some(mapped_type) then when mapped_type in {
                 // The spelling is read from the DECLARATION; the callers use it
@@ -1187,10 +1183,7 @@ given TypeChecker {
         };
     };
 
-    implicit_static_receiver_type_name(
-        self,
-        receiver_opt Option[Type],
-    ) String = {
+    implicit_static_receiver_type_name(self, receiver_opt: Option[Type]): String = {
         return when receiver_opt in {
             .Some(receiver_type) then when receiver_type in {
                 // Display only: the spelling is read from the declaration.
@@ -1228,11 +1221,11 @@ given TypeChecker {
 
     implicit_member_param_types(
         self,
-        implicit_static_receiver_opt Option[Type],
-        implicit_static_type_name String,
-        expected Option[Type],
-        member_name String,
-    ) List[Type] = {
+        implicit_static_receiver_opt: Option[Type],
+        implicit_static_type_name: String,
+        expected: Option[Type],
+        member_name: String,
+    ): List[Type] = {
         return when implicit_static_receiver_opt in {
             .Some(receiver_type) then self.resolve_static_method_param_types_for_receiver(
                 implicit_static_type_name,
@@ -1248,13 +1241,13 @@ given TypeChecker {
 
     check_implicit_member_args(
         self,
-        args List[Expr],
-        param_types List[Type],
-        scope Scope,
-        construction_blame_span Option[SourceSpan],
-    ) List[TypedExpr] = {
+        args: List[Expr],
+        param_types: List[Type],
+        scope: Scope,
+        construction_blame_span: Option[SourceSpan],
+    ): List[TypedExpr] = {
         let mutable typed_args = List[TypedExpr].new();
-        let mutable arg_idx UInt = 0;
+        let mutable arg_idx: UInt = 0;
         for a in args then {
             let arg_expected = when param_types.get(arg_idx) in {
                 .Some(ft) then Option[Type].Some(ft),
@@ -1269,7 +1262,9 @@ given TypeChecker {
             let arg_blame = when construction_blame_span in {
                 .Some(blame_span) then {
                     if a is .IntegerLiteral(...) then {
-                        self.storage.range_blame_span = Option[SourceSpan].Some(blame_span);
+                        self.storage.range_blame_span = Option[SourceSpan].Some(
+                            blame_span,
+                        );
                     };
                     blame_span
                 },
@@ -1290,11 +1285,11 @@ given TypeChecker {
 
     lower_implicit_member_expr_from_typed_args(
         self,
-        implicit_static_receiver_opt Option[Type],
-        member_name String,
-        typed_args List[TypedExpr],
-        expected Option[Type],
-    ) TypedExpr = {
+        implicit_static_receiver_opt: Option[Type],
+        member_name: String,
+        typed_args: List[TypedExpr],
+        expected: Option[Type],
+    ): TypedExpr = {
         let typed_implicit_static_call_opt = when implicit_static_receiver_opt in {
             .Some(receiver_type) then {
                 Option[TypedExpr].Some(
@@ -1327,10 +1322,10 @@ given TypeChecker {
 
     check_implicit_member_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .ImplicitMemberExpr(member_name, args, _) then {
                 if expected is .None() then {
@@ -1367,8 +1362,9 @@ given TypeChecker {
                     args_copy,
                     param_types,
                     scope,
-                    if implicit_member_is_enum_case then Option[SourceSpan].Some(expr_span(expr))
-                    else Option[SourceSpan].None(),
+                    if implicit_member_is_enum_case then Option[SourceSpan].Some(
+                        expr_span(expr),
+                    ) else Option[SourceSpan].None(),
                 );
                 let lowered = self.lower_implicit_member_expr_from_typed_args(
                     implicit_static_receiver_opt,
@@ -1411,7 +1407,7 @@ given TypeChecker {
         };
     };
 
-    branch_needs_expected_type_for_implicit_member(self, expr Expr) Bool = {
+    branch_needs_expected_type_for_implicit_member(self, expr: Expr): Bool = {
         let _ = self;
         return when expr in {
             .ImplicitMemberExpr(_, _, _) then true,
@@ -1419,7 +1415,7 @@ given TypeChecker {
         };
     };
 
-    is_implicit_member_context_type(self, t Type) Bool = {
+    is_implicit_member_context_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
             .StructureType(_) then true,
@@ -1430,7 +1426,7 @@ given TypeChecker {
         };
     };
 
-    common_branch_supertype(self, lhs Type, rhs Type) Option[Type] = {
+    common_branch_supertype(self, lhs: Type, rhs: Type): Option[Type] = {
         // Two branches disagree only in reference-ness, and their pointees
         // agree: the shared type is the non-mutable side. Anything else has no
         // common supertype, which is what each inner catchall says.
@@ -1482,11 +1478,7 @@ given TypeChecker {
         };
     };
 
-    should_skip_soft_branch_adaptation(
-        self,
-        expr_type Type,
-        expected_type Type,
-    ) Bool = {
+    should_skip_soft_branch_adaptation(self, expr_type: Type, expected_type: Type): Bool = {
         return when expected_type in {
             .MutableReferenceType(expected_inner) then when expr_type in {
                 .ReferenceType(actual_inner) then self.same_expr_type(
@@ -1515,11 +1507,11 @@ given TypeChecker {
 
     report_expected_void_branch_mismatch(
         self,
-        expected Option[Type],
-        then_type Type,
-        else_type Type,
-        span SourceSpan,
-    ) Void = {
+        expected: Option[Type],
+        then_type: Type,
+        else_type: Type,
+        span: SourceSpan,
+    ): Void = {
         let expected_t = when expected in {
             .Some(value) then value,
             .None() then Type.Unknown(),
@@ -1541,7 +1533,7 @@ given TypeChecker {
     /// gives way, and the two branches agree. A literal is flexible only
     /// toward its own kind: an integer literal does not become a float or a
     /// string here.
-    branch_literal_absorbs_type(self, branch TypedExpr, target Type) Bool = {
+    branch_literal_absorbs_type(self, branch: TypedExpr, target: Type): Bool = {
         return when branch.expr_kind in {
             .IntegerLiteral(_) then self.is_integer_type(target),
             .FloatLiteral(_) then self.is_float_type(target),
@@ -1551,10 +1543,10 @@ given TypeChecker {
 
     check_conditional_loop_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .IfExpr(condition, then_branch, else_branch, _) then {
                 let lowered_opt = self.lower_if_condition_with_bindings(
@@ -1877,10 +1869,10 @@ given TypeChecker {
 
     check_control_flow_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Block(statements, tail_expression, block_span) then self.check_block(
                 statements,
@@ -1919,11 +1911,11 @@ given TypeChecker {
 
     typed_params_for_callable_value(
         self,
-        param_types List[Type],
-        param_specs List[FunctionParamSpec],
-    ) List[TypedParam] = {
+        param_types: List[Type],
+        param_specs: List[FunctionParamSpec],
+    ): List[TypedParam] = {
         let mutable typed_params = List[TypedParam].new();
-        let mutable index UInt = 0;
+        let mutable index: UInt = 0;
         while index < param_types.count() then {
             let spec = if index < param_specs.count() then param_specs[index]
             else FunctionParamSpec("", false, false, false, Option[Expr].None());
@@ -1934,14 +1926,20 @@ given TypeChecker {
                 generated.to_string()
             } else spec.name;
             typed_params.push(
-                TypedParam(param_name, spec.is_mutable, param_types[index], spec.named, spec.default_value),
+                TypedParam(
+                    param_name,
+                    spec.is_mutable,
+                    param_types[index],
+                    spec.named,
+                    spec.default_value,
+                ),
             );
             index += 1;
         };
         return typed_params;
     };
 
-    callable_value_arg_exprs(self, params List[TypedParam]) List[TypedExpr] = {
+    callable_value_arg_exprs(self, params: List[TypedParam]): List[TypedExpr] = {
         let mutable args = List[TypedExpr].new();
         for param in params then {
             let kind = if param.is_mutable then VariableKind.MutableValue()
@@ -1958,9 +1956,9 @@ given TypeChecker {
 
     make_callable_value_lambda(
         self,
-        params List[TypedParam],
-        body TypedExpr,
-    ) TypedExpr = {
+        params: List[TypedParam],
+        body: TypedExpr,
+    ): TypedExpr = {
         let lambda_type = self.build_function_type_from_params(params, body.expr_type);
         return make_typed_expr(
             TypedExprKind.LambdaExpr(params, body.expr_type, body),
@@ -1970,8 +1968,8 @@ given TypeChecker {
 
     static_receiver_info_for_type(
         self,
-        receiver_type Type,
-    ) Option[Pair[String, List[Type]]] = {
+        receiver_type: Type,
+    ): Option[Pair[String, List[Type]]] = {
         let canonical = self.canonicalize_alias_type(receiver_type);
         return when canonical in {
             .StructureType(def_id) then Option[Pair[String, List[Type]]].Some(
@@ -2080,9 +2078,9 @@ given TypeChecker {
 
     try_make_type_member_value_lambda(
         self,
-        receiver_type Type,
-        member_name String,
-    ) Option[TypedExpr] = {
+        receiver_type: Type,
+        member_name: String,
+    ): Option[TypedExpr] = {
         let canonical = self.canonicalize_alias_type(receiver_type);
         if self.static_member_is_enum_case(canonical, member_name) then {
             let field_types = self.get_enum_case_field_types(canonical, member_name);
@@ -2150,10 +2148,10 @@ given TypeChecker {
 
     check_member_dispatch_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         when expr in {
             .MemberPath(base, path, _) then {
                 when base in {
@@ -2505,7 +2503,7 @@ given TypeChecker {
                     .None() then List[FunctionParamSpec].new(),
                 };
                 let mutable typed_args = List[TypedExpr].new();
-                let mutable gmc_arg_idx UInt = 0;
+                let mutable gmc_arg_idx: UInt = 0;
                 for a in args then {
                     let gmc_param_expected = when gmc_param_types.get(gmc_arg_idx) in {
                         .Some(pt) then Option[Type].Some(pt),
@@ -2669,9 +2667,13 @@ given TypeChecker {
                                         typed_base,
                                         trait_type,
                                         method_symbol,
-                                        self.trait_method_def_id_of(trait_type, method_name),
+                                        self.trait_method_def_id_of(
+                                            trait_type,
+                                            method_name,
+                                        ),
                                         effective_method_type_args,
-                                        .None()),
+                                        .None(),
+                                    ),
                                     method_symbol.symbol_type,
                                 )
                             } else {
@@ -2701,7 +2703,8 @@ given TypeChecker {
                                     method_symbol,
                                     self.trait_method_def_id_of(trait_type, method_name),
                                     effective_method_type_args,
-                                    .None()),
+                                    .None(),
+                                ),
                                 method_symbol.symbol_type,
                             )
                             else make_typed_expr(
@@ -2820,7 +2823,7 @@ given TypeChecker {
                     method_name,
                 );
                 let mutable typed_args = List[TypedExpr].new();
-                let mutable qmc_arg_idx UInt = 0;
+                let mutable qmc_arg_idx: UInt = 0;
                 for a in args then {
                     let qmc_param_expected = when qmc_param_types.get(qmc_arg_idx) in {
                         .Some(pt) then Option[Type].Some(pt),
@@ -2866,7 +2869,8 @@ given TypeChecker {
                         method_symbol,
                         self.trait_method_def_id_of(trait_type, method_name),
                         List[Type].new(),
-                        .None()),
+                        .None(),
+                    ),
                     method_symbol.symbol_type,
                 );
                 make_typed_expr(TypedExprKind.Call(callee, typed_args), qmc_ret_type)
@@ -2968,7 +2972,7 @@ given TypeChecker {
                     method_name,
                 );
                 let mutable typed_args = List[TypedExpr].new();
-                let mutable qgmc_arg_idx UInt = 0;
+                let mutable qgmc_arg_idx: UInt = 0;
                 for a in args then {
                     let qgmc_param_expected = when qgmc_param_types.get(qgmc_arg_idx) in {
                         .Some(pt) then Option[Type].Some(pt),
@@ -3014,7 +3018,8 @@ given TypeChecker {
                         method_symbol,
                         self.trait_method_def_id_of(trait_type, method_name),
                         resolved_method_type_args,
-                        .None()),
+                        .None(),
+                    ),
                     method_symbol.symbol_type,
                 );
                 make_typed_expr(TypedExprKind.Call(callee, typed_args), qgmc_ret_type)
@@ -3031,10 +3036,9 @@ given TypeChecker {
                 // = wrap[String];`) is not a type standing in for a value and
                 // keeps its own objection, and so does a base that names
                 // nothing this module can see.
-                if self.storage.generic_templates.lookup_struct_def_id(base).is_valid()
-                    or self.storage.generic_templates.lookup_enum_def_id(base).is_valid()
-                    or self.trait_def_id_of(base) is .Some(_)
-                then {
+                if self.storage.generic_templates.lookup_struct_def_id(base).is_valid() or self.storage.generic_templates.lookup_enum_def_id(
+                    base,
+                ).is_valid() or self.trait_def_id_of(base) is .Some(_) then {
                     let resolved_t = self.generic_instantiation_resolved_type(
                         base,
                         resolved_args,
@@ -3055,9 +3059,7 @@ given TypeChecker {
                 make_typed_expr(
                     TypedExprKind.GenericInstantiation(
                         Type.GenericStruct(
-                            self.storage.generic_templates.lookup_struct_def_id(
-                                base,
-                            ),
+                            self.storage.generic_templates.lookup_struct_def_id(base),
                             List[Type].new(),
                         ),
                         resolved_args,
@@ -3163,7 +3165,7 @@ given TypeChecker {
                                 helper_name,
                             );
                             let mutable typed_args = List[TypedExpr].new();
-                            let mutable arg_idx UInt = 0;
+                            let mutable arg_idx: UInt = 0;
                             for a in args then {
                                 let arg_expected = when param_types.get(arg_idx) in {
                                     .Some(param_type) then Option[Type].Some(param_type),
@@ -3202,7 +3204,7 @@ given TypeChecker {
                                 helper_name,
                             );
                             let mutable typed_args = List[TypedExpr].new();
-                            let mutable arg_idx UInt = 0;
+                            let mutable arg_idx: UInt = 0;
                             for a in args then {
                                 let arg_expected = when param_types.get(arg_idx) in {
                                     .Some(param_type) then Option[Type].Some(param_type),
@@ -3241,7 +3243,7 @@ given TypeChecker {
                                 helper_name,
                             );
                             let mutable typed_args = List[TypedExpr].new();
-                            let mutable arg_idx UInt = 0;
+                            let mutable arg_idx: UInt = 0;
                             for a in args then {
                                 let arg_expected = when param_types.get(arg_idx) in {
                                     .Some(param_type) then Option[Type].Some(param_type),
@@ -3283,11 +3285,7 @@ given TypeChecker {
     /// non-pointer expected type it is the ordinary mismatch row with the
     /// literal's spelling as the got-side. It lowers to the `nullPtr` typed
     /// intrinsic -- the same machinery `null_ptr()` used.
-    lower_null_literal(
-        self,
-        expected Option[Type],
-        span SourceSpan,
-    ) TypedExpr = {
+    lower_null_literal(self, expected: Option[Type], span: SourceSpan): TypedExpr = {
         return when expected in {
             .None() then {
                 self.push_diagnostic_at_span(
@@ -3329,10 +3327,10 @@ given TypeChecker {
 
     check_literal_pattern_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Identifier(name, span) then {
                 let typed_ident = self.check_identifier_expr_at(name, span, scope, false);
@@ -3596,7 +3594,7 @@ given TypeChecker {
         };
     };
 
-    ref_expr_inner_expected(self, expected Option[Type]) Option[Type] = {
+    ref_expr_inner_expected(self, expected: Option[Type]): Option[Type] = {
         return when expected in {
             .Some(et) then when et in {
                 .ReferenceType(inner_t) then Option[Type].Some(inner_t),
@@ -3608,10 +3606,10 @@ given TypeChecker {
     };
     check_ref_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .RefExpr(inner, is_mutable, _) then {
                 let mutable inner_expected = Option[Type].None();
@@ -3674,7 +3672,7 @@ given TypeChecker {
                                         typed_base.expr_type,
                                         helper_name,
                                     );
-                                    let mutable arg_idx UInt = 0;
+                                    let mutable arg_idx: UInt = 0;
                                     for arg in args then {
                                         let arg_expected = when param_types.get(arg_idx) in {
                                             .Some(param_type) then Option[Type].Some(
@@ -3697,7 +3695,7 @@ given TypeChecker {
                                         typed_base.expr_type,
                                         helper_name,
                                     );
-                                    let mutable arg_idx UInt = 0;
+                                    let mutable arg_idx: UInt = 0;
                                     for arg in args then {
                                         let arg_expected = when param_types.get(arg_idx) in {
                                             .Some(param_type) then Option[Type].Some(
@@ -3793,10 +3791,10 @@ given TypeChecker {
 
     check_weakref_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         let _ = expected;
         return when expr in {
             .WeakrefExpr(inner, _) then {
@@ -3835,10 +3833,10 @@ given TypeChecker {
 
     check_ptr_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         let _ = expected;
         return when expr in {
             .PtrExpr(inner, is_mutable, _) then {
@@ -3920,10 +3918,10 @@ given TypeChecker {
 
     check_deref_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         let _ = expected;
         let _ = scope;
         return when expr in {
@@ -4112,10 +4110,10 @@ given TypeChecker {
 
     check_reference_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .RefExpr(_, _, _) then self.check_ref_expr_ref(expr, expected, scope),
             .WeakrefExpr(_, _) then self.check_weakref_expr_ref(expr, expected, scope),
@@ -4129,10 +4127,10 @@ given TypeChecker {
 
     check_basic_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Identifier(_, _) then self.check_literal_pattern_expr_ref(
                 expr,
@@ -4184,11 +4182,7 @@ given TypeChecker {
                 expected,
                 scope,
             ),
-            .IsExpr(...) then self.check_literal_pattern_expr_ref(
-                expr,
-                expected,
-                scope,
-            ),
+            .IsExpr(...) then self.check_literal_pattern_expr_ref(expr, expected, scope),
             .IsNotExpr(_, _, _) then self.check_literal_pattern_expr_ref(
                 expr,
                 expected,
@@ -4209,10 +4203,10 @@ given TypeChecker {
 
     check_expr_core_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         // A diagnostic that arrives without a location is a problem at the
         // expression being checked, not at the statement that contains it. The
         // previous location is restored on the way out, which is what keeps a
@@ -4341,7 +4335,10 @@ given TypeChecker {
                 expected,
                 scope,
             ),
-            .EmptyLiteral(lit_span) then self.lower_empty_literal_expr(expected, lit_span),
+            .EmptyLiteral(lit_span) then self.lower_empty_literal_expr(
+                expected,
+                lit_span,
+            ),
             .Call(callee, args, _) then {
                 self.check_call_expr_ref(callee, args, expected, scope)
             },

@@ -20,40 +20,40 @@ There is no garbage collector and no manual `free`. Nominal types come in exactl
 ## A taste of Koral
 
 ```koral
-type Point(x Int, y Int);
-type mutable Counter(mutable hits Int);
+type Point(x: Int, y: Int);
+type mutable Counter(mutable hits: Int);
 
 type Shape {
-    Circle(r Float64),
-    Rectangle(w Float64, h Float64),
+    Circle(r: Float64),
+    Rectangle(w: Float64, h: Float64),
 };
 
 trait Describe {
-    describe(self) String;
+    describe(self): String;
 };
 
-given Point as Describe {
-    describe(self) String = "Point(\(self.x), \(self.y))";
+given Point: Describe {
+    describe(self): String = "Point(\(self.x), \(self.y))";
 };
 
-let area(s Shape) Float64 = when s in {
+let area(s: Shape): Float64 = when s in {
     .Circle(r) then 3.14159 * r * r,
     .Rectangle(w, h) then w * h,
 };
 
-let lookup(key String) Option[Int] =
+let lookup(key: String): Option[Int] =
     if key == "port" then Option[Int].Some(8080) else Option[Int].None();
 
-let double_port(config Option[Int]) Option[Int] = {
+let double_port(config: Option[Int]): Option[Int] = {
     let port = config or return;
     return Option[Int].Some(port * 2);
 };
 
-let main() Void = {
+let main(): Void = {
     let c = Counter(0);
     c.hits = c.hits + 1;
 
-    let shapes List[Shape] = [.Circle(1.0), .Rectangle(2.0, 3.0)];
+    let shapes: List[Shape] = [.Circle(1.0), .Rectangle(2.0, 3.0)];
     let mutable total = 0.0;
     for s in shapes then {
         total = total + area(s);

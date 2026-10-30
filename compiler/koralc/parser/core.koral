@@ -1,32 +1,32 @@
 using "std/os" { ... };
 
 public type DeclQualifiers(
-    is_foreign Bool,
-    is_intrinsic Bool,
-    invalid_message Option[String],
+    is_foreign: Bool,
+    is_intrinsic: Bool,
+    invalid_message: Option[String],
 );
 
 private type ParseDeclFlags(
-    access AccessModifier,
-    has_explicit_access Bool,
-    invalid_access_message Option[String],
+    access: AccessModifier,
+    has_explicit_access: Bool,
+    invalid_access_message: Option[String],
 );
 
 public type mutable Parser(
-    tokens List[Token],
-    file_path String,
-    mutable index UInt,
-    mutable pending_statements List[Statement],
+    tokens: List[Token],
+    file_path: String,
+    mutable index: UInt,
+    mutable pending_statements: List[Statement],
 );
 
 given Parser {
-    parse_debug(self, message String) Void = {
+    parse_debug(self, message: String): Void = {
         if env("KORAL_DEBUG_PARSE") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             eprintln("[parse] \(message)");
         };
     };
 
-    token_position_text(self, token Token) String = {
+    token_position_text(self, token: Token): String = {
         let _ = self;
         let mutable text = StringBuilder.new();
         text.push_string(token.line.to_string());
@@ -37,10 +37,10 @@ given Parser {
 
     format_context_position_error(
         self,
-        prefix String,
-        context String,
-        token Token,
-    ) String = {
+        prefix: String,
+        context: String,
+        token: Token,
+    ): String = {
         let mutable text = StringBuilder.new();
         text.push_string(prefix);
         text.push_string(context);
@@ -51,12 +51,7 @@ given Parser {
         return text.to_string();
     };
 
-    format_progress_error(
-        self,
-        prefix String,
-        context String,
-        token Token,
-    ) String = {
+    format_progress_error(self, prefix: String, context: String, token: Token): String = {
         let mutable text = StringBuilder.new();
         text.push_string(self.format_context_position_error(prefix, context, token));
         text.push_string(" (token: ");
@@ -65,7 +60,7 @@ given Parser {
         return text.to_string();
     };
 
-    parser_error_at(self, message String, token Token) DiagnosticError = {
+    parser_error_at(self, message: String, token: Token): DiagnosticError = {
         return make_diagnostic(
             DiagnosticStage.Parser(),
             self.file_path,
@@ -74,7 +69,7 @@ given Parser {
         );
     };
 
-    parser_error(self, message String) DiagnosticError = {
+    parser_error(self, message: String): DiagnosticError = {
         return self.parser_error_at(message.to_string(), self.current());
     };
 
@@ -85,10 +80,10 @@ given Parser {
     /// were a token.
     unexpected_token_error_at(
         self,
-        got String,
-        expected String,
-        token Token,
-    ) DiagnosticError = {
+        got: String,
+        expected: String,
+        token: Token,
+    ): DiagnosticError = {
         return self.parser_error_at(
             "Unexpected token: \(got), expected: \(expected)",
             token,
@@ -101,7 +96,7 @@ given Parser {
     /// diagnostic with no line/column cannot be acted on. This used to build a
     /// span-less diagnostic, so 75 error paths printed bare `syntax error: msg`
     /// with no `file:line:col`.
-    parser_error_at_current(self, message String) DiagnosticError = {
+    parser_error_at_current(self, message: String): DiagnosticError = {
         return self.parser_error_at(message.to_string(), self.current());
     };
 
@@ -111,22 +106,18 @@ given Parser {
     /// a failure inside a construct that has been read whole -- an
     /// interpolation inside a string literal -- the cursor has moved past the
     /// place the complaint is about.
-    parser_error_at_span(
-        self,
-        message String,
-        span SourceSpan,
-    ) DiagnosticError = {
+    parser_error_at_span(self, message: String, span: SourceSpan): DiagnosticError = {
         return make_diagnostic(DiagnosticStage.Parser(), self.file_path, message, span);
     };
 
-    previous_token(self) Option[Token] = {
+    previous_token(self): Option[Token] = {
         if self.index == 0 then {
             return .None();
         };
         return .Some(self.tokens[self.index - 1]);
     };
 
-    span_from_start(self, start Token) SourceSpan = {
+    span_from_start(self, start: Token): SourceSpan = {
         let start_loc = SourceLocation(start.line, start.column);
         let end_tok = self.previous_token() or else {
             return SourceSpan(start_loc, start_loc);
@@ -135,12 +126,12 @@ given Parser {
         return SourceSpan(start_loc, end_loc);
     };
 
-    token_span(self, token Token) SourceSpan = {
+    token_span(self, token: Token): SourceSpan = {
         let loc = SourceLocation(token.line, token.column);
         return SourceSpan(loc, loc);
     };
 
-    span_from_expr_start(self, expr Expr) SourceSpan = {
+    span_from_expr_start(self, expr: Expr): SourceSpan = {
         let expr_base_span = expr_span(expr);
         let end_tok = self.previous_token() or else {
             return expr_base_span;
@@ -153,7 +144,7 @@ given Parser {
         return SourceSpan(expr_base_span.start, end_loc);
     };
 
-    is_decimal_digits(self, text String) Bool = {
+    is_decimal_digits(self, text: String): Bool = {
         let runes = text.to_runes();
         if runes.is_empty() then {
             return false;
@@ -166,7 +157,7 @@ given Parser {
         return true;
     };
 
-    pattern_from_text(self, text String, span SourceSpan) PatternNode = {
+    pattern_from_text(self, text: String, span: SourceSpan): PatternNode = {
         if text == "_" then {
             return PatternNode.Wildcard(span);
         };
@@ -233,10 +224,10 @@ given Parser {
     };
 
     // 按顶层逗号分割 pattern 参数列表（忽略括号内的逗号）
-    split_pattern_args(self, text String) List[String] = {
+    split_pattern_args(self, text: String): List[String] = {
         let mutable result = List[String].new();
         let mutable current = StringBuilder.new();
-        let mutable depth UInt = 0;
+        let mutable depth: UInt = 0;
         let runes = text.to_runes();
         for ch in runes then {
             if ch == '(' or ch == '[' then {
@@ -260,50 +251,42 @@ given Parser {
         return result;
     };
 
-    public new(tokens List[Token]) Parser = {
+    public new(tokens: List[Token]): Parser = {
         return Parser(tokens, "", 0, List[Statement].new());
     };
 
-    public new_in_file(tokens List[Token], file_path String) Parser = {
-        return Parser(
-            tokens,
-            file_path,
-            0,
-            List[Statement].new(),
-        );
+    public new_in_file(tokens: List[Token], file_path: String): Parser = {
+        return Parser(tokens, file_path, 0, List[Statement].new());
     };
 
-    current(self) Token = {
+    current(self): Token = {
         if self.index < self.tokens.count() then {
             return self.tokens[self.index];
         };
         return Token(TokenKind.Eof(), 0, 0, false);
     };
 
-    save_state(self) UInt = self.index;
+    save_state(self): UInt = self.index;
 
-    restore_state(self, saved UInt) Void = {
+    restore_state(self, saved: UInt): Void = {
         self.index = saved;
     };
 
-    peek_kind(self) Option[TokenKind] = {
+    peek_kind(self): Option[TokenKind] = {
         if self.index + 1 < self.tokens.count() then {
             return .Some(self.tokens[self.index + 1].kind);
         };
         return .None();
     };
 
-    next_is_colon(self) Bool = {
+    next_is_assign(self): Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
         };
-        return self.tokens[self.index + 1].kind is .Colon();
+        return self.tokens[self.index + 1].kind is .Assign();
     };
 
-    current_labeled_argument_name(
-        self,
-        allow_underscore Bool,
-    ) Option[String] = {
+    current_labeled_argument_name(self, allow_underscore: Bool): Option[String] = {
         return when self.current().kind in {
             .Identifier(label) then {
                 if self.is_upper_first(label) then {
@@ -312,7 +295,7 @@ given Parser {
                 if not allow_underscore and label == "_" then {
                     return Option[String].None();
                 };
-                if self.next_is_colon() then {
+                if self.next_is_assign() then {
                     return Option[String].Some(label);
                 };
                 Option[String].None()
@@ -321,28 +304,28 @@ given Parser {
         };
     };
 
-    next_is_then(self) Bool = {
+    next_is_then(self): Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
         };
         return self.tokens[self.index + 1].kind is .KwThen();
     };
 
-    next_is_else(self) Bool = {
+    next_is_else(self): Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
         };
         return self.tokens[self.index + 1].kind is .KwElse();
     };
 
-    next_is_return(self) Bool = {
+    next_is_return(self): Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
         };
         return self.tokens[self.index + 1].kind is .KwReturn();
     };
 
-    is_eof(self) Bool = {
+    is_eof(self): Bool = {
         when self.current().kind in {
             .Eof() then {
                 return true;
@@ -354,7 +337,7 @@ given Parser {
     };
 
     // Range bounds start at the comparison-operand layer, not the full expression grammar.
-    can_start_range_bound(self, kind TokenKind) Bool = {
+    can_start_range_bound(self, kind: TokenKind): Bool = {
         return when kind in {
             .Identifier(_) then true,
             .IntegerLiteral(_) then true,
@@ -385,12 +368,12 @@ given Parser {
 
     // 检查当前位置是否是泛型类型表达式 [T, U]TypeName
     // 判断字符串首字母是否大写（用于区分类型名和变量名）
-    is_upper_first(self, s String) Bool = {
+    is_upper_first(self, s: String): Bool = {
         let runes = s.to_runes();
         if runes.is_empty() then {
             return false;
         };
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < runes.count() then {
             let ch = runes[i];
             if ch == '_' then {
@@ -402,12 +385,12 @@ given Parser {
         return false;
     };
 
-    is_lower_first(self, s String) Bool = {
+    is_lower_first(self, s: String): Bool = {
         let runes = s.to_runes();
         if runes.is_empty() then {
             return false;
         };
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < runes.count() then {
             let ch = runes[i];
             if ch == '_' then {
@@ -419,7 +402,7 @@ given Parser {
         return false;
     };
 
-    is_valid_value_name(self, s String) Bool = {
+    is_valid_value_name(self, s: String): Bool = {
         if s.is_empty() then {
             return false;
         };
@@ -437,7 +420,7 @@ given Parser {
         return all_underscore or self.is_lower_first(s);
     };
 
-    is_valid_module_segment_name(self, s String) Bool = {
+    is_valid_module_segment_name(self, s: String): Bool = {
         if s.is_empty() then {
             return false;
         };
@@ -449,7 +432,7 @@ given Parser {
         if not first.is_ascii_lowercase() then {
             return false;
         };
-        let mutable i UInt = 1;
+        let mutable i: UInt = 1;
         while i < runes.count() then {
             let ch = runes[i];
             if not ch.is_ascii_lowercase() and not ch.is_ascii_digit() and ch != '_' then {
@@ -460,22 +443,22 @@ given Parser {
         return true;
     };
 
-    invalid_variable_name_error(self, name String) String =
+    invalid_variable_name_error(self, name: String): String =
         "Variable name '\(name)' must start with a lowercase letter";
-    invalid_function_name_error(self, name String) String =
+    invalid_function_name_error(self, name: String): String =
         "Function name '\(name)' must start with a lowercase letter";
-    invalid_type_name_error(self, name String) String =
+    invalid_type_name_error(self, name: String): String =
         "Type name '\(name)' must start with an uppercase letter";
-    invalid_field_name_error(self, name String) String =
+    invalid_field_name_error(self, name: String): String =
         "Field name '\(name)' must start with a lowercase letter";
-    invalid_parameter_name_error(self, name String) String =
+    invalid_parameter_name_error(self, name: String): String =
         "Parameter name '\(name)' must start with a lowercase letter";
-    invalid_enum_case_name_error(self, name String) String =
+    invalid_enum_case_name_error(self, name: String): String =
         "Enum case name '\(name)' must start with an uppercase letter";
-    invalid_module_name_error(self, name String) String =
+    invalid_module_name_error(self, name: String): String =
         "Module name '\(name)' must start with a lowercase letter";
 
-    advance(self) Token = {
+    advance(self): Token = {
         let t = self.current();
         if not self.is_eof() then {
             self.index += 1;
@@ -483,13 +466,13 @@ given Parser {
         return t;
     };
 
-    consume_semicolon(self) Void = {
+    consume_semicolon(self): Void = {
         if self.current().kind is .Semicolon() then {
             self.advance();
         };
     };
 
-    require_semicolon(self) Result[Void] = {
+    require_semicolon(self): Result[Void] = {
         if self.current().kind is .Semicolon() then {
             self.advance();
             return .Ok({});
@@ -501,9 +484,9 @@ given Parser {
         );
     };
 
-    can_continue_dot_postfix(self) Bool = self.current().kind is .Dot();
+    can_continue_dot_postfix(self): Bool = self.current().kind is .Dot();
 
-    should_continue_postfix_after_expression(self) Bool = {
+    should_continue_postfix_after_expression(self): Bool = {
         return when self.current().kind in {
             .LParen() then true,
             .LBracket() then true,
@@ -512,7 +495,7 @@ given Parser {
         };
     };
 
-    expect_identifier(self, label String) Result[String] = {
+    expect_identifier(self, label: String): Result[String] = {
         let t = self.current();
         if t.kind is .Identifier(name) then {
             self.advance();
@@ -535,7 +518,7 @@ given Parser {
     /// The same qualifiers, read as a bounded token peek from `start_index`.
     /// Reads the buffer only -- never moves the cursor -- so a caller that just
     /// needs to know what is there does not have to parse and roll back.
-    peek_decl_qualifiers_at(self, start_index UInt) DeclQualifiers = {
+    peek_decl_qualifiers_at(self, start_index: UInt): DeclQualifiers = {
         let mutable is_foreign = false;
         let mutable is_intrinsic = false;
         let mutable invalid_message = Option[String].None();
@@ -595,7 +578,7 @@ given Parser {
         return DeclQualifiers(is_foreign, is_intrinsic, invalid_message);
     };
 
-    parse_decl_qualifiers(self) DeclQualifiers = {
+    parse_decl_qualifiers(self): DeclQualifiers = {
         let mutable is_foreign = false;
         let mutable is_intrinsic = false;
         let mutable invalid_message = Option[String].None();
@@ -656,7 +639,7 @@ given Parser {
     /// it is an attempt to use the old modifier, not a name. A name position is
     /// left alone: `let file_private = 1` and `type T(file_private: Int)` name
     /// their declarations and keep working.
-    legacy_access_modifier_message(self) Option[String] = {
+    legacy_access_modifier_message(self): Option[String] = {
         let mutable name = "";
         when self.current().kind in {
             .Identifier(text) then {
@@ -691,7 +674,7 @@ given Parser {
     /// declaration keyword, or the declared NAME. When the next token instead
     /// completes the current identifier AS a name (`:`, `(`, `[`, a type after a
     /// positional field name, ...) the identifier is a name, not a modifier.
-    next_token_opens_declaration_item(self) Bool = {
+    next_token_opens_declaration_item(self): Bool = {
         if self.index + 1 >= self.tokens.count() then {
             return false;
         };
@@ -702,7 +685,7 @@ given Parser {
         };
     };
 
-    parse_decl_flags(self) ParseDeclFlags = {
+    parse_decl_flags(self): ParseDeclFlags = {
         let mutable access = AccessModifier.Internal();
         let mutable has_explicit_access = false;
         let mutable invalid_access_message = Option[String].None();
@@ -815,11 +798,11 @@ given Parser {
 
     wrap_decl(
         self,
-        access AccessModifier,
-        is_foreign Bool,
-        is_intrinsic Bool,
-        base Decl,
-    ) Result[Decl] = {
+        access: AccessModifier,
+        is_foreign: Bool,
+        is_intrinsic: Bool,
+        base: Decl,
+    ): Result[Decl] = {
         if is_foreign then {
             return when base in {
                 .FunctionDecl(_, name, _, params, return_type, _, span, name_span) then .Ok(
@@ -901,7 +884,7 @@ given Parser {
         return .Ok(base);
     };
 
-    is_type_start(self) Bool = {
+    is_type_start(self): Bool = {
         return when self.current().kind in {
             .Star() then true,
             .QuestionMark() then true,
@@ -926,7 +909,7 @@ given Parser {
 
     /// `*` + type-head (mutable, uppercase ident, Self) starts a pointer type.
     /// `*` + anything else is the dereference operator.
-    index_followed_by_type_head_at(self, index UInt) Bool = {
+    index_followed_by_type_head_at(self, index: UInt): Bool = {
         if index + 1 >= self.tokens.count() then {
             return false;
         };
@@ -943,7 +926,7 @@ given Parser {
     /// A `(` counts when it opens a parenthesized TYPE: either a function
     /// type's parameter list (`*(Int) -> Int(p)` is a cast) or a grouping
     /// (`*(Int)(p)` is a cast); `*(p)` is a deref.
-    index_followed_by_type_application_at(self, index UInt) Bool = {
+    index_followed_by_type_application_at(self, index: UInt): Bool = {
         if self.index_followed_by_type_head_at(index) then {
             return true;
         };
@@ -961,7 +944,7 @@ given Parser {
 
     /// The index just past a `[` ... `]` type argument list that starts at
     /// `start_index`, or `None` when the run is not exactly one.
-    scan_type_list_at(self, start_index UInt) Option[UInt] = {
+    scan_type_list_at(self, start_index: UInt): Option[UInt] = {
         if start_index >= self.tokens.count() then {
             return Option[UInt].None();
         };
@@ -1010,7 +993,7 @@ given Parser {
 
     /// The index just past a `(` ... `)` function-type parameter list that
     /// starts at `start_index`, or `None`.
-    scan_type_param_list_at(self, start_index UInt) Option[UInt] = {
+    scan_type_param_list_at(self, start_index: UInt): Option[UInt] = {
         if start_index >= self.tokens.count() then {
             return Option[UInt].None();
         };
@@ -1063,11 +1046,11 @@ given Parser {
     /// scan as a non-empty type list ending exactly at `)` (a parenthesized
     /// type). An empty `()` is decided by the `->` alone -- `let f () Int = …`
     /// stays a signature.
-    paren_opens_type_at(self, index UInt) Bool = {
+    paren_opens_type_at(self, index: UInt): Bool = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return false;
         };
-        let mutable depth UInt = 0;
+        let mutable depth: UInt = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1102,7 +1085,7 @@ given Parser {
     /// The span of the balanced `(` ... `)` group starting at `index` -- from
     /// the opening paren to the closing one. A grouping complaint is anchored
     /// at the whole group.
-    paren_group_span_at(self, index UInt) Option[SourceSpan] = {
+    paren_group_span_at(self, index: UInt): Option[SourceSpan] = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return Option[SourceSpan].None();
         };
@@ -1110,7 +1093,7 @@ given Parser {
             self.tokens[index].line,
             self.tokens[index].column,
         );
-        let mutable depth UInt = 0;
+        let mutable depth: UInt = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1137,11 +1120,11 @@ given Parser {
     /// Whether the balanced `(` ... `)` run starting at `index` is followed by
     /// a `->`: the tell of a function TYPE's parameter list. A parenthesized
     /// group without the `->` is a grouping of exactly one type instead.
-    paren_run_followed_by_arrow_at(self, index UInt) Bool = {
+    paren_run_followed_by_arrow_at(self, index: UInt): Bool = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return false;
         };
-        let mutable depth UInt = 0;
+        let mutable depth: UInt = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1164,7 +1147,7 @@ given Parser {
 
     /// The index just past one type starting at `start_index`, or `None` when
     /// the run there is not a type.
-    scan_type_shape_at(self, start_index UInt) Option[UInt] = {
+    scan_type_shape_at(self, start_index: UInt): Option[UInt] = {
         let mutable i = start_index;
         // Prefixes: `?T`, `*T`, `*mutable T`. They nest: `?*T`.
         let mutable more_prefixes = true;
@@ -1226,7 +1209,7 @@ given Parser {
     /// or `None`. This is the SHAPE of a postfix cast and of a Rust-style
     /// qualified path `Type(Trait)`; which one it is depends on the base, not
     /// on the tokens here.
-    scan_paren_type_suffix_at(self, start_index UInt) Option[UInt] = {
+    scan_paren_type_suffix_at(self, start_index: UInt): Option[UInt] = {
         if start_index >= self.tokens.count() then {
             return Option[UInt].None();
         };
@@ -1247,11 +1230,11 @@ given Parser {
 
     /// The index just past a `[ <type-list> ]` suffix that starts at
     /// `start_index`, or `None`.
-    scan_type_arg_list_suffix_at(self, start_index UInt) Option[UInt] = {
+    scan_type_arg_list_suffix_at(self, start_index: UInt): Option[UInt] = {
         return self.scan_type_list_at(start_index);
     };
 
-    parse_type_arg_list(self) Result[List[TypeNode]] = {
+    parse_type_arg_list(self): Result[List[TypeNode]] = {
         when self.current().kind in {
             .LBracket() then {
                 self.advance();
@@ -1288,7 +1271,7 @@ given Parser {
         return .Ok(args);
     };
 
-    parse_function_type_param_list(self) Result[List[TypeNode]] = {
+    parse_function_type_param_list(self): Result[List[TypeNode]] = {
         when self.current().kind in {
             .LParen() then {
                 self.advance();
@@ -1331,7 +1314,7 @@ given Parser {
 
     // A type-parameter bound. `None` means "no bound at all" -- `Any` is the
     // absence of a constraint, not a constraint, so it never reaches the AST.
-    parse_trait_constraint(self) Result[Option[Bound]] = {
+    parse_trait_constraint(self): Result[Option[Bound]] = {
         if self.current().kind is .KwMut() then {
             self.advance();
             return .Ok(Option[Bound].Some(Bound.Mutable()));
@@ -1347,7 +1330,7 @@ given Parser {
         return .Error(self.parser_error("Expected type parameter constraint"));
     };
 
-    parse_type(self) Result[TypeNode] = {
+    parse_type(self): Result[TypeNode] = {
         // The type's span starts at its first token -- `?T` starts at the `?`,
         // `*T` at the `*`, `List[Int]` at the name. A diagnostic that
         // names the type points here.
@@ -1454,7 +1437,6 @@ given Parser {
             .Identifier(module_or_name) then {
                 self.advance();
 
-
                 if not self.is_upper_first(module_or_name) then {
                     let mutable message = StringBuilder.new();
                     message.push_string("Type name '");
@@ -1488,7 +1470,7 @@ given Parser {
         };
     };
 
-    parse_type_parameters(self) Result[List[TypeParameter]] = {
+    parse_type_parameters(self): Result[List[TypeParameter]] = {
         let mutable params = List[TypeParameter].new();
 
         if self.current().kind is .LBracket() then {
@@ -1530,7 +1512,19 @@ given Parser {
                     self.parser_error_at_current("Lifetime syntax has been removed."),
                 );
             };
-            if self.current().kind is not .KwMut() and is not .KwForeign() and not self.is_type_start() then {
+            // Constraints are spelled `name: C1 and C2`; the colon separates
+            // the type parameter from its bounds.
+            if self.current().kind is .Colon() then {
+                self.advance();
+            } else {
+                return .Error(
+                    self.parser_error_at_current(
+                        "expected ':' after generic parameter name '\(param_name)'",
+                    ),
+                );
+            };
+            if self.current().kind is not .KwMut() and is not .KwForeign() and not self.is_type_start(
+            ) then {
                 let t = self.current();
                 let mutable message = StringBuilder.new();
                 message.push_string("Type parameter '");
@@ -1586,7 +1580,7 @@ given Parser {
     /// Supported literals: integer, float, bool, string, rune, empty collection
     /// (`[]`), full-range (`...`), null (`null`). A leading `-` is accepted for
     /// numeric literals (`x: Int = -1`).
-    parse_default_value_literal(self) Result[Expr] = {
+    parse_default_value_literal(self): Result[Expr] = {
         let start_token = self.current();
         let start_span = self.token_span(start_token);
         if start_token.kind is .Minus() then {
@@ -1679,9 +1673,9 @@ given Parser {
 
     parse_param_list(
         self,
-        func_name String,
-        reject_named_params Bool,
-    ) Result[List[Param]] = {
+        func_name: String,
+        reject_named_params: Bool,
+    ): Result[List[Param]] = {
         let mutable params = List[Param].new();
         // Positional params must come before named params (grammar.bnf
         // <func-param-list>): a declaration fixes one call shape, so the two
@@ -1738,24 +1732,15 @@ given Parser {
                     );
                 };
 
-                // Check for colon - indicates named parameter
-                let mutable is_named = false;
+                // Every parameter is spelled `name: Type`; the colon separates
+                // the name from its type. A following `=` marks a named
+                // parameter (`name: Type =` required, `name: Type = value`).
                 if self.current().kind is .Colon() then {
-                    is_named = true;
                     self.advance();
-                    if reject_named_params then {
-                        return .Error(
-                            self.parser_error_at(
-                                "Named parameters are not supported in foreign declarations",
-                                name_token,
-                            ),
-                        );
-                    };
-                    seen_named = true;
-                } else if seen_named then {
+                } else {
                     return .Error(
                         self.parser_error_at_current(
-                            "Positional parameter '\(name)' cannot appear after named parameters",
+                            "expected ':' after parameter name '\(name)'",
                         ),
                     );
                 };
@@ -1769,19 +1754,32 @@ given Parser {
                 };
                 let mutable param_type = self.parse_type() or return;
 
-                // Only named parameters can have default values
+                // `=` marks a named parameter; an empty `=` is the required
+                // form whose slot the caller fills.
+                let mutable is_named = false;
                 let mutable default_value = Option[Expr].None();
                 if self.current().kind is .Assign() then {
-                    if not is_named then {
+                    is_named = true;
+                    self.advance();
+                    if reject_named_params then {
                         return .Error(
-                            self.parser_error_at_current(
-                                "Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
+                            self.parser_error_at(
+                                "Named parameters are not supported in foreign declarations",
+                                name_token,
                             ),
                         );
                     };
-                    self.advance();
-                    let default_expr = self.parse_default_value_literal() or return;
-                    default_value = Option[Expr].Some(default_expr);
+                    seen_named = true;
+                    if self.current().kind is not .Comma() and is not .RParen() then {
+                        let default_expr = self.parse_default_value_literal() or return;
+                        default_value = Option[Expr].Some(default_expr);
+                    };
+                } else if seen_named then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Positional parameter '\(name)' cannot appear after named parameters",
+                        ),
+                    );
                 };
 
                 params.push(Param(name, is_mut, param_type, is_named, default_value));
@@ -1808,7 +1806,7 @@ given Parser {
         return .Ok(params);
     };
 
-    parse_let_decl(self, access AccessModifier) Result[Decl] = {
+    parse_let_decl(self, access: AccessModifier): Result[Decl] = {
         let start = self.current();
         self.advance();
 
@@ -1873,14 +1871,9 @@ given Parser {
             };
             self.advance();
 
-            if self.current().kind is .Assign() then {
-                return .Error(
-                    self.parser_error_at_current(
-                        "Missing return type: function and method declarations must explicitly declare a return type",
-                    ),
-                );
-            };
-            if not self.is_type_start() then {
+            if self.current().kind is .Colon() then {
+                self.advance();
+            } else {
                 return .Error(
                     self.parser_error_at_current(
                         "Missing return type: function and method declarations must explicitly declare a return type",
@@ -1957,7 +1950,9 @@ given Parser {
         };
 
         if decl_is_foreign then {
-            if not self.is_type_start() then {
+            if self.current().kind is .Colon() then {
+                self.advance();
+            } else {
                 return .Error(
                     self.parser_error_at_current(
                         "foreign let declaration requires explicit type",
@@ -1980,7 +1975,8 @@ given Parser {
         };
 
         let mutable type_name = Option[TypeNode].None();
-        if self.is_type_start() then {
+        if self.current().kind is .Colon() then {
+            self.advance();
             let parsed = self.parse_type() or return;
             type_name = .Some(parsed);
         };
@@ -2011,7 +2007,7 @@ given Parser {
         return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
     };
 
-    parse_type_decl(self, access AccessModifier) Result[Decl] = {
+    parse_type_decl(self, access: AccessModifier): Result[Decl] = {
         let start = self.current();
         self.advance();
 
@@ -2111,35 +2107,40 @@ given Parser {
                                 );
                             };
 
-                            // Check for colon - indicates named field
-                            let mutable field_named = false;
+                            // Every field is spelled `name: Type`; a following
+                            // `=` marks a named field (`name: Type =` required,
+                            // `name: Type = value`).
                             if self.current().kind is .Colon() then {
-                                field_named = true;
-                                seen_named_field = true;
                                 self.advance();
-                            } else if seen_named_field then {
+                            } else {
                                 return .Error(
                                     self.parser_error_at_current(
-                                        "Positional field '\(field_name)' cannot appear after named fields",
+                                        "expected ':' after field name '\(field_name)'",
                                     ),
                                 );
                             };
 
                             let mutable field_type = self.parse_type() or return;
 
-                            // Only named fields can have default values
+                            let mutable field_named = false;
                             let mutable field_default_value = Option[Expr].None();
                             if self.current().kind is .Assign() then {
-                                if not field_named then {
-                                    return .Error(
-                                        self.parser_error_at_current(
-                                            "Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
-                                        ),
+                                field_named = true;
+                                seen_named_field = true;
+                                self.advance();
+                                if self.current().kind is not .Comma() and is not .RParen() then {
+                                    let field_default_expr = self.parse_default_value_literal(
+                                    ) or return;
+                                    field_default_value = Option[Expr].Some(
+                                        field_default_expr,
                                     );
                                 };
-                                self.advance();
-                                let field_default_expr = self.parse_default_value_literal() or return;
-                                field_default_value = Option[Expr].Some(field_default_expr);
+                            } else if seen_named_field then {
+                                return .Error(
+                                    self.parser_error_at_current(
+                                        "Positional field '\(field_name)' cannot appear after named fields",
+                                    ),
+                                );
                             };
 
                             fields.push(
@@ -2281,34 +2282,37 @@ given Parser {
                                                 ),
                                             );
                                         };
-                                        // Check for colon - indicates named field
-                                        let mutable payload_named = false;
+                                        // Every field is spelled `name: Type`; a
+                                        // following `=` marks a named field.
                                         if self.current().kind is .Colon() then {
+                                            self.advance();
+                                        } else {
+                                            return .Error(
+                                                self.parser_error_at_current(
+                                                    "expected ':' after field name '\(payload_name)'",
+                                                ),
+                                            );
+                                        };
+                                        let mutable payload_type = self.parse_type() or return;
+                                        let mutable payload_named = false;
+                                        let mutable payload_default_value = Option[Expr].None(
+                                        );
+                                        if self.current().kind is .Assign() then {
                                             payload_named = true;
                                             self.advance();
                                             seen_named_payload = true;
+                                            if self.current().kind is not .Comma() and is not .RParen() then {
+                                                let payload_default_expr = self.parse_default_value_literal(
+                                                ) or return;
+                                                payload_default_value = Option[Expr].Some(
+                                                    payload_default_expr,
+                                                );
+                                            };
                                         } else if seen_named_payload then {
                                             return .Error(
                                                 self.parser_error_at_current(
                                                     "Positional field '\(payload_name)' cannot appear after named fields",
                                                 ),
-                                            );
-                                        };
-                                        let mutable payload_type = self.parse_type() or return;
-                                        // Parse optional default value for named fields
-                                        let mutable payload_default_value = Option[Expr].None();
-                                        if self.current().kind is .Assign() then {
-                                            if not payload_named then {
-                                                return .Error(
-                                                    self.parser_error_at_current(
-                                                        "Default values are only allowed for named parameters (use 'name: Type = value' syntax)",
-                                                    ),
-                                                );
-                                            };
-                                            self.advance();
-                                            let payload_default_expr = self.parse_default_value_literal() or return;
-                                            payload_default_value = Option[Expr].Some(
-                                                payload_default_expr,
                                             );
                                         };
                                         case_fields.push(
@@ -2404,7 +2408,7 @@ given Parser {
         };
     };
 
-    parse_let_statement(self) Result[Statement] = {
+    parse_let_statement(self): Result[Statement] = {
         let start = self.current();
         self.advance();
 
@@ -2430,7 +2434,8 @@ given Parser {
         };
 
         let mutable type_name = Option[TypeNode].None();
-        if self.is_type_start() then {
+        if self.current().kind is .Colon() then {
+            self.advance();
             let parsed_type_name = self.parse_type() or return;
             type_name = .Some(parsed_type_name);
         };
@@ -2454,7 +2459,7 @@ given Parser {
 
     /// `let (a, b, c) = expr;` -- positional destructuring of a struct with
     /// exactly that many fields, in declaration order. At least two slots.
-    parse_tuple_let_statement(self, start Token) Result[Statement] = {
+    parse_tuple_let_statement(self, start: Token): Result[Statement] = {
         self.advance();
 
         let mutable bindings = List[PairBindingElement].new();
@@ -2498,7 +2503,7 @@ given Parser {
         );
     };
 
-    parse_pair_binding_element(self) Result[PairBindingElement] = {
+    parse_pair_binding_element(self): Result[PairBindingElement] = {
         let start = self.current();
 
         // Nested tuple binding: `(a, (b, c))`. A parenthesized run of two or
@@ -2559,14 +2564,10 @@ given Parser {
         };
 
         let mutable type_name = Option[TypeNode].None();
-        when self.current().kind in {
-            .Comma() then {},
-            .RParen() then {},
-            .KwIn() then {},
-            _ then {
-                let parsed_type_name = self.parse_type() or return;
-                type_name = .Some(parsed_type_name);
-            },
+        if self.current().kind is .Colon() then {
+            self.advance();
+            let parsed_type_name = self.parse_type() or return;
+            type_name = .Some(parsed_type_name);
         };
 
         return .Ok(
@@ -2588,8 +2589,8 @@ given Parser {
     /// same way. The caller emits the outer statement first, then the extras.
     flatten_nested_bindings(
         self,
-        bindings List[PairBindingElement],
-    ) Pair[List[PairBindingElement], List[Pair[List[PairBindingElement], String]]] = {
+        bindings: List[PairBindingElement],
+    ): Pair[List[PairBindingElement], List[Pair[List[PairBindingElement], String]]] = {
         let mutable flat = List[PairBindingElement].new();
         let mutable extras = List[Pair[List[PairBindingElement], String]].new();
         for binding in bindings then {
@@ -2631,9 +2632,9 @@ given Parser {
     /// The `let (b, c) = temp;` statements an expanded nested binding implies.
     nested_binding_extra_lets(
         self,
-        extras List[Pair[List[PairBindingElement], String]],
-        span SourceSpan,
-    ) List[Statement] = {
+        extras: List[Pair[List[PairBindingElement], String]],
+        span: SourceSpan,
+    ): List[Statement] = {
         let mutable out = List[Statement].new();
         for extra in extras then {
             out.push(
@@ -2647,7 +2648,7 @@ given Parser {
         return out;
     };
 
-    is_assignment_operator(self) Bool = {
+    is_assignment_operator(self): Bool = {
         return when self.current().kind in {
             .Assign() then true,
             .PlusAssign() then true,
@@ -2664,9 +2665,7 @@ given Parser {
         };
     };
 
-    parse_assignment_operator(
-        self,
-    ) Result[Option[CompoundAssignmentOperator]] = {
+    parse_assignment_operator(self): Result[Option[CompoundAssignmentOperator]] = {
         return when self.current().kind in {
             .Assign() then .Ok(Option[CompoundAssignmentOperator].None()),
             .PlusAssign() then .Ok(.Some(CompoundAssignmentOperator.AddAssign())),
@@ -2693,7 +2692,7 @@ given Parser {
         };
     };
 
-    parse_expression_checked(self, context String) Result[Expr] = {
+    parse_expression_checked(self, context: String): Result[Expr] = {
         let t = self.current();
         self.parse_debug("expr begin");
         let before = self.index;
@@ -2725,7 +2724,7 @@ given Parser {
         return .Ok(expr);
     };
 
-    parse_statement(self) Result[Statement] = {
+    parse_statement(self): Result[Statement] = {
         let start = self.current();
         self.parse_debug("statement dispatch");
         when self.current().kind in {

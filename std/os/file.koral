@@ -13,27 +13,27 @@ using "std/io" { Reader, Writer, Seeker, SeekOrigin };
 // ============================================================================
 
 /// Close a file descriptor (POSIX close wrapper)
-let foreign __koral_close(fd Int32) Int32;
+let foreign __koral_close(fd: Int32): Int32;
 
 /// Read from a file descriptor (POSIX read wrapper, unbuffered)
-let foreign __koral_read(fd Int32, buf *UInt8, count UInt) Int64;
+let foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Write to a file descriptor (POSIX write wrapper, unbuffered)
-let foreign __koral_write(fd Int32, buf *UInt8, count UInt) Int64;
+let foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Sync file data to disk (POSIX fsync wrapper)
-let foreign __koral_fsync(fd Int32) Int32;
+let foreign __koral_fsync(fd: Int32): Int32;
 
 /// Seek within a file (POSIX lseek wrapper)
-let foreign __koral_lseek(fd Int32, offset Int64, whence Int32) Int64;
+let foreign __koral_lseek(fd: Int32, offset: Int64, whence: Int32): Int64;
 
 /// File locking (cross-platform flock/LockFileEx wrapper)
 /// operation: 1=LOCK_SH, 2=LOCK_EX, 4=LOCK_NB (combinable), 8=LOCK_UN
-let foreign __koral_flock(fd Int32, operation Int32) Int32;
+let foreign __koral_flock(fd: Int32, operation: Int32): Int32;
 
 /// Check if current errno is EWOULDBLOCK (cross-platform)
 /// Returns non-zero if errno is EWOULDBLOCK
-let foreign __koral_errno_is_wouldblock() Int32;
+let foreign __koral_errno_is_wouldblock(): Int32;
 
 // ============================================================================
 // OpenMode Enum
@@ -54,13 +54,13 @@ public type OpenMode {
 
 /// Internal file storage holding the file descriptor and path.
 /// Responsible for closing the fd via drop when the last reference is released.
-type mutable FileStorage(fd Int32, path Path);
+type mutable FileStorage(fd: Int32, path: Path);
 
-given FileStorage as Drop {
+given FileStorage: Drop {
 
     /// Automatically close the file descriptor when FileStorage is dropped.
     /// Only closes when fd >= 0 (valid file descriptor).
-    drop(self) Void = {
+    drop(self): Void = {
         if self.fd >= 0 then {
             __koral_close(self.fd);
         };
@@ -72,7 +72,7 @@ given FileStorage as Drop {
 // ============================================================================
 
 /// Query file metadata via file descriptor (fstat wrapper)
-let foreign __koral_fstat(fd Int32, out *KoralStatResult) Int32;
+let foreign __koral_fstat(fd: Int32, out: *KoralStatResult): Int32;
 
 // ============================================================================
 // Helpers
@@ -87,20 +87,20 @@ let foreign __koral_fstat(fd Int32, out *KoralStatResult) Int32;
 /// The file descriptor is automatically closed when the last reference is released.
 /// Unbuffered design: directly wraps the file descriptor (fd).
 /// For buffered I/O, wrap with std.io BufReader/BufWriter.
-public type mutable File(storage FileStorage);
+public type mutable File(storage: FileStorage);
 
 given File {
 
     /// Returns the underlying OS file descriptor.
     /// This is a low-level operation for interop with OS APIs and cross-module fd sharing.
-    public fd(self) Int = Int(self.storage.fd);
+    public fd(self): Int = Int(self.storage.fd);
 
     /// Get the file path (returns the normalized path from when the file was opened).
     /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
-    public path(self) Path = self.storage.path;
+    public path(self): Path = self.storage.path;
 
     /// Get file metadata by querying via the file descriptor (no path needed).
-    public info(self) Result[FileInfo] = {
+    public info(self): Result[FileInfo] = {
         let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
         let result = __koral_fstat(self.storage.fd, &stat_buf);
         if result != 0 then {
@@ -125,7 +125,7 @@ given File {
     };
 
     /// Sync file data to disk (fsync, ensures physical persistence).
-    public sync(self) Result[Void] = {
+    public sync(self): Result[Void] = {
         let result = __koral_fsync(self.storage.fd);
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -137,7 +137,7 @@ given File {
     // Based on flock(2) (Unix) / LockFileEx (Windows), whole-file advisory lock
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
-    public lock(self) Result[Void] = {
+    public lock(self): Result[Void] = {
         let result = __koral_flock(self.storage.fd, 2); // LOCK_EX
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -146,7 +146,7 @@ given File {
     };
 
     /// Acquire a shared lock (blocking, waits until acquired)
-    public lock_shared(self) Result[Void] = {
+    public lock_shared(self): Result[Void] = {
         let result = __koral_flock(self.storage.fd, 1); // LOCK_SH
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -156,7 +156,7 @@ given File {
 
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
-    public try_lock(self) Result[Bool] = {
+    public try_lock(self): Result[Bool] = {
         let result = __koral_flock(self.storage.fd, 6); // LOCK_EX | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
@@ -169,7 +169,7 @@ given File {
 
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
-    public try_lock_shared(self) Result[Bool] = {
+    public try_lock_shared(self): Result[Bool] = {
         let result = __koral_flock(self.storage.fd, 5); // LOCK_SH | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
@@ -181,7 +181,7 @@ given File {
     };
 
     /// Release the lock
-    public unlock(self) Result[Void] = {
+    public unlock(self): Result[Void] = {
         let result = __koral_flock(self.storage.fd, 8); // LOCK_UN
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -190,10 +190,10 @@ given File {
     };
 };
 
-given File as Reader {
+given File: Reader {
 
     // Unbuffered: directly calls POSIX read, errors returned immediately
-    public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -209,10 +209,10 @@ given File as Reader {
     };
 };
 
-given File as Writer {
+given File: Writer {
 
     // Unbuffered: directly calls POSIX write, errors returned immediately
-    public write(self, from: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -228,14 +228,14 @@ given File as Writer {
     };
 
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
-    public flush(self) Result[Void] = Result[Void].Ok({});
+    public flush(self): Result[Void] = Result[Void].Ok({});
 };
 
-given File as Seeker {
+given File: Seeker {
 
-    public seek(self, pos SeekOrigin) Result[UInt64] = {
-        let mutable offset Int64 = 0;
-        let mutable whence Int32 = 0;
+    public seek(self, pos: SeekOrigin): Result[UInt64] = {
+        let mutable offset: Int64 = 0;
+        let mutable whence: Int32 = 0;
         when pos in {
             .Start(o) then {
                 offset = Int64(o);

@@ -14,13 +14,13 @@ using "std/io" { Reader, Writer };
 // ============================================================================
 
 /// Read from a pipe file descriptor (POSIX read wrapper)
-let foreign __koral_pipe_read(fd Int32, buf *UInt8, count UInt) Int64;
+let foreign __koral_pipe_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Write to a pipe file descriptor (POSIX write wrapper)
-let foreign __koral_pipe_write(fd Int32, buf *UInt8, count UInt) Int64;
+let foreign __koral_pipe_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Close a pipe file descriptor (POSIX close wrapper)
-let foreign __koral_pipe_close(fd Int32) Int32;
+let foreign __koral_pipe_close(fd: Int32): Int32;
 
 /// Get pointer to errno value
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity
@@ -35,13 +35,13 @@ let foreign __koral_pipe_close(fd Int32) Int32;
 
 /// Internal pipe storage holding the file descriptor.
 /// Responsible for closing the fd via drop when the last reference is released.
-type mutable PipeStorage(fd Int32);
+type mutable PipeStorage(fd: Int32);
 
-given PipeStorage as Drop {
+given PipeStorage: Drop {
 
     /// Automatically close the pipe fd when PipeStorage is dropped.
     /// Only closes when fd >= 0 (valid file descriptor).
-    drop(self) Void = {
+    drop(self): Void = {
         if self.fd >= 0 then {
             __koral_pipe_close(self.fd);
         };
@@ -54,18 +54,18 @@ given PipeStorage as Drop {
 
 /// Child process stdin pipe (implements Writer trait).
 /// Closing the pipe via drop sends EOF to the child process.
-public type mutable StdinPipe(storage PipeStorage);
+public type mutable StdinPipe(storage: PipeStorage);
 
 given StdinPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self) Int = Int(self.storage.fd);
+    public fd(self): Int = Int(self.storage.fd);
 };
 
-given StdinPipe as Writer {
+given StdinPipe: Writer {
 
     /// Write data to the child process stdin.
-    public write(self, from: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -81,7 +81,7 @@ given StdinPipe as Writer {
     };
 
     /// Flush is a no-op for pipes (data is already in kernel buffer).
-    public flush(self) Result[Void] = Result[Void].Ok({});
+    public flush(self): Result[Void] = Result[Void].Ok({});
 };
 
 // ============================================================================
@@ -89,18 +89,18 @@ given StdinPipe as Writer {
 // ============================================================================
 
 /// Child process stdout pipe (implements Reader trait).
-public type mutable StdoutPipe(storage PipeStorage);
+public type mutable StdoutPipe(storage: PipeStorage);
 
 given StdoutPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self) Int = Int(self.storage.fd);
+    public fd(self): Int = Int(self.storage.fd);
 };
 
-given StdoutPipe as Reader {
+given StdoutPipe: Reader {
 
     /// Read data from the child process stdout.
-    public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -121,18 +121,18 @@ given StdoutPipe as Reader {
 // ============================================================================
 
 /// Child process stderr pipe (implements Reader trait).
-public type mutable StderrPipe(storage PipeStorage);
+public type mutable StderrPipe(storage: PipeStorage);
 
 given StderrPipe {
 
     /// Returns the underlying OS file descriptor.
-    public fd(self) Int = Int(self.storage.fd);
+    public fd(self): Int = Int(self.storage.fd);
 };
 
-given StderrPipe as Reader {
+given StderrPipe: Reader {
 
     /// Read data from the child process stderr.
-    public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();

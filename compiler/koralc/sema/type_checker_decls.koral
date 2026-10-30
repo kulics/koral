@@ -17,12 +17,12 @@
 /// Everywhere else -- an argument, a `let` initializer, a return value -- it is
 /// a bare value and escapes. Under a lambda (`in_lambda`) even a receiver use
 /// escapes, because the closure captures it.
-let drop_self_escape_span(e Expr) Option[SourceSpan] = {
+let drop_self_escape_span(e: Expr): Option[SourceSpan] = {
     return drop_self_escape_span_in(e, false);
 };
 
 /// Whether `base` is a legal receiver use of `self`.
-let drop_self_receiver_span(base Expr, in_lambda Bool) Option[SourceSpan] = {
+let drop_self_receiver_span(base: Expr, in_lambda: Bool): Option[SourceSpan] = {
     if in_lambda then {
         return drop_self_escape_span_in(base, in_lambda);
     };
@@ -36,7 +36,7 @@ let drop_self_receiver_span(base Expr, in_lambda Bool) Option[SourceSpan] = {
     };
 };
 
-let drop_self_escape_span_in(e Expr, in_lambda Bool) Option[SourceSpan] = {
+let drop_self_escape_span_in(e: Expr, in_lambda: Bool): Option[SourceSpan] = {
     return when e in {
         .Identifier(name, span) then if name == "self" then {
             Option[SourceSpan].Some(span)
@@ -210,10 +210,7 @@ let drop_self_escape_span_in(e Expr, in_lambda Bool) Option[SourceSpan] = {
     };
 };
 
-let drop_self_escape_in_list(
-    exprs List[Expr],
-    in_lambda Bool,
-) Option[SourceSpan] = {
+let drop_self_escape_in_list(exprs: List[Expr], in_lambda: Bool): Option[SourceSpan] = {
     for e in exprs then {
         let found = drop_self_escape_span_in(e, in_lambda);
         if found is .Some(_) then {
@@ -224,9 +221,9 @@ let drop_self_escape_in_list(
 };
 
 let drop_self_escape_in_pairs(
-    entries List[ExprPair],
-    in_lambda Bool,
-) Option[SourceSpan] = {
+    entries: List[ExprPair],
+    in_lambda: Bool,
+): Option[SourceSpan] = {
     for entry in entries then {
         let found = drop_self_escape_span_in(entry.first, in_lambda);
         if found is .Some(_) then {
@@ -241,9 +238,9 @@ let drop_self_escape_in_pairs(
 };
 
 let drop_self_escape_in_parts(
-    parts List[InterpolatedStringPart],
-    in_lambda Bool,
-) Option[SourceSpan] = {
+    parts: List[InterpolatedStringPart],
+    in_lambda: Bool,
+): Option[SourceSpan] = {
     for part in parts then {
         let found = when part in {
             .Literal(_) then Option[SourceSpan].None(),
@@ -256,10 +253,7 @@ let drop_self_escape_in_parts(
     return Option[SourceSpan].None();
 };
 
-let drop_self_escape_in_arms(
-    arms List[WhenArm],
-    in_lambda Bool,
-) Option[SourceSpan] = {
+let drop_self_escape_in_arms(arms: List[WhenArm], in_lambda: Bool): Option[SourceSpan] = {
     for arm in arms then {
         let found = drop_self_escape_span_in(arm.body, in_lambda);
         if found is .Some(_) then {
@@ -270,9 +264,9 @@ let drop_self_escape_in_arms(
 };
 
 let drop_self_escape_in_statements(
-    statements List[Statement],
-    in_lambda Bool,
-) Option[SourceSpan] = {
+    statements: List[Statement],
+    in_lambda: Bool,
+): Option[SourceSpan] = {
     for statement in statements then {
         let found = when statement in {
             .LetStmt(_, _, _, value, _) then drop_self_escape_span_in(value, in_lambda),
@@ -307,9 +301,9 @@ let drop_self_escape_in_statements(
 given TypeChecker {
     validate_drop_member_signature(
         self,
-        target_type Type,
-        members List[TypedGivenMember],
-    ) Void = {
+        target_type: Type,
+        members: List[TypedGivenMember],
+    ): Void = {
         // In the simplified type system, drop(self) is the accepted signature.
         // The parameter type is Self (the type itself), not *mutable Self.
         let mutable expected_param_type = target_type;
@@ -352,10 +346,7 @@ given TypeChecker {
     /// method call. Everything else -- returning it, binding it, storing it,
     /// passing it on, capturing it -- would let a dying object outlive its own
     /// destructor. See `docs/guide/document.md` "Drop".
-    validate_drop_member_body_escape(
-        self,
-        members List[GivenMember],
-    ) Void = {
+    validate_drop_member_body_escape(self, members: List[GivenMember]): Void = {
         for member in members then {
             if member.name != "drop" then {
                 continue;
@@ -378,7 +369,7 @@ given TypeChecker {
 
     /// Mark the target type as having explicit Drop conformance.
     /// This ensures the nominal layout analysis treats it as managed (ARC-backed).
-    mark_explicit_drop_conformance(self, target_type Type) Void = {
+    mark_explicit_drop_conformance(self, target_type: Type): Void = {
         when target_type in {
             .StructureType(def_id) then self.context().set_explicit_drop(def_id),
             .EnumType(def_id) then self.context().set_explicit_drop(def_id),
@@ -393,11 +384,7 @@ given TypeChecker {
         };
     };
 
-    check_decl(
-        self,
-        decl Decl,
-        retain_checked_template_bodies Bool,
-    ) TypedDecl = {
+    check_decl(self, decl: Decl, retain_checked_template_bodies: Bool): TypedDecl = {
         let outer_span = self.enter_current_span(self.decl_span(decl));
         defer {
             self.leave_current_span(outer_span);
@@ -966,7 +953,8 @@ given TypeChecker {
                                     f.name,
                                     f.is_mutable,
                                     self.resolve_type(f.type_name),
-                                    f.named, f.default_value
+                                    f.named,
+                                    f.default_value,
                                 ),
                             );
                         };
@@ -1090,7 +1078,11 @@ given TypeChecker {
                 };
                 let trait_def_id = self.lookup_current_file_def_id(name) or else def_id_invalid(
                 );
-                let typed_members = self.check_trait_members(members, type_params, trait_def_id);
+                let typed_members = self.check_trait_members(
+                    members,
+                    type_params,
+                    trait_def_id,
+                );
                 self.register_trait_metadata(
                     name,
                     trait_def_id,
@@ -1323,7 +1315,7 @@ given TypeChecker {
                                     ) in {
                                         .Some(ti) then {
                                             let targs = resolved_trait_args;
-                                            let mutable tidx UInt = 0;
+                                            let mutable tidx: UInt = 0;
                                             while tidx < ti.type_params.count() and tidx < targs.count(
                                             ) then {
                                                 parent_bindings.insert(
@@ -1443,7 +1435,7 @@ given TypeChecker {
                                         let param_count = if trait_method.params.count() < member.params.count(
                                         ) then trait_method.params.count()
                                         else member.params.count();
-                                        let mutable pi UInt = 1;
+                                        let mutable pi: UInt = 1;
                                         while pi < param_count then {
                                             let trait_param = trait_method.params[pi];
                                             let impl_param = member.params[pi];
@@ -1557,7 +1549,7 @@ given TypeChecker {
         };
     };
 
-    type_node_name(self, node TypeNode) String = {
+    type_node_name(self, node: TypeNode): String = {
         return when node in {
             .Identifier(name, span) then name,
             .Generic(base, _, span) then base,
@@ -1565,7 +1557,7 @@ given TypeChecker {
         };
     };
 
-    concrete_type_modifier_given_message(self) String = {
+    concrete_type_modifier_given_message(self): String = {
         return "Concrete type modifier given declarations are not allowed. Use generic form instead, e.g., 'given [T SomeTrait] T as SomeTrait { ... }'";
     };
 
@@ -1580,9 +1572,9 @@ given TypeChecker {
     /// `decomposeGenericGivenTypeNode` and the checks around it.
     reject_invalid_generic_given_target_if_needed(
         self,
-        target_type TypeNode,
-        type_params List[TypeParameter],
-    ) Bool = {
+        target_type: TypeNode,
+        type_params: List[TypeParameter],
+    ): Bool = {
         if type_params.is_empty() then {
             return false;
         };
@@ -1608,7 +1600,7 @@ given TypeChecker {
                     );
                     return true;
                 };
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 while i < args.count() then {
                     let arg_matches = when args[i] in {
                         .Identifier(arg_name, span) then arg_name == type_params[i].name,
@@ -1653,9 +1645,9 @@ given TypeChecker {
 
     is_concrete_type_modifier_given_target(
         self,
-        target_type TypeNode,
-        type_params List[TypeParameter],
-    ) Bool = {
+        target_type: TypeNode,
+        type_params: List[TypeParameter],
+    ): Bool = {
         if not type_params.is_empty() then {
             return false;
         };
@@ -1669,9 +1661,9 @@ given TypeChecker {
 
     reject_concrete_type_modifier_given_if_needed(
         self,
-        target_type TypeNode,
-        type_params List[TypeParameter],
-    ) Bool = {
+        target_type: TypeNode,
+        type_params: List[TypeParameter],
+    ): Bool = {
         if self.is_concrete_type_modifier_given_target(target_type, type_params) then {
             self.push_diagnostic(
                 self.concrete_type_modifier_given_message(),
@@ -1682,11 +1674,7 @@ given TypeChecker {
         return false;
     };
 
-    validate_trait_parent_arity(
-        self,
-        trait_name String,
-        actual_count UInt,
-    ) Void = {
+    validate_trait_parent_arity(self, trait_name: String, actual_count: UInt): Void = {
         if actual_count == UInt(0) then {
             return;
         };
@@ -1707,16 +1695,16 @@ given TypeChecker {
         };
     };
 
-    validate_trait_parent_type_arguments(self, parents List[TypeNode]) Void = {
+    validate_trait_parent_type_arguments(self, parents: List[TypeNode]): Void = {
         let scope = Scope.new_child(self.storage.global_scope);
         self.validate_trait_parent_type_arguments_in_scope(parents, scope);
     };
 
     validate_trait_parent_type_arguments_in_scope(
         self,
-        parents List[TypeNode],
-        scope Scope,
-    ) Void = {
+        parents: List[TypeNode],
+        scope: Scope,
+    ): Void = {
         for parent in parents then {
             when parent in {
                 .Identifier(name, span) then {

@@ -8,8 +8,8 @@
 /// A simple parent like `Ord` is ParentTraitConstraint("Ord", []).
 public type ParentTraitConstraint(
     // Display only. Identity is `def_id`.
-    name String,
-    type_arg_nodes List[TypeNode],
+    name: String,
+    type_arg_nodes: List[TypeNode],
     // Declaration identity of the parent trait. Name matching cannot tell two
     // same-named traits apart, so anything that asks "is this the trait X" must
     // compare this DefId.
@@ -17,7 +17,7 @@ public type ParentTraitConstraint(
     // Filled when the constraint is built, and back-filled by
     // `TypeChecker.link_parent_trait_def_ids` for parents declared later in the
     // file -- resolving during construction would depend on declaration order.
-    def_id DefId,
+    def_id: DefId,
 );
 
 // ── TraitInfo ─────────────────────────────────────────────────────────────────
@@ -26,31 +26,31 @@ public type TraitInfo(
     // Declaration identity of this trait. Name matching cannot distinguish two
     // same-named traits (or one aliased across modules), so anything that decides
     // "is this the trait X" must compare this DefId.
-    def_id DefId,
-    name String,
-    type_params List[String],
-    parent_traits List[ParentTraitConstraint],
-    methods List[TypedTraitMember],
-    module_path List[String],
+    def_id: DefId,
+    name: String,
+    type_params: List[String],
+    parent_traits: List[ParentTraitConstraint],
+    methods: List[TypedTraitMember],
+    module_path: List[String],
 );
 
 // ── TraitRegistry ─────────────────────────────────────────────────────────────
 
 public type mutable TraitRegistry(
-    mutable traits Dict[String, TraitInfo],
+    mutable traits: Dict[String, TraitInfo],
     // Keyed on the trait DECLARATION's identity. Name lookup is a resolution
     // step; anything that asks "is this the same trait" must come here.
-    mutable traits_by_def_id Dict[UInt, TraitInfo],
-    mutable flattened_cache Dict[String, Dict[String, TypedTraitMember]],
+    mutable traits_by_def_id: Dict[UInt, TraitInfo],
+    mutable flattened_cache: Dict[String, Dict[String, TypedTraitMember]],
     /// The reasons a trait is not object-safe, keyed like the trait. Empty
     /// means it is safe. Keeping the reasons and not just the verdict is what
     /// lets the diagnostic say WHICH method is the problem.
-    mutable object_safety_cache Dict[String, List[String]],
+    mutable object_safety_cache: Dict[String, List[String]],
 );
 
 given TraitRegistry {
 
-    public new() TraitRegistry = {
+    public new(): TraitRegistry = {
         return TraitRegistry(
             Dict[String, TraitInfo].new(),
             Dict[UInt, TraitInfo].new(),
@@ -59,7 +59,7 @@ given TraitRegistry {
         );
     };
 
-    public register(self, info TraitInfo) Void = {
+    public register(self, info: TraitInfo): Void = {
         self.traits.insert(qualified_symbol_key(info.module_path, info.name), info);
         // The unqualified name index (`bare_symbol_key`) -- its own key space so
         // a last-wins index entry cannot clobber a real empty-path symbol of
@@ -87,10 +87,10 @@ given TraitRegistry {
     /// unaffected, so nothing downstream can tell the two spellings apart.
     public register_imported_name(
         self,
-        local_name String,
-        module_path List[String],
-        info TraitInfo,
-    ) Void = {
+        local_name: String,
+        module_path: List[String],
+        info: TraitInfo,
+    ): Void = {
         self.traits.insert(qualified_symbol_key(module_path, local_name), info);
         if not module_path.is_empty() then {
             self.traits.insert(bare_symbol_key(local_name), info);
@@ -99,11 +99,11 @@ given TraitRegistry {
         self.object_safety_cache = Dict[String, List[String]].new();
     };
 
-    public get_by_def_id(self, def_id DefId) Option[TraitInfo] = {
+    public get_by_def_id(self, def_id: DefId): Option[TraitInfo] = {
         return self.traits_by_def_id.get(def_id.id);
     };
 
-    public get(self, name String) Option[TraitInfo] = {
+    public get(self, name: String): Option[TraitInfo] = {
         // By spelling: the unqualified key first (a real empty-path symbol),
         // then the name index (`bare_symbol_key`). The two are separate key
         // spaces; see `bare_symbol_key`.
@@ -121,7 +121,7 @@ given TraitRegistry {
     /// a bound written against one module's trait be satisfied by another's.
     /// That index exists only to name the declaring module in the
     /// "Import it explicitly" diagnostic; see `declared_somewhere`.
-    public get_in_module(self, name String, module_path List[String]) Option[TraitInfo] = {
+    public get_in_module(self, name: String, module_path: List[String]): Option[TraitInfo] = {
         // An EMPTY `module_path` also consults the name index: before the two
         // key spaces were split, `qualified_symbol_key([], name)` and the index
         // were one slot and this lookup found both kinds of entries. The
@@ -143,14 +143,14 @@ given TraitRegistry {
     /// NOT resolution. The only use is naming the declaring module in
     /// "Import it explicitly", exactly like `unimportedTemplateDefId` on the
     /// generic-template side -- it must never win over `get_in_module`.
-    public declared_somewhere(self, name String) Option[TraitInfo] = {
+    public declared_somewhere(self, name: String): Option[TraitInfo] = {
         return when self.traits.get(name) in {
             .Some(info) then Option[TraitInfo].Some(info),
             .None() then self.traits.get(bare_symbol_key(name)),
         };
     };
 
-    public validate_inheritance_graph(self, trait_name String) Result[Void] = {
+    public validate_inheritance_graph(self, trait_name: String): Result[Void] = {
         // The walk is keyed by DECLARATION, not by spelling: two same-named
         // traits from different modules are different nodes and must not share
         // a visited slot. The spellings are kept alongside only to print the
@@ -168,11 +168,11 @@ given TraitRegistry {
 
     private validate_inheritance_graph_internal(
         self,
-        trait_name String,
-        visited List[UInt],
-        stack List[UInt],
-        stack_names List[String],
-    ) Result[Void] = {
+        trait_name: String,
+        visited: List[UInt],
+        stack: List[UInt],
+        stack_names: List[String],
+    ): Result[Void] = {
         let info = when self.get(trait_name) in {
             .Some(found) then found,
             .None() then {
@@ -212,7 +212,10 @@ given TraitRegistry {
 
     // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
     // 同名方法以最近定义的 Trait 为准
-    public flatten_methods(self, trait_name String) Result[Dict[String, TypedTraitMember]] = {
+    public flatten_methods(
+        self,
+        trait_name: String,
+    ): Result[Dict[String, TypedTraitMember]] = {
         return self.flatten_methods_in_module(trait_name, List[String].new());
     };
 
@@ -220,9 +223,9 @@ given TraitRegistry {
     /// declaration from here on.
     public flatten_methods_in_module(
         self,
-        trait_name String,
-        module_path List[String],
-    ) Result[Dict[String, TypedTraitMember]] = {
+        trait_name: String,
+        module_path: List[String],
+    ): Result[Dict[String, TypedTraitMember]] = {
         return when self.get_in_module(trait_name, module_path) in {
             .None() then {
                 let mutable message = StringBuilder.new();
@@ -242,8 +245,8 @@ given TraitRegistry {
     /// method set.
     public flatten_methods_for_def(
         self,
-        trait_def_id DefId,
-    ) Result[Dict[String, TypedTraitMember]] = {
+        trait_def_id: DefId,
+    ): Result[Dict[String, TypedTraitMember]] = {
         let cache_key = "d\(trait_def_id.id)";
         if self.flattened_cache.get(cache_key) is .Some(cached) then {
             return Result[Dict[String, TypedTraitMember]].Ok(cached);
@@ -285,7 +288,7 @@ given TraitRegistry {
 
     // 检查 Trait 是否对象安全
     // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
-    public check_object_safety(self, trait_name String) Result[Bool] = {
+    public check_object_safety(self, trait_name: String): Result[Bool] = {
         return self.check_object_safety_in_module(trait_name, List[String].new());
     };
 
@@ -294,7 +297,7 @@ given TraitRegistry {
     /// The `DefId` selects the trait; the name is used only afterwards to pick a
     /// member inside that one container -- the same as rustc's `associated_items`,
     /// where a name selects within an already-identified impl/trait.
-    public check_object_safety_by_def_id(self, trait_def_id DefId) Result[Bool] = {
+    public check_object_safety_by_def_id(self, trait_def_id: DefId): Result[Bool] = {
         return when self.traits_by_def_id.get(trait_def_id.id) in {
             .Some(info) then self.check_object_safety_in_module(
                 info.name,
@@ -306,9 +309,9 @@ given TraitRegistry {
 
     public check_object_safety_in_module(
         self,
-        trait_name String,
-        module_path List[String],
-    ) Result[Bool] = {
+        trait_name: String,
+        module_path: List[String],
+    ): Result[Bool] = {
         let cache_key = qualified_symbol_key(module_path, trait_name);
         let reasons = self.object_safety_reasons(trait_name, module_path) or return;
         return Result[Bool].Ok(reasons.is_empty());
@@ -321,9 +324,9 @@ given TraitRegistry {
     /// the reader to find which method is responsible.
     public object_safety_reasons(
         self,
-        trait_name String,
-        module_path List[String],
-    ) Result[List[String]] = {
+        trait_name: String,
+        module_path: List[String],
+    ): Result[List[String]] = {
         let cache_key = qualified_symbol_key(module_path, trait_name);
         if self.object_safety_cache.get(cache_key) is .Some(cached) then {
             return Result[List[String]].Ok(cached);
@@ -349,7 +352,7 @@ given TraitRegistry {
                 reasons.push("method '\(m.name)' uses Self in return type");
             };
             // 检查参数（跳过第一个 self 参数）
-            let mutable param_index UInt = 0;
+            let mutable param_index: UInt = 0;
             for p in m.params then {
                 if param_index == UInt(0) and p.name == "self" then {
                     param_index += UInt(1);
@@ -367,7 +370,7 @@ given TraitRegistry {
         return Result[List[String]].Ok(reasons);
     };
 
-    private is_object_safe_receiver_type(self, t Type) Bool = {
+    private is_object_safe_receiver_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
             .GenericParameter(name) then name == "Self",
@@ -375,7 +378,7 @@ given TraitRegistry {
         };
     };
 
-    private type_uses_self(self, t Type) Bool = {
+    private type_uses_self(self, t: Type): Bool = {
         return when t in {
             .GenericParameter(name) then name == "Self",
             .ReferenceType(inner) then self.type_uses_self(inner),
@@ -425,7 +428,7 @@ given TraitRegistry {
     /// Trait inheritance transitivity, by DECLARATION identity: does `trait_id`
     /// inherit from (or equal) `target_id`? Same-named traits from different
     /// modules are different traits and must not be conflated here.
-    public has_inheritance(self, trait_id DefId, target_id DefId) Bool = {
+    public has_inheritance(self, trait_id: DefId, target_id: DefId): Bool = {
         if trait_id == target_id then {
             return true;
         };
@@ -435,10 +438,10 @@ given TraitRegistry {
 
     private has_inheritance_internal(
         self,
-        trait_id DefId,
-        target_id DefId,
-        visited Set[UInt],
-    ) Bool = {
+        trait_id: DefId,
+        target_id: DefId,
+        visited: Set[UInt],
+    ): Bool = {
         if visited.contains(trait_id.id) then {
             return false;
         };
@@ -468,18 +471,18 @@ given TraitRegistry {
 // ── TraitChecker ──────────────────────────────────────────────────────────────
 
 public type TraitChecker(
-    registry TraitRegistry,
-    method_table MethodTable,
-    context CompilerContext,
+    registry: TraitRegistry,
+    method_table: MethodTable,
+    context: CompilerContext,
 );
 
 given TraitChecker {
 
     public new(
-        registry TraitRegistry,
-        method_table MethodTable,
-        context CompilerContext,
-    ) TraitChecker = {
+        registry: TraitRegistry,
+        method_table: MethodTable,
+        context: CompilerContext,
+    ): TraitChecker = {
         return TraitChecker(registry, method_table, context);
     };
 
@@ -489,11 +492,11 @@ given TraitChecker {
     /// them unbound shows the reader a signature they cannot copy.
     private display_trait_method_signature(
         self,
-        method TypedTraitMember,
-        target_type Type,
-        trait_type_params List[String],
-        trait_type_args List[Type],
-    ) String = {
+        method: TypedTraitMember,
+        target_type: Type,
+        trait_type_params: List[String],
+        trait_type_args: List[Type],
+    ): String = {
         let mutable out = StringBuilder.new();
         out.push_string(method.name);
         out.push_byte('(');
@@ -531,17 +534,17 @@ given TraitChecker {
 
     private display_trait_method_type(
         self,
-        t Type,
-        target_type Type,
-        trait_type_params List[String],
-        trait_type_args List[Type],
-    ) String = {
+        t: Type,
+        target_type: Type,
+        trait_type_params: List[String],
+        trait_type_args: List[Type],
+    ): String = {
         return when t in {
             .GenericParameter(name) then {
                 if name == "Self" then {
                     self.context.type_display_name(target_type)
                 } else {
-                    let mutable idx UInt = 0;
+                    let mutable idx: UInt = 0;
                     while idx < trait_type_params.count() then {
                         if trait_type_params[idx] == name and idx < trait_type_args.count(
                         ) then {
@@ -560,13 +563,13 @@ given TraitChecker {
     // 返回 Ok 或 Error(message)
     public check_conformance_in_module(
         self,
-        target_type Type,
-        trait_name String,
-        trait_type_args List[Type],
-        members List[TypedGivenMember],
-        span SourceSpan,
-        module_path List[String],
-    ) Result[Void] = {
+        target_type: Type,
+        trait_name: String,
+        trait_type_args: List[Type],
+        members: List[TypedGivenMember],
+        span: SourceSpan,
+        module_path: List[String],
+    ): Result[Void] = {
         // 仅检查当前 trait 自身的方法 requirement。
         // 父 trait 的显式实现在 TypeChecker 中单独检查。
         let trait_info = when self.registry.get_in_module(trait_name, module_path) in {
@@ -649,7 +652,7 @@ given TraitChecker {
                         return Result[Void].Error(message.to_string());
                     };
 
-                    let mutable idx UInt = 1;
+                    let mutable idx: UInt = 1;
                     let named_check_end = if required_count < actual_count then required_count
                     else actual_count;
                     while idx < named_check_end then {

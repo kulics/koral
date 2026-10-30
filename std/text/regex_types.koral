@@ -4,31 +4,31 @@ using "std" { ... };
 // ============================================================================
 
 // 编译选项（位标志）
-public type RegexFlag(value UInt);
+public type RegexFlag(value: UInt);
 
 given RegexFlag {
 
     // 无特殊选项（默认）
-    public none() RegexFlag = RegexFlag(0);
+    public none(): RegexFlag = RegexFlag(0);
 
     // 大小写不敏感
-    public ignore_case() RegexFlag = RegexFlag(1);
+    public ignore_case(): RegexFlag = RegexFlag(1);
 
     // 多行模式（^/$ 匹配行首/行尾而非字符串首/尾）
-    public multiline() RegexFlag = RegexFlag(2);
+    public multiline(): RegexFlag = RegexFlag(2);
 
     // 组合标志：a | b
-    public combine(self, other RegexFlag) RegexFlag = RegexFlag(
+    public combine(self, other: RegexFlag): RegexFlag = RegexFlag(
         self.value | other.value,
     );
 
     // 测试是否包含某标志
-    public has(self, flag RegexFlag) Bool = (self.value & flag.value) == flag.value;
+    public has(self, flag: RegexFlag): Bool = (self.value & flag.value) == flag.value;
 
     // 转换为 C 层 flags（内部使用）
     // REG_EXTENDED = 1, REG_ICASE = 2, REG_NEWLINE = 4
-    to_c_flags(self) Int32 = {
-        let mutable flags Int32 = 1; // REG_EXTENDED 始终启用
+    to_c_flags(self): Int32 = {
+        let mutable flags: Int32 = 1; // REG_EXTENDED 始终启用
         if self.has(RegexFlag.ignore_case()) then {
             flags = flags | 2;
         };
@@ -40,64 +40,60 @@ given RegexFlag {
 };
 
 // 编译后的正则表达式
-public type Regex(
-    handle *UInt8,
-    pat String,
-    groups UInt,
-);
+public type Regex(handle: *UInt8, pat: String, groups: UInt);
 
-given Regex as Drop {
+given Regex: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         __koral_regex_free(self.handle);
     };
 };
 
 given Regex {
 
-    public pattern(self) String = self.pat;
+    public pattern(self): String = self.pat;
 
-    public group_count(self) UInt = self.groups;
+    public group_count(self): UInt = self.groups;
 };
 
 // 轻量匹配结果（仅位置，不含捕获组）
 public type Match(
-    source String, // 原始文本
-    match_start UInt, // 匹配起始位置（字节偏移）
-    match_end UInt, // 匹配结束位置（字节偏移，不含）
+    source: String, // 原始文本
+    match_start: UInt, // 匹配起始位置（字节偏移）
+    match_end: UInt, // 匹配结束位置（字节偏移，不含）
 );
 
 given Match {
 
-    public text(self) String = self.source.substring(self.match_start..<self.match_end);
+    public text(self): String = self.source.substring(self.match_start..<self.match_end);
 
-    public start(self) UInt = self.match_start;
+    public start(self): UInt = self.match_start;
 
-    public end(self) UInt = self.match_end;
+    public end(self): UInt = self.match_end;
 };
 
 // 带捕获组的匹配结果
 public type Captures(
-    source String, // 原始文本
-    starts List[Int32], // 各捕获组起始位置（-1 = 未匹配）
-    ends List[Int32], // 各捕获组结束位置（-1 = 未匹配）
+    source: String, // 原始文本
+    starts: List[Int32], // 各捕获组起始位置（-1 = 未匹配）
+    ends: List[Int32], // 各捕获组结束位置（-1 = 未匹配）
 );
 
 given Captures {
 
-    public text(self) String = {
+    public text(self): String = {
         let s = UInt(self.starts[0]);
         let e = UInt(self.ends[0]);
         return self.source.substring(s..<e);
     };
 
-    public start(self) UInt = UInt(self.starts[0]);
+    public start(self): UInt = UInt(self.starts[0]);
 
-    public end(self) UInt = UInt(self.ends[0]);
+    public end(self): UInt = UInt(self.ends[0]);
 
-    public group_count(self) UInt = self.starts.count();
+    public group_count(self): UInt = self.starts.count();
 
-    public group(self, index UInt) Option[String] = {
+    public group(self, index: UInt): Option[String] = {
         if index >= self.starts.count() then {
             return Option[String].None();
         };
@@ -109,7 +105,7 @@ given Captures {
         return Option[String].Some(self.source.substring(UInt(s)..<UInt(e)));
     };
 
-    public group_start(self, index UInt) Option[UInt] = {
+    public group_start(self, index: UInt): Option[UInt] = {
         if index >= self.starts.count() then {
             return Option[UInt].None();
         };
@@ -120,7 +116,7 @@ given Captures {
         return Option[UInt].Some(UInt(s));
     };
 
-    public group_end(self, index UInt) Option[UInt] = {
+    public group_end(self, index: UInt): Option[UInt] = {
         if index >= self.ends.count() then {
             return Option[UInt].None();
         };
@@ -133,34 +129,26 @@ given Captures {
 };
 
 // 匹配结果迭代器
-public type mutable MatchIterator(
-    regex Regex,
-    text String,
-    mutable offset UInt,
-);
+public type mutable MatchIterator(regex: Regex, text: String, mutable offset: UInt);
 
 // 捕获组结果迭代器
-public type mutable CapturesIterator(
-    regex Regex,
-    text String,
-    mutable offset UInt,
-);
+public type mutable CapturesIterator(regex: Regex, text: String, mutable offset: UInt);
 
 // 分割结果迭代器
 public type mutable RegexSplitIterator(
-    regex Regex,
-    text String,
-    mutable offset UInt,
-    mutable done Bool,
+    regex: Regex,
+    text: String,
+    mutable offset: UInt,
+    mutable done: Bool,
 );
 
 // ============================================================================
 // MatchIterator — Iterator implementation
 // ============================================================================
 
-given MatchIterator as Iterator[Match] {
+given MatchIterator: Iterator[Match] {
 
-    public next(self) Option[Match] = {
+    public next(self): Option[Match] = {
         if self.offset > self.text.count() then {
             return Option[Match].None();
         };
@@ -185,9 +173,9 @@ given MatchIterator as Iterator[Match] {
 // CapturesIterator — Iterator implementation
 // ============================================================================
 
-given CapturesIterator as Iterator[Captures] {
+given CapturesIterator: Iterator[Captures] {
 
-    public next(self) Option[Captures] = {
+    public next(self): Option[Captures] = {
         if self.offset > self.text.count() then {
             return Option[Captures].None();
         };
@@ -212,9 +200,9 @@ given CapturesIterator as Iterator[Captures] {
 // RegexSplitIterator — Iterator implementation
 // ============================================================================
 
-given RegexSplitIterator as Iterator[String] {
+given RegexSplitIterator: Iterator[String] {
 
-    public next(self) Option[String] = {
+    public next(self): Option[String] = {
         if self.done then {
             return Option[String].None();
         };

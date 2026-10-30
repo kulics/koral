@@ -15,12 +15,12 @@ using "std/io" { Reader, Writer };
 /// TCP socket type.
 /// Holds a socket file descriptor. Automatically closed on drop.
 /// Implements Reader and Writer traits for use with BufReader/BufWriter.
-public type mutable TcpSocket(fd Int64);
+public type mutable TcpSocket(fd: Int64);
 
-given TcpSocket as Drop {
+given TcpSocket: Drop {
 
     /// Automatically close the socket when TcpSocket is dropped.
-    drop(self) Void = {
+    drop(self): Void = {
         if self.fd >= 0 then {
             __koral_socket_close(self.fd);
         };
@@ -33,12 +33,12 @@ given TcpSocket as Drop {
 given TcpSocket {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self) Int = Int(self.fd);
+    public fd(self): Int = Int(self.fd);
 
     /// Connect to a socket address.
     /// Flow: create socket → connect
     /// On any failure, closes the fd and returns Error.
-    public connect[T IntoSocketAddr](addr T) Result[TcpSocket] = {
+    public connect[T: IntoSocketAddr](addr: T): Result[TcpSocket] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
@@ -46,10 +46,10 @@ given TcpSocket {
             },
         };
         // Determine address family from SocketAddr
-        let domain Int32 = if addr.is_ipv4() then __koral_const_AF_INET()
+        let domain: Int32 = if addr.is_ipv4() then __koral_const_AF_INET()
         else __koral_const_AF_INET6();
-        let sock_type Int32 = __koral_const_SOCK_STREAM();
-        let protocol Int32 = 0;
+        let sock_type: Int32 = __koral_const_SOCK_STREAM();
+        let protocol: Int32 = 0;
 
         // Create socket
         let fd = __koral_socket_create(domain, sock_type, protocol);
@@ -74,13 +74,13 @@ given TcpSocket {
     // ========================================================================
 
     /// Get the local address of this socket.
-    public local_addr(self) Result[SocketAddr] = {
+    public local_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
         for i in UInt(0)..<UInt(128) then {
             init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = UInt32(128);
+        let mutable addr_len: UInt32 = UInt32(128);
 
         let result = __koral_socket_getsockname(self.fd, addr_buf, &addr_len);
         if result != 0 then {
@@ -97,13 +97,13 @@ given TcpSocket {
     };
 
     /// Get the peer address of this socket.
-    public peer_addr(self) Result[SocketAddr] = {
+    public peer_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
         for i in UInt(0)..<UInt(128) then {
             init_memory(addr_buf + i, UInt8(0));
         };
-        let mutable addr_len UInt32 = UInt32(128);
+        let mutable addr_len: UInt32 = UInt32(128);
 
         let result = __koral_socket_getpeername(self.fd, addr_buf, &addr_len);
         if result != 0 then {
@@ -125,8 +125,8 @@ given TcpSocket {
 
     /// Shutdown the connection.
     /// Shutdown.Read() = 0, Shutdown.Write() = 1, Shutdown.Both() = 2
-    public shutdown(self, how Shutdown) Result[Void] = {
-        let how_int Int32 = when how in {
+    public shutdown(self, how: Shutdown): Result[Void] = {
+        let how_int: Int32 = when how in {
             .Read() then Int32(0),
             .Write() then Int32(1),
             .Both() then Int32(2),
@@ -144,10 +144,10 @@ given TcpSocket {
 
     /// Set TCP_NODELAY option (disable Nagle's algorithm).
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
-    public set_nodelay(self, nodelay Bool) Result[Void] = {
+    public set_nodelay(self, nodelay: Bool): Result[Void] = {
         let opt_buf = alloc_memory[UInt8](4);
         defer dealloc_memory(opt_buf);
-        let value UInt8 = if nodelay then UInt8(1) else UInt8(0);
+        let value: UInt8 = if nodelay then UInt8(1) else UInt8(0);
         init_memory(opt_buf + 0, value);
         init_memory(opt_buf + 1, UInt8(0));
         init_memory(opt_buf + 2, UInt8(0));
@@ -167,14 +167,14 @@ given TcpSocket {
 
     /// Get TCP_NODELAY option.
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
-    public nodelay(self) Result[Bool] = {
+    public nodelay(self): Result[Bool] = {
         let opt_buf = alloc_memory[UInt8](4);
         defer dealloc_memory(opt_buf);
         init_memory(opt_buf + 0, UInt8(0));
         init_memory(opt_buf + 1, UInt8(0));
         init_memory(opt_buf + 2, UInt8(0));
         init_memory(opt_buf + 3, UInt8(0));
-        let mutable opt_len UInt32 = UInt32(4);
+        let mutable opt_len: UInt32 = UInt32(4);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_IPPROTO_TCP(),
@@ -196,7 +196,7 @@ given TcpSocket {
     /// Set read timeout. None clears the timeout.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
     /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
-    public set_read_timeout(self, timeout Option[Duration]) Result[Void] = {
+    public set_read_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         when timeout in {
@@ -225,7 +225,7 @@ given TcpSocket {
 
     /// Set write timeout. None clears the timeout.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public set_write_timeout(self, timeout Option[Duration]) Result[Void] = {
+    public set_write_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         when timeout in {
@@ -253,13 +253,13 @@ given TcpSocket {
 
     /// Get read timeout. Returns None if no timeout is set.
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    public read_timeout(self) Result[Option[Duration]] = {
+    public read_timeout(self): Result[Option[Duration]] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len UInt32 = UInt32(16);
+        let mutable opt_len: UInt32 = UInt32(16);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_SOL_SOCKET(),
@@ -276,13 +276,13 @@ given TcpSocket {
 
     /// Get write timeout. Returns None if no timeout is set.
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
-    public write_timeout(self) Result[Option[Duration]] = {
+    public write_timeout(self): Result[Option[Duration]] = {
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len UInt32 = UInt32(16);
+        let mutable opt_len: UInt32 = UInt32(16);
         let result = __koral_socket_getsockopt(
             self.fd,
             __koral_const_SOL_SOCKET(),
@@ -303,7 +303,7 @@ given TcpSocket {
 
     /// Convert a Duration to a struct timeval (16 bytes) in a raw buffer.
     /// timeval layout: tv_sec (Int64, 8 bytes LE) + tv_usec (Int64, 8 bytes LE)
-    private duration_to_timeval(duration Duration, buf *mutable UInt8) Void = {
+    private duration_to_timeval(duration: Duration, buf: *mutable UInt8): Void = {
         let secs = duration.secs;
         let usec = duration.nanos / 1000;
 
@@ -330,7 +330,7 @@ given TcpSocket {
 
     /// Convert a struct timeval (16 bytes) from a raw buffer to a [Duration]Option.
     /// Returns None if both tv_sec and tv_usec are zero (no timeout set).
-    private timeval_to_duration(buf *UInt8) Option[Duration] = {
+    private timeval_to_duration(buf: *UInt8): Option[Duration] = {
         // Read tv_sec as little-endian Int64 (bytes 0..7)
         let secs = (Int64(UInt(buf[0])) + (Int64(UInt(buf[1])) << 8) + (Int64(
             UInt(buf[2]),
@@ -355,11 +355,11 @@ given TcpSocket {
     };
 };
 
-given TcpSocket as Reader {
+given TcpSocket: Reader {
 
     /// Reader trait: read bytes into into[range].
     /// Returns Ok(0) on EOF (peer closed connection).
-    public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -375,10 +375,10 @@ given TcpSocket as Reader {
     };
 };
 
-given TcpSocket as Writer {
+given TcpSocket: Writer {
 
     /// Writer trait: write bytes from from[range] into the connection.
-    public write(self, from: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
@@ -394,5 +394,5 @@ given TcpSocket as Writer {
     };
 
     /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
-    public flush(self) Result[Void] = Result[Void].Ok({});
+    public flush(self): Result[Void] = Result[Void].Ok({});
 };

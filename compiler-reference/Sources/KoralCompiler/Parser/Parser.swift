@@ -173,7 +173,8 @@ public class Parser {
     try match(.identifier(name))
 
     var type: TypeNode? = nil
-    if currentToken !== .equal {
+    if currentToken === .colon {
+      try match(.colon)
       type = try parseType()
     }
 
@@ -210,7 +211,8 @@ public class Parser {
     try match(.identifier(name))
 
     var type: TypeNode? = nil
-    if currentToken !== .equal {
+    if currentToken === .colon {
+      try match(.colon)
       type = try parseType()
     }
 
@@ -331,9 +333,10 @@ public class Parser {
 
     try match(.identifier(name))
 
-    // Optional type annotation (anything before ',' or ')' or 'in')
+    // Optional type annotation: `name: Type`
     var type: TypeNode? = nil
-    if currentToken !== .comma && currentToken !== .rightParen && currentToken !== .inKeyword {
+    if currentToken === .colon {
+      try match(.colon)
       type = try parseType()
     }
 
@@ -477,7 +480,7 @@ public class Parser {
     if !allowUnderscore && name == "_" {
       return nil
     }
-    return lexer.peekNextToken() === .colon ? name : nil
+    return lexer.peekNextToken() === .equal ? name : nil
   }
 
   func isValidVariableName(_ name: String) -> Bool {

@@ -24,11 +24,11 @@
 //   m. Remove from instantiating_functions
 //   n. Return the InstantiatedFunction
 //
-private let make_mono_function_body_placeholder_expr(t Type) TypedExpr = {
+private let make_mono_function_body_placeholder_expr(t: Type): TypedExpr = {
     return TypedExpr(TypedExprKind.IntegerLiteral("0"), t, unknown_span());
 };
 
-private let pass_kind_from_type_node(node TypeNode) FunctionParamPassKind = {
+private let pass_kind_from_type_node(node: TypeNode): FunctionParamPassKind = {
     return when node in {
         .Reference(_, is_mutable, span) then if is_mutable then FunctionParamPassKind.ByMutableReference(
         ) else FunctionParamPassKind.ByReference(),
@@ -39,11 +39,11 @@ private let pass_kind_from_type_node(node TypeNode) FunctionParamPassKind = {
 };
 
 private let skip_instantiation_with_unsatisfied_constraints(
-    mono Monomorphizer,
-    template GenericFunctionTemplate,
-    args List[Type],
-) Bool = {
-    let mutable i UInt = 0;
+    mono: Monomorphizer,
+    template: GenericFunctionTemplate,
+    args: List[Type],
+): Bool = {
+    let mutable i: UInt = 0;
     while i < template.type_parameters.count() and i < args.count() then {
         let param = template.type_parameters[i];
         let mutable actual_type = resolve_parameterized_type(mono, (args[i]));
@@ -74,10 +74,10 @@ private let skip_instantiation_with_unsatisfied_constraints(
 };
 
 public let instantiate_function(
-    mono Monomorphizer,
-    template GenericFunctionTemplate,
-    args List[Type],
-) InstantiatedFunction = {
+    mono: Monomorphizer,
+    template: GenericFunctionTemplate,
+    args: List[Type],
+): InstantiatedFunction = {
     // a. If any type arg contains an unresolved GenericParameter, skip code generation
     //    and return a partial InstantiatedFunction with empty mangled name.
     if args_have_generic_parameter(args) then {
@@ -150,7 +150,8 @@ public let instantiate_function(
                         mono.storage.context.symbol_name(sym),
                         sym.is_mutable(),
                         resolved_type,
-                        false, Option[Expr].None()
+                        false,
+                        Option[Expr].None(),
                     ),
                 );
                 concrete_param_types.push(resolved_type);
@@ -168,7 +169,13 @@ public let instantiate_function(
                     node_subst,
                 );
                 concrete_params.push(
-                    TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
+                    TypedParam(
+                        p.name,
+                        p.is_mutable,
+                        resolved_type,
+                        p.named,
+                        p.default_value,
+                    ),
                 );
                 concrete_param_types.push(resolved_type);
             };
@@ -224,7 +231,9 @@ public let instantiate_function(
     // Register the function signature in the DefIdMap.
     let mutable param_specs = List[FunctionParamSpec].new();
     for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.is_mutable, p.named, false, p.default_value));
+        param_specs.push(
+            FunctionParamSpec(p.name, p.is_mutable, p.named, false, p.default_value),
+        );
     };
     mono.storage.context.set_symbol_info(
         def_id,
@@ -362,11 +371,11 @@ public let instantiate_function(
 // Among matching candidates, prefer one with a checked body source.
 //
 public let select_extension_template(
-    extensions List[GenericExtensionMethodTemplate],
-    name String,
-    method_type_arg_count Option[UInt],
-    extension_type_arg_count Option[UInt],
-) Option[GenericExtensionMethodTemplate] = {
+    extensions: List[GenericExtensionMethodTemplate],
+    name: String,
+    method_type_arg_count: Option[UInt],
+    extension_type_arg_count: Option[UInt],
+): Option[GenericExtensionMethodTemplate] = {
     let mutable first_match = Option[GenericExtensionMethodTemplate].None();
     for ext_ref in extensions then {
         if ext_ref.method.name != name then {
@@ -402,11 +411,11 @@ public let select_extension_template(
 };
 
 private let select_conformance_extension_template(
-    mono Monomorphizer,
-    base_type Type,
-    method_name String,
-    method_type_arg_count Option[UInt],
-) Option[GenericExtensionMethodTemplate] = {
+    mono: Monomorphizer,
+    base_type: Type,
+    method_name: String,
+    method_type_arg_count: Option[UInt],
+): Option[GenericExtensionMethodTemplate] = {
     let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
     let count_key = when method_type_arg_count in {
         .Some(count) then count.to_string(),
@@ -484,9 +493,9 @@ private let select_conformance_extension_template(
 };
 
 private let patched_extension_template_with_body(
-    template GenericExtensionMethodTemplate,
-    donor GenericExtensionMethodTemplate,
-) GenericExtensionMethodTemplate = {
+    template: GenericExtensionMethodTemplate,
+    donor: GenericExtensionMethodTemplate,
+): GenericExtensionMethodTemplate = {
     return GenericExtensionMethodTemplate(
         template.type_params,
         donor.method,
@@ -508,15 +517,15 @@ private let patched_extension_template_with_body(
 };
 
 public let lookup_extension_template_checked_body(
-    mono Monomorphizer,
-    template GenericExtensionMethodTemplate,
-) Option[TypedExpr] =
+    mono: Monomorphizer,
+    template: GenericExtensionMethodTemplate,
+): Option[TypedExpr] =
     template.checked_body;
 
 private let concrete_extension_def_id_is_materialized(
-    mono Monomorphizer,
-    def_id DefId,
-) Bool = {
+    mono: Monomorphizer,
+    def_id: DefId,
+): Bool = {
     for node_ref in mono.storage.generated_nodes then {
         when node_ref in {
             .FunctionDecl(_, _, _, _, _, _, id) then {
@@ -560,9 +569,9 @@ private let concrete_extension_def_id_is_materialized(
 // Tries in order: context.get_template_name + get_type_arguments, layout_to_template_info, context.lookup_type.
 // Returns None if none of the sources produce a template name.
 private let resolve_template_name_and_args(
-    mono Monomorphizer,
-    def_id DefId,
-) Option[Pair[String, List[Type]]] = {
+    mono: Monomorphizer,
+    def_id: DefId,
+): Option[Pair[String, List[Type]]] = {
     when mono.storage.context.get_template_name(def_id) in {
         .Some(template_name) then {
             when mono.storage.context.get_type_arguments(def_id) in {
@@ -681,14 +690,14 @@ private let resolve_template_name_and_args(
 /// last wrote the unqualified index, so the test came out true for any pair.
 /// Callers hold the identity on the record they are filtering (`conformance_trait_def_id`,
 /// `GivenTraitDecl.trait_def_id`, the bound's own `def_id`) and must pass that.
-public let trait_identity_matches(left DefId, right DefId) Bool = {
+public let trait_identity_matches(left: DefId, right: DefId): Bool = {
     return left.is_valid() and right.is_valid() and left == right;
 };
 
 private let lookup_extension_methods_fuzzy(
-    mono Monomorphizer,
-    owner MethodOwner,
-) Option[List[GenericExtensionMethodTemplate]] = {
+    mono: Monomorphizer,
+    owner: MethodOwner,
+): Option[List[GenericExtensionMethodTemplate]] = {
     if mono.storage.fuzzy_extension_methods_missing.contains(owner) then {
         return Option[List[GenericExtensionMethodTemplate]].None();
     };
@@ -746,12 +755,12 @@ private let lookup_extension_methods_fuzzy(
 };
 
 private let select_trait_tool_template_cached(
-    mono Monomorphizer,
-    trait_def_id DefId,
-    method_name String,
-    method_type_arg_count Option[UInt],
-    trait_arg_count Option[UInt],
-) Option[GenericExtensionMethodTemplate] = {
+    mono: Monomorphizer,
+    trait_def_id: DefId,
+    method_name: String,
+    method_type_arg_count: Option[UInt],
+    trait_arg_count: Option[UInt],
+): Option[GenericExtensionMethodTemplate] = {
     let method_count_key = when method_type_arg_count in {
         .Some(count) then count.to_string(),
         .None() then "*",
@@ -800,9 +809,9 @@ private let select_trait_tool_template_cached(
 };
 
 private let lookup_given_trait_decls_fuzzy(
-    mono Monomorphizer,
-    trait_def_id DefId,
-) Option[List[TypedDecl]] = {
+    mono: Monomorphizer,
+    trait_def_id: DefId,
+): Option[List[TypedDecl]] = {
     // Keyed on the DECLARATION, never on a spelling: two same-named traits
     // would otherwise share a cache slot and hand each other's `given`s out.
     let key = "d\(trait_def_id.id)";
@@ -837,9 +846,9 @@ private let lookup_given_trait_decls_fuzzy(
 };
 
 private let normalize_trait_conformance_actual_type_for_template_binding(
-    mono Monomorphizer,
-    actual Type,
-) Type = {
+    mono: Monomorphizer,
+    actual: Type,
+): Type = {
     let normalized = normalize_trait_conformance_actual_type(mono, actual);
     let mutable out = normalized;
     when normalized in {
@@ -880,7 +889,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(
 
 /// The generic template's DECLARATION carried by a type -- identity, never a
 /// spelling.
-private let type_template_decl(mono Monomorphizer, t Type) DefId = {
+private let type_template_decl(mono: Monomorphizer, t: Type): DefId = {
     return when t in {
         .GenericStruct(d, _) then d,
         .GenericEnum(d, _) then d,
@@ -892,10 +901,10 @@ private let type_template_decl(mono Monomorphizer, t Type) DefId = {
 };
 
 private let trait_conformance_target_matches_for_template_binding(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-) Bool = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+): Bool = {
     let normalized_pattern = normalize_trait_conformance_actual_type_for_template_binding(
         mono,
         pattern,
@@ -939,10 +948,10 @@ private let trait_conformance_target_matches_for_template_binding(
 };
 
 private let trait_conformance_target_shallow_matches(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-) Bool = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+): Bool = {
     let normalized_pattern = normalize_trait_conformance_actual_type(mono, pattern);
     let normalized_actual = normalize_trait_conformance_actual_type(mono, actual);
     return when normalized_pattern in {
@@ -976,11 +985,11 @@ private let trait_conformance_target_shallow_matches(
 };
 
 private let collect_trait_conformance_bindings_for_template_binding(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-    bindings Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+    bindings: Dict[String, Type],
+): Void = {
     let normalized_pattern = normalize_trait_conformance_actual_type_for_template_binding(
         mono,
         pattern,
@@ -1149,7 +1158,7 @@ private let collect_trait_conformance_bindings_for_template_binding(
                 .GenericStruct(actual_def_id, actual_args) then {
                     if pattern_def_id == actual_def_id and pattern_args.count() == actual_args.count(
                     ) then {
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < pattern_args.count() then {
                             collect_trait_conformance_bindings_for_template_binding(
                                 mono,
@@ -1169,7 +1178,7 @@ private let collect_trait_conformance_bindings_for_template_binding(
                 .GenericEnum(actual_def_id, actual_args) then {
                     if pattern_def_id == actual_def_id and pattern_args.count() == actual_args.count(
                     ) then {
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < pattern_args.count() then {
                             collect_trait_conformance_bindings_for_template_binding(
                                 mono,
@@ -1189,11 +1198,11 @@ private let collect_trait_conformance_bindings_for_template_binding(
 };
 
 private let infer_trait_extension_type_args_for_template_binding(
-    mono Monomorphizer,
-    conformance_target Type,
-    parameterized_base_type Type,
-    trait_def_id DefId,
-) List[Type] = {
+    mono: Monomorphizer,
+    conformance_target: Type,
+    parameterized_base_type: Type,
+    trait_def_id: DefId,
+): List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches_for_template_binding(
         mono,
@@ -1223,11 +1232,11 @@ private let infer_trait_extension_type_args_for_template_binding(
 };
 
 private let resolve_given_trait_args_for_template_binding(
-    mono Monomorphizer,
-    conformance_target Type,
-    trait_args List[Type],
-    parameterized_base_type Type,
-) List[Type] = {
+    mono: Monomorphizer,
+    conformance_target: Type,
+    trait_args: List[Type],
+    parameterized_base_type: Type,
+): List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches_for_template_binding(
         mono,
@@ -1253,10 +1262,10 @@ private let resolve_given_trait_args_for_template_binding(
 };
 
 private let resolve_template_conformance_trait_args_from_metadata(
-    mono Monomorphizer,
-    base_type Type,
-    template GenericExtensionMethodTemplate,
-) List[Type] = {
+    mono: Monomorphizer,
+    base_type: Type,
+    template: GenericExtensionMethodTemplate,
+): List[Type] = {
     let mutable out = List[Type].new();
     let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
     let target_type = when template.conformance_target_type in {
@@ -1288,10 +1297,10 @@ private let resolve_template_conformance_trait_args_from_metadata(
 };
 
 public let resolve_extension_template_conformance_trait_args(
-    mono Monomorphizer,
-    base_type Type,
-    template GenericExtensionMethodTemplate,
-) List[Type] = {
+    mono: Monomorphizer,
+    base_type: Type,
+    template: GenericExtensionMethodTemplate,
+): List[Type] = {
     let mutable out = List[Type].new();
     let from_metadata = resolve_template_conformance_trait_args_from_metadata(
         mono,
@@ -1357,9 +1366,9 @@ public let resolve_extension_template_conformance_trait_args(
 };
 
 public let instantiate_conformance_trait_methods_for_type(
-    mono Monomorphizer,
-    base_type Type,
-) Void = {
+    mono: Monomorphizer,
+    base_type: Type,
+): Void = {
     let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
     let current_generation_version = mono.storage.generated_nodes.count();
     when mono.storage.conformance_trait_methods_scan_version.get(
@@ -1471,12 +1480,12 @@ public let instantiate_conformance_trait_methods_for_type(
 /// are selected by identity -- two same-named traits do not answer for each
 /// other.
 public let instantiate_conformance_trait_method_for_type(
-    mono Monomorphizer,
-    base_type Type,
-    trait_def_id DefId,
-    method_name String,
-    method_type_args List[Type],
-) Void = {
+    mono: Monomorphizer,
+    base_type: Type,
+    trait_def_id: DefId,
+    method_name: String,
+    method_type_args: List[Type],
+): Void = {
     let mutable parameterized_base_type = resolve_parameterized_type(mono, base_type);
     if has_generic_parameter(parameterized_base_type) or args_have_generic_parameter(
         method_type_args,
@@ -1601,13 +1610,13 @@ public let instantiate_conformance_trait_method_for_type(
 //   5. Delegate to instantiate_extension_method_from_entry
 //
 public let instantiate_extension_method(
-    mono Monomorphizer,
-    base_type Type,
-    owner MethodOwner,
-    template GenericExtensionMethodTemplate,
-    type_args List[Type],
-    method_type_args List[Type],
-) Symbol = {
+    mono: Monomorphizer,
+    base_type: Type,
+    owner: MethodOwner,
+    template: GenericExtensionMethodTemplate,
+    type_args: List[Type],
+    method_type_args: List[Type],
+): Symbol = {
     // 1. Resolve the base type if it's a parameterized type.
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
 
@@ -1748,9 +1757,9 @@ public let instantiate_extension_method(
 // The unique owner of the template declaring `def_id`, or None when ambiguous.
 // Pure identity: matched on the declaration's DefId, never its name.
 private let exact_template_owner_for_method_def_id(
-    mono Monomorphizer,
-    def_id DefId,
-) Option[MethodOwner] = {
+    mono: Monomorphizer,
+    def_id: DefId,
+): Option[MethodOwner] = {
     if not def_id.is_valid() then {
         return Option[MethodOwner].None();
     };
@@ -1785,12 +1794,12 @@ private let exact_template_owner_for_method_def_id(
 };
 
 // Generic parameter names in a type, in order of first appearance.
-private let collect_generic_parameter_names_from_type(t Type) List[String] = {
+private let collect_generic_parameter_names_from_type(t: Type): List[String] = {
     let mutable names = List[String].new();
     let mutable seen = Set[String].new();
     let mutable stack = List[Type].new();
     stack.push(t);
-    let mutable index UInt = UInt(0);
+    let mutable index: UInt = UInt(0);
     while index < stack.count() then {
         let current = stack[index];
         index += UInt(1);
@@ -1834,10 +1843,10 @@ private let collect_generic_parameter_names_from_type(t Type) List[String] = {
 // Infer method-level type args by unifying the template's checked signature
 // against the substituted method type (Swift's `inferMethodTypeArgsBySignature`).
 private let infer_method_type_args_by_signature(
-    mono Monomorphizer,
-    template GenericExtensionMethodTemplate,
-    substituted_type Type,
-) List[Type] = {
+    mono: Monomorphizer,
+    template: GenericExtensionMethodTemplate,
+    substituted_type: Type,
+): List[Type] = {
     let mutable out = List[Type].new();
     if template.method.type_params.is_empty() then {
         return out;
@@ -1855,8 +1864,9 @@ private let infer_method_type_args_by_signature(
                         .FunctionType(expected_params, expected_returns) then {
                             let expected_types = param_entry_types(expected_params);
                             let mutable bindings = Dict[String, Type].new();
-                            let mutable i UInt = UInt(1);
-                            while i < checked_params.count() and i < expected_types.count() then {
+                            let mutable i: UInt = UInt(1);
+                            while i < checked_params.count() and i < expected_types.count(
+                            ) then {
                                 let _ = unify_generic_type_pattern(
                                     mono,
                                     (checked_params[i]).symbol_type,
@@ -1881,8 +1891,10 @@ private let infer_method_type_args_by_signature(
                                 out.push(
                                     when bindings.get(type_param.name) in {
                                         .Some(bound) then bound,
-                                        .None() then Type.GenericParameter(type_param.name),
-                                    }
+                                        .None() then Type.GenericParameter(
+                                            type_param.name,
+                                        ),
+                                    },
                                 );
                             };
                         },
@@ -1901,12 +1913,12 @@ private let infer_method_type_args_by_signature(
 // signature against the expected method type (Swift's
 // `inferTraitExtensionTypeArgs`). Returns None when the shape does not fit.
 public let infer_trait_extension_type_args_by_method_type(
-    mono Monomorphizer,
-    base_type Type,
-    method_info GenericExtensionMethodTemplate,
-    expected_method_type Type,
-    method_type_args List[Type],
-) Option[List[Type]] = {
+    mono: Monomorphizer,
+    base_type: Type,
+    method_info: GenericExtensionMethodTemplate,
+    expected_method_type: Type,
+    method_type_args: List[Type],
+): Option[List[Type]] = {
     let (actual_params, actual_return) = when expected_method_type in {
         .FunctionType(params, ret) then Pair(params, ret),
         _ then {
@@ -1920,12 +1932,9 @@ public let infer_trait_extension_type_args_by_method_type(
         if method_type_params.count() != method_type_args.count() then {
             return Option[List[Type]].None();
         };
-        let mutable i UInt = UInt(0);
+        let mutable i: UInt = UInt(0);
         while i < method_type_params.count() then {
-            substitution.insert(
-                (method_type_params[i]).name,
-                method_type_args[i],
-            );
+            substitution.insert((method_type_params[i]).name, method_type_args[i]);
             i += UInt(1);
         };
     };
@@ -1943,10 +1952,7 @@ public let infer_trait_extension_type_args_by_method_type(
                             substitute_type(mono, param.symbol_type, substitution),
                         );
                     };
-                    Pair(
-                        params_out,
-                        substitute_type(mono, checked_return, substitution),
-                    )
+                    Pair(params_out, substitute_type(mono, checked_return, substitution))
                 },
                 .None() then Pair(List[Type].new(), Type.Unknown()),
             }
@@ -1975,7 +1981,7 @@ public let infer_trait_extension_type_args_by_method_type(
         };
     };
     let mutable inferred = Dict[String, Type].new();
-    let mutable i UInt = UInt(0);
+    let mutable i: UInt = UInt(0);
     while i < pattern_params.count() then {
         if not unify_generic_type_pattern(
             mono,
@@ -2024,9 +2030,9 @@ public let infer_trait_extension_type_args_by_method_type(
 // Receiver candidates for identity lookup: the receiver itself, and the pointee
 // of a reference-like receiver (Swift's `identityReceiverLookupCandidates`).
 public let identity_receiver_lookup_candidates(
-    mono Monomorphizer,
-    receiver_type Type,
-) List[Type] = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+): List[Type] = {
     let mutable candidates = List[Type].new();
     let mutable seen = Set[Type].new();
     let append = Type.Unknown();
@@ -2062,10 +2068,10 @@ public let identity_receiver_lookup_candidates(
 // Signature equality, not candidate scanning — the key already named the
 // method; this only rejects a mismatched specialization.
 private let symbol_matches_full_method_type(
-    mono Monomorphizer,
-    hit_def_id DefId,
-    full_method_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    hit_def_id: DefId,
+    full_method_type: Type,
+): Bool = {
     return when mono.storage.context.get_symbol_type(hit_def_id) in {
         .Some(hit_type) then {
             let resolved_hit_type = resolve_parameterized_type(mono, hit_type);
@@ -2086,12 +2092,15 @@ private let symbol_matches_full_method_type(
                             ) then false
                             else {
                                 let mutable ok = true;
-                                let mutable i UInt = UInt(0);
+                                let mutable i: UInt = UInt(0);
                                 while i < hit_types.count() then {
                                     if mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, hit_types[i]),
                                     ) != mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, expected_types[i]),
+                                        resolve_parameterized_type(
+                                            mono,
+                                            expected_types[i],
+                                        ),
                                     ) then {
                                         ok = false;
                                     };
@@ -2111,18 +2120,19 @@ private let symbol_matches_full_method_type(
 };
 
 private let symbol_matches_full_method_type_via_trait_receiver(
-    mono Monomorphizer,
-    hit_def_id DefId,
-    full_method_type Type,
-    trait_def_id DefId,
-) Bool = {
+    mono: Monomorphizer,
+    hit_def_id: DefId,
+    full_method_type: Type,
+    trait_def_id: DefId,
+): Bool = {
     return when mono.storage.context.get_symbol_type(hit_def_id) in {
         .Some(hit_type) then when resolve_parameterized_type(mono, hit_type) in {
             .FunctionType(hit_params, hit_returns) then when full_method_type in {
                 .FunctionType(expected_params, expected_returns) then {
                     let hit_types = param_entry_types(hit_params);
                     let expected_types = param_entry_types(expected_params);
-                    if hit_types.count() != expected_types.count() or hit_types.is_empty() then {
+                    if hit_types.count() != expected_types.count() or hit_types.is_empty(
+                    ) then {
                         return false;
                     };
                     if mono.storage.context.get_layout_key(
@@ -2140,7 +2150,7 @@ private let symbol_matches_full_method_type_via_trait_receiver(
                     if not first_is_trait_receiver then {
                         return false;
                     };
-                    let mutable i UInt = UInt(1);
+                    let mutable i: UInt = UInt(1);
                     while i < hit_types.count() then {
                         if mono.storage.context.get_layout_key(
                             resolve_parameterized_type(mono, hit_types[i]),
@@ -2162,11 +2172,11 @@ private let symbol_matches_full_method_type_via_trait_receiver(
 };
 
 private let symbol_matches_expected_or_trait_receiver(
-    mono Monomorphizer,
-    hit_def_id DefId,
-    full_method_type Type,
-    trait_def_id_opt Option[DefId],
-) Bool = {
+    mono: Monomorphizer,
+    hit_def_id: DefId,
+    full_method_type: Type,
+    trait_def_id_opt: Option[DefId],
+): Bool = {
     if symbol_matches_full_method_type(mono, hit_def_id, full_method_type) then {
         return true;
     };
@@ -2196,11 +2206,11 @@ private let symbol_matches_expected_or_trait_receiver(
 /// Read-only is not a weaker identity check: the key is still owner + DefId +
 /// type args. It only declines to CREATE anything.
 public let lookup_method_instance_identity_readonly(
-    mono Monomorphizer,
-    definition_method Symbol,
-    receiver_type Type,
-    method_type_args List[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    definition_method: Symbol,
+    receiver_type: Type,
+    method_type_args: List[Type],
+): Option[Symbol] = {
     let def_id = definition_method.def_id;
     if not def_id.is_valid() then {
         return Option[Symbol].None();
@@ -2247,9 +2257,7 @@ public let lookup_method_instance_identity_readonly(
                     .Some(function_type) then function_type,
                     .None() then definition_method.symbol_type,
                 };
-                return Option[Symbol].Some(
-                    Symbol(hit, hit_type, SymbolKind.Function()),
-                );
+                return Option[Symbol].Some(Symbol(hit, hit_type, SymbolKind.Function()));
             },
             .None() then {},
         };
@@ -2274,14 +2282,13 @@ public let lookup_method_instance_identity_readonly(
     return Option[Symbol].None();
 };
 
-
 public let resolve_method_instance_by_identity(
-    mono Monomorphizer,
-    definition_method Symbol,
-    substituted_method_type Type,
-    substituted_method_type_args List[Type],
-    receiver_type Type,
-) MethodInstanceResolution = {
+    mono: Monomorphizer,
+    definition_method: Symbol,
+    substituted_method_type: Type,
+    substituted_method_type_args: List[Type],
+    receiver_type: Type,
+): MethodInstanceResolution = {
     let def_id = definition_method.def_id;
     let identity_def_id = when mono.storage.receiver_method_dispatch.get(def_id) in {
         .Some(dispatch_info) then when dispatch_info.method_def_id.is_valid() in {
@@ -2290,7 +2297,9 @@ public let resolve_method_instance_by_identity(
         },
         .None() then def_id,
     };
-    let trait_def_id_opt = when mono.storage.receiver_method_dispatch.get(identity_def_id) in {
+    let trait_def_id_opt = when mono.storage.receiver_method_dispatch.get(
+        identity_def_id,
+    ) in {
         .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
         .None() then when mono.storage.receiver_method_dispatch.get(def_id) in {
             .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
@@ -2387,7 +2396,9 @@ public let resolve_method_instance_by_identity(
     };
 
     let template_ref = when template in {
-        .Some(template_ref) then Option[GenericExtensionMethodTemplate].Some(template_ref),
+        .Some(template_ref) then Option[GenericExtensionMethodTemplate].Some(
+            template_ref,
+        ),
         .None() then Option[GenericExtensionMethodTemplate].None(),
     };
 
@@ -2398,8 +2409,9 @@ public let resolve_method_instance_by_identity(
         when template_ref in {
             .Some(template_ref) then {
                 if not template_ref.method.type_params.is_empty() then {
-                    let mutable i UInt = UInt(0);
-                    while i < template_ref.method.type_params.count() and i < substituted_method_type_args.count() then {
+                    let mutable i: UInt = UInt(0);
+                    while i < template_ref.method.type_params.count() and i < substituted_method_type_args.count(
+                    ) then {
                         m_subst.insert(
                             (template_ref.method.type_params[i]).name,
                             substituted_method_type_args[i],
@@ -2410,12 +2422,10 @@ public let resolve_method_instance_by_identity(
                     let param_names = collect_generic_parameter_names_from_type(
                         substituted_method_type,
                     );
-                    let mutable i UInt = UInt(0);
-                    while i < param_names.count() and i < substituted_method_type_args.count() then {
-                        m_subst.insert(
-                            param_names[i],
-                            substituted_method_type_args[i],
-                        );
+                    let mutable i: UInt = UInt(0);
+                    while i < param_names.count() and i < substituted_method_type_args.count(
+                    ) then {
+                        m_subst.insert(param_names[i], substituted_method_type_args[i]);
                         i += UInt(1);
                     };
                 };
@@ -2424,12 +2434,10 @@ public let resolve_method_instance_by_identity(
                 let param_names = collect_generic_parameter_names_from_type(
                     substituted_method_type,
                 );
-                let mutable i UInt = UInt(0);
-                while i < param_names.count() and i < substituted_method_type_args.count() then {
-                    m_subst.insert(
-                        param_names[i],
-                        substituted_method_type_args[i],
-                    );
+                let mutable i: UInt = UInt(0);
+                while i < param_names.count() and i < substituted_method_type_args.count(
+                ) then {
+                    m_subst.insert(param_names[i], substituted_method_type_args[i]);
                     i += UInt(1);
                 };
             },
@@ -2490,7 +2498,11 @@ public let resolve_method_instance_by_identity(
                         trait_def_id_opt,
                     ) then {
                         return MethodInstanceResolution.Instantiated(
-                            Symbol(remapped.first, full_method_type, SymbolKind.Function()),
+                            Symbol(
+                                remapped.first,
+                                full_method_type,
+                                SymbolKind.Function(),
+                            ),
                         );
                     };
                 };
@@ -2556,9 +2568,9 @@ public let resolve_method_instance_by_identity(
                 mono,
                 template_ref,
                 full_method_type,
-            )
-            else List[Type].new();
-            let resolved_owner_args = if template_ref.type_params.count() == receiver_owner_args.count() then receiver_owner_args
+            ) else List[Type].new();
+            let resolved_owner_args = if template_ref.type_params.count() == receiver_owner_args.count(
+            ) then receiver_owner_args
             else when infer_trait_extension_type_args_by_method_type(
                 mono,
                 resolved_base,
@@ -2569,7 +2581,8 @@ public let resolve_method_instance_by_identity(
                 .Some(inferred) then inferred,
                 .None() then receiver_owner_args,
             };
-            if m_args.count() == template_ref.method.type_params.count() and template_ref.type_params.count() == resolved_owner_args.count() then {
+            if m_args.count() == template_ref.method.type_params.count() and template_ref.type_params.count(
+            ) == resolved_owner_args.count() then {
                 let inst_sym = instantiate_extension_method(
                     mono,
                     resolved_base,
@@ -2627,8 +2640,7 @@ public let resolve_method_instance_by_identity(
                 };
             };
         },
-        .None() then {
-        },
+        .None() then {},
     };
 
     // L3: keep the definition-time DefId ONLY if it's already an emitted
@@ -2645,12 +2657,12 @@ public let resolve_method_instance_by_identity(
 /// Tries each receiver candidate (the receiver and its pointee) and returns the
 /// first instantiated result. Falls back to the first keepDefinitionTime.
 public let resolve_method_instance_by_identity_for_receiver(
-    mono Monomorphizer,
-    definition_method Symbol,
-    substituted_method_type Type,
-    substituted_method_type_args List[Type],
-    receiver_type Type,
-) MethodInstanceResolution = {
+    mono: Monomorphizer,
+    definition_method: Symbol,
+    substituted_method_type: Type,
+    substituted_method_type_args: List[Type],
+    receiver_type: Type,
+): MethodInstanceResolution = {
     let mutable keep_definition_time = Option[Type].None();
     let candidates = identity_receiver_lookup_candidates(mono, receiver_type);
     for candidate in candidates then {
@@ -2676,9 +2688,7 @@ public let resolve_method_instance_by_identity_for_receiver(
         };
     };
     when keep_definition_time in {
-        .Some(method_type) then MethodInstanceResolution.KeepDefinitionTime(
-            method_type,
-        ),
+        .Some(method_type) then MethodInstanceResolution.KeepDefinitionTime(method_type),
         .None() then MethodInstanceResolution.KeepDefinitionTime(
             substituted_method_type,
         ),
@@ -2692,11 +2702,11 @@ public let resolve_method_instance_by_identity_for_receiver(
 /// None when no instance has been materialized; the caller then keeps the
 /// definition-time symbol.
 public let resolve_standalone_method_function_reference(
-    mono Monomorphizer,
-    definition_method Symbol,
-    substituted_function_type Type,
-    substituted_method_type_args List[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    definition_method: Symbol,
+    substituted_function_type: Type,
+    substituted_method_type_args: List[Type],
+): Option[Symbol] = {
     let resolved_function_type = resolve_parameterized_type(
         mono,
         substituted_function_type,
@@ -2728,7 +2738,9 @@ public let resolve_standalone_method_function_reference(
         .GenericStruct(_, args) then {
             for arg in args then {
                 for candidate in identity_receiver_lookup_candidates(mono, arg) then {
-                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(
+                        candidate,
+                    ) then {
                         seen.insert(candidate);
                         receiver_candidates.push(candidate);
                     };
@@ -2738,7 +2750,9 @@ public let resolve_standalone_method_function_reference(
         .GenericEnum(_, args) then {
             for arg in args then {
                 for candidate in identity_receiver_lookup_candidates(mono, arg) then {
-                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(
+                        candidate,
+                    ) then {
                         seen.insert(candidate);
                         receiver_candidates.push(candidate);
                     };
@@ -2750,7 +2764,9 @@ public let resolve_standalone_method_function_reference(
                 .Some(args) then {
                     for arg in args then {
                         for candidate in identity_receiver_lookup_candidates(mono, arg) then {
-                            if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                            if not has_generic_parameter(candidate) and not seen.contains(
+                                candidate,
+                            ) then {
                                 seen.insert(candidate);
                                 receiver_candidates.push(candidate);
                             };
@@ -2765,7 +2781,9 @@ public let resolve_standalone_method_function_reference(
                 .Some(args) then {
                     for arg in args then {
                         for candidate in identity_receiver_lookup_candidates(mono, arg) then {
-                            if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                            if not has_generic_parameter(candidate) and not seen.contains(
+                                candidate,
+                            ) then {
                                 seen.insert(candidate);
                                 receiver_candidates.push(candidate);
                             };
@@ -2789,7 +2807,9 @@ public let resolve_standalone_method_function_reference(
                                 mono,
                                 owner_type,
                             ) then {
-                                if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                                if not has_generic_parameter(candidate) and not seen.contains(
+                                    candidate,
+                                ) then {
                                     seen.insert(candidate);
                                     receiver_candidates.push(candidate);
                                 };
@@ -2815,11 +2835,10 @@ public let resolve_standalone_method_function_reference(
                 .Builtin(name) then builtin_type_for_owner_name(name),
             };
             if not (owner_type is .Unknown()) then {
-                for candidate in identity_receiver_lookup_candidates(
-                    mono,
-                    owner_type,
-                ) then {
-                    if not has_generic_parameter(candidate) and not seen.contains(candidate) then {
+                for candidate in identity_receiver_lookup_candidates(mono, owner_type) then {
+                    if not has_generic_parameter(candidate) and not seen.contains(
+                        candidate,
+                    ) then {
                         seen.insert(candidate);
                         receiver_candidates.push(candidate);
                     };
@@ -2855,7 +2874,7 @@ public let resolve_standalone_method_function_reference(
 // Built-in scalar/modifier type for an owner name in the closed `builtin`
 // space. Only used to recover a candidate receiver type from an owner that
 // has no declaration to carry one.
-private let builtin_type_for_owner_name(name String) Type = {
+private let builtin_type_for_owner_name(name: String): Type = {
     return when name in {
         "Int" then Type.IntType(),
         "Int8" then Type.Int8Type(),
@@ -2889,12 +2908,12 @@ private let builtin_type_for_owner_name(name String) Type = {
 /// Pure identity: no name lookup. Returns None when nothing has been
 /// instantiated for this identity yet.
 public let resolve_trait_placeholder_method_by_identity(
-    mono Monomorphizer,
-    trait_method_def_id DefId,
-    expected_method_type Type,
-    method_type_args List[Type],
-    receiver_type Type,
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    trait_method_def_id: DefId,
+    expected_method_type: Type,
+    method_type_args: List[Type],
+    receiver_type: Type,
+): Option[Symbol] = {
     if not trait_method_def_id.is_valid() then {
         return Option[Symbol].None();
     };
@@ -2925,9 +2944,9 @@ public let resolve_trait_placeholder_method_by_identity(
 // ── instantiate_extension_method_from_entry ──────────────────────────────────
 
 private let normalize_borrowed_extension_base_type(
-    base_type Type,
-    owner MethodOwner,
-) Type = {
+    base_type: Type,
+    owner: MethodOwner,
+): Type = {
     let owner_kind = when owner in {
         .Builtin(kind) then kind,
         .Decl(_) then "",
@@ -2961,14 +2980,14 @@ private let normalize_borrowed_extension_base_type(
 //   i. Return the Symbol for the instantiated method
 //
 public let instantiate_extension_method_from_entry(
-    mono Monomorphizer,
-    base_type Type,
-    structure_name String,
-    effective_owner MethodOwner,
-    type_args List[Type],
-    method_type_args List[Type],
-    template GenericExtensionMethodTemplate,
-) Symbol = {
+    mono: Monomorphizer,
+    base_type: Type,
+    structure_name: String,
+    effective_owner: MethodOwner,
+    type_args: List[Type],
+    method_type_args: List[Type],
+    template: GenericExtensionMethodTemplate,
+): Symbol = {
     // "Is the owner a trait?" is a question about the DECLARATION. It used to be
     // answered by looking a name up in the trait registry.
     let conformance_template = when mono.storage.generic_templates.is_trait_owner(
@@ -3039,7 +3058,7 @@ public let instantiate_extension_method_from_entry(
             resolved_template,
         );
         if tool_trait_args.count() == resolved_template.tool_type_params.count() then {
-            let mutable tool_idx UInt = 0;
+            let mutable tool_idx: UInt = 0;
             while tool_idx < resolved_template.tool_type_params.count() then {
                 let tool_param = resolved_template.tool_type_params[tool_idx];
                 let bound_type = resolve_parameterized_type(
@@ -3245,7 +3264,8 @@ public let instantiate_extension_method_from_entry(
                         mono.storage.context.symbol_name(sym),
                         sym.is_mutable(),
                         resolved_type,
-                        false, Option[Expr].None()
+                        false,
+                        Option[Expr].None(),
                     ),
                 );
                 concrete_param_types.push(resolved_type);
@@ -3262,7 +3282,13 @@ public let instantiate_extension_method_from_entry(
                     mono.resolve_type_node_impl(p.param_type, node_subst),
                 );
                 concrete_params.push(
-                    TypedParam(p.name, p.is_mutable, resolved_type, p.named, p.default_value),
+                    TypedParam(
+                        p.name,
+                        p.is_mutable,
+                        resolved_type,
+                        p.named,
+                        p.default_value,
+                    ),
                 );
                 concrete_param_types.push(resolved_type);
             };
@@ -3320,7 +3346,9 @@ public let instantiate_extension_method_from_entry(
     // Register the function signature.
     let mutable param_specs = List[FunctionParamSpec].new();
     for p in concrete_params then {
-        param_specs.push(FunctionParamSpec(p.name, p.is_mutable, p.named, false, p.default_value));
+        param_specs.push(
+            FunctionParamSpec(p.name, p.is_mutable, p.named, false, p.default_value),
+        );
     };
     mono.storage.context.set_symbol_info(
         def_id,
@@ -3512,8 +3540,7 @@ public let instantiate_extension_method_from_entry(
                 ) then {
                     mono.storage.pending_request_keys.insert(deferred_key);
                     mono.storage.pending_requests.push(deferred_req);
-                } else {
-                };
+                } else {};
                 mono.storage.current_self_type = saved_self_type;
                 return result_symbol;
             };
@@ -3562,13 +3589,13 @@ public let instantiate_extension_method_from_entry(
 };
 
 public let instantiate_extension_method_def_id(
-    mono Monomorphizer,
-    base_type Type,
-    owner MethodOwner,
-    template GenericExtensionMethodTemplate,
-    type_args List[Type],
-    method_type_args List[Type],
-) DefId = {
+    mono: Monomorphizer,
+    base_type: Type,
+    owner: MethodOwner,
+    template: GenericExtensionMethodTemplate,
+    type_args: List[Type],
+    method_type_args: List[Type],
+): DefId = {
     let sym = instantiate_extension_method(
         mono,
         base_type,
@@ -3583,9 +3610,9 @@ public let instantiate_extension_method_def_id(
 // ── instantiate_trait_placeholder_method ─────────────────────────────────────
 
 private let normalize_trait_conformance_actual_type(
-    mono Monomorphizer,
-    actual Type,
-) Type = {
+    mono: Monomorphizer,
+    actual: Type,
+): Type = {
     return when actual in {
         .StructureType(def_id) then {
             when resolve_template_name_and_args(mono, def_id) in {
@@ -3632,10 +3659,10 @@ private let normalize_trait_conformance_actual_type(
 };
 
 private let trait_conformance_target_matches(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-) Bool = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+): Bool = {
     let normalized_pattern = normalize_trait_conformance_actual_type(mono, pattern);
     let normalized_actual = normalize_trait_conformance_actual_type(mono, actual);
     return when normalized_pattern in {
@@ -3663,11 +3690,11 @@ private let trait_conformance_target_matches(
 };
 
 private let collect_trait_conformance_bindings(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-    bindings Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+    bindings: Dict[String, Type],
+): Void = {
     let normalized_pattern = normalize_trait_conformance_actual_type(mono, pattern);
     let normalized_actual = normalize_trait_conformance_actual_type(mono, actual);
     when normalized_pattern in {
@@ -3830,7 +3857,7 @@ private let collect_trait_conformance_bindings(
                 .GenericStruct(actual_def_id, actual_args) then {
                     if pattern_def_id == actual_def_id and pattern_args.count() == actual_args.count(
                     ) then {
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < pattern_args.count() then {
                             collect_trait_conformance_bindings(
                                 mono,
@@ -3850,7 +3877,7 @@ private let collect_trait_conformance_bindings(
                 .GenericEnum(actual_def_id, actual_args) then {
                     if pattern_def_id == actual_def_id and pattern_args.count() == actual_args.count(
                     ) then {
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < pattern_args.count() then {
                             collect_trait_conformance_bindings(
                                 mono,
@@ -3872,7 +3899,7 @@ private let collect_trait_conformance_bindings(
 /// Whether `def_id` names std's `Pair`, or is a monomorphized instantiation of
 /// it. Declaration identity only -- a user type also called `Pair` is a
 /// different type and gets no tuple-destructuring behaviour.
-public let is_std_pair_def_id(context CompilerContext, def_id DefId) Bool = {
+public let is_std_pair_def_id(context: CompilerContext, def_id: DefId): Bool = {
     let want = context.std_type_def_id("Pair") or else {
         return false;
     };
@@ -3882,7 +3909,7 @@ public let is_std_pair_def_id(context CompilerContext, def_id DefId) Bool = {
 /// Whether `def_id` is std's `Rune`. Declaration identity only -- the spelling
 /// is read once, here, to find the std declaration; every later question
 /// compares the identity. A user type also called `Rune` is a different type.
-public let is_std_rune_def_id(context CompilerContext, def_id DefId) Bool = {
+public let is_std_rune_def_id(context: CompilerContext, def_id: DefId): Bool = {
     let want = context.std_type_def_id("Rune") or else {
         return false;
     };
@@ -3890,11 +3917,11 @@ public let is_std_rune_def_id(context CompilerContext, def_id DefId) Bool = {
 };
 
 private let infer_trait_extension_type_args(
-    mono Monomorphizer,
-    conformance_target Type,
-    parameterized_base_type Type,
-    trait_def_id DefId,
-) List[Type] = {
+    mono: Monomorphizer,
+    conformance_target: Type,
+    parameterized_base_type: Type,
+    trait_def_id: DefId,
+): List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches(
         mono,
@@ -3927,11 +3954,11 @@ private let infer_trait_extension_type_args(
 };
 
 private let resolve_given_trait_args(
-    mono Monomorphizer,
-    conformance_target Type,
-    trait_args List[Type],
-    parameterized_base_type Type,
-) List[Type] = {
+    mono: Monomorphizer,
+    conformance_target: Type,
+    trait_args: List[Type],
+    parameterized_base_type: Type,
+): List[Type] = {
     let mutable out = List[Type].new();
     if not trait_conformance_target_matches(
         mono,
@@ -3968,12 +3995,12 @@ private let resolve_given_trait_args(
 /// Only names listed in `wanted` are recorded -- `Self` and the implementation's
 /// own type parameters are left alone. First occurrence wins.
 private let collect_trait_type_args_by_unification(
-    mono Monomorphizer,
-    wanted Set[String],
-    requirement Type,
-    concrete Type,
-    solved Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    wanted: Set[String],
+    requirement: Type,
+    concrete: Type,
+    solved: Dict[String, Type],
+): Void = {
     when requirement in {
         .GenericParameter(name) then {
             if wanted.contains(name) and not solved.contains_key(name) then {
@@ -4117,16 +4144,16 @@ private let collect_trait_type_args_by_unification(
 };
 
 private let collect_trait_type_args_in_list(
-    mono Monomorphizer,
-    wanted Set[String],
-    requirement List[Type],
-    concrete List[Type],
-    solved Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    wanted: Set[String],
+    requirement: List[Type],
+    concrete: List[Type],
+    solved: Dict[String, Type],
+): Void = {
     if requirement.count() != concrete.count() then {
         return;
     };
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < requirement.count() then {
         collect_trait_type_args_by_unification(
             mono,
@@ -4147,14 +4174,14 @@ private let collect_trait_type_args_in_list(
 ///   2. The extension method's own type parameters by name, which works when the
 ///      implementation happened to use the trait's parameter names.
 private let infer_trait_args_from_extension_template_binding(
-    mono Monomorphizer,
-    template GenericExtensionMethodTemplate,
-    concrete_extension_type_args List[Type],
-    trait_def_id DefId,
-) List[Type] = {
+    mono: Monomorphizer,
+    template: GenericExtensionMethodTemplate,
+    concrete_extension_type_args: List[Type],
+    trait_def_id: DefId,
+): List[Type] = {
     let mutable out = List[Type].new();
     let mutable bindings = Dict[String, Type].new();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < template.type_params.count() and i < concrete_extension_type_args.count() then {
         bindings.insert(
             template.type_params[i].name,
@@ -4201,7 +4228,7 @@ private let infer_trait_args_from_extension_template_binding(
                     concrete_return_type,
                     solved,
                 );
-                let mutable p UInt = 0;
+                let mutable p: UInt = 0;
                 while p < member.params.count() and p < template.method.params.count() then {
                     let concrete_param_type = resolve_parameterized_type(
                         mono,
@@ -4243,7 +4270,7 @@ private let infer_trait_args_from_extension_template_binding(
 /// `rustc_middle::ty::fast_reject::SimplifyType` and the `incoherent_impls`
 /// table it feeds. `MethodOwner.Builtin(name)` is the same idea; see the note on
 /// that case. A user type cannot enter this set, so the name cannot collide.
-private let primitive_extension_template_name(t Type) Option[String] = {
+private let primitive_extension_template_name(t: Type): Option[String] = {
     return when t in {
         .IntType() then Option[String].Some("Int"),
         .Int8Type() then Option[String].Some("Int8"),
@@ -4278,10 +4305,10 @@ private let primitive_extension_template_name(t Type) Option[String] = {
 /// own declaration. Ignoring a shape bound here is what let `given[T foreign]`
 /// methods vanish from the emitted C while the call still compiled.
 private let type_satisfies_bound_constraint(
-    mono Monomorphizer,
-    actual_type Type,
-    constraint Bound,
-) Bool = {
+    mono: Monomorphizer,
+    actual_type: Type,
+    constraint: Bound,
+): Bool = {
     return when constraint in {
         // `def_id` was resolved when the enclosing template was registered, in
         // the module that wrote the bound. Looking the spelling up again here
@@ -4297,7 +4324,7 @@ private let type_satisfies_bound_constraint(
     };
 };
 
-private let type_satisfies_mutable_bound(mono Monomorphizer, actual_type Type) Bool = {
+private let type_satisfies_mutable_bound(mono: Monomorphizer, actual_type: Type): Bool = {
     let t = resolve_parameterized_type(mono, actual_type);
     return when t in {
         .StructureType(def_id) then mono.storage.context.is_struct_mutable(def_id),
@@ -4310,7 +4337,7 @@ private let type_satisfies_mutable_bound(mono Monomorphizer, actual_type Type) B
 
 /// The same CLOSED set `satisfies_foreign_constraint` checks in sema: built-in
 /// scalars (including std's `Rune`), raw pointers, and `foreign type` decls.
-private let type_satisfies_foreign_bound(mono Monomorphizer, actual_type Type) Bool = {
+private let type_satisfies_foreign_bound(mono: Monomorphizer, actual_type: Type): Bool = {
     let t = resolve_parameterized_type(mono, actual_type);
     return when t in {
         .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type() or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType() then true,
@@ -4330,10 +4357,10 @@ private let type_satisfies_foreign_bound(mono Monomorphizer, actual_type Type) B
 /// `trait_def_id`. The match is on identity, so two same-named traits from
 /// different modules cannot answer for each other.
 private let type_satisfies_trait_constraint(
-    mono Monomorphizer,
-    actual_type Type,
-    trait_def_id DefId,
-) Bool = {
+    mono: Monomorphizer,
+    actual_type: Type,
+    trait_def_id: DefId,
+): Bool = {
 
     let mutable parameterized_actual_type = resolve_parameterized_type(mono, actual_type);
 
@@ -4489,15 +4516,15 @@ private let type_satisfies_trait_constraint(
 };
 
 public let extension_type_args_satisfy_constraints(
-    mono Monomorphizer,
-    template GenericExtensionMethodTemplate,
-    type_args List[Type],
-) Bool = {
+    mono: Monomorphizer,
+    template: GenericExtensionMethodTemplate,
+    type_args: List[Type],
+): Bool = {
     if template.type_params.count() != type_args.count() then {
         return false;
     };
 
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < template.type_params.count() then {
         let param = template.type_params[i];
         let mutable actual_type = resolve_parameterized_type(mono, (type_args[i]));
@@ -4528,12 +4555,12 @@ public let extension_type_args_satisfy_constraints(
 /// that each need their own instantiation even though they share a trait
 /// identity.
 public let instantiate_trait_vtable_methods(
-    mono Monomorphizer,
-    concrete_type Type,
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
-) Void = {
+    mono: Monomorphizer,
+    concrete_type: Type,
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
+): Void = {
     let mutable visited = Set[UInt].new();
     instantiate_trait_vtable_methods_core(
         mono,
@@ -4546,13 +4573,13 @@ public let instantiate_trait_vtable_methods(
 };
 
 private let instantiate_trait_vtable_methods_core(
-    mono Monomorphizer,
-    concrete_type Type,
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
-    visited Set[UInt],
-) Void = {
+    mono: Monomorphizer,
+    concrete_type: Type,
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
+    visited: Set[UInt],
+): Void = {
     if has_generic_parameter(concrete_type) then {
         return;
     };
@@ -4925,7 +4952,7 @@ private let instantiate_trait_vtable_methods_core(
         .Some(trait_info) then {
             let mutable bindings = Dict[String, Type].new();
             bindings.insert("Self", concrete_type);
-            let mutable param_index UInt = 0;
+            let mutable param_index: UInt = 0;
             while param_index < trait_info.type_params.count() and param_index < trait_type_args.count(
             ) then {
                 bindings.insert(
@@ -4986,11 +5013,11 @@ private let instantiate_trait_vtable_methods_core(
 //      template, type_args, and method_type_args
 //
 public let instantiate_trait_placeholder_method(
-    mono Monomorphizer,
-    base_type Type,
-    method_name String,
-    method_type_args List[Type],
-) Void = {
+    mono: Monomorphizer,
+    base_type: Type,
+    method_name: String,
+    method_type_args: List[Type],
+): Void = {
     let placeholder_base_type = when base_type in {
         .ReferenceType(inner) then inner,
         .MutableReferenceType(inner) then inner,

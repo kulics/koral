@@ -10,37 +10,37 @@ using "std" { ... };
 // FFI Declarations
 // ============================================================================
 
-let foreign __koral_normalize_path(path *UInt8, buf *UInt8, size UInt) Int;
-let foreign __koral_path_separator() UInt8;
-let foreign __koral_path_list_separator() UInt8;
+let foreign __koral_normalize_path(path: *UInt8, buf: *UInt8, size: UInt): Int;
+let foreign __koral_path_separator(): UInt8;
+let foreign __koral_path_list_separator(): UInt8;
 
 // ============================================================================
 // Path Type
 // ============================================================================
 
 public trait IntoPath {
-    into_path(self) Path;
+    into_path(self): Path;
 };
 
-given String as IntoPath {
+given String: IntoPath {
 
-    public into_path(self) Path = Path(self);
+    public into_path(self): Path = Path(self);
 };
 
-given Path as IntoPath {
+given Path: IntoPath {
 
-    public into_path(self) Path = self;
+    public into_path(self): Path = self;
 };
 
-public type Path(private _path String);
+public type Path(private _path: String);
 
 given Path {
 
     /// 判断路径是否为空
-    public is_empty(self) Bool = self._path.is_empty();
+    public is_empty(self): Bool = self._path.is_empty();
 
     /// 判断是否为绝对路径
-    public is_absolute(self) Bool = {
+    public is_absolute(self): Bool = {
         if self._path.is_empty() then {
             return false;
         };
@@ -63,7 +63,7 @@ given Path {
     ///
     /// 永远用 `/` 拼接——这是用户态的规范形，与平台无关。传给操作系统之前由
     /// 运行时的各 syscall 边界负责翻译成平台分隔符。
-    public join[T IntoPath](self, path T) Path = {
+    public join[T: IntoPath](self, path: T): Path = {
         let p = path.into_path();
         if self._path.is_empty() then {
             return p;
@@ -84,11 +84,11 @@ given Path {
     };
 
     /// 返回父目录路径
-    public dir_name(self) Path = {
+    public dir_name(self): Path = {
         if self._path.is_empty() then {
             return Path(".");
         };
-        let mutable p = self._path.replace_all("\\", with: "/");
+        let mutable p = self._path.replace_all("\\", with = "/");
         if is_all_separators(p) then {
             return Path("/");
         };
@@ -114,11 +114,11 @@ given Path {
     };
 
     /// 返回最后一个路径组件名称
-    public base_name(self) String = {
+    public base_name(self): String = {
         if self._path.is_empty() then {
             return ".";
         };
-        let mutable p = self._path.replace_all("\\", with: "/");
+        let mutable p = self._path.replace_all("\\", with = "/");
         if is_all_separators(p) then {
             return "/";
         };
@@ -139,7 +139,7 @@ given Path {
     };
 
     /// 返回文件扩展名（包含点号，如 ".txt"；无扩展名返回空字符串）
-    public ext_name(self) String = {
+    public ext_name(self): String = {
         let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
             return "";
@@ -158,7 +158,7 @@ given Path {
     };
 
     /// 返回文件名去掉扩展名后的部分（如 "file.txt" → "file"，"archive.tar.gz" → "archive.tar"）
-    public stem_name(self) String = {
+    public stem_name(self): String = {
         let name = self.base_name();
         if name == "." or name == ".." or name == "/" then {
             return name;
@@ -171,7 +171,7 @@ given Path {
     };
 
     /// 返回替换了扩展名的新 Path
-    public with_ext_name(self, ext String) Path = {
+    public with_ext_name(self, ext: String): Path = {
         let bname = self.base_name();
         let old_ext = self.ext_name();
         let stem = if old_ext.is_empty() then bname
@@ -182,7 +182,7 @@ given Path {
     };
 
     /// 返回替换了最后一个组件名称的新 Path
-    public with_base_name(self, name String) Path = if self.dir_name().to_string() == "." then Path(
+    public with_base_name(self, name: String): Path = if self.dir_name().to_string() == "." then Path(
         name,
     ) else self.dir_name().join(name);
 
@@ -190,7 +190,7 @@ given Path {
     ///
     /// 这是用户态的规范形，平台无关。传给操作系统之前由运行时各 syscall 边界
     /// 负责翻译成平台分隔符，所以这里刻意不翻成 `\`。
-    public normalize(self) Path = {
+    public normalize(self): Path = {
         let buf_size = self._path.count() + 1;
         let buf = alloc_memory[UInt8](buf_size);
         defer dealloc_memory(buf);
@@ -200,10 +200,10 @@ given Path {
     };
 
     /// 将路径拆分为组件列表
-    public components(self) List[String] = split_path_components(self._path);
+    public components(self): List[String] = split_path_components(self._path);
 
     /// 判断路径是否以指定前缀开头（按组件匹配）
-    public starts_with(self, prefix Path) Bool = {
+    public starts_with(self, prefix: Path): Bool = {
         let self_parts = self.components();
         let prefix_parts = prefix.components();
         if prefix_parts.count() > self_parts.count() then {
@@ -218,7 +218,7 @@ given Path {
     };
 
     /// 判断路径是否以指定后缀结尾（按组件匹配）
-    public ends_with(self, suffix Path) Bool = {
+    public ends_with(self, suffix: Path): Bool = {
         let self_parts = self.components();
         let suffix_parts = suffix.components();
         if suffix_parts.count() > self_parts.count() then {
@@ -234,7 +234,7 @@ given Path {
     };
 
     /// 计算相对于 base 的相对路径
-    public relative_to[T IntoPath](self, base T) Result[Path] = {
+    public relative_to[T: IntoPath](self, base: T): Result[Path] = {
         let b = base.into_path();
         if self._path.is_empty() then {
             return Result[Path].Error("target path is empty");
@@ -253,7 +253,7 @@ given Path {
         let self_parts = norm_self.components();
         let base_parts = norm_base.components();
 
-        let mutable common UInt = 0;
+        let mutable common: UInt = 0;
         let self_len = self_parts.count();
         let base_len = base_parts.count();
         let min_len = if self_len < base_len then self_len else base_len;
@@ -287,7 +287,7 @@ given Path {
 // ============================================================================
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
-public let path_separator() String = {
+public let path_separator(): String = {
     let sep = __koral_path_separator();
     let mutable s = StringBuilder.new();
     s.push_byte(sep);
@@ -300,10 +300,10 @@ public let path_separator() String = {
 /// any other environment variable: an env sniff answers "unset" in a stripped
 /// environment (`env -i`, some CI shells) and then `.exe` naming and PATH
 /// splitting both come out wrong.
-public let is_windows_host() Bool = __koral_path_separator() == UInt8(92);
+public let is_windows_host(): Bool = __koral_path_separator() == UInt8(92);
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
-public let path_list_separator() String = {
+public let path_list_separator(): String = {
     let sep = __koral_path_list_separator();
     let mutable s = StringBuilder.new();
     s.push_byte(sep);
@@ -316,9 +316,9 @@ public let path_list_separator() String = {
 
 /// Split a normalized path (using "/" separator) into a list of components.
 /// Filters out empty parts from consecutive separators.
-private let split_path_components(path String) List[String] = {
-    let mutable parts List[String] = [];
-    let normalized = path.replace_all("\\", with: "/");
+private let split_path_components(path: String): List[String] = {
+    let mutable parts: List[String] = [];
+    let normalized = path.replace_all("\\", with = "/");
     for part in normalized.split("/") then {
         if not part.is_empty() then {
             parts.push(part);
@@ -327,7 +327,7 @@ private let split_path_components(path String) List[String] = {
     return parts;
 };
 
-private let is_all_separators(path String) Bool = {
+private let is_all_separators(path: String): Bool = {
     if path.is_empty() then {
         return false;
     };
@@ -344,21 +344,21 @@ private let is_all_separators(path String) Bool = {
 ///
 /// Its trailing separator is part of the root and must survive trimming --
 /// `C:` is a drive-relative path, not a directory root.
-private let is_drive_root(path String) Bool = {
+private let is_drive_root(path: String): Bool = {
     return path.count() == 3 and path[1] == ':' and path[2] == '/';
 };
 
-given Path as Eq {
+given Path: Eq {
 
-    public equals(self, other Path) Bool = self._path == other._path;
+    public equals(self, other: Path): Bool = self._path == other._path;
 };
 
-given Path as Hash {
+given Path: Hash {
 
-    public hash(self) UInt = self._path.hash();
+    public hash(self): UInt = self._path.hash();
 };
 
-given Path as ToString {
+given Path: ToString {
 
-    public to_string(self) String = self._path;
+    public to_string(self): String = self._path;
 };

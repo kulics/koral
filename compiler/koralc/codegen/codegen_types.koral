@@ -14,7 +14,7 @@
 // in enum case fields. This includes VoidType, Unknown, and unresolved
 // GenericParameter types.
 
-private let is_void_like_type(t Type) Bool = {
+private let is_void_like_type(t: Type): Bool = {
     return when t in {
         .VoidType() then true,
         .Unknown() then true,
@@ -27,10 +27,10 @@ given CodeGen {
 
     register_type_declaration_for_used_type(
         self,
-        decl_map Dict[String, TypeDeclaration],
-        seen Set[String],
-        t Type,
-    ) Void = {
+        decl_map: Dict[String, TypeDeclaration],
+        seen: Set[String],
+        t: Type,
+    ): Void = {
         let mutable concrete_type = self.concretize_codegen_type(t);
         let visit_key = self.concrete_layout_key_for_type(concrete_type);
         if seen.contains(visit_key) then {
@@ -178,10 +178,7 @@ given CodeGen {
         };
     };
 
-    collect_used_type_declarations(
-        self,
-        decl_map Dict[String, TypeDeclaration],
-    ) Void = {
+    collect_used_type_declarations(self, decl_map: Dict[String, TypeDeclaration]): Void = {
         let mutable seen = Set[String].new();
 
         for global in self.program.globals then {
@@ -303,10 +300,7 @@ given CodeGen {
         };
     };
 
-    concrete_struct_fields_from_def(
-        self,
-        def_id DefId,
-    ) Option[List[TypedField]] = {
+    concrete_struct_fields_from_def(self, def_id: DefId): Option[List[TypedField]] = {
         when self.concrete_struct_fields_from_program(def_id) in {
             .Some(fields) then {
                 return Option[List[TypedField]].Some(fields);
@@ -326,7 +320,8 @@ given CodeGen {
                             field.name,
                             field.is_mutable,
                             field.field_type,
-                            field.named, field.default_value
+                            field.named,
+                            field.default_value,
                         ),
                     );
                 };
@@ -336,10 +331,7 @@ given CodeGen {
         };
     };
 
-    concrete_enum_cases_from_def(
-        self,
-        def_id DefId,
-    ) Option[List[TypedEnumCase]] = {
+    concrete_enum_cases_from_def(self, def_id: DefId): Option[List[TypedEnumCase]] = {
         when self.concrete_enum_cases_from_program(def_id) in {
             .Some(cases) then {
                 return Option[List[TypedEnumCase]].Some(cases);
@@ -356,7 +348,12 @@ given CodeGen {
                             return Option[List[TypedEnumCase]].None();
                         };
                         typed_fields.push(
-                            TypedEnumCaseField(param.name, param.param_type, param.named, param.default_value),
+                            TypedEnumCaseField(
+                                param.name,
+                                param.param_type,
+                                param.named,
+                                param.default_value,
+                            ),
                         );
                     };
                     typed_cases.push(TypedEnumCase(case_info.name, typed_fields));
@@ -367,7 +364,7 @@ given CodeGen {
         };
     };
 
-    struct_fields_contain_generic(self, fields List[TypedField]) Bool = {
+    struct_fields_contain_generic(self, fields: List[TypedField]): Bool = {
         for field in fields then {
             if self.type_mentions_unresolved_generic(field.field_type) then {
                 return true;
@@ -376,7 +373,7 @@ given CodeGen {
         return false;
     };
 
-    enum_cases_contain_generic(self, cases List[TypedEnumCase]) Bool = {
+    enum_cases_contain_generic(self, cases: List[TypedEnumCase]): Bool = {
         for case_info in cases then {
             for field in case_info.fields then {
                 if self.type_mentions_unresolved_generic(field.field_type) then {
@@ -392,7 +389,7 @@ given CodeGen {
     /// 生成结构体类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    append_managed_nominal_copy_function(self, name String) Void = {
+    append_managed_nominal_copy_function(self, name: String): Void = {
         self.buffer.push_string(
             "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n",
         );
@@ -407,7 +404,7 @@ given CodeGen {
         self.buffer.push_string("}\n\n");
     };
 
-    append_managed_nominal_drop_function(self, name String) Void = {
+    append_managed_nominal_drop_function(self, name: String): Void = {
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
         self.push_indent_level();
         self.add_indent();
@@ -422,9 +419,9 @@ given CodeGen {
 
     append_managed_nominal_user_drop_prelude(
         self,
-        name String,
-        user_drop String,
-    ) Void = {
+        name: String,
+        user_drop: String,
+    ): Void = {
         self.add_indent();
         self.buffer.push_string("struct \(name) __koral_self;\n");
         self.add_indent();
@@ -444,9 +441,9 @@ given CodeGen {
 
     append_managed_struct_payload_drop_function(
         self,
-        name String,
-        fields List[TypedField],
-    ) Void = {
+        name: String,
+        fields: List[TypedField],
+    ): Void = {
         let payload_name = "__koral_payload_\(name)";
         self.buffer.push_string(
             "static void __koral_\(name)_payload_drop(void* raw_payload) {\n",
@@ -476,9 +473,9 @@ given CodeGen {
 
     append_managed_enum_payload_drop_function(
         self,
-        name String,
-        cases List[TypedEnumCase],
-    ) Void = {
+        name: String,
+        cases: List[TypedEnumCase],
+    ): Void = {
         let payload_name = "__koral_payload_\(name)";
         self.buffer.push_string(
             "static void __koral_\(name)_payload_drop(void* raw_payload) {\n",
@@ -508,7 +505,7 @@ given CodeGen {
                 self.buffer.push_string("switch (self->tag) {\n");
             },
         };
-        let mutable case_index UInt = 0;
+        let mutable case_index: UInt = 0;
         for case_info in cases then {
             let case_c_name = self.sanitize_codegen_identifier(case_info.name);
             self.add_indent();
@@ -533,9 +530,9 @@ given CodeGen {
 
     generate_managed_type_declaration(
         self,
-        name String,
-        fields List[TypedField],
-    ) Void = {
+        name: String,
+        fields: List[TypedField],
+    ): Void = {
         let payload_name = "__koral_payload_\(name)";
         self.buffer.push_string("struct \(payload_name) {\n");
         self.push_indent_level();
@@ -554,9 +551,9 @@ given CodeGen {
 
     generate_managed_enum_declaration(
         self,
-        name String,
-        cases List[TypedEnumCase],
-    ) Void = {
+        name: String,
+        cases: List[TypedEnumCase],
+    ): Void = {
         let payload_name = "__koral_payload_\(name)";
         let niche = self.enum_niche_layout(cases);
         self.buffer.push_string("struct \(payload_name) {\n");
@@ -600,10 +597,10 @@ given CodeGen {
 
     public generate_type_declaration(
         self,
-        name String,
-        fields List[TypedField],
-        managed Bool,
-    ) Void = {
+        name: String,
+        fields: List[TypedField],
+        managed: Bool,
+    ): Void = {
         if managed then {
             self.generate_managed_type_declaration(name, fields);
             return;
@@ -677,10 +674,10 @@ given CodeGen {
     /// Requirements: 3.1, 3.2, 3.3, 3.4
     public generate_enum_declaration(
         self,
-        name String,
-        cases List[TypedEnumCase],
-        managed Bool,
-    ) Void = {
+        name: String,
+        cases: List[TypedEnumCase],
+        managed: Bool,
+    ): Void = {
         if managed then {
             self.generate_managed_enum_declaration(name, cases);
             return;
@@ -744,7 +741,7 @@ given CodeGen {
                 self.buffer.push_string("switch (self->tag) {\n");
             },
         };
-        let mutable case_index UInt = 0;
+        let mutable case_index: UInt = 0;
         for case_info in cases then {
             let case_c_name = self.sanitize_codegen_identifier(case_info.name);
             self.add_indent();
@@ -863,9 +860,9 @@ given CodeGen {
     /// Requirements: 3.5
     public generate_foreign_struct_declaration(
         self,
-        name String,
-        fields List[TypedField],
-    ) Void = {
+        name: String,
+        fields: List[TypedField],
+    ): Void = {
         self.buffer.push_string("struct \(name) {\n");
         self.push_indent_level();
         for field in fields then {
@@ -880,7 +877,7 @@ given CodeGen {
 
     // ── 类型声明收集与拓扑排序 ────────────────────────────────────────────────
 
-    public collect_and_sort_type_declarations(self) List[TypeDeclaration] = {
+    public collect_and_sort_type_declarations(self): List[TypeDeclaration] = {
         let mutable decl_map = Dict[String, TypeDeclaration].new();
 
         for global in self.program.globals then {
@@ -1048,7 +1045,7 @@ given CodeGen {
     // ── 辅助：获取类型声明的依赖集合 ─────────────────────────────────────────
 
     /// 获取一个类型声明所依赖的其他类型名称集合
-    type_requires_complete_definition(self, t Type) Bool = {
+    type_requires_complete_definition(self, t: Type): Bool = {
         let concrete = self.concretize_codegen_type(t);
         return when concrete in {
             .StructureType(_) then not self.uses_managed_nominal_representation(
@@ -1067,12 +1064,12 @@ given CodeGen {
 
     push_type_dependency_name(
         self,
-        deps List[String],
-        seen Set[String],
-        decl_map Dict[String, TypeDeclaration],
-        self_name String,
-        dep_name String,
-    ) Void = {
+        deps: List[String],
+        seen: Set[String],
+        decl_map: Dict[String, TypeDeclaration],
+        self_name: String,
+        dep_name: String,
+    ): Void = {
         let _ = self;
         if dep_name != self_name and decl_map.contains_key(dep_name) and not seen.contains(
             dep_name,
@@ -1084,12 +1081,12 @@ given CodeGen {
 
     record_direct_type_dependency(
         self,
-        deps List[String],
-        seen Set[String],
-        decl_map Dict[String, TypeDeclaration],
-        self_name String,
-        t Type,
-    ) Void = {
+        deps: List[String],
+        seen: Set[String],
+        decl_map: Dict[String, TypeDeclaration],
+        self_name: String,
+        t: Type,
+    ): Void = {
         let concrete = self.concretize_codegen_type(t);
         if not self.type_requires_complete_definition(concrete) then {
             return;
@@ -1108,12 +1105,12 @@ given CodeGen {
 
     record_dependencies_from_type(
         self,
-        deps List[String],
-        seen Set[String],
-        decl_map Dict[String, TypeDeclaration],
-        self_name String,
-        t Type,
-    ) Void = {
+        deps: List[String],
+        seen: Set[String],
+        decl_map: Dict[String, TypeDeclaration],
+        self_name: String,
+        t: Type,
+    ): Void = {
         let concrete = self.concretize_codegen_type(t);
         // Swift CodeGen.requiresCompleteNominalDefinition: a managed nominal's C
         // struct is only `{void* ptr; void* control;}` — an opaque handle that does
@@ -1177,9 +1174,9 @@ given CodeGen {
 
     get_type_dependencies(
         self,
-        decl TypeDeclaration,
-        decl_map Dict[String, TypeDeclaration],
-    ) List[String] = {
+        decl: TypeDeclaration,
+        decl_map: Dict[String, TypeDeclaration],
+    ): List[String] = {
         let mutable deps = List[String].new();
         let mutable seen = Set[String].new();
 
@@ -1225,7 +1222,7 @@ given CodeGen {
     };
 
     /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 EnumType 有效）
-    c_name_for_type(self, t Type) Option[String] = {
+    c_name_for_type(self, t: Type): Option[String] = {
         return when t in {
             .StructureType(_) then self.concrete_type_c_name_fallback(t),
             .EnumType(_) then self.concrete_type_c_name_fallback(t),
@@ -1236,7 +1233,7 @@ given CodeGen {
     };
 
     /// 判断给定名称是否为 foreign 类型（Opaque kind）
-    is_foreign_type(self, name String) Bool = {
+    is_foreign_type(self, name: String): Bool = {
         when self.find_def_id_by_name(name) in {
             .Some(def_id) then {
                 when self.context.get_kind(def_id) in {
@@ -1264,13 +1261,13 @@ given CodeGen {
 };
 
 /// 对字符串列表进行字典序排序（插入排序）
-let sort_strings(list List[String]) List[String] = {
+let sort_strings(list: List[String]): List[String] = {
     let mutable result = List[String].new();
     for s in list then {
         result.push(s);
     };
     let n = result.count();
-    let mutable i UInt = 1;
+    let mutable i: UInt = 1;
     while i < n then {
         let key = result[i];
         let mutable j = i;

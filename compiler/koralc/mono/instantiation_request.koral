@@ -5,20 +5,20 @@
 
 // Describes what kind of generic entity is being instantiated.
 public type InstantiationKind {
-    StructType(template GenericStructTemplate, args List[Type]),
-    EnumType(template GenericEnumTemplate, args List[Type]),
-    Function(template GenericFunctionTemplate, args List[Type]),
-    ExtensionMethod(owner MethodOwner, base_type Type, template GenericExtensionMethodTemplate, type_args List[Type], method_type_args List[Type], ),
-    TraitMethod(base_type Type, method_name String, method_type_args List[Type], ),
+    StructType(template: GenericStructTemplate, args: List[Type]),
+    EnumType(template: GenericEnumTemplate, args: List[Type]),
+    Function(template: GenericFunctionTemplate, args: List[Type]),
+    ExtensionMethod(owner: MethodOwner, base_type: Type, template: GenericExtensionMethodTemplate, type_args: List[Type], method_type_args: List[Type]),
+    TraitMethod(base_type: Type, method_name: String, method_type_args: List[Type]),
 };
 
 // ── InstantiationRequest ──────────────────────────────────────────────────────
 
 // A single request to instantiate a generic entity at a specific call site.
 public type InstantiationRequest(
-    kind InstantiationKind,
-    source_line Int,
-    source_file_name String,
+    kind: InstantiationKind,
+    source_line: Int,
+    source_file_name: String,
 );
 
 // ── InstantiationKey ──────────────────────────────────────────────────────────
@@ -26,16 +26,16 @@ public type InstantiationRequest(
 // Deduplication key derived from an InstantiationRequest.
 // Two requests with the same key represent the same instantiation.
 public type InstantiationKey {
-    StructType(template_def_id DefId, args List[Type]),
-    EnumType(template_def_id DefId, args List[Type]),
-    Function(template_def_id DefId, args List[Type]),
-    ExtensionMethod(owner MethodOwner, method_name String, type_args List[Type], method_type_args List[Type]),
-    TraitMethod(base_type Type, method_name String, method_type_args List[Type]),
+    StructType(template_def_id: DefId, args: List[Type]),
+    EnumType(template_def_id: DefId, args: List[Type]),
+    Function(template_def_id: DefId, args: List[Type]),
+    ExtensionMethod(owner: MethodOwner, method_name: String, type_args: List[Type], method_type_args: List[Type]),
+    TraitMethod(base_type: Type, method_name: String, method_type_args: List[Type]),
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-private let type_parts_to_string(parts List[Type]) String = {
+private let type_parts_to_string(parts: List[Type]): String = {
     if parts.is_empty() then {
         return "-";
     };
@@ -55,7 +55,7 @@ private let type_parts_to_string(parts List[Type]) String = {
 
 given InstantiationKey {
     // Convert the key to its canonical string representation used for deduplication.
-    public to_string(self) String = {
+    public to_string(self): String = {
         return when self in {
             .StructType(template_def_id, args) then "struct:\(template_def_id.id):\(type_parts_to_string(args))",
             .EnumType(template_def_id, args) then "enum:\(template_def_id.id):\(type_parts_to_string(args))",
@@ -66,7 +66,7 @@ given InstantiationKey {
     };
 
     // Numeric rank for deterministic ordering: struct(0) < enum(1) < function(2) < extensionMethod(3) < traitMethod(4)
-    public kind_rank(self) Int = {
+    public kind_rank(self): Int = {
         return when self in {
             .StructType(_, _) then 0,
             .EnumType(_, _) then 1,
@@ -77,9 +77,9 @@ given InstantiationKey {
     };
 };
 
-given InstantiationKey as Eq {
+given InstantiationKey: Eq {
 
-    public equals(self, other InstantiationKey) Bool = when self in {
+    public equals(self, other: InstantiationKey): Bool = when self in {
         .StructType(template_def_id, args) then when other in {
             .StructType(other_template_def_id, other_args) then template_def_id.id == other_template_def_id.id and args == other_args,
             _ then false,
@@ -103,9 +103,9 @@ given InstantiationKey as Eq {
     };
 };
 
-given InstantiationKey as Hash {
+given InstantiationKey: Hash {
 
-    public hash(self) UInt = when self in {
+    public hash(self): UInt = when self in {
         .StructType(template_def_id, args) then {
             let mutable hash = UInt(14695981039346656037);
             hash = stable_hash_combine_value(hash, UInt(0));
@@ -165,7 +165,7 @@ given InstantiationRequest {
     // Derive the InstantiationKey for this request.
     // Generic argument lists are COW and Type is immutable, so reusing the
     // original lists avoids redundant boxing while keeping keys stable.
-    public to_key(self) InstantiationKey = {
+    public to_key(self): InstantiationKey = {
         return when self.kind in {
             .StructType(template, args) then {
                 InstantiationKey.StructType(template.def_id, args)
@@ -193,19 +193,19 @@ given InstantiationRequest {
     };
 
     // Return the canonical structured deduplication key for this request.
-    public deduplication_key(self) InstantiationKey = {
+    public deduplication_key(self): InstantiationKey = {
         return self.to_key();
     };
 };
 
-given InstantiationRequest as Eq {
-    public equals(self, other InstantiationRequest) Bool = {
+given InstantiationRequest: Eq {
+    public equals(self, other: InstantiationRequest): Bool = {
         return self.to_key() == other.to_key();
     };
 };
 
-given InstantiationRequest as Hash {
-    public hash(self) UInt = {
+given InstantiationRequest: Hash {
+    public hash(self): UInt = {
         return self.to_key().hash();
     };
 };

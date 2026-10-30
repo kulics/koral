@@ -25,19 +25,19 @@ using "std/os" { ... };
 /// One rendered declaration, already in its final spelling. Multi-line by
 /// construction -- a type with a body, say -- so it is kept as text rather than
 /// re-split into lines.
-type Decl(text String);
+type Decl(text: String);
 
 type mutable ParsedApi(
-    mutable free_functions List[Decl],
-    mutable traits List[Decl],
-    mutable types List[Decl],
-    mutable givens List[Decl],
+    mutable free_functions: List[Decl],
+    mutable traits: List[Decl],
+    mutable types: List[Decl],
+    mutable givens: List[Decl],
 );
 
-let empty_parsed_api() ParsedApi =
+let empty_parsed_api(): ParsedApi =
     ParsedApi(List[Decl].new(), List[Decl].new(), List[Decl].new(), List[Decl].new());
 
-let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
+let merge_parsed(target: ParsedApi, parsed: ParsedApi): Void = {
     for item in parsed.free_functions then {
         target.free_functions.push(item);
     };
@@ -59,7 +59,7 @@ let merge_parsed(target ParsedApi, parsed ParsedApi) Void = {
 /// Everything a consumer of the file can see, in source order. The filtering
 /// rule lives in `Printer.print_signature` -- one place decides what "the public
 /// API" of a declaration is, and this tool only sorts the results into pages.
-let parse_public_api(file_path Path) ParsedApi = {
+let parse_public_api(file_path: Path): ParsedApi = {
     let api = empty_parsed_api();
 
     let text = read_text_file(file_path) or else as e in {
@@ -84,7 +84,7 @@ let parse_public_api(file_path Path) ParsedApi = {
     return api;
 };
 
-let parse_source(text String) Result[CstFile] = {
+let parse_source(text: String): Result[CstFile] = {
     let mutable tokenizer = Tokenizer.new(text);
     let tokens = tokenizer.tokenize() or return;
     let mutable parser = CstParser.new(tokens);
@@ -95,14 +95,14 @@ let parse_source(text String) Result[CstFile] = {
 /// cannot reach, then terminates it. The `;` is added here rather than by the
 /// printer because this is documentation: the page shows a signature, and a
 /// signature ends in a semicolon.
-let render_signature(d CstDecl) Decl = {
+let render_signature(d: CstDecl): Decl = {
     let mutable printer = Printer.new();
     printer.print_signature(d);
     printer.write_terminator();
     return Decl(printer.result());
 };
 
-let collect_decl(api ParsedApi, d CstDecl) Void = {
+let collect_decl(api: ParsedApi, d: CstDecl): Void = {
     if not Printer.is_public(Printer.decl_visibility(d)) then {
         // A `given` block carries no access modifier and is always part of the
         // story -- it is where a type meets its traits.
@@ -142,7 +142,7 @@ let collect_decl(api ParsedApi, d CstDecl) Void = {
 // Page assembly
 // ============================================================================
 
-let append_declarations(lines List[String], declarations List[Decl]) Void = {
+let append_declarations(lines: List[String], declarations: List[Decl]): Void = {
     for idx in 0..<declarations.count() then {
         lines.push(declarations[idx].text);
         if idx + 1 < declarations.count() then {
@@ -152,7 +152,7 @@ let append_declarations(lines List[String], declarations List[Decl]) Void = {
 };
 
 /// The whole markdown page for one module, as text.
-let render_module_doc(module_key String, source_files List[String]) Result[String] = {
+let render_module_doc(module_key: String, source_files: List[String]): Result[String] = {
     let module_name = module_name_from_key(module_key);
     let module_stem = last_segment(module_key);
     let mutable stem_first = List[String].new();
@@ -241,13 +241,13 @@ let render_module_doc(module_key String, source_files List[String]) Result[Strin
 // declaration is a CST node, the check is against the language: given source
 // text, does the page show the right thing?
 
-type mutable SelfTest(mutable failed Bool);
+type mutable SelfTest(mutable failed: Bool);
 
 given SelfTest {
 
-    new() SelfTest = SelfTest(false);
+    new(): SelfTest = SelfTest(false);
 
-    contains(self, name String, text String, needle String) Void = {
+    contains(self, name: String, text: String, needle: String): Void = {
         if text.contains(needle) then {
             return;
         };
@@ -258,7 +258,7 @@ given SelfTest {
         eprintln(text);
     };
 
-    not_contains(self, name String, text String, needle String) Void = {
+    not_contains(self, name: String, text: String, needle: String): Void = {
         if not text.contains(needle) then {
             return;
         };
@@ -270,7 +270,7 @@ given SelfTest {
     };
 };
 
-let render_all(source String) Result[String] = {
+let render_all(source: String): Result[String] = {
     let file = parse_source(source) or return;
     let mutable out = StringBuilder.new();
     for item in file.items then {
@@ -294,13 +294,13 @@ let render_all(source String) Result[String] = {
     return .Ok(out.to_string());
 };
 
-let run_self_test() Void = {
+let run_self_test(): Void = {
     let mutable t = SelfTest.new();
 
     // Non-public fields stay off the page; the public ones do not. An
     // unmarked field is module-internal by default and stays off too.
     let mixed = render_all(
-        "public type Mixed(public visible String, internal hidden Int, protected token Int, private cache Int, bare Int);\n",
+        "public type Mixed(public visible: String, internal hidden: Int, protected token: Int, private cache: Int, bare: Int);\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render mixed type: \(e.message())");
         exit(1);
@@ -314,38 +314,38 @@ let run_self_test() Void = {
     // A `given` shows only its public methods; a trait shows all of them,
     // because a trait's whole body is its interface.
     let given_text = render_all(
-        "type mutable Box[R Any](value R);\n" + "given[R Any] Box[R] {\n" + "    public new(value R) Box[R] = Box[R](value);\n" + "    private peek(self) R = self.value;\n" + "    get(self) R = self.value;\n" + "};\n",
+        "type mutable Box[R: Any](value: R);\n" + "given[R: Any] Box[R] {\n" + "    public new(value: R): Box[R] = Box[R](value);\n" + "    private peek(self): R = self.value;\n" + "    get(self): R = self.value;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render given: \(e.message())");
         exit(1);
     };
-    t.contains("given shows public methods", given_text, "public new(value R) Box[R]");
+    t.contains("given shows public methods", given_text, "public new(value: R): Box[R]");
     t.not_contains("given drops private methods", given_text, "peek");
-    t.not_contains("given drops unexported methods", given_text, "get(self)");
+    t.not_contains("given drops unexported methods", given_text, "get(self): R");
 
     let trait_text = render_all(
-        "public trait Greet {\n" + "    greet(self) String;\n" + "    help(self) String;\n" + "};\n",
+        "public trait Greet {\n" + "    greet(self): String;\n" + "    help(self): String;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render trait: \(e.message())");
         exit(1);
     };
-    t.contains("trait keeps every member", trait_text, "greet(self) String");
-    t.contains("trait keeps every member (2)", trait_text, "help(self) String");
+    t.contains("trait keeps every member", trait_text, "greet(self): String");
+    t.contains("trait keeps every member (2)", trait_text, "help(self): String");
 
     // Bodies are not part of a signature.
     let function_text = render_all(
-        "public let add(a Int, b Int) Int = {\n" + "    return a + b;\n" + "};\n",
+        "public let add(a: Int, b: Int): Int = {\n" + "    return a + b;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render function: \(e.message())");
         exit(1);
     };
-    t.contains("function signature", function_text, "public let add(a Int, b Int) Int;");
+    t.contains("function signature", function_text, "public let add(a: Int, b: Int): Int;");
     t.not_contains("function body is not shown", function_text, "return");
 
     // A declaration that is not `public` is not part of the public API -- and
     // `given` is the exception, since it carries no access modifier at all.
     let private_text = render_all(
-        "let hidden() Int = 1;\n" + "type Secret(value Int);\n" + "trait Quiet { q(self) Int; };\n",
+        "let hidden(): Int = 1;\n" + "type Secret(value: Int);\n" + "trait Quiet { q(self): Int; };\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render private decls: \(e.message())");
         exit(1);
@@ -357,26 +357,26 @@ let run_self_test() Void = {
     // Comments and multiline strings live inside tokens; a line scanner
     // mis-reads them, the parser does not.
     let comment_text = render_all(
-        "public type Span(\n" + "    // how far it reaches\n" + "    public length UInt,\n" + ");\n",
+        "public type Span(\n" + "    // how far it reaches\n" + "    public length: UInt,\n" + ");\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render commented type: \(e.message())");
         exit(1);
     };
-    t.contains("commented field list keeps its fields", comment_text, "length UInt");
+    t.contains("commented field list keeps its fields", comment_text, "length: UInt");
 
     // Weak references (`?T`) and default values (`name: T = literal`) are part
     // of a signature's meaning. Both have been dropped here before.
     let weak_text = render_all(
-        "public let intrinsic downgrade[T mutable](val T) ?T;\n" + "public let intrinsic upgrade[T mutable](val ?T) Option[T];\n",
+        "public let intrinsic downgrade[T: mutable](val: T): ?T;\n" + "public let intrinsic upgrade[T: mutable](val: ?T): Option[T];\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render weak refs: \(e.message())");
         exit(1);
     };
-    t.contains("weak return type", weak_text, "downgrade[T mutable](val T) ?T;");
-    t.contains("weak parameter type", weak_text, "upgrade[T mutable](val ?T) Option[T];");
+    t.contains("weak return type", weak_text, "downgrade[T: mutable](val: T): ?T;");
+    t.contains("weak parameter type", weak_text, "upgrade[T: mutable](val: ?T): Option[T];");
 
     let default_text = render_all(
-        "public trait Reader {\n" + "    read(self, into: List[UInt8], span: Range[UInt] = ...) Result[UInt];\n" + "};\n" + "public type Span(public length: UInt = 0, public label: String = \"x\");\n",
+        "public trait Reader {\n" + "    read(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];\n" + "};\n" + "public type Span(public length: UInt = 0, public label: String = \"x\");\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render defaults: \(e.message())");
         exit(1);
@@ -398,7 +398,7 @@ let run_self_test() Void = {
 
 /// `io` -> `Io`, `json_value` -> `JsonValue`. File and module names are ASCII
 /// identifiers, so the uppercase is a byte shift and nothing more.
-let to_pascal_case(s String) String = {
+let to_pascal_case(s: String): String = {
     let mutable out = StringBuilder.new();
     let mutable upper_next = true;
     for i in 0..<s.count() then {
@@ -420,7 +420,7 @@ let to_pascal_case(s String) String = {
 /// `std/io/io.koral` -> `Std.Io`, `std/std.koral` -> `Std`. The key is the
 /// directory path under the library root; a file name is not part of it, since
 /// a module may span several files.
-let module_key_for_source(source Path, std_root Path) String = {
+let module_key_for_source(source: Path, std_root: Path): String = {
     let root_name = to_pascal_case(std_root.base_name());
     let rel = source.to_string().trim_prefix(std_root.to_string()).trim_prefix("/");
 
@@ -442,9 +442,9 @@ let module_key_for_source(source Path, std_root Path) String = {
     return root_name + "." + names.join_to_string(".");
 };
 
-let module_name_from_key(key String) String = key;
+let module_name_from_key(key: String): String = key;
 
-let file_stem(path Path) String = {
+let file_stem(path: Path): String = {
     let base = path.base_name();
     let ext = path.ext_name();
     if ext.is_empty() or base.count() <= ext.count() then {
@@ -453,7 +453,7 @@ let file_stem(path Path) String = {
     return base.substring(0..<(base.count() - ext.count()));
 };
 
-let last_segment(key String) String = when key.find_last(".") in {
+let last_segment(key: String): String = when key.find_last(".") in {
     .Some(idx) then key.substring((idx + 1)...),
     .None() then key,
 };
@@ -462,7 +462,7 @@ let last_segment(key String) String = when key.find_last(".") in {
 // Filesystem
 // ============================================================================
 
-let clear_generated_docs_recursive(path Path) Void = {
+let clear_generated_docs_recursive(path: Path): Void = {
     let mutable entries = read_dir(path) or else {
         return;
     };
@@ -480,7 +480,7 @@ let clear_generated_docs_recursive(path Path) Void = {
     };
 };
 
-let clear_generated_docs(docs_root Path) Void = {
+let clear_generated_docs(docs_root: Path): Void = {
     if not path_exist(docs_root) then {
         let _ = create_dir_all(docs_root);
         return;
@@ -488,7 +488,7 @@ let clear_generated_docs(docs_root Path) Void = {
     clear_generated_docs_recursive(docs_root);
 };
 
-let collect_koral_sources(root Path) Result[List[String]] = {
+let collect_koral_sources(root: Path): Result[List[String]] = {
     let mutable out = List[String].new();
     let mutable walker = walk_dir(root) or return;
 
@@ -501,10 +501,10 @@ let collect_koral_sources(root Path) Result[List[String]] = {
     return Result[List[String]].Ok(out);
 };
 
-let find_repo_root() Result[Path] = {
+let find_repo_root(): Result[Path] = {
     let mutable cursor = current_dir() or return;
 
-    let mutable steps UInt = 0;
+    let mutable steps: UInt = 0;
     while steps < 12 then {
         let marker = cursor.join("std/std.koral");
         if path_exist(marker) then {
@@ -528,7 +528,7 @@ let find_repo_root() Result[Path] = {
 // Entry point
 // ============================================================================
 
-let main() Void = {
+let main(): Void = {
     let args = args();
     let mutable check_only = false;
     for i in 1..<args.count() then {
@@ -573,7 +573,7 @@ let main() Void = {
     // `--check` proves the pages on disk are what the tool would write, without
     // touching them. Generated docs are checked in; a change to `std/` that is
     // not followed by a regeneration is a stale page, and this is what says so.
-    let mutable stale UInt = 0;
+    let mutable stale: UInt = 0;
 
     if not check_only then {
         clear_generated_docs(docs_root);
@@ -602,7 +602,7 @@ let main() Void = {
                 );
             };
         } else {
-            let _ = write_text_file(output, content: page) or else as e in {
+            let _ = write_text_file(output, content = page) or else as e in {
                 eprintln("Error writing \(output.to_string()): \(e.message())");
                 exit(1);
             };

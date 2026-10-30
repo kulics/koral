@@ -4,19 +4,19 @@
 
 /// 一条 C 名字分配结果：名字、声明的显示名、声明位置。
 type CNameCollisionEntry(
-    c_name String,
-    display_name String,
-    source_file String,
-    line UInt,
-    column UInt,
-    span SourceSpan,
+    c_name: String,
+    display_name: String,
+    source_file: String,
+    line: UInt,
+    column: UInt,
+    span: SourceSpan,
 );
 
 /// 一次待报告的碰撞：折叠出的 C 名字 + 两个不同拼写。
 type CNameCollisionReport(
-    c_name String,
-    first CNameCollisionEntry,
-    second CNameCollisionEntry,
+    c_name: String,
+    first: CNameCollisionEntry,
+    second: CNameCollisionEntry,
 );
 
 /// C 名字清理不是单射：`aα` 与 `a_` 折叠成同一个 C 名字，链接期才炸。
@@ -29,9 +29,9 @@ type CNameCollisionReport(
 /// foreign 声明、一个声明的多个 DefId）不是折叠撞名，不报告。
 /// 与 Swift `CodeGen.checkCNameCollisions` 同一判定、同一消息、同一顺序。
 public let c_name_collision_diagnostics(
-    program MIRProgram,
-    context CompilerContext,
-) List[DiagnosticError] = {
+    program: MIRProgram,
+    context: CompilerContext,
+): List[DiagnosticError] = {
     let mutable entries = List[CNameCollisionEntry].new();
     for global in program.globals then {
         collect_c_name_collision_entries(global, context, entries);
@@ -42,7 +42,8 @@ public let c_name_collision_diagnostics(
         if is_compiler_minted_c_name(entry.c_name) then {
             continue;
         };
-        let mutable group = groups.get(entry.c_name) or else List[CNameCollisionEntry].new();
+        let mutable group = groups.get(entry.c_name) or else List[CNameCollisionEntry].new(
+        );
         group.push(entry);
         groups.insert(entry.c_name, group);
     };
@@ -101,10 +102,10 @@ public let c_name_collision_diagnostics(
 
 /// 一条声明的 C 名字分配，镜像 Swift `buildCIdentifierMap` 的登记集合。
 private let collect_c_name_collision_entries(
-    global MIRGlobal,
-    context CompilerContext,
-    out List[CNameCollisionEntry],
-) Void = {
+    global: MIRGlobal,
+    context: CompilerContext,
+    out: List[CNameCollisionEntry],
+): Void = {
     when global in {
         .ForeignType(identifier) then {
             push_foreign_c_name_entry(context, identifier.def_id, out);
@@ -116,7 +117,11 @@ private let collect_c_name_collision_entries(
         .ForeignStruct(identifier, _) then {
             push_foreign_c_name_entry(context, identifier.def_id, out);
             when identifier.symbol_type in {
-                .StructureType(def_id) then push_foreign_c_name_entry(context, def_id, out),
+                .StructureType(def_id) then push_foreign_c_name_entry(
+                    context,
+                    def_id,
+                    out,
+                ),
                 _ then {},
             };
         },
@@ -163,10 +168,10 @@ private let collect_c_name_collision_entries(
 /// 非 foreign 声明的 C 名字：模块前缀 + private 文件隔离 + 清理后的名字
 /// （`get_c_identifier`），拿不到时退回 DefId 唯一的 `T_<id>`。
 private let push_plain_c_name_entry(
-    context CompilerContext,
-    def_id DefId,
-    out List[CNameCollisionEntry],
-) Void = {
+    context: CompilerContext,
+    def_id: DefId,
+    out: List[CNameCollisionEntry],
+): Void = {
     let c_name = context.get_c_identifier(def_id) or else "T_\(def_id.id)";
     push_c_name_entry(context, def_id, c_name, out);
 };
@@ -174,10 +179,10 @@ private let push_plain_c_name_entry(
 /// foreign 声明的 C 名字：`cname` 或 Koral 名字原样，不加模块前缀
 /// （Swift `buildCIdentifierMap` 的 foreign 分支同规则）。
 private let push_foreign_c_name_entry(
-    context CompilerContext,
-    def_id DefId,
-    out List[CNameCollisionEntry],
-) Void = {
+    context: CompilerContext,
+    def_id: DefId,
+    out: List[CNameCollisionEntry],
+): Void = {
     let c_name = when context.get_cname(def_id) in {
         .Some(cname) then cname,
         .None() then context.get_name(def_id) or else "T_\(def_id.id)",
@@ -186,11 +191,11 @@ private let push_foreign_c_name_entry(
 };
 
 private let push_c_name_entry(
-    context CompilerContext,
-    def_id DefId,
-    c_name String,
-    out List[CNameCollisionEntry],
-) Void = {
+    context: CompilerContext,
+    def_id: DefId,
+    c_name: String,
+    out: List[CNameCollisionEntry],
+): Void = {
     // 没有显示名的条目无拼写可报告；它们的 C 名字本来就是 DefId 兜底。
     if context.get_name(def_id) is .Some(display_name) then {
         let source_file = context.get_source_file(def_id) or else "";
@@ -210,7 +215,7 @@ private let push_c_name_entry(
 
 /// 编译器自造的 C 名字：运行时/MIR 前缀，以及 DefId 唯一的 `T_<id>` /
 /// `U_<id>` 兜底。按构造唯一，不存在折叠撞名。
-private let is_compiler_minted_c_name(c_name String) Bool = {
+private let is_compiler_minted_c_name(c_name: String): Bool = {
     if c_name.starts_with("__koral_") or c_name.starts_with("__mir_") then {
         return true;
     };
@@ -224,7 +229,7 @@ private let is_compiler_minted_c_name(c_name String) Bool = {
     if runes[UInt(1)] != '_' then {
         return false;
     };
-    let mutable i UInt = 2;
+    let mutable i: UInt = 2;
     while i < runes.count() then {
         if runes[i] < '0' or runes[i] > '9' then {
             return false;
@@ -236,11 +241,11 @@ private let is_compiler_minted_c_name(c_name String) Bool = {
 
 /// 码点序比较：与 UTF-8 字节序同序（UTF-8 保序），与 Swift 端
 /// `Array(a.utf8)` 的比较同一全序。
-private let string_codepoint_less(a String, b String) Bool = {
+private let string_codepoint_less(a: String, b: String): Bool = {
     let ar = a.to_runes();
     let br = b.to_runes();
     let shared = if ar.count() < br.count() then ar.count() else br.count();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < shared then {
         if ar[i] < br[i] then {
             return true;
@@ -255,9 +260,9 @@ private let string_codepoint_less(a String, b String) Bool = {
 
 /// 同名条目里取位置最小者：诊断指向的声明，两侧选同一个。
 private let c_name_entry_location_less(
-    a CNameCollisionEntry,
-    b CNameCollisionEntry,
-) Bool = {
+    a: CNameCollisionEntry,
+    b: CNameCollisionEntry,
+): Bool = {
     if a.source_file != b.source_file then {
         return string_codepoint_less(a.source_file, b.source_file);
     };
@@ -267,10 +272,10 @@ private let c_name_entry_location_less(
     return a.column < b.column;
 };
 
-private let sort_strings_utf8(values List[String]) Void = {
-    let mutable i UInt = 1;
+private let sort_strings_utf8(values: List[String]): Void = {
+    let mutable i: UInt = 1;
     while i < values.count() then {
-        let mutable j UInt = i;
+        let mutable j: UInt = i;
         while j > 0 and string_codepoint_less(values[j], values[j - 1]) then {
             let tmp = values[j - 1];
             values[j - 1] = values[j];
@@ -282,14 +287,11 @@ private let sort_strings_utf8(values List[String]) Void = {
 };
 
 /// 报告按 C 名字的字节序输出，两侧同序。
-private let sort_c_name_reports(reports List[CNameCollisionReport]) Void = {
-    let mutable i UInt = 1;
+private let sort_c_name_reports(reports: List[CNameCollisionReport]): Void = {
+    let mutable i: UInt = 1;
     while i < reports.count() then {
-        let mutable j UInt = i;
-        while j > 0 and string_codepoint_less(
-            reports[j].c_name,
-            reports[j - 1].c_name,
-        ) then {
+        let mutable j: UInt = i;
+        while j > 0 and string_codepoint_less(reports[j].c_name, reports[j - 1].c_name) then {
             let tmp = reports[j - 1];
             reports[j - 1] = reports[j];
             reports[j] = tmp;
@@ -300,7 +302,7 @@ private let sort_c_name_reports(reports List[CNameCollisionReport]) Void = {
 };
 
 given CodeGen {
-    find_def_id_by_name(self, name String) Option[DefId] = {
+    find_def_id_by_name(self, name: String): Option[DefId] = {
         let def_ids = self.def_ids_named(name);
         return when def_ids.get(UInt(0)) in {
             .Some(def_id) then Option[DefId].Some(def_id),
@@ -308,15 +310,15 @@ given CodeGen {
         };
     };
 
-    def_ids_for_name(self, name String) List[DefId] = {
+    def_ids_for_name(self, name: String): List[DefId] = {
         return self.def_ids_named(name);
     };
 
-    spans_equal(self, left SourceSpan, right SourceSpan) Bool = {
+    spans_equal(self, left: SourceSpan, right: SourceSpan): Bool = {
         return left.start.line == right.start.line and left.start.column == right.start.column and left.end.line == right.end.line and left.end.column == right.end.column;
     };
 
-    def_id_has_span(self, def_id DefId, span SourceSpan) Bool = {
+    def_id_has_span(self, def_id: DefId, span: SourceSpan): Bool = {
         return if self.context.get_span(def_id) is .Some(def_span) then self.spans_equal(
             def_span,
             span,
@@ -325,9 +327,9 @@ given CodeGen {
 
     find_function_def_id_by_name_and_span(
         self,
-        name String,
-        span SourceSpan,
-    ) Option[DefId] = {
+        name: String,
+        span: SourceSpan,
+    ): Option[DefId] = {
         for def_id in self.def_ids_for_name(name) then {
             if self.is_function_def_id(def_id) and self.def_id_has_span(def_id, span) then {
                 return Option[DefId].Some(def_id);
@@ -338,9 +340,9 @@ given CodeGen {
 
     find_variable_def_id_by_name_and_span(
         self,
-        name String,
-        span SourceSpan,
-    ) Option[DefId] = {
+        name: String,
+        span: SourceSpan,
+    ): Option[DefId] = {
         for def_id in self.def_ids_for_name(name) then {
             if self.is_variable_def_id(def_id) and self.def_id_has_span(def_id, span) then {
                 return Option[DefId].Some(def_id);
@@ -349,7 +351,7 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    find_function_def_id_by_name(self, name String) Option[DefId] = {
+    find_function_def_id_by_name(self, name: String): Option[DefId] = {
         let def_ids = self.def_ids_for_name(name);
         for def_id in def_ids then {
             if self.is_function_def_id(def_id) and self.has_c_identifier(def_id) then {
@@ -364,7 +366,7 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    find_variable_def_id_by_name(self, name String) Option[DefId] = {
+    find_variable_def_id_by_name(self, name: String): Option[DefId] = {
         let def_ids = self.def_ids_for_name(name);
         for def_id in def_ids then {
             if self.is_variable_def_id(def_id) and self.has_c_identifier(def_id) then {
@@ -379,7 +381,7 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    find_type_like_def_id_by_name(self, name String) Option[DefId] = {
+    find_type_like_def_id_by_name(self, name: String): Option[DefId] = {
         for def_id in self.def_ids_for_name(name) then {
             if self.is_type_like_def_id(def_id) then {
                 return Option[DefId].Some(def_id);
@@ -388,7 +390,7 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    public lookup_struct_type_by_name(self, name String) Option[Type] = {
+    public lookup_struct_type_by_name(self, name: String): Option[Type] = {
         for def_id in self.type_def_ids_named(name) then {
             if self.is_struct_type_def_id(def_id) then {
                 return Option[Type].Some(Type.StructureType(def_id));
@@ -399,9 +401,9 @@ given CodeGen {
 
     public lookup_struct_type_by_name_and_module(
         self,
-        name String,
-        module_path List[String],
-    ) Option[Type] = {
+        name: String,
+        module_path: List[String],
+    ): Option[Type] = {
         let def_ids = self.type_def_ids_named(name);
         for def_id in def_ids then {
             if self.is_struct_type_def_id(def_id) and self.module_paths_equal(
@@ -424,22 +426,22 @@ given CodeGen {
         return Option[Type].None();
     };
 
-    is_struct_type_def_id(self, def_id DefId) Bool = {
+    is_struct_type_def_id(self, def_id: DefId): Bool = {
         return if self.context.get_kind(def_id) is .Some(k) then k is .TypeDef(.Structure()) or is .GenericTemplate(.Structure())
         else false;
     };
 
-    is_type_like_def_id(self, def_id DefId) Bool = {
+    is_type_like_def_id(self, def_id: DefId): Bool = {
         return if self.context.get_kind(def_id) is .Some(k) then k is .TypeDef(_) or is .GenericTemplate(_)
         else false;
     };
 
-    is_function_def_id(self, def_id DefId) Bool = {
+    is_function_def_id(self, def_id: DefId): Bool = {
         return if self.context.get_kind(def_id) is .Some(k) then k is .Function()
         else false;
     };
 
-    is_variable_def_id(self, def_id DefId) Bool = {
+    is_variable_def_id(self, def_id: DefId): Bool = {
         return if self.context.get_kind(def_id) is .Some(k) then k is .Variable()
         else false;
     };

@@ -75,7 +75,7 @@
 <decl-qualifier> ::= "foreign" | "intrinsic"
 // 声明的定义在哪里：在 C，或在编译器里。两者互斥，也不能重复。
 // 它们排在 `mutable` 之前，因为 `mutable` 描述的是绑定：
-// `let foreign mutable errno Int32;`。
+// `let foreign mutable errno: Int32;`。
 // `foreign` / `intrinsic` 声明没有函数体；`given` 只接受 `intrinsic`。
 
 // ============================================================================
@@ -83,10 +83,10 @@
 // ============================================================================
 
 <let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"
-             | "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"
+             | "let" "mutable"? <identifier> (":" <type-annotation>)? "=" <expression> ";"
              | "let" "intrinsic" <identifier> <generic-params>? <function-signature> ";"        // body-less intrinsic function
              | "let" "foreign" <identifier> <positional-signature> ";"                          // body-less foreign function
-             | "let" "foreign" "mutable"? <identifier> <type-annotation> ";"                    // body-less variable
+             | "let" "foreign" "mutable"? <identifier> ":" <type-annotation> ";"                // body-less variable
 // 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）。
 // 带 <decl-qualifier> 的形式没有函数体；不带的必须有。
 // Global `let` bindings initialize in declaration order: a later binding may
@@ -95,26 +95,31 @@
 // intrinsic 函数支持泛型与命名参数（含默认值），只允许出现在标准库里；
 // foreign 函数不支持泛型、不支持命名参数（parse 报 "Named parameters are
 // not supported in foreign declarations"），也不支持函数体。
-<positional-signature> ::= "(" <positional-param-list>? ")" <type-annotation>
+<positional-signature> ::= "(" <positional-param-list>? ")" ":" <type-annotation>
 <positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
-<positional-param> ::= "mutable"? <identifier> <type-annotation>
+<positional-param> ::= "mutable"? <identifier> ":" <type-annotation>
 // 说明：
 // 1) foreign 变量声明必须有类型（支持 mutable）
 // 2) foreign 函数不允许函数体，不支持泛型
-// 3) foreign 函数不支持命名参数，所有参数必须是位置参数（无冒号）
+// 3) foreign 函数不支持命名参数，所有参数必须是位置参数（不带 `=`）
 
-<function-signature> ::= "(" <func-param-list>? ")" <type-annotation>
+<function-signature> ::= "(" <func-param-list>? ")" ":" <type-annotation>
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
-<func-param> ::= "mutable"? <identifier> <type-annotation>                  // positional param
-               | "mutable"? <identifier> ":" <type-annotation>               // named param
-               | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named param with default
+<func-param> ::= "mutable"? <identifier> ":" <type-annotation>                                    // positional param
+               | "mutable"? <identifier> ":" <type-annotation> "="                                // named param (caller must pass label)
+               | "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>        // named param with default
+// Every parameter is spelled `name: Type`; the type is always introduced by
+// `:`. A following `=` marks a NAMED parameter: `name: Type =` (required --
+// the `=` with no value says "the caller fills this") or `name: Type = value`
+// (with a default). No `=` means a POSITIONAL parameter. The `=` IS the named
+// marker, so "only named params can have defaults" is a syntactic rule.
 // Positional params must come before named params. Enforced at function /
 // method / foreign declarations, struct and enum payload field lists, and call
-// arguments. `f(a: Int, b Int)` is rejected at the declaration.
-// NOT yet enforced inside a pattern's argument list (`Point(y: 2, x)`) -- the
+// arguments. `f(a: Int =, b: Int)` is rejected at the declaration.
+// NOT yet enforced inside a pattern's argument list (`Point(y = 2, x)`) -- the
 // subject is matched positionally there and no name is available to report.
-// Named params must be called with labels: name: value.
-// Only named params (with colon) can have default values.
+// Named params must be called with labels: name = value.
+// Only named params (those with `=`) can have default values.
 
 <method-param-list> ::= <method-first-param> ("," <func-param>)* ","?
 // After the first receiver param, remaining params follow the same positional/named rules as func-param.
@@ -125,6 +130,8 @@
 // - func-param: explicit typed parameter (not self)
 
 <type-annotation> ::= <type>
+// 类型标注永远由 `:` 引入（`name: Type`、`): Type`、`: Type = value`）；
+// `:` 写在使用处的产生式里，本产生式只展开类型本身。
 
 // ============================================================================
 // Type Declarations
@@ -149,24 +156,25 @@
 // 2) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
 
 <field-list> ::= <field> ("," <field>)* ","?
-<field> ::= <access-modifier>? "mutable"? <identifier> <type-annotation>                    // positional field
-          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation>                 // named field
-          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>  // named field with default
+<field> ::= <access-modifier>? "mutable"? <identifier> ":" <type-annotation>                                    // positional field
+          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "="                                // named field (caller must pass label)
+          | <access-modifier>? "mutable"? <identifier> ":" <type-annotation> "=" <default-value-literal>        // named field with default
 
 <variant-list> ::= <variant> ("," <variant>)* ","?
 <variant> ::= <type-identifier> "(" <variant-field-list>? ")"       // 括号必写：声明位也写 `Red()`，与构造位 `.Red()`、模式位 `.Red()` 一致
 <variant-field-list> ::= <variant-field> ("," <variant-field>)* ","?
-<variant-field> ::= <identifier> <type-annotation>                    // positional
-                  | <identifier> ":" <type-annotation>                 // named
-                  | <identifier> ":" <type-annotation> "=" <default-value-literal>  // named with default
+<variant-field> ::= <identifier> ":" <type-annotation>                                    // positional
+                  | <identifier> ":" <type-annotation> "="                                // named (caller must pass label)
+                  | <identifier> ":" <type-annotation> "=" <default-value-literal>        // named with default
 
 // ============================================================================
 // Trait Declarations
 // ============================================================================
 
 <trait-decl> ::= "trait" <type-identifier> <generic-params>? <trait-parents>? "{" <trait-member>* "}" ";"
-<trait-parents> ::= <type> ("and" <type>)*
-<trait-member> ::= <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"
+<trait-parents> ::= ":" <type> ("and" <type>)*
+// 父 trait 列表由 `:` 引入：`trait Numeric: Add[Self] and Sub[Self] and Ord {`。
+<trait-member> ::= <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"
 // Trait 需求不接受访问修饰符（`Access modifier on trait method is not supported`）；
 // 需求的有效可见性就是 trait 声明的级别（接口件随容器）。
 // Trait method params follow the same positional/named rules as func-param.
@@ -180,18 +188,20 @@
 // Given Declarations (Type Implementations)
 // ============================================================================
 
-<given-decl> ::= "given" <decl-qualifier>? <generic-params>? <type> ("as" <type>)? "{" <given-member>* "}" ";"
+<given-decl> ::= "given" <decl-qualifier>? <generic-params>? <type> (":" <type>)? "{" <given-member>* "}" ";"
 // `given` 只接受 `intrinsic`（实现在编译器里）。`given intrinsic T { ... };`
 // `given` 不接受访问修饰符（`public given ...` 报
 // "Access modifier on given declaration is not supported"）。
-<given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> "=" <expression> ";"
-                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" <type-annotation> ";"  // body-less, `given intrinsic` only
+// trait conformance 由 `:` 引入：`given List[T]: Iterator[T] { ... };`
+<given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> "=" <expression> ";"
+                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"  // body-less, `given intrinsic` only
 // Given implementations must match the trait's named/positional parameter classification.
-// If the trait declares defaults, the given implementation must NOT redeclare them.
+// If the trait declares defaults, the given implementation must NOT redeclare them
+// (it keeps the `=` marker but drops the default literal: `name: Type =`).
 // If the trait declares no defaults, the given implementation cannot add them.
 // 说明：
 // 1) `given Type { members }` 为类型固有实现
-// 2) `given Type as Trait { members }` 为 trait 实现
+// 2) `given Type: Trait { members }` 为 trait 实现
 // 普通 `given` 方法必须带函数体和显式返回类型（少写返回类型会报
 // "Missing return type"）；无函数体的形式只属于 `given intrinsic`。
 
@@ -201,7 +211,7 @@
 
 <generic-params> ::= "[" <generic-param-list> "]"
 <generic-param-list> ::= <generic-param> ("," <generic-param>)* ","?
-<generic-param> ::= <type-identifier> <trait-constraints>
+<generic-param> ::= <type-identifier> ":" <trait-constraints>
 <trait-constraints> ::= <trait-constraint> ("and" <trait-constraint>)*
 <trait-constraint> ::= "mutable"
                      | "foreign"
@@ -217,7 +227,7 @@
 // 3) 简单 trait 名（如 Eq）
 // 4) 泛型 trait（如 Iterator[T]）
 // 约束是必填的：`[T]` 报 `Type parameter 'T' requires a constraint`；
-// 不加约束就写 `[T Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
+// 不加约束就写 `[T: Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
 
 // ============================================================================
 // Types
@@ -247,7 +257,7 @@
 // `(` in a TYPE now has two readings, decided by the token after `)`:
 //   `->` after `)`  -> function type: the parens are the parameter list.
 //   anything else   -> grouping of exactly ONE type: `(T)` is `T`
-//                      (so `let p (*Int)` is `let p *Int` and `*(Int)` is
+//                      (so `let p: (*Int)` is `let p: *Int` and `*(Int)` is
 //                      `*((Int))` = `*Int`). A group with != 1 type and no
 //                      `->` is refused:
 //                      `A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'`
@@ -278,17 +288,18 @@
 // They are parsed via <expression-statement> → <expression> → <prefix-expression>.
 // Single-branch `if`/`when`/`while`/`for` semantically produce Void.
 
-<let-statement> ::= "let" "mutable"? <identifier> <type-annotation>? "=" <expression> ";"
+<let-statement> ::= "let" "mutable"? <identifier> (":" <type-annotation>)? "=" <expression> ";"
                 | "let" <tuple-binding> "=" <expression> ";"
 
 // A tuple binding destructures a STRUCT by position: `(a, b, c)` against a
 // struct with exactly three fields, in declaration order. N >= 2 -- `(x)` is a
 // parenthesized binding, not a tuple. A field may be discarded with `_`.
+// A slot may carry a type annotation: `let (a: Int, b) = ...`.
 // Slots may nest: `let (a, (b, c)) = ...` destructures a field that is itself
 // a struct, the same way a nested <tuple-pattern> does in `when`/`is`.
 <tuple-binding> ::= "(" <binding-element> ("," <binding-element>)+ ")"
 <binding-element> ::= "_"
-                    | "mutable"? <identifier> <type-annotation>?
+                    | "mutable"? <identifier> (":" <type-annotation>)?
                     | <tuple-binding>
 
 <assignment-statement> ::= <expression> <assign-op> <expression> ";"
@@ -582,17 +593,18 @@
 //     类型头后可跟 `[` <type-list> `]`
 //     裸 `*` **不算**类型起始：`f(*p)` 是解引用实参；只有 `*` 才是类型。
 //
-//   **`let` 声明的 `(`**（签名还是类型标注）：
-//     括号内首 token 是类型头/类型前缀/`(` -> 类型标注（变量绑定）
-//        例：`let p (Int) = 1`（`(Int)` 是分组，p 是 Int）、
-//            `let f (Int) -> Int = g`、`let h ((Int) -> Int) = g`、
-//            `let q *(Int) = &y`（`*(Int)` 是 `*Int`）
-//     括号内首 token 是 `mutable`/小写标识符 -> 参数表（函数声明）
-//        例：`let f(x Int) Int = ...`、`let inc(mutable x Int) Int = ...`
-//     括号为空时看 `)` 之后：`->` 是函数类型 `() -> R`；紧跟 `=` 是空分组
-//     （类型位）-> `A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'`；
-//     其余（结果类型 + `=`）是零参签名（`let g () Int = 1`）。
-//     函数声明的结果类型**裸写**、不带 `->`（与 lambda 的结果类型一致）。
+//   **`let` 声明的 `(`**（参数表还是别的）：
+//     类型标注永远由 `:` 引入（`name: Type`），所以 `let` 名字后的 `(` 一律是
+//     参数表（函数声明），「签名还是类型标注」的歧义已经消失。
+//        例：`let f(x: Int): Int = ...`、`let inc(mutable x: Int): Int = ...`
+//     旧的并置拼法一律拒绝（`Expected '=' in let declaration, got (`）：
+//        `let p (Int) = 1`、`let f (Int) -> Int = g` 都不再是写法。
+//     类型标注写 `let p: (Int) = 1`（`(Int)` 是分组，p 是 Int）、
+//        `let f: (Int) -> Int = g`、`let h: ((Int) -> Int) = g`、
+//        `let q: *(Int) = &y`（`*(Int)` 是 `*Int`）。
+//     空参数表 + 结果类型 + `=` 是零参签名（`let g(): Int = 1`）。
+//     函数声明的结果类型写 `")" ":" <type-annotation>`、不带 `->`
+//     （与 lambda 的结果类型一致）。
 //
 //   `(` 的归类：
 //     **表达式起首的 `(`**（primary 位置）——括号类型头（见 <type-head-expression>）：
@@ -623,10 +635,10 @@
 //     `[` <type-list> `]`     -> 方法上的类型实参（方法不接受时报错）
 //
 //   **lambda 与括号表达式**共用 `(`，判据是 `=>`：
-//     (params) [ReturnType] `=>` ... 是 lambda，其余是括号表达式。
-//     params 是 `name [Type] (, name [Type])* ,?`；`name: Type` 是写错的
-//     lambda 参数，仍按 lambda 解析并报
-//     `Lambda parameters use 'name Type', not 'name: Type'`。
+//     (params) [":" ReturnType] `=>` ... 是 lambda，其余是括号表达式。
+//     params 是 `name [":" Type] (, name [":" Type])* ,?`；`name: Type =` 是
+//     写错的命名 lambda 参数，仍按 lambda 解析并报
+//     `Lambda parameters cannot be named (drop the '=')`。
 //     形状判类不建树，因此失败的分支不会吞掉真正该报的诊断。
 
 <call-suffix> ::= "(" <argument-list>? ")"
@@ -655,10 +667,10 @@
 //     -> `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`
 // 指针 -> 整数同样走 `as`：`p as UInt`。数值互转仍是 `Type(expr)`；`x as Int` 反而报
 // `Numeric conversion is written 'Type(expr)', not 'expr as Type'`。
-// NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 有三个用途：
-// import 别名（`using "..." { X as Y }`）、`given Type as Trait`、表达式强转
-// （`expr as Type`，仅指针 / 弱目标）。此外 `and then as name in body` 里的 `as` 是
-// flow 绑定，不是强转。
+// NEVER `expr(Type)` -- 旧的后缀写法不再存在。`as` 只有两个用途：
+// import 别名（`using "..." { X as Y }`）与表达式强转（`expr as Type`，仅指针 /
+// 弱目标）。given 的 conformance 写 `:`（`given T: Trait`），不走 `as`。
+// 此外 `and then as name in body` 里的 `as` 是 flow 绑定，不是强转。
 <type-application> ::= <type> "(" <argument-list> ")"
 
 // 限定调用（组合节点）：消歧义，指定 trait。两套写法，都必须**带着方法调用**，
@@ -674,15 +686,15 @@
 <qualified-method-tail> ::= ("[" <type-list> "]")? "(" <argument-list>? ")"
 <trait-ref>             ::= <type-identifier> ("[" <type-list> "]")?
 
-<argument> ::= <identifier> ":" <expression>
+<argument> ::= <identifier> "=" <expression>
              | <expression>
 <argument-list> ::= <argument> ("," <argument>)* ","?
 <expression-list> ::= <expression> ("," <expression>)* ","?
 // Semantic rules for labeled arguments:
-// - The declaration fixes the call shape: a named parameter (`name: Type`) MUST be
-//   passed by label, a positional parameter (`name Type`) MUST NOT be. There is no
-//   optional-label form. This applies uniformly to functions, methods and constructors,
-//   and the same rule governs pattern destructuring.
+// - The declaration fixes the call shape: a named parameter (`name: Type =`) MUST be
+//   passed by label (`name = value`), a positional parameter (`name: Type`) MUST NOT
+//   be. There is no optional-label form. This applies uniformly to functions, methods
+//   and constructors, and the same rule governs pattern destructuring.
 // - Positional arguments must not appear after named arguments (call sites;
 //   see the note on <func-param-list> for pattern argument lists).
 // - Named arguments match by parameter/field name and may reorder named fields in constructors.
@@ -704,7 +716,7 @@
                        | <lambda-expression>
                        | "(" <expression> ")"
 // 括号类型头：表达式起首的 `(` <type> `)` 是类型头，类型位的括号则是透明分组
-// （`let p (*Int)` ≡ `let p *Int`）。类型头只有两个合法跟随（跟随门控）：
+// （`let p: (*Int)` ≡ `let p: *Int`）。类型头只有两个合法跟随（跟随门控）：
 <type-head-expression> ::= "(" <type> ")" <type-head-follower>
 <type-head-follower> ::= "(" <argument-list> ")"
                        | "." <identifier> <call-suffix>
@@ -764,17 +776,20 @@
 <block-expression> ::= "{" <statement>* <tail-expression>? "}"
 <tail-expression> ::= <expression>
 
-<lambda-expression> ::= "(" <lambda-param-list>? ")" <type-annotation>? "=>" <expression>
+<lambda-expression> ::= "(" <lambda-param-list>? ")" (":" <type-annotation>)? "=>" <expression>
 <lambda-param-list> ::= <lambda-param> ("," <lambda-param>)* ","?
-<lambda-param> ::= <identifier> <type-annotation>?
+<lambda-param> ::= <identifier> (":" <type-annotation>)?
+// Lambda parameters are `name [: Type]`; lambdas are called positionally, so
+// the `=` (named-parameter marker) is refused here:
+// `Lambda parameters cannot be named (drop the '=')`.
 // Lambda expression examples (`=>` opens the body; `->` is the function-TYPE
 // arrow and never introduces a lambda body):
 //   () => 42                           - no params
 //   (x) => x * 2                       - single param, type inferred
-//   (x Int) => x * 2                   - single param with type
+//   (x: Int) => x * 2                  - single param with type
 //   (x, y) => x + y                    - multiple params, types inferred
-//   (x Int, y Int) Int => x + y        - full type annotations
-//   (x) => { let y = x * 2; return y + 1 } - block body
+//   (x: Int, y: Int): Int => x + y     - full type annotations
+//   (x) => { let y = x * 2; return y + 1; } - block body
 
 // ============================================================================
 // Patterns
@@ -810,11 +825,11 @@
                     | <comparison-pattern>                    // comparison pattern
                     | <enum-case-pattern>                    // enum case pattern
 
-<trait-object-type-binding-pattern> ::= "mutable"? <identifier> <concrete-type-pattern>
+<trait-object-type-binding-pattern> ::= "mutable"? <identifier> ":" <concrete-type-pattern>
 // Binding exact trait-object implementation type pattern.
 // Examples:
-//   err IoError
-//   mutable err IoError
+//   err: IoError
+//   mutable err: IoError
 
 <trait-object-type-pattern> ::= <concrete-type-pattern>
 // Exact implementation-type pattern for trait objects only.
@@ -868,7 +883,7 @@
 
 <enum-case-pattern> ::= "." <type-identifier> "(" <pattern-arg-list>? ")"
 // 模式语法独立于构造语法；即使是零字段 enum case，模式位置也写空括号，如 .None()
-<pattern-arg> ::= <identifier> ":" <match-pattern>    // named pattern argument
+<pattern-arg> ::= <identifier> "=" <match-pattern>    // labeled pattern argument: label = pattern
                 | <rest-pattern>                      // rest slot -- must be the element list's only slot; ignores every field
                 | <match-pattern>                      // positional pattern argument
 <pattern-arg-list> ::= <pattern-arg> ("," <pattern-arg>)* ","?
@@ -898,7 +913,7 @@
 //   结构体 / 枚举变体 整段省略：必须是元素表的**唯一**槽位，忽略每个字段，
 //                     命名字段与位置字段一视同仁。`Point(...)` 即
 //                     `Point(_, _, _)`，`Button(...)` 在
-//                     `type Button(w Int, h: Int)` 上同样合法。要忽略的是
+//                     `type Button(w: Int, h: Int =)` 上同样合法。要忽略的是
 //                     部分字段时逐个写 `_`，不与 `...` 并存。
 // 元组模式不收剩余槽位（`( ... )` 是括号分组错误，混排报「must be the only slot」）。
 //

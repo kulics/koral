@@ -17,10 +17,10 @@ using "std/os" { env };
 //   - Recurse into all sub-expressions, statements, and patterns
 //
 public let substitute_types_in_expression(
-    mono Monomorphizer,
-    expr TypedExpr,
-    substitution Dict[String, Type],
-) TypedExpr = {
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    substitution: Dict[String, Type],
+): TypedExpr = {
     mono.storage.current_recursion_depth += 1;
     if mono.storage.current_recursion_depth >= 180 and env("KORAL_DEBUG_SUBST_TRACE") is .Some(trace_value) and (trace_value == "1" or trace_value == "true" or trace_value == "TRUE") then {
         println(
@@ -64,7 +64,7 @@ public let substitute_types_in_expression(
     return TypedExpr(new_kind, final_type, expr.span);
 };
 
-private let substitution_debug_expr_kind(kind TypedExprKind) String = {
+private let substitution_debug_expr_kind(kind: TypedExprKind): String = {
     return when kind in {
         .Call(_, args) then "Call(args=\(args.count().to_string()))",
         .MethodReference(_, _, method, _, method_type_args, _) then "MethodReference(def=\(method.def_id.id.to_string()),margs=\(method_type_args.count().to_string()))",
@@ -104,10 +104,10 @@ private let substitution_debug_expr_kind(kind TypedExprKind) String = {
 };
 
 private let recover_unknown_expr_type(
-    mono Monomorphizer,
-    kind TypedExprKind,
-    fallback Type,
-) Type = {
+    mono: Monomorphizer,
+    kind: TypedExprKind,
+    fallback: Type,
+): Type = {
     let recovered = when kind in {
         .Variable(symbol) then resolve_parameterized_type(mono, symbol.symbol_type),
         .CastExpr(target_type, _) then resolve_parameterized_type(mono, target_type),
@@ -230,12 +230,12 @@ private let recover_unknown_expr_type(
 };
 
 private let recover_type_construction_type(
-    mono Monomorphizer,
-    identifier Symbol,
-    type_args List[Type],
-    args List[TypedExpr],
-    fallback Type,
-) Type = {
+    mono: Monomorphizer,
+    identifier: Symbol,
+    type_args: List[Type],
+    args: List[TypedExpr],
+    fallback: Type,
+): Type = {
     let mutable resolved_identifier_type = resolve_parameterized_type(
         mono,
         identifier.symbol_type,
@@ -306,10 +306,10 @@ private let recover_type_construction_type(
 };
 
 private let infer_type_construction_type_from_args(
-    mono Monomorphizer,
-    identifier Symbol,
-    args List[TypedExpr],
-) Option[Type] = {
+    mono: Monomorphizer,
+    identifier: Symbol,
+    args: List[TypedExpr],
+): Option[Type] = {
     let template_name = when mono.storage.context.get_template_name(identifier.def_id) in {
         .Some(name) then name,
         .None() then mono.storage.context.get_name(identifier.def_id) or else "",
@@ -357,7 +357,7 @@ private let infer_type_construction_type_from_args(
                 template.type_parameters,
                 Dict[String, Type].new(),
             );
-            let mutable i UInt = 0;
+            let mutable i: UInt = 0;
             while i < args.count() then {
                 let field_pattern = mono.resolve_type_node_impl(
                     template.fields[i].field_type,
@@ -392,11 +392,11 @@ private let infer_type_construction_type_from_args(
 };
 
 private let infer_type_bindings_from_constructor_pattern(
-    mono Monomorphizer,
-    pattern Type,
-    concrete Type,
-    bindings Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    pattern: Type,
+    concrete: Type,
+    bindings: Dict[String, Type],
+): Void = {
     let normalized_pattern = resolve_parameterized_type(mono, pattern);
     let normalized_concrete = resolve_parameterized_type(mono, concrete);
     when normalized_pattern in {
@@ -480,7 +480,7 @@ private let infer_type_bindings_from_constructor_pattern(
         .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
             .FunctionType(concrete_params, concrete_return) then {
                 if pattern_params.count() == concrete_params.count() then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < pattern_params.count() then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
@@ -507,7 +507,7 @@ private let infer_type_bindings_from_constructor_pattern(
                 // itself and let any two templates match.
                 if tplDefId == actual_def_id and pattern_args.count() == concrete_args.count(
                 ) then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
@@ -526,7 +526,7 @@ private let infer_type_bindings_from_constructor_pattern(
             .GenericEnum(concrete_def_id, concrete_args) then {
                 if pattern_def_id == concrete_def_id and pattern_args.count() == concrete_args.count(
                 ) then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < pattern_args.count() then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
@@ -544,7 +544,7 @@ private let infer_type_bindings_from_constructor_pattern(
     }
 };
 
-private let box_each_type(types List[Type]) List[Type] = {
+private let box_each_type(types: List[Type]): List[Type] = {
     let mutable out = List[Type].with_capacity(types.count());
     for t in types then {
         out.push(t);
@@ -552,21 +552,21 @@ private let box_each_type(types List[Type]) List[Type] = {
     return out;
 };
 
-private let make_expected_type_placeholder_expr(t Type) TypedExpr = {
+private let make_expected_type_placeholder_expr(t: Type): TypedExpr = {
     return TypedExpr(TypedExprKind.BoolLiteral(false), t, unknown_span());
 };
 
 private let synthetic_args_from_expected_method_type(
-    mono Monomorphizer,
-    receiver_type Type,
-    expected_method_type Type,
-) List[TypedExpr] = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    expected_method_type: Type,
+): List[TypedExpr] = {
     let mutable args = List[TypedExpr].new();
     let mutable resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     when resolve_parameterized_type(mono, expected_method_type) in {
         .FunctionType(expected_params, _) then {
             let param_types = param_entry_types(expected_params);
-            let mutable start_idx UInt = 0;
+            let mutable start_idx: UInt = 0;
             if not param_types.is_empty() then {
                 let mutable first_param_type = resolve_parameterized_type(
                     mono,
@@ -740,11 +740,11 @@ private let synthetic_args_from_expected_method_type(
 };
 
 private let bind_receiver_method_symbol_for_expected_type(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    expected_method_type Type,
-) Symbol = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    expected_method_type: Type,
+): Symbol = {
     when lookup_exact_receiver_method_symbol(
         mono,
         receiver_type,
@@ -791,11 +791,11 @@ private let bind_receiver_method_symbol_for_expected_type(
 };
 
 private let substitution_lookup_receiver_method_symbol(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    expected_method_type_opt Option[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    expected_method_type_opt: Option[Type],
+): Option[Symbol] = {
     // Identity lookup only (Swift's `resolveMethodInstanceByIdentityForReceiver`).
     // The definition-time DefId names the method; no name-based rebinding.
     return lookup_exact_receiver_method_symbol(
@@ -807,9 +807,9 @@ private let substitution_lookup_receiver_method_symbol(
 };
 
 private let substitution_method_lookup_base_type(
-    mono Monomorphizer,
-    base TypedExpr,
-) Type = {
+    mono: Monomorphizer,
+    base: TypedExpr,
+): Type = {
     when base.expr_kind in {
         .Variable(_) then {
             return base.expr_type;
@@ -830,7 +830,7 @@ private let substitution_method_lookup_base_type(
     };
 };
 
-private let substitution_trait_object_type(t Type) Option[Type] = {
+private let substitution_trait_object_type(t: Type): Option[Type] = {
     return when t in {
         .TraitObject(trait_def_id, type_args) then Option[Type].Some(
             Type.TraitObject(trait_def_id, type_args),
@@ -864,10 +864,10 @@ private let substitution_trait_object_type(t Type) Option[Type] = {
 };
 
 private let normalize_trait_placeholder_expected_method_type(
-    mono Monomorphizer,
-    method_type Type,
-    lookup_base_type Type,
-) Type = {
+    mono: Monomorphizer,
+    method_type: Type,
+    lookup_base_type: Type,
+): Type = {
     let resolved_method_type = resolve_parameterized_type(mono, method_type);
     return when resolved_method_type in {
         .FunctionType(params, return_type) then {
@@ -896,7 +896,7 @@ private let normalize_trait_placeholder_expected_method_type(
             normalized_params.push(
                 FunctionParamEntry(normalized_receiver, first_param.pass_kind),
             );
-            let mutable idx UInt = UInt(1);
+            let mutable idx: UInt = UInt(1);
             while idx < params.count() then {
                 normalized_params.push(params[idx]);
                 idx += UInt(1);
@@ -911,10 +911,10 @@ private let normalize_trait_placeholder_expected_method_type(
 };
 
 private let normalize_method_symbol_type_for_base(
-    mono Monomorphizer,
-    method_type Type,
-    base_type Type,
-) Type = {
+    mono: Monomorphizer,
+    method_type: Type,
+    base_type: Type,
+): Type = {
     let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
     let base_is_nested_ref_like = when resolved_base_type in {
@@ -997,13 +997,7 @@ private let normalize_method_symbol_type_for_base(
             // type's layout IS the base type -- a `self` handed over as `*T`
             // for a method declared on `T`. Anything else keeps the parameter.
             let normalized_first_param = when first_param_type in {
-                .ReferenceType(inner)
-                    or .MutableReferenceType(inner)
-                    or .WeakReferenceType(inner)
-                    or .MutableWeakReferenceType(inner)
-                    or .PointerType(inner)
-                    or .MutablePointerType(inner)
-                where mono.storage.context.get_layout_key(
+                .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) where mono.storage.context.get_layout_key(
                     resolve_parameterized_type(mono, inner),
                 ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type,
                 _ then first_param_type,
@@ -1015,7 +1009,7 @@ private let normalize_method_symbol_type_for_base(
             };
             let mutable normalized_params = List[FunctionParamEntry].new();
             normalized_params.push(make_function_param_entry(normalized_first_param));
-            let mutable idx UInt = UInt(1);
+            let mutable idx: UInt = UInt(1);
             while idx < param_types.count() then {
                 normalized_params.push(
                     make_function_param_entry(
@@ -1034,10 +1028,10 @@ private let normalize_method_symbol_type_for_base(
 };
 
 private let substitution_method_has_compatible_ref_like_receiver(
-    mono Monomorphizer,
-    method_type Type,
-    base_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    method_type: Type,
+    base_type: Type,
+): Bool = {
     let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
     return when resolved_method_type in {
@@ -1152,10 +1146,10 @@ private let substitution_method_has_compatible_ref_like_receiver(
 };
 
 private let recover_method_return_type(
-    mono Monomorphizer,
-    method Symbol,
-    fallback Type,
-) Type = {
+    mono: Monomorphizer,
+    method: Symbol,
+    fallback: Type,
+): Type = {
     let mutable method_type = resolve_parameterized_type(mono, method.symbol_type);
     let mutable fallback_type = resolve_parameterized_type(mono, fallback);
     return when method_type in {
@@ -1165,11 +1159,11 @@ private let recover_method_return_type(
 };
 
 private let recover_member_field_type(
-    mono Monomorphizer,
-    base_type Type,
-    member_name String,
-    fallback Type,
-) Type = {
+    mono: Monomorphizer,
+    base_type: Type,
+    member_name: String,
+    fallback: Type,
+): Type = {
     let resolved_base = resolve_parameterized_type(mono, base_type);
     when resolved_base in {
         .ReferenceType(inner) then {
@@ -1207,7 +1201,7 @@ private let recover_member_field_type(
             when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(template) then {
                     let mutable subst = Dict[String, Type].new();
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < template.type_parameters.count() and i < args.count() then {
                         subst.insert(template.type_parameters[i].name, (args[i]));
                         i += 1;
@@ -1251,11 +1245,11 @@ private let recover_member_field_type(
 };
 
 private let recover_member_path_type(
-    mono Monomorphizer,
-    base_type Type,
-    path List[Symbol],
-    fallback Type,
-) Type = {
+    mono: Monomorphizer,
+    base_type: Type,
+    path: List[Symbol],
+    fallback: Type,
+): Type = {
     let _ = base_type;
     if path.is_empty() then {
         return resolve_parameterized_type(mono, fallback);
@@ -1271,11 +1265,11 @@ private let recover_member_path_type(
 
 // Substitute types in a TypedExprKind, recursing into sub-expressions.
 private let substitute_expr_kind(
-    mono Monomorphizer,
-    kind TypedExprKind,
-    substitution Dict[String, Type],
-    substituted_expr_type Type,
-) TypedExprKind = {
+    mono: Monomorphizer,
+    kind: TypedExprKind,
+    substitution: Dict[String, Type],
+    substituted_expr_type: Type,
+): TypedExprKind = {
     return when kind in {
         // Variable: remap DefId if it's a generic function that was instantiated.
         .Variable(symbol) then TypedExprKind.Variable(
@@ -1638,10 +1632,7 @@ private let substitute_expr_kind(
                         };
                         let mutable expected_method_type = resolve_parameterized_type(
                             mono,
-                            mono.substitute_type_impl(
-                                method.symbol_type,
-                                substitution,
-                            ),
+                            mono.substitute_type_impl(method.symbol_type, substitution),
                         );
                         let mutable expected_call_param_types = List[Type].new();
                         expected_call_param_types.push(base_type);
@@ -1789,7 +1780,7 @@ private let substitute_expr_kind(
                 when template in {
                     .Some(found_template) then {
                         let mutable inferred = Dict[String, Type].new();
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < found_template.parameters.count() and i < new_args.count(
                         ) then {
                             bind_generic_function_type_node(
@@ -2029,7 +2020,8 @@ private let substitute_expr_kind(
                         new_method,
                         new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite);
+                        dispatch_callsite,
+                    );
                 },
                 .None() then {},
             };
@@ -2091,7 +2083,9 @@ private let substitute_expr_kind(
                     ),
                     .None() then Option[TypedExpr].None(),
                 };
-                new_arms.push(TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type));
+                new_arms.push(
+                    TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type),
+                );
             };
             TypedExprKind.WhenExpr(new_subject, new_arms)
         },
@@ -2100,7 +2094,9 @@ private let substitute_expr_kind(
             let mutable new_params = List[TypedParam].new();
             for p in params then {
                 let new_pt = mono.substitute_type_impl(p.param_type, substitution);
-                new_params.push(TypedParam(p.name, p.is_mutable, new_pt, p.named, p.default_value));
+                new_params.push(
+                    TypedParam(p.name, p.is_mutable, new_pt, p.named, p.default_value),
+                );
             };
             let new_return = mono.substitute_type_impl(return_type, substitution);
             let new_body = substitute_types_in_expression(mono, body, substitution);
@@ -2191,7 +2187,8 @@ private let substitute_expr_kind(
                         new_method,
                         new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite)
+                        dispatch_callsite,
+                    )
                 },
                 .None() then {
                     if not has_generic_parameter(lookup_base_type) then {
@@ -2275,7 +2272,8 @@ private let substitute_expr_kind(
                         new_method,
                         new_method.def_id,
                         new_method_type_args,
-                        dispatch_callsite)
+                        dispatch_callsite,
+                    )
                 },
             }
         },
@@ -2417,10 +2415,10 @@ private let substitute_expr_kind(
 // Substitute the type in a Symbol and remap its DefId if it was a generic
 // function that has been instantiated.
 private let substitute_symbol(
-    mono Monomorphizer,
-    symbol Symbol,
-    substitution Dict[String, Type],
-) Symbol = {
+    mono: Monomorphizer,
+    symbol: Symbol,
+    substitution: Dict[String, Type],
+): Symbol = {
     let mutable substituted_type = mono.substitute_type_impl(
         symbol.symbol_type,
         substitution,
@@ -2455,11 +2453,11 @@ private let substitute_symbol(
 };
 
 private let remapped_function_def_id_for_type(
-    mono Monomorphizer,
-    symbol Symbol,
-    resolved_type Type,
-    allow_function_shape_fallback Bool,
-) DefId = {
+    mono: Monomorphizer,
+    symbol: Symbol,
+    resolved_type: Type,
+    allow_function_shape_fallback: Bool,
+): DefId = {
     if symbol.kind is not .Function() then {
         return symbol.def_id;
     };
@@ -2624,7 +2622,7 @@ private let remapped_function_def_id_for_type(
                         .FunctionType(fn_params, return_type) then {
                             let mutable inferred = Dict[String, Type].new();
                             let param_types = param_entry_types(fn_params);
-                            let mutable i UInt = 0;
+                            let mutable i: UInt = 0;
                             while i < template.parameters.count() and i < param_types.count(
                             ) then {
                                 bind_generic_function_type_node(
@@ -2685,12 +2683,12 @@ private let remapped_function_def_id_for_type(
 // The TypeNode is turned into a SHAPE first (see `resolve_type_node_identity`),
 // so the matcher below compares DECLARATION DefIds and never sees a name.
 private let bind_generic_function_type_node(
-    mono Monomorphizer,
-    expected_node TypeNode,
-    actual Type,
-    type_params List[TypeParameterDecl],
-    bindings Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    expected_node: TypeNode,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
     bind_generic_function_type_from_shape(
         mono,
         resolve_type_node_identity(mono, expected_node, type_params),
@@ -2701,12 +2699,12 @@ private let bind_generic_function_type_node(
 };
 
 private let bind_generic_function_type_from_shape(
-    mono Monomorphizer,
-    pattern Type,
-    actual Type,
-    type_params List[TypeParameterDecl],
-    bindings Dict[String, Type],
-) Void = {
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
     when pattern in {
         .GenericParameter(name) then {
             when bindings.get(name) in {
@@ -2863,7 +2861,7 @@ private let bind_generic_function_type_from_shape(
         .GenericStruct(pattern_def_id, pattern_args) then when actual in {
             .GenericStruct(actual_def_id, actual_args) then {
                 if pattern_def_id == actual_def_id then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < pattern_args.count() and i < actual_args.count() then {
                         bind_generic_function_type_from_shape(
                             mono,
@@ -2881,7 +2879,7 @@ private let bind_generic_function_type_from_shape(
         .GenericEnum(pattern_def_id, pattern_args) then when actual in {
             .GenericEnum(actual_def_id, actual_args) then {
                 if pattern_def_id == actual_def_id then {
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     while i < pattern_args.count() and i < actual_args.count() then {
                         bind_generic_function_type_from_shape(
                             mono,
@@ -2899,7 +2897,7 @@ private let bind_generic_function_type_from_shape(
         .FunctionType(pattern_params, pattern_return) then when actual in {
             .FunctionType(fn_params, ret_type) then {
                 let param_types = param_entry_types(fn_params);
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 while i < pattern_params.count() and i < param_types.count() then {
                     bind_generic_function_type_from_shape(
                         mono,
@@ -2925,9 +2923,9 @@ private let bind_generic_function_type_from_shape(
 };
 
 private let is_type_parameter_name(
-    name String,
-    type_params List[TypeParameterDecl],
-) Bool = {
+    name: String,
+    type_params: List[TypeParameterDecl],
+): Bool = {
     for type_param in type_params then {
         if type_param.name == name then {
             return true;
@@ -2936,7 +2934,7 @@ private let is_type_parameter_name(
     return false;
 };
 
-private let static_method_receiver_key(mono Monomorphizer, t Type) String = {
+private let static_method_receiver_key(mono: Monomorphizer, t: Type): String = {
     return when t in {
         .ReferenceType(inner) then static_method_receiver_key(mono, inner),
         .MutableReferenceType(inner) then static_method_receiver_key(mono, inner),
@@ -2949,9 +2947,9 @@ private let static_method_receiver_key(mono Monomorphizer, t Type) String = {
 };
 
 private let push_static_method_receiver_alias(
-    alias_list List[String],
-    alias String,
-) List[String] = {
+    alias_list: List[String],
+    alias: String,
+): List[String] = {
     if alias.is_empty() then {
         return alias_list;
     };
@@ -2965,7 +2963,7 @@ private let push_static_method_receiver_alias(
     return updated;
 };
 
-private let strict_wrapper_receiver_aliases(t Type) List[String] = {
+private let strict_wrapper_receiver_aliases(t: Type): List[String] = {
     let mutable aliases = List[String].new();
     when t in {
         .ReferenceType(_) then {
@@ -3004,7 +3002,7 @@ private let strict_wrapper_receiver_aliases(t Type) List[String] = {
     return aliases;
 };
 
-private let static_method_receiver_aliases(mono Monomorphizer, t Type) List[String] = {
+private let static_method_receiver_aliases(mono: Monomorphizer, t: Type): List[String] = {
     let mutable aliases = List[String].new();
     aliases = push_static_method_receiver_alias(
         aliases,
@@ -3094,7 +3092,7 @@ private let static_method_receiver_aliases(mono Monomorphizer, t Type) List[Stri
     return aliases;
 };
 
-private let receiver_uses_strict_wrapper_dispatch(mono Monomorphizer, t Type) Bool = {
+private let receiver_uses_strict_wrapper_dispatch(mono: Monomorphizer, t: Type): Bool = {
     return when resolve_parameterized_type(mono, t) in {
         .ReferenceType(_) then true,
         .MutableReferenceType(_) then true,
@@ -3109,10 +3107,10 @@ private let receiver_uses_strict_wrapper_dispatch(mono Monomorphizer, t Type) Bo
 };
 
 private let bind_static_method_symbol(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-) Symbol = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+): Symbol = {
     let mutable receiver_owners = List[MethodOwner].new();
     collect_receiver_owners(mono, receiver_type, receiver_owners);
     for receiver_owner in receiver_owners then {
@@ -3169,10 +3167,10 @@ private let bind_static_method_symbol(
 };
 
 private let method_type_matches_expected_pattern(
-    mono Monomorphizer,
-    actual Type,
-    expected Type,
-) Bool = {
+    mono: Monomorphizer,
+    actual: Type,
+    expected: Type,
+): Bool = {
     let normalized_actual = resolve_parameterized_type(mono, actual);
     let normalized_expected = resolve_parameterized_type(mono, expected);
     if mono.storage.context.get_layout_key(normalized_actual) == mono.storage.context.get_layout_key(
@@ -3197,7 +3195,7 @@ private let method_type_matches_expected_pattern(
                 if actual_params.count() != expected_params.count() then {
                     return false;
                 };
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < actual_params.count() then {
                     if not method_type_matches_expected_pattern(
                         mono,
@@ -3221,10 +3219,10 @@ private let method_type_matches_expected_pattern(
 };
 
 private let method_type_matches_expected(
-    mono Monomorphizer,
-    candidate Type,
-    expected_opt Option[Type],
-) Bool = {
+    mono: Monomorphizer,
+    candidate: Type,
+    expected_opt: Option[Type],
+): Bool = {
     return when expected_opt in {
         .None() then true,
         .Some(expected) then {
@@ -3248,10 +3246,10 @@ private let method_type_matches_expected(
 };
 
 private let method_type_matches_expected_strict(
-    mono Monomorphizer,
-    candidate Type,
-    expected_opt Option[Type],
-) Bool = {
+    mono: Monomorphizer,
+    candidate: Type,
+    expected_opt: Option[Type],
+): Bool = {
     return when expected_opt in {
         .None() then true,
         .Some(expected) then {
@@ -3263,10 +3261,10 @@ private let method_type_matches_expected_strict(
 };
 
 private let finalize_direct_method_candidate(
-    mono Monomorphizer,
-    symbol Symbol,
-    expected_opt Option[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    symbol: Symbol,
+    expected_opt: Option[Type],
+): Option[Symbol] = {
     let symbol_type = mono.storage.context.get_function_type(symbol.def_id) or else symbol.symbol_type;
     let resolved_symbol = Symbol(
         symbol.def_id,
@@ -3317,12 +3315,12 @@ private let finalize_direct_method_candidate(
 };
 
 private let lookup_direct_receiver_method_symbol(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    method_name String,
-    expected_opt Option[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    method_name: String,
+    expected_opt: Option[Type],
+): Option[Symbol] = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     let mutable resolved_receiver_instantiations = List[Pair[MethodOwner, List[Type]]].new(
     );
@@ -3376,10 +3374,10 @@ private let lookup_direct_receiver_method_symbol(
 };
 
 private let strict_wrapper_receiver_param_matches(
-    mono Monomorphizer,
-    receiver_param_type Type,
-    receiver_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    receiver_param_type: Type,
+    receiver_type: Type,
+): Bool = {
     let normalized_param = resolve_parameterized_type(mono, receiver_param_type);
     let normalized_receiver = resolve_parameterized_type(mono, receiver_type);
     if normalized_param == normalized_receiver then {
@@ -3443,10 +3441,10 @@ private let strict_wrapper_receiver_param_matches(
 };
 
 private let wrapper_receiver_param_matches(
-    mono Monomorphizer,
-    receiver_param_type Type,
-    receiver_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    receiver_param_type: Type,
+    receiver_type: Type,
+): Bool = {
     let normalized_param = resolve_parameterized_type(mono, receiver_param_type);
     let normalized_receiver = resolve_parameterized_type(mono, receiver_type);
     if mono.storage.context.get_layout_key(normalized_param) == mono.storage.context.get_layout_key(
@@ -3502,11 +3500,11 @@ private let wrapper_receiver_param_matches(
 };
 
 private let method_type_matches_expected_for_wrapper_receiver(
-    mono Monomorphizer,
-    candidate Type,
-    expected_opt Option[Type],
-    receiver_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    candidate: Type,
+    expected_opt: Option[Type],
+    receiver_type: Type,
+): Bool = {
     let normalized_candidate = resolve_parameterized_type(mono, candidate);
     return when normalized_candidate in {
         .FunctionType(candidate_params, candidate_return) then {
@@ -3527,7 +3525,7 @@ private let method_type_matches_expected_for_wrapper_receiver(
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
-                        let mutable idx UInt = UInt(1);
+                        let mutable idx: UInt = UInt(1);
                         while idx < candidate_params.count() then {
                             let mutable candidate_param_type = resolve_parameterized_type(
                                 mono,
@@ -3564,11 +3562,11 @@ private let method_type_matches_expected_for_wrapper_receiver(
 };
 
 private let method_type_matches_expected_for_wrapper_receiver_strict(
-    mono Monomorphizer,
-    candidate Type,
-    expected_opt Option[Type],
-    receiver_type Type,
-) Bool = {
+    mono: Monomorphizer,
+    candidate: Type,
+    expected_opt: Option[Type],
+    receiver_type: Type,
+): Bool = {
     let normalized_candidate = resolve_parameterized_type(mono, candidate);
     return when normalized_candidate in {
         .FunctionType(candidate_params, candidate_return) then {
@@ -3589,7 +3587,7 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
-                        let mutable idx UInt = UInt(1);
+                        let mutable idx: UInt = UInt(1);
                         while idx < candidate_params.count() then {
                             let candidate_param_type = resolve_parameterized_type(
                                 mono,
@@ -3618,11 +3616,11 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
 };
 
 private let method_symbol_matches_expected_for_receiver_lookup(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    expected_method_type_opt Option[Type],
-) Bool = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    expected_method_type_opt: Option[Type],
+): Bool = {
     let candidate_type = when mono.storage.context.get_function_type(method.def_id) in {
         .Some(function_type) then function_type,
         .None() then method.symbol_type,
@@ -3645,7 +3643,7 @@ private let method_symbol_matches_expected_for_receiver_lookup(
     );
 };
 
-private let semantic_receiver_method_name(mono Monomorphizer, method Symbol) String = {
+private let semantic_receiver_method_name(mono: Monomorphizer, method: Symbol): String = {
     if method.def_id.id > 0 then {
         when mono.receiver_method_dispatch_info(method.def_id) in {
             .Some(info) then {
@@ -3674,10 +3672,10 @@ private let semantic_receiver_method_name(mono Monomorphizer, method Symbol) Str
 };
 
 private let semantic_receiver_method_name_for_def_id(
-    mono Monomorphizer,
-    def_id DefId,
-    fallback_name String,
-) String = {
+    mono: Monomorphizer,
+    def_id: DefId,
+    fallback_name: String,
+): String = {
     when mono.receiver_method_dispatch_info(def_id) in {
         .Some(info) then {
             return info.method_name;
@@ -3705,11 +3703,11 @@ private let semantic_receiver_method_name_for_def_id(
 };
 
 private let lookup_exact_receiver_method_symbol(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    expected_method_type_opt Option[Type],
-) Option[Symbol] = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    expected_method_type_opt: Option[Type],
+): Option[Symbol] = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
 
     // Identity lookup FIRST (Swift `resolveMethodInstanceByIdentityForReceiver`,
@@ -4102,11 +4100,11 @@ private let lookup_exact_receiver_method_symbol(
 };
 
 let bind_receiver_method_symbol(
-    mono Monomorphizer,
-    receiver_type Type,
-    method Symbol,
-    expected_method_type_opt Option[Type],
-) Symbol = {
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    expected_method_type_opt: Option[Type],
+): Symbol = {
     let resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     let strict_wrapper_dispatch = receiver_uses_strict_wrapper_dispatch(
         mono,
@@ -4580,9 +4578,9 @@ let bind_receiver_method_symbol(
 };
 
 private let substitution_semantic_method_name(
-    mono Monomorphizer,
-    method Symbol,
-) String = {
+    mono: Monomorphizer,
+    method: Symbol,
+): String = {
     if method.def_id.id > 0 then {
         when mono.receiver_method_dispatch_info(method.def_id) in {
             .Some(info) then {
@@ -4611,13 +4609,13 @@ private let substitution_semantic_method_name(
 };
 
 private let substitution_ordered_trait_method_names_helper(
-    mono Monomorphizer,
-    trait_name String,
-    module_path List[String],
-    visited Set[UInt],
-    ordered List[String],
-    seen Set[String],
-) Void = {
+    mono: Monomorphizer,
+    trait_name: String,
+    module_path: List[String],
+    visited: Set[UInt],
+    ordered: List[String],
+    seen: Set[String],
+): Void = {
     let info = mono.storage.generic_templates.lookup_trait_in_module(
         trait_name,
         module_path,
@@ -4636,12 +4634,12 @@ private let substitution_ordered_trait_method_names_helper(
 /// Walk the trait DECLARATION and its parents. Two same-named traits from
 /// different modules are different declarations and must not share a visit slot.
 private let substitution_ordered_trait_method_names_helper_from_def(
-    mono Monomorphizer,
-    trait_def_id DefId,
-    visited Set[UInt],
-    ordered List[String],
-    seen Set[String],
-) Void = {
+    mono: Monomorphizer,
+    trait_def_id: DefId,
+    visited: Set[UInt],
+    ordered: List[String],
+    seen: Set[String],
+): Void = {
     if visited.contains(trait_def_id.id) then {
         return;
     };
@@ -4667,10 +4665,10 @@ private let substitution_ordered_trait_method_names_helper_from_def(
 };
 
 private let substitution_vtable_method_index(
-    mono Monomorphizer,
-    trait_type Type,
-    method_name String,
-) Int = {
+    mono: Monomorphizer,
+    trait_type: Type,
+    method_name: String,
+): Int = {
     // Display/resolution handle: the spelling comes from the declaration.
     let trait_name = when trait_type in {
         .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
@@ -4712,7 +4710,7 @@ private let substitution_vtable_method_index(
             seen,
         );
     };
-    let mutable idx UInt = 0;
+    let mutable idx: UInt = 0;
     while idx < ordered.count() then {
         if ordered[idx] == method_name then {
             return Int(idx);
@@ -4723,10 +4721,10 @@ private let substitution_vtable_method_index(
 };
 
 let align_method_reference_base_for_bound_method(
-    mono Monomorphizer,
-    receiver_expr TypedExpr,
-    method Symbol,
-) TypedExpr = {
+    mono: Monomorphizer,
+    receiver_expr: TypedExpr,
+    method: Symbol,
+): TypedExpr = {
     let current_expr = when receiver_expr.expr_kind in {
         .TraitObjectConversion(inner, _, _) then inner,
         .RefExpr(inner) then when inner.expr_type in {
@@ -5302,10 +5300,10 @@ let align_method_reference_base_for_bound_method(
 
 // Substitute types in a TypedStatement node.
 public let substitute_statement(
-    mono Monomorphizer,
-    stmt TypedStatement,
-    substitution Dict[String, Type],
-) TypedStatement = {
+    mono: Monomorphizer,
+    stmt: TypedStatement,
+    substitution: Dict[String, Type],
+): TypedStatement = {
     return when stmt in {
         // LetStmt: substitute symbol type and value expression.
         .LetStmt(symbol, value, span) then {
@@ -5387,7 +5385,9 @@ public let substitute_statement(
                     ),
                     .None() then Option[TypedExpr].None(),
                 };
-                new_arms.push(TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type));
+                new_arms.push(
+                    TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type),
+                );
             };
             TypedStatement.WhenStmt(new_subject, new_arms, span)
         },
@@ -5420,10 +5420,10 @@ public let substitute_statement(
 // Most patterns carry no type annotations directly, but struct/enum patterns
 // may contain nested patterns that need substitution.
 public let substitute_pattern(
-    mono Monomorphizer,
-    pattern TypedPattern,
-    substitution Dict[String, Type],
-) TypedPattern = {
+    mono: Monomorphizer,
+    pattern: TypedPattern,
+    substitution: Dict[String, Type],
+): TypedPattern = {
     return when pattern in {
         // StructPattern: recurse into each element pattern.
         .StructPattern(type_name, elements) then {
@@ -5487,7 +5487,10 @@ public let substitute_pattern(
         .IntegerLiteral(value) then TypedPattern.IntegerLiteral(value),
         .NegativeIntegerLiteral(value) then TypedPattern.NegativeIntegerLiteral(value),
         .FloatLiteral(value) then TypedPattern.FloatLiteral(value),
-        .StringLiteral(value, equals_symbol) then TypedPattern.StringLiteral(value, equals_symbol),
+        .StringLiteral(value, equals_symbol) then TypedPattern.StringLiteral(
+            value,
+            equals_symbol,
+        ),
         .RuneLiteral(value) then TypedPattern.RuneLiteral(value),
         .ComparisonPattern(op, value) then TypedPattern.ComparisonPattern(op, value),
         .WeakBinding(symbol) then {

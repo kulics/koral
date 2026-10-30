@@ -15,23 +15,23 @@ type foreign CDirHandle {};
 type foreign CDirEntry {};
 
 // Directory I/O
-let foreign __koral_opendir(path *UInt8) *CDirHandle;
-let foreign __koral_readdir(dir *CDirHandle) *CDirEntry;
-let foreign __koral_closedir(dir *CDirHandle) Int32;
-let foreign __koral_dirent_name(entry *CDirEntry) *UInt8;
-let foreign __koral_dirent_type(entry *CDirEntry) Int32;
+let foreign __koral_opendir(path: *UInt8): *CDirHandle;
+let foreign __koral_readdir(dir: *CDirHandle): *CDirEntry;
+let foreign __koral_closedir(dir: *CDirHandle): Int32;
+let foreign __koral_dirent_name(entry: *CDirEntry): *UInt8;
+let foreign __koral_dirent_type(entry: *CDirEntry): Int32;
 
 // Directory manipulation
-let foreign __koral_mkdir(path *UInt8, mode UInt32) Int32;
-let foreign __koral_rmdir(path *UInt8) Int32;
-let foreign __koral_mkdtemp(template *UInt8) *UInt8;
+let foreign __koral_mkdir(path: *UInt8, mode: UInt32): Int32;
+let foreign __koral_rmdir(path: *UInt8): Int32;
+let foreign __koral_mkdtemp(template: *UInt8): *UInt8;
 
 // ============================================================================
 // Helpers
 // ============================================================================
 
 /// Convert a dirent type code to FileType
-private let dir_entry_type(entry *CDirEntry) FileType = {
+private let dir_entry_type(entry: *CDirEntry): FileType = {
     let t = __koral_dirent_type(entry);
     return when t in {
         0 then FileType.RegularFile(),
@@ -47,33 +47,33 @@ private let dir_entry_type(entry *CDirEntry) FileType = {
 
 /// Directory entry with type information
 public type DirEntry(
-    private _name String,
-    private _path Path,
-    private _file_type FileType,
+    private _name: String,
+    private _path: Path,
+    private _file_type: FileType,
 );
 
 given DirEntry {
 
     /// File/directory name
-    public name(self) String = self._name;
+    public name(self): String = self._name;
 
     /// Full path
-    public path(self) Path = self._path;
+    public path(self): Path = self._path;
 
     /// File type
-    public file_type(self) FileType = self._file_type;
+    public file_type(self): FileType = self._file_type;
 
-    public is_file(self) Bool = self._file_type.is_file();
-    public is_dir(self) Bool = self._file_type.is_dir();
-    public is_symlink(self) Bool = self._file_type.is_symlink();
+    public is_file(self): Bool = self._file_type.is_file();
+    public is_dir(self): Bool = self._file_type.is_dir();
+    public is_symlink(self): Bool = self._file_type.is_symlink();
 
     /// Get full file metadata (triggers stat system call)
-    public info(self) Result[FileInfo] = file_info(self._path);
+    public info(self): Result[FileInfo] = file_info(self._path);
 };
 
-given DirEntry as ToString {
+given DirEntry: ToString {
 
-    public to_string(self) String = {
+    public to_string(self): String = {
         let mutable s = StringBuilder.new();
         s.push_string("DirEntry(");
         s.push_string(self._name);
@@ -84,26 +84,26 @@ given DirEntry as ToString {
     };
 };
 
-private type mutable DirIteratorStorage(handle *CDirHandle, base Path);
+private type mutable DirIteratorStorage(handle: *CDirHandle, base: Path);
 
-given DirIteratorStorage as Drop {
+given DirIteratorStorage: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         if self.handle != null then {
             __koral_closedir(self.handle);
         };
     };
 };
 
-public type mutable DirIterator(storage DirIteratorStorage);
+public type mutable DirIterator(storage: DirIteratorStorage);
 
-private type mutable WalkDirStorage(mutable stack List[DirIterator]);
+private type mutable WalkDirStorage(mutable stack: List[DirIterator]);
 
-public type mutable WalkDirIterator(mutable storage WalkDirStorage);
+public type mutable WalkDirIterator(mutable storage: WalkDirStorage);
 
-given DirIterator as Iterator[DirEntry] {
+given DirIterator: Iterator[DirEntry] {
 
-    public next(self) Option[DirEntry] = {
+    public next(self): Option[DirEntry] = {
         let entry = __koral_readdir(self.storage.handle);
         if entry == null then {
             return Option[DirEntry].None();
@@ -120,9 +120,9 @@ given DirIterator as Iterator[DirEntry] {
     };
 };
 
-given WalkDirIterator as Iterator[DirEntry] {
+given WalkDirIterator: Iterator[DirEntry] {
 
-    public next(self) Option[DirEntry] = {
+    public next(self): Option[DirEntry] = {
         let top_opt = self.storage.stack.pop();
         if top_opt is .None() then {
             return Option[DirEntry].None();
@@ -156,15 +156,15 @@ given WalkDirIterator as Iterator[DirEntry] {
 // ============================================================================
 
 /// Create single directory (parent must exist)
-public let create_dir[T IntoPath](path T) Result[Void] = {
+public let create_dir[T: IntoPath](path: T): Result[Void] = {
     let s = path.into_path().to_string();
     return if __koral_mkdir(s.data, 493) == 0 then .Ok({})
     else .Error(last_error_message());
 };
 
 /// Create directory recursively (creates all missing parent directories)
-public let create_dir_all[T IntoPath](path T) Result[Void] = {
-    let mutable normalized = path.into_path().to_string().replace_all("\\", with: "/");
+public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
+    let mutable normalized = path.into_path().to_string().replace_all("\\", with = "/");
     if normalized.is_empty() then {
         return Result[Void].Ok({});
     };
@@ -181,7 +181,7 @@ public let create_dir_all[T IntoPath](path T) Result[Void] = {
     };
 
     let mutable current = StringBuilder.new();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     let n = normalized.count();
 
     if normalized.starts_with("//") then {
@@ -245,15 +245,15 @@ public let create_dir_all[T IntoPath](path T) Result[Void] = {
 };
 
 /// Remove empty directory
-public let remove_dir[T IntoPath](path T) Result[Void] = {
+public let remove_dir[T: IntoPath](path: T): Result[Void] = {
     let s = path.into_path().to_string();
     return if __koral_rmdir(s.data) == 0 then .Ok({}) else .Error(last_error_message());
 };
 
 /// Remove directory recursively (removes all contents first)
-public let remove_dir_all[T IntoPath](path T) Result[Void] = {
+public let remove_dir_all[T: IntoPath](path: T): Result[Void] = {
     let p = path.into_path();
-    let mutable dirs List[Path] = [];
+    let mutable dirs: List[Path] = [];
     let mutable entries = walk_dir(p) or return;
 
     while entries.next() is .Some(entry) then {
@@ -278,7 +278,7 @@ public let remove_dir_all[T IntoPath](path T) Result[Void] = {
 
 /// Open a directory iterator.
 /// Handle is released in iterator drop logic.
-public let read_dir[T IntoPath](path T) Result[DirIterator] = {
+public let read_dir[T: IntoPath](path: T): Result[DirIterator] = {
     let p = path.into_path();
     let s = p.to_string();
     let dir = __koral_opendir(s.data);
@@ -292,8 +292,8 @@ public let read_dir[T IntoPath](path T) Result[DirIterator] = {
 /// Recursively walk a directory tree (depth-first).
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
-public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
-    let mutable stack List[DirIterator] = [];
+public let walk_dir[T: IntoPath](path: T): Result[WalkDirIterator] = {
+    let mutable stack: List[DirIterator] = [];
     let root_iter = read_dir(path) or return;
     stack.push(root_iter);
     return .Ok(WalkDirIterator(WalkDirStorage(stack)));
@@ -306,7 +306,7 @@ public let walk_dir[T IntoPath](path T) Result[WalkDirIterator] = {
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
 /// Returns the full path of the created temporary directory.
-public let create_temp_dir[T IntoPath](dir T, prefix: String) Result[Path] = {
+public let create_temp_dir[T: IntoPath](dir: T, prefix: String =): Result[Path] = {
     let dir_path = dir.into_path();
     let base = if dir_path.is_empty() then temp_dir() else dir_path;
     let base_str = base.to_string();

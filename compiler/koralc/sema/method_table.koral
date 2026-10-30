@@ -5,23 +5,23 @@
 // method on a different type.
 
 public type mutable MethodTable(
-    mutable methods Dict[MethodOwner, Dict[String, Symbol]],
-    mutable inherent_keys Dict[MethodOwner, Set[String]],
+    mutable methods: Dict[MethodOwner, Dict[String, Symbol]],
+    mutable inherent_keys: Dict[MethodOwner, Set[String]],
     // Declaration identity of each trait that has provided a given
     // (owner, method_name). The DefId form of Swift's
     // `extensionMethodTraitSources[typeName][methodName]`.
-    mutable method_sources Dict[MethodOwner, Dict[String, List[DefId]]],
+    mutable method_sources: Dict[MethodOwner, Dict[String, List[DefId]]],
     // METHOD FACE (§3.4): which TRAIT provides a non-inherent method.
     // Empty means "no trait claimed it" -- an inherent `given X { }` or a
     // declaration whose provenance was never stamped -- and such a method is
     // always callable. A method listed here is callable only when one of these
     // traits is in scope at the call site (Rust: "items from traits can only be
     // used if the trait is in scope").
-    mutable method_traits Dict[MethodOwner, Dict[String, List[DefId]]],
+    mutable method_traits: Dict[MethodOwner, Dict[String, List[DefId]]],
 );
 
 given MethodTable {
-    public new() MethodTable = {
+    public new(): MethodTable = {
         return MethodTable(
             Dict[MethodOwner, Dict[String, Symbol]].new(),
             Dict[MethodOwner, Set[String]].new(),
@@ -30,7 +30,7 @@ given MethodTable {
         );
     };
 
-    private method_names(self, owner MethodOwner) Dict[String, Symbol] = {
+    private method_names(self, owner: MethodOwner): Dict[String, Symbol] = {
         return when self.methods.get(owner) in {
             .Some(m) then m,
             .None() then Dict[String, Symbol].new(),
@@ -39,9 +39,9 @@ given MethodTable {
 
     private name_set(
         self,
-        table Dict[MethodOwner, Set[String]],
-        owner MethodOwner,
-    ) Set[String] = {
+        table: Dict[MethodOwner, Set[String]],
+        owner: MethodOwner,
+    ): Set[String] = {
         return when table.get(owner) in {
             .Some(s) then s,
             .None() then Set[String].new(),
@@ -60,11 +60,11 @@ given MethodTable {
     /// and lookups afterwards read the slot as they would an uncontested name.
     public register_with_source(
         self,
-        owner MethodOwner,
-        method_name String,
-        method Symbol,
-        source_def_id DefId,
-    ) Bool = {
+        owner: MethodOwner,
+        method_name: String,
+        method: Symbol,
+        source_def_id: DefId,
+    ): Bool = {
         let mutable sources = when self.method_sources.get(owner) in {
             .Some(by_name) then by_name,
             .None() then Dict[String, List[DefId]].new(),
@@ -91,21 +91,21 @@ given MethodTable {
         return made_ambiguous;
     };
 
-    public register(self, owner MethodOwner, method_name String, method Symbol) Void = {
+    public register(self, owner: MethodOwner, method_name: String, method: Symbol): Void = {
         let _ = self.register_with_source(owner, method_name, method, method.def_id);
     };
 
-    public lookup(self, owner MethodOwner, method_name String) Option[Symbol] = {
+    public lookup(self, owner: MethodOwner, method_name: String): Option[Symbol] = {
         return self.method_names(owner).get(method_name);
     };
 
-    public mark_inherent(self, owner MethodOwner, method_name String) Void = {
+    public mark_inherent(self, owner: MethodOwner, method_name: String): Void = {
         let mutable inherent = self.name_set(self.inherent_keys, owner);
         inherent.insert(method_name);
         self.inherent_keys.insert(owner, inherent);
     };
 
-    public is_inherent(self, owner MethodOwner, method_name String) Bool = {
+    public is_inherent(self, owner: MethodOwner, method_name: String): Bool = {
         return self.name_set(self.inherent_keys, owner).contains(method_name);
     };
 
@@ -116,10 +116,10 @@ given MethodTable {
     /// slot is then open if ANY of them is in scope.
     public register_providing_trait(
         self,
-        owner MethodOwner,
-        method_name String,
-        trait_def_id DefId,
-    ) Void = {
+        owner: MethodOwner,
+        method_name: String,
+        trait_def_id: DefId,
+    ): Void = {
         let mutable by_name = when self.method_traits.get(owner) in {
             .Some(m) then m,
             .None() then Dict[String, List[DefId]].new(),
@@ -141,7 +141,7 @@ given MethodTable {
     /// Traits that provide `method_name` on `owner`. Empty when the method is
     /// inherent or its provenance was never stamped -- the caller treats that
     /// as always callable.
-    public providing_traits(self, owner MethodOwner, method_name String) List[DefId] = {
+    public providing_traits(self, owner: MethodOwner, method_name: String): List[DefId] = {
         return when self.method_traits.get(owner) in {
             .Some(by_name) then when by_name.get(method_name) in {
                 .Some(list) then list,

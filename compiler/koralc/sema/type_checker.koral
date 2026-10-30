@@ -8,53 +8,53 @@ using "std/os" { env };
 // value without losing mutations (mirrors the List/storage ref pattern).
 
 type mutable TypeCheckerStorage(
-    mutable global_scope Scope,
-    mutable context CompilerContext,
-    mutable method_table MethodTable,
+    mutable global_scope: Scope,
+    mutable context: CompilerContext,
+    mutable method_table: MethodTable,
     // One DefId per `given` member, assigned once and reused by every later
     // pass. The parser cannot allocate, so `GivenMember.def_id` arrives invalid;
     // if each pass minted its own the typed member and the AST member would
     // disagree and a call site bound to one could not find a table keyed by the
     // other.
-    mutable given_member_def_ids Dict[String, DefId],
-    mutable diagnostics DiagnosticCollector,
-    mutable file_path String,
-    mutable module_path List[String],
-    mutable package_id String,
-    mutable function_return_context FunctionReturnContext,
-    mutable in_loop Bool,
-    mutable in_defer Bool,
-    mutable constraint_solver ConstraintSolver,
-    mutable trait_registry TraitRegistry,
-    mutable generic_param_constraints Dict[String, List[GenericConstraintBound]],
+    mutable given_member_def_ids: Dict[String, DefId],
+    mutable diagnostics: DiagnosticCollector,
+    mutable file_path: String,
+    mutable module_path: List[String],
+    mutable package_id: String,
+    mutable function_return_context: FunctionReturnContext,
+    mutable in_loop: Bool,
+    mutable in_defer: Bool,
+    mutable constraint_solver: ConstraintSolver,
+    mutable trait_registry: TraitRegistry,
+    mutable generic_param_constraints: Dict[String, List[GenericConstraintBound]],
     /// Shape bounds on a type parameter -- `T mutable`, `T foreign` -- keyed by
     /// parameter name. These are not traits and cannot live in
     /// `generic_param_constraints`; without them a bare `T` would appear to
     /// satisfy every shape bound, which is how `f[T Any]` used to call
     /// `g[T mutable]` unchecked.
-    mutable generic_param_shape_bounds Dict[String, List[Bound]],
+    mutable generic_param_shape_bounds: Dict[String, List[Bound]],
     /// A method's OWN type parameters -- `get[T mutable]` inside a `given` --
     /// keyed by the method symbol's declaration identity. The call site holds a
     /// `Symbol`; this is the only way back to the bound list it must enforce.
     /// Registered whenever a method symbol is built from a declaration that
     /// carries type parameters; empty lists are never stored.
-    mutable method_type_params Dict[DefId, List[TypeParameterDecl]],
-    mutable generic_templates GenericTemplateRegistry,
-    mutable instantiation_requests Set[InstantiationRequest],
-    mutable import_graph Option[ImportGraph],
-    mutable explicit_trait_conformances Set[ExplicitTraitConformanceKey],
+    mutable method_type_params: Dict[DefId, List[TypeParameterDecl]],
+    mutable generic_templates: GenericTemplateRegistry,
+    mutable instantiation_requests: Set[InstantiationRequest],
+    mutable import_graph: Option[ImportGraph],
+    mutable explicit_trait_conformances: Set[ExplicitTraitConformanceKey],
     /// Where each conformance was FIRST declared, keyed like
     /// `explicit_trait_conformances`. Conflict detection compares the stored
     /// span against the visiting declaration's: the same declaration arrives
     /// once per pass and re-registering its own span is not a conflict, while a
     /// second declaration of the same (self type, trait) pair is.
-    mutable conformance_decl_origins Dict[ExplicitTraitConformanceKey, SourceSpan],
-    mutable generic_trait_conformance_templates List[GenericTraitConformanceTemplate],
-    mutable conformance_index Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
-    mutable trait_requirement_in_progress Set[ExplicitTraitConformanceKey],
-    mutable generic_trait_status_in_progress Set[ExplicitTraitConformanceKey],
-    mutable trait_requirement_cache Dict[ExplicitTraitConformanceKey, Bool],
-    mutable generic_trait_status_cache Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
+    mutable conformance_decl_origins: Dict[ExplicitTraitConformanceKey, SourceSpan],
+    mutable generic_trait_conformance_templates: List[GenericTraitConformanceTemplate],
+    mutable conformance_index: Dict[MethodOwner, List[GenericTraitConformanceTemplate]],
+    mutable trait_requirement_in_progress: Set[ExplicitTraitConformanceKey],
+    mutable generic_trait_status_in_progress: Set[ExplicitTraitConformanceKey],
+    mutable trait_requirement_cache: Dict[ExplicitTraitConformanceKey, Bool],
+    mutable generic_trait_status_cache: Dict[ExplicitTraitConformanceKey, GenericTraitConformanceStatus],
     /// Constraint enforcement phase. Swift calls `enforceGenericConstraints`
     /// only from `resolveGenericExtensionMethod` — i.e. at a CALL SITE, where
     /// type arguments are concrete. Checking a body while materializing a
@@ -62,12 +62,12 @@ type mutable TypeCheckerStorage(
     /// not report constraint violations: `contains` materialized for
     /// `EnumerateIterator[T, R] as Iterator[Pair[UInt, T]]` would otherwise
     /// demand `Pair[UInt, T]: Eq` before `T` is known. True = defer.
-    mutable constraint_enforcement_deferred Bool,
-    mutable conformance_witnesses Dict[String, ConformanceWitness],
+    mutable constraint_enforcement_deferred: Bool,
+    mutable conformance_witnesses: Dict[String, ConformanceWitness],
     /// Current scope for type resolution — analogous to Swift's `currentScope`.
     /// Always points to the innermost scope. Type resolution walks up the scope chain.
     /// Initialized to global_scope in the constructor.
-    mutable current_scope Scope,
+    mutable current_scope: Scope,
     /// Where the checker currently is, for a diagnostic that has no more
     /// specific place to blame.
     ///
@@ -82,33 +82,33 @@ type mutable TypeCheckerStorage(
     /// Set on entry to a declaration, statement or expression and restored on
     /// the way out. The innermost construct wins, which is what keeps a
     /// statement from swallowing an expression's location.
-    mutable current_span SourceSpan,
+    mutable current_span: SourceSpan,
     /// While a construction's arguments are being checked, the span a literal
     /// range violation blames: the construction CALL, not the literal. The
     /// reference compiler coerces construction arguments after they are
     /// checked and blames the ambient call, so `Point(300, 0)` points at
     /// `Point` while `let x UInt8 = 300` still points at the literal.
-    mutable range_blame_span Option[SourceSpan],
+    mutable range_blame_span: Option[SourceSpan],
     /// Global `let` initializers run in declaration order; a later one may read
     /// an earlier one, never the reverse. `initialized_globals` holds the names
     /// whose initializer has already been checked, so a forward reference -- and
     /// therefore every cycle -- is visible at the point of use instead of
     /// quietly reading the zero the runtime has not written yet.
-    mutable initialized_globals Set[String],
+    mutable initialized_globals: Set[String],
     /// True while a global `let` initializer is being checked. The order rule
     /// applies there and nowhere else: a function body may freely call forward
     /// to any global.
-    mutable in_global_init Bool,
+    mutable in_global_init: Bool,
 );
 
-public type mutable TypeChecker(mutable storage TypeCheckerStorage);
+public type mutable TypeChecker(mutable storage: TypeCheckerStorage);
 
-type IfChain(arms List[Pair[Expr, Expr]], final_else Option[Expr]);
+type IfChain(arms: List[Pair[Expr, Expr]], final_else: Option[Expr]);
 
 type mutable FunctionReturnContext(
-    mutable expected_return_type Option[Type],
-    mutable inferred_return_type Option[Type],
-    mutable is_inferring Bool,
+    mutable expected_return_type: Option[Type],
+    mutable inferred_return_type: Option[Type],
+    mutable is_inferring: Bool,
 );
 
 /// A single trait bound on a generic parameter, preserving type arguments.
@@ -119,14 +119,14 @@ type mutable FunctionReturnContext(
 /// matched by its KIND and keeps `DefId(0)`, and nothing may read its spelling
 /// to decide anything.
 public type GenericConstraintBound(
-    trait_def_id DefId,
-    trait_name String,
-    type_args List[Type],
+    trait_def_id: DefId,
+    trait_name: String,
+    type_args: List[Type],
 );
 
 type GenericConstraintSnapshot(
-    previous_constraints Dict[String, Option[List[GenericConstraintBound]]],
-    previous_shape_bounds Dict[String, Option[List[Bound]]],
+    previous_constraints: Dict[String, Option[List[GenericConstraintBound]]],
+    previous_shape_bounds: Dict[String, Option[List[Bound]]],
 );
 
 /// A blanket/direct conformance pattern. `trait_def_id` is the trait
@@ -134,11 +134,11 @@ type GenericConstraintSnapshot(
 /// display-only. Two same-named traits from different modules must never share
 /// a template match.
 type GenericTraitConformanceTemplate(
-    target_type Type,
-    owner_type_params List[TypeParameterDecl],
-    trait_name String,
-    trait_def_id DefId,
-    trait_arg_types List[Type],
+    target_type: Type,
+    owner_type_params: List[TypeParameterDecl],
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_arg_types: List[Type],
 );
 
 /// A conformance fact, keyed on the trait's DECLARATION identity.
@@ -147,10 +147,10 @@ type GenericTraitConformanceTemplate(
 /// `equals`/`hash` use. Two same-named traits in different modules must not
 /// alias, and renaming a trait must not invalidate the conformance set.
 type ExplicitTraitConformanceKey(
-    target_type Type,
-    trait_def_id DefId,
-    trait_name String,
-    trait_arg_types List[Type],
+    target_type: Type,
+    trait_def_id: DefId,
+    trait_name: String,
+    trait_arg_types: List[Type],
 );
 
 /// A trait reference normalised to (declaration identity, type arguments).
@@ -160,9 +160,9 @@ type ExplicitTraitConformanceKey(
 /// print it. Two spellings that resolve to the same declaration are the same
 /// reference; two same-named traits from different modules are not.
 public type CanonicalTraitRef(
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
 );
 
 given CanonicalTraitRef {
@@ -177,7 +177,7 @@ given CanonicalTraitRef {
     /// be found under another. Identity is the DefId (rustc: `Res::Def(..,
     /// DefId)`; `trait_name` is the equivalent of a `Symbol` kept for printing).
     /// See `docs/design/traits-and-givens.md`.
-    public cache_key(self) String = {
+    public cache_key(self): String = {
         if self.trait_type_args.is_empty() then {
             return self.trait_def_id.id.to_string();
         };
@@ -196,48 +196,48 @@ given CanonicalTraitRef {
         return out.to_string();
     };
 
-    public key(self, self_type Type) String = {
+    public key(self, self_type: Type): String = {
         return "\(stable_type_key(self_type)):\(self.cache_key())";
     };
 };
 
 public type RequirementSlotParameter(
-    name String,
-    is_mutable Bool,
-    param_type Type,
-    named Bool,
+    name: String,
+    is_mutable: Bool,
+    param_type: Type,
+    named: Bool,
 );
 
 public type RequirementSlot(
-    declaring_trait_ref CanonicalTraitRef,
-    trait_method_def_id DefId,
-    method_name String,
-    parameters List[RequirementSlotParameter],
-    return_type Type,
-    index UInt,
+    declaring_trait_ref: CanonicalTraitRef,
+    trait_method_def_id: DefId,
+    method_name: String,
+    parameters: List[RequirementSlotParameter],
+    return_type: Type,
+    index: UInt,
 );
 
 public type ConformanceWitness(
-    self_type Type,
-    trait_ref CanonicalTraitRef,
-    direct_parent_trait_refs List[CanonicalTraitRef],
-    requirement_slots List[RequirementSlot],
-    local_implementation_def_ids_by_method_name Dict[String, DefId],
-    local_implementation_def_ids_by_trait_method_def_id Dict[DefId, DefId],
+    self_type: Type,
+    trait_ref: CanonicalTraitRef,
+    direct_parent_trait_refs: List[CanonicalTraitRef],
+    requirement_slots: List[RequirementSlot],
+    local_implementation_def_ids_by_method_name: Dict[String, DefId],
+    local_implementation_def_ids_by_trait_method_def_id: Dict[DefId, DefId],
 );
 
 given ConformanceWitness {
-    public key(self) String = self.trait_ref.key(self.self_type);
+    public key(self): String = self.trait_ref.key(self.self_type);
 };
 
-given ExplicitTraitConformanceKey as Eq {
-    public equals(self, other ExplicitTraitConformanceKey) Bool = {
+given ExplicitTraitConformanceKey: Eq {
+    public equals(self, other: ExplicitTraitConformanceKey): Bool = {
         return self.target_type == other.target_type and self.trait_def_id == other.trait_def_id and self.trait_arg_types == other.trait_arg_types;
     };
 };
 
-given ExplicitTraitConformanceKey as Hash {
-    public hash(self) UInt = {
+given ExplicitTraitConformanceKey: Hash {
+    public hash(self): UInt = {
         let mutable h = UInt(14695981039346656037);
         h = stable_hash_combine_value(h, stable_type_hash(self.target_type));
         h = stable_hash_combine_value(h, self.trait_def_id.id);
@@ -250,13 +250,17 @@ given ExplicitTraitConformanceKey as Hash {
 
 type GenericTraitConformanceStatus {
     Satisfied(),
-    MissingConstraint(target_type Type, constraint_param String, trait_name String),
-    MissingBlanketGiven(modifier_name String),
+    MissingConstraint(target_type: Type, constraint_param: String, trait_name: String),
+    MissingBlanketGiven(modifier_name: String),
     MissingConformance(),
 };
 
 given TypeChecker {
-    public new(global_scope Scope, context CompilerContext, file_path String) TypeChecker = {
+    public new(
+        global_scope: Scope,
+        context: CompilerContext,
+        file_path: String,
+    ): TypeChecker = {
         // Install the ambient display context so free functions holding only a
         // `Type` can spell a declaration. Mirrors Swift's
         // `SemanticErrorContext.currentCompilerContext = context` in
@@ -308,7 +312,7 @@ given TypeChecker {
     /// name table -- see `GenericTemplateRegistry.candidate_keys`. Identity
     /// still travels on the `DefId`; this only decides which declaration a
     /// spelling denotes.
-    install_name_resolution_context(self) Void = {
+    install_name_resolution_context(self): Void = {
         let source_file = Option[String].Some(self.storage.file_path);
         self.storage.generic_templates.current_module_path = self.storage.module_path;
         self.storage.generic_templates.current_source_file = source_file;
@@ -319,7 +323,7 @@ given TypeChecker {
         );
     };
 
-    clone_function_return_context(self) FunctionReturnContext = {
+    clone_function_return_context(self): FunctionReturnContext = {
         let current = self.storage.function_return_context;
         return FunctionReturnContext(
             current.expected_return_type,
@@ -328,19 +332,19 @@ given TypeChecker {
         );
     };
 
-    public has_errors(self) Bool = self.storage.diagnostics.has_errors();
+    public has_errors(self): Bool = self.storage.diagnostics.has_errors();
 
-    public compiler_context(self) CompilerContext = {
+    public compiler_context(self): CompilerContext = {
         return self.context();
     };
 
     register_receiver_dispatch_for_given_members(
         self,
-        target_type Type,
-        trait_name Option[String],
-        trait_def_id Option[DefId],
-        members List[TypedGivenMember],
-    ) Void = {
+        target_type: Type,
+        trait_name: Option[String],
+        trait_def_id: Option[DefId],
+        members: List[TypedGivenMember],
+    ): Void = {
         let owner = Option[ReceiverMethodOwner].Some(
             ReceiverMethodOwner.ConcreteType(target_type),
         );
@@ -387,7 +391,7 @@ given TypeChecker {
         };
     };
 
-    duplicate_definition_message(self, name String) String = {
+    duplicate_definition_message(self, name: String): String = {
         let _ = self;
         let mutable message = StringBuilder.new();
         message.push_string("Duplicate definition: ");
@@ -395,7 +399,7 @@ given TypeChecker {
         return message.to_string();
     };
 
-    invalidate_trait_requirement_caches(self) Void = {
+    invalidate_trait_requirement_caches(self): Void = {
         self.storage.trait_requirement_in_progress = Set[ExplicitTraitConformanceKey].new(
         );
         self.storage.generic_trait_status_in_progress = Set[ExplicitTraitConformanceKey].new(
@@ -417,7 +421,7 @@ given TypeChecker {
     /// again for the same expression -- a second generic instantiation attempt,
     /// a receiver rewrite, a re-check of the same binding -- must not multiply
     /// its message.
-    push_diagnostic(self, message String, span SourceSpan) Void = {
+    push_diagnostic(self, message: String, span: SourceSpan): Void = {
         // A message that arrives without a location is a problem at whatever
         // construct the walker is inside -- see `current_span`. A message that
         // arrives with one keeps it: the call site knows better than the cursor
@@ -438,10 +442,10 @@ given TypeChecker {
 
     report_pass2_decl_consistency_error(
         self,
-        decl_kind String,
-        name String,
-        detail String,
-    ) Void = {
+        decl_kind: String,
+        name: String,
+        detail: String,
+    ): Void = {
         let mutable message = StringBuilder.new();
         message.push_string("internal consistency error while collecting ");
         message.push_string(decl_kind);
@@ -455,7 +459,7 @@ given TypeChecker {
         self.push_diagnostic(message.to_string(), unknown_span());
     };
 
-    sema_progress_debug_enabled(self) Bool = {
+    sema_progress_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SEMA_PROGRESS") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -463,7 +467,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_given_body_debug_enabled(self) Bool = {
+    skip_given_body_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_GIVEN_BODY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -471,7 +475,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_decl_check_debug_enabled(self) Bool = {
+    skip_decl_check_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -479,7 +483,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_function_decl_check_debug_enabled(self) Bool = {
+    skip_function_decl_check_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_FUNCTION_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -487,7 +491,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_let_decl_check_debug_enabled(self) Bool = {
+    skip_let_decl_check_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_LET_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -495,7 +499,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_given_decl_check_debug_enabled(self) Bool = {
+    skip_given_decl_check_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_GIVEN_DECL_CHECK") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -503,7 +507,7 @@ given TypeChecker {
         return false;
     };
 
-    reset_constraint_solver_each_decl_debug_enabled(self) Bool = {
+    reset_constraint_solver_each_decl_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_RESET_CONSTRAINT_SOLVER_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -511,7 +515,7 @@ given TypeChecker {
         return false;
     };
 
-    clear_variable_symbol_types_each_decl_debug_enabled(self) Bool = {
+    clear_variable_symbol_types_each_decl_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_CLEAR_VARIABLE_SYMBOL_TYPES_EACH_DECL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -519,7 +523,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_typed_decl_retention_debug_enabled(self) Bool = {
+    skip_typed_decl_retention_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TYPED_DECL_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -527,7 +531,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_trait_tool_template_backfill_debug_enabled(self) Bool = {
+    skip_trait_tool_template_backfill_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TRAIT_TOOL_TEMPLATE_BACKFILL") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -535,7 +539,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_checked_decl_substitution_debug_enabled(self) Bool = {
+    skip_checked_decl_substitution_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CHECKED_DECL_SUBSTITUTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -543,7 +547,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_template_typed_body_boxing_debug_enabled(self) Bool = {
+    skip_template_typed_body_boxing_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_TEMPLATE_TYPED_BODY_BOXING") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -551,7 +555,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_concrete_given_program_body_retention_debug_enabled(self) Bool = {
+    skip_concrete_given_program_body_retention_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CONCRETE_GIVEN_PROGRAM_BODY_RETENTION") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -559,7 +563,7 @@ given TypeChecker {
         return false;
     };
 
-    drop_template_body_debug_enabled(self) Bool = {
+    drop_template_body_debug_enabled(self): Bool = {
         let file_filter = env("KORAL_DEBUG_DROP_TEMPLATE_BODY_FILE_CONTAINS");
         return when file_filter in {
             .Some(value) then self.storage.file_path.contains(value),
@@ -567,7 +571,7 @@ given TypeChecker {
         };
     };
 
-    skip_call_family_debug_enabled(self) Bool = {
+    skip_call_family_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_CALL_FAMILY") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -575,7 +579,7 @@ given TypeChecker {
         return false;
     };
 
-    skip_member_path_debug_enabled(self) Bool = {
+    skip_member_path_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_SKIP_MEMBER_PATH") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -583,7 +587,7 @@ given TypeChecker {
         return false;
     };
 
-    template_retain_debug_enabled(self) Bool = {
+    template_retain_debug_enabled(self): Bool = {
         let _ = self;
         if env("KORAL_DEBUG_TEMPLATE_RETAIN") is .Some(value) and (value == "1" or value == "true" or value == "TRUE") then {
             return true;
@@ -591,7 +595,7 @@ given TypeChecker {
         return false;
     };
 
-    log_sema_progress(self, checked_decl_count UInt, total_nodes UInt) Void = {
+    log_sema_progress(self, checked_decl_count: UInt, total_nodes: UInt): Void = {
         let pending_constraints = self.storage.constraint_solver.constraints.count();
         let pending_default_constraints = self.storage.constraint_solver.default_constraints.count(
         );
@@ -627,7 +631,7 @@ given TypeChecker {
         );
     };
 
-    decl_debug_label(self, decl Decl) String = {
+    decl_debug_label(self, decl: Decl): String = {
         let _ = self;
         return when decl in {
             .LetDecl(_, name, _, _, _, _, _) then "let \(name)",
@@ -648,7 +652,7 @@ given TypeChecker {
         };
     };
 
-    record_instantiation_request(self, request InstantiationRequest) Void = {
+    record_instantiation_request(self, request: InstantiationRequest): Void = {
         self.storage.instantiation_requests.insert(request);
     };
 
@@ -668,8 +672,8 @@ given TypeChecker {
     ///   the target declares.
     register_imported_trait_names(
         self,
-        nodes List[Pair[LoadedNode, List[String]]],
-    ) Void = {
+        nodes: List[Pair[LoadedNode, List[String]]],
+    ): Void = {
         for pair in nodes then {
             self.bind_prelude_trait_names(pair.second);
         };
@@ -729,7 +733,7 @@ given TypeChecker {
 
     /// std's root traits, bound into `importing_module`. The prelude is a real
     /// import -- just one the language writes for you.
-    bind_prelude_trait_names(self, importing_module List[String]) Void = {
+    bind_prelude_trait_names(self, importing_module: List[String]): Void = {
         for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
             let info = entry.second;
             if not self.is_std_root_module_decl(info.def_id, info.module_path) then {
@@ -749,11 +753,7 @@ given TypeChecker {
     /// Root-ness is the module's shape: std's root is the single-segment module
     /// in that package, the one its manifest names as the main module. Submodules
     /// (`std::io` and friends) are imported explicitly and are not prelude.
-    is_std_root_module_decl(
-        self,
-        def_id DefId,
-        module_path List[String],
-    ) Bool = {
+    is_std_root_module_decl(self, def_id: DefId, module_path: List[String]): Bool = {
         if not module_path.count() == 1 then {
             return false;
         };
@@ -766,7 +766,7 @@ given TypeChecker {
     /// Whether a batch import may bring this trait in. `internal` /
     /// `private` never travel; `protected` travels within a package
     /// and is re-checked at use by the visibility checker.
-    importable_trait_access(self, def_id DefId) Bool = {
+    importable_trait_access(self, def_id: DefId): Bool = {
         return when self.storage.context.get_access(def_id) in {
             .Some(access) then when access in {
                 .Public() or .Protected() then true,
@@ -781,10 +781,10 @@ given TypeChecker {
     /// `trait_registry`, monomorphization through `generic_templates.traits`.
     bind_imported_trait_name(
         self,
-        local_name String,
-        importing_module List[String],
-        trait_def_id DefId,
-    ) Void = {
+        local_name: String,
+        importing_module: List[String],
+        trait_def_id: DefId,
+    ): Void = {
         when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
             .Some(info) then self.storage.trait_registry.register_imported_name(
                 local_name,
@@ -816,13 +816,13 @@ given TypeChecker {
 
     register_trait_metadata(
         self,
-        name String,
-        trait_def_id DefId,
-        type_params List[TypeParameter],
-        parent_constraints List[ParentTraitConstraint],
-        raw_members List[TraitMember],
-        typed_members List[TypedTraitMember],
-    ) Void = {
+        name: String,
+        trait_def_id: DefId,
+        type_params: List[TypeParameter],
+        parent_constraints: List[ParentTraitConstraint],
+        raw_members: List[TraitMember],
+        typed_members: List[TypedTraitMember],
+    ): Void = {
         let mutable param_names = List[String].new();
         for tp in type_params then {
             param_names.push(tp.name);
@@ -837,10 +837,7 @@ given TypeChecker {
         );
         let mutable method_def_ids_by_name = Dict[String, DefId].new();
         for member in typed_members then {
-            method_def_ids_by_name.insert(
-                member.name,
-                member.def_id,
-            );
+            method_def_ids_by_name.insert(member.name, member.def_id);
         };
         self.storage.trait_registry.register(info);
         let decl_info = TraitDeclInfo(
@@ -886,9 +883,9 @@ given TypeChecker {
     /// `def_id_invalid()`, which is always on its way to a diagnostic.
     canonical_trait_ref(
         self,
-        trait_name String,
-        trait_type_args List[Type],
-    ) CanonicalTraitRef = {
+        trait_name: String,
+        trait_type_args: List[Type],
+    ): CanonicalTraitRef = {
         return CanonicalTraitRef(
             trait_name,
             self.trait_def_id_by_name(trait_name),
@@ -899,16 +896,16 @@ given TypeChecker {
     /// Same, when the caller already holds the declaration identity.
     canonical_trait_ref_with_def_id(
         self,
-        trait_name String,
-        trait_def_id DefId,
-        trait_type_args List[Type],
-    ) CanonicalTraitRef = {
+        trait_name: String,
+        trait_def_id: DefId,
+        trait_type_args: List[Type],
+    ): CanonicalTraitRef = {
         let resolved = if trait_def_id.is_valid() then trait_def_id
         else self.trait_def_id_by_name(trait_name);
         return CanonicalTraitRef(trait_name, resolved, trait_type_args);
     };
 
-    trait_extension_self_type(self, resolved_target Type) Type = {
+    trait_extension_self_type(self, resolved_target: Type): Type = {
         return when resolved_target in {
             .TraitObject(...) then Type.GenericParameter("Self"),
             .ReferenceType(inner) then when inner in {
@@ -933,9 +930,9 @@ given TypeChecker {
 
     trait_type_substitution(
         self,
-        trait_ref CanonicalTraitRef,
-        self_type Type,
-    ) Dict[String, Type] = {
+        trait_ref: CanonicalTraitRef,
+        self_type: Type,
+    ): Dict[String, Type] = {
         let mutable substitution = Dict[String, Type].new();
         substitution.insert("Self", self_type);
         // Identity: the reference carries the trait's DECLARATION.
@@ -943,7 +940,7 @@ given TypeChecker {
             trait_ref.trait_def_id,
         ) in {
             .Some(trait_info) then {
-                let mutable index UInt = 0;
+                let mutable index: UInt = 0;
                 while index < trait_info.type_params.count() and index < trait_ref.trait_type_args.count(
                 ) then {
                     substitution.insert(
@@ -960,9 +957,9 @@ given TypeChecker {
 
     direct_parent_trait_refs(
         self,
-        trait_ref CanonicalTraitRef,
-        self_type Type,
-    ) List[CanonicalTraitRef] = {
+        trait_ref: CanonicalTraitRef,
+        self_type: Type,
+    ): List[CanonicalTraitRef] = {
         let mutable parents = List[CanonicalTraitRef].new();
         // Identity: the reference carries the trait's DECLARATION.
         when self.storage.generic_templates.lookup_trait_by_def_id(
@@ -1004,9 +1001,9 @@ given TypeChecker {
     /// and a parent's used to send `show` to `base`.
     requirement_slots(
         self,
-        trait_ref CanonicalTraitRef,
-        self_type Type,
-    ) List[RequirementSlot] = {
+        trait_ref: CanonicalTraitRef,
+        self_type: Type,
+    ): List[RequirementSlot] = {
         let mutable slots = List[RequirementSlot].new();
         let mutable seen_methods = Set[String].new();
         let mutable visited_trait_refs = Set[String].new();
@@ -1026,12 +1023,12 @@ given TypeChecker {
     /// and must not share a visit slot.
     collect_requirement_slots(
         self,
-        trait_ref CanonicalTraitRef,
-        self_type Type,
-        slots List[RequirementSlot],
-        seen_methods Set[String],
-        visited_trait_refs Set[String],
-    ) Void = {
+        trait_ref: CanonicalTraitRef,
+        self_type: Type,
+        slots: List[RequirementSlot],
+        seen_methods: Set[String],
+        visited_trait_refs: Set[String],
+    ): Void = {
         let current_key = trait_ref.cache_key();
         if visited_trait_refs.contains(current_key) then {
             return;
@@ -1089,7 +1086,8 @@ given TypeChecker {
                     slots.push(
                         RequirementSlot(
                             trait_ref,
-                            trait_info.method_def_ids_by_name.get(method.name) or else def_id_invalid(),
+                            trait_info.method_def_ids_by_name.get(method.name) or else def_id_invalid(
+                            ),
                             method.name,
                             parameters,
                             self.resolve_type_with_self_and_bindings(
@@ -1108,18 +1106,20 @@ given TypeChecker {
 
     record_conformance_witness(
         self,
-        self_type Type,
-        trait_name String,
-        trait_type_args List[Type],
-        members List[TypedGivenMember],
-    ) Void = {
+        self_type: Type,
+        trait_name: String,
+        trait_type_args: List[Type],
+        members: List[TypedGivenMember],
+    ): Void = {
         let trait_ref = self.canonical_trait_ref(trait_name, trait_type_args);
         let mutable implementations = Dict[String, DefId].new();
         for member in members then {
             implementations.insert(member.name, member.def_id);
         };
         let mutable implementations_by_trait_method_def_id = Dict[DefId, DefId].new();
-        when self.storage.generic_templates.lookup_trait_by_def_id(trait_ref.trait_def_id) in {
+        when self.storage.generic_templates.lookup_trait_by_def_id(
+            trait_ref.trait_def_id,
+        ) in {
             .Some(trait_info) then {
                 for member in members then {
                     when trait_info.method_def_ids_by_name.get(member.name) in {
@@ -1148,9 +1148,9 @@ given TypeChecker {
 
     template_checked_body(
         self,
-        body Option[TypedExpr],
-        retain_checked_template_bodies Bool,
-    ) Option[TypedExpr] = {
+        body: Option[TypedExpr],
+        retain_checked_template_bodies: Bool,
+    ): Option[TypedExpr] = {
         if self.drop_template_body_debug_enabled() then {
             return Option[TypedExpr].None();
         };
@@ -1160,26 +1160,22 @@ given TypeChecker {
         } else Option[TypedExpr].None();
     };
 
-    push_diagnostic_at_span(self, message String, span SourceSpan) Void = {
+    push_diagnostic_at_span(self, message: String, span: SourceSpan): Void = {
         self.push_diagnostic(message, span);
     };
 
-    push_expr_diagnostic(self, expr Expr, message String) Void = {
+    push_expr_diagnostic(self, expr: Expr, message: String): Void = {
         self.push_diagnostic_at_span(message, expr_span(expr));
     };
 
-    push_pattern_diagnostic(self, pattern PatternNode, message String) Void = {
+    push_pattern_diagnostic(self, pattern: PatternNode, message: String): Void = {
         self.push_diagnostic_at_span(message, pattern_span(pattern));
     };
 
     /// Whether one lowered pattern covers every value of its subject type --
     /// the `for`-binding question, judged by the exhaustiveness checker's own
     /// coverage machinery rather than the syntactic irrefutability shortcut.
-    pattern_covers_full_space(
-        self,
-        pattern TypedPattern,
-        subject_type Type,
-    ) Bool = {
+    pattern_covers_full_space(self, pattern: TypedPattern, subject_type: Type): Bool = {
         let mutable patterns = List[TypedPattern].new();
         patterns.push(pattern);
         let checker = ExhaustivenessChecker.new(
@@ -1192,28 +1188,28 @@ given TypeChecker {
         return checker.covers_full_space();
     };
 
-    context(self) CompilerContext = {
+    context(self): CompilerContext = {
         return self.storage.context;
     };
 
-    in_function_context(self) Bool = {
+    in_function_context(self): Bool = {
         if self.storage.function_return_context.is_inferring then {
             return true;
         };
         return self.storage.function_return_context.expected_return_type is .Some(_);
     };
 
-    allocate_unindexed_def_id(self, name String, kind DefKind) DefId = {
+    allocate_unindexed_def_id(self, name: String, kind: DefKind): DefId = {
         let mutable context = self.context();
         return context.allocate_unindexed(name, kind);
     };
 
     make_member_path_symbol(
         self,
-        name String,
-        member_type Type,
-        is_mutable Bool,
-    ) Symbol = {
+        name: String,
+        member_type: Type,
+        is_mutable: Bool,
+    ): Symbol = {
         let kind = SymbolKind.Variable(
             if is_mutable then VariableKind.MutableValue() else VariableKind.Value(),
         );
@@ -1228,11 +1224,11 @@ given TypeChecker {
     // makeGlobalSymbol/getOrAllocateTypeDefId flow instead of allocating fallback ids.
     get_or_allocate_top_level_def_id(
         self,
-        name String,
-        kind DefKind,
-        access AccessModifier,
-        span SourceSpan,
-    ) DefId = {
+        name: String,
+        kind: DefKind,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): DefId = {
         let mutable context = self.context();
         return when access in {
             .Private() then when context.lookup_def_id(
@@ -1272,13 +1268,13 @@ given TypeChecker {
 
     make_top_level_symbol(
         self,
-        name String,
-        symbol_type Type,
-        kind SymbolKind,
-        access AccessModifier,
-        span SourceSpan,
-        is_mutable Bool,
-    ) Symbol = {
+        name: String,
+        symbol_type: Type,
+        kind: SymbolKind,
+        access: AccessModifier,
+        span: SourceSpan,
+        is_mutable: Bool,
+    ): Symbol = {
         let def_kind = when kind in {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
@@ -1311,12 +1307,12 @@ given TypeChecker {
 
     make_top_level_type_symbol(
         self,
-        name String,
-        type_kind TypeDefKind,
-        symbol_type Type,
-        access AccessModifier,
-        span SourceSpan,
-    ) Symbol = {
+        name: String,
+        type_kind: TypeDefKind,
+        symbol_type: Type,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): Symbol = {
         let def_id = self.get_or_allocate_top_level_def_id(
             name,
             DefKind.TypeDef(type_kind),
@@ -1332,19 +1328,15 @@ given TypeChecker {
         return symbol;
     };
 
-    fresh_type_variable(
-        self,
-        name Option[String],
-        span SourceSpan,
-    ) TypeVariable = {
+    fresh_type_variable(self, name: Option[String], span: SourceSpan): TypeVariable = {
         return self.storage.constraint_solver.fresh_type_variable(name, span);
     };
 
     fresh_literal_type_variable(
         self,
-        kind LiteralDefaultKind,
-        span SourceSpan,
-    ) TypeVariable = {
+        kind: LiteralDefaultKind,
+        span: SourceSpan,
+    ): TypeVariable = {
         return self.storage.constraint_solver.fresh_literal_type_variable(kind, span);
     };
 
@@ -1354,7 +1346,7 @@ given TypeChecker {
     /// construction sites that have not yet been migrated to
     /// `make_typed_expr_at`: it only ever succeeds by borrowing a span from a
     /// child, which is exactly the case the recorded span exists to fix.
-    typed_expr_span(self, expr TypedExpr) SourceSpan = {
+    typed_expr_span(self, expr: TypedExpr): SourceSpan = {
         if is_known_span(expr.span) then {
             return expr.span;
         };
@@ -1459,11 +1451,11 @@ given TypeChecker {
         };
     };
 
-    push_typed_expr_diagnostic(self, expr TypedExpr, message String) Void = {
+    push_typed_expr_diagnostic(self, expr: TypedExpr, message: String): Void = {
         self.push_diagnostic_at_span(message, self.typed_expr_span(expr));
     };
 
-    statement_span(self, stmt Statement) SourceSpan = {
+    statement_span(self, stmt: Statement): SourceSpan = {
         return when stmt in {
             .LetStmt(_, _, _, _, span) then span,
             .TupleLetStmt(_, _, span) then span,
@@ -1480,7 +1472,7 @@ given TypeChecker {
     ///
     /// Every declaration carries its span; this just names which field that
     /// is, so `check_decl` can record it as the place a diagnostic belongs to.
-    decl_span(self, decl Decl) SourceSpan = {
+    decl_span(self, decl: Decl): SourceSpan = {
         return when decl in {
             .LetDecl(_, _, _, _, _, span, _) then span,
             .FunctionDecl(_, _, _, _, _, _, span, _) then span,
@@ -1509,7 +1501,7 @@ given TypeChecker {
     /// location behind for whatever is checked next.
     ///
     /// Returns the location to hand back to `leave_current_span`.
-    enter_current_span(self, span SourceSpan) SourceSpan = {
+    enter_current_span(self, span: SourceSpan): SourceSpan = {
         let outer = self.storage.current_span;
         if is_known_span(span) then {
             self.storage.current_span = span;
@@ -1517,15 +1509,15 @@ given TypeChecker {
         return outer;
     };
 
-    leave_current_span(self, outer SourceSpan) Void = {
+    leave_current_span(self, outer: SourceSpan): Void = {
         self.storage.current_span = outer;
     };
 
-    push_statement_diagnostic(self, stmt Statement, message String) Void = {
+    push_statement_diagnostic(self, stmt: Statement, message: String): Void = {
         self.push_diagnostic_at_span(message, self.statement_span(stmt));
     };
 
-    trait_def_id_by_name(self, trait_name String) DefId = {
+    trait_def_id_by_name(self, trait_name: String): DefId = {
         when self.storage.generic_templates.traits.get(
             qualified_symbol_key(self.storage.module_path, trait_name),
         ) in {
@@ -1559,15 +1551,11 @@ given TypeChecker {
         return def_id_invalid();
     };
 
-    make_trait_object_type(
-        self,
-        trait_name String,
-        type_args List[Type],
-    ) Type = {
+    make_trait_object_type(self, trait_name: String, type_args: List[Type]): Type = {
         return Type.TraitObject(self.trait_def_id_by_name(trait_name), type_args);
     };
 
-    canonical_trait_object_type(self, trait_name String) Type = {
+    canonical_trait_object_type(self, trait_name: String): Type = {
         when self.lookup_current_file_type_symbol(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
                 .TraitObject(trait_object_def_id, _) then {
@@ -1593,19 +1581,19 @@ given TypeChecker {
     };
 
     // Treat both Unknown and TypeVar as unresolved so they do not leak into codegen.
-    is_unresolved_expr_type(self, t Type) Bool = when t in {
+    is_unresolved_expr_type(self, t: Type): Bool = when t in {
         .Unknown() then true,
         .TypeVar(_) then true,
         _ then false,
     };
 
-    is_value_expr_type(self, t Type) Bool = when t in {
+    is_value_expr_type(self, t: Type): Bool = when t in {
         .VoidType() then false,
         .NeverType() then false,
         _ then not self.is_unresolved_expr_type(t),
     };
 
-    is_ffi_compatible_type(self, t Type) Bool = {
+    is_ffi_compatible_type(self, t: Type): Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -1639,7 +1627,7 @@ given TypeChecker {
         };
     };
 
-    contains_borrowed_reference_type(self, t Type) Bool = {
+    contains_borrowed_reference_type(self, t: Type): Bool = {
         return when t in {
             .BorrowedReferenceType(_) then true,
             .MutableBorrowedReferenceType(_) then true,
@@ -1689,7 +1677,7 @@ given TypeChecker {
         };
     };
 
-    contains_never_type(self, t Type) Bool = {
+    contains_never_type(self, t: Type): Bool = {
         return when t in {
             .NeverType() then true,
             .ReferenceType(inner) then self.contains_never_type(inner),
@@ -1734,7 +1722,7 @@ given TypeChecker {
         };
     };
 
-    ffi_type_error(self, t Type) String = {
+    ffi_type_error(self, t: Type): String = {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
@@ -1747,7 +1735,7 @@ given TypeChecker {
         };
     };
 
-    same_expr_type(self, left Type, right Type) Bool = {
+    same_expr_type(self, left: Type, right: Type): Bool = {
         let normalized_left = self.canonicalize_alias_type(
             self.concretize_default_literal_type(left),
         );
@@ -1768,9 +1756,9 @@ given TypeChecker {
 
     nominal_instantiation_matches_generic(
         self,
-        nominal Type,
-        generic_candidate Type,
-    ) Bool = {
+        nominal: Type,
+        generic_candidate: Type,
+    ): Bool = {
         return when nominal in {
             // Identity: the template's DECLARATION, not its spelling.
             .StructureType(def_id) then when generic_candidate in {
@@ -1785,7 +1773,7 @@ given TypeChecker {
                     if actual_args.count() != expected_args.count() then {
                         return false;
                     };
-                    let mutable index UInt = 0;
+                    let mutable index: UInt = 0;
                     while index < actual_args.count() then {
                         if not self.same_expr_type(
                             actual_args[index],
@@ -1811,7 +1799,7 @@ given TypeChecker {
                     if actual_args.count() != expected_args.count() then {
                         return false;
                     };
-                    let mutable index UInt = 0;
+                    let mutable index: UInt = 0;
                     while index < actual_args.count() then {
                         if not self.same_expr_type(
                             actual_args[index],
@@ -1829,7 +1817,7 @@ given TypeChecker {
         };
     };
 
-    canonicalize_alias_type(self, t Type) Type = {
+    canonicalize_alias_type(self, t: Type): Type = {
         return when t in {
             .StructureType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
@@ -1889,7 +1877,7 @@ given TypeChecker {
         };
     };
 
-    concretize_default_literal_type(self, t Type) Type = {
+    concretize_default_literal_type(self, t: Type): Type = {
         let resolved = self.storage.constraint_solver.resolve(t);
         return when resolved in {
             .TypeVar(tv) then when tv.literal_default_kind in {
@@ -1953,7 +1941,7 @@ given TypeChecker {
         };
     };
 
-    display_type_name(self, t Type) String = {
+    display_type_name(self, t: Type): String = {
         let resolved = self.canonicalize_alias_type(
             self.concretize_default_literal_type(t),
         );
@@ -1967,7 +1955,7 @@ given TypeChecker {
 
     /// The innermost type's name. Alias and default-literal preprocessing have
     /// already happened in `display_type_name`; this names what is left.
-    display_type_base_name(self, resolved Type) String = {
+    display_type_base_name(self, resolved: Type): String = {
         return when resolved in {
             .StructureType(def_id) then when self.context().get_name(def_id) in {
                 .Some(name) then name,
@@ -2051,10 +2039,10 @@ given TypeChecker {
 
     choose_conditional_result_type(
         self,
-        expected Option[Type],
-        then_type Type,
-        else_type Option[Type],
-    ) Type = {
+        expected: Option[Type],
+        then_type: Type,
+        else_type: Option[Type],
+    ): Type = {
         when expected in {
             .Some(et) then {
                 if not self.contains_generic_parameter(et) then {
@@ -2188,29 +2176,26 @@ given TypeChecker {
         return then_type;
     };
 
-    is_enum_decl_type(self, t Type) Bool = when t in {
+    is_enum_decl_type(self, t: Type): Bool = when t in {
         .EnumType(_) then true,
         _ then false,
     };
 
-    is_enum_base_name(self, base String) Bool = {
+    is_enum_base_name(self, base: String): Bool = {
         if self.resolve_type_name_binding(base) is .Some(t) then {
             return self.is_enum_decl_type(t);
         };
         return false;
     };
 
-    is_enum_base_name_in_scope(self, base String, scope Scope) Bool = {
+    is_enum_base_name_in_scope(self, base: String, scope: Scope): Bool = {
         if self.try_resolve_named_type_in_scope_without_diag(base, scope) is .Some(t) then {
             return self.is_enum_decl_type(t);
         };
         return false;
     };
 
-    retained_given_member_skeleton(
-        self,
-        member TypedGivenMember,
-    ) TypedGivenMember = {
+    retained_given_member_skeleton(self, member: TypedGivenMember): TypedGivenMember = {
         let _ = self;
         return TypedGivenMember(
             member.def_id,
@@ -2222,7 +2207,7 @@ given TypeChecker {
         );
     };
 
-    retained_decl_skeleton(self, typed_decl TypedDecl) TypedDecl = {
+    retained_decl_skeleton(self, typed_decl: TypedDecl): TypedDecl = {
         return when typed_decl in {
             .FunctionDecl(access, name, _, _, body, span, id) then {
                 TypedDecl.FunctionDecl(
@@ -2299,7 +2284,7 @@ given TypeChecker {
         };
     };
 
-    decl_can_clear_local_symbol_types_in_build(self, decl Decl) Bool = {
+    decl_can_clear_local_symbol_types_in_build(self, decl: Decl): Bool = {
         let _ = self;
         return when decl in {
             .LetDecl(_, _, _, _, _, _, _) then true,
@@ -2343,9 +2328,9 @@ given TypeChecker {
 
     public check_program(
         self,
-        program Program,
-        retain_checked_template_bodies Bool,
-    ) TypedProgram = {
+        program: Program,
+        retain_checked_template_bodies: Bool,
+    ): TypedProgram = {
         self.collect_signatures(program);
         let mutable typed_decls = List[TypedDecl].new();
         let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled();
@@ -2377,9 +2362,9 @@ given TypeChecker {
     // Each node carries its own source_file for accurate diagnostics.
     public check_loaded_nodes(
         self,
-        nodes List[Pair[LoadedNode, List[String]]],
-        retain_checked_template_bodies Bool,
-    ) TypedProgram = {
+        nodes: List[Pair[LoadedNode, List[String]]],
+        retain_checked_template_bodies: Bool,
+    ): TypedProgram = {
         let debug_progress = self.sema_progress_debug_enabled();
         if debug_progress then {
             println(
@@ -2540,8 +2525,8 @@ given TypeChecker {
 
     finalize_checked_decl_constraints(
         self,
-        typed_decl Option[TypedDecl],
-    ) Option[TypedDecl] = {
+        typed_decl: Option[TypedDecl],
+    ): Option[TypedDecl] = {
         let subst_result = self.storage.constraint_solver.solve();
         let skip_checked_decl_substitution = self.skip_checked_decl_substitution_debug_enabled(
         );
@@ -2598,9 +2583,9 @@ given TypeChecker {
 
     refresh_concrete_stored_exprs(
         self,
-        subst TypeSubstitution,
-        typed_decl TypedDecl,
-    ) Void = {
+        subst: TypeSubstitution,
+        typed_decl: TypedDecl,
+    ): Void = {
         when typed_decl in {
             .LetDecl(_, _, _, _, _, _, id) then {
                 let mutable context = self.context();
@@ -2641,9 +2626,9 @@ given TypeChecker {
 
     refresh_concrete_given_member_body_list(
         self,
-        subst TypeSubstitution,
-        members List[TypedGivenMember],
-    ) Void = {
+        subst: TypeSubstitution,
+        members: List[TypedGivenMember],
+    ): Void = {
         let mutable context = self.context();
         for member_ref in members then {
             when context.get_concrete_given_member_body(member_ref.def_id) in {
@@ -2680,9 +2665,9 @@ given TypeChecker {
     /// list.
     trait_tool_target_name(
         self,
-        target_type TypeNode,
-        type_params List[TypeParameter],
-    ) Option[String] = {
+        target_type: TypeNode,
+        type_params: List[TypeParameter],
+    ): Option[String] = {
         let candidate = when target_type in {
             .Identifier(name, span) then {
                 if not type_params.is_empty() then {
@@ -2694,7 +2679,7 @@ given TypeChecker {
                 if args.count() != type_params.count() then {
                     return Option[String].None();
                 };
-                let mutable index UInt = 0;
+                let mutable index: UInt = 0;
                 while index < args.count() then {
                     let expected_name = type_params[index].name;
                     let matches = when args[index] in {
@@ -2726,11 +2711,11 @@ given TypeChecker {
 
     register_trait_tool_block(
         self,
-        trait_name String,
-        type_params List[TypeParameter],
-        members List[GivenMember],
-        span SourceSpan,
-    ) Bool = {
+        trait_name: String,
+        type_params: List[TypeParameter],
+        members: List[GivenMember],
+        span: SourceSpan,
+    ): Bool = {
         let trait_info = when self.storage.trait_registry.get_in_module(
             trait_name,
             self.storage.module_path,
@@ -2832,11 +2817,7 @@ given TypeChecker {
 
     // Swift `ownRequirements` — methods a trait declares as requirements, as opposed
     // to trait-tool entity methods. Parent requirements are inherited, so recurse.
-    trait_declares_requirement(
-        self,
-        trait_name String,
-        method_name String,
-    ) Bool = {
+    trait_declares_requirement(self, trait_name: String, method_name: String): Bool = {
         // The spelling is resolved once, here; the walk is by declaration.
         let trait_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
         let mutable visited = Set[UInt].new();
@@ -2851,10 +2832,10 @@ given TypeChecker {
     /// different modules are different nodes and must not share a visit slot.
     trait_declares_requirement_in_trait(
         self,
-        trait_def_id DefId,
-        method_name String,
-        visited Set[UInt],
-    ) Bool = {
+        trait_def_id: DefId,
+        method_name: String,
+        visited: Set[UInt],
+    ): Bool = {
         if visited.contains(trait_def_id.id) then {
             return false;
         };
@@ -2884,8 +2865,8 @@ given TypeChecker {
 
     flattened_trait_tool_methods(
         self,
-        trait_name String,
-    ) Result[Dict[String, TraitToolMethodEntry]] = {
+        trait_name: String,
+    ): Result[Dict[String, TraitToolMethodEntry]] = {
         // The spelling is resolved once, here; the walk is by declaration.
         let trait_def_id = self.trait_def_id_of(trait_name) or else def_id_invalid();
         let mutable visited = Set[UInt].new();
@@ -2901,10 +2882,10 @@ given TypeChecker {
     /// `trait_name` survives only to print diagnostics.
     flattened_trait_tool_methods_in_trait(
         self,
-        trait_def_id DefId,
-        trait_name String,
-        visited Set[UInt],
-    ) Result[Dict[String, TraitToolMethodEntry]] = {
+        trait_def_id: DefId,
+        trait_name: String,
+        visited: Set[UInt],
+    ): Result[Dict[String, TraitToolMethodEntry]] = {
         if visited.contains(trait_def_id.id) then {
             return Result[Dict[String, TraitToolMethodEntry]].Ok(
                 Dict[String, TraitToolMethodEntry].new(),
@@ -2991,11 +2972,11 @@ given TypeChecker {
         return Result[Dict[String, TraitToolMethodEntry]].Ok(result);
     };
 
-    trait_tool_method_is_receiver_style(self, method GivenMember) Bool = {
+    trait_tool_method_is_receiver_style(self, method: GivenMember): Bool = {
         return not method.params.is_empty() and method.params[UInt(0)].name == "self";
     };
 
-    collect_signatures(self, program Program) Void = {
+    collect_signatures(self, program: Program): Void = {
         for decl in program.declarations then {
             when decl in {
                 .TraitDecl(_, _, _, _, _, _, _) then self.collect_decl_signature(decl),
@@ -3029,7 +3010,7 @@ given TypeChecker {
     /// already registered. Resolving during construction would depend on
     /// declaration order and leave a forward reference unbound; this back-fills
     /// those so nothing downstream has to re-resolve a spelling.
-    link_parent_trait_def_ids(self) Void = {
+    link_parent_trait_def_ids(self): Void = {
         let mutable pending = List[TraitInfo].new();
         for entry in self.storage.trait_registry.traits_by_def_id.iterator() then {
             pending.push(entry.second);
@@ -3124,9 +3105,9 @@ given TypeChecker {
     /// and the declaration has to be named.
     validate_trait_parent_existence(
         self,
-        parents List[TypeNode],
-        span SourceSpan,
-    ) Void = {
+        parents: List[TypeNode],
+        span: SourceSpan,
+    ): Void = {
         for parent in parents then {
             let pname = self.type_node_name(parent);
             let resolved = when self.storage.trait_registry.get_in_module(
@@ -3148,7 +3129,7 @@ given TypeChecker {
         };
     };
 
-    collect_decl_signature(self, decl Decl) Void = {
+    collect_decl_signature(self, decl: Decl): Void = {
         let outer_span = self.enter_current_span(self.decl_span(decl));
         defer {
             self.leave_current_span(outer_span);
@@ -3178,7 +3159,8 @@ given TypeChecker {
                                     field.name,
                                     field.is_mutable,
                                     self.copy_type_node(field.type_name),
-                                    field.named, field.default_value
+                                    field.named,
+                                    field.default_value,
                                 ),
                             );
                         };
@@ -3317,7 +3299,8 @@ given TypeChecker {
                                         field.name,
                                         false,
                                         self.copy_type_node(field.type_name),
-                                        field.named, field.default_value
+                                        field.named,
+                                        field.default_value,
                                     ),
                                 );
                             };
@@ -3377,7 +3360,8 @@ given TypeChecker {
                                     EnumCaseParam(
                                         f.name,
                                         self.resolve_type(f.type_name),
-                                        f.named, f.default_value
+                                        f.named,
+                                        f.default_value,
                                     ),
                                 );
                             };
@@ -3395,7 +3379,8 @@ given TypeChecker {
                                             f.type_name,
                                             bindings,
                                         ),
-                                        f.named, f.default_value
+                                        f.named,
+                                        f.default_value,
                                     ),
                                 );
                             };
@@ -3615,7 +3600,8 @@ given TypeChecker {
                                 self.resolve_type(f.type_name),
                                 true,
                                 f.access,
-                                f.named, f.default_value
+                                f.named,
+                                f.default_value,
                             ),
                         );
                     };
@@ -4149,7 +4135,11 @@ given TypeChecker {
                 };
                 let trait_def_id = self.lookup_current_file_def_id(name) or else def_id_invalid(
                 );
-                let typed_members = self.check_trait_members(members, type_params, trait_def_id);
+                let typed_members = self.check_trait_members(
+                    members,
+                    type_params,
+                    trait_def_id,
+                );
                 self.register_trait_metadata(
                     name,
                     trait_def_id,
@@ -4174,10 +4164,10 @@ given TypeChecker {
     /// read before allocating, so the second pass reuses the first's answer.
     members_with_def_ids(
         self,
-        members List[GivenMember],
-        target_type Type,
-        conformance_trait_name Option[String],
-    ) List[GivenMember] = {
+        members: List[GivenMember],
+        target_type: Type,
+        conformance_trait_name: Option[String],
+    ): List[GivenMember] = {
         // Two traits may declare the same method name on one type
         // (`Greet.greet` and `Farewell.greet`). Keying on (owner, name) alone
         // collapses them into one DefId, and the method table can then no
@@ -4206,7 +4196,10 @@ given TypeChecker {
                         // already an error reported at registration.
                         let alias_key = "\(self.context().method_owner_of(target_type).display())#\(member.name)";
                         if not self.storage.given_member_def_ids.contains_key(alias_key) then {
-                            self.storage.given_member_def_ids.insert(alias_key, allocated);
+                            self.storage.given_member_def_ids.insert(
+                                alias_key,
+                                allocated,
+                            );
                         };
                         allocated
                     },
@@ -4229,11 +4222,11 @@ given TypeChecker {
 
     collect_given_signatures(
         self,
-        members List[GivenMember],
-        target_type Type,
-        owner_type_params List[TypeParameter],
-        conformance_trait_name Option[String],
-    ) Void = {
+        members: List[GivenMember],
+        target_type: Type,
+        owner_type_params: List[TypeParameter],
+        conformance_trait_name: Option[String],
+    ): Void = {
         // Build a scope with owner type params so resolve_type sees them
         // Always set current_scope (like Swift's withNewScope) so generic params are visible
         let prev_scope = self.storage.current_scope;
@@ -4314,68 +4307,68 @@ given TypeChecker {
                 // and must NOT be stamped here (stamping a private generic
                 // helper's access without its home made it read as denied).
                 if conformance_trait_name is .Some(_) and owner_type_params.is_empty() then {
-                // PASS-2 CONFORMANCE REGISTRATION (mirror of
-                // `register_conformance_method_signatures_for_concrete_type`,
-                // which otherwise runs in pass 3). A `given X as T { m }` member
-                // is registered NOW so a cross-module static-requirement call
-                // resolves to the IMPL at any module ordering -- the pass-3
-                // registration lands after the root module's check when a
-                // submodule sorts later, and the call then bound a DefId no
-                // instance table answered for. Resolving to the impl routes
-                // visibility to its requirement-level stamp
-                // (`conformance_member_registration_access`), so an internal
-                // trait's requirement is denied cross-module and a public
-                // trait's is allowed -- matching Swift, which resolves the method
-                // then judges `effectiveMethodAccessForMemberAccess`. Static
-                // calls reach this via `lookup_named_method_signature` (no method
-                // face gate) = "resolve, then judge visibility"; the receiver
-                // face gate is applied at lookup and is untouched here.
-                //
-                // ONLY when the slot is EMPTY: a second, distinct declaration
-                // reaching one slot must stay visible to pass 3's ambiguity
-                // report, so this never consumes that collision.
-                if self.lookup_method_signature(type_key, m.name) is .None() then {
-                    let conformance_symbol = Symbol(
-                        m.def_id,
-                        make_function_type(param_types, ret),
-                        SymbolKind.Function(),
-                    );
-                    let source_def_id = self.context().get_original_def_id(m.def_id) or else m.def_id;
-                    let _ = self.storage.method_table.register_with_source(
-                        type_key,
-                        m.name,
-                        conformance_symbol,
-                        source_def_id,
-                    );
-                    let conformance_trait_def_id = when conformance_trait_name in {
-                        .Some(trait_name) then self.trait_def_id_of(trait_name),
-                        .None() then Option[DefId].None(),
-                    };
-                    // STAMP the impl's effective ACCESS (requirement level) here
-                    // too -- the pass-3 stamp in `check_given_members_for_type`
-                    // lands after a submodule sorts later than the root, so a
-                    // cross-module call saw an un-stamped (permissive) DefId and
-                    // admitted an internal trait's requirement. The requirement
-                    // level comes from `conformance_member_registration_access`
-                    // (the trait's declaration level), NOT an ambient home -- so
-                    // this is the impl-stamp route and never touches
-                    // `storage.module_path`. The impl's home stays as the existing
-                    // pass-3 stamp sets it.
-                    let stamp_access = self.conformance_member_registration_access(
-                        conformance_trait_def_id,
-                        m.name,
-                        m.access,
-                    );
-                    self.context().set_access(m.def_id, stamp_access);
-                    when conformance_trait_def_id in {
-                        .Some(tid) then self.storage.method_table.register_providing_trait(
+                    // PASS-2 CONFORMANCE REGISTRATION (mirror of
+                    // `register_conformance_method_signatures_for_concrete_type`,
+                    // which otherwise runs in pass 3). A `given X as T { m }` member
+                    // is registered NOW so a cross-module static-requirement call
+                    // resolves to the IMPL at any module ordering -- the pass-3
+                    // registration lands after the root module's check when a
+                    // submodule sorts later, and the call then bound a DefId no
+                    // instance table answered for. Resolving to the impl routes
+                    // visibility to its requirement-level stamp
+                    // (`conformance_member_registration_access`), so an internal
+                    // trait's requirement is denied cross-module and a public
+                    // trait's is allowed -- matching Swift, which resolves the method
+                    // then judges `effectiveMethodAccessForMemberAccess`. Static
+                    // calls reach this via `lookup_named_method_signature` (no method
+                    // face gate) = "resolve, then judge visibility"; the receiver
+                    // face gate is applied at lookup and is untouched here.
+                    //
+                    // ONLY when the slot is EMPTY: a second, distinct declaration
+                    // reaching one slot must stay visible to pass 3's ambiguity
+                    // report, so this never consumes that collision.
+                    if self.lookup_method_signature(type_key, m.name) is .None() then {
+                        let conformance_symbol = Symbol(
+                            m.def_id,
+                            make_function_type(param_types, ret),
+                            SymbolKind.Function(),
+                        );
+                        let source_def_id = self.context().get_original_def_id(m.def_id) or else m.def_id;
+                        let _ = self.storage.method_table.register_with_source(
                             type_key,
                             m.name,
-                            tid,
-                        ),
-                        .None() then {},
+                            conformance_symbol,
+                            source_def_id,
+                        );
+                        let conformance_trait_def_id = when conformance_trait_name in {
+                            .Some(trait_name) then self.trait_def_id_of(trait_name),
+                            .None() then Option[DefId].None(),
+                        };
+                        // STAMP the impl's effective ACCESS (requirement level) here
+                        // too -- the pass-3 stamp in `check_given_members_for_type`
+                        // lands after a submodule sorts later than the root, so a
+                        // cross-module call saw an un-stamped (permissive) DefId and
+                        // admitted an internal trait's requirement. The requirement
+                        // level comes from `conformance_member_registration_access`
+                        // (the trait's declaration level), NOT an ambient home -- so
+                        // this is the impl-stamp route and never touches
+                        // `storage.module_path`. The impl's home stays as the existing
+                        // pass-3 stamp sets it.
+                        let stamp_access = self.conformance_member_registration_access(
+                            conformance_trait_def_id,
+                            m.name,
+                            m.access,
+                        );
+                        self.context().set_access(m.def_id, stamp_access);
+                        when conformance_trait_def_id in {
+                            .Some(tid) then self.storage.method_table.register_providing_trait(
+                                type_key,
+                                m.name,
+                                tid,
+                            ),
+                            .None() then {},
+                        };
                     };
-                };
                 };
                 continue;
             };
@@ -4408,7 +4401,7 @@ given TypeChecker {
         };
     };
 
-    string_list_contains(self, values List[String], target String) Bool = {
+    string_list_contains(self, values: List[String], target: String): Bool = {
         let mutable index = UInt(0);
         while index < values.count() then {
             if values[index] == target then {
@@ -4421,8 +4414,8 @@ given TypeChecker {
 
     to_template_type_params(
         self,
-        type_params List[TypeParameter],
-    ) List[TypeParameterDecl] = {
+        type_params: List[TypeParameter],
+    ): List[TypeParameterDecl] = {
         let mutable out = List[TypeParameterDecl].new();
         for tp in type_params then {
             let mutable constraints = List[Bound].new();
@@ -4441,8 +4434,8 @@ given TypeChecker {
 
     generic_type_param_bindings(
         self,
-        type_params List[TypeParameter],
-    ) Dict[String, Type] = {
+        type_params: List[TypeParameter],
+    ): Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         for tp in type_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name));
@@ -4452,9 +4445,9 @@ given TypeChecker {
 
     merged_type_param_bindings(
         self,
-        owner_params List[TypeParameter],
-        method_params List[TypeParameter],
-    ) Dict[String, Type] = {
+        owner_params: List[TypeParameter],
+        method_params: List[TypeParameter],
+    ): Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         for tp in owner_params then {
             bindings.insert(tp.name, Type.GenericParameter(tp.name));
@@ -4465,7 +4458,7 @@ given TypeChecker {
         return bindings;
     };
 
-    to_template_params(self, params List[Param]) List[TemplateParam] = {
+    to_template_params(self, params: List[Param]): List[TemplateParam] = {
         let mutable out = List[TemplateParam].new();
         for p in params then {
             out.push(
@@ -4473,18 +4466,19 @@ given TypeChecker {
                     p.name,
                     p.is_mutable,
                     self.copy_type_node(p.type_name),
-                    p.named, p.default_value
+                    p.named,
+                    p.default_value,
                 ),
             );
         };
         return out;
     };
 
-    copy_type_node_ref(self, type_node TypeNode) TypeNode = {
+    copy_type_node_ref(self, type_node: TypeNode): TypeNode = {
         return self.copy_type_node(type_node);
     };
 
-    copy_type_node_ref_list(self, type_nodes List[TypeNode]) List[TypeNode] = {
+    copy_type_node_ref_list(self, type_nodes: List[TypeNode]): List[TypeNode] = {
         let mutable copied = List[TypeNode].with_capacity(type_nodes.count());
         for type_node in type_nodes then {
             copied.push(self.copy_type_node_ref(type_node));
@@ -4492,7 +4486,7 @@ given TypeChecker {
         return copied;
     };
 
-    copy_type_node(self, type_node TypeNode) TypeNode = {
+    copy_type_node(self, type_node: TypeNode): TypeNode = {
         return when type_node in {
             .Identifier(name, span) then TypeNode.Identifier(name, span),
             .Reference(inner, is_mutable, span) then TypeNode.Reference(
@@ -4529,7 +4523,7 @@ given TypeChecker {
         };
     };
 
-    to_type_ref_list(self, types List[Type]) List[Type] = {
+    to_type_ref_list(self, types: List[Type]): List[Type] = {
         let mutable out = List[Type].new();
         for t in types then {
             out.push(t);
@@ -4539,8 +4533,8 @@ given TypeChecker {
 
     from_template_type_params(
         self,
-        type_params List[TypeParameterDecl],
-    ) List[TypeParameter] = {
+        type_params: List[TypeParameterDecl],
+    ): List[TypeParameter] = {
         let mutable out = List[TypeParameter].new();
         for tp in type_params then {
             let mutable constraints = List[Bound].new();
@@ -4554,9 +4548,9 @@ given TypeChecker {
 
     constraint_bounds_for_type_param(
         self,
-        tp TypeParameter,
-        param_names List[String],
-    ) List[GenericConstraintBound] = {
+        tp: TypeParameter,
+        param_names: List[String],
+    ): List[GenericConstraintBound] = {
         let mutable constraints = List[GenericConstraintBound].new();
         for c in tp.constraints then {
             constraints.push(self.resolve_constraint_bound(c, param_names));
@@ -4571,9 +4565,9 @@ given TypeChecker {
     /// GenericConstraintBound is still name-keyed; that collapses in the identity step.
     resolve_constraint_bound(
         self,
-        b Bound,
-        param_names List[String],
-    ) GenericConstraintBound = {
+        b: Bound,
+        param_names: List[String],
+    ): GenericConstraintBound = {
         return when b in {
             .Trait(_, name, args) then {
                 let mutable resolved_args = List[Type].new();
@@ -4603,11 +4597,7 @@ given TypeChecker {
     };
 
     /// Lightweight type arg resolution for constraint bounds — no diagnostics on miss.
-    resolve_constraint_type_arg(
-        self,
-        node TypeNode,
-        param_names List[String],
-    ) Type = {
+    resolve_constraint_type_arg(self, node: TypeNode, param_names: List[String]): Type = {
         return when node in {
             .Identifier(name, span) then self.resolve_constraint_identifier(
                 name,
@@ -4633,11 +4623,7 @@ given TypeChecker {
     /// Iterator[T], T Any]` names the `T` being declared, and a global type that
     /// happens to be called `T` is a different thing entirely. Only when the
     /// name is not one of those does it become an ordinary type reference.
-    resolve_constraint_identifier(
-        self,
-        name String,
-        param_names List[String],
-    ) Type = {
+    resolve_constraint_identifier(self, name: String, param_names: List[String]): Type = {
         for param_name in param_names then {
             if param_name == name then {
                 return Type.GenericParameter(name);
@@ -4655,7 +4641,7 @@ given TypeChecker {
     /// before any signature is resolved -- so the identity cannot depend on
     /// declaration order. The template registry is the fallback, for names the
     /// symbol table does not hold. Never returns a name-only match.
-    generic_template_def_id(self, base String) DefId = {
+    generic_template_def_id(self, base: String): DefId = {
         let from_global = when self.resolve_type_name_binding(base) in {
             .Some(t) then when t in {
                 .StructureType(def_id) then def_id,
@@ -4685,10 +4671,10 @@ given TypeChecker {
 
     resolve_constraint_generic_type(
         self,
-        base String,
-        args List[TypeNode],
-        param_names List[String],
-    ) Type = {
+        base: String,
+        args: List[TypeNode],
+        param_names: List[String],
+    ): Type = {
         let mutable resolved_args = List[Type].new();
         for arg in args then {
             resolved_args.push(self.resolve_constraint_type_arg(arg, param_names));
@@ -4708,10 +4694,10 @@ given TypeChecker {
 
     resolve_constraint_ref_type(
         self,
-        inner TypeNode,
-        is_mutable Bool,
-        param_names List[String],
-    ) Type = {
+        inner: TypeNode,
+        is_mutable: Bool,
+        param_names: List[String],
+    ): Type = {
         let resolved_inner = self.resolve_constraint_type_arg(inner, param_names);
         if is_mutable then {
             return Type.MutableReferenceType(resolved_inner);
@@ -4721,8 +4707,8 @@ given TypeChecker {
 
     snapshot_generic_constraints(
         self,
-        type_params List[TypeParameter],
-    ) GenericConstraintSnapshot = {
+        type_params: List[TypeParameter],
+    ): GenericConstraintSnapshot = {
         let mutable previous_constraints = Dict[String, Option[List[GenericConstraintBound]]].new(
         );
         let mutable previous_shape_bounds = Dict[String, Option[List[Bound]]].new();
@@ -4757,10 +4743,7 @@ given TypeChecker {
         return GenericConstraintSnapshot(previous_constraints, previous_shape_bounds);
     };
 
-    register_generic_constraints(
-        self,
-        type_params List[TypeParameter],
-    ) Void = {
+    register_generic_constraints(self, type_params: List[TypeParameter]): Void = {
         self.invalidate_trait_requirement_caches();
         // Collect the whole parameter list first: a constraint may name a
         // parameter declared after it (`[R Iterator[T], T Any]`), and lexical
@@ -4788,10 +4771,7 @@ given TypeChecker {
         };
     };
 
-    restore_generic_constraints(
-        self,
-        snapshot GenericConstraintSnapshot,
-    ) Void = {
+    restore_generic_constraints(self, snapshot: GenericConstraintSnapshot): Void = {
         self.invalidate_trait_requirement_caches();
         for entry in snapshot.previous_constraints then {
             let name = entry.first;
@@ -4815,7 +4795,7 @@ given TypeChecker {
         };
     };
 
-    nominal_def_id_for_type(self, t Type) Option[DefId] = {
+    nominal_def_id_for_type(self, t: Type): Option[DefId] = {
         return when t in {
             .StructureType(def_id) then .Some(def_id),
             .EnumType(def_id) then .Some(def_id),

@@ -22,22 +22,22 @@ public type ImportKind {
 /// `name as alias` entries rewrite its spelling. Empty means the batch comes
 /// whole. It is always empty on non-batch edges (§3.3).
 public type ImportEdge(
-    source List[String],
-    target List[String],
-    kind ImportKind,
-    source_file Option[String],
-    span SourceSpan,
-    filter List[UsingModuleItem],
+    source: List[String],
+    target: List[String],
+    kind: ImportKind,
+    source_file: Option[String],
+    span: SourceSpan,
+    filter: List[UsingModuleItem],
 );
 
 public type SymbolImportEdge(
-    module List[String],
-    target List[String],
-    symbol String,
-    original_symbol String,
-    kind ImportKind,
-    source_file Option[String],
-    span SourceSpan,
+    module: List[String],
+    target: List[String],
+    symbol: String,
+    original_symbol: String,
+    kind: ImportKind,
+    source_file: Option[String],
+    span: SourceSpan,
 );
 
 /// Whether `spelling` lands under its own name from a filtered batch (§3.3).
@@ -46,7 +46,7 @@ public type SymbolImportEdge(
 /// it, and the re-spelling is carried by its own symbol edge so it resolves
 /// through the ordinary import layer. Everything the filter is silent about
 /// comes whole.
-public let batch_filter_allows(filter List[UsingModuleItem], spelling String) Bool = {
+public let batch_filter_allows(filter: List[UsingModuleItem], spelling: String): Bool = {
     for item in filter then {
         if item.name == spelling then {
             return false;
@@ -58,41 +58,41 @@ public let batch_filter_allows(filter List[UsingModuleItem], spelling String) Bo
 // ── ImportGraph ───────────────────────────────────────────────────────────────
 
 public type mutable ImportGraph(
-    mutable edges List[ImportEdge],
-    mutable symbol_imports List[SymbolImportEdge],
+    mutable edges: List[ImportEdge],
+    mutable symbol_imports: List[SymbolImportEdge],
     // symbol_imports 的按名字索引：name -> 所有 `symbol` 或 `original_symbol` 命中该名的边，
     // 顺序与 symbol_imports 中一致。命名类型解析原先每次都要线性扫完整个 symbol_imports，
     // 且每一项都要比较源文件路径（还分配两个规范化字符串），占了类型检查的三分之一以上。
-    mutable symbol_imports_by_name Dict[String, List[SymbolImportEdge]],
+    mutable symbol_imports_by_name: Dict[String, List[SymbolImportEdge]],
 );
 
 given ImportGraph {
-    public new() ImportGraph = {
+    public new(): ImportGraph = {
         return ImportGraph([], [], Dict[String, List[SymbolImportEdge]].new());
     };
 
     public add_module_import(
         self,
-        from List[String],
-        to List[String],
-        kind ImportKind,
-        source_file Option[String],
-        span SourceSpan,
-        filter List[UsingModuleItem],
-    ) Void = {
+        from: List[String],
+        to: List[String],
+        kind: ImportKind,
+        source_file: Option[String],
+        span: SourceSpan,
+        filter: List[UsingModuleItem],
+    ): Void = {
         self.edges.push(ImportEdge(from, to, kind, source_file, span, filter));
     };
 
     public add_symbol_import(
         self,
-        module List[String],
-        target List[String],
-        symbol String,
-        kind ImportKind,
-        source_file Option[String],
-        original_symbol Option[String],
-        span SourceSpan,
-    ) Void = {
+        module: List[String],
+        target: List[String],
+        symbol: String,
+        kind: ImportKind,
+        source_file: Option[String],
+        original_symbol: Option[String],
+        span: SourceSpan,
+    ): Void = {
         let edge = SymbolImportEdge(
             module,
             target,
@@ -106,14 +106,14 @@ given ImportGraph {
         self.index_symbol_import(edge);
     };
 
-    private index_symbol_import(self, edge SymbolImportEdge) Void = {
+    private index_symbol_import(self, edge: SymbolImportEdge): Void = {
         self.index_symbol_import_name(edge, edge.symbol);
         if edge.original_symbol != edge.symbol then {
             self.index_symbol_import_name(edge, edge.original_symbol);
         };
     };
 
-    private index_symbol_import_name(self, edge SymbolImportEdge, name String) Void = {
+    private index_symbol_import_name(self, edge: SymbolImportEdge, name: String): Void = {
         when self.symbol_imports_by_name.get(name) in {
             .Some(bucket) then {
                 bucket.push(edge);
@@ -129,13 +129,13 @@ given ImportGraph {
     /// 名字命中 `name` 的候选符号导入边（`symbol` 或 `original_symbol` 与之相等）。
     /// 只做哈希查找；调用方仍按模块 / 源文件 / 具体字段过滤，语义不变。
     /// 找不到时返回 `.None()`，不分配空列表。
-    public symbol_import_candidates(self, name String) Option[List[SymbolImportEdge]] = {
+    public symbol_import_candidates(self, name: String): Option[List[SymbolImportEdge]] = {
         return self.symbol_imports_by_name.get(name);
     };
 
     // 合并另一个 ImportGraph 的所有边
     // 用于将标准库导入图合并到用户代码导入图
-    public merge(self, other ImportGraph) Void = {
+    public merge(self, other: ImportGraph): Void = {
         for edge in other.edges then {
             self.edges.push(edge);
         };
@@ -147,11 +147,11 @@ given ImportGraph {
 
     public get_import_kind(
         self,
-        symbol_module_path List[String],
-        symbol_name Option[String],
-        in_module List[String],
-        in_source_file Option[String],
-    ) ImportKind = {
+        symbol_module_path: List[String],
+        symbol_name: Option[String],
+        in_module: List[String],
+        in_source_file: Option[String],
+    ): ImportKind = {
         // Local definition
         if string_list_eq(symbol_module_path, in_module) then {
             return ImportKind.Local();
@@ -194,8 +194,10 @@ given ImportGraph {
                             // `{ !a, ... }` drops a member and `{ a as b, ... }`
                             // re-spells it; either way it does not arrive under
                             // its own name (§3.3).
-                            if symbol_name is .Some(n) and not batch_filter_allows(edge.filter, n)
-                            then {
+                            if symbol_name is .Some(n) and not batch_filter_allows(
+                                edge.filter,
+                                n,
+                            ) then {
                                 continue;
                             };
                             return edge.kind;
@@ -218,43 +220,43 @@ given ImportGraph {
 // ── LoadedFile ────────────────────────────────────────────────────────────────
 
 // A parsed global node with its source file.
-public type LoadedNode(decl Decl, source_file String, package_id String);
+public type LoadedNode(decl: Decl, source_file: String, package_id: String);
 
 // ── ModuleInfo ────────────────────────────────────────────────────────────────
 
 // Mutable module state lives in storage so ModuleInfo can be passed by value.
 type mutable ModuleInfoStorage(
-    path List[String],
-    entry_file String,
-    is_external Bool,
+    path: List[String],
+    entry_file: String,
+    is_external: Bool,
     // Root-view full name (`std/io`, `game_utils`) -- the key the module is
     // known by, and the sort key for emitting nodes. Load order is `using`
     // discovery order; the symbol tables must not depend on it.
-    full_name String,
+    full_name: String,
     // "std:std" / "root:x" / "dependency:key", set from the owning package.
-    package_id String,
+    package_id: String,
     // The derived C symbol prefix (§5.3.1) -- (package source, entry
     // position), never the consumer's spelling. Empty for modules whose spec
     // never carried one; the derivation sites fall back to `path`.
-    symbol_key String,
-    mutable merged_submodules List[String],
-    mutable global_nodes List[LoadedNode],
+    symbol_key: String,
+    mutable merged_submodules: List[String],
+    mutable global_nodes: List[LoadedNode],
 );
 
-public type mutable ModuleInfo(mutable storage ModuleInfoStorage);
+public type mutable ModuleInfo(mutable storage: ModuleInfoStorage);
 
 given ModuleInfo {
-    public new(path List[String], entry_file String, is_external Bool) ModuleInfo =
+    public new(path: List[String], entry_file: String, is_external: Bool): ModuleInfo =
         ModuleInfo.named(path, entry_file, is_external, join_path(path, "."), "", "");
 
     public named(
-        path List[String],
-        entry_file String,
-        is_external Bool,
-        full_name String,
-        package_id String,
-        symbol_key String,
-    ) ModuleInfo = {
+        path: List[String],
+        entry_file: String,
+        is_external: Bool,
+        full_name: String,
+        package_id: String,
+        symbol_key: String,
+    ): ModuleInfo = {
         let s = ModuleInfoStorage(
             path,
             entry_file,
@@ -268,16 +270,16 @@ given ModuleInfo {
         return ModuleInfo(s);
     };
 
-    public path(self) List[String] = self.storage.path;
-    public entry_file(self) String = self.storage.entry_file;
-    public is_external(self) Bool = self.storage.is_external;
-    public full_name(self) String = self.storage.full_name;
-    public package_id(self) String = self.storage.package_id;
-    public symbol_key(self) String = self.storage.symbol_key;
-    public merged_submodules(self) List[String] = self.storage.merged_submodules;
-    public global_nodes(self) List[LoadedNode] = self.storage.global_nodes;
+    public path(self): List[String] = self.storage.path;
+    public entry_file(self): String = self.storage.entry_file;
+    public is_external(self): Bool = self.storage.is_external;
+    public full_name(self): String = self.storage.full_name;
+    public package_id(self): String = self.storage.package_id;
+    public symbol_key(self): String = self.storage.symbol_key;
+    public merged_submodules(self): List[String] = self.storage.merged_submodules;
+    public global_nodes(self): List[LoadedNode] = self.storage.global_nodes;
 
-    public path_string(self) String = {
+    public path_string(self): String = {
         let mutable out = StringBuilder.new();
         out.push_string("");
         let mutable first = true;
@@ -291,16 +293,16 @@ given ModuleInfo {
         return out.to_string();
     };
 
-    public directory(self) String = {
+    public directory(self): String = {
         let p = self.storage.entry_file.into_path();
         return p.dir_name().to_string();
     };
 
-    public add_merged_submodule(self, file String) Void = {
+    public add_merged_submodule(self, file: String): Void = {
         self.storage.merged_submodules.push(file);
     };
 
-    public has_merged_submodule(self, file String) Bool = {
+    public has_merged_submodule(self, file: String): Bool = {
         for f in self.storage.merged_submodules then {
             if f == file then {
                 return true;
@@ -309,7 +311,7 @@ given ModuleInfo {
         return false;
     };
 
-    public add_node(self, decl Decl, source_file String) Void = {
+    public add_node(self, decl: Decl, source_file: String): Void = {
         self.storage.global_nodes.push(
             LoadedNode(decl, source_file, self.storage.package_id),
         );
@@ -319,16 +321,16 @@ given ModuleInfo {
 // ── CompilationUnit ───────────────────────────────────────────────────────────
 
 type mutable CompilationUnitStorage(
-    root_module ModuleInfo,
-    mutable loaded_module_paths List[String],
-    mutable loaded_modules List[ModuleInfo],
-    mutable import_graph ImportGraph,
+    root_module: ModuleInfo,
+    mutable loaded_module_paths: List[String],
+    mutable loaded_modules: List[ModuleInfo],
+    mutable import_graph: ImportGraph,
 );
 
-public type mutable CompilationUnit(mutable storage CompilationUnitStorage);
+public type mutable CompilationUnit(mutable storage: CompilationUnitStorage);
 
 given CompilationUnit {
-    public new(root_module ModuleInfo) CompilationUnit = {
+    public new(root_module: ModuleInfo): CompilationUnit = {
         let s = CompilationUnitStorage(
             root_module,
             [root_module.path_string()],
@@ -341,7 +343,7 @@ given CompilationUnit {
     /// A unit with no modules in it yet. Used when modules are loaded by
     /// manifest spec rather than from a single entry file -- the first module
     /// loaded is not privileged, so there is no root to pre-install.
-    public empty() CompilationUnit = {
+    public empty(): CompilationUnit = {
         let placeholder = ModuleInfo.new(List[String].new(), "", false);
         let s = CompilationUnitStorage(
             placeholder,
@@ -352,31 +354,38 @@ given CompilationUnit {
         return CompilationUnit(s);
     };
 
-    public root_module(self) ModuleInfo = self.storage.root_module;
-    public import_graph(self) ImportGraph = self.storage.import_graph;
+    public root_module(self): ModuleInfo = self.storage.root_module;
+    public import_graph(self): ImportGraph = self.storage.import_graph;
 
     public add_import_edge(
         self,
-        from List[String],
-        to List[String],
-        kind ImportKind,
-        source_file Option[String],
-        span SourceSpan,
-        filter List[UsingModuleItem],
-    ) Void = {
-        self.storage.import_graph.add_module_import(from, to, kind, source_file, span, filter);
+        from: List[String],
+        to: List[String],
+        kind: ImportKind,
+        source_file: Option[String],
+        span: SourceSpan,
+        filter: List[UsingModuleItem],
+    ): Void = {
+        self.storage.import_graph.add_module_import(
+            from,
+            to,
+            kind,
+            source_file,
+            span,
+            filter,
+        );
     };
 
     public add_symbol_import_edge(
         self,
-        module List[String],
-        target List[String],
-        symbol String,
-        kind ImportKind,
-        source_file Option[String],
-        original_symbol Option[String],
-        span SourceSpan,
-    ) Void = {
+        module: List[String],
+        target: List[String],
+        symbol: String,
+        kind: ImportKind,
+        source_file: Option[String],
+        original_symbol: Option[String],
+        span: SourceSpan,
+    ): Void = {
         self.storage.import_graph.add_symbol_import(
             module,
             target,
@@ -389,7 +398,7 @@ given CompilationUnit {
     };
 
     // 合并另一个编译单元的导入图（用于标准库合并）
-    public merge_import_graph(self, other CompilationUnit) Void = {
+    public merge_import_graph(self, other: CompilationUnit): Void = {
         self.storage.import_graph.merge(other.import_graph());
     };
 
@@ -402,7 +411,7 @@ given CompilationUnit {
     /// (`List.sort_by` over a mutable newtype used to overflow the compiler's
     /// stack; that is fixed and guarded by
     /// `tests/compiler-cases/list_sort_by_mutable_newtype_test.koral`.)
-    public add_module(self, module ModuleInfo) Void = {
+    public add_module(self, module: ModuleInfo): Void = {
         let key = module.path_string();
         for p in self.storage.loaded_module_paths then {
             if p == key then {
@@ -411,7 +420,7 @@ given CompilationUnit {
         };
 
         let mutable insert_at = self.storage.loaded_modules.count();
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < self.storage.loaded_modules.count() then {
             if self.storage.loaded_modules[i].path_string() > module.path_string() then {
                 insert_at = i;
@@ -424,7 +433,7 @@ given CompilationUnit {
         self.storage.loaded_modules.insert_at(insert_at, module);
     };
 
-    public has_module(self, path_string String) Bool = {
+    public has_module(self, path_string: String): Bool = {
         for p in self.storage.loaded_module_paths then {
             if p == path_string then {
                 return true;
@@ -433,8 +442,8 @@ given CompilationUnit {
         return false;
     };
 
-    public get_module(self, path_string String) Option[ModuleInfo] = {
-        let mutable i UInt = 0;
+    public get_module(self, path_string: String): Option[ModuleInfo] = {
+        let mutable i: UInt = 0;
         for p in self.storage.loaded_module_paths then {
             if p == path_string then {
                 return Option[ModuleInfo].Some(self.storage.loaded_modules[i]);
@@ -447,7 +456,7 @@ given CompilationUnit {
     /// Module path (dotted) -> derived symbol key (§5.3.1) for every module in
     /// the unit. The key is what C symbol prefixes are derived from; the path
     /// is what `using` and diagnostics spell.
-    public module_symbol_keys(self) Dict[String, String] = {
+    public module_symbol_keys(self): Dict[String, String] = {
         let mutable out = Dict[String, String].new();
         for module in self.storage.loaded_modules then {
             let path_key = module.path_string();
@@ -464,7 +473,7 @@ given CompilationUnit {
     };
 
     // Collect all global nodes in dependency order.
-    public collect_all_nodes(self) List[LoadedNode] = {
+    public collect_all_nodes(self): List[LoadedNode] = {
         let mutable result = List[LoadedNode].new();
         for module in self.storage.loaded_modules then {
             for node in module.global_nodes().iterator() then {
@@ -476,7 +485,7 @@ given CompilationUnit {
 
     // Collect all global nodes with their module path, in dependency order.
     // Returns a list of (LoadedNode, module_path) pairs.
-    public collect_all_nodes_with_path(self) List[Pair[LoadedNode, List[String]]] = {
+    public collect_all_nodes_with_path(self): List[Pair[LoadedNode, List[String]]] = {
         let mutable result = List[Pair[LoadedNode, List[String]]].new();
         for module in self.storage.loaded_modules then {
             let module_path = module.path();
@@ -492,13 +501,13 @@ given CompilationUnit {
     /// Modules get loaded in `using` discovery order, and which `using` is seen
     /// first is not something a symbol table may depend on. Both compilers emit
     /// by full name so the same program always yields the same tables.
-    public collect_all_nodes_with_path_sorted(self) List[Pair[LoadedNode, List[String]]] =
+    public collect_all_nodes_with_path_sorted(self): List[Pair[LoadedNode, List[String]]] =
         self.collect_all_nodes_with_path();
 
     public collect_nodes_with_path_for_module(
         self,
-        path_string String,
-    ) List[Pair[LoadedNode, List[String]]] = {
+        path_string: String,
+    ): List[Pair[LoadedNode, List[String]]] = {
         let mutable result = List[Pair[LoadedNode, List[String]]].new();
         when self.get_module(path_string) in {
             .Some(module) then {
@@ -515,7 +524,7 @@ given CompilationUnit {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-public let string_list_eq(a List[String], b List[String]) Bool = {
+public let string_list_eq(a: List[String], b: List[String]): Bool = {
     if a.count() != b.count() then {
         return false;
     };
@@ -527,7 +536,7 @@ public let string_list_eq(a List[String], b List[String]) Bool = {
     return true;
 };
 
-public let source_file_matches(stored Option[String], current Option[String]) Bool = when stored in {
+public let source_file_matches(stored: Option[String], current: Option[String]): Bool = when stored in {
     .None() then true,
     .Some(s) then when current in {
         .Some(c) then source_file_paths_equal(s, c),
@@ -541,7 +550,7 @@ public let source_file_matches(stored Option[String], current Option[String]) Bo
 /// 多字节序列的续字节里，规范化也不改变字节长度——所以逐字节比较、把 `\` 当作 `/`
 /// 就是同一回事。原先的实现对每一次比较都把两个路径各自 `to_runes()` + `StringBuilder`
 /// 重建一遍，光这项就占了类型检查的三成。
-private let source_file_paths_equal(a String, b String) Bool = {
+private let source_file_paths_equal(a: String, b: String): Bool = {
     if a == b then {
         return true;
     };
@@ -551,7 +560,7 @@ private let source_file_paths_equal(a String, b String) Bool = {
     };
     let ap = a.borrow_ptr();
     let bp = b.borrow_ptr();
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     while i < len then {
         let mutable x = ap[i];
         let mutable y = bp[i];
@@ -570,7 +579,7 @@ private let source_file_paths_equal(a String, b String) Bool = {
 };
 
 // Join path segments with separator
-public let join_path(segments List[String], sep String) String = {
+public let join_path(segments: List[String], sep: String): String = {
     let mutable out = StringBuilder.new();
     out.push_string("");
     let mutable first = true;
@@ -585,7 +594,7 @@ public let join_path(segments List[String], sep String) String = {
 };
 
 // Validate module name: lowercase letter start, only [a-z0-9_]
-public let validate_module_name(name String) Option[String] = {
+public let validate_module_name(name: String): Option[String] = {
     if name.count() == 0 then {
         return Option[String].Some("Module name cannot be empty");
     };

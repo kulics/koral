@@ -14,36 +14,36 @@
 // ============================================================================
 
 public type CstType {
-    Named(name Token),
-    SelfType(kw Token),
-    Mutable(inner CstType, kw Token),
+    Named(name: Token),
+    SelfType(kw: Token),
+    Mutable(inner: CstType, kw: Token),
     // A bare `mutable` in a generic PARAMETER constraint (`[T mutable]`). It is
     // a type-kind constraint keyword, not a type (grammar.bnf <trait-constraint>),
     // so it carries no inner type.
-    ConstraintKeyword(kw Token),
-    Generic(lbracket Token, args List[CstTypeArg], rbracket Token, base Token),
+    ConstraintKeyword(kw: Token),
+    Generic(lbracket: Token, args: List[CstTypeArg], rbracket: Token, base: Token),
     // `(T1, T2) -> R`: the arrow is printed as part of the shape, so the node
     // keeps the delimiters that carry comments and spacing.
-    Function(lparen Token, args List[CstTypeArg], rparen Token, return_type CstType),
+    Function(lparen: Token, args: List[CstTypeArg], rparen: Token, return_type: CstType),
     // `(T)` -- grouping of exactly one type. The parens are LOAD-BEARING:
     // `let p (*Int)` must round-trip WITH them, so the node keeps the
     // delimiters the way `CstExpr.Paren` does. A doubled nesting collapses to
     // one layer at parse time (`((T))` -> `(T)`), the same policy as the
     // expression `Paren`. `(` with a type LIST and `->` is a `Function`, not
     // this; a list without `->` is rejected outright.
-    Paren(lparen Token, inner CstType, rparen Token),
-    Ptr(inner CstType, kw Token),
-    Weakref(inner CstType, kw Token),
+    Paren(lparen: Token, inner: CstType, rparen: Token),
+    Ptr(inner: CstType, kw: Token),
+    Weakref(inner: CstType, kw: Token),
 };
 
 // The separator slot of a list item: the comment tokens that trail the item
 // before its separator -- `a /* c */, b` -- and the comma itself when the
 // source wrote one. Comments before a closing delimiter ride the same slot
 // with no comma: `f(a /* c */)`. A formatter may not drop them.
-public type CstComma(comments List[Token], token Option[Token]);
+public type CstComma(comments: List[Token], token: Option[Token]);
 
 // A type argument with optional trailing comma
-public type CstTypeArg(inner CstType, comma Option[CstComma]);
+public type CstTypeArg(inner: CstType, comma: Option[CstComma]);
 
 // ============================================================================
 // CST Expression Nodes
@@ -51,29 +51,29 @@ public type CstTypeArg(inner CstType, comma Option[CstComma]);
 
 public type CstExpr {
     // Literals
-    IntLit(token Token),
-    FloatLit(token Token),
-    StrLit(token Token),
-    InterpStr(token Token),
-    BoolLit(token Token),
+    IntLit(token: Token),
+    FloatLit(token: Token),
+    StrLit(token: Token),
+    InterpStr(token: Token),
+    BoolLit(token: Token),
     // The null-pointer literal `null` -- a sibling of `BoolLit`, same shape:
     // the token carries the spelling and the printer writes it verbatim.
-    NullLit(token Token),
-    Ident(token Token),
-    SelfExpr(token Token),
-    UnderscoreExpr(token Token),
-    Commented(comments List[Token], inner CstExpr),
+    NullLit(token: Token),
+    Ident(token: Token),
+    SelfExpr(token: Token),
+    UnderscoreExpr(token: Token),
+    Commented(comments: List[Token], inner: CstExpr),
 
     // Operators
-    BinaryOp(left CstExpr, op Token, right CstExpr),
-    UnaryMinus(op Token, operand CstExpr),
-    Deref(op Token, operand CstExpr),
-    Upgrade(op Token, operand CstExpr),
-    AddressOf(op Token, mut_kw Option[Token], operand CstExpr),
-    NotExpr(op Token, operand CstExpr),
-    IsExpr(subject CstExpr, is_kw Token, not_kw Option[Token], pattern CstPattern),
-    BitwiseNot(op Token, operand CstExpr),
-    PrefixKw(kw Token, operand CstExpr),
+    BinaryOp(left: CstExpr, op: Token, right: CstExpr),
+    UnaryMinus(op: Token, operand: CstExpr),
+    Deref(op: Token, operand: CstExpr),
+    Upgrade(op: Token, operand: CstExpr),
+    AddressOf(op: Token, mut_kw: Option[Token], operand: CstExpr),
+    NotExpr(op: Token, operand: CstExpr),
+    IsExpr(subject: CstExpr, is_kw: Token, not_kw: Option[Token], pattern: CstPattern),
+    BitwiseNot(op: Token, operand: CstExpr),
+    PrefixKw(kw: Token, operand: CstExpr),
     /// `cast_type(operand)` -- the cast / type application `Int(x)`,
     /// `Option[Int](x)`. The target type comes FIRST and the value is
     /// the parenthesized operand; the old postfix spelling `operand(Type)` is
@@ -84,7 +84,7 @@ public type CstExpr {
     /// operator: `*Int(q)` parses as `*(Int(q))` and `?T(x)` as `?(T(x))`,
     /// operator chains over the call. The trait-object upcast IS this spelling:
     /// `Drawable(c)`, `Transform[Int](c)`, `(Drawable)(c)`.
-    TypeCast(lparen Token, cast_type CstType, rparen Token, operand CstExpr),
+    TypeCast(lparen: Token, cast_type: CstType, rparen: Token, operand: CstExpr),
     /// `operand as Type` -- pointer reinterpretation and weak construction:
     /// `p as *Int`, `x as ?Box`. (A trait target `c as Drawable` parses here
     /// too but is a SEMA error: the trait upcast is written `Drawable(c)`.)
@@ -95,36 +95,36 @@ public type CstExpr {
     /// result takes no postfix suffixes -- a method call on one needs
     /// parentheses, `(self as *T).equals(...)`. The `as` token and the target
     /// type travel with the node so the round trip is faithful.
-    AsCast(operand CstExpr, as_kw Token, cast_type CstType),
+    AsCast(operand: CstExpr, as_kw: Token, cast_type: CstType),
     /// The `base(Trait)` prefix of a qualified call `base(Trait).method(...)`.
     /// This prefix is never a standalone expression: the parser only builds it
     /// as part of the composite `Call(FieldAccess(QualifiedTrait(...), method),
     /// args)`, and a bare `base(Trait)` is rejected. `operand` is the base
     /// (a type name for `Type(Trait).method`, any expression for
     /// `expr(Trait).method`), `trait_type` the parenthesized trait.
-    QualifiedTrait(lparen Token, trait_type CstType, rparen Token, operand CstExpr),
-    Paren(lparen Token, inner CstExpr, rparen Token),
+    QualifiedTrait(lparen: Token, trait_type: CstType, rparen: Token, operand: CstExpr),
+    Paren(lparen: Token, inner: CstExpr, rparen: Token),
 
     // Access and calls
-    FieldAccess(base CstExpr, dot Token, field Token),
-    Call(callee CstExpr, lparen Token, args List[CstCallArg], rparen Token),
-    SubscriptExpr(base CstExpr, lbracket Token, args List[CstCallArg], rbracket Token),
-    GenericInst(base CstExpr, lbracket Token, type_args List[CstTypeArg], rbracket Token),
-    ImplicitMember(dot Token, name Token, lparen Option[Token], args List[CstCallArg], rparen Option[Token]),
+    FieldAccess(base: CstExpr, dot: Token, field: Token),
+    Call(callee: CstExpr, lparen: Token, args: List[CstCallArg], rparen: Token),
+    SubscriptExpr(base: CstExpr, lbracket: Token, args: List[CstCallArg], rbracket: Token),
+    GenericInst(base: CstExpr, lbracket: Token, type_args: List[CstTypeArg], rbracket: Token),
+    ImplicitMember(dot: Token, name: Token, lparen: Option[Token], args: List[CstCallArg], rparen: Option[Token]),
 
     // Control flow
-    Block(lbrace Token, items List[CstItem], tail_expr Option[CstExpr], tail_comments List[Token], rbrace Token),
-    If(kw Token, cond CstExpr, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
-    IfPattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, then_body CstExpr, else_kw Option[Token], else_body Option[CstExpr]),
-    While(kw Token, cond CstExpr, then_kw Token, body CstExpr),
-    WhilePattern(kw Token, subject CstExpr, is_kw Token, pattern CstPattern, then_kw Token, body CstExpr),
-    For(kw Token, binding CstPattern, eq Token, iterable CstExpr, where_kw Option[Token], guard Option[CstExpr], then_kw Token, body CstExpr),
-    When(kw Token, subject CstExpr, is_kw Token, lbrace Token, arms List[CstWhenArm], rbrace Token),
+    Block(lbrace: Token, items: List[CstItem], tail_expr: Option[CstExpr], tail_comments: List[Token], rbrace: Token),
+    If(kw: Token, cond: CstExpr, then_kw: Token, then_body: CstExpr, else_kw: Option[Token], else_body: Option[CstExpr]),
+    IfPattern(kw: Token, subject: CstExpr, is_kw: Token, pattern: CstPattern, then_kw: Token, then_body: CstExpr, else_kw: Option[Token], else_body: Option[CstExpr]),
+    While(kw: Token, cond: CstExpr, then_kw: Token, body: CstExpr),
+    WhilePattern(kw: Token, subject: CstExpr, is_kw: Token, pattern: CstPattern, then_kw: Token, body: CstExpr),
+    For(kw: Token, binding: CstPattern, eq: Token, iterable: CstExpr, where_kw: Option[Token], guard: Option[CstExpr], then_kw: Token, body: CstExpr),
+    When(kw: Token, subject: CstExpr, is_kw: Token, lbrace: Token, arms: List[CstWhenArm], rbrace: Token),
 
     // Chaining
-    AndThen(left CstExpr, and_kw Token, then_kw Token, right CstExpr),
-    OrElse(left CstExpr, or_kw Token, else_kw Token, right CstExpr),
-    OrReturn(left CstExpr, or_kw Token, return_kw Token),
+    AndThen(left: CstExpr, and_kw: Token, then_kw: Token, right: CstExpr),
+    OrElse(left: CstExpr, or_kw: Token, else_kw: Token, right: CstExpr),
+    OrReturn(left: CstExpr, or_kw: Token, return_kw: Token),
     /// The elided receiver of an `and then .member()` chain: the unwrapped
     /// value. Carries no tokens -- it prints as nothing, so `FieldAccess` on it
     /// reads `.field`. Only ever the base of that chain.
@@ -132,125 +132,139 @@ public type CstExpr {
     /// `and then .f(x).g` -- a postfix chain on the elided receiver. The wrapper
     /// is what tells printer and tools that this is the chain form rather than
     /// an implicit member; `chain`'s base is a `FlowReceiver`.
-    FlowChain(chain CstExpr),
+    FlowChain(chain: CstExpr),
     /// `as name in body` -- an explicit binder for the flow payload. The body
     /// is a layer operand, so an `or else` after it belongs to the outer chain.
-    FlowBind(as_kw Token, name Token, in_kw Token, body CstExpr),
+    FlowBind(as_kw: Token, name: Token, in_kw: Token, body: CstExpr),
 
     // Range
-    RangeExpr(left Option[CstExpr], op Token, right Option[CstExpr]),
+    RangeExpr(left: Option[CstExpr], op: Token, right: Option[CstExpr]),
 
     // Collection literals
-    EmptyLiteral(lbracket Token, rbracket Token),
-    CollectionLiteral(lbracket Token, elements List[CstCollectionElement], rbracket Token),
-    DictLiteral(lbracket Token, entries List[CstDictEntry], rbracket Token),
+    EmptyLiteral(lbracket: Token, rbracket: Token),
+    CollectionLiteral(lbracket: Token, elements: List[CstCollectionElement], rbracket: Token),
+    DictLiteral(lbracket: Token, entries: List[CstDictEntry], rbracket: Token),
 
     // Lambda
-    Lambda(lparen Token, params List[CstLambdaParam], rparen Token, ret_type Option[CstType], arrow Token, body CstExpr),
+    Lambda(lparen: Token, params: List[CstLambdaParam], rparen: Token, ret_type: Option[CstType], arrow: Token, body: CstExpr),
 
     // Enum variant declaration in type enum body
-    EnumVariant(name Token, lparen Token, fields List[CstEnumField], rparen Token),
+    EnumVariant(name: Token, lparen: Token, fields: List[CstEnumField], rparen: Token),
 };
 
 // Call argument with optional trailing comma
 public type CstCallArg {
-    Value(label Option[Token], colon Option[Token], value CstExpr, comma Option[CstComma]),
+    Value(label: Option[Token], colon: Option[Token], value: CstExpr, comma: Option[CstComma]),
 };
 
-public type CstCollectionElement(value CstExpr, comma Option[CstComma]);
+public type CstCollectionElement(value: CstExpr, comma: Option[CstComma]);
 
-public type CstDictEntry(key CstExpr, colon Token, value CstExpr, comma Option[CstComma]);
+public type CstDictEntry(
+    key: CstExpr,
+    colon: Token,
+    value: CstExpr,
+    comma: Option[CstComma],
+);
 
 // Lambda parameter
-public type CstLambdaParam(name Token, param_type Option[CstType], comma Option[CstComma]);
+public type CstLambdaParam(
+    name: Token,
+    param_type: Option[CstType],
+    comma: Option[CstComma],
+);
 
 // Enum variant field: Name(Type) as `fieldName FieldType` or `fieldName: FieldType`
 // `comments` are the comment tokens that preceded the field in source. A
 // formatter that drops them is broken, and `typed_ast.koral` keeps one on its
 // identity slot -- so they travel with the field they document.
 public type CstEnumField(
-    comments List[Token],
-    name Token,
-    colon Option[Token],
-    field_type CstType,
-    default_value Option[CstDefault],
-    comma Option[CstComma],
+    comments: List[Token],
+    name: Token,
+    colon: Option[Token],
+    field_type: CstType,
+    default_value: Option[CstDefault],
+    comma: Option[CstComma],
 );
 
 // A named field's or parameter's `= <literal>` default (grammar.bnf <field>,
 // <func-param>, <variant-field>). The value is a LITERAL, never an expression:
 // number, bool, string, rune, `[]`, a bare range, or `null` -- so the tokens
 // are kept as written.
-public type CstDefault(eq Token, value_tokens List[Token]);
+public type CstDefault(eq: Token, value_tokens: List[Token]);
 
 // ============================================================================
 // CST Pattern Nodes
 // ============================================================================
 
 public type CstPattern {
-    Wildcard(token Token),
-    Variable(name Token),
-    MutVariable(mut_kw Token, name Token),
-    PatIntLit(token Token),
-    NegIntLit(minus Token, token Token),
+    Wildcard(token: Token),
+    Variable(name: Token),
+    MutVariable(mut_kw: Token, name: Token),
+    PatIntLit(token: Token),
+    NegIntLit(minus: Token, token: Token),
     // `1.5` / `-1.5` -- the minus travels with the token so the round trip
     // keeps the spacing the author wrote
-    PatFloatLit(token Token),
-    NegFloatLit(minus Token, token Token),
-    PatStrLit(token Token),
-    PatBoolLit(token Token),
+    PatFloatLit(token: Token),
+    NegFloatLit(minus: Token, token: Token),
+    PatStrLit(token: Token),
+    PatBoolLit(token: Token),
     // `null` as a literal pattern -- the same slot as `1` / `true`.
-    PatNullLit(token Token),
-    EnumCase(dot Token, name Token, lparen Option[Token], args List[CstPatternArg], rparen Option[Token]),
-    StructPattern(name Token, lparen Token, args List[CstPatternArg], rparen Token),
+    PatNullLit(token: Token),
+    EnumCase(dot: Token, name: Token, lparen: Option[Token], args: List[CstPatternArg], rparen: Option[Token]),
+    StructPattern(name: Token, lparen: Token, args: List[CstPatternArg], rparen: Token),
     // `> -5` -- the minus is part of the pattern and must survive a round trip
-    Comparison(op Token, minus Option[Token], value Token),
-    AndPattern(left CstPattern, and_kw Token, right CstPattern),
-    OrPattern(left CstPattern, or_kw Token, right CstPattern),
-    NotPattern(not_kw Token, inner CstPattern),
+    Comparison(op: Token, minus: Option[Token], value: Token),
+    AndPattern(left: CstPattern, and_kw: Token, right: CstPattern),
+    OrPattern(left: CstPattern, or_kw: Token, right: CstPattern),
+    NotPattern(not_kw: Token, inner: CstPattern),
     // (a, b, c) -- positional destructuring of a struct, also the
     // `for (a, b, c) in ...` binding form
-    TuplePattern(lparen Token, items List[CstTuplePatternItem], rparen Token),
+    TuplePattern(lparen: Token, items: List[CstTuplePatternItem], rparen: Token),
     /// `A or is B` / `A and is B` -- the tail of an `is` chain. The chain is
     /// ONE pattern (`x is A or is B` is `x is (A or B)`), so it hangs off the
     /// enclosing `is` as its pattern; `first` is the first slot's pattern and
     /// each link appends its connector, `is` and slot. Every one of those is a
     /// token the formatter must reprint.
-    IsChain(first CstPattern, links List[CstIsLink]),
+    IsChain(first: CstPattern, links: List[CstIsLink]),
     // [a, b] -- destructuring of a `List[T]` by length. A rest slot turns the
     // exact length into a lower bound.
-    ListPattern(lbracket Token, items List[CstListPatternItem], rbracket Token),
+    ListPattern(lbracket: Token, items: List[CstListPatternItem], rbracket: Token),
     // `...` -- the rest slot: swallows the unwritten slots of a list, enum-case,
     // struct or tuple element list. It only ignores them, never binds.
-    Rest(ellipsis Token),
+    Rest(ellipsis: Token),
     // [mutable] name Type -- bind the matched trait-object implementation
-    TypeBinding(mut_kw Option[Token], name Token, bound_type CstType),
+    TypeBinding(mut_kw: Option[Token], name: Token, bound_type: CstType),
     // `?name` -- weak-reference unpacking: bind the strong reference if the
     // handle is still alive. `?TypeName(name)` -- the same, with a target type
     // check; `name` is the binding inside the parens and `target_type` is the
     // `TypeName`, so the printed spelling is `?TypeName(name)`.
-    WeakBinding(question Token, name Token, lparen Option[Token], target_type Option[CstType], rparen Option[Token]),
+    WeakBinding(question: Token, name: Token, lparen: Option[Token], target_type: Option[CstType], rparen: Option[Token]),
 };
 
 public type CstPatternArg(
-    label Option[Token],
-    colon Option[Token],
-    pattern CstPattern,
-    comma Option[CstComma],
+    label: Option[Token],
+    colon: Option[Token],
+    pattern: CstPattern,
+    comma: Option[CstComma],
 );
 
 // One slot of a `(a, b, c)` tuple pattern: a pattern and the comma that
 // follows it, if any. The commas are kept as tokens so the checked formatter
 // can see every token the author wrote.
-public type CstTuplePatternItem(pattern CstPattern, comma Option[CstComma]);
+public type CstTuplePatternItem(pattern: CstPattern, comma: Option[CstComma]);
 
 // One slot of a `[a, b]` list pattern, kept the same way.
-public type CstListPatternItem(pattern CstPattern, comma Option[CstComma]);
+public type CstListPatternItem(pattern: CstPattern, comma: Option[CstComma]);
 
 // One link of an `is` chain: `or is P` / `and is P`, with the connector and
 // the `is` kept as tokens so the formatter can reprint exactly what was
 // written. `not_kw` is the slot's own `is not` negation.
-public type CstIsLink(connector Token, is_kw Token, not_kw Option[Token], pattern CstPattern);
+public type CstIsLink(
+    connector: Token,
+    is_kw: Token,
+    not_kw: Option[Token],
+    pattern: CstPattern,
+);
 
 // ============================================================================
 // CST When Arm
@@ -260,14 +274,14 @@ public type CstIsLink(connector Token, is_kw Token, not_kw Option[Token], patter
 // body`) between the pattern and `then`; they travel together. The guard is
 // arm-level -- never on a sub-pattern.
 public type CstWhenArm(
-    leading_comments List[Token],
-    pattern CstPattern,
-    guard_kw Option[Token],
-    guard Option[CstExpr],
-    then_kw Token,
-    body CstExpr,
-    comma Option[CstComma],
-    trailing_comments List[Token],
+    leading_comments: List[Token],
+    pattern: CstPattern,
+    guard_kw: Option[Token],
+    guard: Option[CstExpr],
+    then_kw: Token,
+    body: CstExpr,
+    comma: Option[CstComma],
+    trailing_comments: List[Token],
 );
 
 // ============================================================================
@@ -275,16 +289,20 @@ public type CstWhenArm(
 // ============================================================================
 
 public type CstParam {
-    SelfParam(kw Token, mut_kw Option[Token], comma Option[CstComma]),
-    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[CstComma]),
+    SelfParam(kw: Token, mut_kw: Option[Token], comma: Option[CstComma]),
+    NamedParam(name: Token, mut_kw: Option[Token], colon: Option[Token], param_type: CstType, default_value: Option[CstDefault], comma: Option[CstComma]),
 };
 
-public type CstGenericParam(name Token, constraints List[CstType], comma Option[CstComma]);
+public type CstGenericParam(
+    name: Token,
+    constraints: List[CstType],
+    comma: Option[CstComma],
+);
 
 public type CstGenericParams(
-    lbracket Token,
-    params List[CstGenericParam],
-    rbracket Token,
+    lbracket: Token,
+    params: List[CstGenericParam],
+    rbracket: Token,
 );
 
 // ============================================================================
@@ -292,14 +310,14 @@ public type CstGenericParams(
 // ============================================================================
 
 public type CstStmt {
-    VarDecl(let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType], eq Token, value CstExpr),
-    TupleVarDecl(let_kw Token, lparen Token, items List[CstTupleBindingItem], rparen Token, eq Token, value CstExpr),
-    Assignment(target CstExpr, op Token, value CstExpr),
-    ExprStmt(expr CstExpr, semi Option[Token]),
-    Defer(kw Token, value CstExpr),
-    Return(kw Token, value Option[CstExpr]),
-    Break(kw Token),
-    Continue(kw Token),
+    VarDecl(let_kw: Token, mut_kw: Option[Token], name: Token, var_type: Option[CstType], eq: Token, value: CstExpr),
+    TupleVarDecl(let_kw: Token, lparen: Token, items: List[CstTupleBindingItem], rparen: Token, eq: Token, value: CstExpr),
+    Assignment(target: CstExpr, op: Token, value: CstExpr),
+    ExprStmt(expr: CstExpr, semi: Option[Token]),
+    Defer(kw: Token, value: CstExpr),
+    Return(kw: Token, value: Option[CstExpr]),
+    Break(kw: Token),
+    Continue(kw: Token),
 };
 
 /// One slot of a `let` binding: a leaf (`_`, `name`, `mutable name`,
@@ -307,40 +325,40 @@ public type CstStmt {
 /// `<binding-element> ::= "_" | "mutable"? <identifier> <type-annotation>?
 /// | <tuple-binding>`. A `for` binding is a match pattern instead.
 public type CstPairBinding {
-    Leaf(mut_kw Option[Token], name Token, binding_type Option[CstType], is_discard Bool),
-    Nested(lparen Token, items List[CstTupleBindingItem], rparen Token),
+    Leaf(mut_kw: Option[Token], name: Token, binding_type: Option[CstType], is_discard: Bool),
+    Nested(lparen: Token, items: List[CstTupleBindingItem], rparen: Token),
 };
 
 // One slot of a `let (a, _, c) = ...` tuple binding: a binding and the comma
 // that follows it, if any.
-public type CstTupleBindingItem(binding CstPairBinding, comma Option[CstComma]);
+public type CstTupleBindingItem(binding: CstPairBinding, comma: Option[CstComma]);
 
 // ============================================================================
 // CST Type Body (for type declarations)
 // ============================================================================
 
 public type CstTypeBody {
-    Struct(lparen Token, items List[CstStructBodyItem], rparen Token),
-    Enum(lbrace Token, cases List[CstItem], rbrace Token),
-    Alias(eq Token, target CstType),
+    Struct(lparen: Token, items: List[CstStructBodyItem], rparen: Token),
+    Enum(lbrace: Token, cases: List[CstItem], rbrace: Token),
+    Alias(eq: Token, target: CstType),
     Empty(),
 };
 
 public type CstStructBodyItem {
-    Field(field CstStructField),
-    Comment(token Token),
-    TrailingComment(token Token),
+    Field(field: CstStructField),
+    Comment(token: Token),
+    TrailingComment(token: Token),
     BlankLine(),
 };
 
 public type CstStructField(
-    mut_kw Option[Token],
-    access Option[Token],
-    name Token,
-    colon Option[Token],
-    field_type CstType,
-    default_value Option[CstDefault],
-    comma Option[CstComma],
+    mut_kw: Option[Token],
+    access: Option[Token],
+    name: Token,
+    colon: Option[Token],
+    field_type: CstType,
+    default_value: Option[CstDefault],
+    comma: Option[CstComma],
 );
 
 // ============================================================================
@@ -348,22 +366,22 @@ public type CstStructField(
 // ============================================================================
 
 public type CstDecl {
-    Using(tokens List[Token]),
-    Func(vis Option[Token], modifiers List[Token], let_kw Option[Token], mut_kw Option[Token], generic_params Option[CstGenericParams], name Option[Token], lparen Option[Token], params List[CstParam], rparen Option[Token], return_type Option[CstType], eq Token, body CstExpr),
-    ForeignDecl(vis Option[Token], modifiers List[Token], let_kw Option[Token], mut_kw Option[Token], generic_params Option[CstGenericParams], name Option[Token], lparen Option[Token], params List[CstParam], rparen Option[Token], return_type Option[CstType]),
-    Type(vis Option[Token], modifiers List[Token], kw Token, mut_kw Option[Token], generic_params Option[CstGenericParams], name Token, body CstTypeBody),
-    Trait(vis Option[Token], kw Token, generic_params Option[CstGenericParams], name Token, super_traits List[CstType], lbrace Token, members List[CstItem], rbrace Token),
-    Given(vis Option[Token], modifiers List[Token], kw Token, generic_params Option[CstGenericParams], target CstType, as_kw Option[Token], trait_type Option[CstType], lbrace Token, members List[CstItem], rbrace Token),
-    Var(vis Option[Token], let_kw Token, mut_kw Option[Token], name Token, var_type Option[CstType]),
-    TraitMethod(vis Option[Token], generic_params Option[CstGenericParams], name Token, lparen Token, params List[CstTraitMethodParam], rparen Token, return_type Option[CstType]),
+    Using(tokens: List[Token]),
+    Func(vis: Option[Token], modifiers: List[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType], eq: Token, body: CstExpr),
+    ForeignDecl(vis: Option[Token], modifiers: List[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType]),
+    Type(vis: Option[Token], modifiers: List[Token], kw: Token, mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Token, body: CstTypeBody),
+    Trait(vis: Option[Token], kw: Token, generic_params: Option[CstGenericParams], name: Token, super_traits: List[CstType], lbrace: Token, members: List[CstItem], rbrace: Token),
+    Given(vis: Option[Token], modifiers: List[Token], kw: Token, generic_params: Option[CstGenericParams], target: CstType, as_kw: Option[Token], trait_type: Option[CstType], lbrace: Token, members: List[CstItem], rbrace: Token),
+    Var(vis: Option[Token], let_kw: Token, mut_kw: Option[Token], name: Token, var_type: Option[CstType]),
+    TraitMethod(vis: Option[Token], generic_params: Option[CstGenericParams], name: Token, lparen: Token, params: List[CstTraitMethodParam], rparen: Token, return_type: Option[CstType]),
 };
 
 // Trait method parameter
 public type CstTraitMethodParam {
     // self -- the only receiver form (grammar.bnf <method-first-param>)
-    SelfParam(kw Token, mut_kw Option[Token], comma Option[CstComma]),
+    SelfParam(kw: Token, mut_kw: Option[Token], comma: Option[CstComma]),
     // [mutable] name [: Type [= default]]
-    NamedParam(name Token, mut_kw Option[Token], colon Option[Token], param_type CstType, default_value Option[CstDefault], comma Option[CstComma]),
+    NamedParam(name: Token, mut_kw: Option[Token], colon: Option[Token], param_type: CstType, default_value: Option[CstDefault], comma: Option[CstComma]),
 };
 
 // ============================================================================
@@ -371,16 +389,16 @@ public type CstTraitMethodParam {
 // ============================================================================
 
 public type CstItem {
-    Decl(decl CstDecl),
-    Stmt(stmt CstStmt),
+    Decl(decl: CstDecl),
+    Stmt(stmt: CstStmt),
     // Comments between a declaration / statement and its `;` -- `let x = 1
     // /* c */;`. They travel with the item so the terminator still lands
     // after them; a line comment pushes it to the next line.
-    DeclPreSemi(comments List[Token], decl CstDecl),
-    StmtPreSemi(comments List[Token], stmt CstStmt),
-    Comment(token Token),
-    TrailingComment(token Token),
+    DeclPreSemi(comments: List[Token], decl: CstDecl),
+    StmtPreSemi(comments: List[Token], stmt: CstStmt),
+    Comment(token: Token),
+    TrailingComment(token: Token),
     BlankLine(),
 };
 
-public type CstFile(public items List[CstItem]);
+public type CstFile(public items: List[CstItem]);

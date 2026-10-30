@@ -18,11 +18,11 @@ using "std" { ... };
 using "std/os" { ... };
 
 /// A project-layout problem, with the paths it is about (package-root-relative).
-public type LayoutProblem(message String, paths List[String]);
+public type LayoutProblem(message: String, paths: List[String]);
 
 /// Whether `rel_path` is covered by any of the manifest's `exclude` entries.
 /// An entry naming a directory covers everything under it.
-private let is_excluded(rel_path String, exclude List[String]) Bool = {
+private let is_excluded(rel_path: String, exclude: List[String]): Bool = {
     for entry in exclude then {
         if rel_path == entry then {
             return true;
@@ -42,7 +42,7 @@ private let is_excluded(rel_path String, exclude List[String]) Bool = {
 /// and cannot claim a file here. Both local forms claim the target -- bare
 /// `using "./x.koral";` merges it (§3.2) and `using "./x.koral" { … };` makes it
 /// a module of its own (§3.1) -- so one walk covers both.
-private let local_using_specifier(line String) Option[String] = {
+private let local_using_specifier(line: String): Option[String] = {
     let trimmed = line.trim_ascii();
     if not trimmed.starts_with("using \"") then {
         return Option[String].None();
@@ -62,7 +62,7 @@ private let local_using_specifier(line String) Option[String] = {
 };
 
 /// The files a source file claims through its local `using` specs.
-private let local_uses_of(file_path String) List[String] = {
+private let local_uses_of(file_path: String): List[String] = {
     let mutable out = List[String].new();
     let text = when read_text_file(file_path) in {
         .Ok(t) then t,
@@ -84,7 +84,7 @@ private let local_uses_of(file_path String) List[String] = {
 
 /// Absolute when the platform can produce one, so `./a/../b` and `b` compare
 /// equal across the walk.
-private let normalized_path(p String) String = {
+private let normalized_path(p: String): String = {
     return when absolute_path(p) in {
         .Ok(a) then a.to_string(),
         .Error(_) then p,
@@ -97,10 +97,10 @@ private let normalized_path(p String) String = {
 /// `declared_entries` are the manifest's `modules[*].entry` values. The claimed
 /// set is the transitive closure of local `using` specs starting from them.
 public let find_orphan_sources(
-    root String,
-    declared_entries List[String],
-    exclude List[String],
-) Result[List[String]] = {
+    root: String,
+    declared_entries: List[String],
+    exclude: List[String],
+): Result[List[String]] = {
     let root_norm = normalized_path(root);
 
     let mutable claimed = Set[String].new();
@@ -164,10 +164,10 @@ public let find_orphan_sources(
 /// deliberately free of the CLI's types, so both `koral` and its tests can
 /// reach it without dragging the CLI's `main` along.
 public let lint_orphans(
-    root String,
-    declared_entries List[String],
-    exclude List[String],
-) Option[LayoutProblem] = {
+    root: String,
+    declared_entries: List[String],
+    exclude: List[String],
+): Option[LayoutProblem] = {
     let orphans = when find_orphan_sources(root, declared_entries, exclude) in {
         .Ok(list) then list,
         .Error(e) then {
@@ -181,11 +181,9 @@ public let lint_orphans(
         return Option[LayoutProblem].None();
     };
 
-    let mutable message =
-        "source file(s) belong to no module; every .koral file in the package must be part of exactly one module's closure";
+    let mutable message = "source file(s) belong to no module; every .koral file in the package must be part of exactly one module's closure";
     if not exclude.is_empty() then {
-        message = message
-            + " (paths in 'exclude' are skipped -- put fixtures there instead of leaving them loose)";
+        message = message + " (paths in 'exclude' are skipped -- put fixtures there instead of leaving them loose)";
     };
     message = message + ":";
     return Option[LayoutProblem].Some(LayoutProblem(message, orphans));
@@ -193,7 +191,7 @@ public let lint_orphans(
 
 /// Render a problem's body. The caller owns the `error: ` envelope --
 /// `error_msg` already adds it.
-public let render_layout_problem(problem LayoutProblem) String = {
+public let render_layout_problem(problem: LayoutProblem): String = {
     let mutable text = problem.message;
     for p in problem.paths then {
         text = text + "\n  " + p;

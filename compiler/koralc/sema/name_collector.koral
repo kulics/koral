@@ -3,23 +3,23 @@
 // Does NOT inspect function bodies.
 
 public type mutable NameCollector(
-    mutable context CompilerContext,
-    mutable global_scope Scope,
-    mutable diagnostics DiagnosticCollector,
-    mutable module_path List[String],
-    mutable source_file String,
-    mutable package_id String,
+    mutable context: CompilerContext,
+    mutable global_scope: Scope,
+    mutable diagnostics: DiagnosticCollector,
+    mutable module_path: List[String],
+    mutable source_file: String,
+    mutable package_id: String,
     // Generic template names that belong to the standard library. The compiler
     // builds std's containers and `Option` by name (`genericEnumType(template:
     // "Option", ...)`), so a user template with one of those names would take
     // the lang item out from under inference. Nothing else is reserved: two
     // user modules may both declare `Box[T]`, and a non-generic `Duration` may
     // share std's name freely -- both are pinned by cross-module tests.
-    mutable std_generic_template_names Set[String],
+    mutable std_generic_template_names: Set[String],
 );
 
 given NameCollector {
-    public new() NameCollector = {
+    public new(): NameCollector = {
         return NameCollector(
             CompilerContext.new(),
             Scope.new_root(),
@@ -31,7 +31,7 @@ given NameCollector {
         );
     };
 
-    public new_with_context(module_path List[String], source_file String) NameCollector = {
+    public new_with_context(module_path: List[String], source_file: String): NameCollector = {
         return NameCollector(
             CompilerContext.new(),
             Scope.new_root(),
@@ -44,7 +44,7 @@ given NameCollector {
     };
 
     // Register all top-level names from a program.
-    public collect(self, program Program) Void = {
+    public collect(self, program: Program): Void = {
         for decl in program.declarations then {
             self.collect_decl(decl);
         };
@@ -54,8 +54,8 @@ given NameCollector {
     // Each node carries its own source_file; module_path is provided per-node via pairs.
     public collect_loaded_nodes_with_path(
         self,
-        pairs List[Pair[LoadedNode, List[String]]],
-    ) Void = {
+        pairs: List[Pair[LoadedNode, List[String]]],
+    ): Void = {
         let saved_module_path = self.module_path;
         let saved_source_file = self.source_file;
         let saved_package_id = self.package_id;
@@ -72,11 +72,11 @@ given NameCollector {
 
     private make_var_symbol(
         self,
-        name String,
-        is_mutable Bool,
-        access AccessModifier,
-        span SourceSpan,
-    ) Symbol = {
+        name: String,
+        is_mutable: Bool,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): Symbol = {
         let kind = if is_mutable then SymbolKind.Variable(VariableKind.MutableValue())
         else SymbolKind.Variable(VariableKind.Value());
         let mutable context = self.context;
@@ -94,10 +94,10 @@ given NameCollector {
 
     private make_fn_symbol(
         self,
-        name String,
-        access AccessModifier,
-        span SourceSpan,
-    ) Symbol = {
+        name: String,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): Symbol = {
         let mutable context = self.context;
         let def_id = context.allocate_full_in_package(
             name,
@@ -111,7 +111,7 @@ given NameCollector {
         return Symbol(def_id, Type.Unknown(), SymbolKind.Function());
     };
 
-    private duplicate_definition_message(self, name String) String = {
+    private duplicate_definition_message(self, name: String): String = {
         let _ = self;
         let mutable message = StringBuilder.new();
         message.push_string("Duplicate definition: ");
@@ -119,14 +119,14 @@ given NameCollector {
         return message.to_string();
     };
 
-    private is_std_package(self) Bool = {
+    private is_std_package(self): Bool = {
         return is_std_package_id(self.package_id);
     };
 
     /// `intrinsic` names something the compiler provides. Letting user code
     /// declare one would let anyone claim a builtin, so it is std-only.
     /// Returns true when the declaration has been rejected.
-    private reject_intrinsic_outside_std(self, span SourceSpan) Bool = {
+    private reject_intrinsic_outside_std(self, span: SourceSpan): Bool = {
         if self.is_std_package() then {
             return false;
         };
@@ -138,7 +138,7 @@ given NameCollector {
     };
 
     /// Whether declaring this name would take one of std's generic templates.
-    private shadows_std_generic_template(self, name String, is_generic Bool) Bool = {
+    private shadows_std_generic_template(self, name: String, is_generic: Bool): Bool = {
         if not is_generic then {
             return false;
         };
@@ -152,7 +152,7 @@ given NameCollector {
     /// Report at a source location. A name-collection diagnostic with no span
     /// cannot be jumped to, so every caller must say where the offending
     /// declaration is.
-    private push_name_diagnostic(self, message String, span SourceSpan) Void = {
+    private push_name_diagnostic(self, message: String, span: SourceSpan): Void = {
         self.diagnostics.push(
             make_diagnostic(DiagnosticStage.Semantic(), self.source_file, message, span),
         );
@@ -160,26 +160,26 @@ given NameCollector {
 
     private has_conflicting_top_level_name(
         self,
-        name String,
-        access AccessModifier,
-    ) Bool = {
+        name: String,
+        access: AccessModifier,
+    ): Bool = {
         return self.has_existing_top_level_definition(name, access);
     };
 
     private has_conflicting_top_level_type_name(
         self,
-        name String,
-        access AccessModifier,
-    ) Bool = {
+        name: String,
+        access: AccessModifier,
+    ): Bool = {
         return self.has_existing_top_level_definition(name, access);
     };
 
     private has_existing_top_level_definition(
         self,
-        name String,
-        access AccessModifier,
-    ) Bool = {
-        let mutable id UInt = 1;
+        name: String,
+        access: AccessModifier,
+    ): Bool = {
+        let mutable id: UInt = 1;
         let next_def_id = self.context.next_def_id();
         while id < next_def_id then {
             let def_id = DefId(id);
@@ -204,7 +204,7 @@ given NameCollector {
         return false;
     };
 
-    private collect_decl(self, decl Decl) Void = {
+    private collect_decl(self, decl: Decl): Void = {
         when decl in {
             .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {

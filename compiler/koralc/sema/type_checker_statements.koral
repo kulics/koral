@@ -6,15 +6,15 @@
 given TypeChecker {
     report_managed_reference_writeback_if_needed(
         self,
-        target TypedExpr,
-        span SourceSpan,
-    ) Void = {
+        target: TypedExpr,
+        span: SourceSpan,
+    ): Void = {
         let _ = self;
         let _ = target;
         let _ = span;
     };
 
-    inferred_self_value_binding_type(self, expr TypedExpr) Option[Type] = {
+    inferred_self_value_binding_type(self, expr: TypedExpr): Option[Type] = {
         return when expr.expr_kind in {
             .Variable(symbol) then if self.context().symbol_name(symbol) == "self" then {
                 when expr.expr_type in {
@@ -31,10 +31,10 @@ given TypeChecker {
 
     check_value_body_expr(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Block(statements, tail_expression, block_span) then self.check_block(
                 statements,
@@ -47,7 +47,7 @@ given TypeChecker {
         };
     };
 
-    merge_inferred_function_return_type(self, new_type Type) Void = {
+    merge_inferred_function_return_type(self, new_type: Type): Void = {
         if new_type is .NeverType() or self.is_unresolved_expr_type(new_type) then {
             return;
         };
@@ -63,7 +63,7 @@ given TypeChecker {
         };
     };
 
-    note_inferred_void_return(self, span SourceSpan) Void = {
+    note_inferred_void_return(self, span: SourceSpan): Void = {
         if not self.storage.function_return_context.is_inferring then {
             return;
         };
@@ -83,7 +83,7 @@ given TypeChecker {
         );
     };
 
-    wrap_statement_as_block_expr(self, stmt TypedStatement) TypedExpr = {
+    wrap_statement_as_block_expr(self, stmt: TypedStatement): TypedExpr = {
         let mutable block_type = if self.statement_can_fall_through(stmt) then Type.VoidType(
         ) else Type.NeverType();
         let mutable statements = List[TypedStatement].new();
@@ -94,7 +94,7 @@ given TypeChecker {
         );
     };
 
-    source_expr_is_obviously_pure_statement(self, expr Expr) Bool = {
+    source_expr_is_obviously_pure_statement(self, expr: Expr): Bool = {
         let _ = self;
         return when expr in {
             .Identifier(_, _) then true,
@@ -211,7 +211,7 @@ given TypeChecker {
         };
     };
 
-    typed_expr_has_observable_statement_effect(self, expr TypedExpr) Bool = {
+    typed_expr_has_observable_statement_effect(self, expr: TypedExpr): Bool = {
         let direct_effect = when expr.expr_kind in {
             .Call(_, _) then true,
             .GenericCall(_, _, _) then true,
@@ -288,10 +288,10 @@ given TypeChecker {
 
     require_effectful_statement_expression(
         self,
-        source_expr Expr,
-        typed_expr TypedExpr,
-        span SourceSpan,
-    ) Void = {
+        source_expr: Expr,
+        typed_expr: TypedExpr,
+        span: SourceSpan,
+    ): Void = {
         // A statement that already stands accused at this very place is one
         // mistake -- `2;` after a `return` is unreachable AND pure, and the
         // first of those is the one to act on.
@@ -307,7 +307,7 @@ given TypeChecker {
         };
     };
 
-    check_statement_body_expr(self, expr Expr, scope Scope) TypedExpr = {
+    check_statement_body_expr(self, expr: Expr, scope: Scope): TypedExpr = {
         let raw_expr = when expr in {
             .IfExpr(_, _, _, _) then self.wrap_statement_as_block_expr(
                 self.check_if_statement_expr(expr, expr_span(expr), scope),
@@ -370,13 +370,13 @@ given TypeChecker {
 
     check_if_statement_expr(
         self,
-        expr Expr,
-        span SourceSpan,
-        scope Scope,
-    ) TypedStatement = {
+        expr: Expr,
+        span: SourceSpan,
+        scope: Scope,
+    ): TypedStatement = {
         let mutable current = expr;
         let mutable current_span = span;
-        let mutable lower_steps UInt = 0;
+        let mutable lower_steps: UInt = 0;
 
         while true then {
             when current in {
@@ -452,10 +452,10 @@ given TypeChecker {
 
     check_when_statement_expr(
         self,
-        expr Expr,
-        span SourceSpan,
-        scope Scope,
-    ) TypedStatement = {
+        expr: Expr,
+        span: SourceSpan,
+        scope: Scope,
+    ): TypedStatement = {
         return when expr in {
             .WhenExpr(subject, arms, _) then {
                 let raw_typed_subj = self.check_expr_scoped_ref(subject, .None(), scope);
@@ -595,10 +595,10 @@ given TypeChecker {
 
     check_while_statement_expr(
         self,
-        expr Expr,
-        span SourceSpan,
-        scope Scope,
-    ) TypedStatement = {
+        expr: Expr,
+        span: SourceSpan,
+        scope: Scope,
+    ): TypedStatement = {
         return when expr in {
             .WhileExpr(condition, body, _) then {
                 let typed_cond = when condition in {
@@ -630,10 +630,10 @@ given TypeChecker {
 
     check_statement_expr_ref(
         self,
-        expr Expr,
-        span SourceSpan,
-        scope Scope,
-    ) TypedStatement = {
+        expr: Expr,
+        span: SourceSpan,
+        scope: Scope,
+    ): TypedStatement = {
         return when expr in {
             .IfExpr(_, _, _, _) then self.check_if_statement_expr(expr, span, scope),
             .WhenExpr(_, _, _) then self.check_when_statement_expr(expr, span, scope),
@@ -666,11 +666,7 @@ given TypeChecker {
     /// with no tail at all (`Void`), or a non-block body of the wrong type --
     /// the declaration is wrong about what it returns. Blame the declaration:
     /// it is the signature the reader has to fix.
-    validate_body_return_type(
-        self,
-        typed_body TypedExpr,
-        return_type Type,
-    ) Void = {
+    validate_body_return_type(self, typed_body: TypedExpr, return_type: Type): Void = {
         if self.is_unresolved_expr_type(return_type) then {
             return;
         };
@@ -690,12 +686,12 @@ given TypeChecker {
 
     check_block(
         self,
-        statements List[Statement],
-        tail_expression Option[Expr],
-        expected Option[Type],
-        scope Scope,
-        block_span SourceSpan,
-    ) TypedExpr = {
+        statements: List[Statement],
+        tail_expression: Option[Expr],
+        expected: Option[Type],
+        scope: Scope,
+        block_span: SourceSpan,
+    ): TypedExpr = {
         let mutable block_scope = Scope.new_child(scope);
         let typed_block = self.check_block_in_scope(
             statements,
@@ -709,31 +705,27 @@ given TypeChecker {
 
     make_assignment_temp_symbol(
         self,
-        prefix String,
-        t Type,
-        variable_kind VariableKind,
-    ) Symbol = {
+        prefix: String,
+        t: Type,
+        variable_kind: VariableKind,
+    ): Symbol = {
         let def_id = self.allocate_unindexed_def_id(prefix, DefKind.Variable());
         return Symbol(def_id, t, SymbolKind.Variable(variable_kind));
     };
 
     push_assignment_temp_decl(
         self,
-        prefix String,
-        value TypedExpr,
-        variable_kind VariableKind,
-        statements List[TypedStatement],
-    ) Symbol = {
+        prefix: String,
+        value: TypedExpr,
+        variable_kind: VariableKind,
+        statements: List[TypedStatement],
+    ): Symbol = {
         let sym = self.make_assignment_temp_symbol(prefix, value.expr_type, variable_kind);
         statements.push(TypedStatement.LetStmt(sym, value, unknown_span()));
         return sym;
     };
 
-    infer_writable_subscript_base_expr_ref(
-        self,
-        base Expr,
-        scope Scope,
-    ) TypedExpr = {
+    infer_writable_subscript_base_expr_ref(self, base: Expr, scope: Scope): TypedExpr = {
         return when base in {
             .SubscriptExpr(outer_base, outer_args, _) then {
                 let typed_outer_base = self.infer_writable_subscript_base_expr_ref(
@@ -757,7 +749,7 @@ given TypeChecker {
                                 "__index_get",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
-                            let mutable arg_idx UInt = 0;
+                            let mutable arg_idx: UInt = 0;
                             for arg in outer_args then {
                                 let arg_expected = if arg_idx < param_types.count() then Option[Type].Some(
                                     param_types[arg_idx],
@@ -837,14 +829,14 @@ given TypeChecker {
     /// recoverable location is some sub-expression's declaration.
     lower_subscript_assignment_stmt(
         self,
-        base Expr,
-        args List[Expr],
-        value Expr,
-        typed_target TypedExpr,
-        op Option[CompoundAssignmentOperator],
-        scope Scope,
-        target_span SourceSpan,
-    ) TypedStatement = {
+        base: Expr,
+        args: List[Expr],
+        value: Expr,
+        typed_target: TypedExpr,
+        op: Option[CompoundAssignmentOperator],
+        scope: Scope,
+        target_span: SourceSpan,
+    ): TypedStatement = {
         let typed_base = self.infer_writable_subscript_base_expr_ref(base, scope);
         let base_inner_type = self.builtin_subscript_base_type(typed_base.expr_type);
         when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
@@ -1012,7 +1004,7 @@ given TypeChecker {
         else set_param_types.count() - UInt(1);
 
         let mutable typed_args = List[TypedExpr].new();
-        let mutable arg_idx UInt = 0;
+        let mutable arg_idx: UInt = 0;
         for arg in args then {
             let arg_expected = if arg_idx < expected_index_count then Option[Type].Some(
                 set_param_types[arg_idx],
@@ -1214,12 +1206,12 @@ given TypeChecker {
     // reachable at the end.
     check_block_in_scope(
         self,
-        statements List[Statement],
-        tail_expression Option[Expr],
-        expected Option[Type],
-        scope Scope,
-        block_span SourceSpan,
-    ) TypedExpr = {
+        statements: List[Statement],
+        tail_expression: Option[Expr],
+        expected: Option[Type],
+        scope: Scope,
+        block_span: SourceSpan,
+    ): TypedExpr = {
         let diagnostics_before = self.storage.diagnostics.count();
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
@@ -1293,7 +1285,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Block(typed_stmts, typed_tail), block_type);
     };
 
-    statement_terminator_name(self, stmt TypedStatement) Option[String] = {
+    statement_terminator_name(self, stmt: TypedStatement): Option[String] = {
         return when stmt in {
             .ReturnStmt(_, _) then Option[String].Some("return"),
             .BreakStmt(_) then Option[String].Some("break"),
@@ -1309,7 +1301,7 @@ given TypeChecker {
         };
     };
 
-    statement_can_fall_through(self, stmt TypedStatement) Bool = {
+    statement_can_fall_through(self, stmt: TypedStatement): Bool = {
         return when stmt in {
             .ReturnStmt(_, _) then false,
             .BreakStmt(_) then false,
@@ -1334,10 +1326,10 @@ given TypeChecker {
 
     check_statement(
         self,
-        stmt Statement,
-        expected Option[Type],
-        scope Scope,
-    ) TypedStatement = {
+        stmt: Statement,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedStatement = {
         let outer_span = self.enter_current_span(self.statement_span(stmt));
         defer {
             self.leave_current_span(outer_span);
@@ -1585,7 +1577,7 @@ given TypeChecker {
                 // from the subject's DECLARATION, never from a name.
                 let field_types = self.for_tuple_binding_types(pair_type, bindings, span);
                 let mutable symbols = List[Option[Symbol]].new();
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 while i < bindings.count() then {
                     let field_type = when field_types.get(i) in {
                         .Some(t) then t,
@@ -1936,7 +1928,7 @@ given TypeChecker {
         };
     };
 
-    assignment_target_error_name(self, target TypedExpr) String = {
+    assignment_target_error_name(self, target: TypedExpr): String = {
         return when target.expr_kind in {
             .Variable(sym) then self.context().symbol_name(sym),
             .MemberPath(_, path) then if path.is_empty() then "member"
@@ -1946,7 +1938,7 @@ given TypeChecker {
         };
     };
 
-    is_ref_like_assignment_type(self, t Type) Bool = {
+    is_ref_like_assignment_type(self, t: Type): Bool = {
         return when t in {
             .ReferenceType(_) then true,
             .MutableReferenceType(_) then true,
@@ -1960,7 +1952,7 @@ given TypeChecker {
         };
     };
 
-    assignment_target_root_identifier(self, target Expr) Option[String] = {
+    assignment_target_root_identifier(self, target: Expr): Option[String] = {
         return when target in {
             .Identifier(name, _) then Option[String].Some(name),
             .MemberPath(base, _, _) then self.assignment_target_root_identifier(base),
@@ -1970,11 +1962,7 @@ given TypeChecker {
             _ then Option[String].None(),
         };
     };
-    lookup_assignment_root_symbol(
-        self,
-        name String,
-        scope Scope,
-    ) Option[Symbol] = {
+    lookup_assignment_root_symbol(self, name: String, scope: Scope): Option[Symbol] = {
         let local_sym_opt = scope.lookup(name);
         if local_sym_opt is .Some(_) then {
             return local_sym_opt;
@@ -1982,7 +1970,7 @@ given TypeChecker {
         return self.lookup_shared_symbol(name);
     };
 
-    assignment_target_traverses_ref_like_link(self, target TypedExpr) Bool = {
+    assignment_target_traverses_ref_like_link(self, target: TypedExpr): Bool = {
         return when target.expr_kind in {
             .Variable(sym) then self.is_ref_like_assignment_type(sym.symbol_type),
             .MemberPath(base, path) then {
@@ -1990,7 +1978,7 @@ given TypeChecker {
                     return true;
                 };
                 let mutable current = base.expr_type;
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < path.count() then {
                     let segment = path[idx];
                     let mutable segment_type = segment.symbol_type;
@@ -2010,7 +1998,7 @@ given TypeChecker {
         };
     };
 
-    assignment_target_root_is_mutable_typed(self, target TypedExpr) Bool = {
+    assignment_target_root_is_mutable_typed(self, target: TypedExpr): Bool = {
         if self.assignment_target_traverses_ref_like_link(target) then {
             return true;
         };
@@ -2034,7 +2022,7 @@ given TypeChecker {
     };
 
     /// Returns true if the type is a nominal type declared as `type mutable`.
-    is_type_mutable_nominal(self, t Type) Bool = {
+    is_type_mutable_nominal(self, t: Type): Bool = {
         return when t in {
             .StructureType(def_id) then self.context().def_id_map.is_struct_mutable(
                 def_id,
@@ -2052,10 +2040,10 @@ given TypeChecker {
 
     assignment_target_root_is_mutable(
         self,
-        original_target Expr,
-        target TypedExpr,
-        scope Scope,
-    ) Bool = {
+        original_target: Expr,
+        target: TypedExpr,
+        scope: Scope,
+    ): Bool = {
         return when self.assignment_target_root_identifier(original_target) in {
             .Some(name) then when self.lookup_assignment_root_symbol(name, scope) in {
                 // A mutable root, or one that is a reference into something
@@ -2069,11 +2057,7 @@ given TypeChecker {
         };
     };
 
-    check_assignment_target_expr_ref(
-        self,
-        target Expr,
-        scope Scope,
-    ) TypedExpr = {
+    check_assignment_target_expr_ref(self, target: Expr, scope: Scope): TypedExpr = {
         return when target in {
             .DerefExpr(inner, span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
@@ -2219,7 +2203,7 @@ given TypeChecker {
 
     /// Recursively lower subscript bases in writable member path targets
     /// through mut_ref_at, matching Swift's inferWritableMemberBase behavior.
-    infer_writable_member_base(self, base Expr, scope Scope) TypedExpr = {
+    infer_writable_member_base(self, base: Expr, scope: Scope): TypedExpr = {
         return when base in {
             .SubscriptExpr(outer_base, outer_args, _) then {
                 let typed_outer_base = self.infer_writable_member_base(outer_base, scope);
@@ -2240,7 +2224,7 @@ given TypeChecker {
                                 "__index_get",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
-                            let mutable arg_idx UInt = 0;
+                            let mutable arg_idx: UInt = 0;
                             for arg in outer_args then {
                                 let arg_expected = if arg_idx < param_types.count() then Option[Type].Some(
                                     param_types[arg_idx],
@@ -2314,11 +2298,7 @@ given TypeChecker {
         };
     };
 
-    member_is_mutable_for_assignment(
-        self,
-        base_type Type,
-        member String,
-    ) Bool = {
+    member_is_mutable_for_assignment(self, base_type: Type, member: String): Bool = {
         let inner_type = when base_type in {
             .MutableReferenceType(inner) then inner,
             .MutablePointerType(inner) then inner,
@@ -2390,7 +2370,7 @@ given TypeChecker {
     /// path has already said `Member 'x' not found in type 'T'`, and the
     /// immutability rules below would only add a second line naming the wrong
     /// rule ("Cannot assign to immutable variable: x").
-    assignment_target_has_unresolved_member(self, target TypedExpr) Bool = {
+    assignment_target_has_unresolved_member(self, target: TypedExpr): Bool = {
         return when target.expr_kind in {
             .MemberPath(base, path) then {
                 if self.assignment_target_has_unresolved_member(base) then {
@@ -2407,10 +2387,7 @@ given TypeChecker {
         };
     };
 
-    first_immutable_field_in_assignment_target(
-        self,
-        target TypedExpr,
-    ) Option[String] = {
+    first_immutable_field_in_assignment_target(self, target: TypedExpr): Option[String] = {
         return when target.expr_kind in {
             .MemberPath(base, path) then {
                 let prior = self.first_immutable_field_in_assignment_target(base);
@@ -2418,7 +2395,7 @@ given TypeChecker {
                     return prior;
                 };
                 let mutable current = base.expr_type;
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < path.count() then {
                     let segment = path[idx];
                     let is_last = idx + UInt(1) == path.count();

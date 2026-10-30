@@ -14,24 +14,24 @@ using "std/os" { ... };
 // ── ModuleError ───────────────────────────────────────────────────────────────
 
 public type ModuleError {
-    FileNotFound(file String, search_path String),
-    CircularDependency(path List[String]),
-    InvalidModulePath(path String),
-    DuplicateUsing(name String, span SourceSpan),
-    ParseError(file String, message String),
-    InvalidEntryFileName(filename String, reason String),
-    UnknownPackageName(name String, known List[String], span SourceSpan),
-    UnknownModule(name String, package_name String, declared List[String], span SourceSpan),
-    NoMainModule(package_name String, declared List[String], span SourceSpan),
-    InvalidModuleSpecifier(specifier String, span SourceSpan),
-    CrossPackageMerge(specifier String, span SourceSpan),
-    FileClaimedTwice(file String, owner String, claimant String),
+    FileNotFound(file: String, search_path: String),
+    CircularDependency(path: List[String]),
+    InvalidModulePath(path: String),
+    DuplicateUsing(name: String, span: SourceSpan),
+    ParseError(file: String, message: String),
+    InvalidEntryFileName(filename: String, reason: String),
+    UnknownPackageName(name: String, known: List[String], span: SourceSpan),
+    UnknownModule(name: String, package_name: String, declared: List[String], span: SourceSpan),
+    NoMainModule(package_name: String, declared: List[String], span: SourceSpan),
+    InvalidModuleSpecifier(specifier: String, span: SourceSpan),
+    CrossPackageMerge(specifier: String, span: SourceSpan),
+    FileClaimedTwice(file: String, owner: String, claimant: String),
 };
 
 given ModuleError {
     /// Where the failure is written, when it points at a token. A failure that
     /// names files rather than source (a missing file, a merge ring) has none.
-    public span(self) Option[SourceSpan] = when self in {
+    public span(self): Option[SourceSpan] = when self in {
         .DuplicateUsing(_, span) then Option[SourceSpan].Some(span),
         .UnknownPackageName(_, _, span) then Option[SourceSpan].Some(span),
         .UnknownModule(_, _, _, span) then Option[SourceSpan].Some(span),
@@ -44,7 +44,7 @@ given ModuleError {
     /// `path:line:col: error: msg` when it points at a token, `path: error: msg`
     /// when it only names a file. The stage is `error` either way: these are
     /// module-resolution failures, not lexer or parser ones.
-    public render(self, fallback_file String) String = {
+    public render(self, fallback_file: String): String = {
         let msg = self.message();
         when self.span() in {
             .Some(span) then {
@@ -60,8 +60,8 @@ given ModuleError {
     };
 };
 
-given ModuleError as Error {
-    public message(self) String = {
+given ModuleError: Error {
+    public message(self): String = {
         return when self in {
             .FileNotFound(file, search_path) then "File '\(file)' not found in '\(search_path)'",
             .CircularDependency(path) then {
@@ -99,46 +99,46 @@ given ModuleError as Error {
 };
 
 private type PendingUsing {
-    Module(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
-    LocalModule(specifier String, span SourceSpan, items Option[List[UsingModuleItem]], import_all Bool),
-    File(specifier String, span SourceSpan),
+    Module(specifier: String, span: SourceSpan, items: Option[List[UsingModuleItem]], import_all: Bool),
+    LocalModule(specifier: String, span: SourceSpan, items: Option[List[UsingModuleItem]], import_all: Bool),
+    File(specifier: String, span: SourceSpan),
 };
 
 // ── ModuleResolver ────────────────────────────────────────────────────────────
 
 type mutable ModuleResolverStorage(
-    mutable resolving_files List[String],
+    mutable resolving_files: List[String],
     // The packages a `using` name can name. Absent for a bare-file compile,
     // where `using` can only merge files.
-    mutable registry Option[PackageRegistry],
-    mutable root_package Option[LoadedPackage],
+    mutable registry: Option[PackageRegistry],
+    mutable root_package: Option[LoadedPackage],
     // Root-view full name -> the module it names, as loaded.
-    mutable module_index Dict[String, ResolvedModuleSpec],
+    mutable module_index: Dict[String, ResolvedModuleSpec],
     // Modules currently being loaded, for import-cycle detection.
-    mutable module_stack List[String],
+    mutable module_stack: List[String],
     // Which module's closure already claims each source file (§7). A file is
     // compiled into exactly one module; a second claim is an error rather than
     // a second copy of the same declarations under a different identity.
-    mutable claimed_files Dict[String, String],
+    mutable claimed_files: Dict[String, String],
 );
 
-public type mutable ModuleResolver(mutable storage ModuleResolverStorage);
+public type mutable ModuleResolver(mutable storage: ModuleResolverStorage);
 
 public type ResolvedModuleGraph(
-    root_module_path String,
-    import_graph ImportGraph,
-    loaded_nodes List[LoadedNode],
-    loaded_nodes_with_path List[Pair[LoadedNode, List[String]]],
-    node_source_paths List[String],
-    module_paths List[List[String]],
-    source_files List[String],
+    root_module_path: String,
+    import_graph: ImportGraph,
+    loaded_nodes: List[LoadedNode],
+    loaded_nodes_with_path: List[Pair[LoadedNode, List[String]]],
+    node_source_paths: List[String],
+    module_paths: List[List[String]],
+    source_files: List[String],
     // Module path (dotted) -> derived symbol key (§5.3.1): what C symbol
     // prefixes derive from, kept beside the name-based `module_paths`.
-    module_symbol_keys Dict[String, String],
+    module_symbol_keys: Dict[String, String],
 );
 
 given ModuleResolver {
-    public new() ModuleResolver = {
+    public new(): ModuleResolver = {
         let s = ModuleResolverStorage(
             List[String].new(),
             Option[PackageRegistry].None(),
@@ -153,7 +153,7 @@ given ModuleResolver {
     /// Install the package table `using` names resolve against. Without one,
     /// a module import has nothing it could name and is reported as an unknown
     /// package.
-    public set_packages(self, registry PackageRegistry, root LoadedPackage) Void = {
+    public set_packages(self, registry: PackageRegistry, root: LoadedPackage): Void = {
         self.storage.registry = Option[PackageRegistry].Some(registry);
         self.storage.root_package = Option[LoadedPackage].Some(root);
     };
@@ -162,9 +162,9 @@ given ModuleResolver {
     /// statements reach, into `unit`.
     public resolve_module_spec(
         self,
-        spec ResolvedModuleSpec,
-        unit CompilationUnit,
-    ) Result[ModuleInfo] = {
+        spec: ResolvedModuleSpec,
+        unit: CompilationUnit,
+    ): Result[ModuleInfo] = {
         // `CompilationUnit` keys modules by their dotted path, so that is the
         // key to look up by -- not the display full name. Two spellings for one
         // module means loading it twice.
@@ -204,10 +204,10 @@ given ModuleResolver {
     /// Parse and process a single file into a module.
     private resolve_file(
         self,
-        file String,
-        module ModuleInfo,
-        unit CompilationUnit,
-    ) Result[Void] = {
+        file: String,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+    ): Result[Void] = {
         let normalized_file = when absolute_path(file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
@@ -315,10 +315,10 @@ given ModuleResolver {
 
     private collect_pending_usings(
         self,
-        normalized_file String,
-        module ModuleInfo,
-        unit CompilationUnit,
-    ) Result[List[PendingUsing]] = {
+        normalized_file: String,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+    ): Result[List[PendingUsing]] = {
         module_debug("[module] read: begin");
 
         let source = read_text_file(normalized_file.into_path()) or else {
@@ -346,9 +346,9 @@ given ModuleResolver {
         for decl in program.declarations then {
             when decl in {
                 .UsingDecl(specifier, items, import_all, span) then {
-                    let is_path = specifier.starts_with("./") or specifier.starts_with("../") or specifier.starts_with(
-                        ".\\",
-                    ) or specifier.starts_with("..\\");
+                    let is_path = specifier.starts_with("./") or specifier.starts_with(
+                        "../",
+                    ) or specifier.starts_with(".\\") or specifier.starts_with("..\\");
                     if is_path and items is .Some(_) then {
                         // A local path with braces imports from the module
                         // rooted at that entry file (§3.1). The entry file is
@@ -378,12 +378,12 @@ given ModuleResolver {
     /// a dependency's source names its own packages, not the consumer's (§4).
     private resolve_module_import(
         self,
-        specifier String,
-        specifier_span SourceSpan,
-        module ModuleInfo,
-        unit CompilationUnit,
-        load Bool,
-    ) Result[ResolvedModuleSpec] = {
+        specifier: String,
+        specifier_span: SourceSpan,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        load: Bool,
+    ): Result[ResolvedModuleSpec] = {
         // The specifier is `package[/subpath]`. The first segment is a package
         // name; the rest is the subpath inside it (§4). There is no lookup that
         // skips the package -- a bare subpath is not a spelling of anything.
@@ -485,15 +485,15 @@ given ModuleResolver {
 
     private record_module_using(
         self,
-        specifier String,
-        specifier_span SourceSpan,
-        items Option[List[UsingModuleItem]],
-        import_all Bool,
-        module ModuleInfo,
-        unit CompilationUnit,
-        current_file String,
-        imported_this_file Set[String],
-    ) Result[Void] = {
+        specifier: String,
+        specifier_span: SourceSpan,
+        items: Option[List[UsingModuleItem]],
+        import_all: Bool,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        current_file: String,
+        imported_this_file: Set[String],
+    ): Result[Void] = {
         let is_merge = items is .None();
         let spec = self.resolve_module_import(
             specifier,
@@ -522,13 +522,7 @@ given ModuleResolver {
                 // one and its boundary is gone. It is the same operation the
                 // `./` path form performs -- a specifier only says where the
                 // target is, not what happens to it.
-                return self.merge_module_into(
-                    spec,
-                    specifier,
-                    specifier_span,
-                    module,
-                    unit,
-                );
+                return self.merge_module_into(spec, specifier, specifier_span, module, unit);
             },
             .Some(list) then {
                 if import_all then {
@@ -601,15 +595,15 @@ given ModuleResolver {
     /// (bare form) or imported by name if a manifest entry names it.
     private record_local_module_using(
         self,
-        specifier String,
-        specifier_span SourceSpan,
-        items Option[List[UsingModuleItem]],
-        import_all Bool,
-        module ModuleInfo,
-        unit CompilationUnit,
-        current_file String,
-        imported_this_file Set[String],
-    ) Result[Void] = {
+        specifier: String,
+        specifier_span: SourceSpan,
+        items: Option[List[UsingModuleItem]],
+        import_all: Bool,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        current_file: String,
+        imported_this_file: Set[String],
+    ): Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string();
         let mutable target = current_dir.into_path();
         for segment in specifier.split("/") then {
@@ -726,7 +720,7 @@ given ModuleResolver {
     /// The `package_root` of the registered package whose source tree contains
     /// `file_path` -- longest match wins, since a path dependency may sit inside
     /// the root package's tree. `None` when no package claims the file.
-    private package_root_containing(self, file_path String) Option[String] = {
+    private package_root_containing(self, file_path: String): Option[String] = {
         let entry_path = (when absolute_path(file_path.into_path()) in {
             .Ok(p) then p,
             .Error(_) then file_path.into_path(),
@@ -745,7 +739,7 @@ given ModuleResolver {
             .None() then {},
         };
         let mutable best = Option[String].None();
-        let mutable best_len UInt = 0;
+        let mutable best_len: UInt = 0;
         let entry_str = entry_path.to_string();
         for pkg in candidates then {
             let root_str = pkg.manifest.package_root.into_path().normalize().to_string();
@@ -772,12 +766,12 @@ given ModuleResolver {
     /// most one module, and once merged it can no longer be imported (§7).
     private merge_module_into(
         self,
-        spec ResolvedModuleSpec,
-        specifier String,
-        specifier_span SourceSpan,
-        module ModuleInfo,
-        unit CompilationUnit,
-    ) Result[Void] = {
+        spec: ResolvedModuleSpec,
+        specifier: String,
+        specifier_span: SourceSpan,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+    ): Result[Void] = {
         // Merge dissolves the target's boundary, so it stays inside one package
         // (§3.2): the target's `internal` names become this module's and
         // its declarations join this package's identity. Another package's
@@ -811,12 +805,12 @@ given ModuleResolver {
     // Resolves a normalized relative source path against the current file's directory and merges it.
     private resolve_file_merge(
         self,
-        file_name String,
-        using_span SourceSpan,
-        module ModuleInfo,
-        unit CompilationUnit,
-        current_file String,
-    ) Result[Void] = {
+        file_name: String,
+        using_span: SourceSpan,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+        current_file: String,
+    ): Result[Void] = {
         let current_dir = current_file.into_path().dir_name().to_string();
         if not file_name.ends_with(".koral") then {
             return Result[Void].Error(
@@ -905,16 +899,20 @@ given ModuleResolver {
     /// Load a bare file's contents into an already-created module. There is no
     /// package table behind a bare file, so a module import here has nothing it
     /// could name.
-    public resolve_single_file(self, module ModuleInfo, unit CompilationUnit) Result[Void] = {
+    public resolve_single_file(
+        self,
+        module: ModuleInfo,
+        unit: CompilationUnit,
+    ): Result[Void] = {
         return self.resolve_file(module.entry_file(), module, unit);
     };
 
     // Main entry: resolve a module from its entry file.
     public resolve_module_with_path(
         self,
-        entry_file String,
-        root_module_path Option[List[String]],
-    ) Result[CompilationUnit] = {
+        entry_file: String,
+        root_module_path: Option[List[String]],
+    ): Result[CompilationUnit] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(e) then {
@@ -967,7 +965,7 @@ given ModuleResolver {
         return Result[CompilationUnit].Ok(unit);
     };
 
-    public resolve_module(self, entry_file String) Result[CompilationUnit] = {
+    public resolve_module(self, entry_file: String): Result[CompilationUnit] = {
         return self.resolve_module_with_path(entry_file, Option[List[String]].None());
     };
 
@@ -983,9 +981,9 @@ given ModuleResolver {
     /// own `using` statements reach.
     public resolve_for_typecheck(
         self,
-        entry_file String,
-        no_std Bool,
-    ) Result[ResolvedModuleGraph] = {
+        entry_file: String,
+        no_std: Bool,
+    ): Result[ResolvedModuleGraph] = {
         let abs_path = when absolute_path(entry_file.into_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then entry_file,
@@ -1058,7 +1056,7 @@ given ModuleResolver {
     };
 
     /// Every module spec this resolver has loaded, in no particular order.
-    public loaded_module_specs(self) List[ResolvedModuleSpec] = {
+    public loaded_module_specs(self): List[ResolvedModuleSpec] = {
         let mutable specs = List[ResolvedModuleSpec].new();
         for kv in self.storage.module_index.iterator() then {
             specs.push(kv.second);
@@ -1068,8 +1066,8 @@ given ModuleResolver {
 
     private collect_unique_module_paths(
         self,
-        loaded_nodes_with_path List[Pair[LoadedNode, List[String]]],
-    ) List[List[String]] = {
+        loaded_nodes_with_path: List[Pair[LoadedNode, List[String]]],
+    ): List[List[String]] = {
         let mutable seen = Set[String].new();
         let mutable module_paths = List[List[String]].new();
         for pair in loaded_nodes_with_path.iterator() then {
@@ -1084,7 +1082,7 @@ given ModuleResolver {
         return module_paths;
     };
 
-    private collect_unique_sources(self, loaded_nodes List[LoadedNode]) List[String] = {
+    private collect_unique_sources(self, loaded_nodes: List[LoadedNode]): List[String] = {
         let mutable seen = Set[String].new();
         let mutable source_files = List[String].new();
         for node in loaded_nodes.iterator() then {
@@ -1102,7 +1100,7 @@ given ModuleResolver {
 
 /// `"std:std"` / `"root:<name>"` / `"dependency:<key>"` -- the tag later passes
 /// key cross-package visibility on.
-public let package_id_for_kind(kind ResolvedPackageKind) String = when kind in {
+public let package_id_for_kind(kind: ResolvedPackageKind): String = when kind in {
     .Root() then "root:user",
     .Std() then "std:std",
     .Dependency(key) then "dependency:\(key)",
@@ -1111,14 +1109,14 @@ public let package_id_for_kind(kind ResolvedPackageKind) String = when kind in {
 /// Whether `package_id` is std's. Decided by the identity
 /// `package_id_for_kind` mints -- never by a module path or a user spelling,
 /// either of which a package can choose freely.
-public let is_std_package_id(package_id String) Bool = {
+public let is_std_package_id(package_id: String): Bool = {
     return package_id == package_id_for_kind(.Std());
 };
 
 /// Sorted, comma-joined -- or `<none>` when there is nothing to list. Order
 /// must not depend on hash iteration, because the text is compared across
 /// compilers.
-private let join_sorted(values List[String]) String = {
+private let join_sorted(values: List[String]): String = {
     if values.is_empty() then {
         return "<none>";
     };
@@ -1128,7 +1126,7 @@ private let join_sorted(values List[String]) String = {
 };
 
 /// The keys a package's manifest declares, for "module not found" messages.
-public let declared_module_keys(manifest PackageManifest) List[String] = {
+public let declared_module_keys(manifest: PackageManifest): List[String] = {
     let mutable keys = List[String].new();
     let mutable iter = manifest.modules.iterator();
     while iter.next() is .Some(entry) then {
@@ -1140,7 +1138,7 @@ public let declared_module_keys(manifest PackageManifest) List[String] = {
 
 // Convert PascalCase module identifier to snake_case file name
 // e.g. "Primitives" -> "primitives", "BufReader" -> "buf_reader", "Std" -> "std"
-public let module_identifier_to_file_name(identifier String) String = {
+public let module_identifier_to_file_name(identifier: String): String = {
     if identifier.is_empty() then {
         return identifier;
     };
@@ -1163,7 +1161,7 @@ public let module_identifier_to_file_name(identifier String) String = {
 
 // Render a module path as the `using` specifier a user would actually write.
 // ["Std", "Time"] -> "std/time". Diagnostics must quote code, not internal names.
-public let module_path_to_using_specifier(module_path List[String]) String = {
+public let module_path_to_using_specifier(module_path: List[String]): String = {
     let mutable parts = List[String].new();
     for seg in module_path then {
         parts.push(module_identifier_to_file_name(seg));
@@ -1173,7 +1171,7 @@ public let module_path_to_using_specifier(module_path List[String]) String = {
 
 // Convert snake_case file name to PascalCase module identifier
 // e.g. "primitives" -> "Primitives", "buf_reader" -> "BufReader"
-public let module_file_name_to_identifier(filename String) String = {
+public let module_file_name_to_identifier(filename: String): String = {
     let mutable result = StringBuilder.new();
     let mutable capitalize_next = true;
     let runes = filename.to_runes();
@@ -1191,7 +1189,7 @@ public let module_file_name_to_identifier(filename String) String = {
     return result.to_string();
 };
 
-private let module_debug(message String) Void = {
+private let module_debug(message: String): Void = {
     if env("KORAL_DEBUG_MODULE") is .Some(v) and (v == "1" or v == "true" or v == "TRUE") then {
         eprintln(message);
     };

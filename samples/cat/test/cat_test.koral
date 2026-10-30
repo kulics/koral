@@ -7,33 +7,33 @@ using "std/proc" { ... };
 
 type TestResult {
     Pass(),
-    Fail(message String),
+    Fail(message: String),
 };
 
-type TestCase(name String, result TestResult);
+type TestCase(name: String, result: TestResult);
 
-type ProcessOutput(stdout String, stderr String, exit_code Int);
+type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
 
-let pass() TestResult = TestResult.Pass();
-let fail(msg String) TestResult = TestResult.Fail(msg);
+let pass(): TestResult = TestResult.Pass();
+let fail(msg: String): TestResult = TestResult.Fail(msg);
 
-let create_temp_text_file(name String, content String) Result[String] = {
+let create_temp_text_file(name: String, content: String): Result[String] = {
     let path = name.into_path();
-    write_text_file(path, content: content) or return;
+    write_text_file(path, content = content) or return;
     return Result[String].Ok(name);
 };
 
-let cleanup_temp_file(path String) Void = {
+let cleanup_temp_file(path: String): Void = {
     let _ = remove_file(path.into_path());
 };
 
-let cleanup_temp_files(paths List[String]) Void = {
+let cleanup_temp_files(paths: List[String]): Void = {
     for path in paths then {
         cleanup_temp_file(path);
     };
 };
 
-let run_cat(args List[String]) Result[ProcessOutput] = {
+let run_cat(args: List[String]): Result[ProcessOutput] = {
     let cat_bin = if env("OS") is .Some(os) and os.contains("Windows") then "./bin/sample-cat/cat.exe"
     else "./bin/sample-cat/cat";
     let cmd = Command.new(cat_bin).args(args).set_stdin(IoRedirect.Null());
@@ -42,7 +42,7 @@ let run_cat(args List[String]) Result[ProcessOutput] = {
     return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
 };
 
-let assert_eq(actual String, expected String, msg String) TestResult = {
+let assert_eq(actual: String, expected: String, msg: String): TestResult = {
     if actual == expected then {
         return pass();
     };
@@ -55,18 +55,18 @@ let assert_eq(actual String, expected String, msg String) TestResult = {
     return fail(m.to_string());
 };
 
-let normalize_newlines(s String) String = {
-    return s.replace_all("\r\n", with: "\n");
+let normalize_newlines(s: String): String = {
+    return s.replace_all("\r\n", with = "\n");
 };
 
-let assert_true(cond Bool, msg String) TestResult = {
+let assert_true(cond: Bool, msg: String): TestResult = {
     if cond then {
         return pass();
     };
     return fail(msg);
 };
 
-let test_single_file() TestResult = {
+let test_single_file(): TestResult = {
     let path = create_temp_text_file("tmp_cat_single.txt", "Hello\nWorld\n") or else {
         return fail("cannot create temp file for single file test");
     };
@@ -86,7 +86,7 @@ let test_single_file() TestResult = {
     return fail("single file exit code is not 0");
 };
 
-let test_multiple_files() TestResult = {
+let test_multiple_files(): TestResult = {
     let a = create_temp_text_file("tmp_cat_multi_1.txt", "A\n") or else {
         return fail("cannot create first temp file");
     };
@@ -107,7 +107,7 @@ let test_multiple_files() TestResult = {
     );
 };
 
-let test_number_all_lines() TestResult = {
+let test_number_all_lines(): TestResult = {
     let path = create_temp_text_file("tmp_cat_n.txt", "Line 1\nLine 2\n\nLine 4\n") or else {
         return fail("cannot create temp file for -n test");
     };
@@ -121,7 +121,7 @@ let test_number_all_lines() TestResult = {
     return assert_eq(normalize_newlines(out.stdout), expected, "-n formatting mismatch");
 };
 
-let test_number_nonblank() TestResult = {
+let test_number_nonblank(): TestResult = {
     let path = create_temp_text_file("tmp_cat_b.txt", "Line 1\n\nLine 3\n") or else {
         return fail("cannot create temp file for -b test");
     };
@@ -135,7 +135,7 @@ let test_number_nonblank() TestResult = {
     return assert_eq(normalize_newlines(out.stdout), expected, "-b formatting mismatch");
 };
 
-let test_squeeze_blank() TestResult = {
+let test_squeeze_blank(): TestResult = {
     let path = create_temp_text_file("tmp_cat_s.txt", "A\n\n\n\nB\n") or else {
         return fail("cannot create temp file for -s test");
     };
@@ -148,7 +148,7 @@ let test_squeeze_blank() TestResult = {
     return assert_eq(normalize_newlines(out.stdout), "A\n\nB\n", "-s squeeze mismatch");
 };
 
-let test_show_ends_tabs_all() TestResult = {
+let test_show_ends_tabs_all(): TestResult = {
     let path = create_temp_text_file("tmp_cat_special.txt", "X\tY\n") or else {
         return fail("cannot create temp file for -E/-T/-A test");
     };
@@ -177,7 +177,7 @@ let test_show_ends_tabs_all() TestResult = {
     return assert_true(ok_e and ok_t and ok_a, "-E/-T/-A behavior mismatch");
 };
 
-let test_invalid_option() TestResult = {
+let test_invalid_option(): TestResult = {
     let out = run_cat(["--badopt"]) or else {
         return fail("invalid option command failed");
     };
@@ -185,7 +185,7 @@ let test_invalid_option() TestResult = {
     return assert_true(ok, "invalid option not reported");
 };
 
-let test_missing_file() TestResult = {
+let test_missing_file(): TestResult = {
     let out = run_cat(["no_such_file_12345.txt"]) or else {
         return fail("missing file command failed");
     };
@@ -193,7 +193,7 @@ let test_missing_file() TestResult = {
     return assert_true(ok, "missing file not reported");
 };
 
-let test_help_and_version() TestResult = {
+let test_help_and_version(): TestResult = {
     let help = run_cat(["--help"]) or else {
         return fail("help command failed");
     };
@@ -207,7 +207,7 @@ let test_help_and_version() TestResult = {
     return assert_true(ok, "help/version output mismatch");
 };
 
-let property_multifile_roundtrip() TestResult = {
+let property_multifile_roundtrip(): TestResult = {
     for i in 0..<20 then {
         let mutable paths = List[String].new();
         defer cleanup_temp_files(paths);
@@ -250,7 +250,7 @@ let property_multifile_roundtrip() TestResult = {
     return pass();
 };
 
-let run_case(name String, r TestResult) TestCase = {
+let run_case(name: String, r: TestResult): TestCase = {
     print("- ");
     print(name);
     print(" ... ");
@@ -267,7 +267,7 @@ let run_case(name String, r TestResult) TestCase = {
     return TestCase(name, r);
 };
 
-public let main() Int = {
+public let main(): Int = {
     println("========================================");
     println("koral-cat merged test suite");
     println("========================================");
@@ -286,8 +286,8 @@ public let main() Int = {
         run_case("property: multifile roundtrip", property_multifile_roundtrip()),
     );
 
-    let mutable passed UInt = 0;
-    let mutable failed UInt = 0;
+    let mutable passed: UInt = 0;
+    let mutable failed: UInt = 0;
     for test in tests then {
         when test.result in {
             .Pass() then {

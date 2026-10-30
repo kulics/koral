@@ -1,5 +1,5 @@
 given TypeChecker {
-    should_defer_explicit_trait_check(self, t Type) Bool = {
+    should_defer_explicit_trait_check(self, t: Type): Bool = {
         return when t in {
             .Unknown() then true,
             .TypeVar(_) then true,
@@ -10,10 +10,10 @@ given TypeChecker {
 
     check_expr_scoped_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         let skip_call_family_expr = if self.skip_call_family_debug_enabled() then when expr in {
             .Call(_, _, _) then true,
             .GenericMethodCall(_, _, _, _, _) then true,
@@ -91,7 +91,7 @@ given TypeChecker {
         return self.check_expr_core_ref(expr, expected, scope);
     };
 
-    flatten_left_assoc_and_operands(self, expr Expr) List[Expr] = {
+    flatten_left_assoc_and_operands(self, expr: Expr): List[Expr] = {
         let mutable reversed_tail = List[Expr].new();
         let mutable current = expr;
         while true then {
@@ -116,7 +116,7 @@ given TypeChecker {
         return operands;
     };
 
-    flatten_left_assoc_or_operands(self, expr Expr) List[Expr] = {
+    flatten_left_assoc_or_operands(self, expr: Expr): List[Expr] = {
         let mutable reversed_tail = List[Expr].new();
         let mutable current = expr;
         while true then {
@@ -143,10 +143,10 @@ given TypeChecker {
 
     require_boolean_logical_operand(
         self,
-        left TypedExpr,
-        right TypedExpr,
-        span SourceSpan,
-    ) Void = {
+        left: TypedExpr,
+        right: TypedExpr,
+        span: SourceSpan,
+    ): Void = {
         if left.expr_type is not .BoolType() or right.expr_type is not .BoolType() then {
             self.push_diagnostic_at_span(
                 "Type mismatch: expected Bool, got \(self.display_type_name(left.expr_type)) and \(self.display_type_name(right.expr_type))",
@@ -155,7 +155,7 @@ given TypeChecker {
         };
     };
 
-    check_and_expr_iterative(self, expr Expr, scope Scope) TypedExpr = {
+    check_and_expr_iterative(self, expr: Expr, scope: Scope): TypedExpr = {
         let operands = self.flatten_left_assoc_and_operands(expr);
         let mutable typed_operands = List[TypedExpr].new();
         for operand in operands then {
@@ -171,7 +171,7 @@ given TypeChecker {
             return make_typed_expr(TypedExprKind.BoolLiteral(true), Type.BoolType());
         };
         let mutable current = (typed_operands[UInt(0)]);
-        let mutable i UInt = 1;
+        let mutable i: UInt = 1;
         while i < typed_operands.count() then {
             let right = (typed_operands[i]);
             self.require_boolean_logical_operand(current, right, expr_span(expr));
@@ -184,7 +184,7 @@ given TypeChecker {
         return current;
     };
 
-    check_or_expr_iterative(self, expr Expr, scope Scope) TypedExpr = {
+    check_or_expr_iterative(self, expr: Expr, scope: Scope): TypedExpr = {
         let operands = self.flatten_left_assoc_or_operands(expr);
         let mutable typed_operands = List[TypedExpr].new();
         for operand in operands then {
@@ -200,7 +200,7 @@ given TypeChecker {
             return make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType());
         };
         let mutable current = (typed_operands[UInt(0)]);
-        let mutable i UInt = 1;
+        let mutable i: UInt = 1;
         while i < typed_operands.count() then {
             let right = (typed_operands[i]);
             self.require_boolean_logical_operand(current, right, expr_span(expr));
@@ -215,10 +215,10 @@ given TypeChecker {
 
     collect_bitwise_chain(
         self,
-        left Expr,
-        op BitwiseOperator,
-        right Expr,
-    ) Pair[List[Expr], List[BitwiseOperator]] = {
+        left: Expr,
+        op: BitwiseOperator,
+        right: Expr,
+    ): Pair[List[Expr], List[BitwiseOperator]] = {
         let mutable ops_rev = List[BitwiseOperator].new();
         let mutable rhs_rev = List[Expr].new();
         let mutable current_left = left;
@@ -260,10 +260,10 @@ given TypeChecker {
 
     collect_if_chain(
         self,
-        condition Expr,
-        then_branch Expr,
-        else_branch Option[Expr],
-    ) IfChain = {
+        condition: Expr,
+        then_branch: Expr,
+        else_branch: Option[Expr],
+    ): IfChain = {
         let mutable arms = List[Pair[Expr, Expr]].new();
         arms.push(Pair[Expr, Expr](condition, then_branch));
         let mutable current_else = else_branch;
@@ -288,7 +288,7 @@ given TypeChecker {
         return IfChain(arms, Option[Expr].None());
     };
 
-    pattern_contains_bindings(self, pattern PatternNode) Bool = {
+    pattern_contains_bindings(self, pattern: PatternNode): Bool = {
         let mutable names = Set[String].new();
         let mutable stack = List[PatternNode].new();
         stack.push(pattern);
@@ -339,7 +339,7 @@ given TypeChecker {
         return not names.is_empty();
     };
 
-    condition_contains_is_with_bindings(self, expr Expr) Bool = {
+    condition_contains_is_with_bindings(self, expr: Expr): Bool = {
         return when expr in {
             .IsExpr(_, pattern, _) then self.pattern_contains_bindings(pattern),
             .AndExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(
@@ -356,7 +356,7 @@ given TypeChecker {
         };
     };
 
-    condition_contains_is_expression(self, expr Expr) Bool = {
+    condition_contains_is_expression(self, expr: Expr): Bool = {
         return when expr in {
             .IsExpr(...) then true,
             .AndExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(
@@ -373,7 +373,7 @@ given TypeChecker {
         };
     };
 
-    condition_requires_pattern_lowering(self, expr Expr) Bool = {
+    condition_requires_pattern_lowering(self, expr: Expr): Bool = {
         return when expr in {
             .IsExpr(...) then true,
             .AndExpr(left, right, _) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(
@@ -390,7 +390,7 @@ given TypeChecker {
     ///
     /// The rule is about a binding written in a pattern, so the violation is
     /// reported ON THAT `is` -- not on the `or` / `not` that happens to wrap it.
-    first_is_with_bindings(self, expr Expr) Option[Expr] = {
+    first_is_with_bindings(self, expr: Expr): Option[Expr] = {
         return when expr in {
             .IsExpr(_, pattern, _) then if self.pattern_contains_bindings(pattern) then Option[Expr].Some(
                 expr,
@@ -419,7 +419,7 @@ given TypeChecker {
     /// on top of the one real message. Swift stops at the first diagnostic;
     /// koralc keeps checking, so the two streams only agree when a rejection
     /// leaves the names defined.
-    bind_rejected_is_patterns(self, expr Expr, scope Scope) Void = {
+    bind_rejected_is_patterns(self, expr: Expr, scope: Scope): Void = {
         when expr in {
             .IsExpr(subject, pattern, _) then {
                 let typed_subj = self.check_expr_scoped_ref(
@@ -450,7 +450,7 @@ given TypeChecker {
         };
     };
 
-    check_or_branches_for_bindings(self, expr Expr) Bool = {
+    check_or_branches_for_bindings(self, expr: Expr): Bool = {
         return when expr in {
             .OrExpr(left, right, _) then {
                 let offending = if self.condition_contains_is_with_bindings(left) then self.first_is_with_bindings(
@@ -489,7 +489,7 @@ given TypeChecker {
         };
     };
 
-    flatten_and_chain_into(self, expr Expr, out List[Expr]) Void = {
+    flatten_and_chain_into(self, expr: Expr, out: List[Expr]): Void = {
         when expr in {
             .AndExpr(left, right, _) then {
                 self.flatten_and_chain_into(left, out);
@@ -499,7 +499,7 @@ given TypeChecker {
         };
     };
 
-    expr_condition_span(self, expr Expr) SourceSpan = {
+    expr_condition_span(self, expr: Expr): SourceSpan = {
         return when expr in {
             .IsExpr(_, _, span) then span,
             .IsNotExpr(_, _, span) then span,
@@ -509,16 +509,18 @@ given TypeChecker {
 
     make_if_expr_from_condition(
         self,
-        condition Expr,
-        then_expr Expr,
-        else_expr Option[Expr],
-        fallback_span SourceSpan,
-    ) Expr = {
+        condition: Expr,
+        then_expr: Expr,
+        else_expr: Option[Expr],
+        fallback_span: SourceSpan,
+    ): Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span;
                 let mutable arms = List[WhenArm].new();
-                arms.push(WhenArm(pattern, Option[Expr].None(), then_expr, false, false));
+                arms.push(
+                    WhenArm(pattern, Option[Expr].None(), then_expr, false, false),
+                );
                 let else_body = when else_expr in {
                     .Some(else_ref) then else_ref,
                     .None() then Expr.Block(
@@ -549,10 +551,10 @@ given TypeChecker {
 
     make_while_expr_from_condition(
         self,
-        condition Expr,
-        body Expr,
-        fallback_span SourceSpan,
-    ) Expr = {
+        condition: Expr,
+        body: Expr,
+        fallback_span: SourceSpan,
+    ): Expr = {
         return when condition in {
             .IsExpr(subject, pattern, span) then {
                 let actual_span = if is_known_span(span) then span else fallback_span;
@@ -587,11 +589,7 @@ given TypeChecker {
     /// order. Only the and-spine is walked; `or` / `not` keep their ordinary
     /// expression semantics, so an `is` buried in one of those is checked by
     /// the generic path and rejected there if it binds.
-    check_guard_expression(
-        self,
-        guard Expr,
-        scope Scope,
-    ) TypedExpr = {
+    check_guard_expression(self, guard: Expr, scope: Scope): TypedExpr = {
         // Same rule as if/while: bindings under expression `or` / `not` are
         // refused with the same two diagnostics.
         if self.check_or_branches_for_bindings(guard) then {
@@ -620,29 +618,24 @@ given TypeChecker {
             let step = self.check_guard_step(clause, guard, scope);
             folded = when folded in {
                 .Some(acc) then Option[TypedExpr].Some(
-                    make_typed_expr(
-                        TypedExprKind.AndExpr(acc, step),
-                        Type.BoolType(),
-                    ),
+                    make_typed_expr(TypedExprKind.AndExpr(acc, step), Type.BoolType()),
                 ),
                 .None() then Option[TypedExpr].Some(step),
             };
         };
         return when folded in {
             .Some(result) then result,
-            .None() then make_typed_expr(TypedExprKind.BoolLiteral(false), Type.BoolType()),
+            .None() then make_typed_expr(
+                TypedExprKind.BoolLiteral(false),
+                Type.BoolType(),
+            ),
         };
     };
 
     /// One conjunct of a guard's and-spine. `is` / `is not` become typed
     /// pattern tests that also bind; everything else is an ordinary Bool
     /// check.
-    check_guard_step(
-        self,
-        clause Expr,
-        guard Expr,
-        scope Scope,
-    ) TypedExpr = {
+    check_guard_step(self, clause: Expr, guard: Expr, scope: Scope): TypedExpr = {
         let negated = clause is .IsNotExpr(...);
         if clause is .IsExpr(...) or negated then {
             let subject_pattern = when clause in {
@@ -718,16 +711,8 @@ given TypeChecker {
             if not negated then {
                 // Bind before lowering the pattern so the names resolve, the
                 // same order the arm pattern takes.
-                let _ = self.bind_pattern_vars(
-                    pattern,
-                    pattern_subject_t,
-                    scope,
-                );
-                self.ensure_pattern_bindings_present(
-                    pattern,
-                    pattern_subject_t,
-                    scope,
-                );
+                let _ = self.bind_pattern_vars(pattern, pattern_subject_t, scope);
+                self.ensure_pattern_bindings_present(pattern, pattern_subject_t, scope);
             };
             let typed_pattern = self.lower_typed_pattern(
                 pattern,
@@ -755,12 +740,12 @@ given TypeChecker {
 
     lower_if_condition_with_bindings(
         self,
-        condition Expr,
-        then_expr Expr,
-        else_expr Option[Expr],
-        outer_span SourceSpan,
-        scope Scope,
-    ) Option[Expr] = {
+        condition: Expr,
+        then_expr: Expr,
+        else_expr: Option[Expr],
+        outer_span: SourceSpan,
+        scope: Scope,
+    ): Option[Expr] = {
         if self.check_or_branches_for_bindings(condition) then {
             self.bind_rejected_is_patterns(condition, scope);
             return Option[Expr].Some(
@@ -830,11 +815,11 @@ given TypeChecker {
 
     lower_while_condition_with_bindings(
         self,
-        condition Expr,
-        body Expr,
-        outer_span SourceSpan,
-        scope Scope,
-    ) Option[Expr] = {
+        condition: Expr,
+        body: Expr,
+        outer_span: SourceSpan,
+        scope: Scope,
+    ): Option[Expr] = {
         if not self.condition_contains_is_expression(condition) then {
             return Option[Expr].None();
         };
@@ -859,7 +844,7 @@ given TypeChecker {
         };
     };
 
-    make_break_block_expr(self, span SourceSpan) Expr = {
+    make_break_block_expr(self, span: SourceSpan): Expr = {
         let mutable statements = List[Statement].new();
         statements.push(Statement.BreakStmt(span));
         return Expr.Block(statements, Option[Expr].None(), span);
@@ -867,11 +852,11 @@ given TypeChecker {
 
     lower_range_expr_from_typed(
         self,
-        op RangeOperator,
-        typed_left Option[TypedExpr],
-        typed_right Option[TypedExpr],
-        range_type Type,
-    ) TypedExpr = {
+        op: RangeOperator,
+        typed_left: Option[TypedExpr],
+        typed_right: Option[TypedExpr],
+        range_type: Type,
+    ): TypedExpr = {
         let mutable args = List[TypedExpr].new();
         let case_name = when op in {
             .Closed() then {
@@ -953,12 +938,12 @@ given TypeChecker {
 
     check_range_expr_ref(
         self,
-        op RangeOperator,
-        left Option[Expr],
-        right Option[Expr],
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        op: RangeOperator,
+        left: Option[Expr],
+        right: Option[Expr],
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         let expected_element_type = when expected in {
             .Some(et) then {
                 if self.is_std_type(et, "Range") then {

@@ -6,35 +6,35 @@ using "std" { ... };
 // Uses compile-time static dispatch (generics, not trait objects).
 // ============================================================================
 
-public type mutable BufReader[R Reader](
-    private inner R,
-    private mutable buf List[UInt8],
-    private cap UInt,
-    private mutable start UInt,
-    private mutable end UInt,
+public type mutable BufReader[R: Reader](
+    private inner: R,
+    private mutable buf: List[UInt8],
+    private cap: UInt,
+    private mutable start: UInt,
+    private mutable end: UInt,
 );
 
-given[R Reader] BufReader[R] {
+given[R: Reader] BufReader[R] {
 
-    public new(r R) BufReader[R] = {
-        let cap UInt = 4096;
+    public new(r: R): BufReader[R] = {
+        let cap: UInt = 4096;
         return BufReader[R](r, make_bytes(cap), cap, 0, 0);
     };
 
-    public with_capacity(cap UInt, r R) BufReader[R] = {
+    public with_capacity(cap: UInt, r: R): BufReader[R] = {
         if cap == 0 then {
             panic("BufReader.with_capacity: zero capacity");
         };
         return BufReader[R](r, make_bytes(cap), cap, 0, 0);
     };
 
-    private fill_buf(self) Result[UInt] = {
+    private fill_buf(self): Result[UInt] = {
         if self.start < self.end then {
             return Result[UInt].Ok(self.end - self.start);
         };
         self.start = 0;
         self.end = 0;
-        return when self.inner.read(into: self.buf, span: 0..<self.cap) in {
+        return when self.inner.read(into = self.buf, span = 0..<self.cap) in {
             .Ok(n) then {
                 self.end = n;
                 Result[UInt].Ok(n)
@@ -43,7 +43,7 @@ given[R Reader] BufReader[R] {
         };
     };
 
-    public read_byte(self) Result[Option[UInt8]] = {
+    public read_byte(self): Result[Option[UInt8]] = {
         return when self.fill_buf() in {
             .Ok(n) then {
                 if n == 0 then {
@@ -57,7 +57,7 @@ given[R Reader] BufReader[R] {
         };
     };
 
-    public read_rune(self) Result[Option[Rune]] = {
+    public read_rune(self): Result[Option[Rune]] = {
         return when self.read_byte() in {
             .Error(e) then Result[Option[Rune]].Error(e),
             .Ok(first_opt) then {
@@ -72,8 +72,8 @@ given[R Reader] BufReader[R] {
                             );
                         };
 
-                        let mutable needed UInt = 0;
-                        let mutable code UInt32 = 0;
+                        let mutable needed: UInt = 0;
+                        let mutable code: UInt32 = 0;
 
                         if first >= UInt8(194) and first <= UInt8(223) then {
                             needed = 1;
@@ -88,7 +88,7 @@ given[R Reader] BufReader[R] {
                             return Result[Option[Rune]].Error("invalid UTF-8 sequence");
                         };
 
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         while i < needed then {
                             when self.read_byte() in {
                                 .Error(e) then {
@@ -145,10 +145,10 @@ given[R Reader] BufReader[R] {
     // defaulting to the whole buffer like `Reader.read`.
     public read_until(
         self,
-        delim UInt8,
-        into: List[UInt8],
+        delim: UInt8,
+        into: List[UInt8] =,
         span: Range[UInt] = ...,
-    ) Result[UInt] = {
+    ): Result[UInt] = {
         let spec = into.slice_spec(span);
         let base = spec.start();
         let mutable out_pos = base;
@@ -168,9 +168,9 @@ given[R Reader] BufReader[R] {
 
                     let src_ptr = self.buf.borrow_ptr();
 
-                    let mutable i UInt = 0;
+                    let mutable i: UInt = 0;
                     let mutable found = false;
-                    let mutable take UInt = avail;
+                    let mutable take: UInt = avail;
                     while i < avail then {
                         let b = src_ptr[self.start + i];
                         if b == delim then {
@@ -203,9 +203,9 @@ given[R Reader] BufReader[R] {
         return Result[UInt].Ok(out_pos - base);
     };
 
-    public read_line(self) Result[Option[String]] = {
+    public read_line(self): Result[Option[String]] = {
         let mutable tmp = make_bytes(4096);
-        when self.read_until(UInt8(10), into: tmp, span: ...) in {
+        when self.read_until(UInt8(10), into = tmp, span = ...) in {
             .Ok(n) then {
                 if n == 0 then {
                     return Result[Option[String]].Ok(Option[String].None());
@@ -222,7 +222,7 @@ given[R Reader] BufReader[R] {
         };
     };
 
-    public skip(self, n UInt) Result[UInt] = {
+    public skip(self, n: UInt): Result[UInt] = {
         let mutable remaining = n;
         while remaining > 0 then {
             when self.fill_buf() in {
@@ -243,9 +243,9 @@ given[R Reader] BufReader[R] {
     };
 };
 
-given[R Reader] BufReader[R] as Reader {
+given[R: Reader] BufReader[R]: Reader {
 
-    public read(self, into: List[UInt8], span: Range[UInt]) Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let base = span.start();
         let mutable out_pos = base;
@@ -279,9 +279,9 @@ given[R Reader] BufReader[R] as Reader {
     };
 };
 
-given[R Reader and Seeker] BufReader[R] as Seeker {
+given[R: Reader and Seeker] BufReader[R]: Seeker {
 
-    public seek(self, pos SeekOrigin) Result[UInt64] = {
+    public seek(self, pos: SeekOrigin): Result[UInt64] = {
         let unread = self.end - self.start;
         let adjusted = when pos in {
             .Start(offset) then SeekOrigin.Start(offset),

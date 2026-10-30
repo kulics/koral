@@ -12,7 +12,7 @@ using "std/text" { Parseable };
 /// ClockTime represents a time of day with nanosecond precision.
 /// Internal storage is nanoseconds since midnight.
 /// Arithmetic wraps around: 23:00 + 7200s = 01:00.
-public type ClockTime(private nanos_since_midnight Int64);
+public type ClockTime(private nanos_since_midnight: Int64);
 
 // ============================================================================
 // ClockTime Static Constructors
@@ -22,17 +22,17 @@ given ClockTime {
 
     /// Creates a ClockTime from hour, minute, second.
     /// Returns Error if any field is out of range.
-    public new(hour: Int, minute: Int, second: Int) Result[ClockTime] =
-        ClockTime.new_full(hour: hour, minute: minute, second: second, nanosecond: 0);
+    public new(hour: Int =, minute: Int =, second: Int =): Result[ClockTime] =
+        ClockTime.new_full(hour = hour, minute = minute, second = second, nanosecond = 0);
 
     /// Creates a ClockTime from hour, minute, second, nanoseconds.
     /// Returns Error if any field is out of range.
     public new_full(
-        hour: Int,
-        minute: Int,
-        second: Int,
-        nanosecond: Int,
-    ) Result[ClockTime] = {
+        hour: Int =,
+        minute: Int =,
+        second: Int =,
+        nanosecond: Int =,
+    ): Result[ClockTime] = {
         if hour < 0 or hour > 23 then {
             return Result[ClockTime].Error("invalid time: hour out of range");
         };
@@ -53,7 +53,7 @@ given ClockTime {
     };
 
     /// Returns midnight (00:00:00).
-    public midnight() ClockTime = ClockTime(0);
+    public midnight(): ClockTime = ClockTime(0);
 };
 
 // ============================================================================
@@ -63,26 +63,26 @@ given ClockTime {
 given ClockTime {
 
     /// Returns the hour (0-23).
-    public hour(self) Int = Int(
+    public hour(self): Int = Int(
         (self.nanos_since_midnight / (Int64(3_600) * Int64(1_000_000_000))),
     );
 
     /// Returns the minute (0-59).
-    public minute(self) Int = Int(
+    public minute(self): Int = Int(
         ((self.nanos_since_midnight % (Int64(3_600) * Int64(1_000_000_000))) / (Int64(
             60,
         ) * Int64(1_000_000_000))),
     );
 
     /// Returns the second (0-59).
-    public second(self) Int = Int(
+    public second(self): Int = Int(
         ((self.nanos_since_midnight % (Int64(60) * Int64(1_000_000_000))) / Int64(
             1_000_000_000,
         )),
     );
 
     /// Returns the nanosecond (0-999_999_999).
-    public nanosecond(self) Int = Int(
+    public nanosecond(self): Int = Int(
         (self.nanos_since_midnight % Int64(1_000_000_000)),
     );
 };
@@ -91,25 +91,25 @@ given ClockTime {
 // ClockTime Add, Sub, duration_to — wraps around at midnight
 // ============================================================================
 
-let wrap_time_nanos(n Int64) Int64 = {
-    let day Int64 = Int64(86_400) * Int64(1_000_000_000);
+let wrap_time_nanos(n: Int64): Int64 = {
+    let day: Int64 = Int64(86_400) * Int64(1_000_000_000);
     let r = n % day;
     return if r < 0 then r + day else r;
 };
 
-given ClockTime as Add[Duration] {
+given ClockTime: Add[Duration] {
 
     /// [Duration]Add: add — ClockTime + Duration. Wraps around at midnight.
-    public add(self, v Duration) ClockTime = {
+    public add(self, v: Duration): ClockTime = {
         let delta = v.secs * Int64(1_000_000_000) + v.nanos;
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight + delta));
     };
 };
 
-given ClockTime as Sub[Duration] {
+given ClockTime: Sub[Duration] {
 
     /// [Duration]Sub: sub — ClockTime - Duration. Wraps around at midnight.
-    public sub(self, v Duration) ClockTime = {
+    public sub(self, v: Duration): ClockTime = {
         let delta = v.secs * Int64(1_000_000_000) + v.nanos;
         return ClockTime(wrap_time_nanos(self.nanos_since_midnight - delta));
     };
@@ -118,7 +118,7 @@ given ClockTime as Sub[Duration] {
 given ClockTime {
 
     /// Computes the Duration from self to other (returns other - self, wraps forward).
-    public duration_to(self, other ClockTime) Duration = {
+    public duration_to(self, other: ClockTime): Duration = {
         let diff = wrap_time_nanos(
             other.nanos_since_midnight - self.nanos_since_midnight,
         );
@@ -132,22 +132,22 @@ given ClockTime {
 // ClockTime Traits: Eq, Ord, ToString, Parseable
 // ============================================================================
 
-given ClockTime as Eq {
+given ClockTime: Eq {
 
-    public equals(self, other ClockTime) Bool =
+    public equals(self, other: ClockTime): Bool =
         self.nanos_since_midnight == other.nanos_since_midnight;
 };
 
-given ClockTime as Ord {
+given ClockTime: Ord {
 
-    public compare(self, other ClockTime) Int = if self.nanos_since_midnight < other.nanos_since_midnight then -1
+    public compare(self, other: ClockTime): Int = if self.nanos_since_midnight < other.nanos_since_midnight then -1
     else if self.nanos_since_midnight > other.nanos_since_midnight then 1 else 0;
 };
 
-given ClockTime as ToString {
+given ClockTime: ToString {
 
     /// Formats as ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
-    public to_string(self) String = {
+    public to_string(self): String = {
         let mutable result = StringBuilder.new();
         push_padded(result, self.hour(), 2);
         result.push_byte(':');
@@ -193,10 +193,10 @@ given ClockTime as ToString {
     };
 };
 
-given ClockTime as Parseable {
+given ClockTime: Parseable {
 
     /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
-    public parse(s String) Result[ClockTime] = {
+    public parse(s: String): Result[ClockTime] = {
         let len = Int(s.count());
         if len < 8 then {
             return Result[ClockTime].Error("invalid time: expected HH:MM:SS");
@@ -239,10 +239,10 @@ given ClockTime as Parseable {
             );
         };
         return ClockTime.new_full(
-            hour: hr.value,
-            minute: mi.value,
-            second: se.value,
-            nanosecond: nanos,
+            hour = hr.value,
+            minute = mi.value,
+            second = se.value,
+            nanosecond = nanos,
         );
     };
 };

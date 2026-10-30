@@ -9,7 +9,7 @@ using "std/os" { ... };
 /// A module as the manifest declares it. `key` is the package-internal name --
 /// `"."` for the main module, otherwise the subpath. A consumer spells the FULL
 /// name, `package[/subpath]`; the manifest only describes the inside (§5.2).
-public type ModuleConfig(entry String, links List[String]);
+public type ModuleConfig(entry: String, links: List[String]);
 
 /// Five fields (§5.1): `package`, `version`, `modules`, `dependencies`,
 /// `exclude`.
@@ -17,24 +17,24 @@ public type ModuleConfig(entry String, links List[String]);
 /// target IS the main module), no `requires` (the module graph comes from
 /// `using`, §5.4), no `module_aliases` (renaming is the dependency key, §5.3).
 public type ProjectConfig(
-    package String,
-    version String,
-    modules Dict[String, ModuleConfig],
-    dependencies Dict[String, DepConfig],
+    package: String,
+    version: String,
+    modules: Dict[String, ModuleConfig],
+    dependencies: Dict[String, DepConfig],
     /// Package-root-relative paths that are NOT package source -- formatter
     /// fixtures, generated inputs, anything `.koral` that no module may claim.
     /// The project lint (`koral lint`) skips them; the compiler never sees this
     /// field, because "is this file meant to be in the program" is a question
     /// about the repository, not about the program (§7).
-    exclude List[String],
+    exclude: List[String],
 );
 
 /// `source` is the fetch location and the package's identity (§5.3). The key
 /// under which it sits in `dependencies` is the name the SOURCE writes for it,
 /// which is why renaming a dependency is just changing that key.
-public type DepConfig(key String, source String, version String);
+public type DepConfig(key: String, source: String, version: String);
 
-private let is_valid_module_segment(segment String) Bool = {
+private let is_valid_module_segment(segment: String): Bool = {
     if segment.count() == 0 then {
         return false;
     };
@@ -62,7 +62,7 @@ private let is_valid_module_segment(segment String) Bool = {
 /// A manifest module key is `"."` or a `/`-separated subpath of identifier
 /// segments (§5.2). It never carries the package name -- that would be
 /// describing the package from the outside, which is the consumer's job.
-private let is_valid_module_key(key String) Bool = {
+private let is_valid_module_key(key: String): Bool = {
     if key == "." then {
         return true;
     };
@@ -78,11 +78,11 @@ private let is_valid_module_key(key String) Bool = {
 };
 
 /// A package name is a single identifier segment (§2.1) -- no `/`, no `.`.
-private let is_valid_package_name(name String) Bool =
+private let is_valid_package_name(name: String): Bool =
     name.count() > 0 and is_valid_module_segment(name);
 
 /// A module full name as source writes it: `package[/subpath]`.
-private let is_valid_module_full_name(name String) Bool = {
+private let is_valid_module_full_name(name: String): Bool = {
     if name.count() == 0 then {
         return false;
     };
@@ -100,7 +100,7 @@ private let is_valid_module_full_name(name String) Bool = {
     return seen and is_valid_package_name(head);
 };
 
-private let json_string_array(values List[String]) JsonValue = {
+private let json_string_array(values: List[String]): JsonValue = {
     let mutable arr = List[JsonValue].new();
     for value in values then {
         arr.push(JsonValue.String(value));
@@ -109,10 +109,10 @@ private let json_string_array(values List[String]) JsonValue = {
 };
 
 private let load_string_array_field(
-    value JsonValue,
-    field_name String,
-    context String,
-) Result[List[String]] = {
+    value: JsonValue,
+    field_name: String,
+    context: String,
+): Result[List[String]] = {
     let arr = value.as_array() or else {
         return .Error("error: '\(field_name)' in \(context) must be an array");
     };
@@ -128,10 +128,10 @@ private let load_string_array_field(
 };
 
 private let load_string_dict_field(
-    value JsonValue,
-    field_name String,
-    context String,
-) Result[Dict[String, String]] = {
+    value: JsonValue,
+    field_name: String,
+    context: String,
+): Result[Dict[String, String]] = {
     let obj = value.as_object() or else {
         return .Error("error: '\(field_name)' in \(context) must be an object");
     };
@@ -150,19 +150,19 @@ private let load_string_dict_field(
 };
 
 private let load_optional_string_array_field(
-    json JsonValue,
-    field_name String,
-    context String,
-) Result[List[String]] = when json.get_field(field_name) in {
+    json: JsonValue,
+    field_name: String,
+    context: String,
+): Result[List[String]] = when json.get_field(field_name) in {
     .Some(value_ref) then load_string_array_field(value_ref, field_name, context),
     .None() then .Ok(List[String].new()),
 };
 
 private let load_optional_string_dict_field(
-    json JsonValue,
-    field_name String,
-    context String,
-) Result[Dict[String, String]] = when json.get_field(field_name) in {
+    json: JsonValue,
+    field_name: String,
+    context: String,
+): Result[Dict[String, String]] = when json.get_field(field_name) in {
     .Some(value_ref) then load_string_dict_field(value_ref, field_name, context),
     .None() then .Ok(Dict[String, String].new()),
 };
@@ -170,7 +170,7 @@ private let load_optional_string_dict_field(
 /// The default build target is the main module -- the one declared under the
 /// `modules` key `"."` (§5.1). Its full name is the package name. A package
 /// with no main module has no default; the caller has to say which module.
-public let default_target_module(config ProjectConfig) Result[String] = {
+public let default_target_module(config: ProjectConfig): Result[String] = {
     if config.modules.contains_key(".") then {
         return .Ok(config.package);
     };
@@ -180,11 +180,14 @@ public let default_target_module(config ProjectConfig) Result[String] = {
 };
 
 /// The `modules` key a full name (`package[/subpath]`) refers to.
-public let module_key_for_full_name(config ProjectConfig, full_name String) Result[String] = {
+public let module_key_for_full_name(
+    config: ProjectConfig,
+    full_name: String,
+): Result[String] = {
     let mutable head = full_name;
     let mutable subpath = "";
     if full_name.contains("/") then {
-        let mutable idx UInt = 0;
+        let mutable idx: UInt = 0;
         while idx < full_name.count() then {
             if full_name[idx] == '/' then {
                 head = full_name.substring(.Until(idx));
@@ -209,9 +212,9 @@ public let module_key_for_full_name(config ProjectConfig, full_name String) Resu
 };
 
 public let target_module_for_build(
-    config ProjectConfig,
-    flags Dict[String, String],
-) Result[String] = {
+    config: ProjectConfig,
+    flags: Dict[String, String],
+): Result[String] = {
     let module_name = flags.get("--module") or else {
         return default_target_module(config);
     };
@@ -221,14 +224,14 @@ public let target_module_for_build(
 };
 
 /// Artifact names come from the full name, which separates subpaths with `/`.
-public let artifact_stem(module_name String) String =
-    module_name.replace_all("/", with: "__").replace_all("::", with: "__");
+public let artifact_stem(module_name: String): String =
+    module_name.replace_all("/", with = "__").replace_all("::", with = "__");
 
 private let reject_obsolete_field(
-    json JsonValue,
-    field String,
-    hint String,
-) Result[Void] = {
+    json: JsonValue,
+    field: String,
+    hint: String,
+): Result[Void] = {
     if json.get_field(field) is .Some(_) then {
         return .Error(
             "error: koral.json field '\(field)' is no longer supported -- \(hint)",
@@ -237,7 +240,7 @@ private let reject_obsolete_field(
     return .Ok({});
 };
 
-public let load_config(project_dir String) Result[ProjectConfig] = {
+public let load_config(project_dir: String): Result[ProjectConfig] = {
     let config_path = project_dir + "/koral.json";
 
     if not path_exist(config_path.into_path()) then {
@@ -405,7 +408,9 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
         let mutable exclude_iter = exclude_arr.iterator();
         while exclude_iter.next() is .Some(item) then {
             let path = item.as_string() or else {
-                return .Error("error: 'exclude' must be an array of strings in koral.json");
+                return .Error(
+                    "error: 'exclude' must be an array of strings in koral.json",
+                );
             };
             if path.is_empty() or path.starts_with("/") or path.contains("..") then {
                 return .Error(
@@ -419,7 +424,7 @@ public let load_config(project_dir String) Result[ProjectConfig] = {
     return .Ok(ProjectConfig(package, version, modules, dependencies, exclude));
 };
 
-public let save_config(project_dir String, config ProjectConfig) Result[Void] = {
+public let save_config(project_dir: String, config: ProjectConfig): Result[Void] = {
     let mutable obj = Dict[String, JsonValue].new();
     obj.insert("package", JsonValue.String(config.package));
     obj.insert("version", JsonValue.String(config.version));
@@ -455,6 +460,6 @@ public let save_config(project_dir String, config ProjectConfig) Result[Void] = 
     let json = JsonValue.Object(obj);
     let text = json.to_string_pretty() + "\n";
     let config_path = project_dir + "/koral.json";
-    write_text_file(config_path.into_path(), content: text) or return;
+    write_text_file(config_path.into_path(), content = text) or return;
     return .Ok({});
 };

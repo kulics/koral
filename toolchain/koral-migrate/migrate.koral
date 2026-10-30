@@ -1,0 +1,92 @@
+// ============================================================================
+// Koral Syntax Migration - one-shot old -> new spelling rewriter
+// ============================================================================
+// Parses each file with the old-syntax parser and re-prints it with the new
+// printer, which is the migration engine: `name Type` becomes `name: Type`,
+// named parameters/fields gain `=`, call and pattern labels switch from `:`
+// to `=`, type patterns bind with `:`, constraints / trait parents / given
+// conformances / return types / let bindings all take `:`. Comments are
+// tokens on the CST and survive the rewrite verbatim.
+//
+// This is NOT the formatter: the formatting contract (tokens survive) is
+// deliberately violated here, because the tokens are what changes. Run once.
+// ============================================================================
+
+using "koral_syntax" { ... };
+
+using "std/os" { ... };
+
+// ============================================================================
+// CLI Entry Point
+// ============================================================================
+
+let main(): Void = {
+    let arguments = args();
+
+    if arguments.count() <= 1 then {
+        eprintln("Usage: koral-migrate <file1.koral> [file2.koral ...]");
+        exit(1);
+    };
+
+    let mutable had_error = false;
+
+    for i in 1..<arguments.count() then {
+        let path = arguments[i];
+        when migrate_file(path) in {
+            .Ok(_) then {},
+            .Error(e) then {
+                eprintln("Error: \(path): \(e.message())");
+                had_error = true;
+            },
+        };
+    };
+
+    if had_error then {
+        exit(1);
+    };
+};
+
+// ============================================================================
+// File Operations
+// ============================================================================
+
+let migrate_file(path: String): Result[Void] = {
+    let file_path = path.into_path();
+    let source = read_text_file(file_path) or return;
+    let migrated = format_source(normalize_newlines(source)) or return;
+
+    if migrated == source then {
+        return .Ok({});
+    };
+    return write_text_file(file_path, content = migrated);
+};
+
+/// Line endings are layout: `\r\n` and bare `\r` fold to `\n`, so the rewrite
+/// sees one spelling of "end of line".
+let normalize_newlines(source: String): String = {
+    if not source.contains("\r") then {
+        return source;
+    };
+
+    let runes = source.to_runes();
+    let mutable out = StringBuilder.new();
+    let mutable i: UInt = 0;
+
+    while i < runes.count() then {
+        let r = runes[i];
+        if r == '\r' then {
+            out.push_byte('\n');
+            if i + 1 < runes.count() and runes[i + 1] == '\n' then {
+                i += 2;
+            } else {
+                i += 1;
+            };
+            continue;
+        };
+
+        out.push_string(r.to_string());
+        i += 1;
+    };
+
+    return out.to_string();
+};

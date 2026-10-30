@@ -6,13 +6,13 @@ using "koral_syntax" { ... };
 
 using "std/os" { ... };
 
-type mutable TestRunner(mutable pass_count UInt, mutable fail_count UInt);
+type mutable TestRunner(mutable pass_count: UInt, mutable fail_count: UInt);
 
 given TestRunner {
 
-    new() TestRunner = TestRunner(0, 0);
+    new(): TestRunner = TestRunner(0, 0);
 
-    test(self, name String, input String, expected String) Void = {
+    test(self, name: String, input: String, expected: String): Void = {
         when format_source(input) in {
             .Ok(result) then {
                 if result == expected then {
@@ -33,7 +33,12 @@ given TestRunner {
         };
     };
 
-    test_error_contains(self, name String, input String, expected_substring String) Void = {
+    test_error_contains(
+        self,
+        name: String,
+        input: String,
+        expected_substring: String,
+    ): Void = {
         when format_source(input) in {
             .Ok(result) then {
                 self.fail_count += 1;
@@ -62,7 +67,7 @@ given TestRunner {
     /// Formats through `format_source_checked`, so the run also asserts the
     /// formatting contract (nothing but `;` and `,` moved) and idempotence.
     /// Anything the raw printer would print by corrupting the source fails here.
-    test_checked(self, name String, input String, expected String) Void = {
+    test_checked(self, name: String, input: String, expected: String): Void = {
         when format_source_checked(input) in {
             .Ok(result) then {
                 if result == expected then {
@@ -83,7 +88,7 @@ given TestRunner {
         };
     };
 
-    summary(self) Void = {
+    summary(self): Void = {
         let total = self.pass_count + self.fail_count;
         println(self.pass_count.to_string() + "/" + total.to_string() + " tests passed");
         if self.fail_count > 0 then {
@@ -92,51 +97,51 @@ given TestRunner {
     };
 };
 
-let main() Void = {
+let main(): Void = {
     let mutable t = TestRunner.new();
 
     // === Basic let bindings ===
     t.test("simple let spacing", "let x=1+2;\n", "let x = 1 + 2;\n");
-    t.test("let with type", "let x Int=42;\n", "let x Int = 42;\n");
+    t.test("let with type", "let x: Int=42;\n", "let x: Int = 42;\n");
     t.test("let mutable", "let mutable x=0;\n", "let mutable x = 0;\n");
-    t.test("public let", "public let x Int=42;\n", "public let x Int = 42;\n");
+    t.test("public let", "public let x: Int=42;\n", "public let x: Int = 42;\n");
 
     // === Function declarations ===
     t.test(
         "func decl",
-        "let add(a Int,b Int) Int=a+b;\n",
-        "let add(a Int, b Int) Int = a + b;\n",
+        "let add(a: Int,b: Int) : Int=a+b;\n",
+        "let add(a: Int, b: Int): Int = a + b;\n",
     );
     t.test(
         "func with block",
-        "let f() Void={\nlet x=1;\nlet y=2;\n};\n",
-        "let f() Void = {\n    let x = 1;\n    let y = 2;\n};\n",
+        "let f() : Void={\nlet x=1;\nlet y=2;\n};\n",
+        "let f(): Void = {\n    let x = 1;\n    let y = 2;\n};\n",
     );
     t.test(
         "return stmt",
-        "let f() Int={\nreturn 42;\n};\n",
-        "let f() Int = {\n    return 42;\n};\n",
+        "let f() : Int={\nreturn 42;\n};\n",
+        "let f(): Int = {\n    return 42;\n};\n",
     );
-    t.test("block tail expr", "let f() Int={\n42\n};\n", "let f() Int = {\n    42\n};\n");
+    t.test("block tail expr", "let f() : Int={\n42\n};\n", "let f(): Int = {\n    42\n};\n");
     t.test(
         "defer stmt",
-        "let f() Void={\ndefer close();\n};\n",
-        "let f() Void = {\n    defer close();\n};\n",
+        "let f() : Void={\ndefer close();\n};\n",
+        "let f(): Void = {\n    defer close();\n};\n",
     );
     t.test(
         "block tail expr with stmt",
-        "let f() Int={\nfoo();\n42\n};\n",
-        "let f() Int = {\n    foo();\n    42\n};\n",
+        "let f() : Int={\nfoo();\n42\n};\n",
+        "let f(): Int = {\n    foo();\n    42\n};\n",
     );
     t.test(
         "defer stmt with semi",
-        "let f() Void={\ndefer close();\n};\n",
-        "let f() Void = {\n    defer close();\n};\n",
+        "let f() : Void={\ndefer close();\n};\n",
+        "let f(): Void = {\n    defer close();\n};\n",
     );
     t.test(
         "block expression stmt only",
-        "let f() Void={\nfoo();\nbar();\n};\n",
-        "let f() Void = {\n    foo();\n    bar();\n};\n",
+        "let f() : Void={\nfoo();\nbar();\n};\n",
+        "let f(): Void = {\n    foo();\n    bar();\n};\n",
     );
 
     // === Using declarations ===
@@ -163,11 +168,7 @@ let main() Void = {
         "using \"std/os\" { };\n",
         "using \"std/os\" { };\n",
     );
-    t.test(
-        "import all",
-        "using \"std/os\"{...};\n",
-        "using \"std/os\" { ... };\n",
-    );
+    t.test("import all", "using \"std/os\"{...};\n", "using \"std/os\" { ... };\n");
     t.test(
         "import all with rename",
         "using \"std/os\" { Config as OsConfig, ... };\n",
@@ -191,40 +192,40 @@ let main() Void = {
     // <type-prefix>). The managed `*`*T` / `*! T` spellings are gone.
     t.test(
         "raw pointer types",
-        "let f(p *mutable Int, q *Int) Void={};\n",
-        "let f(p *mutable Int, q *Int) Void = {};\n",
+        "let f(p: *mutable Int, q: *Int) : Void={};\n",
+        "let f(p: *mutable Int, q: *Int): Void = {};\n",
     );
     t.test(
         "type mutable",
-        "type mutable Counter(mutable count Int);\n",
-        "type mutable Counter(mutable count Int);\n",
+        "type mutable Counter(mutable count: Int);\n",
+        "type mutable Counter(mutable count: Int);\n",
     );
     t.test(
         "generic type mutable",
-        "type mutable Box[R Mark](value R);\n",
-        "type mutable Box[R Mark](value R);\n",
+        "type mutable Box[R: Mark](value: R);\n",
+        "type mutable Box[R: Mark](value: R);\n",
     );
     // `mutable` in a generic PARAMETER constraint is a type-kind constraint
     // keyword, not a type -- `[T mutable]`.
     t.test(
         "mutable constraint",
-        "let f[T mutable](v T) Int=0;\n",
-        "let f[T mutable](v T) Int = 0;\n",
+        "let f[T: mutable](v: T) : Int=0;\n",
+        "let f[T: mutable](v: T): Int = 0;\n",
     );
     t.test(
         "mutable and trait constraint",
-        "let f[T mutable and Eq](v T) Int=0;\n",
-        "let f[T mutable and Eq](v T) Int = 0;\n",
+        "let f[T: mutable and Eq](v: T) : Int=0;\n",
+        "let f[T: mutable and Eq](v: T): Int = 0;\n",
     );
     // Named params are <func-param> form 2, and trait members follow the same
     // rules -- so `name: Type` belongs there too.
-    t.test("named param", "let f(a: Int) Int=a;\n", "let f(a: Int) Int = a;\n");
+    t.test("named param", "let f(a: Int) : Int=a;\n", "let f(a: Int): Int = a;\n");
     // Defaults are a LITERAL, never an expression (grammar.bnf <field>).
     t.test("named field with default", "type P(x: Int=3);\n", "type P(x: Int = 3);\n");
     t.test(
         "named param with default",
-        "let f(a: Int=3,b: Int=4) Int=a;\n",
-        "let f(a: Int = 3, b: Int = 4) Int = a;\n",
+        "let f(a: Int=3,b: Int=4) : Int=a;\n",
+        "let f(a: Int = 3, b: Int = 4): Int = a;\n",
     );
     t.test(
         "enum field with default",
@@ -240,36 +241,36 @@ let main() Void = {
     );
     t.test(
         "trait named param",
-        "trait T {\nm(self, a: Int) Int;\n};\n",
-        "trait T {\n    m(self, a: Int) Int;\n};\n",
+        "trait T {\nm(self, a: Int =) : Int;\n};\n",
+        "trait T {\n    m(self, a: Int =): Int;\n};\n",
     );
 
     t.test(
         "public type tuple",
-        "public type Point(x Int,y Int);\n",
-        "public type Point(x Int, y Int);\n",
+        "public type Point(x: Int,y: Int);\n",
+        "public type Point(x: Int, y: Int);\n",
     );
 
     // === Trait and Given ===
     t.test(
         "trait decl",
-        "trait Printable {\nto_string(self) String;\n};\n",
-        "trait Printable {\n    to_string(self) String;\n};\n",
+        "trait Printable {\nto_string(self) : String;\n};\n",
+        "trait Printable {\n    to_string(self): String;\n};\n",
     );
     t.test(
         "trait mutable receiver",
-        "trait Counter {\nbump(self) Int;\n};\n",
-        "trait Counter {\n    bump(self) Int;\n};\n",
+        "trait Counter {\nbump(self) : Int;\n};\n",
+        "trait Counter {\n    bump(self): Int;\n};\n",
     );
     t.test(
         "given block",
-        "given Point {\npublic new(x Int,y Int) Point=Point(x,y);\n};\n",
-        "given Point {\n    public new(x Int, y Int) Point = Point(x, y);\n};\n",
+        "given Point {\npublic new(x: Int,y: Int) : Point=Point(x,y);\n};\n",
+        "given Point {\n    public new(x: Int, y: Int): Point = Point(x, y);\n};\n",
     );
     t.test(
         "given trait impl",
-        "given Point as Eq {\npublic equals(self,other Point) Bool=self.x==other.x;\n};\n",
-        "given Point as Eq {\n    public equals(self, other Point) Bool = self.x == other.x;\n};\n",
+        "given Point: Eq {\npublic equals(self,other: Point) : Bool=self.x==other.x;\n};\n",
+        "given Point: Eq {\n    public equals(self, other: Point): Bool = self.x == other.x;\n};\n",
     );
 
     // === When/in expressions ===
@@ -342,8 +343,8 @@ let main() Void = {
     t.test("range op", "let r=0..<10;\n", "let r = 0..<10;\n");
     t.test(
         "compound assign",
-        "let f() Void={\nx+=1;\n};\n",
-        "let f() Void = {\n    x += 1;\n};\n",
+        "let f() : Void={\nx+=1;\n};\n",
+        "let f(): Void = {\n    x += 1;\n};\n",
     );
 
     // === Strings ===
@@ -357,8 +358,8 @@ let main() Void = {
     t.test("line comment", "// hello world\n", "// hello world\n");
     t.test(
         "trailing comment in block",
-        "let f() Void={\nfoo(); // trailing\nbar();\n};\n",
-        "let f() Void = {\n    foo(); // trailing\n    bar();\n};\n",
+        "let f() : Void={\nfoo(); // trailing\nbar();\n};\n",
+        "let f(): Void = {\n    foo(); // trailing\n    bar();\n};\n",
     );
     t.test("crlf normalization", "let x=1;\r\nlet y=2;\r\n", "let x = 1;\nlet y = 2;\n");
 
@@ -374,26 +375,26 @@ let main() Void = {
     // casts.
     t.test(
         "cast target type leads",
-        "let main() Void={\nlet y=Int64(42);\nlet z=Int(y);\n};\n",
-        "let main() Void = {\n    let y = Int64(42);\n    let z = Int(y);\n};\n",
+        "let main() : Void={\nlet y=Int64(42);\nlet z=Int(y);\n};\n",
+        "let main(): Void = {\n    let y = Int64(42);\n    let z = Int(y);\n};\n",
     );
     t.test(
         "generic cast target",
-        "let main() Void={\nlet v=Option[Int](x);\n};\n",
-        "let main() Void = {\n    let v = Option[Int](x);\n};\n",
+        "let main() : Void={\nlet v=Option[Int](x);\n};\n",
+        "let main(): Void = {\n    let v = Option[Int](x);\n};\n",
     );
     // A single operand is the cast spelling; a structural `Type(args)`
     // construction keeps its argument list either way.
     t.test(
         "constructor call keeps its arguments",
-        "let main() Void={\nlet p=Pair(1,2);\nlet q=Point(x);\n};\n",
-        "let main() Void = {\n    let p = Pair(1, 2);\n    let q = Point(x);\n};\n",
+        "let main() : Void={\nlet p=Pair(1,2);\nlet q=Point(x);\n};\n",
+        "let main(): Void = {\n    let p = Pair(1, 2);\n    let q = Point(x);\n};\n",
     );
     // Bare `*` still dereferences -- only `*` starts a type.
     t.test(
         "deref of a star argument is not a cast",
-        "let main() Void={\nlet v=f(*p);\n};\n",
-        "let main() Void = {\n    let v = f(*p);\n};\n",
+        "let main() : Void={\nlet v=f(*p);\n};\n",
+        "let main(): Void = {\n    let v = f(*p);\n};\n",
     );
     // `expr as Type` is the cast spelling for pointer and weak targets. The
     // chain groups left and the cast result takes no postfix suffixes. The
@@ -401,55 +402,55 @@ let main() Void = {
     // `Transform[Int](c)`, `(Drawable)(c)`.
     t.test_checked(
         "raw pointer cast",
-        "let main() Void={\nlet p = q as *Int;\n};\n",
-        "let main() Void = {\n    let p = q as *Int;\n};\n",
+        "let main() : Void={\nlet p = q as *Int;\n};\n",
+        "let main(): Void = {\n    let p = q as *Int;\n};\n",
     );
     t.test_checked(
         "mutable raw pointer cast",
-        "let main() Void={\nlet p = q as *mutable Int;\n};\n",
-        "let main() Void = {\n    let p = q as *mutable Int;\n};\n",
+        "let main() : Void={\nlet p = q as *mutable Int;\n};\n",
+        "let main(): Void = {\n    let p = q as *mutable Int;\n};\n",
     );
     t.test_checked(
         "weak reference cast",
-        "let main() Void={\nlet w = x as ?T;\n};\n",
-        "let main() Void = {\n    let w = x as ?T;\n};\n",
+        "let main() : Void={\nlet w = x as ?T;\n};\n",
+        "let main(): Void = {\n    let w = x as ?T;\n};\n",
     );
     t.test_checked(
         "trait upcast uses the call form",
-        "let main() Void={\nlet d = Drawable(c);\n};\n",
-        "let main() Void = {\n    let d = Drawable(c);\n};\n",
+        "let main() : Void={\nlet d = Drawable(c);\n};\n",
+        "let main(): Void = {\n    let d = Drawable(c);\n};\n",
     );
     t.test_checked(
         "generic trait upcast uses the call form",
-        "let main() Void={\nlet d = Transform[Int](c);\n};\n",
-        "let main() Void = {\n    let d = Transform[Int](c);\n};\n",
+        "let main() : Void={\nlet d = Transform[Int](c);\n};\n",
+        "let main(): Void = {\n    let d = Transform[Int](c);\n};\n",
     );
     t.test_checked(
         "parenthesized trait upcast uses the call form",
-        "let main() Void={\nlet d = (Drawable)(c);\n};\n",
-        "let main() Void = {\n    let d = (Drawable)(c);\n};\n",
+        "let main() : Void={\nlet d = (Drawable)(c);\n};\n",
+        "let main(): Void = {\n    let d = (Drawable)(c);\n};\n",
     );
     // `c as Drawable` is now a SEMA error (the upcast is written `Drawable(c)`)
     // -- but a trait target is syntactically fine, so the formatter keeps it.
     t.test_checked(
         "trait target in an as cast still round-trips",
-        "let main() Void={\nlet d = c as Drawable;\n};\n",
-        "let main() Void = {\n    let d = c as Drawable;\n};\n",
+        "let main() : Void={\nlet d = c as Drawable;\n};\n",
+        "let main(): Void = {\n    let d = c as Drawable;\n};\n",
     );
     t.test_checked(
         "chained cast groups left",
-        "let main() Void={\nlet p2 = p as UInt as *mutable UInt;\n};\n",
-        "let main() Void = {\n    let p2 = p as UInt as *mutable UInt;\n};\n",
+        "let main() : Void={\nlet p2 = p as UInt as *mutable UInt;\n};\n",
+        "let main(): Void = {\n    let p2 = p as UInt as *mutable UInt;\n};\n",
     );
     t.test_checked(
         "cast result needs parens before a method call",
-        "let main() Void={\nlet r = (x as *T).equals(1);\n};\n",
-        "let main() Void = {\n    let r = (x as *T).equals(1);\n};\n",
+        "let main() : Void={\nlet r = (x as *T).equals(1);\n};\n",
+        "let main(): Void = {\n    let r = (x as *T).equals(1);\n};\n",
     );
     t.test_checked(
         "cast binds tighter than comparison",
-        "let main() Void={\nlet b = p as *Int == q;\n};\n",
-        "let main() Void = {\n    let b = p as *Int == q;\n};\n",
+        "let main() : Void={\nlet b = p as *Int == q;\n};\n",
+        "let main(): Void = {\n    let b = p as *Int == q;\n};\n",
     );
     // A leading `*` / `?` is always an operator, so the old cast-looking
     // spellings are operator chains over the call or the type-as-value:
@@ -458,30 +459,30 @@ let main() Void = {
     // parse and round-trip.
     t.test_checked(
         "prefixed call parses as an operator chain",
-        "let main() Void={\nlet p = *Int(q);\n};\n",
-        "let main() Void = {\n    let p = *Int(q);\n};\n",
+        "let main() : Void={\nlet p = *Int(q);\n};\n",
+        "let main(): Void = {\n    let p = *Int(q);\n};\n",
     );
     t.test_checked(
         "bare prefixed type parses as an operator chain",
-        "let main() Void={\nlet p = ?T;\n};\n",
-        "let main() Void = {\n    let p = ?T;\n};\n",
+        "let main() : Void={\nlet p = ?T;\n};\n",
+        "let main(): Void = {\n    let p = ?T;\n};\n",
     );
     t.test_checked(
         "nested prefixed cast shape parses as operator chains",
-        "let main() Void={\nlet p = ?*T(x);\n};\n",
-        "let main() Void = {\n    let p = ?*T(x);\n};\n",
+        "let main() : Void={\nlet p = ?*T(x);\n};\n",
+        "let main(): Void = {\n    let p = ?*T(x);\n};\n",
     );
     // `?` before a lowercase pointee is the upgrade operator and `*` is
     // deref, so `**p` / `?*p` are chains, not cast shapes. The legacy `?*T`
     // TYPE spelling stays rejected -- at the type, not the lexer.
     t.test_checked(
         "deref and upgrade chains keep their sigils",
-        "let main() Void={\nlet a = **p;\nlet b = ? *p;\n};\n",
-        "let main() Void = {\n    let a = **p;\n    let b = ?*p;\n};\n",
+        "let main() : Void={\nlet a = **p;\nlet b = ? *p;\n};\n",
+        "let main(): Void = {\n    let a = **p;\n    let b = ?*p;\n};\n",
     );
     t.test_error_contains(
         "legacy weak type spelling rejected",
-        "let main() Void={\nlet w ?*T = x;\n};\n",
+        "let main() : Void={\nlet w: ?*T = x;\n};\n",
         "legacy '?*T'",
     );
 
@@ -492,59 +493,59 @@ let main() Void = {
     // rejected -- with no `->`, the parens hold exactly one type.
     t.test_checked(
         "parenthesized type head takes a call",
-        "let main() Void={\nlet p = (Point)(1, 2);\n};\n",
-        "let main() Void = {\n    let p = (Point)(1, 2);\n};\n",
+        "let main(): Void={\nlet p = (Point)(1, 2);\n};\n",
+        "let main(): Void = {\n    let p = (Point)(1, 2);\n};\n",
     );
     t.test_checked(
         "parenthesized type head takes a method call",
-        "let main() Void={\nlet o = (Point).origin();\n};\n",
-        "let main() Void = {\n    let o = (Point).origin();\n};\n",
+        "let main() : Void={\nlet o = (Point).origin();\n};\n",
+        "let main(): Void = {\n    let o = (Point).origin();\n};\n",
     );
     t.test_checked(
         "parenthesized pointer type head takes a method call",
-        "let main() Void={\nlet r = (*Foo).f();\n};\n",
-        "let main() Void = {\n    let r = (*Foo).f();\n};\n",
+        "let main() : Void={\nlet r = (*Foo).f();\n};\n",
+        "let main(): Void = {\n    let r = (*Foo).f();\n};\n",
     );
     t.test_checked(
         "parenthesized function type head takes a method call",
-        "let main() Void={\nlet r = ((Int) -> Int).call();\n};\n",
-        "let main() Void = {\n    let r = ((Int) -> Int).call();\n};\n",
+        "let main() : Void={\nlet r = ((Int) -> Int).call();\n};\n",
+        "let main(): Void = {\n    let r = ((Int) -> Int).call();\n};\n",
     );
     t.test_checked(
         "grouped pointer type annotation keeps its parens",
-        "let main() Void={\nlet p (*Int) = q;\n};\n",
-        "let main() Void = {\n    let p (*Int) = q;\n};\n",
+        "let main() : Void={\nlet p: (*Int) = q;\n};\n",
+        "let main(): Void = {\n    let p: (*Int) = q;\n};\n",
     );
     t.test_checked(
         "grouped function type annotation keeps its parens",
-        "let main() Void={\nlet f ((Int) -> Int) = g;\n};\n",
-        "let main() Void = {\n    let f ((Int) -> Int) = g;\n};\n",
+        "let main() : Void={\nlet f: ((Int) -> Int) = g;\n};\n",
+        "let main(): Void = {\n    let f: ((Int) -> Int) = g;\n};\n",
     );
     t.test_checked(
         "grouped pointee keeps its parens",
-        "let main() Void={\nlet p *(Int) = q;\n};\n",
-        "let main() Void = {\n    let p *(Int) = q;\n};\n",
+        "let main() : Void={\nlet p: *(Int) = q;\n};\n",
+        "let main(): Void = {\n    let p: *(Int) = q;\n};\n",
     );
     t.test_checked(
         "weak upgrade of a qualified call",
-        "let main() Void={\nlet v = ?Foo.bar();\n};\n",
-        "let main() Void = {\n    let v = ?Foo.bar();\n};\n",
+        "let main() : Void={\nlet v = ?Foo.bar();\n};\n",
+        "let main(): Void = {\n    let v = ?Foo.bar();\n};\n",
     );
     // Bare `(T)` with no follower is the same type-head primary. The
     // compilers reject it at sema; here it parses and round-trips.
     t.test_checked(
         "bare parenthesized type head round-trips",
-        "let main() Void={\nlet p = (T);\n};\n",
-        "let main() Void = {\n    let p = (T);\n};\n",
+        "let main() : Void={\nlet p = (T);\n};\n",
+        "let main(): Void = {\n    let p = (T);\n};\n",
     );
     t.test_error_contains(
         "multi-type grouping rejected",
-        "let p (Int, String) = q;\n",
+        "let p: (Int, String) = q;\n",
         "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
     );
     t.test_error_contains(
         "empty grouping rejected in a type slot",
-        "type P(x ());\n",
+        "type P(x: ());\n",
         "A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
     );
 
@@ -553,33 +554,33 @@ let main() Void = {
     // `true` / `false`: it lexes as a literal token, never as an identifier.
     t.test_checked(
         "null literal with pointer type",
-        "let p *Int = null;\n",
-        "let p *Int = null;\n",
+        "let p: *Int = null;\n",
+        "let p: *Int = null;\n",
     );
     t.test_checked(
         "null comparison",
-        "let f(p: *Int) Bool = p == null;\n",
-        "let f(p: *Int) Bool = p == null;\n",
+        "let f(p: *Int =) : Bool = p == null;\n",
+        "let f(p: *Int =): Bool = p == null;\n",
     );
     t.test_checked(
         "null in an is pattern",
-        "let f(p: *Int) Bool = p is null;\n",
-        "let f(p: *Int) Bool = p is null;\n",
+        "let f(p: *Int =) : Bool = p is null;\n",
+        "let f(p: *Int =): Bool = p is null;\n",
     );
     t.test_checked(
         "negated null in an is pattern",
-        "let f(p: *Int) Bool = p is not null;\n",
-        "let f(p: *Int) Bool = p is not null;\n",
+        "let f(p: *Int =) : Bool = p is not null;\n",
+        "let f(p: *Int =): Bool = p is not null;\n",
     );
     t.test_checked(
         "null in a when pattern",
-        "let f(p: *Int) Int = when p in {\nnull then 1,\n_ then 2,\n};\n",
-        "let f(p: *Int) Int = when p in {\n    null then 1,\n    _ then 2,\n};\n",
+        "let f(p: *Int =) : Int = when p in {\nnull then 1,\n_ then 2,\n};\n",
+        "let f(p: *Int =): Int = when p in {\n    null then 1,\n    _ then 2,\n};\n",
     );
     t.test_checked(
         "null default on a function parameter",
-        "let f(p: *Int = null) Int = 1;\n",
-        "let f(p: *Int = null) Int = 1;\n",
+        "let f(p: *Int = null) : Int = 1;\n",
+        "let f(p: *Int = null): Int = 1;\n",
     );
     t.test_checked(
         "null default on a type field",
@@ -589,13 +590,13 @@ let main() Void = {
     // The `as` cast keeps round-tripping with a `null` operand.
     t.test_checked(
         "null operand in an as cast",
-        "let main() Void={\nlet u = null as UInt;\n};\n",
-        "let main() Void = {\n    let u = null as UInt;\n};\n",
+        "let main() : Void={\nlet u = null as UInt;\n};\n",
+        "let main(): Void = {\n    let u = null as UInt;\n};\n",
     );
     t.test_checked(
         "null operand in a pointer as cast",
-        "let main() Void={\nlet p = null as *Int;\n};\n",
-        "let main() Void = {\n    let p = null as *Int;\n};\n",
+        "let main() : Void={\nlet p = null as *Int;\n};\n",
+        "let main(): Void = {\n    let p = null as *Int;\n};\n",
     );
     // `null` is a keyword: an identifier slot rejects it. A top-level `let`
     // fails at the declaration name; a statement's `let` at the variable name.
@@ -606,7 +607,7 @@ let main() Void = {
     );
     t.test_error_contains(
         "null is not a variable name",
-        "let main() Void = {\nlet null = 1;\n};\n",
+        "let main() : Void = {\nlet null = 1;\n};\n",
         "expected variable name, got 'null'",
     );
     // The default-value error names the whole literal set, `null` included --
@@ -622,18 +623,18 @@ let main() Void = {
     // by position at any field count.
     t.test(
         "tuple destructuring",
-        "let main() Void={\nlet (a,b)=Pair(1,2);\n};\n",
-        "let main() Void = {\n    let (a, b) = Pair(1, 2);\n};\n",
+        "let main() : Void={\nlet (a,b)=Pair(1,2);\n};\n",
+        "let main(): Void = {\n    let (a, b) = Pair(1, 2);\n};\n",
     );
     t.test(
         "tuple destructuring three slots",
-        "let main() Void={\nlet (a,_,c)=Point3(1,2,3);\n};\n",
-        "let main() Void = {\n    let (a, _, c) = Point3(1, 2, 3);\n};\n",
+        "let main() : Void={\nlet (a,_,c)=Point3(1,2,3);\n};\n",
+        "let main(): Void = {\n    let (a, _, c) = Point3(1, 2, 3);\n};\n",
     );
     // There is no pair literal. A `Pair` is built with its own constructor.
     t.test_error_contains(
         "pair literal rejected",
-        "let main() Void={\nlet p=(1,2);\n};\n",
+        "let main() : Void={\nlet p=(1,2);\n};\n",
         "pair literal",
     );
     // A list kept on one line has no trailing comma; one the formatter exploded
@@ -641,61 +642,61 @@ let main() Void = {
     // separator, and the line shape is what decides it.
     t.test(
         "collection literals drop inline trailing comma",
-        "let main() Void={\nlet xs=[1,2,];\nlet d=[\"a\":1,];\n};\n",
-        "let main() Void = {\n    let xs = [1, 2];\n    let d = [\"a\": 1];\n};\n",
+        "let main() : Void={\nlet xs=[1,2,];\nlet d=[\"a\":1,];\n};\n",
+        "let main(): Void = {\n    let xs = [1, 2];\n    let d = [\"a\": 1];\n};\n",
     );
     t.test(
         "collection literals",
-        "let main() Void={\nlet xs=[1,2];\n};\n",
-        "let main() Void = {\n    let xs = [1, 2];\n};\n",
+        "let main() : Void={\nlet xs=[1,2];\n};\n",
+        "let main(): Void = {\n    let xs = [1, 2];\n};\n",
     );
     t.test(
         "qualified trait call",
-        "let main() Void={\nlet r=Num(Tag).plus_ten(n,);\n};\n",
-        "let main() Void = {\n    let r = Num(Tag).plus_ten(n);\n};\n",
+        "let main() : Void={\nlet r=Num(Tag).plus_ten(n,);\n};\n",
+        "let main(): Void = {\n    let r = Num(Tag).plus_ten(n);\n};\n",
     );
     // The prefix `base(Trait)` is never standalone: the written form is always
     // the composite `base(Trait).method(...)`, for a type name or any receiver.
     t.test(
         "receiver-qualified trait call",
-        "let main() Void={\nlet r=value(Tag).plus_ten(1);\n};\n",
-        "let main() Void = {\n    let r = value(Tag).plus_ten(1);\n};\n",
+        "let main() : Void={\nlet r=value(Tag).plus_ten(1);\n};\n",
+        "let main(): Void = {\n    let r = value(Tag).plus_ten(1);\n};\n",
     );
     t.test(
         "qualified generic method call",
-        "let main() Void={\nlet r=Num(Tag).plus_ten[Int](n);\n};\n",
-        "let main() Void = {\n    let r = Num(Tag).plus_ten[Int](n);\n};\n",
+        "let main() : Void={\nlet r=Num(Tag).plus_ten[Int](n);\n};\n",
+        "let main(): Void = {\n    let r = Num(Tag).plus_ten[Int](n);\n};\n",
     );
     t.test_error_contains(
         "old postfix cast rejected",
-        "let main() Void={\nlet y=x(Int);\n};\n",
+        "let main() : Void={\nlet y=x(Int);\n};\n",
         "A qualified call must include its method call",
     );
     t.test_error_contains(
         "bare qualified trait prefix rejected",
-        "let main() Void={\nlet r=Num(Tag);\n};\n",
+        "let main() : Void={\nlet r=Num(Tag);\n};\n",
         "A qualified call must include its method call",
     );
     t.test_error_contains(
         "qualified trait without method call rejected",
-        "let main() Void={\nlet r=Num(Tag).plus_ten;\n};\n",
+        "let main() : Void={\nlet r=Num(Tag).plus_ten;\n};\n",
         "A qualified call must include its method call",
     );
     // Exploded argument lists end in a comma so the next edit is one line.
     t.test(
         "exploded call args keep a trailing comma",
-        "let main() Void={\nreturn f(a_very_long_argument_one,a_very_long_argument_two,a_very_long_argument_three,a_very_long_argument_four);\n};\n",
-        "let main() Void = {\n    return f(\n        a_very_long_argument_one,\n        a_very_long_argument_two,\n        a_very_long_argument_three,\n        a_very_long_argument_four,\n    );\n};\n",
+        "let main() : Void={\nreturn f(a_very_long_argument_one,a_very_long_argument_two,a_very_long_argument_three,a_very_long_argument_four);\n};\n",
+        "let main(): Void = {\n    return f(\n        a_very_long_argument_one,\n        a_very_long_argument_two,\n        a_very_long_argument_three,\n        a_very_long_argument_four,\n    );\n};\n",
     );
     t.test(
         "named params in declaration",
-        "let connect(host String,port: Int) Void={};\n",
-        "let connect(host String, port: Int) Void = {};\n",
+        "let connect(host: String,port: Int) : Void={};\n",
+        "let connect(host: String, port: Int): Void = {};\n",
     );
     t.test(
         "protected access token",
-        "protected let value Int=1;\n",
-        "protected let value Int = 1;\n",
+        "protected let value: Int=1;\n",
+        "protected let value: Int = 1;\n",
     );
     t.test_error_contains(
         "given not trait rejected",
@@ -704,8 +705,8 @@ let main() Void = {
     );
     t.test(
         "trait parent list",
-        "trait FloatMath Numeric and Div[Self] and Neg {\n};\n",
-        "trait FloatMath Numeric and Div[Self] and Neg {};\n",
+        "trait FloatMath: Numeric and Div[Self] and Neg {\n};\n",
+        "trait FloatMath: Numeric and Div[Self] and Neg {};\n",
     );
 
     // === Multiple declarations ===
@@ -715,8 +716,8 @@ let main() Void = {
     t.test("idempotent simple", "let x = 1 + 2;\n", "let x = 1 + 2;\n");
     t.test(
         "idempotent trait",
-        "trait Foo {\n    bar(self) Int;\n};\n",
-        "trait Foo {\n    bar(self) Int;\n};\n",
+        "trait Foo {\n    bar(self) : Int;\n};\n",
+        "trait Foo {\n    bar(self): Int;\n};\n",
     );
 
     // === Rejected stale syntax ===
@@ -742,21 +743,21 @@ let main() Void = {
     );
     t.test(
         "full range argument",
-        "type Button(label Range[Int]);\nlet make() Button=Button(...);\n",
-        "type Button(label Range[Int]);\nlet make() Button = Button(...);\n",
+        "type Button(label: Range[Int]);\nlet make() : Button=Button(...);\n",
+        "type Button(label: Range[Int]);\nlet make(): Button = Button(...);\n",
     );
     // A trailing comment on a `using` sits after the declaration's own `;`.
     // The printer used to append a second `;` at the end of the line, where the
     // line comment swallowed it -- the contract saw a comment token grow a `;`.
     t.test_checked(
         "using with trailing comment",
-        "using \"std/io\"; // 全部\n\nlet main() Int = {\n    return 0;\n};\n",
-        "using \"std/io\"; // 全部\n\nlet main() Int = {\n    return 0;\n};\n",
+        "using \"std/io\"; // å¨é¨\n\nlet main() : Int = {\n    return 0;\n};\n",
+        "using \"std/io\"; // å¨é¨\n\nlet main(): Int = {\n    return 0;\n};\n",
     );
     t.test_checked(
         "using with comment before terminator",
-        "using \"std/io\" /* c */;\n\nlet main() Int = {\n    return 0;\n};\n",
-        "using \"std/io\" /* c */;\n\nlet main() Int = {\n    return 0;\n};\n",
+        "using \"std/io\" /* c */;\n\nlet main() : Int = {\n    return 0;\n};\n",
+        "using \"std/io\" /* c */;\n\nlet main(): Int = {\n    return 0;\n};\n",
     );
     // `name: Type` is a NAMED field -- a different declaration, not an
     // alternate spelling (grammar.bnf <field>: "named field"). It used to be
@@ -789,15 +790,15 @@ let main() Void = {
     // a formatter deleting user prose -- `typed_ast.koral` keeps one there.
     t.test(
         "comment in enum payload",
-        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
-        "type E {\n    Given(\n        span Span,\n        // the declaration identity\n        id DefId,\n    ),\n};\n",
+        "type E {\n    Given(\n        span: Span,\n        // the declaration identity\n        id: DefId,\n    ),\n};\n",
+        "type E {\n    Given(\n        span: Span,\n        // the declaration identity\n        id: DefId,\n    ),\n};\n",
     );
     t.test(
         "positional constructor field",
-        "type Point(x Int,y Int);\n",
-        "type Point(x Int, y Int);\n",
+        "type Point(x: Int,y: Int);\n",
+        "type Point(x: Int, y: Int);\n",
     );
-    t.test_error_contains("missing then rejected", "let main() Void = if 1 1;\n", "then");
+    t.test_error_contains("missing then rejected", "let main() : Void = if 1 1;\n", "then");
     // Range spellings (grammar.bnf <range-op> / <open-range-op>): the `..`
     // family is closed (both bounds written), the `...` family elides one.
     // Maximal munch: `...<` > `...` > `..<` > `..` at a dot, `<...` > `<..<`
@@ -897,28 +898,28 @@ let main() Void = {
     );
     t.test_checked(
         "comment before a statement terminator",
-        "let main() Void = {\n    f() /* c */;\n};\n",
-        "let main() Void = {\n    f() /* c */;\n};\n",
+        "let main() : Void = {\n    f() /* c */;\n};\n",
+        "let main(): Void = {\n    f() /* c */;\n};\n",
     );
     t.test_checked(
         "comment before a bare return terminator",
-        "let main() Void = {\n    return /* c */;\n};\n",
-        "let main() Void = {\n    return /* c */;\n};\n",
+        "let main() : Void = {\n    return /* c */;\n};\n",
+        "let main(): Void = {\n    return /* c */;\n};\n",
     );
     t.test_checked(
         "comment after a block tail expression",
-        "let f() Int = {\n    v /* c */\n};\n",
-        "let f() Int = {\n    v /* c */\n};\n",
+        "let f() : Int = {\n    v /* c */\n};\n",
+        "let f(): Int = {\n    v /* c */\n};\n",
     );
     t.test_checked(
         "comment before a list separator",
-        "let f(a Int /* c */, b Int) Int = 0;\n",
-        "let f(a Int /* c */, b Int) Int = 0;\n",
+        "let f(a: Int /* c */, b: Int) : Int = 0;\n",
+        "let f(a: Int /* c */, b: Int): Int = 0;\n",
     );
     t.test_checked(
         "comment before a closing delimiter",
-        "let main() Void = {\n    f(a /* c */);\n};\n",
-        "let main() Void = {\n    f(a /* c */);\n};\n",
+        "let main() : Void = {\n    f(a /* c */);\n};\n",
+        "let main(): Void = {\n    f(a /* c */);\n};\n",
     );
     t.test_checked(
         "comment before an enum variant separator",
@@ -931,28 +932,28 @@ let main() Void = {
     // The two arrows never trade places.
     t.test_checked(
         "function type annotation",
-        "let f(Int) -> Int = g;\n",
-        "let f (Int) -> Int = g;\n",
+        "let f: (Int) -> Int = g;\n",
+        "let f: (Int) -> Int = g;\n",
     );
     t.test_checked(
         "nested function type",
-        "let f ((Int) -> Int) -> Int = g;\n",
-        "let f ((Int) -> Int) -> Int = g;\n",
+        "let f: ((Int) -> Int) -> Int = g;\n",
+        "let f: ((Int) -> Int) -> Int = g;\n",
     );
     t.test_checked(
         "zero-parameter function type vs zero-parameter declaration",
-        "let t () -> Void = r;\n\nlet f() Int = {\n    return 0;\n};\n",
-        "let t () -> Void = r;\n\nlet f() Int = {\n    return 0;\n};\n",
+        "let t: () -> Void = r;\n\nlet f() : Int = {\n    return 0;\n};\n",
+        "let t: () -> Void = r;\n\nlet f(): Int = {\n    return 0;\n};\n",
     );
     t.test_checked(
         "function-typed parameter and return",
-        "let compose(f (Int) -> Int) (Int) -> Int = f;\n",
-        "let compose(f (Int) -> Int) (Int) -> Int = f;\n",
+        "let compose(f: (Int) -> Int): (Int) -> Int = f;\n",
+        "let compose(f: (Int) -> Int): (Int) -> Int = f;\n",
     );
     t.test_checked(
         "lambda with return type",
-        "let f = (x Int) Int => x + 1;\n",
-        "let f = (x Int) Int => x + 1;\n",
+        "let f = (x: Int) : Int => x + 1;\n",
+        "let f = (x: Int): Int => x + 1;\n",
     );
     t.test_checked(
         "lambda with inferred params",
@@ -961,18 +962,18 @@ let main() Void = {
     );
     t.test_checked(
         "lambda taking a function",
-        "let a = (f (Int) -> Int, x Int) Int => f(x);\n",
-        "let a = (f (Int) -> Int, x Int) Int => f(x);\n",
+        "let a = (f: (Int) -> Int, x: Int) : Int => f(x);\n",
+        "let a = (f: (Int) -> Int, x: Int): Int => f(x);\n",
     );
     t.test_checked(
         "lambda returning a function type",
-        "let r = (x) (Int) -> Int => x;\n",
-        "let r = (x) (Int) -> Int => x;\n",
+        "let r = (x): (Int) -> Int => x;\n",
+        "let r = (x): (Int) -> Int => x;\n",
     );
     t.test_checked(
         "function type in generic argument",
-        "let ms List[(Int) -> Int] = [];\n",
-        "let ms List[(Int) -> Int] = [];\n",
+        "let ms: List[(Int) -> Int] = [];\n",
+        "let ms: List[(Int) -> Int] = [];\n",
     );
     // ── parse parity with the compiler ──────────────────────────────────
     // The formatter's parser must accept exactly what `koralc` accepts. Each
@@ -986,7 +987,7 @@ let main() Void = {
     );
     t.test_error_contains(
         "legacy `->` lambda rejected",
-        "let main() Void = {\n    let f = (x) -> x;\n};\n",
+        "let main() : Void = {\n    let f = (x) -> x;\n};\n",
         "expected ';' after let declaration",
     );
     t.test_error_contains(
@@ -1036,48 +1037,33 @@ let main() Void = {
     );
     t.test(
         "raw pointer type `*T`",
-        "type T(a Int);\nlet f(x *T) Int = 0;\n",
-        "type T(a Int);\nlet f(x *T) Int = 0;\n",
+        "type T(a: Int);\nlet f(x: *T) : Int = 0;\n",
+        "type T(a: Int);\nlet f(x: *T): Int = 0;\n",
     );
     t.test(
         "raw pointer type `*mutable T`",
-        "type T(a Int);\nlet f(x *mutable T) Int = 0;\n",
-        "type T(a Int);\nlet f(x *mutable T) Int = 0;\n",
+        "type T(a: Int);\nlet f(x: *mutable T) : Int = 0;\n",
+        "type T(a: Int);\nlet f(x: *mutable T): Int = 0;\n",
     );
     t.test_error_contains(
         "legacy `?*T` rejected",
-        "type T(a Int);\nlet f(x ?*T) Int = 0;\n",
+        "type T(a: Int);\nlet f(x: ?*T) : Int = 0;\n",
         "Weak reference syntax is '?T', not legacy '?*T'",
     );
     t.test_error_contains(
         "`?mutable T` rejected",
-        "type mutable T(a Int);\nlet f(x ?mutable T) Int = 0;\n",
+        "type mutable T(a: Int);\nlet f(x: ?mutable T) : Int = 0;\n",
         "expected type name",
     );
     t.test_error_contains(
         "`*self` receiver rejected",
-        "type T(a Int);\ngiven T {\n    f(*self) Int = 0;\n};\n",
+        "type T(a: Int);\ngiven T {\n    f(*self) : Int = 0;\n};\n",
         "use 'self' only",
     );
     t.test_error_contains(
         "`*self mutable` receiver rejected",
-        "type mutable T(a Int);\ngiven T {\n    f(*self mutable) Int = 0;\n};\n",
+        "type mutable T(a: Int);\ngiven T {\n    f(*self mutable) : Int = 0;\n};\n",
         "use 'self' only",
-    );
-    t.test_error_contains(
-        "positional param default rejected",
-        "let f(x Int = 5) Int = 0;\n",
-        "Default values are only allowed for named parameters",
-    );
-    t.test_error_contains(
-        "positional field default rejected",
-        "type T(x Int = 5);\n",
-        "Default values are only allowed for named parameters",
-    );
-    t.test_error_contains(
-        "positional variant-field default rejected",
-        "type E {\n    R(x Int = 5),\n};\n",
-        "Default values are only allowed for named parameters",
     );
     // The only written form of a qualified call is `Type(Trait).method(...)`
     // (grammar.bnf <qualified-path-suffix>). `(x as Tag).plus_ten(1)` is no
@@ -1087,17 +1073,17 @@ let main() Void = {
     // leaves `.plus_ten` a stray token.
     t.test_checked(
         "parenthesized trait cast takes a method call",
-        "let main() Void={\nlet r = (x as Tag).plus_ten(1);\n};\n",
-        "let main() Void = {\n    let r = (x as Tag).plus_ten(1);\n};\n",
+        "let main() : Void={\nlet r = (x as Tag).plus_ten(1);\n};\n",
+        "let main(): Void = {\n    let r = (x as Tag).plus_ten(1);\n};\n",
     );
     t.test_error_contains(
         "method call on unparenthesized cast rejected",
-        "let main() Void={\nlet r = x as Tag.plus_ten(1);\n};\n",
+        "let main() : Void={\nlet r = x as Tag.plus_ten(1);\n};\n",
         "expected ';'",
     );
     t.test_error_contains(
         "method call on unparenthesized pointer cast rejected",
-        "let main() Void={\nlet r = x as *T.equals(1);\n};\n",
+        "let main() : Void={\nlet r = x as *T.equals(1);\n};\n",
         "expected ';'",
     );
     t.test_error_contains(
@@ -1120,27 +1106,27 @@ let main() Void = {
     // (guide/grammar.bnf <expression>). Each message is the compiler's own.
     t.test_error_contains(
         "logical `and` after flow rejected",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 and false;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 and false;\n    let _ = v;\n    return 0;\n};\n",
         "'and' cannot be mixed with the flow operators",
     );
     t.test_error_contains(
         "logical `or` after flow rejected",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 or false;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let o = Option[Int].Some(1);\n    let v = o and then as v in v == 1 or false;\n    let _ = v;\n    return 0;\n};\n",
         "'or' cannot be mixed with the flow operators",
     );
     t.test_error_contains(
         "flow `and then` after logical rejected",
-        "let main() Int = {\n    let v = true or false and then as v in v == 1;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = true or false and then as v in v == 1;\n    let _ = v;\n    return 0;\n};\n",
         "'and then' cannot be mixed with logical",
     );
     t.test_error_contains(
         "flow `or else` after logical rejected",
-        "let main() Int = {\n    let v = true and false or else false;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = true and false or else false;\n    let _ = v;\n    return 0;\n};\n",
         "'or else' cannot be mixed with logical",
     );
     t.test_error_contains(
         "flow `or return` after logical rejected",
-        "let main() Int = {\n    let v = true and false or return;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = true and false or return;\n    let _ = v;\n    return 0;\n};\n",
         "'or return' cannot be mixed with logical",
     );
     // `;` is required by the compiler and must not be supplied here. Grammar
@@ -1149,7 +1135,7 @@ let main() Void = {
     // with `expected: ';'`, so it must be rejected here too.
     t.test_error_contains(
         "top-level declaration without `;` rejected",
-        "let f() Int = 1\n",
+        "let f() : Int = 1\n",
         "expected ';' after declaration",
     );
     t.test_error_contains(
@@ -1159,22 +1145,22 @@ let main() Void = {
     );
     t.test_error_contains(
         "top-level type without `;` rejected",
-        "type T(a Int)\n",
+        "type T(a: Int)\n",
         "expected ';' after declaration",
     );
     t.test_error_contains(
         "member method without `;` rejected",
-        "type T(a Int);\ngiven T {\n    go(self) Int = 1\n};\n",
+        "type T(a: Int);\ngiven T {\n    go(self) : Int = 1\n};\n",
         "expected ';' after declaration",
     );
     t.test_error_contains(
         "block binding without `;` rejected",
-        "let f() Int = {\n    let x = 1\n    x\n};\n",
+        "let f() : Int = {\n    let x = 1\n    x\n};\n",
         "expected ';' after let declaration",
     );
     t.test_error_contains(
         "bare expression that is not the tail rejected",
-        "let f() Int = {\n    1\n    2\n};\n",
+        "let f() : Int = {\n    1\n    2\n};\n",
         "expected ';' after expression statement",
     );
     // Forms the compiler DOES accept -- these must keep formatting.
@@ -1198,51 +1184,51 @@ let main() Void = {
     );
     t.test(
         "leading underscore in type name accepted",
-        "type _Foo(a Int);\n",
-        "type _Foo(a Int);\n",
+        "type _Foo(a: Int);\n",
+        "type _Foo(a: Int);\n",
     );
     // Parentheses are the only way to cross the flow / logical boundary, so
     // they are load-bearing: dropping one would turn accepted source into the
     // rejected mix. Assert the parentheses survive a rewrite.
     t.test_checked(
         "parenthesised flow inside logical keeps its parens",
-        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
-        "let main() Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let r = true and (Option[Int].Some(1) and then as v in v > 0 or else false);\n    let _ = r;\n    return 0;\n};\n",
     );
     t.test_checked(
         "parenthesised logical inside flow keeps its parens",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = Option[Int].Some(1) and then as v in (v == 1 and false);\n    let _ = v;\n    return 0;\n};\n",
     );
     // Chains inside one layer are still accepted, and still flatten onto one
     // line when they fit.
     t.test_checked(
         "flow chain inside its own layer accepted",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = Option[Int].Some(1) and then as v in v * 2 or else 0;\n    let _ = v;\n    return 0;\n};\n",
     );
     // The chain and binder forms are load-bearing: the leading dot marks the
     // chain (an implicit member would mean something else) and `as v in` is the
     // name the body uses. Dropping either would change what the source means.
     t.test_checked(
         "and then chain keeps its leading dot",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = Option[Int].Some(1) and then .to_string();\n    let _ = v;\n    return 0;\n};\n",
     );
     t.test_checked(
         "and then binder keeps its name",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = Option[Int].Some(1) and then as x in x * 2;\n    let _ = v;\n    return 0;\n};\n",
     );
     t.test_checked(
         "or else binder keeps its name",
-        "let main() Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let r = Result[String].Error(\"boom\");\n    let v = r or else as e in e.message();\n    let _ = v;\n    return 0;\n};\n",
     );
     t.test_checked(
         "chain and binder compose with or else",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = Option[Int].Some(1) and then .to_string() or else \"none\";\n    let w = Option[Int].Some(1) and then as x in x * 2 or else 0;\n    let _ = v;\n    let _ = w;\n    return 0;\n};\n",
     );
     // `or else as e in` on Option is a SEMANTIC refusal (None has no payload),
     // not a parse error: the shape is well-formed and the formatter must keep
@@ -1250,13 +1236,13 @@ let main() Void = {
     // is covered by `tests/compiler-cases/flow_bind_or_else_option_error.koral`.
     t.test_checked(
         "or else binder is well-formed syntax even where sema refuses it",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let o = Option[Int].Some(1);\n    let v = o or else as e in 0;\n    let _ = v;\n    return 0;\n};\n",
     );
     t.test_checked(
         "logical chain inside its own layer accepted",
-        "let main() Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
-        "let main() Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
+        "let main() : Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
+        "let main(): Int = {\n    let v = true or false and true;\n    let _ = v;\n    return 0;\n};\n",
     );
     // Newlines carry no meaning: only `;` ends a statement (grammar.bnf
     // "Statement Termination"). An expression may therefore span lines after
@@ -1266,30 +1252,30 @@ let main() Void = {
     // split a call from its arguments.
     t.test_checked(
         "operator-led continuation accepted",
-        "public let f(x UInt32) UInt32 = {\n    let word = x << 24\n        | x << 16\n        | x << 8\n        | x;\n    return word;\n};\n",
-        "public let f(x UInt32) UInt32 = {\n    let word = x << 24 | x << 16 | x << 8 | x;\n    return word;\n};\n",
+        "public let f(x: UInt32) : UInt32 = {\n    let word = x << 24\n        | x << 16\n        | x << 8\n        | x;\n    return word;\n};\n",
+        "public let f(x: UInt32): UInt32 = {\n    let word = x << 24 | x << 16 | x << 8 | x;\n    return word;\n};\n",
     );
     t.test_checked(
         "newline does not split a call from its arguments",
-        "let main() Int = {\n    let v = f\n        (1);\n    return v;\n};\n",
-        "let main() Int = {\n    let v = f(1);\n    return v;\n};\n",
+        "let main() : Int = {\n    let v = f\n        (1);\n    return v;\n};\n",
+        "let main(): Int = {\n    let v = f(1);\n    return v;\n};\n",
     );
     t.test_checked(
         "newline does not split a chain from its receiver",
-        "let main() Int = {\n    let n = \"abc\"\n        .count();\n    return n;\n};\n",
-        "let main() Int = {\n    let n = \"abc\".count();\n    return n;\n};\n",
+        "let main() : Int = {\n    let n = \"abc\"\n        .count();\n    return n;\n};\n",
+        "let main(): Int = {\n    let n = \"abc\".count();\n    return n;\n};\n",
     );
     // `it` is an ordinary identifier: it names nothing implicitly and is free
     // for a declaration like any other name.
     t.test_checked(
         "`it` as declaration name accepted",
-        "let main() Int = {\n    let it Int = 0;\n    return it;\n};\n",
-        "let main() Int = {\n    let it Int = 0;\n    return it;\n};\n",
+        "let main() : Int = {\n    let it: Int = 0;\n    return it;\n};\n",
+        "let main(): Int = {\n    let it: Int = 0;\n    return it;\n};\n",
     );
     t.test(
         "`or else as e in` binder round-trips",
-        "let g(r Result[Int]) Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
-        "let g(r Result[Int]) Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
+        "let g(r: Result[Int]) : Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
+        "let g(r: Result[Int]): Int = {\n    let x = r or else as e in {\n        let _ = e;\n        return 0;\n    };\n    return x;\n};\n",
     );
     // `while` and `for` always produce `Void`, so a `Void` binding IS their
     // value position and the language accepts it (document.md: "while and for
@@ -1298,13 +1284,13 @@ let main() Void = {
     // forever without anyone noticing: the harness did not compile at all.
     t.test(
         "while in Void binding",
-        "let x Void = while true then {};\n",
-        "let x Void = while true then {};\n",
+        "let x: Void = while true then {};\n",
+        "let x: Void = while true then {};\n",
     );
     t.test(
         "for in Void binding",
-        "let x Void = for item in [1,2] then println(item);\n",
-        "let x Void = for item in [1, 2] then println(item);\n",
+        "let x: Void = for item in [1,2] then println(item);\n",
+        "let x: Void = for item in [1, 2] then println(item);\n",
     );
 
     // ====================================================================
@@ -1319,13 +1305,13 @@ let main() Void = {
     // stay in the prefix slot. The old prefix order is a parse error now.
     t.test(
         "qualifier after let keyword",
-        "let foreign foo Int;\n",
-        "let foreign foo Int;\n",
+        "let foreign foo: Int;\n",
+        "let foreign foo: Int;\n",
     );
     t.test(
         "access modifier before qualifier",
-        "public let foreign foo Int;\n",
-        "public let foreign foo Int;\n",
+        "public let foreign foo: Int;\n",
+        "public let foreign foo: Int;\n",
     );
     t.test(
         "intrinsic qualifier on type",
@@ -1347,13 +1333,13 @@ let main() Void = {
     // accepted for free functions and rejected inside a trait body.
     t.test(
         "mutable param in trait method",
-        "trait T {\ninc(self, mutable value Int) Int;\n};\n",
-        "trait T {\n    inc(self, mutable value Int) Int;\n};\n",
+        "trait T {\ninc(self, mutable value: Int) : Int;\n};\n",
+        "trait T {\n    inc(self, mutable value: Int): Int;\n};\n",
     );
     t.test(
         "mutable param in given method",
-        "type A();\ntrait T {\ninc(self, mutable value Int) Int;\n};\ngiven A as T {\ninc(self, mutable value Int) Int = value;\n};\n",
-        "type A();\ntrait T {\n    inc(self, mutable value Int) Int;\n};\ngiven A as T {\n    inc(self, mutable value Int) Int = value;\n};\n",
+        "type A();\ntrait T {\ninc(self, mutable value: Int) : Int;\n};\ngiven A: T {\ninc(self, mutable value: Int) : Int = value;\n};\n",
+        "type A();\ntrait T {\n    inc(self, mutable value: Int): Int;\n};\ngiven A: T {\n    inc(self, mutable value: Int): Int = value;\n};\n",
     );
 
     // Default values are literals, and the literal set includes `...` (the
@@ -1369,48 +1355,48 @@ let main() Void = {
     // under `when` / `is`. All of these were "expected ')', got ','".
     t.test(
         "for tuple binding",
-        "let main() Void = {\nfor (left, right) in pairs then {\nprintln(left);\n};\n};\n",
-        "let main() Void = {\n    for (left, right) in pairs then {\n        println(left);\n    };\n};\n",
+        "let main() : Void = {\nfor (left, right) in pairs then {\nprintln(left);\n};\n};\n",
+        "let main(): Void = {\n    for (left, right) in pairs then {\n        println(left);\n    };\n};\n",
     );
     t.test(
         "for tuple binding three slots",
-        "let main() Void = {\nfor (x, _, z) in points then {\nprintln(x);\n};\n};\n",
-        "let main() Void = {\n    for (x, _, z) in points then {\n        println(x);\n    };\n};\n",
+        "let main() : Void = {\nfor (x, _, z) in points then {\nprintln(x);\n};\n};\n",
+        "let main(): Void = {\n    for (x, _, z) in points then {\n        println(x);\n    };\n};\n",
     );
     t.test(
         "tuple pattern in when",
-        "let main() Void = {\nlet s = when p in {\n(a, b) then a + b,\n};\n};\n",
-        "let main() Void = {\n    let s = when p in {\n        (a, b) then a + b,\n    };\n};\n",
+        "let main() : Void = {\nlet s = when p in {\n(a, b) then a + b,\n};\n};\n",
+        "let main(): Void = {\n    let s = when p in {\n        (a, b) then a + b,\n    };\n};\n",
     );
     t.test(
         "tuple pattern in is",
-        "let main() Void = {\nif p is (a, b) then {\nprintln(a);\n};\n};\n",
-        "let main() Void = {\n    if p is (a, b) then {\n        println(a);\n    };\n};\n",
+        "let main() : Void = {\nif p is (a, b) then {\nprintln(a);\n};\n};\n",
+        "let main(): Void = {\n    if p is (a, b) then {\n        println(a);\n    };\n};\n",
     );
 
     // `name Type` binds the matched trait-object implementation; `mutable name
     // Type` binds it mutably (grammar.bnf <trait-object-type-binding-pattern>).
     t.test(
         "trait object type binding pattern",
-        "let f(t T) Int = when t in {\nio ProbeError then 1,\n_ then 0,\n};\n",
-        "let f(t T) Int = when t in {\n    io ProbeError then 1,\n    _ then 0,\n};\n",
+        "let f(t: T) : Int = when t in {\nio: ProbeError then 1,\n_ then 0,\n};\n",
+        "let f(t: T): Int = when t in {\n    io: ProbeError then 1,\n    _ then 0,\n};\n",
     );
     t.test(
         "mutable trait object type binding pattern",
-        "let f(t T) Int = when t in {\nmutable io ProbeError then 1,\n_ then 0,\n};\n",
-        "let f(t T) Int = when t in {\n    mutable io ProbeError then 1,\n    _ then 0,\n};\n",
+        "let f(t: T) : Int = when t in {\nmutable io: ProbeError then 1,\n_ then 0,\n};\n",
+        "let f(t: T): Int = when t in {\n    mutable io: ProbeError then 1,\n    _ then 0,\n};\n",
     );
 
     // Weak-reference upgrade: `?expr` upgrades a weak reference to `Option[T]`.
     t.test(
         "weak upgrade expression",
-        "let main() Void = {\nlet v = ?w;\n};\n",
-        "let main() Void = {\n    let v = ?w;\n};\n",
+        "let main() : Void = {\nlet v = ?w;\n};\n",
+        "let main(): Void = {\n    let v = ?w;\n};\n",
     );
     t.test(
         "weak upgrade in when",
-        "let f(w ?Port) Int = when ?w in {\n.Some(p) then p,\n.None() then 0,\n};\n",
-        "let f(w ?Port) Int = when ?w in {\n    .Some(p) then p,\n    .None() then 0,\n};\n",
+        "let f(w: ?Port) : Int = when ?w in {\n.Some(p) then p,\n.None() then 0,\n};\n",
+        "let f(w: ?Port): Int = when ?w in {\n    .Some(p) then p,\n    .None() then 0,\n};\n",
     );
 
     // An import list may span lines; the line breaks are kept, because `using`
@@ -1426,16 +1412,16 @@ let main() Void = {
     // the prose survives, the meaning does not.
     t.test(
         "own-line comment stays on its own line",
-        "type S(\n    a Int,\n    // documents b\n    b UInt,\n);\n",
-        "type S(\n    a Int,\n    // documents b\n    b UInt,\n);\n",
+        "type S(\n    a: Int,\n    // documents b\n    b: UInt,\n);\n",
+        "type S(\n    a: Int,\n    // documents b\n    b: UInt,\n);\n",
     );
     // Comment text is byte-for-byte the author's, trailing spaces included. The
     // test runner reads `// EXPECT: ` markers -- trimming one rewrites an
     // expectation.
     t.test(
         "comment trailing space preserved",
-        "let x Int = 1; // note:  \n",
-        "let x Int = 1; // note:  \n",
+        "let x: Int = 1; // note:  \n",
+        "let x: Int = 1; // note:  \n",
     );
 
     // Multiline strings carry their own column layout; the closing `"""` sets
@@ -1443,15 +1429,15 @@ let main() Void = {
     // interior would change the value.
     t.test(
         "multiline string interior untouched",
-        "let main() Void = {\nlet s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
-        "let main() Void = {\n    let s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
+        "let main() : Void = {\nlet s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
+        "let main(): Void = {\n    let s = \"\"\"\n        hello\n        world\n        \"\"\";\n};\n",
     );
 
     // A function declaration without a body needs `foreign` or `intrinsic`.
     // Parsing it as a variable would drop the parameter list on the floor.
     t.test_error_contains(
         "body-less function without modifier rejected",
-        "let bad(x Int) Int;\n",
+        "let bad(x: Int) : Int;\n",
         "foreign",
     );
 
@@ -1459,8 +1445,8 @@ let main() Void = {
     // come back byte-identical to its expectation AND survive a second pass.
     t.test_checked(
         "checked: qualifier after keyword",
-        "public let foreign mutable foo Int32;\n",
-        "public let foreign mutable foo Int32;\n",
+        "public let foreign mutable foo: Int32;\n",
+        "public let foreign mutable foo: Int32;\n",
     );
     t.test_checked(
         "checked: tuple pattern",
@@ -1469,8 +1455,8 @@ let main() Void = {
     );
     t.test_checked(
         "checked: comment with trailing space",
-        "let x Int = 1; // note:  \n",
-        "let x Int = 1; // note:  \n",
+        "let x: Int = 1; // note:  \n",
+        "let x: Int = 1; // note:  \n",
     );
     t.test_checked(
         "checked: multiline string",
@@ -1482,42 +1468,42 @@ let main() Void = {
     // written, whether it can fail is the compiler's call) ===
     t.test(
         "for plain binding",
-        "let main() Void={\nfor x in xs then f(x);\n};\n",
-        "let main() Void = {\n    for x in xs then f(x);\n};\n",
+        "let main() : Void={\nfor x in xs then f(x);\n};\n",
+        "let main(): Void = {\n    for x in xs then f(x);\n};\n",
     );
     t.test(
         "for mutable binding",
-        "let main() Void={\nfor mutable x in xs then x+=1;\n};\n",
-        "let main() Void = {\n    for mutable x in xs then x += 1;\n};\n",
+        "let main() : Void={\nfor mutable x in xs then x+=1;\n};\n",
+        "let main(): Void = {\n    for mutable x in xs then x += 1;\n};\n",
     );
     t.test(
         "for tuple binding",
-        "let main() Void={\nfor (a,b) in pairs then f(a,b);\n};\n",
-        "let main() Void = {\n    for (a, b) in pairs then f(a, b);\n};\n",
+        "let main() : Void={\nfor (a,b) in pairs then f(a,b);\n};\n",
+        "let main(): Void = {\n    for (a, b) in pairs then f(a, b);\n};\n",
     );
     t.test(
         "for tuple binding with discard",
-        "let main() Void={\nfor (a,_,c) in xs then f(a,c);\n};\n",
-        "let main() Void = {\n    for (a, _, c) in xs then f(a, c);\n};\n",
+        "let main() : Void={\nfor (a,_,c) in xs then f(a,c);\n};\n",
+        "let main(): Void = {\n    for (a, _, c) in xs then f(a, c);\n};\n",
     );
     t.test(
         "for struct pattern",
-        "let main() Void={\nfor Point(a,b) in xs then f(a,b);\n};\n",
-        "let main() Void = {\n    for Point(a, b) in xs then f(a, b);\n};\n",
+        "let main() : Void={\nfor Point(a,b) in xs then f(a,b);\n};\n",
+        "let main(): Void = {\n    for Point(a, b) in xs then f(a, b);\n};\n",
     );
     t.test(
         "for guard",
-        "let main() Void={\nfor x in xs where x>0 then f(x);\n};\n",
-        "let main() Void = {\n    for x in xs where x > 0 then f(x);\n};\n",
+        "let main() : Void={\nfor x in xs where x>0 then f(x);\n};\n",
+        "let main(): Void = {\n    for x in xs where x > 0 then f(x);\n};\n",
     );
     t.test_error_contains(
         "for guard retired 'if' spelling",
-        "let main() Void={\nfor x in xs if x>0 then f(x);\n};\n",
+        "let main() : Void={\nfor x in xs if x>0 then f(x);\n};\n",
         "Pattern guards use 'where', not 'if'",
     );
     t.test_error_contains(
         "for parenthesized slot rejected",
-        "let main() Void={\nfor (x) in xs then f(x);\n};\n",
+        "let main() : Void={\nfor (x) in xs then f(x);\n};\n",
         "A parenthesized pattern groups nothing; `(` starts a tuple pattern with at least two slots. Under 'is', combine tests with 'or is' / 'and is'",
     );
 
@@ -1527,23 +1513,23 @@ let main() Void = {
     // in `when`/`is`.
     t.test(
         "nested let tuple binding",
-        "let main() Void={\nlet (a,(b,c))=Outer(1,Inner(2,3));\n};\n",
-        "let main() Void = {\n    let (a, (b, c)) = Outer(1, Inner(2, 3));\n};\n",
+        "let main() : Void={\nlet (a,(b,c))=Outer(1,Inner(2,3));\n};\n",
+        "let main(): Void = {\n    let (a, (b, c)) = Outer(1, Inner(2, 3));\n};\n",
     );
     t.test(
         "nested for tuple binding",
-        "let main() Void={\nfor (a,(b,c)) in xs then f(a,b,c);\n};\n",
-        "let main() Void = {\n    for (a, (b, c)) in xs then f(a, b, c);\n};\n",
+        "let main() : Void={\nfor (a,(b,c)) in xs then f(a,b,c);\n};\n",
+        "let main(): Void = {\n    for (a, (b, c)) in xs then f(a, b, c);\n};\n",
     );
     t.test(
         "nested let tuple binding with mutable and type",
-        "let main() Void={\nlet (mutable a,(b Int,_))=Outer(1,Inner(2,3));\n};\n",
-        "let main() Void = {\n    let (mutable a, (b Int, _)) = Outer(1, Inner(2, 3));\n};\n",
+        "let main() : Void={\nlet (mutable a,(b: Int,_))=Outer(1,Inner(2,3));\n};\n",
+        "let main(): Void = {\n    let (mutable a, (b: Int, _)) = Outer(1, Inner(2, 3));\n};\n",
     );
     t.test(
         "deeply nested tuple binding",
-        "let main() Void={\nlet ((a,b),(c,(d,e)))=make();\n};\n",
-        "let main() Void = {\n    let ((a, b), (c, (d, e))) = make();\n};\n",
+        "let main() : Void={\nlet ((a,b),(c,(d,e)))=make();\n};\n",
+        "let main(): Void = {\n    let ((a, b), (c, (d, e))) = make();\n};\n",
     );
 
     // === `Self` is a type, not an expression ===
@@ -1552,18 +1538,18 @@ let main() Void = {
     // position (`* Self(p)`, `let x Self`, ...).
     t.test_error_contains(
         "Self as expression rejected",
-        "let main() Void={\nlet p=Self(1,2);\n};\n",
+        "let main() : Void={\nlet p=Self(1,2);\n};\n",
         "'Self' is a type and cannot be used as an expression",
     );
     t.test_error_contains(
         "bare Self as expression rejected",
-        "let main() Void={\nlet p=Self;\n};\n",
+        "let main() : Void={\nlet p=Self;\n};\n",
         "'Self' is a type and cannot be used as an expression",
     );
     t.test(
         "Self as type annotation allowed",
-        "let main() Void={\nlet x Self=y;\n};\n",
-        "let main() Void = {\n    let x Self = y;\n};\n",
+        "let main() : Void={\nlet x: Self=y;\n};\n",
+        "let main(): Void = {\n    let x: Self = y;\n};\n",
     );
 
     t.summary();
@@ -1581,16 +1567,16 @@ let main() Void = {
 // ============================================================================
 
 /// The directories that hold real Koral source: the code people edit and ship.
-let corpus_roots() List[String] = ["std", "compiler", "toolchain", "samples"];
+let corpus_roots(): List[String] = ["std", "compiler", "toolchain", "samples"];
 
-let run_corpus_gate(t TestRunner) Void = {
+let run_corpus_gate(t: TestRunner): Void = {
     let repo_root = find_repo_root() or else as e in {
         eprintln("CORPUS GATE: \(e.message())");
         exit(1);
     };
 
-    let mutable checked UInt = 0;
-    let mutable failed UInt = 0;
+    let mutable checked: UInt = 0;
+    let mutable failed: UInt = 0;
 
     for relative in corpus_roots() then {
         let root = repo_root.join(relative);
@@ -1645,10 +1631,10 @@ let run_corpus_gate(t TestRunner) Void = {
     };
 };
 
-let find_repo_root() Result[Path] = {
+let find_repo_root(): Result[Path] = {
     let mutable cursor = current_dir() or return;
 
-    let mutable steps UInt = 0;
+    let mutable steps: UInt = 0;
     while steps < 12 then {
         if path_exist(cursor.join("std").join("std.koral")) then {
             return Result[Path].Ok(cursor);

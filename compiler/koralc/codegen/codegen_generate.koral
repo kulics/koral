@@ -20,31 +20,31 @@
 using "std/os" { ... };
 using "std/proc" { ... };
 
-private let codegen_function_trace_enabled() Bool = {
+private let codegen_function_trace_enabled(): Bool = {
     return if env("KORAL_DEBUG_CODEGEN_FUNCTIONS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
     else false;
 };
 
-private let codegen_step_trace_enabled() Bool = {
+private let codegen_step_trace_enabled(): Bool = {
     return if env("KORAL_DEBUG_CODEGEN_STEPS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
     else false;
 };
 
-private let trace_codegen_step(message String) Void = {
+private let trace_codegen_step(message: String): Void = {
     if codegen_step_trace_enabled() then {
         eprintln(message);
     };
 };
 
-type ForeignFunctionPrototype(name String, params List[TypedParam], return_type Type);
+type ForeignFunctionPrototype(name: String, params: List[TypedParam], return_type: Type);
 
 type ForeignDeclarations(
-    empty_types List[String],
-    functions List[ForeignFunctionPrototype],
+    empty_types: List[String],
+    functions: List[ForeignFunctionPrototype],
 );
 
 given CodeGen {
-    public validate_mir_function(self, function MIRFunction) Void = {
+    public validate_mir_function(self, function: MIRFunction): Void = {
         let mutable return_type = self.mir_function_return_type(function);
         if self.type_contains_generic(function.identifier.symbol_type) then {
             panic(
@@ -73,13 +73,13 @@ given CodeGen {
         };
     };
 
-    public validate_mir_functions(self, functions List[MIRFunction]) Void = {
+    public validate_mir_functions(self, functions: List[MIRFunction]): Void = {
         for function in functions then {
             self.validate_mir_function(function);
         };
     };
 
-    validate_codegen_inputs(self) Void = {
+    validate_codegen_inputs(self): Void = {
         self.validate_mir_functions(self.program.functions);
 
         for global in self.program.globals then {
@@ -237,7 +237,7 @@ given CodeGen {
         };
     };
 
-    is_concrete_nominal_instance(self, t Type) Bool = {
+    is_concrete_nominal_instance(self, t: Type): Bool = {
         return when t in {
             .GenericStruct(_, type_args) then {
                 let mutable concrete = true;
@@ -307,20 +307,20 @@ given CodeGen {
         };
     };
 
-    user_defined_drop_type_key(self, receiver_type Type) String = {
+    user_defined_drop_type_key(self, receiver_type: Type): String = {
         return self.emitted_type_c_name_fallback(receiver_type);
     };
 
-    user_defined_drop_method_name(self, receiver_type Type) String = {
+    user_defined_drop_method_name(self, receiver_type: Type): String = {
         let type_c_name = self.user_defined_drop_type_key(receiver_type);
         return self.compose_method_c_name(type_c_name, "drop");
     };
 
     emitted_user_defined_drop_method_name(
         self,
-        receiver_type Type,
-        method_def_id DefId,
-    ) String = {
+        receiver_type: Type,
+        method_def_id: DefId,
+    ): String = {
         return when self.context.get_symbol(method_def_id) in {
             .Some(symbol) then self.callable_c_name(symbol),
             .None() then self.user_defined_drop_method_name(receiver_type),
@@ -331,11 +331,11 @@ given CodeGen {
     /// the spelling "Drop". Sema resolves that identity once
     /// (`CompilerContext.set_std_drop_trait_def_id`) and stamps it on every
     /// `MIRGlobal.Given`.
-    is_std_drop_impl(self, trait_def_id Option[DefId]) Bool = {
+    is_std_drop_impl(self, trait_def_id: Option[DefId]): Bool = {
         return self.context.is_std_drop_impl_def_id(trait_def_id);
     };
 
-    user_defined_drop_for_type_name(self, type_name String) Option[String] = {
+    user_defined_drop_for_type_name(self, type_name: String): Option[String] = {
         for global in self.program.globals then {
             when global in {
                 .Given(target_type, _, _, methods, trait_def_id) then {
@@ -419,7 +419,7 @@ given CodeGen {
     /// 生成完整的 C 源代码
     ///
     /// Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 13.1, 13.2, 13.3
-    public generate_into_buffer(self) Void = {
+    public generate_into_buffer(self): Void = {
         trace_codegen_step("[codegen-step] validate inputs");
         self.validate_codegen_inputs();
         trace_codegen_step("[codegen-step] prelude start");
@@ -430,7 +430,7 @@ given CodeGen {
         self.finalize_program_into_buffer();
     };
 
-    public generate_prelude_into_buffer(self) Void = {
+    public generate_prelude_into_buffer(self): Void = {
         self.buffer = CodegenBuffer.new();
         trace_codegen_step("[codegen-step] scan program inputs");
         let foreign_declarations = self.scan_program_codegen_inputs();
@@ -451,19 +451,19 @@ given CodeGen {
         trace_codegen_step("[codegen-step] prelude done");
     };
 
-    public finalize_program_into_buffer(self) Void = {
+    public finalize_program_into_buffer(self): Void = {
         self.emit_c_main();
     };
 
-    public into_generated_string(self) String =
+    public into_generated_string(self): String =
         self.emit_drop_thunk_definitions(self.buffer.into_string());
 
-    public generate(self) String = {
+    public generate(self): String = {
         self.generate_into_buffer();
         return self.into_generated_string();
     };
 
-    scan_program_codegen_inputs(self) ForeignDeclarations = {
+    scan_program_codegen_inputs(self): ForeignDeclarations = {
         let mutable empty_types = List[String].new();
         let mutable foreign_functions = List[ForeignFunctionPrototype].new();
         let stdlib_functions = ["exit", "abort"];
@@ -521,7 +521,7 @@ given CodeGen {
     /// 生成 #include 指令
     ///
     /// Requirements: 12.1
-    emit_includes(self) Void = {
+    emit_includes(self): Void = {
         self.buffer.push_string("#include <stdatomic.h>\n");
         self.buffer.push_string("#include <stdint.h>\n");
         self.buffer.push_string("#include <stdlib.h>\n");
@@ -535,7 +535,7 @@ given CodeGen {
     /// 生成 foreign 类型声明（typedef struct {Name} {Name}）
     ///
     /// Requirements: 3.8
-    emit_foreign_types(self, foreign_declarations ForeignDeclarations) Void = {
+    emit_foreign_types(self, foreign_declarations: ForeignDeclarations): Void = {
         if foreign_declarations.empty_types.is_empty() then {
             return;
         };
@@ -546,7 +546,7 @@ given CodeGen {
         self.buffer.push_string("\n");
     };
 
-    emit_type_forward_declarations(self, declarations List[TypeDeclaration]) Void = {
+    emit_type_forward_declarations(self, declarations: List[TypeDeclaration]): Void = {
         for decl in declarations then {
             when decl in {
                 .Structure(name, _, _, _) then {
@@ -577,8 +577,8 @@ given CodeGen {
 
     emit_managed_nominal_wrapper_declarations(
         self,
-        declarations List[TypeDeclaration],
-    ) Void = {
+        declarations: List[TypeDeclaration],
+    ): Void = {
         for decl in declarations then {
             when decl in {
                 .Structure(name, _, _, managed) then {
@@ -607,7 +607,7 @@ given CodeGen {
     /// 收集、拓扑排序、生成类型定义（结构体/枚举，含 copy/drop）
     ///
     /// Requirements: 3.1–3.8, 13.1
-    emit_type_declarations(self) Void = {
+    emit_type_declarations(self): Void = {
         let sorted_decls = self.collect_and_sort_type_declarations();
         self.emit_type_forward_declarations(sorted_decls);
         self.emit_managed_nominal_wrapper_declarations(sorted_decls);
@@ -633,7 +633,7 @@ given CodeGen {
     /// 生成 extern 函数声明
     ///
     /// Requirements: 4.6, 4.7
-    emit_foreign_functions(self, foreign_declarations ForeignDeclarations) Void = {
+    emit_foreign_functions(self, foreign_declarations: ForeignDeclarations): Void = {
         if foreign_declarations.functions.is_empty() then {
             return;
         };
@@ -653,7 +653,7 @@ given CodeGen {
 
     // ── emit_mir_function_declarations ───────────────────────────────────────
 
-    emit_mir_function_declarations(self) Void = {
+    emit_mir_function_declarations(self): Void = {
         let mutable emitted = Set[String].new();
         // Emit from actual function implementations first (correct types).
         for function_ref in self.program.functions then {
@@ -690,7 +690,7 @@ given CodeGen {
 
     // ── emit_mir_global_variables ────────────────────────────────────────────
 
-    emit_mir_global_variables(self) Void = {
+    emit_mir_global_variables(self): Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignGlobalVariable(identifier, is_mutable, decl_type) then {
@@ -718,13 +718,13 @@ given CodeGen {
     /// 生成 vtable 定义（调用 process_vtable_requests）
     ///
     /// Requirements: 10.1–10.5
-    emit_vtable_definitions(self) Void = {
+    emit_vtable_definitions(self): Void = {
         self.process_vtable_requests();
     };
 
     // ── emit_mir_function_implementations ────────────────────────────────────
 
-    public emit_mir_function_implementations(self) Void = {
+    public emit_mir_function_implementations(self): Void = {
         let mutable emitted_count = UInt(0);
         while not self.program.functions.is_empty() then {
             let function = self.program.functions.pop().unwrap();
@@ -745,11 +745,11 @@ given CodeGen {
 
     emit_declared_function_declaration(
         self,
-        identifier Symbol,
-        params List[TypedParam],
-        return_type Type,
-        emitted Set[String],
-    ) Void = {
+        identifier: Symbol,
+        params: List[TypedParam],
+        return_type: Type,
+        emitted: Set[String],
+    ): Void = {
         let c_name = self.callable_c_name(identifier);
         if emitted.contains(c_name) then {
             return;
@@ -773,11 +773,7 @@ given CodeGen {
         self.buffer.push_string("\(return_c_type) \(c_name)(\(declaration_params));\n");
     };
 
-    emit_symbol_function_declaration(
-        self,
-        symbol Symbol,
-        emitted Set[String],
-    ) Void = {
+    emit_symbol_function_declaration(self, symbol: Symbol, emitted: Set[String]): Void = {
         let c_name = self.callable_c_name(symbol);
         if emitted.contains(c_name) then {
             return;
@@ -806,7 +802,7 @@ given CodeGen {
     /// 生成 C main 函数
     ///
     /// Requirements: 12.6, 12.7, 12.8
-    emit_c_main(self) Void = {
+    emit_c_main(self): Void = {
         let has_global_inits = self.has_mir_global_initializers();
         let has_user_main = when self.user_main_function_name in {
             .Some(_) then true,
@@ -881,7 +877,7 @@ given CodeGen {
         self.buffer.push_string("}\n");
     };
 
-    has_mir_global_initializers(self) Bool = {
+    has_mir_global_initializers(self): Bool = {
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(_, _, _, _) then {
@@ -893,7 +889,7 @@ given CodeGen {
         return false;
     };
 
-    emit_mir_global_initializers(self) Void = {
+    emit_mir_global_initializers(self): Void = {
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(identifier, initializer_function, _, _) then {
@@ -910,7 +906,7 @@ given CodeGen {
     // ── 辅助：构建参数列表字符串 ──────────────────────────────────────────────
 
     /// 将 [TypedParam]List 转换为 C 参数声明字符串
-    public build_param_list(self, params List[TypedParam]) String = {
+    public build_param_list(self, params: List[TypedParam]): String = {
         if params.is_empty() then {
             return "void";
         };
@@ -932,7 +928,7 @@ given CodeGen {
     };
 
     // 只生成参数类型（不带参数名），用于函数声明
-    public build_param_type_list(self, params List[TypedParam]) String = {
+    public build_param_type_list(self, params: List[TypedParam]): String = {
         if params.is_empty() then {
             return "void";
         };
@@ -950,7 +946,7 @@ given CodeGen {
         return result.to_string();
     };
 
-    public build_param_type_list_from_function_type(self, fn_type Type) String = {
+    public build_param_type_list_from_function_type(self, fn_type: Type): String = {
         return when fn_type in {
             .FunctionType(params, _) then {
                 if params.is_empty() then {
@@ -958,7 +954,7 @@ given CodeGen {
                 };
                 let mutable result = StringBuilder.new();
                 let mutable first = true;
-                let mutable index UInt = 0;
+                let mutable index: UInt = 0;
                 while index < params.count() then {
                     if not first then {
                         result.push_string(", ");
@@ -978,7 +974,7 @@ given CodeGen {
     /// 检查类型是否包含泛型参数
     ///
     /// Requirements: 13.2
-    public type_contains_generic(self, t Type) Bool = {
+    public type_contains_generic(self, t: Type): Bool = {
         return self.context.contains_generic_parameter(t) or type_mentions_unresolved_generic_placeholder(
             t,
         );
@@ -988,14 +984,14 @@ given CodeGen {
     ///
     /// 这用于代码生成阶段的“是否已单态化”判断，避免在递归具体类型上
     /// 深入遍历整个类型图。
-    public type_mentions_unresolved_generic(self, t Type) Bool = {
+    public type_mentions_unresolved_generic(self, t: Type): Bool = {
         return type_mentions_unresolved_generic_placeholder(t);
     };
 
     /// 检查参数列表是否包含泛型参数
     ///
     /// Requirements: 13.2
-    params_contain_generic(self, params List[TypedParam]) Bool = {
+    params_contain_generic(self, params: List[TypedParam]): Bool = {
         for p in params then {
             if self.type_contains_generic(p.param_type) then {
                 return true;
@@ -1007,7 +1003,7 @@ given CodeGen {
     /// 检查 C 名称是否包含泛型参数标记（如 _k__T_ 前缀）
     ///
     /// 用于跳过未完全单态化的方法（如 _k__T_Deque_reserve）
-    public c_name_has_generic_marker(self, c_name String) Bool = {
+    public c_name_has_generic_marker(self, c_name: String): Bool = {
         // 检查是否包含 _k__ 前缀（泛型方法标记）
         return c_name.starts_with("_k__");
     };

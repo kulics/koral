@@ -68,7 +68,7 @@
 **前导点永远是「上下文接收者的成员」，上下文有两种。**
 
 - **值上下文**：紧跟 `and then`，接收者是刚被解包的值 → `and then .f()` = `and then as v in v.f()`。
-- **类型上下文**：期望类型已知处（`or else` 的默认值、`let x T = .foo()`、有类型的实参位），
+- **类型上下文**：期望类型已知处（`or else` 的默认值、`let x: T = .foo()`、有类型的实参位），
   接收者是那个类型 → implicit member，规则原样不动。
 
 一个机制，两个上下文。`and then` 之后的 implicit member 读法不可达（`and then` 不把期望
@@ -118,7 +118,7 @@ config and then as v in v.title   // 展开
 省掉的只是外层那一包。
 
 **判定只看声明类型，泛型参数视为不透明。** `f: (T) -> U` 里的 `U` 是类型参数，
-一律走「包一层」——于是 `map[U Any](f (T) -> U) Option[U]` 对所有实例化
+一律走「包一层」——于是 `map[U: Any](f: (T) -> U): Option[U]` 对所有实例化
 （含 `U = Option[V]`）都给出 `Option[U]`，Functor 律不破。判定不得在单态化实例上重做，
 否则 `map` 的签名会在 `U = Option[V]` 时被折叠击穿。
 
@@ -128,7 +128,7 @@ config and then as v in v.title   // 展开
 > **只有包装结果的算子才折叠。**
 
 跨族（Option 左、变换返回 Result）取「包一层」，不报错——`map` 必须能构造
-`Option[Result[V]]`，若算子在「声明返回异族」时报错，`x and then f(it)` 与 `x.map(f)`
+`Option[Result[V]]`，若算子在「声明返回异族」时报错，`x and then as v in f(v)` 与 `x.map(f)`
 对同一个 `f` 会给出不同裁定。
 
 ### `or else` 不折叠，绑定仅 Result

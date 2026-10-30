@@ -16,20 +16,20 @@ using "std" { ... };
 // ============================================================================
 
 // channel internal shared storage
-private type mutable ChannelStorage[T Any](
-    mutex Mutex,
-    not_empty MutexCondvar, // notify consumer: new message available
-    not_full MutexCondvar, // notify producer: space available
-    mutable queue List[T], // message queue
-    capacity UInt, // buffer size
-    mutable sender_closed Bool, // all SendChannels have been dropped
-    mutable receiver_closed Bool, // all RecvChannels have been dropped
+private type mutable ChannelStorage[T: Any](
+    mutex: Mutex,
+    not_empty: MutexCondvar, // notify consumer: new message available
+    not_full: MutexCondvar, // notify producer: space available
+    mutable queue: List[T], // message queue
+    capacity: UInt, // buffer size
+    mutable sender_closed: Bool, // all SendChannels have been dropped
+    mutable receiver_closed: Bool, // all RecvChannels have been dropped
 );
 
-public type mutable SendChannel[T Any](private channel ChannelStorage[T]);
+public type mutable SendChannel[T: Any](private channel: ChannelStorage[T]);
 
-given[T Any] SendChannel[T] as Drop {
-    drop(self) Void = {
+given[T: Any] SendChannel[T]: Drop {
+    drop(self): Void = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -38,10 +38,10 @@ given[T Any] SendChannel[T] as Drop {
     };
 };
 
-public type mutable RecvChannel[T Any](private channel ChannelStorage[T]);
+public type mutable RecvChannel[T: Any](private channel: ChannelStorage[T]);
 
-given[T Any] RecvChannel[T] as Drop {
-    drop(self) Void = {
+given[T: Any] RecvChannel[T]: Drop {
+    drop(self): Void = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -50,9 +50,9 @@ given[T Any] RecvChannel[T] as Drop {
     };
 };
 
-given[T Any] SendChannel[T] {
+given[T: Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
-    public send(self, value T) Result[Void] = {
+    public send(self, value: T): Result[Void] = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -68,7 +68,7 @@ given[T Any] SendChannel[T] {
     };
 
     /// 非阻塞发送
-    public try_send(self, value T) Result[Bool] = {
+    public try_send(self, value: T): Result[Bool] = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -84,9 +84,9 @@ given[T Any] SendChannel[T] {
     };
 };
 
-given[T Any] RecvChannel[T] {
+given[T: Any] RecvChannel[T] {
     /// 接收消息（阻塞，直到有消息或通道关闭）
-    public recv(self) Result[T] = {
+    public recv(self): Result[T] = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -102,7 +102,7 @@ given[T Any] RecvChannel[T] {
     };
 
     /// 非阻塞接收
-    public try_recv(self) Result[Option[T]] = {
+    public try_recv(self): Result[Option[T]] = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
@@ -124,7 +124,7 @@ given[T Any] RecvChannel[T] {
 
 /// 类型安全的消息传递通道工厂。
 /// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
-public let make_channel[T Any](capacity UInt) Pair[SendChannel[T], RecvChannel[T]] = {
+public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChannel[T]] = {
     let mu = Mutex.new();
     let not_empty = mu.condvar();
     let not_full = mu.condvar();

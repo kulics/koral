@@ -4,19 +4,19 @@
 // ── ExhaustivenessChecker ─────────────────────────────────────────────────────
 
 public type ExhaustivenessChecker(
-    subject_type Type,
-    patterns List[TypedPattern],
+    subject_type: Type,
+    patterns: List[TypedPattern],
     /// Indices of invented arms -- the synthetic else of a desugared if-is /
     /// while-is. They make the match exhaustive but are not patterns anyone
     /// wrote: no unreachable or duplicate complaint names them, and they never
     /// stand as the catchall a later pattern would "follow".
-    synthetic_indices Set[UInt],
-    context CompilerContext,
-    generic_templates GenericTemplateRegistry,
-    span SourceSpan,
+    synthetic_indices: Set[UInt],
+    context: CompilerContext,
+    generic_templates: GenericTemplateRegistry,
+    span: SourceSpan,
 );
 
-private let render_list_shape(slots Int, rest Bool) String = {
+private let render_list_shape(slots: Int, rest: Bool): String = {
     let mutable parts = List[String].new();
     let mutable i = 0;
     while i < slots then {
@@ -41,17 +41,17 @@ private let render_list_shape(slots Int, rest Bool) String = {
 };
 
 private type PatternSpace {
-    Full(type_value Type),
+    Full(type_value: Type),
     Empty(),
-    EnumCases(type_name String, cases Dict[String, List[PatternSpace]]),
-    BoolValues(has_true Bool, has_false Bool),
-    IntRange(has_min Bool, min_val Int, has_max Bool, max_val Int),
+    EnumCases(type_name: String, cases: Dict[String, List[PatternSpace]]),
+    BoolValues(has_true: Bool, has_false: Bool),
+    IntRange(has_min: Bool, min_val: Int, has_max: Bool, max_val: Int),
     /// List space -- which lengths are still fully uncovered. A length counts
     /// as covered only when EVERY list of that length matches a pattern already
     /// seen. Partial element coverage (`[1, ...]`) is not represented: such a
     /// length stays uncovered. That under-claims exhaustiveness, never
     /// over-claims it.
-    ListLengths(type_value Type, covered_exact Set[Int], covered_tail_from Option[Int]),
+    ListLengths(type_value: Type, covered_exact: Set[Int], covered_tail_from: Option[Int]),
 };
 
 // Simple integer string parser for exhaustiveness checking. The magnitude
@@ -59,13 +59,13 @@ private type PatternSpace {
 // parses -- Int.min included -- and a value past the Int domain comes back
 // None and contributes no coverage (the reference compiler's `Int64(value)`
 // reads nil there).
-let parse_int_str(s String) Option[Int] = {
+let parse_int_str(s: String): Option[Int] = {
     if s.is_empty() then {
         return Option[Int].None();
     };
-    let mutable magnitude UInt = 0;
+    let mutable magnitude: UInt = 0;
     let mutable negative = false;
-    let mutable i UInt = 0;
+    let mutable i: UInt = 0;
     let first = s[UInt(0)];
     if first == '-' then {
         negative = true;
@@ -122,12 +122,12 @@ let parse_int_str(s String) Option[Int] = {
 
 given ExhaustivenessChecker {
     public new(
-        subject_type Type,
-        patterns List[TypedPattern],
-        context CompilerContext,
-        generic_templates GenericTemplateRegistry,
-        span SourceSpan,
-    ) ExhaustivenessChecker = {
+        subject_type: Type,
+        patterns: List[TypedPattern],
+        context: CompilerContext,
+        generic_templates: GenericTemplateRegistry,
+        span: SourceSpan,
+    ): ExhaustivenessChecker = {
         return ExhaustivenessChecker(
             subject_type,
             patterns,
@@ -141,13 +141,13 @@ given ExhaustivenessChecker {
     /// The same check with invented arms marked: they still count for
     /// coverage but draw no complaint of their own.
     public new_marking_synthetic(
-        subject_type Type,
-        patterns List[TypedPattern],
-        synthetic_indices Set[UInt],
-        context CompilerContext,
-        generic_templates GenericTemplateRegistry,
-        span SourceSpan,
-    ) ExhaustivenessChecker = {
+        subject_type: Type,
+        patterns: List[TypedPattern],
+        synthetic_indices: Set[UInt],
+        context: CompilerContext,
+        generic_templates: GenericTemplateRegistry,
+        span: SourceSpan,
+    ): ExhaustivenessChecker = {
         return ExhaustivenessChecker(
             subject_type,
             patterns,
@@ -160,7 +160,7 @@ given ExhaustivenessChecker {
 
     // 执行穷举性检查
     // 返回 Ok 或 Error(message)
-    public check(self) Result[Void] = {
+    public check(self): Result[Void] = {
         // 先检查不可达模式
         let _ = self.check_unreachable_patterns() or return;
 
@@ -386,7 +386,7 @@ given ExhaustivenessChecker {
     /// scan, no message. A finite subject space must come back empty after
     /// subtracting the patterns; anything the space cannot describe falls
     /// back to the catchall question. Callers keep their own wording.
-    public covers_full_space(self) Bool = {
+    public covers_full_space(self): Bool = {
         if self.subject_is_integer() then {
             return self.patterns_cover_integer_domain();
         };
@@ -411,7 +411,7 @@ given ExhaustivenessChecker {
     };
 
     /// Whether the subject is one of the integer types.
-    private subject_is_integer(self) Bool = {
+    private subject_is_integer(self): Bool = {
         return when self.subject_type in {
             .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type() or .WrappingUInt64Type() then true,
             _ then false,
@@ -422,18 +422,38 @@ given ExhaustivenessChecker {
     /// "the whole half-line", mirroring the reference compiler exactly: it
     /// too treats `Int` / `Int32` / `Int64` as unbounded and `UInt` / `UInt32`
     /// / `UInt64` as merely non-negative.
-    private integer_type_bounds(self) PatternSpace = {
+    private integer_type_bounds(self): PatternSpace = {
         return when self.subject_type in {
-            .UInt8Type() or .WrappingUInt8Type() then PatternSpace.IntRange(true, 0, true, 255),
-            .UInt16Type() or .WrappingUInt16Type() then PatternSpace.IntRange(true, 0, true, 65535),
+            .UInt8Type() or .WrappingUInt8Type() then PatternSpace.IntRange(
+                true,
+                0,
+                true,
+                255,
+            ),
+            .UInt16Type() or .WrappingUInt16Type() then PatternSpace.IntRange(
+                true,
+                0,
+                true,
+                65535,
+            ),
             .UIntType() or .UInt32Type() or .UInt64Type() or .WrappingUIntType() or .WrappingUInt32Type() or .WrappingUInt64Type() then PatternSpace.IntRange(
                 true,
                 0,
                 false,
                 0,
             ),
-            .Int8Type() or .WrappingInt8Type() then PatternSpace.IntRange(true, -128, true, 127),
-            .Int16Type() or .WrappingInt16Type() then PatternSpace.IntRange(true, -32768, true, 32767),
+            .Int8Type() or .WrappingInt8Type() then PatternSpace.IntRange(
+                true,
+                -128,
+                true,
+                127,
+            ),
+            .Int16Type() or .WrappingInt16Type() then PatternSpace.IntRange(
+                true,
+                -32768,
+                true,
+                32767,
+            ),
             _ then PatternSpace.IntRange(false, 0, false, 0),
         };
     };
@@ -448,7 +468,7 @@ given ExhaustivenessChecker {
     /// the whole domain -- so both agree on shapes like `>= 65 and <= 90` (the
     /// intersection) and `5 then .., <= 4` (a hole that keeps the match
     /// non-exhaustive), and on the unbounded edges of Int.
-    private patterns_cover_integer_domain(self) Bool = {
+    private patterns_cover_integer_domain(self): Bool = {
         let bounds = self.integer_type_bounds();
         let mutable intervals = List[PatternSpace].new();
         for p in self.patterns.iterator() then {
@@ -495,8 +515,8 @@ given ExhaustivenessChecker {
     /// unbounded-lower first, then by lower bound; unbounded-upper beats
     /// bounded, then by upper bound. The merge walk below is only correct on
     /// this order.
-    private sort_spans(self, spans List[PatternSpace]) Void = {
-        let mutable i UInt = 1;
+    private sort_spans(self, spans: List[PatternSpace]): Void = {
+        let mutable i: UInt = 1;
         while i < spans.count() then {
             let key = spans[i];
             let mutable j = i;
@@ -509,7 +529,7 @@ given ExhaustivenessChecker {
         };
     };
 
-    private span_sort_less(self, a PatternSpace, b PatternSpace) Bool = {
+    private span_sort_less(self, a: PatternSpace, b: PatternSpace): Bool = {
         return when a in {
             .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
                 .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
@@ -542,7 +562,7 @@ given ExhaustivenessChecker {
     /// Whether two spans merge: they overlap, sit next to each other, or one
     /// side is unbounded in the meeting direction. The reference compiler's
     /// rule verbatim -- an interval ending at Int.max touches anything.
-    private spans_touch_or_overlap(self, a PatternSpace, b PatternSpace) Bool = {
+    private spans_touch_or_overlap(self, a: PatternSpace, b: PatternSpace): Bool = {
         return when a in {
             .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
                 .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
@@ -565,7 +585,7 @@ given ExhaustivenessChecker {
 
     /// The one span covering both: a bound survives only when BOTH sides pin
     /// it.
-    private merge_spans(self, a PatternSpace, b PatternSpace) PatternSpace = {
+    private merge_spans(self, a: PatternSpace, b: PatternSpace): PatternSpace = {
         return when a in {
             .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
                 .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
@@ -592,15 +612,17 @@ given ExhaustivenessChecker {
     /// Whether one span stretches across every value the domain carries. An
     /// unbounded domain side is covered only by an unbounded span side -- the
     /// reference compiler's reading.
-    private span_covers_bounds(self, c PatternSpace, bounds PatternSpace) Bool = {
+    private span_covers_bounds(self, c: PatternSpace, bounds: PatternSpace): Bool = {
         return when c in {
             .IntRange(c_lo_has, c_lo, c_hi_has, c_hi) then when bounds in {
                 .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
                     if self.span_is_empty(c) then {
                         return false;
                     };
-                    let lower_ok = if b_lo_has then (c_lo_has and c_lo <= b_lo) else (not c_lo_has);
-                    let upper_ok = if b_hi_has then (c_hi_has and c_hi >= b_hi) else (not c_hi_has);
+                    let lower_ok = if b_lo_has then (c_lo_has and c_lo <= b_lo)
+                    else (not c_lo_has);
+                    let upper_ok = if b_hi_has then (c_hi_has and c_hi >= b_hi)
+                    else (not c_hi_has);
                     lower_ok and upper_ok
                 },
                 _ then false,
@@ -611,7 +633,7 @@ given ExhaustivenessChecker {
 
     /// The integer spans a pattern covers. `or` concatenates, `and`
     /// intersects: exactly the coverage semantics of the pattern itself.
-    private pattern_int_spans(self, pattern TypedPattern) List[PatternSpace] = {
+    private pattern_int_spans(self, pattern: TypedPattern): List[PatternSpace] = {
         return when pattern in {
             .Wildcard() then {
                 let mutable spans = List[PatternSpace].new();
@@ -675,7 +697,7 @@ given ExhaustivenessChecker {
     };
 
     /// Whether the span carries no value at all.
-    private span_is_empty(self, span PatternSpace) Bool = {
+    private span_is_empty(self, span: PatternSpace): Bool = {
         return when span in {
             .IntRange(has_min, min_val, has_max, max_val) then has_min and has_max and min_val > max_val,
             _ then true,
@@ -684,7 +706,7 @@ given ExhaustivenessChecker {
 
     /// The values both spans carry. Unbounded sides win by absence: a bound
     /// only exists on the result when BOTH sides pin it.
-    private span_intersect(self, a PatternSpace, b PatternSpace) PatternSpace = {
+    private span_intersect(self, a: PatternSpace, b: PatternSpace): PatternSpace = {
         return when a in {
             .IntRange(a_lo_has, a_lo, a_hi_has, a_hi) then when b in {
                 .IntRange(b_lo_has, b_lo, b_hi_has, b_hi) then {
@@ -714,7 +736,7 @@ given ExhaustivenessChecker {
 
     /// The parts of `span` the subtraction does not carry -- zero, one or two
     /// spans. Exact, so the remaining set never shrinks past the truth.
-    private span_subtract(self, span PatternSpace, sub PatternSpace) List[PatternSpace] = {
+    private span_subtract(self, span: PatternSpace, sub: PatternSpace): List[PatternSpace] = {
         let pieces = List[PatternSpace].new();
         // Subtracting an empty span removes nothing.
         if self.span_is_empty(sub) then {
@@ -765,7 +787,7 @@ given ExhaustivenessChecker {
     /// A weak binding always leaves the dead case behind, and a refutable list
     /// slot (`[1, ...]`) may match nothing at a length -- in both cases the
     /// space comes back unchanged without the pattern being unreachable.
-    private coverage_is_approximate(self, pattern TypedPattern) Bool = {
+    private coverage_is_approximate(self, pattern: TypedPattern): Bool = {
         return when pattern in {
             .WeakBinding(_) then true,
             // `subtract` deliberately claims nothing for these (one contiguous
@@ -800,24 +822,24 @@ given ExhaustivenessChecker {
                 };
                 false
             },
-            .AndPattern(left, right) then self.coverage_is_approximate(
-                left,
-            ) or self.coverage_is_approximate(right),
-            .OrPattern(left, right) then self.coverage_is_approximate(
-                left,
-            ) or self.coverage_is_approximate(right),
+            .AndPattern(left, right) then self.coverage_is_approximate(left) or self.coverage_is_approximate(
+                right,
+            ),
+            .OrPattern(left, right) then self.coverage_is_approximate(left) or self.coverage_is_approximate(
+                right,
+            ),
             .NotPattern(inner) then self.coverage_is_approximate(inner),
             _ then false,
         };
     };
 
-    private check_unreachable_patterns(self) Result[Void] = {
+    private check_unreachable_patterns(self): Result[Void] = {
         let mutable covered_trait_object_types = Set[String].new();
         let mutable has_catchall = false;
-        let mutable catchall_index UInt = 0;
+        let mutable catchall_index: UInt = 0;
         let mutable catchall_pattern_desc = StringBuilder.new();
         catchall_pattern_desc.push_string("");
-        let mutable pattern_index UInt = 0;
+        let mutable pattern_index: UInt = 0;
         let mutable remaining_space = self.initial_finite_pattern_space();
         let mutable seen_patterns = Set[String].new();
 
@@ -915,7 +937,7 @@ given ExhaustivenessChecker {
         return Result[Void].Ok({});
     };
 
-    private initial_finite_pattern_space(self) Option[PatternSpace] = {
+    private initial_finite_pattern_space(self): Option[PatternSpace] = {
         return when self.subject_type in {
             .EnumType(def_id) then when self.context.get_enum_cases(def_id) in {
                 .Some(cases) then Option[PatternSpace].Some(
@@ -1013,7 +1035,7 @@ given ExhaustivenessChecker {
 
     /// Whether the subject is std's `List[T]`. Declaration identity, never the
     /// spelling: a user type also called `List` is not one.
-    private is_std_list_subject(self, t Type) Bool = {
+    private is_std_list_subject(self, t: Type): Bool = {
         let want = self.context.std_type_def_id("List") or else {
             return false;
         };
@@ -1028,9 +1050,9 @@ given ExhaustivenessChecker {
 
     private enum_pattern_space(
         self,
-        type_name String,
-        maybe_cases Option[List[EnumCaseInfo]],
-    ) PatternSpace = {
+        type_name: String,
+        maybe_cases: Option[List[EnumCaseInfo]],
+    ): PatternSpace = {
         let _ = self;
         let mutable cases = Dict[String, List[PatternSpace]].new();
         when maybe_cases in {
@@ -1051,7 +1073,7 @@ given ExhaustivenessChecker {
     /// The seed's `PatternSpace.fullSpace`: a bool is a bool space, an enum is
     /// its case map, and everything else (a generic enum included -- its
     /// fields are the DECLARATION's, unsubstituted) stays a flat `Full`.
-    private full_space_for_type(self, t Type) PatternSpace = {
+    private full_space_for_type(self, t: Type): PatternSpace = {
         return when t in {
             .BoolType() then PatternSpace.BoolValues(true, true),
             .EnumType(def_id) then self.enum_pattern_space(
@@ -1067,13 +1089,13 @@ given ExhaustivenessChecker {
     /// `Wrap[Inner]`'s `inner T`.
     private substitute_type_args(
         self,
-        t Type,
-        param_names List[String],
-        args List[Type],
-    ) Type = {
+        t: Type,
+        param_names: List[String],
+        args: List[Type],
+    ): Type = {
         return when t in {
             .GenericParameter(name) then {
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < param_names.count() then {
                     if param_names[idx] == name and idx < args.count() then {
                         return args[idx];
@@ -1112,7 +1134,7 @@ given ExhaustivenessChecker {
         };
     };
 
-    private pattern_space_is_empty(self, space PatternSpace) Bool = {
+    private pattern_space_is_empty(self, space: PatternSpace): Bool = {
         let _ = self;
         return when space in {
             .Empty() then true,
@@ -1138,7 +1160,7 @@ given ExhaustivenessChecker {
         };
     };
 
-    private pattern_space_equals(self, lhs PatternSpace, rhs PatternSpace) Bool = {
+    private pattern_space_equals(self, lhs: PatternSpace, rhs: PatternSpace): Bool = {
         let _ = self;
         return when lhs in {
             .Empty() then rhs is .Empty(),
@@ -1165,7 +1187,7 @@ given ExhaustivenessChecker {
                         if left_fields.count() != right_fields.count() then {
                             return false;
                         };
-                        let mutable idx UInt = 0;
+                        let mutable idx: UInt = 0;
                         while idx < left_fields.count() then {
                             if not self.pattern_space_equals(
                                 left_fields[idx],
@@ -1219,7 +1241,7 @@ given ExhaustivenessChecker {
     // For unbounded ranges (no min, no max), we skip the subtraction because a
     // single IntRange cannot represent "all integers except N". This avoids
     // false unreachable-pattern diagnostics.
-    private subtract_int_literal(self, space PatternSpace, int_val Int) PatternSpace = {
+    private subtract_int_literal(self, space: PatternSpace, int_val: Int): PatternSpace = {
         return when space in {
             .Full(t) then {
                 // Convert Full to IntRange and subtract
@@ -1242,9 +1264,9 @@ given ExhaustivenessChecker {
     // can only represent a single contiguous range.
     private subtract_int_from_range(
         self,
-        space PatternSpace,
-        int_val Int,
-    ) PatternSpace = {
+        space: PatternSpace,
+        int_val: Int,
+    ): PatternSpace = {
         return when space in {
             .IntRange(has_min, min_val, has_max, max_val) then {
                 if has_min and has_max and min_val > max_val then {
@@ -1290,17 +1312,25 @@ given ExhaustivenessChecker {
     // reference compiler's interval model reads these the same way).
     private comparison_to_int_range(
         self,
-        op ComparisonPatternOperator,
-        value_str String,
-    ) PatternSpace = {
+        op: ComparisonPatternOperator,
+        value_str: String,
+    ): PatternSpace = {
         return when parse_int_str(value_str) in {
             .None() then PatternSpace.IntRange(true, 1, true, 0),
             .Some(value) then when op in {
-                .Greater() then if value == 9223372036854775807 then PatternSpace.IntRange(true, 1, true, 0)
-                else PatternSpace.IntRange(true, value + 1, false, 0),
+                .Greater() then if value == 9223372036854775807 then PatternSpace.IntRange(
+                    true,
+                    1,
+                    true,
+                    0,
+                ) else PatternSpace.IntRange(true, value + 1, false, 0),
                 .GreaterEqual() then PatternSpace.IntRange(true, value, false, 0),
-                .Less() then if value == 0 - 9223372036854775807 - 1 then PatternSpace.IntRange(true, 1, true, 0)
-                else PatternSpace.IntRange(false, 0, true, value - 1),
+                .Less() then if value == 0 - 9223372036854775807 - 1 then PatternSpace.IntRange(
+                    true,
+                    1,
+                    true,
+                    0,
+                ) else PatternSpace.IntRange(false, 0, true, value - 1),
                 .LessEqual() then PatternSpace.IntRange(false, 0, true, value),
             },
         };
@@ -1309,10 +1339,10 @@ given ExhaustivenessChecker {
     // Subtract a comparison range from a PatternSpace.
     private subtract_comparison(
         self,
-        space PatternSpace,
-        op ComparisonPatternOperator,
-        value_str String,
-    ) PatternSpace = {
+        space: PatternSpace,
+        op: ComparisonPatternOperator,
+        value_str: String,
+    ): PatternSpace = {
         return when space in {
             .Full(t) then {
                 // Start with full IntRange, subtract comparison
@@ -1333,9 +1363,9 @@ given ExhaustivenessChecker {
     // Subtract sub (an IntRange) from space (an IntRange).
     private subtract_range_from_range(
         self,
-        space PatternSpace,
-        sub PatternSpace,
-    ) PatternSpace = {
+        space: PatternSpace,
+        sub: PatternSpace,
+    ): PatternSpace = {
         return when space in {
             .IntRange(s_has_min, s_min, s_has_max, s_max) then when sub in {
                 .IntRange(r_has_min, r_min, r_has_max, r_max) then {
@@ -1371,10 +1401,10 @@ given ExhaustivenessChecker {
 
     private subtract_pattern(
         self,
-        space PatternSpace,
-        pattern TypedPattern,
-        subject_type Type,
-    ) PatternSpace = {
+        space: PatternSpace,
+        pattern: TypedPattern,
+        subject_type: Type,
+    ): PatternSpace = {
         return when pattern in {
             .Wildcard() then PatternSpace.Empty(),
             .Variable(_) then PatternSpace.Empty(),
@@ -1412,10 +1442,7 @@ given ExhaustivenessChecker {
                     space
                 }
             },
-            .ListPattern(_, elements) then self.subtract_list_pattern(
-                space,
-                elements,
-            ),
+            .ListPattern(_, elements) then self.subtract_list_pattern(space, elements),
             .RestPattern() then space,
             _ then space,
         };
@@ -1428,9 +1455,9 @@ given ExhaustivenessChecker {
     /// both close the space early and make a later arm look unreachable.
     private subtract_list_pattern(
         self,
-        space PatternSpace,
-        elements List[TypedPattern],
-    ) PatternSpace = {
+        space: PatternSpace,
+        elements: List[TypedPattern],
+    ): PatternSpace = {
         let _ = self;
         let mutable fixed = List[TypedPattern].new();
         let mutable has_rest = false;
@@ -1480,16 +1507,11 @@ given ExhaustivenessChecker {
             covered_exact.insert(Int(fixed.count()));
         };
 
-        let next = PatternSpace.ListLengths(
-            space_type,
-            covered_exact,
-            covered_tail_from,
-        );
+        let next = PatternSpace.ListLengths(space_type, covered_exact, covered_tail_from);
         return if self.pattern_space_is_empty(next) then PatternSpace.Empty() else next;
     };
 
-
-    private subtract_bool(self, space PatternSpace, value Bool) PatternSpace = {
+    private subtract_bool(self, space: PatternSpace, value: Bool): PatternSpace = {
         let _ = self;
         return when space in {
             .BoolValues(has_true, has_false) then {
@@ -1517,10 +1539,10 @@ given ExhaustivenessChecker {
 
     private can_precisely_subtract_pattern(
         self,
-        space PatternSpace,
-        pattern TypedPattern,
-        subject_type Type,
-    ) Bool = {
+        space: PatternSpace,
+        pattern: TypedPattern,
+        subject_type: Type,
+    ): Bool = {
         return when pattern in {
             .Wildcard() then true,
             .Variable(_) then true,
@@ -1548,7 +1570,7 @@ given ExhaustivenessChecker {
                 if case_fields.count() != elements.count() then {
                     return false;
                 };
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < elements.count() then {
                     let field_space = case_fields[idx];
                     let mutable field_type = self.pattern_space_type(field_space);
@@ -1579,11 +1601,11 @@ given ExhaustivenessChecker {
 
     private subtract_enum_case(
         self,
-        space PatternSpace,
-        case_name String,
-        elements List[TypedPatternElement],
-        subject_type Type,
-    ) PatternSpace = {
+        space: PatternSpace,
+        case_name: String,
+        elements: List[TypedPatternElement],
+        subject_type: Type,
+    ): PatternSpace = {
         // A COPY of the case map: a managed `Dict` aliases on assignment, and
         // mutating the space's own map here would make the "unchanged means
         // covered" reading fire against a space that already moved.
@@ -1627,7 +1649,7 @@ given ExhaustivenessChecker {
         };
     };
 
-    private enum_case_map_for_type(self, t Type) Dict[String, List[PatternSpace]] = {
+    private enum_case_map_for_type(self, t: Type): Dict[String, List[PatternSpace]] = {
         let mutable cases = Dict[String, List[PatternSpace]].new();
         let maybe_cases = when t in {
             .EnumType(def_id) then self.context.get_enum_cases(def_id),
@@ -1656,14 +1678,14 @@ given ExhaustivenessChecker {
 
     private subtract_pattern_fields(
         self,
-        fields List[PatternSpace],
-        elements List[TypedPatternElement],
-    ) List[PatternSpace] = {
+        fields: List[PatternSpace],
+        elements: List[TypedPatternElement],
+    ): List[PatternSpace] = {
         if fields.count() != elements.count() then {
             return fields;
         };
         let mutable result = List[PatternSpace].new();
-        let mutable idx UInt = 0;
+        let mutable idx: UInt = 0;
         while idx < fields.count() then {
             let field_space = fields[idx];
             let element = elements[idx];
@@ -1674,7 +1696,7 @@ given ExhaustivenessChecker {
         return result;
     };
 
-    private pattern_space_type(self, space PatternSpace) Type = {
+    private pattern_space_type(self, space: PatternSpace): Type = {
         let _ = self;
         return when space in {
             .Full(t) then t,
@@ -1687,8 +1709,8 @@ given ExhaustivenessChecker {
 
     private pattern_elements_all_catchall(
         self,
-        elements List[TypedPatternElement],
-    ) Bool = {
+        elements: List[TypedPatternElement],
+    ): Bool = {
         let _ = self;
         for element in elements then {
             if not is_catchall(element.pattern) then {
@@ -1698,7 +1720,7 @@ given ExhaustivenessChecker {
         return true;
     };
 
-    private pattern_space_list_all_empty(self, spaces List[PatternSpace]) Bool = {
+    private pattern_space_list_all_empty(self, spaces: List[PatternSpace]): Bool = {
         for space in spaces then {
             if not self.pattern_space_is_empty(space) then {
                 return false;
@@ -1707,7 +1729,7 @@ given ExhaustivenessChecker {
         return true;
     };
 
-    private pattern_space_missing_cases(self, space PatternSpace) List[String] = {
+    private pattern_space_missing_cases(self, space: PatternSpace): List[String] = {
         return when space in {
             .Empty() then List[String].new(),
             .Full(t) then {
@@ -1781,10 +1803,10 @@ given ExhaustivenessChecker {
     /// rest pattern for whatever runs past it.
     private render_missing_list_lengths(
         self,
-        type_value Type,
-        covered_exact Set[Int],
-        covered_tail_from Option[Int],
-    ) List[String] = {
+        type_value: Type,
+        covered_exact: Set[Int],
+        covered_tail_from: Option[Int],
+    ): List[String] = {
         let _ = self;
         if covered_exact.is_empty() and covered_tail_from is .None() then {
             let mutable out = List[String].new();
@@ -1822,9 +1844,9 @@ given ExhaustivenessChecker {
 
     private render_missing_constructor(
         self,
-        case_name String,
-        fields List[PatternSpace],
-    ) List[String] = {
+        case_name: String,
+        fields: List[PatternSpace],
+    ): List[String] = {
         let _ = self;
         if fields.is_empty() then {
             let mutable out = List[String].new();
@@ -1856,7 +1878,7 @@ given ExhaustivenessChecker {
         return out;
     };
 
-    private pattern_space_missing_fragments(self, space PatternSpace) List[String] = {
+    private pattern_space_missing_fragments(self, space: PatternSpace): List[String] = {
         return when space in {
             .Empty() then List[String].new(),
             .Full(_) then {
@@ -1931,8 +1953,8 @@ given ExhaustivenessChecker {
 
     private combine_missing_field_options(
         self,
-        options List[List[String]],
-    ) List[List[String]] = {
+        options: List[List[String]],
+    ): List[List[String]] = {
         if options.is_empty() then {
             return List[List[String]].new();
         };
@@ -1958,7 +1980,7 @@ given ExhaustivenessChecker {
         return result;
     };
 
-    private exhaustiveness_type_name(self) String = {
+    private exhaustiveness_type_name(self): String = {
         return when self.subject_type in {
             .EnumType(_) then self.context.type_display_name(self.subject_type),
             .GenericEnum(tplDefId, _) then def_id_spelling(tplDefId),
@@ -1969,9 +1991,9 @@ given ExhaustivenessChecker {
 
     private non_exhaustive_match_message_from_patterns(
         self,
-        type_name String,
-        missing List[String],
-    ) String = {
+        type_name: String,
+        missing: List[String],
+    ): String = {
         let _ = self;
         let mutable msg = StringBuilder.new();
         msg.push_string("Non-exhaustive match on type '");
@@ -1988,9 +2010,8 @@ given ExhaustivenessChecker {
         return msg.to_string();
     };
 
-
     // 检查 enum 是否已被完全覆盖
-    private is_enum_fully_covered(self, covered_cases Set[String]) Bool = {
+    private is_enum_fully_covered(self, covered_cases: Set[String]): Bool = {
         let all_cases = self.get_all_enum_case_names();
         if all_cases.is_empty() then {
             return false;
@@ -2004,7 +2025,7 @@ given ExhaustivenessChecker {
     };
 
     // 获取所有 enum case 名称
-    private get_all_enum_case_names(self) Set[String] = {
+    private get_all_enum_case_names(self): Set[String] = {
         let mutable names = Set[String].new();
         when self.subject_type in {
             .EnumType(def_id) then {
@@ -2038,7 +2059,7 @@ given ExhaustivenessChecker {
     };
 
     // 检查 Bool 类型的穷举性
-    private check_bool_exhaustiveness(self, has_catchall Bool) Result[Void] = {
+    private check_bool_exhaustiveness(self, has_catchall: Bool): Result[Void] = {
         if has_catchall then {
             return Result[Void].Ok({});
         };
@@ -2074,7 +2095,7 @@ given ExhaustivenessChecker {
         return Result[Void].Ok({});
     };
 
-    private missing_catchall_message(self, type_name String) String = {
+    private missing_catchall_message(self, type_name: String): String = {
         let _ = self;
         let mutable msg = StringBuilder.new();
         msg.push_string("Match on type '");
@@ -2085,10 +2106,10 @@ given ExhaustivenessChecker {
 
     private non_exhaustive_match_message(
         self,
-        type_name String,
-        missing List[String],
-        add_case_dot Bool,
-    ) String = {
+        type_name: String,
+        missing: List[String],
+        add_case_dot: Bool,
+    ): String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Non-exhaustive match on type '");
         msg.push_string(type_name);
@@ -2111,7 +2132,7 @@ given ExhaustivenessChecker {
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
 // 判断模式是否为 catchall（通配符或绑定模式）
-public let is_catchall(pattern TypedPattern) Bool = {
+public let is_catchall(pattern: TypedPattern): Bool = {
     return when pattern in {
         .Wildcard() then true,
         .Variable(_) then true,
@@ -2141,7 +2162,7 @@ public let is_catchall(pattern TypedPattern) Bool = {
 // `context` is what turns a `Type` into a NAME. Without it the printer falls
 // back to `struct#<id>` / `enum#<id>`, and those internal stamps end up in
 // user-facing diagnostics.
-public let pattern_description(pattern TypedPattern, context CompilerContext) String = {
+public let pattern_description(pattern: TypedPattern, context: CompilerContext): String = {
     return when pattern in {
         .Wildcard() then "_",
         // The NAME, never the DefId number: two compilers number their DefIds
@@ -2281,17 +2302,17 @@ public let pattern_description(pattern TypedPattern, context CompilerContext) St
 /// is unreachable" makes the reader count the arms by hand to find which one
 /// already ate the subject.
 private let unreachable_after_pattern_message(
-    offending String,
-    catchall_desc String,
-    catchall_index UInt,
-) String = {
+    offending: String,
+    catchall_desc: String,
+    catchall_index: UInt,
+): String = {
     return "Unreachable pattern '\(offending)': already covered by '\(catchall_desc)' at position \(catchall_index + UInt(1))";
 };
 
 public let collect_trait_object_types(
-    pattern TypedPattern,
-    context CompilerContext,
-) Set[String] = {
+    pattern: TypedPattern,
+    context: CompilerContext,
+): Set[String] = {
     let mutable covered = Set[String].new();
     when pattern in {
         .TraitObjectType(target_type) then {

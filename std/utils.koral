@@ -9,22 +9,22 @@
 // ============================================================================
 
 // Pair - generic tuple-like utility type
-public type Pair[T Any, U Any](public first T, public second U);
+public type Pair[T: Any, U: Any](public first: T, public second: U);
 
-given[T Eq, U Eq] Pair[T, U] as Eq {
+given[T: Eq, U: Eq] Pair[T, U]: Eq {
 
-    public equals(self, other Pair[T, U]) Bool =
+    public equals(self, other: Pair[T, U]): Bool =
         self.first == other.first and self.second == other.second;
 };
 
-given[T Hash, U Hash] Pair[T, U] as Hash {
+given[T: Hash, U: Hash] Pair[T, U]: Hash {
 
-    public hash(self) UInt = self.first.hash().combine_hash(self.second.hash());
+    public hash(self): UInt = self.first.hash().combine_hash(self.second.hash());
 };
 
-given[T Ord, U Ord] Pair[T, U] as Ord {
+given[T: Ord, U: Ord] Pair[T, U]: Ord {
 
-    public compare(self, other Pair[T, U]) Int = {
+    public compare(self, other: Pair[T, U]): Int = {
         let c = self.first.compare(other.first);
         if c != 0 then {
             return c;
@@ -33,8 +33,8 @@ given[T Ord, U Ord] Pair[T, U] as Ord {
     };
 };
 
-public let max[T Ord](a T, b T) T = if a > b then a else b;
-public let min[T Ord](a T, b T) T = if a < b then a else b;
+public let max[T: Ord](a: T, b: T): T = if a > b then a else b;
+public let min[T: Ord](a: T, b: T): T = if a < b then a else b;
 
 // ============================================================================
 // Cell - shared mutable state
@@ -42,13 +42,13 @@ public let min[T Ord](a T, b T) T = if a < b then a else b;
 // Closure capture is copy-only, so a `let mutable` local cannot be captured.
 // To carry mutable state into a closure, hold it in a `Cell` (a shared
 // `type mutable` object) and capture the cell.
-public type mutable Cell[T Any](public mutable value T);
+public type mutable Cell[T: Any](public mutable value: T);
 
-given[T Any] Cell[T] {
+given[T: Any] Cell[T] {
 
-    public get(self) T = self.value;
+    public get(self): T = self.value;
 
-    public set(self, value T) Void = {
+    public set(self, value: T): Void = {
         self.value = value;
     };
 };
@@ -56,7 +56,7 @@ given[T Any] Cell[T] {
 given Ord {
 
     /// Clamps self into the inclusive range [min, max].
-    public clamp(self, min: Self, max: Self) Self = if self < min then min
+    public clamp(self, min: Self =, max: Self =): Self = if self < min then min
     else if self > max then max else self;
 };
 
@@ -66,32 +66,32 @@ given Ord {
 
 type foreign CFile {};
 
-let foreign fwrite(buf *UInt8, size UInt, count UInt, file *CFile) UInt;
-let foreign fflush(file *CFile) Void;
-let foreign fgetc(file *CFile) Int;
-let foreign __koral_stdin() *CFile;
-let foreign __koral_stdout() *CFile;
-let foreign __koral_stderr() *CFile;
+let foreign fwrite(buf: *UInt8, size: UInt, count: UInt, file: *CFile): UInt;
+let foreign fflush(file: *CFile): Void;
+let foreign fgetc(file: *CFile): Int;
+let foreign __koral_stdin(): *CFile;
+let foreign __koral_stdout(): *CFile;
+let foreign __koral_stderr(): *CFile;
 
-public let foreign exit(code Int) Never;
-public let foreign abort() Never;
+public let foreign exit(code: Int): Never;
+public let foreign abort(): Never;
 
-private let foreign __koral_set_args(argc Int32, argv **UInt8) Void;
-private let foreign __koral_argc() Int32;
-private let foreign __koral_argv() **UInt8;
+private let foreign __koral_set_args(argc: Int32, argv: **UInt8): Void;
+private let foreign __koral_argc(): Int32;
+private let foreign __koral_argv(): **UInt8;
 
-let foreign __koral_errno_ptr() *Int32;
-let foreign __koral_strerror(errnum Int32) *UInt8;
+let foreign __koral_errno_ptr(): *Int32;
+let foreign __koral_strerror(errnum: Int32): *UInt8;
 
 /// Get the last OS error (errno) as a human-readable String.
-public let last_error_message() String = {
+public let last_error_message(): String = {
     let err = *__koral_errno_ptr();
     let msg = __koral_strerror(err);
     return String.from_cstring_unchecked(msg);
 };
 
-public let args() List[String] = {
-    let mutable result List[String] = [];
+public let args(): List[String] = {
+    let mutable result: List[String] = [];
     let count = UInt(__koral_argc());
     for i in 0..<count then {
         let arg_ptr = __koral_argv()[i];
@@ -105,7 +105,7 @@ public let args() List[String] = {
 // ============================================================================
 
 // High-level panic function (uses String)
-public let panic(message String) Never = {
+public let panic(message: String): Never = {
     let prefix = "Panic: ";
     fwrite(prefix.data, 1, prefix.len, __koral_stderr());
     fwrite(message.data, 1, message.len, __koral_stderr());
@@ -115,7 +115,7 @@ public let panic(message String) Never = {
     abort();
 };
 
-public let assert(condition Bool, message String) Void = {
+public let assert(condition: Bool, message: String): Void = {
     if not condition then {
         panic(message);
     };
@@ -125,13 +125,13 @@ public let assert(condition Bool, message String) Void = {
 // Standard IO Functions
 // ============================================================================
 
-public let print[T ToString](value T) Void = {
+public let print[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stdout());
     fflush(__koral_stdout());
 };
 
-public let println[T ToString](value T) Void = {
+public let println[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stdout());
     let newline = "\n";
@@ -139,13 +139,13 @@ public let println[T ToString](value T) Void = {
     fflush(__koral_stdout());
 };
 
-public let eprint[T ToString](value T) Void = {
+public let eprint[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stderr());
     fflush(__koral_stderr());
 };
 
-public let eprintln[T ToString](value T) Void = {
+public let eprintln[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stderr());
     let newline = "\n";
@@ -153,7 +153,7 @@ public let eprintln[T ToString](value T) Void = {
     fflush(__koral_stderr());
 };
 
-public let scanln() Option[String] = {
+public let scanln(): Option[String] = {
     let mutable result = StringBuilder.new();
 
     while true then {

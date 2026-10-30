@@ -1,9 +1,6 @@
 given TypeChecker {
 
-    should_use_trait_placeholder_for_eq_ord_receiver(
-        self,
-        receiver_type Type,
-    ) Bool = {
+    should_use_trait_placeholder_for_eq_ord_receiver(self, receiver_type: Type): Bool = {
         return when receiver_type in {
             .GenericParameter(_) then true,
             .ReferenceType(_) then true,
@@ -18,10 +15,10 @@ given TypeChecker {
 
     method_symbol_matches_binary_call(
         self,
-        method_symbol Symbol,
-        base_type Type,
-        rhs_type Type,
-    ) Bool = {
+        method_symbol: Symbol,
+        base_type: Type,
+        rhs_type: Type,
+    ): Bool = {
         return when method_symbol.symbol_type in {
             .FunctionType(params, _) then {
                 if params.count() < UInt(2) then {
@@ -45,11 +42,11 @@ given TypeChecker {
 
     make_binary_method_placeholder_symbol(
         self,
-        base_type Type,
-        rhs_type Type,
-        method_name String,
-        fallback_return Type,
-    ) Symbol = {
+        base_type: Type,
+        rhs_type: Type,
+        method_name: String,
+        fallback_return: Type,
+    ): Symbol = {
         let def_id = self.allocate_unindexed_def_id(method_name, DefKind.Function());
         let mutable param_types = List[Type].new();
         param_types.push(base_type);
@@ -63,11 +60,11 @@ given TypeChecker {
 
     resolved_or_placeholder_method_symbol(
         self,
-        base_type Type,
-        rhs_type Type,
-        method_name String,
-        fallback_return Type,
-    ) Symbol = {
+        base_type: Type,
+        rhs_type: Type,
+        method_name: String,
+        fallback_return: Type,
+    ): Symbol = {
         return when self.resolve_source_method_signature(base_type, method_name) in {
             .Some(symbol) then if self.method_symbol_matches_binary_call(
                 symbol,
@@ -89,7 +86,7 @@ given TypeChecker {
         };
     };
 
-    is_numeric_literal_expr(self, expr TypedExpr) Bool = {
+    is_numeric_literal_expr(self, expr: TypedExpr): Bool = {
         return when expr.expr_kind in {
             .IntegerLiteral(_) then true,
             .FloatLiteral(_) then true,
@@ -100,13 +97,13 @@ given TypeChecker {
     /// Whether the expression is an integer literal operand -- the operand
     /// that joins the other side's integer width before it is range-checked.
     /// A negative spelling is folded into the literal's value, not a node.
-    is_integer_literal_operand(self, e Expr) Bool = {
+    is_integer_literal_operand(self, e: Expr): Bool = {
         return e is .IntegerLiteral(...);
     };
 
     /// Whether the expression is a `null` operand -- the pointer literal that
     /// aims at the other operand's type.
-    is_null_literal_operand(self, e Expr) Bool = {
+    is_null_literal_operand(self, e: Expr): Bool = {
         return e is .NullLiteral(...);
     };
 
@@ -116,10 +113,10 @@ given TypeChecker {
     /// the right one.
     check_arithmetic_operand_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(
                 name,
@@ -183,12 +180,12 @@ given TypeChecker {
 
     check_arithmetic_expr_ref(
         self,
-        left Expr,
-        op ArithmeticOperator,
-        right Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        left: Expr,
+        op: ArithmeticOperator,
+        right: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
 
         // Join first, then range-check: a leading integer literal joins the
         // other operand's integer width in either position, so the neighbour
@@ -247,7 +244,11 @@ given TypeChecker {
             let left_expected = if self.is_integer_type(initial_typed_right.expr_type) then Option[Type].Some(
                 initial_typed_right.expr_type,
             ) else expected;
-            initial_typed_left = self.check_arithmetic_operand_ref(left, left_expected, scope);
+            initial_typed_left = self.check_arithmetic_operand_ref(
+                left,
+                left_expected,
+                scope,
+            );
         } else {
             initial_typed_left = self.check_arithmetic_operand_ref(left, expected, scope);
             initial_typed_right = self.check_arithmetic_operand_ref(
@@ -288,9 +289,7 @@ given TypeChecker {
                     Option[SourceSpan].Some(expr_span(right)),
                 );
             };
-            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and (
-                (right_is_int and left_is_int_lit) or (right_is_float and left_is_float_lit)
-            ) then {
+            if not self.same_expr_type(typed_left.expr_type, typed_right.expr_type) and ((right_is_int and left_is_int_lit) or (right_is_float and left_is_float_lit)) then {
                 typed_left = self.adapt_expr_to_expected_type_at(
                     typed_left,
                     Option[Type].Some(typed_right.expr_type),
@@ -324,11 +323,11 @@ given TypeChecker {
     /// for types like String.
     combine_arithmetic_operands(
         self,
-        typed_left TypedExpr,
-        op ArithmeticOperator,
-        typed_right TypedExpr,
-        blame_span SourceSpan,
-    ) TypedExpr = {
+        typed_left: TypedExpr,
+        op: ArithmeticOperator,
+        typed_right: TypedExpr,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
         let left_raw_t = typed_left.expr_type;
         let right_raw_t = typed_right.expr_type;
         let left_t = self.concretize_default_literal_type(left_raw_t);
@@ -356,7 +355,9 @@ given TypeChecker {
                                                 typed_left,
                                                 op,
                                                 make_typed_expr(
-                                                    TypedExprKind.IntegerLiteral(cp_text),
+                                                    TypedExprKind.IntegerLiteral(
+                                                        cp_text,
+                                                    ),
                                                     Type.UInt8Type(),
                                                 ),
                                                 blame_span,
@@ -384,7 +385,9 @@ given TypeChecker {
                                         if cp >= 0 and cp <= 127 then {
                                             return self.combine_arithmetic_operands(
                                                 make_typed_expr(
-                                                    TypedExprKind.IntegerLiteral(cp_text),
+                                                    TypedExprKind.IntegerLiteral(
+                                                        cp_text,
+                                                    ),
                                                     Type.UInt8Type(),
                                                 ),
                                                 op,
@@ -627,11 +630,11 @@ given TypeChecker {
     /// already has the target's type reaches the operator.
     combine_compound_arithmetic_operands(
         self,
-        typed_target TypedExpr,
-        op ArithmeticOperator,
-        typed_value TypedExpr,
-        blame_span SourceSpan,
-    ) TypedExpr = {
+        typed_target: TypedExpr,
+        op: ArithmeticOperator,
+        typed_value: TypedExpr,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
         // A literal neighbour joins the target's integer width through the
         // expected type at the operand check; whatever is still a bare literal
         // default displays and compares as that default (`Int`, `Float64`).
@@ -639,7 +642,9 @@ given TypeChecker {
         let value_t = typed_value.expr_type;
         if not self.same_expr_type(target_t, value_t) and not self.is_unresolved_expr_type(
             self.concretize_default_literal_type(target_t),
-        ) and not self.is_unresolved_expr_type(self.concretize_default_literal_type(value_t)) and target_t is not .NeverType() and value_t is not .NeverType() then {
+        ) and not self.is_unresolved_expr_type(
+            self.concretize_default_literal_type(value_t),
+        ) and target_t is not .NeverType() and value_t is not .NeverType() then {
             self.push_diagnostic(
                 "Type mismatch: expected \(self.display_type_name(target_t)), got \(self.display_type_name(value_t))",
                 blame_span,
@@ -649,12 +654,7 @@ given TypeChecker {
                 Type.Unknown(),
             );
         };
-        return self.combine_arithmetic_operands(
-            typed_target,
-            op,
-            typed_value,
-            blame_span,
-        );
+        return self.combine_arithmetic_operands(typed_target, op, typed_value, blame_span);
     };
 
     /// The pairs the seed refuses before it builds the node. Legal here:
@@ -665,16 +665,14 @@ given TypeChecker {
     /// and an error node in place of the arithmetic.
     arithmetic_pair_rejection(
         self,
-        typed_left TypedExpr,
-        left_t Type,
-        op ArithmeticOperator,
-        typed_right TypedExpr,
-        right_t Type,
-        blame_span SourceSpan,
-    ) Option[TypedExpr] = {
-        if self.is_unresolved_expr_type(left_t) or self.is_unresolved_expr_type(
-            right_t,
-        ) then {
+        typed_left: TypedExpr,
+        left_t: Type,
+        op: ArithmeticOperator,
+        typed_right: TypedExpr,
+        right_t: Type,
+        blame_span: SourceSpan,
+    ): Option[TypedExpr] = {
+        if self.is_unresolved_expr_type(left_t) or self.is_unresolved_expr_type(right_t) then {
             return Option[TypedExpr].None();
         };
         if left_t is .NeverType() or right_t is .NeverType() then {
@@ -698,10 +696,7 @@ given TypeChecker {
                     // `ptr + offset`: the offset is an UInt, or an integer
                     // literal that joins UInt. `p + 1` is legal; `p + n` for
                     // an Int `n` is not pointer arithmetic at all.
-                    let offset_fits = self.same_expr_type(
-                        right_t,
-                        Type.UIntType(),
-                    ) or typed_right.expr_kind is .IntegerLiteral(_);
+                    let offset_fits = self.same_expr_type(right_t, Type.UIntType()) or typed_right.expr_kind is .IntegerLiteral(_);
                     if offset_fits then {
                         return Option[TypedExpr].None();
                     };
@@ -788,13 +783,13 @@ given TypeChecker {
     /// land on the same span the conformance line used.
     arithmetic_operator_method_followon(
         self,
-        typed_left TypedExpr,
-        left_t Type,
-        op ArithmeticOperator,
-        typed_right TypedExpr,
-        right_t Type,
-        blame_span SourceSpan,
-    ) TypedExpr = {
+        typed_left: TypedExpr,
+        left_t: Type,
+        op: ArithmeticOperator,
+        typed_right: TypedExpr,
+        right_t: Type,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
         let method_name = self.arithmetic_method_name(op);
         let error_node = make_typed_expr(
             TypedExprKind.ArithmeticExpr(typed_left, op, typed_right),
@@ -829,26 +824,23 @@ given TypeChecker {
     /// a wrapping target gets the wrapping node, never the checked one.
     make_binary_arithmetic_expr(
         self,
-        lhs TypedExpr,
-        op ArithmeticOperator,
-        rhs TypedExpr,
-        result_type Type,
-    ) TypedExpr = {
+        lhs: TypedExpr,
+        op: ArithmeticOperator,
+        rhs: TypedExpr,
+        result_type: Type,
+    ): TypedExpr = {
         if self.is_wrapping_integer_type(result_type) then {
             return make_typed_expr(
                 TypedExprKind.WrappingArithmeticExpr(lhs, op, rhs),
                 result_type,
             );
         };
-        return make_typed_expr(
-            TypedExprKind.ArithmeticExpr(lhs, op, rhs),
-            result_type,
-        );
+        return make_typed_expr(TypedExprKind.ArithmeticExpr(lhs, op, rhs), result_type);
     };
 
     /// The operator's name as the diagnostic spells it. Deliberately the seed's
     /// spelling: the two must agree verbatim on the message.
-    bitwise_operator_name(self, op BitwiseOperator) String = {
+    bitwise_operator_name(self, op: BitwiseOperator): String = {
         let _ = self;
         return when op in {
             .BitAnd() then "and",
@@ -861,12 +853,12 @@ given TypeChecker {
 
     check_bitwise_expr_ref(
         self,
-        left Expr,
-        op BitwiseOperator,
-        right Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        left: Expr,
+        op: BitwiseOperator,
+        right: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
 
         let chain = self.collect_bitwise_chain(left, op, right);
         let operands = chain.first;
@@ -880,7 +872,9 @@ given TypeChecker {
         // neighbour's type the same way -- a pointer joins it, a non-pointer
         // is the mismatch row with `null` on the got-side; two `null`s have no
         // operand to aim at and both stay unconstrained.
-        let second_operand = if operands.count() > UInt(1) then Option[Expr].Some(operands[UInt(1)]) else Option[Expr].None();
+        let second_operand = if operands.count() > UInt(1) then Option[Expr].Some(
+            operands[UInt(1)],
+        ) else Option[Expr].None();
         let first_is_null = self.is_null_literal_operand(first_operand);
         let second_is_null = when second_operand in {
             .Some(second) then self.is_null_literal_operand(second),
@@ -901,8 +895,12 @@ given TypeChecker {
             };
             current = self.check_operand_expr_ref(first_operand, aim_type, scope);
         } else {
-            if self.is_integer_literal_operand(first_operand) and second_operand is .Some(second) and not self.is_integer_literal_operand(second) then {
-                pre_typed_second = Option[TypedExpr].Some(self.check_operand_expr_ref(second, Option[Type].None(), scope));
+            if self.is_integer_literal_operand(first_operand) and second_operand is .Some(second) and not self.is_integer_literal_operand(
+                second,
+            ) then {
+                pre_typed_second = Option[TypedExpr].Some(
+                    self.check_operand_expr_ref(second, Option[Type].None(), scope),
+                );
             };
             current = if pre_typed_second is .Some(typed_second) and self.is_integer_type(
                 typed_second.expr_type,
@@ -913,10 +911,11 @@ given TypeChecker {
             ) else self.check_operand_expr_ref(first_operand, expected, scope);
         };
 
-        let mutable i UInt = 1;
+        let mutable i: UInt = 1;
         while i < operands.count() then {
             let next_operand = (operands[i]);
-            let typed_right = if i == UInt(1) and pre_typed_second is .Some(pre_typed) then pre_typed else self.check_operand_expr_ref(
+            let typed_right = if i == UInt(1) and pre_typed_second is .Some(pre_typed) then pre_typed
+            else self.check_operand_expr_ref(
                 next_operand,
                 .Some(current.expr_type),
                 scope,
@@ -950,7 +949,7 @@ given TypeChecker {
         return result;
     };
 
-    describe_expr_shallow(self, expr Expr) String = {
+    describe_expr_shallow(self, expr: Expr): String = {
         return when expr in {
             .Identifier(_, _) then "identifier",
             .IntegerLiteral(...) then "int",
@@ -992,10 +991,10 @@ given TypeChecker {
 
     validate_lambda_parameter_types(
         self,
-        params List[LambdaParam],
-        typed_params List[TypedParam],
-    ) Void = {
-        let mutable i UInt = 0;
+        params: List[LambdaParam],
+        typed_params: List[TypedParam],
+    ): Void = {
+        let mutable i: UInt = 0;
         while i < params.count() and i < typed_params.count() then {
             let param = params[i];
             let typed_param = typed_params[i];
@@ -1011,11 +1010,7 @@ given TypeChecker {
         };
     };
 
-    validate_lambda_return_type(
-        self,
-        expected_ret Type,
-        typed_body TypedExpr,
-    ) Void = {
+    validate_lambda_return_type(self, expected_ret: Type, typed_body: TypedExpr): Void = {
         if self.is_unresolved_expr_type(expected_ret) then {
             return;
         };
@@ -1037,11 +1032,7 @@ given TypeChecker {
         );
     };
 
-    validate_lambda_captures(
-        self,
-        params List[TypedParam],
-        body TypedExpr,
-    ) Void = {
+    validate_lambda_captures(self, params: List[TypedParam], body: TypedExpr): Void = {
         let mutable local_names = Set[String].new();
         for p in params then {
             local_names.insert(p.name);
@@ -1053,10 +1044,10 @@ given TypeChecker {
 
     is_lambda_captured_symbol(
         self,
-        symbol Symbol,
-        local_names Set[String],
-        local_ids Set[UInt],
-    ) Bool = {
+        symbol: Symbol,
+        local_names: Set[String],
+        local_ids: Set[UInt],
+    ): Bool = {
         let is_variable = when symbol.kind in {
             .Variable(_) then true,
             _ then false,
@@ -1079,10 +1070,10 @@ given TypeChecker {
     /// statement or the closure that happens to contain it.
     report_mutable_lambda_capture(
         self,
-        symbol Symbol,
-        reported_ids Set[UInt],
-        span SourceSpan,
-    ) Void = {
+        symbol: Symbol,
+        reported_ids: Set[UInt],
+        span: SourceSpan,
+    ): Void = {
         if not symbol.is_mutable() or reported_ids.contains(symbol.def_id.id) then {
             return;
         };
@@ -1098,10 +1089,10 @@ given TypeChecker {
 
     report_borrowed_lambda_capture(
         self,
-        symbol Symbol,
-        reported_ids Set[UInt],
-        span SourceSpan,
-    ) Void = {
+        symbol: Symbol,
+        reported_ids: Set[UInt],
+        span: SourceSpan,
+    ): Void = {
         if not self.contains_borrowed_reference_type(symbol.symbol_type) or reported_ids.contains(
             symbol.def_id.id,
         ) then {
@@ -1114,11 +1105,7 @@ given TypeChecker {
         );
     };
 
-    collect_pattern_binding_names(
-        self,
-        pattern TypedPattern,
-        names Set[String],
-    ) Void = {
+    collect_pattern_binding_names(self, pattern: TypedPattern, names: Set[String]): Void = {
         when pattern in {
             .Variable(symbol) then {
                 let symbol_name = self.context().symbol_name(symbol);
@@ -1153,11 +1140,7 @@ given TypeChecker {
         };
     };
 
-    collect_lambda_param_names(
-        self,
-        params List[TypedParam],
-        names Set[String],
-    ) Void = {
+    collect_lambda_param_names(self, params: List[TypedParam], names: Set[String]): Void = {
         for param in params then {
             names.insert(param.name);
         };
@@ -1165,9 +1148,9 @@ given TypeChecker {
 
     collect_pair_binding_name(
         self,
-        binding PairBindingElement,
-        names Set[String],
-    ) Void = {
+        binding: PairBindingElement,
+        names: Set[String],
+    ): Void = {
         if binding.is_discard or binding.name == "_" then {
             return;
         };
@@ -1176,11 +1159,11 @@ given TypeChecker {
 
     validate_lambda_captures_in_stmt(
         self,
-        stmt TypedStatement,
-        local_names Set[String],
-        local_ids Set[UInt],
-        reported_ids Set[UInt],
-    ) Void = {
+        stmt: TypedStatement,
+        local_names: Set[String],
+        local_ids: Set[UInt],
+        reported_ids: Set[UInt],
+    ): Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(
@@ -1302,11 +1285,11 @@ given TypeChecker {
 
     validate_lambda_captures_in_expr(
         self,
-        expr TypedExpr,
-        local_names Set[String],
-        local_ids Set[UInt],
-        reported_ids Set[UInt],
-    ) Void = {
+        expr: TypedExpr,
+        local_names: Set[String],
+        local_ids: Set[UInt],
+        reported_ids: Set[UInt],
+    ): Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
@@ -1821,7 +1804,7 @@ given TypeChecker {
         };
     };
 
-    is_null_ptr_call_expr(self, expr Expr) Bool = {
+    is_null_ptr_call_expr(self, expr: Expr): Bool = {
         return when expr in {
             .NullLiteral(_) then true,
             .Call(callee, args, _) then when callee in {
@@ -1834,12 +1817,12 @@ given TypeChecker {
 
     normalize_comparison_operands(
         self,
-        initial_left TypedExpr,
-        left_source Option[Expr],
-        initial_right TypedExpr,
-        right_source Option[Expr],
-        scope Scope,
-    ) Pair[TypedExpr, TypedExpr] = {
+        initial_left: TypedExpr,
+        left_source: Option[Expr],
+        initial_right: TypedExpr,
+        right_source: Option[Expr],
+        scope: Scope,
+    ): Pair[TypedExpr, TypedExpr] = {
         let mutable typed_left = initial_left;
         let mutable typed_right = initial_right;
 
@@ -1973,11 +1956,11 @@ given TypeChecker {
 
     build_typed_comparison_expr(
         self,
-        typed_left TypedExpr,
-        op ComparisonOperator,
-        typed_right TypedExpr,
-        span SourceSpan,
-    ) TypedExpr = {
+        typed_left: TypedExpr,
+        op: ComparisonOperator,
+        typed_right: TypedExpr,
+        span: SourceSpan,
+    ): TypedExpr = {
         // An operand that already failed has no type to compare: stay silent
         // rather than pile a second complaint on the first.
         if typed_left.expr_type is .Unknown() or typed_right.expr_type is .Unknown() then {
@@ -2043,14 +2026,14 @@ given TypeChecker {
 
     lower_comparison_chain_step(
         self,
-        operands List[Expr],
-        operators List[ComparisonOperator],
-        index UInt,
-        left_expr TypedExpr,
-        left_source Option[Expr],
-        pre_typed_right Option[TypedExpr],
-        scope Scope,
-    ) TypedExpr = {
+        operands: List[Expr],
+        operators: List[ComparisonOperator],
+        index: UInt,
+        left_expr: TypedExpr,
+        left_source: Option[Expr],
+        pre_typed_right: Option[TypedExpr],
+        scope: Scope,
+    ): TypedExpr = {
         let mutable right_source = (operands[index + UInt(1)]);
         let right_source_ref = right_source;
         // A literal operand joins the width of the value it is compared
@@ -2062,7 +2045,9 @@ given TypeChecker {
                 if self.is_null_literal_operand(right_source_ref) then {
                     when left_expr.expr_type in {
                         .PointerType(_) then Option[Type].Some(left_expr.expr_type),
-                        .MutablePointerType(_) then Option[Type].Some(left_expr.expr_type),
+                        .MutablePointerType(_) then Option[Type].Some(
+                            left_expr.expr_type,
+                        ),
                         _ then Option[Type].None(),
                     }
                 } else if self.is_integer_literal_operand(right_source_ref) and self.is_integer_type(
@@ -2151,10 +2136,10 @@ given TypeChecker {
 
     check_comparison_chain_expr_ref(
         self,
-        operands List[Expr],
-        operators List[ComparisonOperator],
-        scope Scope,
-    ) TypedExpr = {
+        operands: List[Expr],
+        operators: List[ComparisonOperator],
+        scope: Scope,
+    ): TypedExpr = {
         if operands.is_empty() or operands.count() != operators.count() + UInt(1) or operators.count(
         ) < UInt(2) then {
             self.push_diagnostic_at_span("Invalid comparison chain", unknown_span());
@@ -2168,8 +2153,12 @@ given TypeChecker {
         // default before the two ever meet.
         let second_operand = (operands[UInt(1)]);
         let mutable pre_typed_right = Option[TypedExpr].None();
-        if self.is_integer_literal_operand(first_operand_ref) and not self.is_integer_literal_operand(second_operand) then {
-            pre_typed_right = Option[TypedExpr].Some(self.check_expr_core_ref(second_operand, .None(), scope));
+        if self.is_integer_literal_operand(first_operand_ref) and not self.is_integer_literal_operand(
+            second_operand,
+        ) then {
+            pre_typed_right = Option[TypedExpr].Some(
+                self.check_expr_core_ref(second_operand, .None(), scope),
+            );
         };
         let typed_left = if pre_typed_right is .Some(typed_second) and self.is_integer_type(
             typed_second.expr_type,
@@ -2191,7 +2180,7 @@ given TypeChecker {
 
     /// The operator's name as the diagnostic spells it. Deliberately the seed's
     /// spelling: the two must agree verbatim on the message.
-    comparison_operation_name(self, op ComparisonOperator) String = {
+    comparison_operation_name(self, op: ComparisonOperator): String = {
         let _ = self;
         return when op in {
             .Equal() then "equal",
@@ -2205,11 +2194,11 @@ given TypeChecker {
 
     check_comparison_expr_ref(
         self,
-        left Expr,
-        op ComparisonOperator,
-        right Expr,
-        scope Scope,
-    ) TypedExpr = {
+        left: Expr,
+        op: ComparisonOperator,
+        right: Expr,
+        scope: Scope,
+    ): TypedExpr = {
         // Join first, then range-check: a leading integer literal joins the
         // other operand's integer width, so the neighbour types first and the
         // literal is checked against that width instead of against its Int
@@ -2284,7 +2273,10 @@ given TypeChecker {
         );
         // A comparison relates two values of ONE type. `1 < true` is not a
         // narrow rule about `true`, it is not a comparison.
-        if not self.same_expr_type(normalized.first.expr_type, normalized.second.expr_type) then {
+        if not self.same_expr_type(
+            normalized.first.expr_type,
+            normalized.second.expr_type,
+        ) then {
             self.push_diagnostic(
                 "Invalid operation \(self.comparison_operation_name(op)) between types \(self.display_type_name(normalized.first.expr_type)) and \(self.display_type_name(normalized.second.expr_type))",
                 expr_span(left),
@@ -2298,7 +2290,7 @@ given TypeChecker {
         );
     };
 
-    is_builtin_equality_comparable(self, t Type) Bool = {
+    is_builtin_equality_comparable(self, t: Type): Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -2329,7 +2321,7 @@ given TypeChecker {
         };
     };
 
-    is_builtin_ordering_comparable(self, t Type) Bool = {
+    is_builtin_ordering_comparable(self, t: Type): Bool = {
         return when t in {
             .IntType() then true,
             .Int8Type() then true,
@@ -2357,12 +2349,7 @@ given TypeChecker {
         };
     };
 
-    build_equals_call(
-        self,
-        lhs TypedExpr,
-        rhs TypedExpr,
-        span SourceSpan,
-    ) TypedExpr = {
+    build_equals_call(self, lhs: TypedExpr, rhs: TypedExpr, span: SourceSpan): TypedExpr = {
         // The seed's record-and-continue: a missing conformance is one line
         // and the method lookup below still runs -- a receiver without
         // `equals` to call adds `Member 'equals' not found in type '<T>'` on
@@ -2394,9 +2381,13 @@ given TypeChecker {
                     lhs,
                     self.canonical_trait_object_type("Eq"),
                     method_symbol,
-                    self.trait_method_def_id_of(self.canonical_trait_object_type("Eq"), "equals"),
+                    self.trait_method_def_id_of(
+                        self.canonical_trait_object_type("Eq"),
+                        "equals",
+                    ),
                     List[Type].new(),
-                    .None()),
+                    .None(),
+                ),
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.BoolType());
@@ -2448,10 +2439,10 @@ given TypeChecker {
 
     build_compare_call(
         self,
-        lhs TypedExpr,
-        rhs TypedExpr,
-        span SourceSpan,
-    ) TypedExpr = {
+        lhs: TypedExpr,
+        rhs: TypedExpr,
+        span: SourceSpan,
+    ): TypedExpr = {
         // Record-and-continue, exactly as `build_equals_call`.
         let _ = self.enforce_explicit_trait_requirement_with_context(
             lhs.expr_type,
@@ -2480,9 +2471,13 @@ given TypeChecker {
                     lhs,
                     self.canonical_trait_object_type("Ord"),
                     method_symbol,
-                    self.trait_method_def_id_of(self.canonical_trait_object_type("Ord"), "compare"),
+                    self.trait_method_def_id_of(
+                        self.canonical_trait_object_type("Ord"),
+                        "compare",
+                    ),
                     List[Type].new(),
-                    .None()),
+                    .None(),
+                ),
                 method_symbol.symbol_type,
             );
             return make_typed_expr(TypedExprKind.Call(callee, args), Type.IntType());
@@ -2530,7 +2525,7 @@ given TypeChecker {
         return make_typed_expr(TypedExprKind.Call(callee, args), call_ret_type);
     };
 
-    arithmetic_trait_name(self, op ArithmeticOperator) Option[String] = {
+    arithmetic_trait_name(self, op: ArithmeticOperator): Option[String] = {
         return when op in {
             .Add() then Option[String].Some("Add"),
             .Subtract() then Option[String].Some("Sub"),
@@ -2540,7 +2535,7 @@ given TypeChecker {
         };
     };
 
-    arithmetic_method_name(self, op ArithmeticOperator) String = {
+    arithmetic_method_name(self, op: ArithmeticOperator): String = {
         return when op in {
             .Add() then "add",
             .Subtract() then "sub",
@@ -2550,7 +2545,7 @@ given TypeChecker {
         };
     };
 
-    arithmetic_operation_name(self, op ArithmeticOperator) String = {
+    arithmetic_operation_name(self, op: ArithmeticOperator): String = {
         return when op in {
             .Add() then "plus",
             .Subtract() then "minus",
@@ -2562,11 +2557,11 @@ given TypeChecker {
 
     generic_parameter_satisfies_trait_constraint(
         self,
-        t Type,
-        trait_def_id DefId,
-        trait_name String,
-        trait_args List[Type],
-    ) Bool = {
+        t: Type,
+        trait_def_id: DefId,
+        trait_name: String,
+        trait_args: List[Type],
+    ): Bool = {
         return when t in {
             .GenericParameter(name) then self.generic_param_has_trait_bound(
                 name,
@@ -2579,11 +2574,11 @@ given TypeChecker {
 
     build_arithmetic_method_call(
         self,
-        lhs TypedExpr,
-        rhs TypedExpr,
-        method_name String,
-        fallback_type Type,
-    ) TypedExpr = {
+        lhs: TypedExpr,
+        rhs: TypedExpr,
+        method_name: String,
+        fallback_type: Type,
+    ): TypedExpr = {
         self.maybe_record_extension_method_instantiation(
             lhs.expr_type,
             method_name,
@@ -2621,11 +2616,11 @@ given TypeChecker {
 
     build_binary_method_call(
         self,
-        lhs TypedExpr,
-        rhs TypedExpr,
-        method_name String,
-        fallback_type Type,
-    ) TypedExpr = {
+        lhs: TypedExpr,
+        rhs: TypedExpr,
+        method_name: String,
+        fallback_type: Type,
+    ): TypedExpr = {
         self.maybe_record_extension_method_instantiation(
             lhs.expr_type,
             method_name,
@@ -2663,10 +2658,10 @@ given TypeChecker {
 
     build_unary_method_call(
         self,
-        operand TypedExpr,
-        method_name String,
-        fallback_type Type,
-    ) TypedExpr = {
+        operand: TypedExpr,
+        method_name: String,
+        fallback_type: Type,
+    ): TypedExpr = {
         let call_expr = self.lower_receiver_method_call_expr(
             operand,
             method_name,
@@ -2680,9 +2675,9 @@ given TypeChecker {
 
     convert_interpolated_part_to_string(
         self,
-        part InterpolatedStringPart,
-        scope Scope,
-    ) TypedExpr = {
+        part: InterpolatedStringPart,
+        scope: Scope,
+    ): TypedExpr = {
         return when part in {
             .Literal(value) then make_typed_expr(
                 TypedExprKind.StringLiteral(value),
@@ -2730,9 +2725,9 @@ given TypeChecker {
 
     lower_interpolated_string(
         self,
-        parts List[InterpolatedStringPart],
-        scope Scope,
-    ) TypedExpr = {
+        parts: List[InterpolatedStringPart],
+        scope: Scope,
+    ): TypedExpr = {
         if parts.is_empty() then {
             return make_typed_expr(
                 TypedExprKind.StringLiteral(""),
@@ -2783,7 +2778,7 @@ given TypeChecker {
             "count",
             uint_type,
         );
-        let mutable part_idx UInt = 1;
+        let mutable part_idx: UInt = 1;
         while part_idx < part_symbols.count() then {
             let part_var = make_typed_expr(
                 TypedExprKind.Variable((part_symbols[part_idx])),

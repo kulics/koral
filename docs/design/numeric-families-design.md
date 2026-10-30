@@ -90,8 +90,8 @@
 同一份函数体在不同家族上行为不同，因为 `+ - * / %` 本身是家族多态的：
 
 ```koral
-given Int8       as Integer { pow(self, e UInt) Self = { …用 self * self… }; };   // 溢出 panic
-given WrappingInt8 as Integer { pow(self, e UInt) Self = { …用 self * self… }; }; // 溢出回绕
+given Int8: Integer { pow(self, e: UInt): Self = { …用 self * self… }; };   // 溢出 panic
+given WrappingInt8: Integer { pow(self, e: UInt): Self = { …用 self * self… }; }; // 溢出回绕
 ```
 
 **方法名不携带策略。** 因此 `Integer` 不得有 `wrapping_abs` / `wrapping_pow` 这类
@@ -213,9 +213,9 @@ Wrapping<T>`），所以 `n + 1` 不成立，每个常量都要写成 `n + Wrapp
 这正是公理 7 要求的出口。方法族把意图摊在每个操作上，漏写前缀是静默改语义；
 两套转换拼写（`Type(x)` 与 `wrapping_cast`）让读者先做词表选择。
 
-**3. sealed trait + `wrapping_cast[T Integer]`——不再需要。**
+**3. sealed trait + `wrapping_cast[T: Integer]`——不再需要。**
 
-原是给 `wrapping_cast[T Any]` 的空约束补一个封闭 bound。`wrapping_cast` 去掉后，
+原是给 `wrapping_cast[T: Any]` 的空约束补一个封闭 bound。`wrapping_cast` 去掉后，
 「哪些类型参与整数位移动」由类型系统本身表达（三个家族都是内建类型），不再需要 trait。
 sealed trait 作为通用语言能力另行独立交付。
 

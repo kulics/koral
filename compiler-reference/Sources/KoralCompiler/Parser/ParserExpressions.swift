@@ -252,6 +252,8 @@ extension Parser {
       currentToken = savedToken
     }
     if currentToken === .fatArrow { return true }
+    guard currentToken === .colon else { return false }
+    advanceShape()
     guard scanTypeShapeConsuming() else { return false }
     return currentToken === .fatArrow
   }
@@ -283,16 +285,27 @@ extension Parser {
     while true {
       guard case .identifier = currentToken else { return false }
       advanceShape()
-      // A parameter is `name [Type]`. `name: Type` is a MISTAKEN lambda
-      // parameter, and still a lambda: the real parse reports
-      // `Lambda parameters use 'name Type', not 'name: Type'`. A classifier
+      // A parameter is `name [: Type]`; the colon separates the name from
+      // its type. `name: Type =` is not a lambda parameter at all: lambdas
+      // are called positionally, so the real parse reports
+      // `Lambda parameters cannot be named (drop the '=')`. A classifier
       // that refused it would re-read the construct as a parenthesized
       // expression and blame the `->` instead.
       if currentToken === .colon {
         advanceShape()
         guard scanTypeShapeConsuming() else { return false }
       } else if currentToken !== .comma && currentToken !== .rightParen {
-        guard scanTypeShapeConsuming() else { return false }
+        return false
+      }
+      // A named marker `=` is not a lambda parameter, but the scan keeps the
+      // shape lambda-like so the real parse reports
+      // `Lambda parameters cannot be named (drop the '=')` instead of
+      // re-reading the construct as a parenthesized expression.
+      if currentToken === .equal {
+        advanceShape()
+        while currentToken !== .comma && currentToken !== .rightParen && currentToken !== .eof {
+          advanceShape()
+        }
       }
       if currentToken === .comma {
         advanceShape()
@@ -1296,10 +1309,10 @@ extension Parser {
     // re-parsing `a`, instead of the pair-literal error the labeled parse had.
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
       // Anchored at the label: an argument-shape diagnostic is about the
-      // `label: value` pair as written, and the label is where it starts.
+      // `label = value` pair as written, and the label is where it starts.
       let labelSpan = currentSpan
       try match(.identifier(name))
-      try match(.colon)
+      try match(.equal)
       let expr = try expression()
       return CallArg(label: name, expression: expr, span: labelSpan)
     }
@@ -1688,14 +1701,16 @@ extension Parser {
         }
         try match(.identifier(paramName))
 
-        // Lambda parameters are `name Type`, not `name: Type`.
-        if currentToken === .colon {
-          throw ParserError.rejectedConstruct(span: currentSpan, message: "Lambda parameters use 'name Type', not 'name: Type'")
-        }
-
+        // Lambda parameters are `name [: Type]`; the colon separates the
+        // name from its type. Lambdas are called positionally, so `=` (the
+        // named-parameter marker) is not accepted here.
         var paramType: TypeNode? = nil
-        if currentToken !== .comma && currentToken !== .rightParen {
+        if currentToken === .colon {
+          try match(.colon)
           paramType = try parseType()
+        }
+        if currentToken === .equal {
+          throw ParserError.rejectedConstruct(span: currentSpan, message: "Lambda parameters cannot be named (drop the '=')")
         }
         parameters.append((name: paramName, type: paramType))
 
@@ -1709,7 +1724,8 @@ extension Parser {
     try match(.rightParen)
 
     var returnType: TypeNode? = nil
-    if currentToken !== .fatArrow {
+    if currentToken === .colon {
+      try match(.colon)
       returnType = try parseType()
     }
     // `=>` opens the body.

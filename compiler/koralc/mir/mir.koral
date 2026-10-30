@@ -6,30 +6,32 @@ using "./mir_verifier.koral";
 // `struct { let rawValue: Int }`. Declaring them `type mutable` made every ID a
 // heap-allocated ARC-managed nominal (and routed MIRScopeID into the managed-nominal
 // path, which is where the spurious `Koralc_MIRScopeID.tag` emission came from).
-public type MIRBlockID(raw_value UInt);
-public type MIRLocalID(raw_value UInt);
-public type MIRScopeID(raw_value UInt);
+public type MIRBlockID(raw_value: UInt);
+public type MIRLocalID(raw_value: UInt);
+public type MIRScopeID(raw_value: UInt);
 
 public type mutable MIRProgram(
-    globals List[MIRGlobal],
-    mutable functions List[MIRFunction],
-    context CompilerContext,
-    static_method_lookup Dict[MethodInstanceKey, DefId],
+    globals: List[MIRGlobal],
+    mutable functions: List[MIRFunction],
+    context: CompilerContext,
+    static_method_lookup: Dict[MethodInstanceKey, DefId],
     // Spelling -> declaration. This is the NAME RESOLUTION table and is the only
     // place a trait name decides anything.
-    traits Dict[String, TraitDeclInfo],
+    traits: Dict[String, TraitDeclInfo],
     // Declaration identity -> declaration. Anything asking "is this the trait X"
     // reads here: two same-named traits from different modules are different
     // traits, so the spelling cannot answer that.
-    traits_by_def_id Dict[UInt, TraitDeclInfo],
-    receiver_method_dispatch Dict[DefId, ReceiverMethodDispatchInfo],
-    concrete_callables_by_def_id Dict[DefId, ConcreteCallableInfo],
-    conformance_witnesses Dict[String, ConformanceWitness],
+    traits_by_def_id: Dict[UInt, TraitDeclInfo],
+    receiver_method_dispatch: Dict[DefId, ReceiverMethodDispatchInfo],
+    concrete_callables_by_def_id: Dict[DefId, ConcreteCallableInfo],
+    conformance_witnesses: Dict[String, ConformanceWitness],
 );
 
 /// The DefId index over `traits`. Built alongside the spelling table so the two
 /// never disagree; see `MIRProgram.traits_by_def_id`.
-public let trait_decl_index(traits Dict[String, TraitDeclInfo]) Dict[UInt, TraitDeclInfo] = {
+public let trait_decl_index(
+    traits: Dict[String, TraitDeclInfo],
+): Dict[UInt, TraitDeclInfo] = {
     let mutable out = Dict[UInt, TraitDeclInfo].new();
     for entry in traits.iterator() then {
         out.insert(entry.second.def_id.id, entry.second);
@@ -40,22 +42,22 @@ public let trait_decl_index(traits Dict[String, TraitDeclInfo]) Dict[UInt, Trait
 given MIRProgram {
     /// The trait declared at `def_id`. Identity lookup -- the spelling is never
     /// consulted. Mirrors `GenericTemplateRegistry.lookup_trait_by_def_id`.
-    public trait_by_def_id(self, def_id DefId) Option[TraitDeclInfo] = {
+    public trait_by_def_id(self, def_id: DefId): Option[TraitDeclInfo] = {
         return self.traits_by_def_id.get(def_id.id);
     };
 };
 
 public type MIRFunctionWorkItem(
-    identifier Symbol,
-    params List[TypedParam],
-    return_type Type,
-    kind MIRFunctionKind,
-    body TypedExpr,
+    identifier: Symbol,
+    params: List[TypedParam],
+    return_type: Type,
+    kind: MIRFunctionKind,
+    body: TypedExpr,
 );
 
 public type MIRFunctionKind {
     Global(),
-    Given(target_type Type, trait_name Option[String], trait_type_args List[Type], trait_def_id Option[DefId]),
+    Given(target_type: Type, trait_name: Option[String], trait_type_args: List[Type], trait_def_id: Option[DefId]),
 };
 
 /// Identity of a vtable is (concrete type, trait DECLARATION, trait arguments).
@@ -63,11 +65,11 @@ public type MIRFunctionKind {
 /// different modules are different traits and need different vtables, so nothing
 /// may key on the spelling.
 public type MIRTraitVTable(
-    concrete_type Type,
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
-    methods List[MIRTraitVTableMethod],
+    concrete_type: Type,
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
+    methods: List[MIRTraitVTableMethod],
 );
 
 given MIRTraitVTable {
@@ -76,10 +78,10 @@ given MIRTraitVTable {
     /// so the identity cannot drift between call sites.
     public matches(
         self,
-        concrete_type Type,
-        trait_def_id DefId,
-        trait_type_args List[Type],
-    ) Bool = {
+        concrete_type: Type,
+        trait_def_id: DefId,
+        trait_type_args: List[Type],
+    ): Bool = {
         if self.trait_def_id != trait_def_id then {
             return false;
         };
@@ -89,7 +91,7 @@ given MIRTraitVTable {
         if self.trait_type_args.count() != trait_type_args.count() then {
             return false;
         };
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < self.trait_type_args.count() then {
             if stable_type_key(self.trait_type_args[i]) != stable_type_key(
                 trait_type_args[i],
@@ -103,41 +105,41 @@ given MIRTraitVTable {
 };
 
 public type MIRTraitVTableMethod(
-    trait_method_def_id DefId,
-    name String,
-    return_type Option[Type],
-    parameters List[MIRTraitVTableParameter],
-    self_by_value Bool,
+    trait_method_def_id: DefId,
+    name: String,
+    return_type: Option[Type],
+    parameters: List[MIRTraitVTableParameter],
+    self_by_value: Bool,
 );
 
-public type MIRTraitVTableParameter(name String, param_type Option[Type], is_self Bool);
+public type MIRTraitVTableParameter(name: String, param_type: Option[Type], is_self: Bool);
 
 public type MIRGlobal {
-    ForeignFunction(identifier Symbol, params List[TypedParam], return_type Type),
-    ForeignType(identifier Symbol),
-    ForeignStruct(identifier Symbol, fields List[TypedField]),
-    ForeignGlobalVariable(identifier Symbol, is_mutable Bool, decl_type Type),
-    GlobalVariable(identifier Symbol, initializer_function Symbol, is_mutable Bool, decl_type Type),
-    StructDeclaration(identifier Symbol, fields List[TypedField]),
-    EnumDeclaration(identifier Symbol, cases List[TypedEnumCase]),
-    Function(identifier Symbol, params List[TypedParam], return_type Type, kind MIRFunctionKind),
-    Given(target_type Type, trait_name Option[String], trait_type_args List[Type], methods List[Symbol], trait_def_id Option[DefId]),
-    TraitVTable(vtable MIRTraitVTable),
-    TemplatePlaceholder(name String),
+    ForeignFunction(identifier: Symbol, params: List[TypedParam], return_type: Type),
+    ForeignType(identifier: Symbol),
+    ForeignStruct(identifier: Symbol, fields: List[TypedField]),
+    ForeignGlobalVariable(identifier: Symbol, is_mutable: Bool, decl_type: Type),
+    GlobalVariable(identifier: Symbol, initializer_function: Symbol, is_mutable: Bool, decl_type: Type),
+    StructDeclaration(identifier: Symbol, fields: List[TypedField]),
+    EnumDeclaration(identifier: Symbol, cases: List[TypedEnumCase]),
+    Function(identifier: Symbol, params: List[TypedParam], return_type: Type, kind: MIRFunctionKind),
+    Given(target_type: Type, trait_name: Option[String], trait_type_args: List[Type], methods: List[Symbol], trait_def_id: Option[DefId]),
+    TraitVTable(vtable: MIRTraitVTable),
+    TemplatePlaceholder(name: String),
 };
 
 public type MIRFunction(
-    identifier Symbol,
-    params List[TypedParam],
-    return_type Type,
-    kind MIRFunctionKind,
-    entry_block MIRBlockID,
-    locals List[MIRLocal],
-    blocks List[MIRBasicBlock],
-    temporary_value_sources_by_local Dict[UInt, MIRTemporaryValueSourceLocation],
+    identifier: Symbol,
+    params: List[TypedParam],
+    return_type: Type,
+    kind: MIRFunctionKind,
+    entry_block: MIRBlockID,
+    locals: List[MIRLocal],
+    blocks: List[MIRBasicBlock],
+    temporary_value_sources_by_local: Dict[UInt, MIRTemporaryValueSourceLocation],
 );
 
-public type MIRTemporaryValueSourceLocation(block_index UInt, statement_index UInt);
+public type MIRTemporaryValueSourceLocation(block_index: UInt, statement_index: UInt);
 
 /// A local slot.
 ///
@@ -149,11 +151,11 @@ public type MIRTemporaryValueSourceLocation(block_index UInt, statement_index UI
 /// have: sema rejects a mutable capture outright, `Cannot capture mutable
 /// variable ... hold the state in a Cell and capture the cell instead`).
 public type MIRLocal(
-    id MIRLocalID,
-    name String,
-    local_type Type,
-    storage MIRStorage,
-    symbol Option[Symbol],
+    id: MIRLocalID,
+    name: String,
+    local_type: Type,
+    storage: MIRStorage,
+    symbol: Option[Symbol],
 );
 
 public type MIRStorage {
@@ -164,70 +166,70 @@ public type MIRStorage {
 };
 
 public type mutable MIRBasicBlock(
-    id MIRBlockID,
-    mutable statements List[MIRStatement],
-    mutable terminator MIRTerminator,
+    id: MIRBlockID,
+    mutable statements: List[MIRStatement],
+    mutable terminator: MIRTerminator,
 );
 
 public type MIRStatement {
-    Declare(local MIRLocalID),
-    Assign(place MIRPlace, value MIRValue),
-    CompoundAssign(assignment MIRCompoundAssignment),
-    Drop(place MIRPlace),
-    Retain(value MIRValue),
-    Release(value MIRValue),
-    Evaluate(value MIRValue),
-    ScopeEnter(scope MIRScopeID),
-    ScopeExit(scope MIRScopeID),
-    DebugSource(span SourceSpan),
+    Declare(local: MIRLocalID),
+    Assign(place: MIRPlace, value: MIRValue),
+    CompoundAssign(assignment: MIRCompoundAssignment),
+    Drop(place: MIRPlace),
+    Retain(value: MIRValue),
+    Release(value: MIRValue),
+    Evaluate(value: MIRValue),
+    ScopeEnter(scope: MIRScopeID),
+    ScopeExit(scope: MIRScopeID),
+    DebugSource(span: SourceSpan),
 };
 
 public type MIRTerminator {
-    Goto(block MIRBlockID),
-    Branch(condition MIROperand, then_block MIRBlockID, else_block MIRBlockID),
-    SwitchValue(operand MIROperand, cases List[MIRSwitchCase], default_block Option[MIRBlockID]),
-    ReturnValue(operand Option[MIROperand]),
+    Goto(block: MIRBlockID),
+    Branch(condition: MIROperand, then_block: MIRBlockID, else_block: MIRBlockID),
+    SwitchValue(operand: MIROperand, cases: List[MIRSwitchCase], default_block: Option[MIRBlockID]),
+    ReturnValue(operand: Option[MIROperand]),
     Unreachable(),
 };
 
 public type MIRPlace {
-    Local(local MIRLocalID),
-    Global(def_id DefId),
-    Field(base MIRPlace, field Symbol),
-    EnumPayload(base MIRPlace, case_name String, field_name String, field_index UInt, field_type Type),
-    Deref(base MIRValue, pointee Type),
-    PointerElement(base MIRValue, element Type),
+    Local(local: MIRLocalID),
+    Global(def_id: DefId),
+    Field(base: MIRPlace, field: Symbol),
+    EnumPayload(base: MIRPlace, case_name: String, field_name: String, field_index: UInt, field_type: Type),
+    Deref(base: MIRValue, pointee: Type),
+    PointerElement(base: MIRValue, element: Type),
 };
 
 public type MIRValue {
-    Operand(operand MIROperand),
-    PlaceRead(place MIRPlace, ownership MIROwnershipUse),
-    Binary(operation MIRBinaryOperation),
-    Unary(operation MIRUnaryOperation),
-    Call(call MIRCall),
-    Aggregate(aggregate MIRAggregate),
-    EnumCase(construction MIREnumConstruction),
-    EnumTag(tag MIREnumTag),
-    TraitObjectConversion(conversion MIRTraitObjectConversion),
-    TraitMethodCall(call MIRTraitMethodCall),
-    Ref(place MIRPlace, kind MIRReferenceKind, allocation MIRReferenceAllocation),
-    Pointer(place MIRPlace),
-    Cast(operand MIROperand, target_type Type),
-    Intrinsic(node MIRIntrinsic),
-    Lambda(lambda MIRLambda),
+    Operand(operand: MIROperand),
+    PlaceRead(place: MIRPlace, ownership: MIROwnershipUse),
+    Binary(operation: MIRBinaryOperation),
+    Unary(operation: MIRUnaryOperation),
+    Call(call: MIRCall),
+    Aggregate(aggregate: MIRAggregate),
+    EnumCase(construction: MIREnumConstruction),
+    EnumTag(tag: MIREnumTag),
+    TraitObjectConversion(conversion: MIRTraitObjectConversion),
+    TraitMethodCall(call: MIRTraitMethodCall),
+    Ref(place: MIRPlace, kind: MIRReferenceKind, allocation: MIRReferenceAllocation),
+    Pointer(place: MIRPlace),
+    Cast(operand: MIROperand, target_type: Type),
+    Intrinsic(node: MIRIntrinsic),
+    Lambda(lambda: MIRLambda),
 };
 
 public type MIROperand {
-    Local(local MIRLocalID),
-    Constant(constant MIRConstant),
-    Function(symbol Symbol),
+    Local(local: MIRLocalID),
+    Constant(constant: MIRConstant),
+    Function(symbol: Symbol),
 };
 
 public type MIRConstant {
-    Integer(value String, constant_type Type),
-    Float(value String, constant_type Type),
-    StringLiteral(value String, constant_type Type),
-    Boolean(value Bool),
+    Integer(value: String, constant_type: Type),
+    Float(value: String, constant_type: Type),
+    StringLiteral(value: String, constant_type: Type),
+    Boolean(value: Bool),
     Void(),
 };
 
@@ -239,25 +241,25 @@ public type MIROwnershipUse {
 };
 
 public type MIRBinaryOperation(
-    left MIROperand,
-    operator_kind MIRBinaryOperator,
-    right MIROperand,
-    result_type Type,
+    left: MIROperand,
+    operator_kind: MIRBinaryOperator,
+    right: MIROperand,
+    result_type: Type,
 );
 
 public type MIRBinaryOperator {
-    Arithmetic(op ArithmeticOperator, checked Bool),
-    WrappingArithmetic(op ArithmeticOperator),
-    Comparison(op ComparisonOperator),
+    Arithmetic(op: ArithmeticOperator, checked: Bool),
+    WrappingArithmetic(op: ArithmeticOperator),
+    Comparison(op: ComparisonOperator),
     LogicalAnd(),
     LogicalOr(),
-    Bitwise(op BitwiseOperator, checked_shift Bool),
+    Bitwise(op: BitwiseOperator, checked_shift: Bool),
 };
 
 public type MIRUnaryOperation(
-    operator_kind MIRUnaryOperator,
-    operand MIROperand,
-    result_type Type,
+    operator_kind: MIRUnaryOperator,
+    operand: MIROperand,
+    result_type: Type,
 );
 
 public type MIRUnaryOperator {
@@ -279,84 +281,84 @@ public type MIRReferenceAllocation {
 };
 
 public type MIRCompoundAssignment(
-    target MIRPlace,
-    operator_kind CompoundAssignmentOperator,
-    value MIRValue,
+    target: MIRPlace,
+    operator_kind: CompoundAssignmentOperator,
+    value: MIRValue,
 );
 
 public type MIRCall(
-    callee MIROperand,
-    arguments List[MIRValue],
-    argument_ownerships List[MIROwnershipUse],
-    result_type Type,
+    callee: MIROperand,
+    arguments: List[MIRValue],
+    argument_ownerships: List[MIROwnershipUse],
+    result_type: Type,
 );
 
 public type MIRAggregate(
-    aggregate_type Type,
-    fields List[MIRValue],
-    field_ownerships List[MIROwnershipUse],
+    aggregate_type: Type,
+    fields: List[MIRValue],
+    field_ownerships: List[MIROwnershipUse],
 );
 
 public type MIREnumConstruction(
-    enum_type Type,
-    case_name String,
-    arguments List[MIRValue],
+    enum_type: Type,
+    case_name: String,
+    arguments: List[MIRValue],
 );
 
-public type MIREnumTag(subject MIRValue, enum_type Type);
+public type MIREnumTag(subject: MIRValue, enum_type: Type);
 
 public type MIRTraitObjectConversion(
-    inner MIRValue,
-    source_ownership MIROwnershipUse,
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
-    concrete_type Type,
-    result_type Type,
+    inner: MIRValue,
+    source_ownership: MIROwnershipUse,
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
+    concrete_type: Type,
+    result_type: Type,
 );
 
 public type MIRTraitMethodCall(
-    receiver MIRValue,
-    receiver_ownership MIROwnershipUse,
-    trait_name String,
-    trait_def_id DefId,
-    trait_type_args List[Type],
-    method_name String,
-    method_index Int,
-    arguments List[MIRValue],
-    argument_ownerships List[MIROwnershipUse],
-    result_type Type,
+    receiver: MIRValue,
+    receiver_ownership: MIROwnershipUse,
+    trait_name: String,
+    trait_def_id: DefId,
+    trait_type_args: List[Type],
+    method_name: String,
+    method_index: Int,
+    arguments: List[MIRValue],
+    argument_ownerships: List[MIROwnershipUse],
+    result_type: Type,
 );
 
 public type MIRLambda(
-    params List[Symbol],
-    captures List[Symbol],
-    capture_sources List[MIRPlace],
-    function MIRFunction,
-    lambda_type Type,
+    params: List[Symbol],
+    captures: List[Symbol],
+    capture_sources: List[MIRPlace],
+    function: MIRFunction,
+    lambda_type: Type,
 );
 
 public type MIRIntrinsic {
-    AllocMemory(count MIRValue, result_type Type),
-    DeallocMemory(pointer MIRValue),
-    CopyMemory(dest MIRValue, source MIRValue, count MIRValue),
-    MoveMemory(dest MIRValue, source MIRValue, count MIRValue),
-    DowngradeRef(value MIRValue, result_type Type),
-    UpgradeRef(value MIRValue, result_type Type),
-    TraitObjectMatches(value MIRValue, trait_name String, trait_def_id DefId, trait_type_args List[Type], concrete_type Type),
-    TraitObjectDowncast(value MIRValue, result_type Type),
-    InitMemory(pointer MIRValue, value MIRValue),
-    DeinitMemory(pointer MIRValue),
-    TakeMemory(pointer MIRValue, result_type Type),
-    NullPtr(result_type Type),
-    SpawnThread(out_handle MIRValue, out_tid MIRValue, closure MIRValue, stack_size MIRValue),
+    AllocMemory(count: MIRValue, result_type: Type),
+    DeallocMemory(pointer: MIRValue),
+    CopyMemory(dest: MIRValue, source: MIRValue, count: MIRValue),
+    MoveMemory(dest: MIRValue, source: MIRValue, count: MIRValue),
+    DowngradeRef(value: MIRValue, result_type: Type),
+    UpgradeRef(value: MIRValue, result_type: Type),
+    TraitObjectMatches(value: MIRValue, trait_name: String, trait_def_id: DefId, trait_type_args: List[Type], concrete_type: Type),
+    TraitObjectDowncast(value: MIRValue, result_type: Type),
+    InitMemory(pointer: MIRValue, value: MIRValue),
+    DeinitMemory(pointer: MIRValue),
+    TakeMemory(pointer: MIRValue, result_type: Type),
+    NullPtr(result_type: Type),
+    SpawnThread(out_handle: MIRValue, out_tid: MIRValue, closure: MIRValue, stack_size: MIRValue),
 };
 
-public type MIRSwitchCase(value MIRConstant, target MIRBlockID);
+public type MIRSwitchCase(value: MIRConstant, target: MIRBlockID);
 
 public type MIRExprResult(
-    result_type Type,
-    category ValueCategory,
-    operand Option[MIROperand],
-    place Option[MIRPlace],
+    result_type: Type,
+    category: ValueCategory,
+    operand: Option[MIROperand],
+    place: Option[MIRPlace],
 );

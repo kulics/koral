@@ -8,14 +8,10 @@
 // - check_and/or 表达式（迭代式）
 
 given TypeChecker {
-    lookup_non_global_scope_symbol(
-        self,
-        scope Scope,
-        name String,
-    ) Option[Symbol] = {
+    lookup_non_global_scope_symbol(self, scope: Scope, name: String): Option[Symbol] = {
         let _ = self;
         let mutable current_opt = Option[Scope].Some(scope);
-        let mutable traversed UInt = 0;
+        let mutable traversed: UInt = 0;
 
         while current_opt is .Some(_) then {
             let current = when current_opt in {
@@ -54,10 +50,10 @@ given TypeChecker {
     /// Swift reports `Member 'nope' not found in type 'Foo'` at the same point.
     report_missing_member_if_needed(
         self,
-        lookup_type Type,
-        member String,
-        span SourceSpan,
-    ) Bool = {
+        lookup_type: Type,
+        member: String,
+        span: SourceSpan,
+    ): Bool = {
         // A cascade, not a second mistake: once the receiver's type is already
         // `Unknown` the first diagnostic has said everything. Reporting again
         // would print `Member 'x' not found in type '?'` for every downstream use.
@@ -83,7 +79,9 @@ given TypeChecker {
         // E0599 -- without it the reader is told a method that plainly exists
         // does not.
         let face_hint = self.method_face_hint(
-            self.extension_template_key(self.normalize_method_receiver_type(lookup_type)),
+            self.extension_template_key(
+                self.normalize_method_receiver_type(lookup_type),
+            ),
             member,
         );
         let message = "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'";
@@ -99,12 +97,12 @@ given TypeChecker {
 
     report_pointer_member_access_issue_if_needed(
         self,
-        resolved Type,
-        has_pointer_method Bool,
-        pointer_type Type,
-        pointee Type,
-        member String,
-    ) Void = {
+        resolved: Type,
+        has_pointer_method: Bool,
+        pointer_type: Type,
+        pointee: Type,
+        member: String,
+    ): Void = {
         if resolved is not .Unknown() or has_pointer_method then {
             return;
         };
@@ -129,7 +127,7 @@ given TypeChecker {
         };
     };
 
-    expr_contains_or_return(self, expr Expr) Bool = {
+    expr_contains_or_return(self, expr: Expr): Bool = {
         let _ = self;
         return when expr in {
             .OrReturnExpr(_, _) then true,
@@ -281,7 +279,7 @@ given TypeChecker {
         };
     };
 
-    stmts_contain_or_return(self, statements List[Statement]) Bool = {
+    stmts_contain_or_return(self, statements: List[Statement]): Bool = {
         // An early-out scan: the guard names the one case in which this
         // statement matters, and every other shape falls through to the
         // catchall and the next statement.
@@ -293,9 +291,9 @@ given TypeChecker {
                 .TupleLetStmt(_, value, _) where self.expr_contains_or_return(value) then {
                     return true;
                 },
-                .AssignmentStmt(target, _, value, _) where self.expr_contains_or_return(target) or self.expr_contains_or_return(
-                    value,
-                ) then {
+                .AssignmentStmt(target, _, value, _) where self.expr_contains_or_return(
+                    target,
+                ) or self.expr_contains_or_return(value) then {
                     return true;
                 },
                 .ExprStmt(value, _) where self.expr_contains_or_return(value) then {
@@ -314,7 +312,7 @@ given TypeChecker {
     };
 
     /// Whether a module path names the standard library root.
-    is_std_module_path(self, module_path List[String]) Bool = {
+    is_std_module_path(self, module_path: List[String]): Bool = {
         if module_path.is_empty() then {
             return false;
         };
@@ -326,7 +324,7 @@ given TypeChecker {
     /// "Drop" is read HERE (it has to be, this is the language's link point for
     /// the compiler protocol) and the result is the declaration's DefId, which
     /// every later comparison uses.
-    is_std_drop_trait(self, trait_name String) Bool = {
+    is_std_drop_trait(self, trait_name: String): Bool = {
         if trait_name != "Drop" then {
             return false;
         };
@@ -350,7 +348,7 @@ given TypeChecker {
         };
     };
 
-    has_explicit_std_drop_conformance(self, base_type Type) Bool = {
+    has_explicit_std_drop_conformance(self, base_type: Type): Bool = {
         // Mint the Drop protocol's DECLARATION first, then compare against it.
         // Asking `has_explicit_trait_conformance(_, "Drop")` before that is a
         // spelling lookup, and a user trait also called `Drop` would answer.
@@ -374,9 +372,9 @@ given TypeChecker {
 
     resolve_source_method_signature(
         self,
-        base_type Type,
-        method_name String,
-    ) Option[Symbol] = {
+        base_type: Type,
+        method_name: String,
+    ): Option[Symbol] = {
         let raw_method_signature = self.resolve_method_signature(base_type, method_name);
         return self.resolve_source_method_signature_from_raw(
             base_type,
@@ -387,10 +385,10 @@ given TypeChecker {
 
     resolve_source_method_signature_from_raw(
         self,
-        base_type Type,
-        method_name String,
-        raw_method_signature Option[Symbol],
-    ) Option[Symbol] = {
+        base_type: Type,
+        method_name: String,
+        raw_method_signature: Option[Symbol],
+    ): Option[Symbol] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[Symbol].None();
         };
@@ -417,7 +415,7 @@ given TypeChecker {
         };
     };
 
-    check_expr_global_ref(self, expr Expr, expected Option[Type]) TypedExpr = {
+    check_expr_global_ref(self, expr: Expr, expected: Option[Type]): TypedExpr = {
         let prev_function_return_context = self.clone_function_return_context();
         let prev_in_loop = self.storage.in_loop;
         let prev_in_defer = self.storage.in_defer;
@@ -451,15 +449,15 @@ given TypeChecker {
         return typed;
     };
 
-    ast_expr_span(self, expr Expr) SourceSpan = expr_span(expr);
+    ast_expr_span(self, expr: Expr): SourceSpan = expr_span(expr);
 
     check_identifier_expr_at(
         self,
-        name String,
-        span SourceSpan,
-        scope Scope,
-        allow_type_name Bool,
-    ) TypedExpr = {
+        name: String,
+        span: SourceSpan,
+        scope: Scope,
+        allow_type_name: Bool,
+    ): TypedExpr = {
         let local_sym_opt = self.lookup_non_global_scope_symbol(scope, name);
         let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None()
         else self.lookup_current_file_symbol(name);
@@ -601,25 +599,25 @@ given TypeChecker {
         );
     };
 
-    check_identifier_expr(self, name String, scope Scope) TypedExpr = {
+    check_identifier_expr(self, name: String, scope: Scope): TypedExpr = {
         return self.check_identifier_expr_at(name, unknown_span(), scope, false);
     };
 
     check_operand_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return self.check_child_expr_ref(expr, expected, scope);
     };
 
     check_child_expr_ref(
         self,
-        expr Expr,
-        expected Option[Type],
-        scope Scope,
-    ) TypedExpr = {
+        expr: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
         return when expr in {
             .Identifier(name, span) then self.check_identifier_expr_at(
                 name,
@@ -839,10 +837,10 @@ given TypeChecker {
 
     make_typed_member_path_expr(
         self,
-        typed_base TypedExpr,
-        member Symbol,
-        member_type Type,
-    ) TypedExpr = {
+        typed_base: TypedExpr,
+        member: Symbol,
+        member_type: Type,
+    ): TypedExpr = {
         let member_access = when typed_base.expr_kind in {
             .MemberPath(path_base, path) then {
                 if self.is_ref_like_assignment_type(typed_base.expr_type) then {
@@ -903,10 +901,7 @@ given TypeChecker {
         };
     };
 
-    split_member_path_call_callee(
-        self,
-        callee Expr,
-    ) Option[Pair[Expr, String]] = {
+    split_member_path_call_callee(self, callee: Expr): Option[Pair[Expr, String]] = {
         return when callee in {
             .MemberPath(base, path, _) then {
                 let mutable copied_path = List[String].new();
@@ -920,7 +915,7 @@ given TypeChecker {
                 let receiver_expr = if copied_path.count() == 1 then base
                 else {
                     let mutable receiver_path = List[String].new();
-                    let mutable idx UInt = 0;
+                    let mutable idx: UInt = 0;
                     while idx + 1 < copied_path.count() then {
                         receiver_path.push(copied_path[idx]);
                         idx += 1;
@@ -935,12 +930,7 @@ given TypeChecker {
         };
     };
 
-    check_member_expr_ref(
-        self,
-        base Expr,
-        member String,
-        scope Scope,
-    ) TypedExpr = {
+    check_member_expr_ref(self, base: Expr, member: String, scope: Scope): TypedExpr = {
         let typed_base = when base in {
             .Identifier(name, span) then self.check_identifier_expr_at(
                 name,
@@ -1135,7 +1125,7 @@ given TypeChecker {
                 when self.storage.generic_templates.struct_by_def_id(tplDefId) in {
                     .Some(struct_template) then {
                         let mutable bindings = Dict[String, Type].new();
-                        let mutable i UInt = 0;
+                        let mutable i: UInt = 0;
                         let param_count = struct_template.type_parameters.count();
                         let arg_count = args.count();
                         let n = if param_count < arg_count then param_count
@@ -1164,7 +1154,7 @@ given TypeChecker {
         return self.make_typed_member_path_expr(typed_base, member_symbol, member_type);
     };
 
-    check_call_callee_expr_ref(self, callee Expr, scope Scope) TypedExpr = {
+    check_call_callee_expr_ref(self, callee: Expr, scope: Scope): TypedExpr = {
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(
                 name,
@@ -1367,9 +1357,13 @@ given TypeChecker {
                                                 typed_receiver,
                                                 trait_type,
                                                 sym,
-                                                self.trait_method_def_id_of(trait_type, parts.second),
+                                                self.trait_method_def_id_of(
+                                                    trait_type,
+                                                    parts.second,
+                                                ),
                                                 List[Type].new(),
-                                                .None()),
+                                                .None(),
+                                            ),
                                             sym_type,
                                         )
                                         else make_typed_expr(
@@ -1448,7 +1442,7 @@ given TypeChecker {
         };
     };
 
-    ref_target_expr_name(self, expr Expr) String = {
+    ref_target_expr_name(self, expr: Expr): String = {
         return when expr in {
             .Identifier(name, _) then name,
             .MemberPath(_, path, _) then if path.is_empty() then "member"
@@ -1460,7 +1454,7 @@ given TypeChecker {
         };
     };
 
-    ref_target_typed_name(self, expr TypedExpr) String = {
+    ref_target_typed_name(self, expr: TypedExpr): String = {
         return when expr.expr_kind in {
             .Variable(sym) then self.context().symbol_name(sym),
             .MemberPath(_, path) then if path.is_empty() then "member"
@@ -1471,7 +1465,7 @@ given TypeChecker {
         };
     };
 
-    is_literal_expr(self, expr Expr) Bool = {
+    is_literal_expr(self, expr: Expr): Bool = {
         return when expr in {
             .StringLiteral(...) then true,
             .IntegerLiteral(...) then true,
@@ -1486,7 +1480,7 @@ given TypeChecker {
         };
     };
 
-    is_implicit_ref_candidate_shape(self, expr TypedExpr) Bool = {
+    is_implicit_ref_candidate_shape(self, expr: TypedExpr): Bool = {
         return when expr.expr_kind in {
             .Variable(_) then true,
             .MemberPath(...) then true,
@@ -1496,15 +1490,11 @@ given TypeChecker {
         };
     };
 
-    can_take_implicit_ref_receiver(self, expr TypedExpr) Bool = {
+    can_take_implicit_ref_receiver(self, expr: TypedExpr): Bool = {
         return self.can_take_ref_of_expr(expr);
     };
 
-    type_matches_expected_pattern(
-        self,
-        expected_pattern Type,
-        actual_type Type,
-    ) Bool = {
+    type_matches_expected_pattern(self, expected_pattern: Type, actual_type: Type): Bool = {
         if self.same_expr_type(expected_pattern, actual_type) then {
             return true;
         };
@@ -1518,10 +1508,10 @@ given TypeChecker {
 
     report_trait_flatten_failure(
         self,
-        trait_name String,
-        method_name String,
-        error Error,
-    ) Void = {
+        trait_name: String,
+        method_name: String,
+        error: Error,
+    ): Void = {
         let mutable message = StringBuilder.new();
         message.push_string("failed to flatten trait ");
         message.push_string(trait_name);
@@ -1536,9 +1526,9 @@ given TypeChecker {
 
     find_trait_constraint_for_method(
         self,
-        base_type Type,
-        method_name String,
-    ) Option[String] = {
+        base_type: Type,
+        method_name: String,
+    ): Option[String] = {
         if method_name == "drop" and self.has_explicit_std_drop_conformance(base_type) then {
             return Option[String].None();
         };
@@ -1659,9 +1649,9 @@ given TypeChecker {
 
     can_convert_to_trait_object(
         self,
-        actual_type Type,
-        expected_trait_type Type,
-    ) Bool = {
+        actual_type: Type,
+        expected_trait_type: Type,
+    ): Bool = {
         // The expected type IS a trait object and carries the trait's
         // DECLARATION. Spelling it out and resolving the name back is a
         // DefId -> name -> DefId round-trip, and the name lands in whichever
@@ -1720,7 +1710,7 @@ given TypeChecker {
 
     /// The type arguments a trait OBJECT carries: `Sink[Int]` -> `[Int]`.
     /// A trait with no parameters contributes none.
-    trait_object_type_args(self, t Type) List[Type] = {
+    trait_object_type_args(self, t: Type): List[Type] = {
         return when t in {
             .TraitObject(_, args) then args,
             _ then List[Type].new(),
@@ -1729,7 +1719,7 @@ given TypeChecker {
 
     /// The concrete side of a trait-object conversion: the reference's
     /// pointee, or the type itself when there is no reference to peel.
-    trait_object_concrete_type(self, source_type Type) Type = {
+    trait_object_concrete_type(self, source_type: Type): Type = {
         return when source_type in {
             .ReferenceType(inner) then inner,
             .MutableReferenceType(inner) then inner,
@@ -1741,10 +1731,10 @@ given TypeChecker {
 
     wrap_trait_object_conversion(
         self,
-        expr TypedExpr,
-        trait_type Type,
-        result_type Type,
-    ) TypedExpr = {
+        expr: TypedExpr,
+        trait_type: Type,
+        result_type: Type,
+    ): TypedExpr = {
         let already_trait_object = when expr.expr_type in {
             .TraitObject(...) then true,
             .ReferenceType(inner) then inner is .TraitObject(...),
@@ -1788,11 +1778,7 @@ given TypeChecker {
         );
     };
 
-    trait_object_conversion_result_type(
-        self,
-        source_type Type,
-        trait_type Type,
-    ) Type = {
+    trait_object_conversion_result_type(self, source_type: Type, trait_type: Type): Type = {
         return when source_type in {
             .MutableReferenceType(_) then Type.MutableReferenceType(trait_type),
             .ReferenceType(_) then Type.ReferenceType(trait_type),
@@ -1807,10 +1793,10 @@ given TypeChecker {
     };
     adapt_expr_to_expected_type_at(
         self,
-        expr TypedExpr,
-        expected_type_opt Option[Type],
-        source_span_opt Option[SourceSpan],
-    ) TypedExpr = {
+        expr: TypedExpr,
+        expected_type_opt: Option[Type],
+        source_span_opt: Option[SourceSpan],
+    ): TypedExpr = {
         let expr_ref = expr;
         let diagnostic_span = when source_span_opt in {
             .Some(source_span) then if is_known_span(source_span) then source_span
@@ -2827,9 +2813,9 @@ given TypeChecker {
 
     adapt_expr_to_expected_type(
         self,
-        expr TypedExpr,
-        expected_type_opt Option[Type],
-    ) TypedExpr = {
+        expr: TypedExpr,
+        expected_type_opt: Option[Type],
+    ): TypedExpr = {
         return self.adapt_expr_to_expected_type_at(
             expr,
             expected_type_opt,

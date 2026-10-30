@@ -11,32 +11,32 @@
 // directly addressable by pointer — enabling */*subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
-type DictBucket[K Hash, V Any](tag UInt, key K, value V);
+type DictBucket[K: Hash, V: Any](tag: UInt, key: K, value: V);
 
 // Bucket tag constants (inlined as UInt(0), UInt(1), UInt(2))
 
-private let bucket_tag_ptr[K Hash, V Any](
-    bucket_ptr *mutable DictBucket[K, V],
-) *mutable UInt =
+private let bucket_tag_ptr[K: Hash, V: Any](
+    bucket_ptr: *mutable DictBucket[K, V],
+): *mutable UInt =
     bucket_ptr as *mutable UInt;
 
-private let bucket_set_tag[K Hash, V Any](
-    bucket_ptr *mutable DictBucket[K, V],
-    tag UInt,
-) Void = {
+private let bucket_set_tag[K: Hash, V: Any](
+    bucket_ptr: *mutable DictBucket[K, V],
+    tag: UInt,
+): Void = {
     let tag_ptr = bucket_tag_ptr(bucket_ptr);
     *tag_ptr = tag;
 };
 
-public type mutable Dict[K Hash, V Any](
-    mutable buckets *mutable DictBucket[K, V],
-    mutable size UInt,
-    mutable capacity UInt,
+public type mutable Dict[K: Hash, V: Any](
+    mutable buckets: *mutable DictBucket[K, V],
+    mutable size: UInt,
+    mutable capacity: UInt,
 );
 
-given[K Hash, V Any] Dict[K, V] as Drop {
+given[K: Hash, V: Any] Dict[K, V]: Drop {
 
-    drop(self) Void = {
+    drop(self): Void = {
         for i in 0..<self.capacity then {
             if (self.buckets + i).tag == UInt(1) then {
                 deinit_memory(self.buckets + i);
@@ -46,28 +46,28 @@ given[K Hash, V Any] Dict[K, V] as Drop {
     };
 };
 
-public type mutable DictIterator[K Hash, V Any](
-    source Dict[K, V],
-    mutable index UInt,
+public type mutable DictIterator[K: Hash, V: Any](
+    source: Dict[K, V],
+    mutable index: UInt,
 );
 
 // ============================================================================
 // Dict Methods
 // ============================================================================
-given[K Hash, V Any] Dict[K, V] {
+given[K: Hash, V: Any] Dict[K, V] {
 
     /// 空表不分配桶数组，首次 insert（走 rehash）时再分配。
     /// 编译器里每个 `Scope` 都带一张 `Dict[String, Type]`，大量是空的或只有一两项，
     /// 为它们每次付 16 桶 alloc + 16 次清零不值得。
-    public new() Self = {
+    public new(): Self = {
         return Dict[K, V](null, 0, 0);
     };
 
-    public with_capacity(capacity UInt) Self = {
+    public with_capacity(capacity: UInt): Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
-        let requested UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
-        let mutable cap UInt = UInt(4);
+        let requested: UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
+        let mutable cap: UInt = UInt(4);
         while cap < requested then {
             cap = cap * UInt(2);
         };
@@ -78,11 +78,11 @@ given[K Hash, V Any] Dict[K, V] {
         return Dict[K, V](buckets, 0, cap);
     };
 
-    public count(self) UInt = self.size;
+    public count(self): UInt = self.size;
 
     // Using when for bucket handling
     // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
-    private find_slot(self, key K) Option[UInt] = {
+    private find_slot(self, key: K): Option[UInt] = {
         // 尚未分配桶数组（空表）：没有可命中的槽位。
         if self.capacity == UInt(0) then {
             return Option[UInt].None();
@@ -91,7 +91,7 @@ given[K Hash, V Any] Dict[K, V] {
         let h = key.hash();
         let mutable idx = h & mask;
         let mutable first_deleted = Option[UInt].None();
-        let mutable probes UInt = 0;
+        let mutable probes: UInt = 0;
         while probes < self.capacity then {
             let bucket_tag = (self.buckets + idx).tag;
             if bucket_tag == UInt(0) then {
@@ -122,7 +122,7 @@ given[K Hash, V Any] Dict[K, V] {
         return first_deleted;
     };
 
-    private rehash(self) Void = {
+    private rehash(self): Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 空表首次分配；已有桶数组时翻倍。
@@ -148,7 +148,7 @@ given[K Hash, V Any] Dict[K, V] {
     };
 
     // Internal insert used by rehash - doesn't return old value
-    private insert_internal(self, key K, value V) Void = {
+    private insert_internal(self, key: K, value: V): Void = {
         when self.find_slot(key) in {
             .None() then {
                 panic("Dict insert failed");
@@ -167,7 +167,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public insert(self, key K, value V) Void = {
+    public insert(self, key: K, value: V): Void = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
         };
@@ -189,7 +189,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public try_insert(self, key K, value V) Bool = {
+    public try_insert(self, key: K, value: V): Bool = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
         };
@@ -210,13 +210,13 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public insert_dict(self, other Dict[K, V]) Void = {
+    public insert_dict(self, other: Dict[K, V]): Void = {
         for entry in other then {
             self.insert(entry.first, entry.second);
         };
     };
 
-    public get(self, key K) Option[V] = {
+    public get(self, key: K): Option[V] = {
         when self.find_slot(key) in {
             .None() then {
                 return Option[V].None();
@@ -232,7 +232,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public get_or_insert(self, key K, value V) V = {
+    public get_or_insert(self, key: K, value: V): V = {
         when self.get(key) in {
             .Some(v) then {
                 return v;
@@ -244,21 +244,21 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public contains_key(self, key K) Bool = when self.get(key) in {
+    public contains_key(self, key: K): Bool = when self.get(key) in {
         .Some(_) then true,
         .None() then false,
     };
 
-    public remove(self, key K) Void = {
+    public remove(self, key: K): Void = {
         let _ = self.take(key);
     };
 
-    public try_remove(self, key K) Bool = when self.take(key) in {
+    public try_remove(self, key: K): Bool = when self.take(key) in {
         .Some(_) then true,
         .None() then false,
     };
 
-    public take(self, key K) Option[V] = {
+    public take(self, key: K): Option[V] = {
         when self.find_slot(key) in {
             .None() then {
                 return Option[V].None();
@@ -278,9 +278,9 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    public is_empty(self) Bool = self.size == 0;
+    public is_empty(self): Bool = self.size == 0;
 
-    public clear(self) Void = {
+    public clear(self): Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
             if bucket_ptr.tag == UInt(1) then {
@@ -292,7 +292,7 @@ given[K Hash, V Any] Dict[K, V] {
     };
 
     // Retains only entries satisfying the predicate. O(n).
-    public retain(self, predicate (K, V) -> Bool) Void = {
+    public retain(self, predicate: (K, V) -> Bool): Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
             if bucket_ptr.tag == UInt(1) then {
@@ -306,7 +306,7 @@ given[K Hash, V Any] Dict[K, V] {
     };
 
     // Builtin subscript helpers for d[key] syntax
-    private __index_get(self, key K) V = {
+    private __index_get(self, key: K): V = {
         when self.get(key) in {
             .Some(v) then {
                 return v;
@@ -317,7 +317,7 @@ given[K Hash, V Any] Dict[K, V] {
         };
     };
 
-    private __index_set(self, key K, value V) Void = {
+    private __index_set(self, key: K, value: V): Void = {
         when self.get(key) in {
             .None() then {
                 panic("Dict key not found");
@@ -336,10 +336,10 @@ given[K Hash, V Any] Dict[K, V] {
     };
 };
 
-given[K Hash, V Any] Dict[K, V] as Clone {
+given[K: Hash, V: Any] Dict[K, V]: Clone {
 
     // Independent shallow copy: new dict identity, keys/values copied one level.
-    public clone(self) Self = {
+    public clone(self): Self = {
         let mutable result = Dict[K, V].with_capacity(self.size);
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
@@ -351,17 +351,17 @@ given[K Hash, V Any] Dict[K, V] as Clone {
     };
 };
 
-given[K Hash, V Any] Dict[K, V] as Default {
+given[K: Hash, V: Any] Dict[K, V]: Default {
 
-    public default() Self = Dict[K, V].new();
+    public default(): Self = Dict[K, V].new();
 };
 
 // ============================================================================
 // Dict Iterator
 // ============================================================================
-given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
+given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
 
-    public next(self) Option[Pair[K, V]] = {
+    public next(self): Option[Pair[K, V]] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
@@ -380,14 +380,14 @@ given[K Hash, V Any] DictIterator[K, V] as Iterator[Pair[K, V]] {
 // ============================================================================
 
 // DictKeysIterator - iterates over keys only
-public type mutable DictKeysIterator[K Hash, V Any](
-    source Dict[K, V],
-    mutable index UInt,
+public type mutable DictKeysIterator[K: Hash, V: Any](
+    source: Dict[K, V],
+    mutable index: UInt,
 );
 
-given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
+given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
 
-    public next(self) Option[K] = {
+    public next(self): Option[K] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
@@ -400,14 +400,14 @@ given[K Hash, V Any] DictKeysIterator[K, V] as Iterator[K] {
 };
 
 // DictValuesIterator - iterates over values only
-public type mutable DictValuesIterator[K Hash, V Any](
-    source Dict[K, V],
-    mutable index UInt,
+public type mutable DictValuesIterator[K: Hash, V: Any](
+    source: Dict[K, V],
+    mutable index: UInt,
 );
 
-given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
+given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
 
-    public next(self) Option[V] = {
+    public next(self): Option[V] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
@@ -420,20 +420,20 @@ given[K Hash, V Any] DictValuesIterator[K, V] as Iterator[V] {
 };
 
 // Add keys() and values() methods to Dict
-given[K Hash, V Any] Dict[K, V] {
+given[K: Hash, V: Any] Dict[K, V] {
 
-    public keys(self) DictKeysIterator[K, V] = DictKeysIterator[K, V](self, 0);
-    public values(self) DictValuesIterator[K, V] = DictValuesIterator[K, V](self, 0);
+    public keys(self): DictKeysIterator[K, V] = DictKeysIterator[K, V](self, 0);
+    public values(self): DictValuesIterator[K, V] = DictValuesIterator[K, V](self, 0);
 };
 
-given[K Hash, V Any] Dict[K, V] as Iterable[Pair[K, V], DictIterator[K, V]] {
+given[K: Hash, V: Any] Dict[K, V]: Iterable[Pair[K, V], DictIterator[K, V]] {
 
-    public iterator(self) DictIterator[K, V] = DictIterator[K, V](self, 0);
+    public iterator(self): DictIterator[K, V] = DictIterator[K, V](self, 0);
 };
 
-given[T Any] List[T] {
+given[T: Any] List[T] {
 
-    public group_by[K Hash](self, key (T) -> K) Dict[K, List[T]] = {
+    public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]] = {
         let mutable groups = Dict[K, List[T]].new();
         for i in 0..<self.count() then {
             let value = self[i];

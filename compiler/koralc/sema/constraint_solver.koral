@@ -4,18 +4,18 @@
 // 约束求解错误类型。
 public type ConstraintSolverError {
     // 合一失败
-    UnificationFailed(message String, span SourceSpan),
+    UnificationFailed(message: String, span: SourceSpan),
     // 类型变量未被解析
-    UnsolvedTypeVariable(tv TypeVariable, span SourceSpan),
+    UnsolvedTypeVariable(tv: TypeVariable, span: SourceSpan),
     // Trait 约束未满足
-    TraitNotSatisfied(target Type, trait_name String, span SourceSpan),
+    TraitNotSatisfied(target: Type, trait_name: String, span: SourceSpan),
     // 约束冲突
-    ConflictingConstraints(message String, span SourceSpan),
+    ConflictingConstraints(message: String, span: SourceSpan),
 };
 
-given ConstraintSolverError as Error {
+given ConstraintSolverError: Error {
 
-    public message(self) String = {
+    public message(self): String = {
         return when self in {
             .UnificationFailed(message, _) then message,
             .UnsolvedTypeVariable(tv, _) then "Unsolved type variable: \(tv.display())",
@@ -26,24 +26,24 @@ given ConstraintSolverError as Error {
 };
 
 // 类型替换：将类型变量 ID 映射到具体类型。
-public type TypeSubstitution(mapping Dict[UInt, Type]);
+public type TypeSubstitution(mapping: Dict[UInt, Type]);
 
 given TypeSubstitution {
 
-    public new() TypeSubstitution = {
+    public new(): TypeSubstitution = {
         return TypeSubstitution(Dict[UInt, Type].new());
     };
 
     // 将替换应用到类型 t，递归替换所有已知的类型变量。
     // Fast path: if mapping is empty, return t unchanged (no allocation).
-    public apply(self, t Type) Type = {
+    public apply(self, t: Type): Type = {
         if self.mapping.is_empty() then {
             return t;
         };
         return self.apply_impl(t);
     };
 
-    private apply_impl(self, t Type) Type = {
+    private apply_impl(self, t: Type): Type = {
         return when t in {
             .TypeVar(tv_ref) then {
                 let tv = tv_ref;
@@ -142,21 +142,21 @@ given TypeSubstitution {
 
 // 约束求解器。
 public type mutable ConstraintSolver(
-    context CompilerContext,
-    mutable unifier Unifier,
-    mutable constraints List[Constraint],
-    mutable default_constraints List[Constraint],
-    mutable errors List[ConstraintSolverError],
-    mutable next_type_variable_id UInt,
+    context: CompilerContext,
+    mutable unifier: Unifier,
+    mutable constraints: List[Constraint],
+    mutable default_constraints: List[Constraint],
+    mutable errors: List[ConstraintSolverError],
+    mutable next_type_variable_id: UInt,
     // 用于 Instantiate 约束判断 struct/enum 的类型查找回调。
     // 由 TypeChecker 在创建 ConstraintSolver 后注入。
-    mutable enum_type_names Set[String],
-    mutable template_def_ids Dict[String, DefId],
+    mutable enum_type_names: Set[String],
+    mutable template_def_ids: Dict[String, DefId],
 );
 
 given ConstraintSolver {
 
-    public new(context CompilerContext) ConstraintSolver = {
+    public new(context: CompilerContext): ConstraintSolver = {
         return ConstraintSolver(
             context,
             Unifier.new(context),
@@ -169,7 +169,7 @@ given ConstraintSolver {
         );
     };
 
-    public fresh_type_variable(self, name Option[String], span SourceSpan) TypeVariable = {
+    public fresh_type_variable(self, name: Option[String], span: SourceSpan): TypeVariable = {
         let id = self.next_type_variable_id;
         self.next_type_variable_id += 1;
         return TypeVariable(id, name, Option[LiteralDefaultKind].None(), span);
@@ -177,9 +177,9 @@ given ConstraintSolver {
 
     public fresh_literal_type_variable(
         self,
-        kind LiteralDefaultKind,
-        span SourceSpan,
-    ) TypeVariable = {
+        kind: LiteralDefaultKind,
+        span: SourceSpan,
+    ): TypeVariable = {
         let id = self.next_type_variable_id;
         self.next_type_variable_id += 1;
         return TypeVariable(
@@ -191,18 +191,18 @@ given ConstraintSolver {
     };
 
     // 注册一个 enum 类型名称，用于 Instantiate 约束判断。
-    public register_enum_type(self, name String, def_id DefId) Void = {
+    public register_enum_type(self, name: String, def_id: DefId): Void = {
         self.enum_type_names.insert(name);
         self.template_def_ids.insert(name, def_id);
     };
 
-    public register_struct_type(self, name String, def_id DefId) Void = {
+    public register_struct_type(self, name: String, def_id: DefId): Void = {
         self.template_def_ids.insert(name, def_id);
     };
 
     // Debug helper: clear in-flight solver state between declarations.
     // Keeps enum type registry intact for Instantiate classification.
-    public clear_debug_state(self) Void = {
+    public clear_debug_state(self): Void = {
         self.unifier = Unifier.new(self.context);
         self.constraints = List[Constraint].new();
         self.default_constraints = List[Constraint].new();
@@ -210,7 +210,7 @@ given ConstraintSolver {
     };
 
     // 添加约束：DefaultInt/DefaultFloat 放入 default_constraints，其余放入 constraints。
-    public add_constraint(self, c Constraint) Void = {
+    public add_constraint(self, c: Constraint): Void = {
         when c in {
             .DefaultInt(_, _) then {
                 self.default_constraints.push(c);
@@ -225,7 +225,7 @@ given ConstraintSolver {
     };
 
     // 对 constraints 按 priority 做插入排序（priority 越小越优先）。
-    private sort_constraints(self) Void = {
+    private sort_constraints(self): Void = {
         let n = self.constraints.count();
         let mutable i = UInt(1);
         while i < n then {
@@ -247,7 +247,7 @@ given ConstraintSolver {
     };
 
     // 求解所有约束，返回 TypeSubstitution。
-    public solve(self) Result[TypeSubstitution] = {
+    public solve(self): Result[TypeSubstitution] = {
         // 1. 按优先级排序
         self.sort_constraints();
 
@@ -295,7 +295,7 @@ given ConstraintSolver {
     };
 
     // 处理单个约束。
-    private process_constraint(self, c Constraint) Void = {
+    private process_constraint(self, c: Constraint): Void = {
         when c in {
             .Equal(lhs, rhs, span) then {
                 let result = self.unifier.unify(lhs, rhs, span);
@@ -346,7 +346,7 @@ given ConstraintSolver {
     };
 
     // 处理默认类型约束。
-    private process_default_constraint(self, c Constraint) Void = {
+    private process_default_constraint(self, c: Constraint): Void = {
         when c in {
             .DefaultInt(tv, span) then {
                 let resolved = self.unifier.resolve(Type.TypeVar(tv));
@@ -403,7 +403,7 @@ given ConstraintSolver {
     };
 
     // 辅助：将 [Type]List 转换为 [Type ref]List。
-    private types_to_refs(self, types List[Type]) List[Type] = {
+    private types_to_refs(self, types: List[Type]): List[Type] = {
         let mutable out = List[Type].new();
         for t in types then {
             out.push(t);
@@ -412,7 +412,7 @@ given ConstraintSolver {
     };
 
     // 辅助：检查类型是否包含类型变量。
-    private type_contains_tv(self, t Type) Bool = {
+    private type_contains_tv(self, t: Type): Bool = {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
@@ -450,7 +450,7 @@ given ConstraintSolver {
     };
 
     // 解析类型：将类型变量替换为已绑定的类型。
-    public resolve(self, t Type) Type = {
+    public resolve(self, t: Type): Type = {
         return self.unifier.resolve(t);
     };
 };

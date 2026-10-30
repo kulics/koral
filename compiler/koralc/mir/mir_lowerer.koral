@@ -1,22 +1,22 @@
 using "std/os" { env };
 
 public type mutable MIRLowerer(
-    program MonomorphizedProgram,
-    context CompilerContext,
-    mutable pending_work_items List[MIRFunctionWorkItem],
-    mutable streaming_nodes_prepared Bool,
-    mutable diagnostics DiagnosticCollector,
+    program: MonomorphizedProgram,
+    context: CompilerContext,
+    mutable pending_work_items: List[MIRFunctionWorkItem],
+    mutable streaming_nodes_prepared: Bool,
+    mutable diagnostics: DiagnosticCollector,
 );
 
 private type PreparedMIRLowering(
-    metadata_program MIRProgram,
-    work_items List[MIRFunctionWorkItem],
-    builder_program MonomorphizedProgram,
+    metadata_program: MIRProgram,
+    work_items: List[MIRFunctionWorkItem],
+    builder_program: MonomorphizedProgram,
 );
 
-public type LoweredMIRProgram(mir_program MIRProgram, diagnostics DiagnosticCollector);
+public type LoweredMIRProgram(mir_program: MIRProgram, diagnostics: DiagnosticCollector);
 
-private let empty_monomorphized_program() MonomorphizedProgram = {
+private let empty_monomorphized_program(): MonomorphizedProgram = {
     return MonomorphizedProgram(
         List[TypedDecl].new(),
         Dict[String, TraitDeclInfo].new(),
@@ -38,8 +38,8 @@ private let empty_monomorphized_program() MonomorphizedProgram = {
 };
 
 private let make_builder_program_view(
-    program MonomorphizedProgram,
-) MonomorphizedProgram = {
+    program: MonomorphizedProgram,
+): MonomorphizedProgram = {
     return MonomorphizedProgram(
         List[TypedDecl].new(),
         Dict[String, TraitDeclInfo].new(),
@@ -61,9 +61,9 @@ private let make_builder_program_view(
 };
 
 private let prepare_mir_lowering(
-    program MonomorphizedProgram,
-    context CompilerContext,
-) PreparedMIRLowering = {
+    program: MonomorphizedProgram,
+    context: CompilerContext,
+): PreparedMIRLowering = {
     let mutable prep = MIRLowerer.new(program, context);
     let metadata_program = prep.metadata_program();
     let mutable work_items = List[MIRFunctionWorkItem].new();
@@ -91,28 +91,28 @@ private let prepare_mir_lowering(
     );
 };
 
-private let mir_progress_enabled() Bool = {
+private let mir_progress_enabled(): Bool = {
     return if env("KORAL_DEBUG_MIR_PROGRESS") is .Some(value) then value == "1" or value == "true" or value == "TRUE"
     else false;
 };
 
-private let trace_mir_progress(label String) Void = {
+private let trace_mir_progress(label: String): Void = {
     if mir_progress_enabled() then {
         eprintln(label);
     };
 };
 
 public let lower_monomorphized_program_releasing_source(
-    mutable program MonomorphizedProgram,
-    context CompilerContext,
-) LoweredMIRProgram = {
+    mutable program: MonomorphizedProgram,
+    context: CompilerContext,
+): LoweredMIRProgram = {
     let prepared = prepare_mir_lowering(program, context);
     program = empty_monomorphized_program();
 
     let mutable builder_program = prepared.builder_program;
     let mutable lowerer = MIRLowerer.new(builder_program, context);
     let mutable functions = List[MIRFunction].new();
-    let mutable item_index UInt = 0;
+    let mutable item_index: UInt = 0;
     for item in prepared.work_items then {
         if mir_progress_enabled() then {
             let mutable message = StringBuilder.new();
@@ -153,7 +153,7 @@ public let lower_monomorphized_program_releasing_source(
 };
 
 given MIRLowerer {
-    public new(program MonomorphizedProgram, context CompilerContext) MIRLowerer =
+    public new(program: MonomorphizedProgram, context: CompilerContext): MIRLowerer =
         MIRLowerer(
             program,
             context,
@@ -162,7 +162,7 @@ given MIRLowerer {
             DiagnosticCollector.new(),
         );
 
-    unique_vtable_requests(self) List[VtableRequest] = {
+    unique_vtable_requests(self): List[VtableRequest] = {
         let _ = self;
         let mutable seen = Set[String].new();
         let mutable unique = List[VtableRequest].new();
@@ -171,7 +171,7 @@ given MIRLowerer {
             key.push_string(stable_type_key(request.concrete_type));
             key.push_string("|");
             key.push_string(request.trait_name);
-            let mutable i UInt = 0;
+            let mutable i: UInt = 0;
             while i < request.trait_type_args.count() then {
                 key.push_string("|");
                 key.push_string(stable_type_key(request.trait_type_args[i]));
@@ -186,7 +186,7 @@ given MIRLowerer {
         return unique;
     };
 
-    public metadata_program(self) MIRProgram = {
+    public metadata_program(self): MIRProgram = {
         let mutable collected_globals = List[MIRGlobal].new();
 
         for request in self.unique_vtable_requests() then {
@@ -369,7 +369,7 @@ given MIRLowerer {
         return program;
     };
 
-    public lower_next_work_item(self) Option[MIRFunction] = {
+    public lower_next_work_item(self): Option[MIRFunction] = {
         self.prepare_streaming_nodes();
 
         while true then {
@@ -388,7 +388,7 @@ given MIRLowerer {
         return Option[MIRFunction].None();
     };
 
-    prepare_streaming_nodes(self) Void = {
+    prepare_streaming_nodes(self): Void = {
         if self.streaming_nodes_prepared then {
             return;
         };
@@ -401,7 +401,7 @@ given MIRLowerer {
         self.streaming_nodes_prepared = true;
     };
 
-    enqueue_node_work_items(self, node_ref TypedDecl) Void = {
+    enqueue_node_work_items(self, node_ref: TypedDecl): Void = {
         when node_ref in {
             .LetDecl(_, _, _, _, initializer, _, identifier) then {
                 let init_function = self.make_global_initializer_symbol(identifier);
@@ -765,7 +765,7 @@ given MIRLowerer {
         };
     };
 
-    public lower(self) MIRProgram = {
+    public lower(self): MIRProgram = {
         let program = self.metadata_program();
         let mutable functions = List[MIRFunction].new();
         while true then {
@@ -791,7 +791,7 @@ given MIRLowerer {
         return lowered;
     };
 
-    public lower_work_item(self, item MIRFunctionWorkItem) MIRFunction = {
+    public lower_work_item(self, item: MIRFunctionWorkItem): MIRFunction = {
         return self.make_function(
             item.identifier,
             item.params,
@@ -803,12 +803,12 @@ given MIRLowerer {
 
     make_function(
         self,
-        identifier Symbol,
-        params List[TypedParam],
-        return_type Type,
-        kind MIRFunctionKind,
-        body TypedExpr,
-    ) MIRFunction = {
+        identifier: Symbol,
+        params: List[TypedParam],
+        return_type: Type,
+        kind: MIRFunctionKind,
+        body: TypedExpr,
+    ): MIRFunction = {
         // For std Drop implementations, keep the canonical ABI: `drop(self)`
         // lowers to a pointer receiver in C. Identity is by trait DefId, never
         // by method spelling.
@@ -834,7 +834,8 @@ given MIRLowerer {
                     self_param.name,
                     self_param.is_mutable,
                     Type.MutablePointerType(base_param_type),
-                    self_param.named, self_param.default_value
+                    self_param.named,
+                    self_param.default_value,
                 ),
             );
             effective_params = wrapped;
@@ -856,12 +857,12 @@ given MIRLowerer {
         return function;
     };
 
-    should_lower_function(self, identifier Symbol) Bool = {
+    should_lower_function(self, identifier: Symbol): Bool = {
         let _ = self;
         return not self.context.contains_generic_parameter(identifier.symbol_type);
     };
 
-    make_global_initializer_symbol(self, identifier Symbol) Symbol = {
+    make_global_initializer_symbol(self, identifier: Symbol): Symbol = {
         let mutable function_type = Type.FunctionType(
             List[FunctionParamEntry].new(),
             identifier.symbol_type,
@@ -880,16 +881,16 @@ given MIRLowerer {
         );
     };
 
-    make_given_member_symbol(self, member TypedGivenMember) Symbol = {
+    make_given_member_symbol(self, member: TypedGivenMember): Symbol = {
         let drop_trait_def_id = when self.program.receiver_method_dispatch.get(
             member.def_id,
         ) in {
             .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
             .None() then Option[DefId].None(),
         };
-        let mutable is_drop_method = member.params.count() == 1 and member.params[UInt(0)].name == "self" and self.context.is_std_drop_impl_def_id(
-            drop_trait_def_id,
-        );
+        let mutable is_drop_method = member.params.count() == 1 and member.params[
+            UInt(0)
+        ].name == "self" and self.context.is_std_drop_impl_def_id(drop_trait_def_id);
         let mutable rebuilt_param_types = List[Type].new();
         for param in member.params then {
             if is_drop_method and param.name == "self" then {
@@ -918,7 +919,7 @@ given MIRLowerer {
         return Symbol(member.def_id, function_type, SymbolKind.Function());
     };
 
-    make_trait_vtable(self, request VtableRequest) MIRTraitVTable = {
+    make_trait_vtable(self, request: VtableRequest): MIRTraitVTable = {
         return MIRTraitVTable(
             request.concrete_type,
             request.trait_name,
@@ -928,7 +929,7 @@ given MIRLowerer {
         );
     };
 
-    copy_type_ref_list(self, values List[Type]) List[Type] = {
+    copy_type_ref_list(self, values: List[Type]): List[Type] = {
         let mutable out = List[Type].new();
         for value in values then {
             out.push(value);
@@ -936,10 +937,7 @@ given MIRLowerer {
         return out;
     };
 
-    make_trait_vtable_methods(
-        self,
-        request VtableRequest,
-    ) List[MIRTraitVTableMethod] = {
+    make_trait_vtable_methods(self, request: VtableRequest): List[MIRTraitVTableMethod] = {
         let mutable ordered_members = List[TypedTraitMember].new();
         let mutable visited_traits = Set[String].new();
         let mutable seen_methods = Set[String].new();
@@ -973,8 +971,8 @@ given MIRLowerer {
 
     make_trait_vtable_method_from_requirement_slot(
         self,
-        slot RequirementSlot,
-    ) MIRTraitVTableMethod = {
+        slot: RequirementSlot,
+    ): MIRTraitVTableMethod = {
         let mutable parameters = List[MIRTraitVTableParameter].new();
         for parameter in slot.parameters then {
             parameters.push(
@@ -994,7 +992,7 @@ given MIRLowerer {
         );
     };
 
-    requirement_slot_self_by_value(self, slot RequirementSlot) Bool = {
+    requirement_slot_self_by_value(self, slot: RequirementSlot): Bool = {
         if slot.parameters.is_empty() then {
             return false;
         };
@@ -1015,7 +1013,7 @@ given MIRLowerer {
         };
     };
 
-    type_module_path(self, t Type) List[String] = {
+    type_module_path(self, t: Type): List[String] = {
         return when t in {
             .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
@@ -1034,13 +1032,13 @@ given MIRLowerer {
 
     collect_instantiated_trait_members(
         self,
-        trait_def_id DefId,
-        concrete_type Type,
-        bindings Dict[String, Type],
-        visited_traits Set[String],
-        seen_methods Set[String],
-        ordered_members List[TypedTraitMember],
-    ) Void = {
+        trait_def_id: DefId,
+        concrete_type: Type,
+        bindings: Dict[String, Type],
+        visited_traits: Set[String],
+        seen_methods: Set[String],
+        ordered_members: List[TypedTraitMember],
+    ): Void = {
         let visit_key = self.trait_binding_visit_key(trait_def_id, bindings);
         if visited_traits.contains(visit_key) then {
             return;
@@ -1088,9 +1086,9 @@ given MIRLowerer {
 
     trait_binding_visit_key(
         self,
-        trait_def_id DefId,
-        bindings Dict[String, Type],
-    ) String = {
+        trait_def_id: DefId,
+        bindings: Dict[String, Type],
+    ): String = {
         let mutable key = StringBuilder.new();
 
         // Keyed by DECLARATION: two same-named traits from different modules are
@@ -1116,11 +1114,11 @@ given MIRLowerer {
 
     parent_trait_bindings(
         self,
-        parent ParentTraitConstraint,
-        preferred_module_path List[String],
-        concrete_type Type,
-        bindings Dict[String, Type],
-    ) Dict[String, Type] = {
+        parent: ParentTraitConstraint,
+        preferred_module_path: List[String],
+        concrete_type: Type,
+        bindings: Dict[String, Type],
+    ): Dict[String, Type] = {
         let mutable result = Dict[String, Type].new();
         for entry in bindings then {
             result.insert(entry.first, entry.second);
@@ -1130,7 +1128,7 @@ given MIRLowerer {
         // Identity: the parent constraint carries the declaration it names.
         when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count(
                 ) then {
                     result.insert(
@@ -1150,9 +1148,9 @@ given MIRLowerer {
 
     resolve_trait_type_node_with_bindings(
         self,
-        node TypeNode,
-        bindings Dict[String, Type],
-    ) Type = {
+        node: TypeNode,
+        bindings: Dict[String, Type],
+    ): Type = {
         return when node in {
             .Identifier(name, span) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -1253,7 +1251,7 @@ given MIRLowerer {
         };
     };
 
-    trait_member_has_receiver(self, member TypedTraitMember) Bool = {
+    trait_member_has_receiver(self, member: TypedTraitMember): Bool = {
         let _ = self;
         if member.params.is_empty() then {
             return false;
@@ -1262,15 +1260,12 @@ given MIRLowerer {
         return first_param.name == "self";
     };
 
-    trait_member_type_bindings(
-        self,
-        request VtableRequest,
-    ) Dict[String, Type] = {
+    trait_member_type_bindings(self, request: VtableRequest): Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         bindings.insert("Self", request.concrete_type);
         when self.program.trait_by_def_id(request.trait_def_id) in {
             .Some(trait_info) then {
-                let mutable index UInt = 0;
+                let mutable index: UInt = 0;
                 while index < trait_info.type_params.count() and index < request.trait_type_args.count(
                 ) then {
                     bindings.insert(
@@ -1285,7 +1280,7 @@ given MIRLowerer {
         return bindings;
     };
 
-    apply_type_bindings(self, t Type, bindings Dict[String, Type]) Type = {
+    apply_type_bindings(self, t: Type, bindings: Dict[String, Type]): Type = {
         let _ = self;
         if bindings.is_empty() then {
             return t;
@@ -1358,9 +1353,9 @@ given MIRLowerer {
 
     apply_type_bindings_to_trait_member(
         self,
-        member TypedTraitMember,
-        bindings Dict[String, Type],
-    ) TypedTraitMember = {
+        member: TypedTraitMember,
+        bindings: Dict[String, Type],
+    ): TypedTraitMember = {
         let mutable params = List[TypedParam].new();
         for param in member.params then {
             params.push(
@@ -1368,7 +1363,8 @@ given MIRLowerer {
                     param.name,
                     param.is_mutable,
                     self.apply_type_bindings(param.param_type, bindings),
-                    param.named, param.default_value
+                    param.named,
+                    param.default_value,
                 ),
             );
         };
@@ -1381,10 +1377,7 @@ given MIRLowerer {
         );
     };
 
-    make_trait_vtable_method(
-        self,
-        member TypedTraitMember,
-    ) MIRTraitVTableMethod = {
+    make_trait_vtable_method(self, member: TypedTraitMember): MIRTraitVTableMethod = {
         let mutable params = List[MIRTraitVTableParameter].new();
         let mutable first = true;
         let mutable self_by_value = false;

@@ -109,7 +109,7 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 名字只留在两个位置：
 
 - **书写处的解析边界**：运算符的 lang item 拼写（`lang_trait_def_id("Eq")`）、
-  `given X as Tag` 的 trait 名。语法不带声明，这里必须读一次名字。
+  `given X: Tag` 的 trait 名。语法不带声明，这里必须读一次名字。
 - **打消息**：诊断要拼写，判定不要。
 
 **trait object 的 trait 不必在作用域里。** `make_alpha().value()` 里 `value` 属于
@@ -139,7 +139,7 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 
 出处：`compiler/koralc/ast/nodes.koral` 的 `Bound`、`compiler/koralc/sema/type_checker.koral`。
 
-**约束位**（`given [T Any] One { ... }`）：`Any` 是**无约束**，不是「一种约束」。
+**约束位**（`given[T: Any] One { ... }`）：`Any` 是**无约束**，不是「一种约束」。
 
 ```koral
 /// Recognise a bound from its source spelling. `Any` produces no bound at all
@@ -166,7 +166,7 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 - Trait-object exact type patterns are open-world checks. In `when`, they do not make a match exhaustive; keep a default `_` arm.
 - Trait objects are direct trait-name types; no `Object` marker trait is required.
 
-**绑定是被匹配类型的具体值。** `err is io IoError` 把 `io` 绑成 `IoError`，不是擦除后的
+**绑定是被匹配类型的具体值。** `err is io: IoError` 把 `io` 绑成 `IoError`，不是擦除后的
 trait object（`guide/document.md`「Exact Type Patterns」）。同一条规则里
 *the subject stays a trait object; it is not auto-dereferenced* 说的是**测试**作用在擦除后的
 subject 上——判「这个擦除值的具体类型是不是 `IoError`」，不先解引用——不是说绑定物是擦除值。
@@ -184,7 +184,7 @@ weak 能力 = `mutable` 约束 + `?T`，不设 marker trait。**正本**在
 
 ### `given` 与 trait 声明分开
 
-`trait` 声明能力；`given X { ... }` 把方法接到已有类型上；`given X as Trait { ... }` 声明遵循。
+`trait` 声明能力；`given X { ... }` 把方法接到已有类型上；`given X: Trait { ... }` 声明遵循。
 分开的理由：能力的**定义**与能力的**授予**是两件事——一个类型可以被第三方授予能力，
 不必改它的声明。出处：记录 §6 的语法备忘（用法见手册）。
 
@@ -198,7 +198,7 @@ weak 能力 = `mutable` 约束 + `?T`，不设 marker trait。**正本**在
 - **`Any` 作为一种约束**——曾经是（退化成 `"?"` 哨兵），已否掉；理由记在 `Bound` 的注释里
   （每个消费方都要特判），但没记录当初为何那么设计。
 - **把精确类型模式的绑定当作擦除后的 subject**——否掉。那要求绑定标成 trait object 类型、
-  方法走 trait 派发，写 `io IoError` 就没有意义了；手册写的绑定物是 `IoError`。
+  方法走 trait 派发，写 `io: IoError` 就没有意义了；手册写的绑定物是 `IoError`。
 
 ## 风险与未决
 

@@ -1,5 +1,5 @@
 given TypeChecker {
-    surface_named_type(self, t Type) Type = {
+    surface_named_type(self, t: Type): Type = {
         return when t in {
             .TraitObject(...) then Type.ReferenceType(t),
             _ then t,
@@ -12,7 +12,7 @@ given TypeChecker {
     // unaffected by the internal `ReferenceType(TraitObject)` layout wrap that
     // surface_named_type adds. Matching on a bare `.TraitObject` shape instead
     // silently skipped every wrapped case.
-    as_trait_object_type(self, t Type) Option[Type] = {
+    as_trait_object_type(self, t: Type): Option[Type] = {
         return when t in {
             .TraitObject(tplDefId, _) then Option[Type].Some(t),
             .ReferenceType(inner) then self.as_trait_object_type(inner),
@@ -25,7 +25,7 @@ given TypeChecker {
         };
     };
 
-    to_type_ref_list_in_resolution(self, args List[Type]) List[Type] = {
+    to_type_ref_list_in_resolution(self, args: List[Type]): List[Type] = {
         let mutable refs = List[Type].new();
         for arg in args then {
             refs.push(arg);
@@ -33,7 +33,7 @@ given TypeChecker {
         return refs;
     };
 
-    trait_object_safety_name(self, t Type) Option[String] = {
+    trait_object_safety_name(self, t: Type): Option[String] = {
         return when t in {
             .TraitObject(trait_def_id, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
@@ -52,11 +52,11 @@ given TypeChecker {
 
     resolve_visible_generic_template_type(
         self,
-        base String,
-        resolved_args List[Type],
-        base_type Type,
-        span SourceSpan,
-    ) Type = {
+        base: String,
+        resolved_args: List[Type],
+        base_type: Type,
+        span: SourceSpan,
+    ): Type = {
         let canonical = self.canonicalize_alias_type(base_type);
         return when canonical in {
             .StructureType(def_id) then {
@@ -97,11 +97,11 @@ given TypeChecker {
     /// `Undefined trait` wherever it is spelled.
     validate_template_bounds(
         self,
-        def_id DefId,
-        resolved_args List[Type],
-        span SourceSpan,
-        check_conformance Bool,
-    ) Void = {
+        def_id: DefId,
+        resolved_args: List[Type],
+        span: SourceSpan,
+        check_conformance: Bool,
+    ): Void = {
         let mutable type_params = Option[List[TypeParameterDecl]].None();
         if self.storage.generic_templates.struct_by_def_id(def_id) is .Some(tmpl) then {
             type_params = Option[List[TypeParameterDecl]].Some(tmpl.type_parameters);
@@ -112,7 +112,7 @@ given TypeChecker {
             if params.count() != resolved_args.count() then {
                 return;
             };
-            let mutable i UInt = 0;
+            let mutable i: UInt = 0;
             while i < params.count() then {
                 let param = params[i];
                 let bound_type = resolved_args[i];
@@ -155,11 +155,7 @@ given TypeChecker {
     /// Report why a trait cannot be a trait object, naming the offending
     /// methods. "is not object-safe" alone leaves the reader to find which
     /// method is responsible.
-    check_trait_object_safety(
-        self,
-        trait_name String,
-        span SourceSpan,
-    ) Bool = {
+    check_trait_object_safety(self, trait_name: String, span: SourceSpan): Bool = {
         return when self.storage.trait_registry.object_safety_reasons(
             trait_name,
             self.storage.module_path,
@@ -177,11 +173,7 @@ given TypeChecker {
         };
     };
 
-    trait_object_safety_message(
-        self,
-        trait_name String,
-        reasons List[String],
-    ) String = {
+    trait_object_safety_message(self, trait_name: String, reasons: List[String]): String = {
         let mutable msg = StringBuilder.new();
         msg.push_string("Trait '");
         msg.push_string(trait_name);
@@ -197,7 +189,7 @@ given TypeChecker {
         return msg.to_string();
     };
 
-    resolve_type(self, node TypeNode) Type = {
+    resolve_type(self, node: TypeNode): Type = {
         return when node in {
             .Identifier(name, span) then {
                 // Swift `resolveTypeNode` (TypeCheckerTypeResolution.swift:295)
@@ -322,11 +314,7 @@ given TypeChecker {
         };
     };
 
-    resolve_type_with_bindings(
-        self,
-        node TypeNode,
-        bindings Dict[String, Type],
-    ) Type = {
+    resolve_type_with_bindings(self, node: TypeNode, bindings: Dict[String, Type]): Type = {
         return when node in {
             .Identifier(name, span) then when bindings.get(name) in {
                 .Some(bound) then bound,
@@ -482,7 +470,7 @@ given TypeChecker {
     /// what keeps a user's `type T` from capturing std's `[T ...]` parameters.
     /// Everything else goes through the ordinary chain, which keys module-level
     /// declarations by (module, name).
-    resolve_type_name_binding(self, name String) Option[Type] = {
+    resolve_type_name_binding(self, name: String): Option[Type] = {
         let gp = self.storage.current_scope.lookup_generic_param_type(name);
         when gp in {
             .Some(t) then {
@@ -511,9 +499,9 @@ given TypeChecker {
 
     try_resolve_named_type_in_scope_without_diag(
         self,
-        name String,
-        scope Scope,
-    ) Option[Type] = {
+        name: String,
+        scope: Scope,
+    ): Option[Type] = {
         if name == "Self" then {
             return scope.lookup_type("Self");
         };
@@ -549,10 +537,10 @@ given TypeChecker {
     /// belongs at the name.
     resolve_named_type_in_scope(
         self,
-        name String,
-        scope Scope,
-        span SourceSpan,
-    ) Type = {
+        name: String,
+        scope: Scope,
+        span: SourceSpan,
+    ): Type = {
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t);
             self.check_type_visibility(canonical, name, scope, span);
@@ -562,7 +550,7 @@ given TypeChecker {
         return Type.Unknown();
     };
 
-    resolve_type_in_scope(self, node TypeNode, scope Scope) Type = {
+    resolve_type_in_scope(self, node: TypeNode, scope: Scope): Type = {
         return when node in {
             .Identifier(name, span) then {
                 let resolved = self.resolve_named_type_in_scope(name, scope, span);
@@ -685,11 +673,7 @@ given TypeChecker {
         };
     };
 
-    variable_kind_for_param_type(
-        self,
-        param_type Type,
-        is_mutable Bool,
-    ) VariableKind = {
+    variable_kind_for_param_type(self, param_type: Type, is_mutable: Bool): VariableKind = {
         let is_mutable_ref_like = when param_type in {
             .MutableReferenceType(_) then true,
             .MutablePointerType(_) then true,
@@ -715,7 +699,7 @@ given TypeChecker {
 
     /// `try_resolve_named_type_unchecked`, minus declarations that belong to
     /// another file (`private` names are their file's alone, §3.3).
-    try_resolve_named_type_without_diag(self, name String) Option[Type] = {
+    try_resolve_named_type_without_diag(self, name: String): Option[Type] = {
         let resolved = self.try_resolve_named_type_unchecked(name);
         when resolved in {
             .Some(t) then {
@@ -730,7 +714,7 @@ given TypeChecker {
         };
     };
 
-    try_resolve_named_type_unchecked(self, name String) Option[Type] = {
+    try_resolve_named_type_unchecked(self, name: String): Option[Type] = {
         if name == "Int" then {
             return Option[Type].Some(Type.IntType());
         };
@@ -850,7 +834,7 @@ given TypeChecker {
         return Option[Type].None();
     };
 
-    builtin_string_type(self) Type = {
+    builtin_string_type(self): Type = {
         return when self.storage.global_scope.lookup_type_in_module(
             "String",
             self.storage.module_path,
@@ -860,7 +844,7 @@ given TypeChecker {
         };
     };
 
-    builtin_rune_type(self) Type = {
+    builtin_rune_type(self): Type = {
         return when self.storage.global_scope.lookup_type_in_module(
             "Rune",
             self.storage.module_path,
@@ -870,7 +854,7 @@ given TypeChecker {
         };
     };
 
-    rune_literal_scalar_value(self, value String) String = {
+    rune_literal_scalar_value(self, value: String): String = {
         let bytes = value.to_bytes();
         if bytes.is_empty() then {
             return "0";
@@ -904,11 +888,7 @@ given TypeChecker {
         return "0";
     };
 
-    build_rune_constructor_expr(
-        self,
-        scalar_value String,
-        rune_type Type,
-    ) TypedExpr = {
+    build_rune_constructor_expr(self, scalar_value: String, rune_type: Type): TypedExpr = {
         return when rune_type in {
             .StructureType(def_id) then {
                 let type_name = self.context().get_name(def_id) or else "Rune";
@@ -937,7 +917,7 @@ given TypeChecker {
     /// else -- an empty literal, or one holding several code points -- has no
     /// value to carry, so say so here rather than let the first code point
     /// silently win.
-    validate_rune_literal_value(self, value String) Bool = {
+    validate_rune_literal_value(self, value: String): Bool = {
         let rune_count = value.to_runes().count();
         if rune_count == UInt(0) then {
             self.push_diagnostic("Rune literal cannot be empty", unknown_span());
@@ -953,7 +933,7 @@ given TypeChecker {
         return true;
     };
 
-    validate_rune_literal_ascii_for_uint8(self, value String) Bool = {
+    validate_rune_literal_ascii_for_uint8(self, value: String): Bool = {
         if value.to_runes().count() == UInt(1) then {
             let bytes = value.to_bytes();
             if bytes.count() == UInt(1) and bytes[UInt(0)] <= UInt8(127) then {
@@ -967,7 +947,7 @@ given TypeChecker {
         return false;
     };
 
-    lower_rune_literal(self, value String, expected Option[Type]) TypedExpr = {
+    lower_rune_literal(self, value: String, expected: Option[Type]): TypedExpr = {
         when expected in {
             .Some(target_type) then {
                 if target_type is .UInt8Type() then {
@@ -1016,11 +996,7 @@ given TypeChecker {
         };
     };
 
-    lower_rune_literal_for_cast(
-        self,
-        value String,
-        target_type Type,
-    ) TypedExpr = {
+    lower_rune_literal_for_cast(self, value: String, target_type: Type): TypedExpr = {
         // A cast checks its operand as a value first: `UInt8('ab')` is a bad
         // rune literal before it is a cast, and that is the complaint to make.
         let _ = self.validate_rune_literal_value(value);
@@ -1039,11 +1015,11 @@ given TypeChecker {
 
     /// Std's `String`, by declaration identity -- a user type also named
     /// `String` is a different type and gets none of the built-in behaviour.
-    is_string_type(self, t Type) Bool =
+    is_string_type(self, t: Type): Bool =
         self.is_std_type(self.canonicalize_alias_type(t), "String");
 
     /// Std's `Rune`, by declaration identity.
-    is_rune_type(self, t Type) Bool =
+    is_rune_type(self, t: Type): Bool =
         self.is_std_type(self.canonicalize_alias_type(t), "Rune");
 
     /// Reference / weak-reference / raw-pointer shapes, mutable or not.
@@ -1051,30 +1027,23 @@ given TypeChecker {
     /// set, and it is not the same family as the MIR builder's
     /// `is_ref_like_type` -- that one also covers borrowed references and
     /// excludes raw pointers.
-    is_ref_or_pointer_type(self, t Type) Bool = {
+    is_ref_or_pointer_type(self, t: Type): Bool = {
         return when t in {
-            .ReferenceType(_)
-                or .MutableReferenceType(_)
-                or .WeakReferenceType(_)
-                or .MutableWeakReferenceType(_)
-                or .PointerType(_)
-                or .MutablePointerType(_)
-            then true,
+            .ReferenceType(_) or .MutableReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then true,
             _ then false,
         };
     };
 
     /// A user-declared aggregate: struct or enum, generic or concrete.
     /// `Unknown` is deliberately absent -- it is unresolved, not nominal.
-    is_nominal_type(self, t Type) Bool = {
+    is_nominal_type(self, t: Type): Bool = {
         return when t in {
-            .StructureType(_) or .GenericStruct(...) or .EnumType(_) or .GenericEnum(...)
-            then true,
+            .StructureType(_) or .GenericStruct(...) or .EnumType(_) or .GenericEnum(...) then true,
             _ then false,
         };
     };
 
-    type_module_path(self, t Type) Option[List[String]] = {
+    type_module_path(self, t: Type): Option[List[String]] = {
         return when t in {
             .StructureType(def_id) then self.context().get_module_path(def_id),
             .EnumType(def_id) then self.context().get_module_path(def_id),
@@ -1092,7 +1061,7 @@ given TypeChecker {
 
     /// `span` is the spelling being resolved: a diagnostic about the name
     /// belongs at the name.
-    resolve_named_type(self, name String, span SourceSpan) Type = {
+    resolve_named_type(self, name: String, span: SourceSpan): Type = {
         // Declaration identity wins over the global textual type scope. This keeps
         // same-named traits/types from different modules distinct while preserving
         // local generic-parameter lookup through current_scope below.

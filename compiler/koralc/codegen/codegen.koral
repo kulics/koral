@@ -20,14 +20,14 @@ using "./codegen_generate.koral";
 
 /// 类型声明的轻量包装，用于依赖排序后的类型定义生成
 type TypeDeclaration {
-    Structure(name String, decl_type Type, fields List[TypedField], managed Bool),
-    Enum(name String, decl_type Type, cases List[TypedEnumCase], managed Bool),
-    ForeignStructure(name String, decl_type Type, fields List[TypedField]),
+    Structure(name: String, decl_type: Type, fields: List[TypedField], managed: Bool),
+    Enum(name: String, decl_type: Type, cases: List[TypedEnumCase], managed: Bool),
+    ForeignStructure(name: String, decl_type: Type, fields: List[TypedField]),
 };
 
 given TypeDeclaration {
     /// 获取类型声明的 C 名称
-    c_name(self) String = {
+    c_name(self): String = {
         return when self in {
             .Structure(name, _, _, _) then name,
             .Enum(name, _, _, _) then name,
@@ -44,69 +44,69 @@ given TypeDeclaration {
 /// 生成等价的 C 语言源代码字符串。
 public type mutable CodeGen(
     // 输入
-    program MIRProgram,
-    context CompilerContext,
-    c_keywords Set[String],
+    program: MIRProgram,
+    context: CompilerContext,
+    c_keywords: Set[String],
 
     // 输出缓冲区
-    mutable buffer CodegenBuffer,
+    mutable buffer: CodegenBuffer,
 
     // 代码生成状态
-    mutable indent StringBuilder,
-    mutable temp_var_counter UInt,
+    mutable indent: StringBuilder,
+    mutable temp_var_counter: UInt,
 
     // 用户 main 函数
-    mutable user_main_function_name Option[String],
-    mutable user_main_return_type Option[Type],
+    mutable user_main_function_name: Option[String],
+    mutable user_main_return_type: Option[Type],
 
     // Vtable 追踪
-    mutable generated_vtable_instances Set[String],
+    mutable generated_vtable_instances: Set[String],
 
     // 当前正在生成的函数 owner 类型，用于在 codegen 中精确解析同 owner 方法调用
-    mutable current_function_owner_type Option[Type],
+    mutable current_function_owner_type: Option[Type],
 
     // 已输出函数实现名（避免同名函数重复定义）
-    mutable emitted_function_names Set[String],
+    mutable emitted_function_names: Set[String],
 
     // Lambda 嵌套函数定义（在父函数之前输出）
-    mutable nested_function_definitions StringBuilder,
+    mutable nested_function_definitions: StringBuilder,
 
     // 预热后的类型名缓存，降低 codegen 热路径中的字符串构造成本
-    mutable c_type_name_cache Dict[String, String],
+    mutable c_type_name_cache: Dict[String, String],
 
     // 预热后的 callable 名缓存，降低 MIR emit 热路径中的方法名拼接成本
-    mutable callable_c_name_cache Dict[UInt, String],
+    mutable callable_c_name_cache: Dict[UInt, String],
 
     // 预热后的方法 owner 类型缓存，降低 callable_c_name/current-owner 热路径中的全局扫描成本
-    mutable method_owner_type_cache Dict[UInt, Type],
+    mutable method_owner_type_cache: Dict[UInt, Type],
 
     // 跨 emitter 复用的 owner-sensitive callable 名缓存
-    mutable current_owner_callable_c_name_cache Dict[String, String],
+    mutable current_owner_callable_c_name_cache: Dict[String, String],
 
     // ── DefId 反查索引 ────────────────────────────────────────────────────
     // codegen 里多处需要「给定 DefId 找回 globals 里的声明」。原先每次调用都全量
     // 扫 program.globals，是 O(N)×调用次数。改成预热一次建索引、之后 O(1) 查表。
     // 注意 DefId 不保证稠密（模块导出后会稀疏），所以一律用 Dict/Set 而非数组下标。
-    mutable foreign_function_def_ids Set[UInt],
-    mutable foreign_global_var_def_ids Set[UInt],
-    mutable foreign_type_def_ids Set[UInt],
-    mutable struct_fields_by_def_id Dict[UInt, List[TypedField]],
-    mutable enum_cases_by_def_id Dict[UInt, List[TypedEnumCase]],
+    mutable foreign_function_def_ids: Set[UInt],
+    mutable foreign_global_var_def_ids: Set[UInt],
+    mutable foreign_type_def_ids: Set[UInt],
+    mutable struct_fields_by_def_id: Dict[UInt, List[TypedField]],
+    mutable enum_cases_by_def_id: Dict[UInt, List[TypedEnumCase]],
 
     // ── Drop glue thunk ─────────────────────────────────────────────────────
     // 头里不存析构函数之后，`__koral_release_value` 的 dtor 参数要按内层类型
     // 单态化出函数指针。没有现成 `void (*)(void*)` glue 的类型（典型是
     // `Ref[Y]`，其 drop 依赖内层类型）按需物化一个 thunk。
     // thunk 定义要出现在使用它之前，所以先占位、最后 splice。
-    mutable drop_thunk_defs List[String],
-    mutable drop_thunk_names Dict[String, String],
+    mutable drop_thunk_defs: List[String],
+    mutable drop_thunk_names: Dict[String, String],
 );
 
 given CodeGen {
     // ── 构造函数 ──────────────────────────────────────────────────────────────
 
     /// 构造 CodeGen 实例，初始化所有状态并构建 C 标识符映射
-    public new(program MIRProgram, context CompilerContext) CodeGen = {
+    public new(program: MIRProgram, context: CompilerContext): CodeGen = {
         let mutable cg = CodeGen(
             program,
             context,
@@ -156,7 +156,7 @@ given CodeGen {
         return cg;
     };
 
-    sanitize_codegen_identifier(self, name String) String = {
+    sanitize_codegen_identifier(self, name: String): String = {
         let mutable result = StringBuilder.new();
         for ch in name.runes() then {
             if ch.is_ascii_alphabetic() or ch.is_ascii_digit() or ch == '_' then {
@@ -183,7 +183,7 @@ given CodeGen {
     /// Re-escaping one of those escapes a symbol that already exists and the
     /// link fails; that is why they bypass this function rather than being
     /// exempted from it.
-    escape_codegen_keyword(self, name String) String = {
+    escape_codegen_keyword(self, name: String): String = {
         if name.is_empty() then {
             return name;
         };
@@ -211,11 +211,11 @@ given CodeGen {
 
     generate_codegen_identifier(
         self,
-        module_path List[String],
-        name String,
-        is_private Bool,
-        source_file String,
-    ) String = {
+        module_path: List[String],
+        name: String,
+        is_private: Bool,
+        source_file: String,
+    ): String = {
         let mutable result = StringBuilder.new();
         let mutable needs_separator = false;
 
@@ -241,11 +241,11 @@ given CodeGen {
         return result.to_string();
     };
 
-    c_identifier_opt(self, def_id DefId) Option[String] = {
+    c_identifier_opt(self, def_id: DefId): Option[String] = {
         return self.context.get_cname(def_id);
     };
 
-    nominal_layout_c_identifier(self, def_id DefId) String = {
+    nominal_layout_c_identifier(self, def_id: DefId): String = {
         if self.context.is_generic_instantiation(def_id) then {
             return when self.context.get_name(def_id) in {
                 .Some(name) then self.sanitize_codegen_identifier(name),
@@ -263,7 +263,7 @@ given CodeGen {
         };
     };
 
-    c_name_for_def_id(self, def_id DefId) String = {
+    c_name_for_def_id(self, def_id: DefId): String = {
         return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
             .None() then when self.context.get_cname(def_id) in {
@@ -276,11 +276,11 @@ given CodeGen {
         };
     };
 
-    has_c_identifier(self, def_id DefId) Bool = {
+    has_c_identifier(self, def_id: DefId): Bool = {
         return self.c_identifier_opt(def_id).is_some();
     };
 
-    concretize_codegen_type(self, t Type) Type = {
+    concretize_codegen_type(self, t: Type): Type = {
         return when t in {
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                 .Some(mapped_type) then self.concretize_codegen_type(mapped_type),
@@ -347,7 +347,7 @@ given CodeGen {
         };
     };
 
-    trait_object_type_from_name(self, trait_name String) Type = {
+    trait_object_type_from_name(self, trait_name: String): Type = {
         let mutable trait_type_args = List[Type].new();
         let mutable trait_def_id = def_id_invalid();
         // By spelling: the unqualified key first (a real empty-path symbol),
@@ -369,7 +369,7 @@ given CodeGen {
         return Type.TraitObject(trait_def_id, trait_type_args);
     };
 
-    trait_name_of_trait_type(self, trait_type Type) String = {
+    trait_name_of_trait_type(self, trait_type: Type): String = {
         return when trait_type in {
             .ReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
             .MutableReferenceType(inner_ref) then self.trait_name_of_trait_type(
@@ -394,18 +394,14 @@ given CodeGen {
         };
     };
 
-    trait_type_args_of_trait_type(self, trait_type Type) List[Type] = {
+    trait_type_args_of_trait_type(self, trait_type: Type): List[Type] = {
         return when trait_type in {
             .TraitObject(_, type_args) then type_args,
             _ then List[Type].new(),
         };
     };
 
-    apply_codegen_type_bindings(
-        self,
-        t Type,
-        bindings Dict[String, Type],
-    ) Type = {
+    apply_codegen_type_bindings(self, t: Type, bindings: Dict[String, Type]): Type = {
         if bindings.is_empty() then {
             return t;
         };
@@ -470,11 +466,11 @@ given CodeGen {
 
     append_generic_parameter_bindings(
         self,
-        mutable bindings Dict[String, Type],
-        target_args List[Type],
-        base_args List[Type],
-    ) Void = {
-        let mutable i UInt = 0;
+        mutable bindings: Dict[String, Type],
+        target_args: List[Type],
+        base_args: List[Type],
+    ): Void = {
+        let mutable i: UInt = 0;
         let n = if target_args.count() < base_args.count() then target_args.count()
         else base_args.count();
         while i < n then {
@@ -488,7 +484,7 @@ given CodeGen {
         };
     };
 
-    build_receiver_bindings(self, target_type Type, base_type Type) Dict[String, Type] = {
+    build_receiver_bindings(self, target_type: Type, base_type: Type): Dict[String, Type] = {
         let mutable bindings = Dict[String, Type].new();
         let mutable concrete_base_type = self.concretize_codegen_type(base_type);
         let effective_base_type = when concrete_base_type in {
@@ -568,10 +564,10 @@ given CodeGen {
 
     method_receiver_bindings(
         self,
-        method_def_id DefId,
-        concrete_receiver_type Type,
-        fn_type Type,
-    ) Dict[String, Type] = {
+        method_def_id: DefId,
+        concrete_receiver_type: Type,
+        fn_type: Type,
+    ): Dict[String, Type] = {
         let from_owner = when self.method_owner_type(method_def_id) in {
             .Some(target_type) then self.build_receiver_bindings(
                 target_type,
@@ -596,11 +592,7 @@ given CodeGen {
         };
     };
 
-    bind_function_type(
-        self,
-        fn_type Type,
-        receiver_bindings Dict[String, Type],
-    ) Type = {
+    bind_function_type(self, fn_type: Type, receiver_bindings: Dict[String, Type]): Type = {
         return when fn_type in {
             .FunctionType(fn_params, return_type_ref) then {
                 let mutable bound_param_types = List[Type].new();
@@ -624,10 +616,10 @@ given CodeGen {
 
     bind_method_function_type(
         self,
-        method_def_id DefId,
-        concrete_receiver_type Type,
-        fn_type Type,
-    ) Type = {
+        method_def_id: DefId,
+        concrete_receiver_type: Type,
+        fn_type: Type,
+    ): Type = {
         let receiver_bindings = self.method_receiver_bindings(
             method_def_id,
             concrete_receiver_type,
@@ -636,14 +628,14 @@ given CodeGen {
         return self.bind_function_type(fn_type, receiver_bindings);
     };
 
-    function_type_param_count(self, fn_type Type) UInt = {
+    function_type_param_count(self, fn_type: Type): UInt = {
         return when fn_type in {
             .FunctionType(fn_params, _) then fn_params.count(),
             _ then UInt(0),
         };
     };
 
-    function_type_param_type(self, fn_type Type, index UInt) Option[Type] = {
+    function_type_param_type(self, fn_type: Type, index: UInt): Option[Type] = {
         return when fn_type in {
             .FunctionType(fn_params, _) then if index < fn_params.count() then Option[Type].Some(
                 (fn_params[index]).param_type,
@@ -652,26 +644,26 @@ given CodeGen {
         };
     };
 
-    function_type_return_type(self, fn_type Type) Type = {
+    function_type_return_type(self, fn_type: Type): Type = {
         return when fn_type in {
             .FunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
 
-    mir_function_return_type(self, function MIRFunction) Type = {
+    mir_function_return_type(self, function: MIRFunction): Type = {
         return function.return_type;
     };
 
-    function_param_specs(self, def_id DefId) List[FunctionParamSpec] = {
+    function_param_specs(self, def_id: DefId): List[FunctionParamSpec] = {
         return self.context.get_param_specs(def_id) or else List[FunctionParamSpec].new();
     };
 
     requested_or_symbol_result_type(
         self,
-        requested_result_type Type,
-        symbol_type Type,
-    ) Type = {
+        requested_result_type: Type,
+        symbol_type: Type,
+    ): Type = {
         return when requested_result_type in {
             .Unknown() then symbol_type,
             .VoidType() then when symbol_type in {
@@ -684,7 +676,7 @@ given CodeGen {
         };
     };
 
-    codegen_types_equal(self, lhs Type, rhs Type) Bool = {
+    codegen_types_equal(self, lhs: Type, rhs: Type): Bool = {
         let left = self.concrete_layout_key_for_type(self.concretize_codegen_type(lhs));
         let right = self.concrete_layout_key_for_type(self.concretize_codegen_type(rhs));
         return left == right;
@@ -692,9 +684,9 @@ given CodeGen {
 
     concrete_callable_symbol(
         self,
-        def_id DefId,
-        requested_result_type Type,
-    ) Option[Symbol] = {
+        def_id: DefId,
+        requested_result_type: Type,
+    ): Option[Symbol] = {
         if def_id.id == 0 then {
             return Option[Symbol].None();
         };
@@ -710,10 +702,10 @@ given CodeGen {
 
     bound_concrete_method_symbol(
         self,
-        def_id DefId,
-        receiver_type Type,
-        requested_result_type Type,
-    ) Option[Symbol] = {
+        def_id: DefId,
+        receiver_type: Type,
+        requested_result_type: Type,
+    ): Option[Symbol] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(receiver_type);
         let mutable bound_result_type = when self.context.get_function_type(def_id) in {
             .Some(function_type) then self.function_type_return_type(
@@ -736,10 +728,10 @@ given CodeGen {
     /// different traits and supply different methods.
     lookup_trait_method_def_id(
         self,
-        concrete_type Type,
-        trait_def_id DefId,
-        method_name String,
-    ) Option[DefId] = {
+        concrete_type: Type,
+        trait_def_id: DefId,
+        method_name: String,
+    ): Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(concrete_type);
         let receiver_key = self.receiver_owner(concrete_receiver_type);
         for entry in self.program.concrete_callables_by_def_id.iterator() then {
@@ -816,10 +808,10 @@ given CodeGen {
 
     lookup_trait_method_def_id_from_given_globals(
         self,
-        concrete_type Type,
-        trait_def_id DefId,
-        method_name String,
-    ) Option[DefId] = {
+        concrete_type: Type,
+        trait_def_id: DefId,
+        method_name: String,
+    ): Option[DefId] = {
         return self.lookup_trait_method_def_id_from_given_globals_with_args(
             concrete_type,
             trait_def_id,
@@ -831,11 +823,11 @@ given CodeGen {
     /// Look up trait method from given globals with trait type args checking
     lookup_trait_method_def_id_from_given_globals_with_args(
         self,
-        concrete_type Type,
-        trait_def_id DefId,
-        trait_type_args List[Type],
-        method_name String,
-    ) Option[DefId] = {
+        concrete_type: Type,
+        trait_def_id: DefId,
+        trait_type_args: List[Type],
+        method_name: String,
+    ): Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(concrete_type);
         for global in self.program.globals then {
             when global in {
@@ -875,11 +867,11 @@ given CodeGen {
     };
 
     /// Check if two lists of trait type args match
-    trait_type_args_match(self, actual List[Type], expected List[Type]) Bool = {
+    trait_type_args_match(self, actual: List[Type], expected: List[Type]): Bool = {
         if actual.count() != expected.count() then {
             return false;
         };
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < actual.count() then {
             if self.type_stable_key(actual[i]) != self.type_stable_key(expected[i]) then {
                 return false;
@@ -890,7 +882,7 @@ given CodeGen {
     };
 
     /// Get a stable key for a type for comparison purposes
-    type_stable_key(self, t Type) String = {
+    type_stable_key(self, t: Type): String = {
         return when t in {
             .IntType() then "Int",
             .Int8Type() then "Int8",
@@ -969,9 +961,9 @@ given CodeGen {
     // `extension_method_def_ids_by_identity` is registered with.
     lookup_receiver_method_def_id(
         self,
-        receiver_type Type,
-        method_def_id DefId,
-    ) Option[DefId] = {
+        receiver_type: Type,
+        method_def_id: DefId,
+    ): Option[DefId] = {
         let concrete_receiver_type = self.concretize_codegen_type(receiver_type);
         let mutable lookup_def_ids = List[DefId].new();
         if method_def_id.is_valid() then {
@@ -980,8 +972,9 @@ given CodeGen {
                 .Some(info) then {
                     when info.trait_method_def_id in {
                         .Some(trait_item_def_id) then {
-                            if trait_item_def_id != method_def_id
-                                and not lookup_def_ids.contains(trait_item_def_id) then {
+                            if trait_item_def_id != method_def_id and not lookup_def_ids.contains(
+                                trait_item_def_id,
+                            ) then {
                                 lookup_def_ids.push(trait_item_def_id);
                             };
                         },
@@ -1007,11 +1000,7 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    receiver_method_matches_lookup(
-        self,
-        def_id DefId,
-        receiver_type Type,
-    ) Bool = {
+    receiver_method_matches_lookup(self, def_id: DefId, receiver_type: Type): Bool = {
         if self.program.receiver_method_dispatch.get(def_id) is .Some(_) then {
             return true;
         };
@@ -1077,10 +1066,10 @@ given CodeGen {
 
     lookup_receiver_method_via_metadata(
         self,
-        receiver_type Type,
-        method_def_id DefId,
-        requested_result_type Type,
-    ) Option[Symbol] = {
+        receiver_type: Type,
+        method_def_id: DefId,
+        requested_result_type: Type,
+    ): Option[Symbol] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(receiver_type);
         when self.lookup_receiver_method_def_id(concrete_receiver_type, method_def_id) in {
             .Some(def_id) then {
@@ -1101,7 +1090,7 @@ given CodeGen {
         return Option[Symbol].None();
     };
 
-    enum_case_name_matches(self, pattern_case_name String, enum_case_name String) Bool = {
+    enum_case_name_matches(self, pattern_case_name: String, enum_case_name: String): Bool = {
         if enum_case_name == pattern_case_name then {
             return true;
         };
@@ -1125,9 +1114,9 @@ given CodeGen {
         return enum_tail == pattern_tail;
     };
 
-    def_ids_named(self, name String) List[DefId] = {
+    def_ids_named(self, name: String): List[DefId] = {
         let mutable out = List[DefId].new();
-        let mutable id UInt = 1;
+        let mutable id: UInt = 1;
         while id < self.context.next_def_id() then {
             let def_id = DefId(id);
             if self.context.get_name(def_id) is .Some(found_name) and found_name == name then {
@@ -1138,7 +1127,7 @@ given CodeGen {
         return out;
     };
 
-    type_def_ids_named(self, name String) List[DefId] = {
+    type_def_ids_named(self, name: String): List[DefId] = {
         let mutable out = List[DefId].new();
         for def_id in self.def_ids_named(name) then {
             when self.context.get_kind(def_id) in {
@@ -1153,11 +1142,7 @@ given CodeGen {
         return out;
     };
 
-    foreign_type_symbol_matches_def_id(
-        self,
-        symbol Symbol,
-        def_id DefId,
-    ) Bool = {
+    foreign_type_symbol_matches_def_id(self, symbol: Symbol, def_id: DefId): Bool = {
         let _ = self;
         if symbol.def_id == def_id then {
             return true;
@@ -1170,23 +1155,23 @@ given CodeGen {
         };
     };
 
-    is_foreign_function_def_id(self, def_id DefId) Bool = {
+    is_foreign_function_def_id(self, def_id: DefId): Bool = {
         return self.foreign_function_def_ids.contains(def_id.id);
     };
 
-    is_foreign_global_var_def_id(self, def_id DefId) Bool = {
+    is_foreign_global_var_def_id(self, def_id: DefId): Bool = {
         return self.foreign_global_var_def_ids.contains(def_id.id);
     };
 
-    is_foreign_type_def_id(self, def_id DefId) Bool = {
+    is_foreign_type_def_id(self, def_id: DefId): Bool = {
         return self.foreign_type_def_ids.contains(def_id.id);
     };
 
-    concrete_callable_info(self, def_id DefId) Option[ConcreteCallableInfo] = {
+    concrete_callable_info(self, def_id: DefId): Option[ConcreteCallableInfo] = {
         return self.program.concrete_callables_by_def_id.get(def_id);
     };
 
-    method_owner_type(self, method_def_id DefId) Option[Type] = {
+    method_owner_type(self, method_def_id: DefId): Option[Type] = {
         return when self.concrete_callable_info(method_def_id) in {
             .Some(info) then info.owner_type,
             .None() then when self.method_owner_type_cache.get(method_def_id.id) in {
@@ -1223,7 +1208,7 @@ given CodeGen {
         };
     };
 
-    owner_base_lookup_key(self, t Type) MethodOwner = {
+    owner_base_lookup_key(self, t: Type): MethodOwner = {
         let mutable concrete_type = self.normalize_vtable_receiver_type(
             self.concretize_codegen_type(t),
         );
@@ -1239,11 +1224,15 @@ given CodeGen {
         return self.receiver_owner(base_type);
     };
 
-    current_owner_callable_c_name_cache_key(self, owner_type Type, symbol Symbol) String = {
+    current_owner_callable_c_name_cache_key(
+        self,
+        owner_type: Type,
+        symbol: Symbol,
+    ): String = {
         return "\(self.receiver_owner(owner_type).display())|\(symbol.def_id.id.to_string())";
     };
 
-    owner_types_match(self, lhs Type, rhs Type) Bool = {
+    owner_types_match(self, lhs: Type, rhs: Type): Bool = {
         let left_concrete = self.concretize_codegen_type(lhs);
         let right_concrete = self.concretize_codegen_type(rhs);
         let left_exact = self.receiver_owner(left_concrete);
@@ -1256,7 +1245,7 @@ given CodeGen {
         );
     };
 
-    callable_logical_name(self, def_id DefId) String = {
+    callable_logical_name(self, def_id: DefId): String = {
         return when self.program.receiver_method_dispatch.get(def_id) in {
             .Some(info) then info.method_name,
             .None() then when self.program.concrete_callables_by_def_id.get(def_id) in {
@@ -1266,14 +1255,14 @@ given CodeGen {
         };
     };
 
-    symbol_is_function_like(self, symbol Symbol) Bool = {
+    symbol_is_function_like(self, symbol: Symbol): Bool = {
         if symbol.kind is .Function() then {
             return true;
         };
         return symbol.symbol_type is .FunctionType(...);
     };
 
-    should_use_current_owner_resolution(self, symbol Symbol) Bool = {
+    should_use_current_owner_resolution(self, symbol: Symbol): Bool = {
         if not self.symbol_is_function_like(symbol) then {
             return false;
         };
@@ -1286,10 +1275,7 @@ given CodeGen {
         };
     };
 
-    extract_helper_method_name_from_symbol(
-        self,
-        symbol_name String,
-    ) Option[String] = {
+    extract_helper_method_name_from_symbol(self, symbol_name: String): Option[String] = {
         let _ = self;
         let body = if symbol_name.starts_with("ref_") then symbol_name.substring(4...)
         else if symbol_name.starts_with("mutref_") then symbol_name.substring(7...)
@@ -1319,10 +1305,7 @@ given CodeGen {
         return Option[String].None();
     };
 
-    extract_template_prefixed_method_name(
-        self,
-        symbol_name String,
-    ) Option[String] = {
+    extract_template_prefixed_method_name(self, symbol_name: String): Option[String] = {
         let _ = self;
         if not symbol_name.contains("_") then {
             return Option[String].None();
@@ -1359,7 +1342,7 @@ given CodeGen {
     // re-derive the answer from a SPELLING: first the method name, then a
     // mangled "helper" name, then a name-equality sweep over every global.
     // Swift's codegen resolves by `methodDefId` and has none of that.
-    current_owner_method_symbol(self, symbol Symbol) Option[Symbol] = {
+    current_owner_method_symbol(self, symbol: Symbol): Option[Symbol] = {
         if not self.symbol_is_function_like(symbol) then {
             return Option[Symbol].None();
         };
@@ -1376,10 +1359,7 @@ given CodeGen {
         };
     };
 
-    fallback_current_owner_method_c_name(
-        self,
-        symbol Symbol,
-    ) Option[String] = {
+    fallback_current_owner_method_c_name(self, symbol: Symbol): Option[String] = {
         if not self.symbol_is_function_like(symbol) then {
             return Option[String].None();
         };
@@ -1475,7 +1455,7 @@ given CodeGen {
         };
     };
 
-    compute_callable_c_name_uncached(self, symbol Symbol) String = {
+    compute_callable_c_name_uncached(self, symbol: Symbol): String = {
         let is_top_level_main = symbol.kind is .Function() and self.context.symbol_name(
             symbol,
         ) == "main" and self.method_owner_type(symbol.def_id) is .None();
@@ -1547,7 +1527,7 @@ given CodeGen {
         };
     };
 
-    public precompute_callable_c_name_cache(self) Void = {
+    public precompute_callable_c_name_cache(self): Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(identifier, _, _) then self.callable_c_name_cache.insert(
@@ -1575,7 +1555,7 @@ given CodeGen {
         };
     };
 
-    public build_method_owner_type_cache(self) Dict[UInt, Type] = {
+    public build_method_owner_type_cache(self): Dict[UInt, Type] = {
         let mutable cache = Dict[UInt, Type].new();
         for function_ref in self.program.functions then {
             when function_ref.kind in {
@@ -1628,7 +1608,7 @@ given CodeGen {
     /// 一次预热，把 codegen 里「按 DefId 反查 globals 声明」的多次全量扫描收敛成查表。
     /// 结果只取决于 program.globals，故在构造时一次性建好。
     /// 取值语义与原来的线性扫描一致：同 id 重复出现时取先出现者。
-    public build_def_id_indices(self) Void = {
+    public build_def_id_indices(self): Void = {
         let mutable foreign_types = Set[UInt].new();
         let mutable struct_fields = Dict[UInt, List[TypedField]].new();
         let mutable enum_cases = Dict[UInt, List[TypedEnumCase]].new();
@@ -1671,7 +1651,7 @@ given CodeGen {
 
     /// 与 `foreign_type_symbol_matches_def_id` 同口径：符号自身 id，
     /// 以及它 symbol_type 里携带的 nominal id，两者都可能被该判定命中。
-    index_foreign_type_symbol(self, identifier Symbol, out Set[UInt]) Void = {
+    index_foreign_type_symbol(self, identifier: Symbol, out: Set[UInt]): Void = {
         out.insert(identifier.def_id.id);
         when identifier.symbol_type in {
             .StructureType(type_def_id) then out.insert(type_def_id.id),
@@ -1681,7 +1661,7 @@ given CodeGen {
         };
     };
 
-    callable_c_name(self, symbol Symbol) String = {
+    callable_c_name(self, symbol: Symbol): String = {
         when self.current_function_owner_type in {
             .Some(owner_type) then {
                 when self.extract_helper_method_name_from_symbol(
@@ -1823,10 +1803,7 @@ given CodeGen {
         return resolved_name;
     };
 
-    receiver_owner_type_from_function_type(
-        self,
-        function_type Type,
-    ) Option[Type] = {
+    receiver_owner_type_from_function_type(self, function_type: Type): Option[Type] = {
         let _ = self;
         return when function_type in {
             .FunctionType(params, _) then {
@@ -1850,7 +1827,7 @@ given CodeGen {
         };
     };
 
-    codegen_layout_info(self, t Type) Option[TypeLayoutInfo] = {
+    codegen_layout_info(self, t: Type): Option[TypeLayoutInfo] = {
         let _ = self;
         let _ = t;
         return Option[TypeLayoutInfo].None();
@@ -1859,14 +1836,14 @@ given CodeGen {
     /// Owner identity of a receiver type. Two types are "the same receiver" iff
     /// their owners are equal; this used to return a LAYOUT KEY, so "same
     /// receiver" meant "same C layout string".
-    receiver_owner(self, t Type) MethodOwner = {
+    receiver_owner(self, t: Type): MethodOwner = {
         let mutable canonical_type = self.normalize_vtable_receiver_type(
             self.concretize_codegen_type(t),
         );
         return self.context.method_owner_of(canonical_type);
     };
 
-    concrete_type_c_name_fallback(self, t Type) Option[String] = {
+    concrete_type_c_name_fallback(self, t: Type): Option[String] = {
         if self.codegen_layout_info(t) is .Some(layout) then {
             return Option[String].Some(layout.emitted_type_name);
         };
@@ -1976,7 +1953,7 @@ given CodeGen {
         };
     };
 
-    receiver_type_lookup_name_fallback(self, t Type) String = {
+    receiver_type_lookup_name_fallback(self, t: Type): String = {
         if self.codegen_layout_info(t) is .Some(layout) then {
             return layout.receiver_lookup_name;
         };
@@ -2060,7 +2037,7 @@ given CodeGen {
         };
     };
 
-    emitted_type_c_name_fallback(self, t Type) String = {
+    emitted_type_c_name_fallback(self, t: Type): String = {
         if self.codegen_layout_info(t) is .Some(layout) then {
             return layout.emitted_type_name;
         };
@@ -2069,7 +2046,7 @@ given CodeGen {
         );
     };
 
-    uses_managed_nominal_representation(self, t Type) Bool = {
+    uses_managed_nominal_representation(self, t: Type): Bool = {
         return when t in {
             .StructureType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
             .EnumType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
@@ -2079,7 +2056,7 @@ given CodeGen {
         };
     };
 
-    nominal_type_c_name(self, t Type) String = {
+    nominal_type_c_name(self, t: Type): String = {
         let c_type = self.c_type_name(t);
         return if c_type.starts_with("struct ") then c_type.substring(
             7..<c_type.count(),
@@ -2088,11 +2065,11 @@ given CodeGen {
         else self.sanitize_codegen_identifier(self.context.type_display_name(t));
     };
 
-    managed_payload_type_name(self, t Type) String = {
+    managed_payload_type_name(self, t: Type): String = {
         return "__koral_payload_\(self.nominal_type_c_name(t))";
     };
 
-    compose_method_c_name(self, type_c_name String, method_name String) String = {
+    compose_method_c_name(self, type_c_name: String, method_name: String): String = {
         let sanitized_method = self.sanitize_codegen_identifier(method_name);
         let escape_prefix = c_escape_prefix();
         let method_component = if sanitized_method.starts_with(escape_prefix) then sanitized_method.substring(
@@ -2105,11 +2082,11 @@ given CodeGen {
     };
 
     /// 比较两个模块路径是否相等
-    module_paths_equal(self, a List[String], b List[String]) Bool = {
+    module_paths_equal(self, a: List[String], b: List[String]): Bool = {
         if a.count() != b.count() then {
             return false;
         };
-        let mutable i UInt = 0;
+        let mutable i: UInt = 0;
         while i < a.count() then {
             if a[i] != b[i] then {
                 return false;
@@ -2120,7 +2097,7 @@ given CodeGen {
     };
 
     // 查找类型定义的 DefId（TypeDef 类型，排除函数/变量）
-    find_type_def_id_by_name(self, name String) Option[DefId] = {
+    find_type_def_id_by_name(self, name: String): Option[DefId] = {
         let def_ids = self.type_def_ids_named(name);
         return when def_ids.get(UInt(0)) in {
             .Some(def_id) then Option[DefId].Some(def_id),
@@ -2128,7 +2105,7 @@ given CodeGen {
         };
     };
 
-    target_type_module_path(self, target_type Type) List[String] = {
+    target_type_module_path(self, target_type: Type): List[String] = {
         return when target_type in {
             .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
@@ -2142,11 +2119,11 @@ given CodeGen {
         };
     };
 
-    concrete_layout_key_for_type(self, t Type) String = {
+    concrete_layout_key_for_type(self, t: Type): String = {
         return self.context.get_layout_key(t);
     };
 
-    concrete_layout_key_for_def_id(self, def_id DefId) Option[String] = {
+    concrete_layout_key_for_def_id(self, def_id: DefId): Option[String] = {
         let name = self.context.get_name(def_id) or else {
             return Option[String].None();
         };
@@ -2164,7 +2141,7 @@ given CodeGen {
             needs_separator = true;
         };
         if is_private and not source_file.is_empty() then {
-            let mutable hash WrappingUInt32 = 0;
+            let mutable hash: WrappingUInt32 = 0;
             for byte in source_file.bytes() then {
                 hash = hash * 31 + WrappingUInt32(byte);
             };
@@ -2183,7 +2160,7 @@ given CodeGen {
     };
 
     // 仅按单态化后的 concrete layout 查找类型 DefId。
-    find_type_def_id_by_layout_or_template(self, t Type) Option[DefId] = {
+    find_type_def_id_by_layout_or_template(self, t: Type): Option[DefId] = {
         let layout_name = self.concrete_layout_key_for_type(t);
         if self.find_type_def_id_by_name(layout_name) is .Some(def_id) then {
             return Option[DefId].Some(def_id);
@@ -2192,25 +2169,19 @@ given CodeGen {
         return Option[DefId].None();
     };
 
-    concrete_struct_fields_from_program(
-        self,
-        def_id DefId,
-    ) Option[List[TypedField]] = {
+    concrete_struct_fields_from_program(self, def_id: DefId): Option[List[TypedField]] = {
         return self.struct_fields_by_def_id.get(def_id.id);
     };
 
-    concrete_enum_cases_from_program(
-        self,
-        def_id DefId,
-    ) Option[List[TypedEnumCase]] = {
+    concrete_enum_cases_from_program(self, def_id: DefId): Option[List[TypedEnumCase]] = {
         return self.enum_cases_by_def_id.get(def_id.id);
     };
 
     lookup_enum_case_index_and_params(
         self,
-        def_id DefId,
-        case_name String,
-    ) Option[Pair[UInt, List[EnumCaseParam]]] = {
+        def_id: DefId,
+        case_name: String,
+    ): Option[Pair[UInt, List[EnumCaseParam]]] = {
         let enum_cases_opt = when self.context.get_enum_cases(def_id) in {
             .Some(enum_cases) then Option[List[EnumCaseInfo]].Some(enum_cases),
             .None() then {
@@ -2224,7 +2195,8 @@ given CodeGen {
                                     EnumCaseParam(
                                         field.name,
                                         field.field_type,
-                                        field.named, field.default_value
+                                        field.named,
+                                        field.default_value,
                                     ),
                                 );
                             };
@@ -2239,10 +2211,10 @@ given CodeGen {
 
         return when enum_cases_opt in {
             .Some(enum_cases) then {
-                let mutable found_index UInt = 0;
+                let mutable found_index: UInt = 0;
                 let mutable found_params = List[EnumCaseParam].new();
                 let mutable found = false;
-                let mutable i UInt = 0;
+                let mutable i: UInt = 0;
                 for uc in enum_cases then {
                     if self.enum_case_name_matches(case_name, uc.name) then {
                         found_index = i;
@@ -2270,7 +2242,7 @@ given CodeGen {
     /// - Foreign 函数使用原始名称（或 cname）
     /// - 全局符号优先使用 mono 产出的 codegen_view 中的映射
     /// - 局部变量使用 `{name}_{defId}` 格式
-    public qualified_name_value(self, symbol Symbol) String = {
+    public qualified_name_value(self, symbol: Symbol): String = {
         if self.is_foreign_function_def_id(symbol.def_id) then {
             return when self.context.get_cname(symbol.def_id) in {
                 .Some(c_name) then c_name,
@@ -2320,12 +2292,12 @@ given CodeGen {
         return "\(base)_\(symbol.def_id.id)";
     };
 
-    public qualified_name(self, symbol Symbol) String = {
+    public qualified_name(self, symbol: Symbol): String = {
         return self.qualified_name_value(symbol);
     };
 
     /// 获取 Symbol 的 C 标识符（用于声明）
-    public c_identifier_for_symbol_value(self, symbol Symbol) String = {
+    public c_identifier_for_symbol_value(self, symbol: Symbol): String = {
         if self.is_foreign_function_def_id(symbol.def_id) then {
             return when self.context.get_cname(symbol.def_id) in {
                 .Some(c_name) then c_name,
@@ -2381,23 +2353,23 @@ given CodeGen {
         };
     };
 
-    public c_identifier_for_symbol(self, symbol Symbol) String = {
+    public c_identifier_for_symbol(self, symbol: Symbol): String = {
         return self.c_identifier_for_symbol_value(symbol);
     };
 
-    public c_identifier_for_param(self, param TypedParam) String = {
+    public c_identifier_for_param(self, param: TypedParam): String = {
         return self.sanitize_codegen_identifier(param.name);
     };
 
     // ── 类型名称映射 ──────────────────────────────────────────────────────────
 
-    ref_wrapper_c_type_name(self, inner_type Type, weak Bool) String = {
+    ref_wrapper_c_type_name(self, inner_type: Type, weak: Bool): String = {
         return if self.type_looks_traitlike_for_storage(inner_type) then if weak then "struct __koral_TraitWeakRef"
         else "struct __koral_TraitRef"
         else if weak then "struct __koral_WeakRef" else "struct __koral_Ref";
     };
 
-    type_looks_traitlike_for_storage(self, t Type) Bool = {
+    type_looks_traitlike_for_storage(self, t: Type): Bool = {
         return when t in {
             .TraitObject(...) then true,
             .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
@@ -2442,17 +2414,13 @@ given CodeGen {
         };
     };
 
-    storage_ref_wrapper_c_type_name(
-        self,
-        inner_type Type,
-        weak Bool,
-    ) Option[String] = {
+    storage_ref_wrapper_c_type_name(self, inner_type: Type, weak: Bool): Option[String] = {
         return if self.type_looks_traitlike_for_storage(inner_type) then Option[String].Some(
             if weak then "struct __koral_TraitWeakRef" else "struct __koral_TraitRef",
         ) else Option[String].None();
     };
 
-    public storage_c_type_name(self, t Type) String = {
+    public storage_c_type_name(self, t: Type): String = {
         let storage_c_type_opt = when t in {
             .ReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
                 inner_ref,
@@ -2491,7 +2459,7 @@ given CodeGen {
         };
     };
 
-    nominal_named_c_type_name(self, t Type) Option[String] = {
+    nominal_named_c_type_name(self, t: Type): Option[String] = {
         return when t in {
             .StructureType(def_id) then {
                 let c_name = self.nominal_layout_c_identifier(def_id);
@@ -2505,7 +2473,7 @@ given CodeGen {
         };
     };
 
-    opaque_mapped_c_type_name(self, mapped_type Type) Option[String] = {
+    opaque_mapped_c_type_name(self, mapped_type: Type): Option[String] = {
         return when mapped_type in {
             .TraitObject(...) then {
                 Option[String].Some("struct __koral_TraitRef")
@@ -2562,7 +2530,7 @@ given CodeGen {
         };
     };
 
-    opaque_fallback_c_type_name(self, def_id DefId) String = {
+    opaque_fallback_c_type_name(self, def_id: DefId): String = {
         return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
             .None() then {
@@ -2574,7 +2542,7 @@ given CodeGen {
         };
     };
 
-    opaque_c_type_name(self, t Type) Option[String] = {
+    opaque_c_type_name(self, t: Type): Option[String] = {
         return when t in {
             .OpaqueType(def_id) then {
                 let mapped_c_type_opt = when self.context.lookup_type(def_id) in {
@@ -2592,7 +2560,7 @@ given CodeGen {
         };
     };
 
-    generic_nominal_c_type_name(self, t Type) Option[String] = {
+    generic_nominal_c_type_name(self, t: Type): Option[String] = {
         return when t in {
             .GenericStruct(...) then {
                 let layout_key = self.concrete_layout_key_for_type(t);
@@ -2620,7 +2588,7 @@ given CodeGen {
         };
     };
 
-    nominal_c_type_name(self, t Type) Option[String] = {
+    nominal_c_type_name(self, t: Type): Option[String] = {
         when self.nominal_named_c_type_name(t) in {
             .Some(name) then {
                 return Option[String].Some(name);
@@ -2636,7 +2604,7 @@ given CodeGen {
         return self.generic_nominal_c_type_name(t);
     };
 
-    reference_like_c_type_name(self, t Type) Option[String] = {
+    reference_like_c_type_name(self, t: Type): Option[String] = {
         return when t in {
             .ReferenceType(inner_ref) then Option[String].Some(
                 self.ref_wrapper_c_type_name(inner_ref, false),
@@ -2666,7 +2634,7 @@ given CodeGen {
         };
     };
 
-    compute_c_type_name_uncached(self, t Type) String = {
+    compute_c_type_name_uncached(self, t: Type): String = {
         let kind = type_handler_kind_from(t);
         when kind in {
             .Primitive() then {
@@ -2690,7 +2658,7 @@ given CodeGen {
         panic(internal_compiler_error("Unresolved type \(display) during codegen"));
     };
 
-    cache_c_type_name(self, t Type) Void = {
+    cache_c_type_name(self, t: Type): Void = {
         if self.type_contains_generic(t) then {
             return;
         };
@@ -2730,7 +2698,7 @@ given CodeGen {
         self.c_type_name_cache.insert(key, self.compute_c_type_name_uncached(t));
     };
 
-    public precompute_c_type_name_cache(self) Void = {
+    public precompute_c_type_name_cache(self): Void = {
         for global in self.program.globals then {
             when global in {
                 .ForeignFunction(_, params, return_type) then {
@@ -2802,14 +2770,14 @@ given CodeGen {
     };
 
     /// 将 Koral Type 映射到 C 类型名称字符串
-    public c_type_name(self, t Type) String = {
+    public c_type_name(self, t: Type): String = {
         return when self.c_type_name_cache.get(stable_type_key(t)) in {
             .Some(name) then name,
             .None() then self.compute_c_type_name_uncached(t),
         };
     };
 
-    nominal_type_from_c_type_name(self, c_type String) Option[Type] = {
+    nominal_type_from_c_type_name(self, c_type: String): Option[Type] = {
         let raw_name = if c_type.starts_with("struct ") then c_type.substring(
             7..<c_type.count(),
         )
@@ -2819,7 +2787,7 @@ given CodeGen {
             return Option[Type].None();
         };
 
-        let mutable id UInt = 1;
+        let mutable id: UInt = 1;
         while id < self.context.next_def_id() then {
             let def_id = DefId(id);
             let candidate = self.c_identifier_opt(def_id) or else "";
@@ -2852,7 +2820,7 @@ given CodeGen {
     };
 
     // 将 C 类型字符串反向映射为内部 Type（用于临时变量类型跟踪）。
-    type_from_c_type_name(self, c_type String) Type = {
+    type_from_c_type_name(self, c_type: String): Type = {
         return when c_type in {
             "int8_t" then Type.Int8Type(),
             "int16_t" then Type.Int16Type(),
@@ -2877,7 +2845,7 @@ given CodeGen {
     // ── 临时变量生成 ──────────────────────────────────────────────────────────
 
     /// 生成下一个临时变量名（格式：`_t{N}`）
-    public next_temp(self) String = {
+    public next_temp(self): String = {
         self.temp_var_counter += 1;
         let mutable name = StringBuilder.new();
         name.push_string("_t");
@@ -2887,7 +2855,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明（格式：`{c_type} _t{N};`）
     /// 返回变量名
-    public next_temp_with_decl(self, c_type String) String = {
+    public next_temp_with_decl(self, c_type: String): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2899,7 +2867,7 @@ given CodeGen {
 
     /// 生成临时变量并在 buffer 中声明并初始化（格式：`{c_type} _t{N} = {init_expr};`）
     /// 返回变量名
-    public next_temp_with_init(self, c_type String, init_expr String) String = {
+    public next_temp_with_init(self, c_type: String, init_expr: String): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2911,7 +2879,12 @@ given CodeGen {
         return name.to_string();
     };
 
-    public next_temp_with_call_1(self, c_type String, func_name String, arg String) String = {
+    public next_temp_with_call_1(
+        self,
+        c_type: String,
+        func_name: String,
+        arg: String,
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2925,7 +2898,7 @@ given CodeGen {
         return name.to_string();
     };
 
-    public next_temp_with_call_0(self, c_type String, func_name String) String = {
+    public next_temp_with_call_0(self, c_type: String, func_name: String): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2939,11 +2912,11 @@ given CodeGen {
 
     public next_temp_with_call_2(
         self,
-        c_type String,
-        func_name String,
-        first_arg String,
-        second_arg String,
-    ) String = {
+        c_type: String,
+        func_name: String,
+        first_arg: String,
+        second_arg: String,
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2959,7 +2932,7 @@ given CodeGen {
         return name.to_string();
     };
 
-    public push_joined_strings(self, values List[String], separator String) Void = {
+    public push_joined_strings(self, values: List[String], separator: String): Void = {
         let mutable first = true;
         for value in values then {
             if not first then {
@@ -2972,10 +2945,10 @@ given CodeGen {
 
     public next_temp_with_call_args(
         self,
-        c_type String,
-        func_name String,
-        arguments List[String],
-    ) String = {
+        c_type: String,
+        func_name: String,
+        arguments: List[String],
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -2989,7 +2962,11 @@ given CodeGen {
         return name.to_string();
     };
 
-    public next_temp_with_braced_values(self, c_type String, values List[String]) String = {
+    public next_temp_with_braced_values(
+        self,
+        c_type: String,
+        values: List[String],
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -3003,11 +2980,11 @@ given CodeGen {
 
     public next_temp_with_infix_init(
         self,
-        c_type String,
-        left String,
-        op String,
-        right String,
-    ) String = {
+        c_type: String,
+        left: String,
+        op: String,
+        right: String,
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -3025,10 +3002,10 @@ given CodeGen {
 
     public next_temp_with_prefixed_value(
         self,
-        c_type String,
-        prefix String,
-        value String,
-    ) String = {
+        c_type: String,
+        prefix: String,
+        value: String,
+    ): String = {
         let name = self.next_temp();
         self.add_indent();
         self.buffer.push_string(c_type);
@@ -3044,17 +3021,17 @@ given CodeGen {
     // ── 缓冲区操作 ────────────────────────────────────────────────────────────
 
     /// 向 buffer 追加当前缩进
-    public add_indent(self) Void = {
+    public add_indent(self): Void = {
         self.buffer.push_string(self.indent.to_string());
     };
 
     /// 向 buffer 追加当前缩进与文本，适合频繁的一行输出场景
-    public push_indented_string(self, text String) Void = {
+    public push_indented_string(self, text: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string(text);
     };
 
-    public push_indented_decl(self, c_type String, name String) Void = {
+    public push_indented_decl(self, c_type: String, name: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string(c_type);
         self.buffer.push_rune(' ');
@@ -3062,7 +3039,7 @@ given CodeGen {
         self.buffer.push_string(";\n");
     };
 
-    public push_indented_assignment(self, dest String, source String) Void = {
+    public push_indented_assignment(self, dest: String, source: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string(dest);
         self.buffer.push_string(" = ");
@@ -3072,10 +3049,10 @@ given CodeGen {
 
     public push_indented_member_assignment(
         self,
-        base String,
-        member String,
-        source String,
-    ) Void = {
+        base: String,
+        member: String,
+        source: String,
+    ): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string(base);
         self.buffer.push_rune('.');
@@ -3087,10 +3064,10 @@ given CodeGen {
 
     public push_indented_control_assignment(
         self,
-        ref_name String,
-        field String,
-        source String,
-    ) Void = {
+        ref_name: String,
+        field: String,
+        source: String,
+    ): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string("__koral_control_of(");
         self.buffer.push_string(ref_name);
@@ -3101,43 +3078,43 @@ given CodeGen {
         self.buffer.push_string(";\n");
     };
 
-    public push_indented_return_value(self, value String) Void = {
+    public push_indented_return_value(self, value: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string("return ");
         self.buffer.push_string(value);
         self.buffer.push_string(";\n");
     };
 
-    public push_indented_return_void(self) Void = {
+    public push_indented_return_void(self): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string("return;\n");
     };
 
-    public push_indented_goto(self, label String) Void = {
+    public push_indented_goto(self, label: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string("goto ");
         self.buffer.push_string(label);
         self.buffer.push_string(";\n");
     };
 
-    public push_indented_if_open(self, condition String) Void = {
+    public push_indented_if_open(self, condition: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string("if (");
         self.buffer.push_string(condition);
         self.buffer.push_string(") {\n");
     };
 
-    public push_indented_label_block_open(self, label String) Void = {
+    public push_indented_label_block_open(self, label: String): Void = {
         self.buffer.push_string(self.indent.to_string());
         self.buffer.push_string(label);
         self.buffer.push_string(": {\n");
     };
 
-    push_indent_level(self) Void = {
+    push_indent_level(self): Void = {
         self.indent.push_string("    ");
     };
 
-    pop_indent_level(self) Void = {
+    pop_indent_level(self): Void = {
         let len = self.indent.count();
         if len < UInt(4) then {
             self.indent = StringBuilder.new();
@@ -3150,14 +3127,14 @@ given CodeGen {
     };
 
     /// 临时增加缩进，执行 body，然后恢复缩进
-    public with_indent(self, body () -> Void) Void = {
+    public with_indent(self, body: () -> Void): Void = {
         self.push_indent_level();
         body();
         self.pop_indent_level();
     };
 
     /// 向 buffer 追加文本
-    public append_to_buffer(self, text String) Void = {
+    public append_to_buffer(self, text: String): Void = {
         self.buffer.push_string(text);
     };
 };

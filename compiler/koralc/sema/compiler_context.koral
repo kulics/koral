@@ -16,24 +16,24 @@
 /// 使用 ref 持有 DefIdMap，与 Swift 版本的 class 语义一致，
 /// 避免 ~500 字节的 DefIdMap 在栈上复制。
 public type mutable CompilerContext(
-    mutable def_id_map DefIdMap,
-    mutable concrete_global_initializers Dict[UInt, TypedExpr],
-    mutable concrete_function_bodies Dict[UInt, TypedExpr],
-    mutable concrete_function_sources Dict[UInt, ConcreteExprSource],
-    mutable concrete_given_member_bodies Dict[UInt, TypedExpr],
-    mutable concrete_given_member_sources Dict[UInt, ConcreteExprSource],
-    mutable method_param_specs Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]],
+    mutable def_id_map: DefIdMap,
+    mutable concrete_global_initializers: Dict[UInt, TypedExpr],
+    mutable concrete_function_bodies: Dict[UInt, TypedExpr],
+    mutable concrete_function_sources: Dict[UInt, ConcreteExprSource],
+    mutable concrete_given_member_bodies: Dict[UInt, TypedExpr],
+    mutable concrete_given_member_sources: Dict[UInt, ConcreteExprSource],
+    mutable method_param_specs: Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]],
 );
 
 public type ConcreteExprSource(
-    body Expr,
-    source_file String,
-    package_id String,
-    module_path List[String],
+    body: Expr,
+    source_file: String,
+    package_id: String,
+    module_path: List[String],
 );
 
 given CompilerContext {
-    public new() CompilerContext = {
+    public new(): CompilerContext = {
         return CompilerContext(
             DefIdMap.new(),
             Dict[UInt, TypedExpr].new(),
@@ -45,7 +45,7 @@ given CompilerContext {
         );
     };
 
-    public from_def_id_map(map DefIdMap) CompilerContext = {
+    public from_def_id_map(map: DefIdMap): CompilerContext = {
         return CompilerContext(
             map,
             Dict[UInt, TypedExpr].new(),
@@ -59,10 +59,10 @@ given CompilerContext {
 
     public register_method_param_specs(
         self,
-        owner MethodOwner,
-        method_name String,
-        specs List[FunctionParamSpec],
-    ) Void = {
+        owner: MethodOwner,
+        method_name: String,
+        specs: List[FunctionParamSpec],
+    ): Void = {
         let mutable methods = self.method_param_specs.get(owner) or else Dict[String, List[FunctionParamSpec]].new(
         );
         methods.insert(method_name, specs);
@@ -71,9 +71,9 @@ given CompilerContext {
 
     public get_method_param_specs(
         self,
-        owner MethodOwner,
-        method_name String,
-    ) Option[List[FunctionParamSpec]] = {
+        owner: MethodOwner,
+        method_name: String,
+    ): Option[List[FunctionParamSpec]] = {
         return when self.method_param_specs.get(owner) in {
             .Some(methods) then methods.get(method_name),
             .None() then Option[List[FunctionParamSpec]].None(),
@@ -82,9 +82,9 @@ given CompilerContext {
 
     public find_method_param_specs_by_name(
         self,
-        method_name String,
-        expected_count UInt,
-    ) Option[List[FunctionParamSpec]] = {
+        method_name: String,
+        expected_count: UInt,
+    ): Option[List[FunctionParamSpec]] = {
         for owner_entry in self.method_param_specs.iterator() then {
             when owner_entry.second.get(method_name) in {
                 .Some(specs) then {
@@ -100,70 +100,70 @@ given CompilerContext {
 
     // ── DefIdMap 查询 ─────────────────────────────────────────────────────
 
-    public get_name(self, def_id DefId) Option[String] = {
+    public get_name(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_name(def_id);
     };
 
-    public get_module_path(self, def_id DefId) Option[List[String]] = {
+    public get_module_path(self, def_id: DefId): Option[List[String]] = {
         return self.def_id_map.get_module_path(def_id);
     };
 
-    public get_source_file(self, def_id DefId) Option[String] = {
+    public get_source_file(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_source_file(def_id);
     };
 
-    public get_package_id(self, def_id DefId) Option[String] = {
+    public get_package_id(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_package_id(def_id);
     };
 
-    public get_kind(self, def_id DefId) Option[DefKind] = {
+    public get_kind(self, def_id: DefId): Option[DefKind] = {
         return self.def_id_map.get_kind(def_id);
     };
 
-    public get_access(self, def_id DefId) Option[AccessModifier] = {
+    public get_access(self, def_id: DefId): Option[AccessModifier] = {
         return self.def_id_map.get_access(def_id);
     };
 
-    public get_span(self, def_id DefId) Option[SourceSpan] = {
+    public get_span(self, def_id: DefId): Option[SourceSpan] = {
         return self.def_id_map.get_span(def_id);
     };
 
-    public get_qualified_name(self, def_id DefId) Option[String] = {
+    public get_qualified_name(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_qualified_name(def_id);
     };
 
-    public get_c_identifier(self, def_id DefId) Option[String] = {
+    public get_c_identifier(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_c_identifier(def_id);
     };
 
     /// `module_path` 里声明的符号的 C 前缀——派生身份键（§5.3.1），随消费方
     /// 拼写不变。编译没提供键表时退回模块路径本身。
-    public symbol_key_for_module_path(self, module_path List[String]) String = {
+    public symbol_key_for_module_path(self, module_path: List[String]): String = {
         return self.def_id_map.module_symbol_key_for(module_path);
     };
 
     /// 安装本编译的 模块路径 -> 派生符号键 表（§5.3.1）。
-    public set_module_symbol_keys(self, keys Dict[String, String]) Void = {
+    public set_module_symbol_keys(self, keys: Dict[String, String]): Void = {
         self.def_id_map.set_module_symbol_keys(keys);
     };
 
-    public get_symbol_type(self, def_id DefId) Option[Type] = {
+    public get_symbol_type(self, def_id: DefId): Option[Type] = {
         return self.def_id_map.get_symbol_type(def_id);
     };
 
-    public get_symbol_kind(self, def_id DefId) Option[SymbolKind] = {
+    public get_symbol_kind(self, def_id: DefId): Option[SymbolKind] = {
         return self.def_id_map.get_symbol_kind(def_id);
     };
 
-    public get_symbol_method_kind(self, def_id DefId) Option[MethodKind] = {
+    public get_symbol_method_kind(self, def_id: DefId): Option[MethodKind] = {
         return self.def_id_map.get_symbol_method_kind(def_id);
     };
 
-    public get_symbol_mutable(self, def_id DefId) Option[Bool] = {
+    public get_symbol_mutable(self, def_id: DefId): Option[Bool] = {
         return self.def_id_map.get_symbol_mutable(def_id);
     };
 
-    public get_symbol(self, def_id DefId) Option[Symbol] = {
+    public get_symbol(self, def_id: DefId): Option[Symbol] = {
         return when self.get_symbol_type(def_id) in {
             .Some(symbol_type) then when self.get_symbol_kind(def_id) in {
                 .Some(kind) then Option[Symbol].Some(Symbol(def_id, symbol_type, kind)),
@@ -173,15 +173,15 @@ given CompilerContext {
         };
     };
 
-    public symbol_name(self, symbol Symbol) String = {
+    public symbol_name(self, symbol: Symbol): String = {
         return self.get_name(symbol.def_id) or else "";
     };
 
-    public symbol_name_or(self, symbol Symbol, fallback String) String = {
+    public symbol_name_or(self, symbol: Symbol, fallback: String): String = {
         return self.get_name(symbol.def_id) or else fallback;
     };
 
-    public is_symbol_mutable(self, def_id DefId) Bool = {
+    public is_symbol_mutable(self, def_id: DefId): Bool = {
         return when self.def_id_map.get_symbol_mutable(def_id) in {
             .Some(v) then v,
             .None() then false,
@@ -192,10 +192,10 @@ given CompilerContext {
 
     public lookup_def_id(
         self,
-        module_path List[String],
-        name String,
-        source_file Option[String],
-    ) Option[DefId] = {
+        module_path: List[String],
+        name: String,
+        source_file: Option[String],
+    ): Option[DefId] = {
         return self.def_id_map.lookup(module_path, name, source_file);
     };
 
@@ -203,13 +203,13 @@ given CompilerContext {
 
     public allocate_def_id(
         self,
-        module_path List[String],
-        name String,
-        kind DefKind,
-        source_file String,
-        access AccessModifier,
-        span SourceSpan,
-    ) DefId = {
+        module_path: List[String],
+        name: String,
+        kind: DefKind,
+        source_file: String,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): DefId = {
         return self.def_id_map.allocate_full(
             name,
             kind,
@@ -221,23 +221,23 @@ given CompilerContext {
         );
     };
 
-    public allocate(self, name String, kind DefKind) DefId = {
+    public allocate(self, name: String, kind: DefKind): DefId = {
         return self.def_id_map.allocate(name, kind);
     };
 
-    public allocate_unindexed(self, name String, kind DefKind) DefId = {
+    public allocate_unindexed(self, name: String, kind: DefKind): DefId = {
         return self.def_id_map.allocate_unindexed(name, kind);
     };
 
     public allocate_full(
         self,
-        name String,
-        kind DefKind,
-        module_path List[String],
-        source_file String,
-        access AccessModifier,
-        span SourceSpan,
-    ) DefId = {
+        name: String,
+        kind: DefKind,
+        module_path: List[String],
+        source_file: String,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): DefId = {
         return self.def_id_map.allocate_full(
             name,
             kind,
@@ -251,14 +251,14 @@ given CompilerContext {
 
     public allocate_full_in_package(
         self,
-        name String,
-        kind DefKind,
-        module_path List[String],
-        source_file String,
-        package_id String,
-        access AccessModifier,
-        span SourceSpan,
-    ) DefId = {
+        name: String,
+        kind: DefKind,
+        module_path: List[String],
+        source_file: String,
+        package_id: String,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): DefId = {
         return self.def_id_map.allocate_full(
             name,
             kind,
@@ -274,16 +274,16 @@ given CompilerContext {
 
     public create_symbol(
         self,
-        name String,
-        module_path List[String],
-        source_file String,
-        symbol_type Type,
-        kind SymbolKind,
-        method_kind MethodKind,
-        access AccessModifier,
-        span SourceSpan,
-        is_mutable Bool,
-    ) Symbol = {
+        name: String,
+        module_path: List[String],
+        source_file: String,
+        symbol_type: Type,
+        kind: SymbolKind,
+        method_kind: MethodKind,
+        access: AccessModifier,
+        span: SourceSpan,
+        is_mutable: Bool,
+    ): Symbol = {
         let def_kind = when kind in {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
@@ -337,17 +337,17 @@ given CompilerContext {
 
     public create_symbol_with_package(
         self,
-        name String,
-        module_path List[String],
-        source_file String,
-        symbol_type Type,
-        kind SymbolKind,
-        method_kind MethodKind,
-        access AccessModifier,
-        span SourceSpan,
-        is_mutable Bool,
-        package_id String,
-    ) Symbol = {
+        name: String,
+        module_path: List[String],
+        source_file: String,
+        symbol_type: Type,
+        kind: SymbolKind,
+        method_kind: MethodKind,
+        access: AccessModifier,
+        span: SourceSpan,
+        is_mutable: Bool,
+        package_id: String,
+    ): Symbol = {
         let def_kind = when kind in {
             .Function() then DefKind.Function(),
             .Variable(_) then DefKind.Variable(),
@@ -401,15 +401,15 @@ given CompilerContext {
 
     // ── 类型定义查询 ──────────────────────────────────────────────────────
 
-    public get_struct_fields(self, def_id DefId) Option[List[StructField]] = {
+    public get_struct_fields(self, def_id: DefId): Option[List[StructField]] = {
         return self.def_id_map.get_struct_fields(def_id);
     };
 
-    public get_struct_fields_by_raw_id(self, raw_id UInt) Option[List[StructField]] = {
+    public get_struct_fields_by_raw_id(self, raw_id: UInt): Option[List[StructField]] = {
         return self.def_id_map.get_struct_fields(DefId(raw_id));
     };
 
-    public def_id_name_equals(self, def_id DefId, expected String) Bool = {
+    public def_id_name_equals(self, def_id: DefId, expected: String): Bool = {
         for entry in self.def_id_map.names then {
             if entry.first == def_id.id then {
                 return entry.second == expected;
@@ -418,20 +418,20 @@ given CompilerContext {
         return false;
     };
 
-    public get_enum_cases(self, def_id DefId) Option[List[EnumCaseInfo]] = {
+    public get_enum_cases(self, def_id: DefId): Option[List[EnumCaseInfo]] = {
         return self.def_id_map.get_enum_cases(def_id);
     };
 
-    public get_enum_cases_by_raw_id(self, raw_id UInt) Option[List[EnumCaseInfo]] = {
+    public get_enum_cases_by_raw_id(self, raw_id: UInt): Option[List[EnumCaseInfo]] = {
         return self.def_id_map.get_enum_cases(DefId(raw_id));
     };
 
-    public enum_case_tag_index_by_raw_id(self, raw_id UInt, case_name String) UInt = {
-        let zero UInt = 0;
+    public enum_case_tag_index_by_raw_id(self, raw_id: UInt, case_name: String): UInt = {
+        let zero: UInt = 0;
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second;
-                let mutable idx UInt = 0;
+                let mutable idx: UInt = 0;
                 for case_info in cases then {
                     if case_info.name == case_name or case_info.name.ends_with(
                         ".\(case_name)",
@@ -448,9 +448,9 @@ given CompilerContext {
 
     public enum_case_param_specs_by_raw_id(
         self,
-        raw_id UInt,
-        case_name String,
-    ) List[FunctionParamSpec] = {
+        raw_id: UInt,
+        case_name: String,
+    ): List[FunctionParamSpec] = {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second;
@@ -483,9 +483,9 @@ given CompilerContext {
 
     public enum_case_params_by_raw_id(
         self,
-        raw_id UInt,
-        case_name String,
-    ) List[EnumCaseParam] = {
+        raw_id: UInt,
+        case_name: String,
+    ): List[EnumCaseParam] = {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second;
@@ -502,7 +502,7 @@ given CompilerContext {
         return List[EnumCaseParam].new();
     };
 
-    public enum_has_case_by_raw_id(self, raw_id UInt, case_name String) Bool = {
+    public enum_has_case_by_raw_id(self, raw_id: UInt, case_name: String): Bool = {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second;
@@ -519,19 +519,19 @@ given CompilerContext {
         return false;
     };
 
-    public is_foreign_struct(self, def_id DefId) Bool = {
+    public is_foreign_struct(self, def_id: DefId): Bool = {
         return self.def_id_map.is_foreign_struct(def_id);
     };
 
-    public get_foreign_struct_fields(self, def_id DefId) Option[List[StructField]] = {
+    public get_foreign_struct_fields(self, def_id: DefId): Option[List[StructField]] = {
         return self.def_id_map.get_foreign_struct_fields(def_id);
     };
 
-    public get_param_specs(self, def_id DefId) Option[List[FunctionParamSpec]] = {
+    public get_param_specs(self, def_id: DefId): Option[List[FunctionParamSpec]] = {
         return self.def_id_map.get_param_specs(def_id);
     };
 
-    public get_function_type(self, def_id DefId) Option[Type] = {
+    public get_function_type(self, def_id: DefId): Option[Type] = {
         return when self.get_symbol_type(def_id) in {
             .Some(symbol_type) then when symbol_type in {
                 .FunctionType(...) then Option[Type].Some(symbol_type),
@@ -541,7 +541,7 @@ given CompilerContext {
         };
     };
 
-    public get_function_return_type(self, def_id DefId) Option[Type] = {
+    public get_function_return_type(self, def_id: DefId): Option[Type] = {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
                 .FunctionType(_, return_type_ref) then Option[Type].Some(
@@ -553,7 +553,7 @@ given CompilerContext {
         };
     };
 
-    public get_function_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
+    public get_function_param_type(self, def_id: DefId, arg_index: UInt): Option[Type] = {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
                 .FunctionType(params, _) then {
@@ -567,27 +567,27 @@ given CompilerContext {
         };
     };
 
-    public signature_param_type(self, def_id DefId, arg_index UInt) Option[Type] = {
+    public signature_param_type(self, def_id: DefId, arg_index: UInt): Option[Type] = {
         return self.get_function_param_type(def_id, arg_index);
     };
 
-    public signature_param_type_or_unknown(self, def_id DefId, arg_index UInt) Type = {
+    public signature_param_type_or_unknown(self, def_id: DefId, arg_index: UInt): Type = {
         return self.get_function_param_type(def_id, arg_index) or else Type.Unknown();
     };
 
-    public get_original_def_id(self, def_id DefId) Option[DefId] = {
+    public get_original_def_id(self, def_id: DefId): Option[DefId] = {
         return self.def_id_map.get_original_def_id(def_id);
     };
 
-    public record_original_def_id(self, def_id DefId, original_def_id DefId) Void = {
+    public record_original_def_id(self, def_id: DefId, original_def_id: DefId): Void = {
         self.def_id_map.record_import(def_id, original_def_id, List[String].new());
     };
 
-    public lookup_type(self, def_id DefId) Option[Type] = {
+    public lookup_type(self, def_id: DefId): Option[Type] = {
         return self.def_id_map.lookup_type(def_id);
     };
 
-    public type_display_name(self, t Type) String = {
+    public type_display_name(self, t: Type): String = {
         return self.def_id_map.type_display_name(t);
     };
 
@@ -595,14 +595,14 @@ given CompilerContext {
     /// the trait is first recognised. Everything that has to answer "is this the
     /// Drop protocol?" compares against this, never against the spelling "Drop"
     /// -- a user trait that happens to be called Drop must not alias it.
-    public set_std_drop_trait_def_id(self, id DefId) Void = {
+    public set_std_drop_trait_def_id(self, id: DefId): Void = {
         self.def_id_map.std_drop_trait_id = Option[DefId].Some(id);
     };
 
     /// The minted identity above, once it exists. A caller that has to ask
     /// "is this conformance to std's Drop?" compares against this -- never
     /// against the spelling.
-    public std_drop_trait_def_id(self) Option[DefId] = {
+    public std_drop_trait_def_id(self): Option[DefId] = {
         return self.def_id_map.std_drop_trait_id;
     };
 
@@ -621,15 +621,15 @@ given CompilerContext {
     // type with the same spelling is a different type and never inherits the
     // built-in behaviour. See `docs/design/traits-and-givens.md`.
 
-    public set_std_type_def_id(self, name String, id DefId) Void = {
+    public set_std_type_def_id(self, name: String, id: DefId): Void = {
         self.def_id_map.std_flow_enum_ids.insert(name, id);
     };
 
-    public std_type_def_id(self, name String) Option[DefId] = {
+    public std_type_def_id(self, name: String): Option[DefId] = {
         return self.def_id_map.std_flow_enum_ids.get(name);
     };
 
-    public is_std_drop_impl_def_id(self, id Option[DefId]) Bool = {
+    public is_std_drop_impl_def_id(self, id: Option[DefId]): Bool = {
         return when self.def_id_map.std_drop_trait_id in {
             .Some(want) then when id in {
                 .Some(got) then got == want,
@@ -639,7 +639,7 @@ given CompilerContext {
         };
     };
 
-    public has_explicit_drop(self, def_id DefId) Bool = {
+    public has_explicit_drop(self, def_id: DefId): Bool = {
         if self.def_id_map.has_explicit_drop(def_id) then {
             return true;
         };
@@ -649,22 +649,22 @@ given CompilerContext {
         );
     };
 
-    public set_explicit_drop(self, def_id DefId) Void = {
+    public set_explicit_drop(self, def_id: DefId): Void = {
         self.def_id_map.set_explicit_drop(def_id);
     };
 
-    public nominal_layout_kind(self, def_id DefId) NominalLayoutKind = {
+    public nominal_layout_kind(self, def_id: DefId): NominalLayoutKind = {
         return if self.requires_managed_nominal_layout_def(def_id) then NominalLayoutKind.Managed(
         ) else NominalLayoutKind.Value();
     };
 
-    public nominal_layout_kind_for_type(self, t Type) NominalLayoutKind = {
+    public nominal_layout_kind_for_type(self, t: Type): NominalLayoutKind = {
         let result = if self.requires_managed_nominal_layout_type(t) then NominalLayoutKind.Managed(
         ) else NominalLayoutKind.Value();
         return result;
     };
 
-    private requires_managed_nominal_layout_type(self, t Type) Bool = {
+    private requires_managed_nominal_layout_type(self, t: Type): Bool = {
         return when t in {
             .StructureType(def_id) then self.requires_managed_nominal_layout_def(def_id),
             .EnumType(def_id) then self.requires_managed_nominal_layout_def(def_id),
@@ -707,7 +707,7 @@ given CompilerContext {
         };
     };
 
-    private requires_managed_nominal_layout_def(self, def_id DefId) Bool = {
+    private requires_managed_nominal_layout_def(self, def_id: DefId): Bool = {
         if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
             return true;
         };
@@ -719,10 +719,10 @@ given CompilerContext {
 
     private contains_nominal_value_cycle(
         self,
-        current DefId,
-        target DefId,
-        mutable path Set[UInt],
-    ) Bool = {
+        current: DefId,
+        target: DefId,
+        mutable path: Set[UInt],
+    ): Bool = {
         let dependencies = self.direct_nominal_value_dependencies_of_def(current);
         for dependency in dependencies then {
             if dependency.id == target.id then {
@@ -740,7 +740,7 @@ given CompilerContext {
         return false;
     };
 
-    private direct_nominal_value_dependencies_of_def(self, def_id DefId) List[DefId] = {
+    private direct_nominal_value_dependencies_of_def(self, def_id: DefId): List[DefId] = {
         if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
             return List[DefId].new();
         };
@@ -773,7 +773,7 @@ given CompilerContext {
         return result;
     };
 
-    private lookup_generic_layout_def_id(self, t Type) Option[DefId] = {
+    private lookup_generic_layout_def_id(self, t: Type): Option[DefId] = {
         let direct_layout_name = self.get_layout_key(t);
         if self.lookup_def_id(
             List[String].new(),
@@ -820,7 +820,7 @@ given CompilerContext {
         };
     };
 
-    private direct_nominal_value_dependencies_in_type(self, t Type) List[DefId] = {
+    private direct_nominal_value_dependencies_in_type(self, t: Type): List[DefId] = {
         let mutable result = List[DefId].new();
         when t in {
             .StructureType(def_id) then {
@@ -914,30 +914,30 @@ given CompilerContext {
         return result;
     };
 
-    public get_cname(self, def_id DefId) Option[String] = {
+    public get_cname(self, def_id: DefId): Option[String] = {
         return self.def_id_map.get_cname(def_id);
     };
 
-    public set_cname(self, def_id DefId, cname String) Void = {
+    public set_cname(self, def_id: DefId, cname: String): Void = {
         self.def_id_map.set_cname(def_id, cname);
     };
 
-    public next_def_id(self) UInt = {
+    public next_def_id(self): UInt = {
         return self.def_id_map.next_id;
     };
 
-    public get_names(self) Dict[UInt, String] = {
+    public get_names(self): Dict[UInt, String] = {
         return self.def_id_map.names;
     };
 
-    public is_generic_instantiation(self, def_id DefId) Bool = {
+    public is_generic_instantiation(self, def_id: DefId): Bool = {
         return when self.def_id_map.get_generic_instantiation(def_id) in {
             .Some(v) then v,
             .None() then false,
         };
     };
 
-    public get_type_arguments(self, def_id DefId) Option[List[Type]] = {
+    public get_type_arguments(self, def_id: DefId): Option[List[Type]] = {
         when self.def_id_map.get_type_arguments(def_id) in {
             .Some(args) then {
                 return Option[List[Type]].Some(args);
@@ -966,7 +966,7 @@ given CompilerContext {
         };
     };
 
-    public get_template_name(self, def_id DefId) Option[String] = {
+    public get_template_name(self, def_id: DefId): Option[String] = {
         when self.def_id_map.get_template_name(def_id) in {
             .Some(name) then {
                 return Option[String].Some(name);
@@ -987,7 +987,7 @@ given CompilerContext {
         };
     };
 
-    public get_template_def_id(self, def_id DefId) DefId = {
+    public get_template_def_id(self, def_id: DefId): DefId = {
         return self.def_id_map.get_template_def_id(def_id);
     };
 
@@ -1007,7 +1007,7 @@ given CompilerContext {
     /// carries its DEFINITION, never a path. The no-declaration closed set is
     /// `rustc_middle::ty::fast_reject::SimplifyType`, used by
     /// `incoherent_impls: FxIndexMap<SimplifiedType, Vec<DefId>>`.
-    public method_owner_of(self, t Type) MethodOwner = {
+    public method_owner_of(self, t: Type): MethodOwner = {
         return when t in {
             .TraitObject(trait_def_id, _) then self.method_owner_decl(trait_def_id),
             .StructureType(def_id) then self.method_owner_decl(def_id),
@@ -1067,12 +1067,12 @@ given CompilerContext {
     ///
     /// Never derived from a spelling -- rustc's `Ty::Adt` holds `&AdtDef`, and an
     /// instance's `AdtDef` is its ADT.
-    public template_declaration(self, def_id DefId) DefId = {
+    public template_declaration(self, def_id: DefId): DefId = {
         let template_id = self.get_template_def_id(def_id);
         return if template_id.is_valid() then template_id else def_id;
     };
 
-    public method_owner_decl(self, def_id DefId) MethodOwner = {
+    public method_owner_decl(self, def_id: DefId): MethodOwner = {
         let template_id = self.get_template_def_id(def_id);
         return MethodOwner.Decl(if template_id.is_valid() then template_id else def_id);
     };
@@ -1082,7 +1082,7 @@ given CompilerContext {
     /// arguments -- the `GenericArgs` half of rustc's `Instance { def, args }`.
     /// Both spellings of an instantiation (`StructureType` of a monomorphized
     /// instance and `GenericStruct` of the template) land on the same pair.
-    public method_owner_and_args(self, t Type) Pair[MethodOwner, List[Type]] = {
+    public method_owner_and_args(self, t: Type): Pair[MethodOwner, List[Type]] = {
         return when t in {
             .GenericStruct(template_def_id, args) then Pair[MethodOwner, List[Type]](
                 self.method_owner_decl(template_def_id),
@@ -1147,7 +1147,7 @@ given CompilerContext {
         };
     };
 
-    private single_type_list(self, t Type) List[Type] = {
+    private single_type_list(self, t: Type): List[Type] = {
         let mutable out = List[Type].new();
         out.push(t);
         return out;
@@ -1157,13 +1157,13 @@ given CompilerContext {
 
     public update_struct_info(
         self,
-        def_id DefId,
-        members List[StructField],
-        is_generic_instantiation Bool,
-        type_arguments Option[List[Type]],
-        template_name Option[String],
-        template_def_id DefId,
-    ) Void = {
+        def_id: DefId,
+        members: List[StructField],
+        is_generic_instantiation: Bool,
+        type_arguments: Option[List[Type]],
+        template_name: Option[String],
+        template_def_id: DefId,
+    ): Void = {
         self.def_id_map.set_struct_info(
             def_id,
             StructTypeInfo(
@@ -1178,13 +1178,13 @@ given CompilerContext {
 
     public update_union_info(
         self,
-        def_id DefId,
-        cases List[EnumCaseInfo],
-        is_generic_instantiation Bool,
-        type_arguments Option[List[Type]],
-        template_name Option[String],
-        template_def_id DefId,
-    ) Void = {
+        def_id: DefId,
+        cases: List[EnumCaseInfo],
+        is_generic_instantiation: Bool,
+        type_arguments: Option[List[Type]],
+        template_name: Option[String],
+        template_def_id: DefId,
+    ): Void = {
         self.def_id_map.set_enum_info(
             def_id,
             EnumTypeInfo(
@@ -1197,78 +1197,78 @@ given CompilerContext {
         );
     };
 
-    public set_struct_mutable(self, def_id DefId, is_mutable Bool) Void = {
+    public set_struct_mutable(self, def_id: DefId, is_mutable: Bool): Void = {
         self.def_id_map.set_struct_mutable(def_id, is_mutable);
     };
 
-    public is_struct_mutable(self, def_id DefId) Bool = {
+    public is_struct_mutable(self, def_id: DefId): Bool = {
         return self.def_id_map.is_struct_mutable(def_id);
     };
 
-    public set_symbol_info(self, def_id DefId, info SymbolInfo) Void = {
+    public set_symbol_info(self, def_id: DefId, info: SymbolInfo): Void = {
         self.def_id_map.set_symbol_info(def_id, info);
     };
 
-    public set_param_specs(self, def_id DefId, specs List[FunctionParamSpec]) Void = {
+    public set_param_specs(self, def_id: DefId, specs: List[FunctionParamSpec]): Void = {
         self.def_id_map.set_param_specs(def_id, specs);
     };
 
-    public set_module_path(self, def_id DefId, module_path List[String]) Void = {
+    public set_module_path(self, def_id: DefId, module_path: List[String]): Void = {
         self.def_id_map.set_module_path(def_id, module_path);
     };
 
-    public set_source_file(self, def_id DefId, source_file String) Void = {
+    public set_source_file(self, def_id: DefId, source_file: String): Void = {
         self.def_id_map.set_source_file(def_id, source_file);
     };
 
-    public set_package_id(self, def_id DefId, package_id String) Void = {
+    public set_package_id(self, def_id: DefId, package_id: String): Void = {
         self.def_id_map.set_package_id(def_id, package_id);
     };
 
-    public set_access(self, def_id DefId, access AccessModifier) Void = {
+    public set_access(self, def_id: DefId, access: AccessModifier): Void = {
         self.def_id_map.set_access(def_id, access);
     };
 
-    public set_span(self, def_id DefId, span SourceSpan) Void = {
+    public set_span(self, def_id: DefId, span: SourceSpan): Void = {
         self.def_id_map.set_span(def_id, span);
     };
 
-    public set_struct_info(self, def_id DefId, info StructTypeInfo) Void = {
+    public set_struct_info(self, def_id: DefId, info: StructTypeInfo): Void = {
         self.def_id_map.set_struct_info(def_id, info);
     };
 
-    public set_enum_info(self, def_id DefId, info EnumTypeInfo) Void = {
+    public set_enum_info(self, def_id: DefId, info: EnumTypeInfo): Void = {
         self.def_id_map.set_enum_info(def_id, info);
     };
 
-    public set_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
+    public set_struct_fields(self, def_id: DefId, fields: List[StructField]): Void = {
         self.def_id_map.set_struct_fields(def_id, fields);
     };
 
-    public set_foreign_struct_fields(self, def_id DefId, fields List[StructField]) Void = {
+    public set_foreign_struct_fields(self, def_id: DefId, fields: List[StructField]): Void = {
         self.def_id_map.set_foreign_struct_fields(def_id, fields);
     };
 
-    public set_enum_cases(self, def_id DefId, cases List[EnumCaseInfo]) Void = {
+    public set_enum_cases(self, def_id: DefId, cases: List[EnumCaseInfo]): Void = {
         self.def_id_map.set_enum_cases(def_id, cases);
     };
 
-    public add_type(self, def_id DefId, t Type) Void = {
+    public add_type(self, def_id: DefId, t: Type): Void = {
         self.def_id_map.add_type(def_id, t);
     };
 
     public clear_variable_symbol_types_in_range(
         self,
-        start_id UInt,
-        end_exclusive UInt,
-    ) Void = {
+        start_id: UInt,
+        end_exclusive: UInt,
+    ): Void = {
         self.def_id_map.clear_variable_symbol_types_in_range(start_id, end_exclusive);
     };
 
     // ── 类型查询 ──────────────────────────────────────────────────────────
 
     /// 获取类型的人类可读名称
-    public get_type_name(self, t Type) String = {
+    public get_type_name(self, t: Type): String = {
         return when t in {
             .StructureType(def_id) then {
                 when self.def_id_map.get_name(def_id) in {
@@ -1297,7 +1297,7 @@ given CompilerContext {
     };
 
     /// 获取类型的调试名称（含泛型参数展开）
-    public get_debug_name(self, t Type) String = {
+    public get_debug_name(self, t: Type): String = {
         return when t in {
             .IntType() then "Int",
             .Int8Type() then "Int8",
@@ -1452,7 +1452,7 @@ given CompilerContext {
     // ── 类型变量查询 ──────────────────────────────────────────────────────
 
     /// 检查类型是否包含类型变量
-    public contains_type_variable(self, t Type) Bool = {
+    public contains_type_variable(self, t: Type): Bool = {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
@@ -1493,19 +1493,19 @@ given CompilerContext {
     };
 
     /// 检查类型是否包含泛型参数
-    public contains_generic_parameter(self, t Type) Bool = {
+    public contains_generic_parameter(self, t: Type): Bool = {
         return type_contains_generic_parameter(t, self);
     };
 
     /// 检查类型表面是否仍提及未解析的泛型占位。
-    public mentions_unresolved_generic_placeholder(self, t Type) Bool = {
+    public mentions_unresolved_generic_placeholder(self, t: Type): Bool = {
         return type_mentions_unresolved_generic_placeholder(t);
     };
 
     // ── Layout Key 生成 ───────────────────────────────────────────────────
 
     /// 生成类型的布局键（用于 C 标识符生成）
-    public get_layout_key(self, t Type) String = {
+    public get_layout_key(self, t: Type): String = {
         return when t in {
             .IntType() then "I",
             .Int8Type() then "I8",
@@ -1629,7 +1629,7 @@ given CompilerContext {
         };
     };
 
-    private layout_key_for_def_id(self, def_id DefId) String = {
+    private layout_key_for_def_id(self, def_id: DefId): String = {
         let name_opt = self.def_id_map.get_name(def_id);
         let module_opt = self.def_id_map.get_module_path(def_id);
         let access_opt = self.def_id_map.get_access(def_id);
@@ -1653,7 +1653,7 @@ given CompilerContext {
         };
         if is_private then {
             if source_opt is .Some(sf) then {
-                let mutable hash WrappingUInt32 = 0;
+                let mutable hash: WrappingUInt32 = 0;
                 // 简单哈希
                 let bytes = sf.bytes();
                 for b in bytes then {
@@ -1690,15 +1690,19 @@ given CompilerContext {
 
     // ── Concrete function/given-member body cache ───────────────────────────
 
-    public get_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
+    public get_concrete_global_initializer(self, def_id: DefId): Option[TypedExpr] = {
         return self.concrete_global_initializers.get(def_id.id);
     };
 
-    public set_concrete_global_initializer(self, def_id DefId, initializer TypedExpr) Void = {
+    public set_concrete_global_initializer(
+        self,
+        def_id: DefId,
+        initializer: TypedExpr,
+    ): Void = {
         self.concrete_global_initializers.insert(def_id.id, initializer);
     };
 
-    public take_concrete_global_initializer(self, def_id DefId) Option[TypedExpr] = {
+    public take_concrete_global_initializer(self, def_id: DefId): Option[TypedExpr] = {
         let initializer = self.concrete_global_initializers.get(def_id.id);
         when initializer in {
             .Some(_) then self.concrete_global_initializers.remove(def_id.id),
@@ -1707,15 +1711,15 @@ given CompilerContext {
         return initializer;
     };
 
-    public get_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
+    public get_concrete_function_body(self, def_id: DefId): Option[TypedExpr] = {
         return self.concrete_function_bodies.get(def_id.id);
     };
 
-    public set_concrete_function_body(self, def_id DefId, body TypedExpr) Void = {
+    public set_concrete_function_body(self, def_id: DefId, body: TypedExpr): Void = {
         self.concrete_function_bodies.insert(def_id.id, body);
     };
 
-    public take_concrete_function_body(self, def_id DefId) Option[TypedExpr] = {
+    public take_concrete_function_body(self, def_id: DefId): Option[TypedExpr] = {
         let body = self.concrete_function_bodies.get(def_id.id);
         when body in {
             .Some(_) then self.concrete_function_bodies.remove(def_id.id),
@@ -1724,19 +1728,19 @@ given CompilerContext {
         return body;
     };
 
-    public get_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
+    public get_concrete_function_source(self, def_id: DefId): Option[ConcreteExprSource] = {
         return self.concrete_function_sources.get(def_id.id);
     };
 
     public set_concrete_function_source(
         self,
-        def_id DefId,
-        source ConcreteExprSource,
-    ) Void = {
+        def_id: DefId,
+        source: ConcreteExprSource,
+    ): Void = {
         self.concrete_function_sources.insert(def_id.id, source);
     };
 
-    public take_concrete_function_source(self, def_id DefId) Option[ConcreteExprSource] = {
+    public take_concrete_function_source(self, def_id: DefId): Option[ConcreteExprSource] = {
         let source = self.concrete_function_sources.get(def_id.id);
         when source in {
             .Some(_) then self.concrete_function_sources.remove(def_id.id),
@@ -1745,15 +1749,15 @@ given CompilerContext {
         return source;
     };
 
-    public get_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
+    public get_concrete_given_member_body(self, def_id: DefId): Option[TypedExpr] = {
         return self.concrete_given_member_bodies.get(def_id.id);
     };
 
-    public set_concrete_given_member_body(self, def_id DefId, body TypedExpr) Void = {
+    public set_concrete_given_member_body(self, def_id: DefId, body: TypedExpr): Void = {
         self.concrete_given_member_bodies.insert(def_id.id, body);
     };
 
-    public take_concrete_given_member_body(self, def_id DefId) Option[TypedExpr] = {
+    public take_concrete_given_member_body(self, def_id: DefId): Option[TypedExpr] = {
         let body = self.concrete_given_member_bodies.get(def_id.id);
         when body in {
             .Some(_) then self.concrete_given_member_bodies.remove(def_id.id),
@@ -1762,22 +1766,25 @@ given CompilerContext {
         return body;
     };
 
-    public get_concrete_given_member_source(self, def_id DefId) Option[ConcreteExprSource] = {
+    public get_concrete_given_member_source(
+        self,
+        def_id: DefId,
+    ): Option[ConcreteExprSource] = {
         return self.concrete_given_member_sources.get(def_id.id);
     };
 
     public set_concrete_given_member_source(
         self,
-        def_id DefId,
-        source ConcreteExprSource,
-    ) Void = {
+        def_id: DefId,
+        source: ConcreteExprSource,
+    ): Void = {
         self.concrete_given_member_sources.insert(def_id.id, source);
     };
 
     public take_concrete_given_member_source(
         self,
-        def_id DefId,
-    ) Option[ConcreteExprSource] = {
+        def_id: DefId,
+    ): Option[ConcreteExprSource] = {
         let source = self.concrete_given_member_sources.get(def_id.id);
         when source in {
             .Some(_) then self.concrete_given_member_sources.remove(def_id.id),
@@ -1788,7 +1795,7 @@ given CompilerContext {
 
     /// Drop and replace concrete body caches with empty dicts to free memory.
     /// Call after monomorphization — MIR lowering and codegen don't need these.
-    public drop_concrete_bodies(self) Void = {
+    public drop_concrete_bodies(self): Void = {
         self.concrete_global_initializers = Dict[UInt, TypedExpr].new();
         self.concrete_function_bodies = Dict[UInt, TypedExpr].new();
         self.concrete_function_sources = Dict[UInt, ConcreteExprSource].new();
@@ -1798,7 +1805,7 @@ given CompilerContext {
 
     /// Drop DefId metadata that is only needed before codegen.
     /// Keep names/types/layout-related maps intact for MIR/codegen queries.
-    public drop_codegen_unused_metadata(self) Void = {
+    public drop_codegen_unused_metadata(self): Void = {
         self.def_id_map.name_to_def_id = Dict[String, DefId].new();
         self.def_id_map.package_ids = Dict[UInt, String].new();
         self.def_id_map.spans = Dict[UInt, SourceSpan].new();
@@ -1813,7 +1820,7 @@ given CompilerContext {
 
 // ── 辅助函数 ──────────────────────────────────────────────────────────────────
 
-private let join_strings(parts List[String], sep String) String = {
+private let join_strings(parts: List[String], sep: String): String = {
     let mutable result = StringBuilder.new();
     let mutable first = true;
     for p in parts then {

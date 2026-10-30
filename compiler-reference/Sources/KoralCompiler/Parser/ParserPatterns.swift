@@ -32,7 +32,7 @@ extension Parser {
       let probeState = lexer.saveState()
       let probeToken = currentToken
       try match(.identifier(name))
-      try match(.colon)
+      try match(.equal)
       let labeledRest = currentToken === .ellipsis
       lexer.restoreState(probeState)
       currentToken = probeToken
@@ -47,7 +47,7 @@ extension Parser {
       let savedToken = currentToken
       do {
         try match(.identifier(name))
-        try match(.colon)
+        try match(.equal)
         let pattern = try parsePattern()
         return PatternArg(label: name, pattern: pattern)
       } catch {
@@ -268,9 +268,12 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      // Type pattern binding without *: name TypeName (new syntax)
-      // Check if next token is a type identifier (starts with uppercase)
-      if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
+      // Type pattern binding: `name: TypeName`
+      if currentToken === .colon {
+        try match(.colon)
+        guard case .identifier(let typeName) = currentToken, isValidTypeName(typeName) else {
+          throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
+        }
         let typeNameSpan = currentSpan
         try match(.identifier(typeName))
         let targetNode = TypeNode.identifier(typeName, span: typeNameSpan)
@@ -328,9 +331,13 @@ extension Parser {
       }
       try match(.identifier(name))
 
-      // Type pattern binding without `*`: `mutable name TypeName`.
+      // Type pattern binding: `mutable name: TypeName`.
       // (`guide/grammar.bnf` <trait-object-type-binding-pattern>.)
-      if case .identifier(let typeName) = currentToken, isValidTypeName(typeName) {
+      if currentToken === .colon {
+        try match(.colon)
+        guard case .identifier(let typeName) = currentToken, isValidTypeName(typeName) else {
+          throw ParserError.expectedTypeIdentifier(span: currentSpan, got: currentToken.description)
+        }
         let typeNameSpan = currentSpan
         try match(.identifier(typeName))
         let targetNode = TypeNode.identifier(typeName, span: typeNameSpan)
