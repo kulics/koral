@@ -343,6 +343,7 @@ given TypeChecker {
         param_specs: List[FunctionParamSpec],
         field_types: List[Type],
         constructor_description: String,
+        call_span: SourceSpan,
     ): Option[List[Expr]] = {
         let effective_specs = if param_specs.is_empty() and not field_types.is_empty() then self.positional_param_specs_for_count(
             field_types.count(),
@@ -351,6 +352,7 @@ given TypeChecker {
             args,
             effective_specs,
             constructor_description,
+            call_span,
         );
     };
 
@@ -1083,6 +1085,7 @@ given TypeChecker {
                     param_specs,
                     field_types,
                     "\(effective_type_name).\(method_name)",
+                    type_name_span,
                 ) or else {
                     return self.empty_typed_block(Type.Unknown());
                 };
@@ -1183,6 +1186,7 @@ given TypeChecker {
             call_args,
             static_param_specs,
             method_name,
+            type_name_span,
         ) or else {
             return self.empty_typed_block(Type.Unknown());
         };
@@ -1536,7 +1540,12 @@ given TypeChecker {
                 // The full declaration list, `self` included: `(T).m()` is not
                 // a method call with a receiver, so nothing is consumed off
                 // the front.
-                when self.plan_call_argument_exprs(args, param_specs, method_name) in {
+                when self.plan_call_argument_exprs(
+                    args,
+                    param_specs,
+                    method_name,
+                    call_span,
+                ) in {
                     .Some(planned_args) then {
                         let mutable arg_idx: UInt = 0;
                         for a in planned_args then {
@@ -2908,6 +2917,7 @@ given TypeChecker {
                 constructor_param_specs,
                 constructor_field_types,
                 ctor_description,
+                expr_span(callee),
             ) or else {
                 return make_typed_expr(
                     TypedExprKind.Call(
@@ -2978,6 +2988,7 @@ given TypeChecker {
                                             param_specs,
                                             field_types,
                                             "\(base_name).\(member_name)",
+                                            expr_span(callee),
                                         ) or else {
                                             return make_typed_expr(
                                                 TypedExprKind.Call(
@@ -3064,6 +3075,7 @@ given TypeChecker {
                                                 param_specs,
                                                 field_types,
                                                 "\(base_name).\(member_name)",
+                                                expr_span(callee),
                                             ) or else {
                                                 return make_typed_expr(
                                                     TypedExprKind.Call(
@@ -3356,6 +3368,7 @@ given TypeChecker {
                 call_args,
                 callee_param_specs,
                 self.call_description_for_expr(callee),
+                expr_span(callee),
             ) or else {
                 return make_typed_expr(
                     TypedExprKind.Call(typed_callee_ref, List[TypedExpr].new()),
@@ -4223,6 +4236,7 @@ given TypeChecker {
                         param_specs,
                         field_types,
                         self.context().type_display_name(ret_type),
+                        expr_span(callee),
                     ) or else {
                         return make_typed_expr(
                             TypedExprKind.Call(typed_callee_ref, typed_args),
@@ -4261,6 +4275,7 @@ given TypeChecker {
                             param_specs,
                             field_types,
                             self.context().symbol_name(sym),
+                            expr_span(callee),
                         ) or else {
                             return make_typed_expr(
                                 TypedExprKind.Call(typed_callee_ref, typed_args),

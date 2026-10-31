@@ -141,7 +141,7 @@ extension TypeChecker {
         if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
           && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
         {
-          try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan))
+          try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
         }
       } else if let expected = expectedReturnType {
         // If expected return type is a generic parameter, infer from body instead
@@ -154,7 +154,7 @@ extension TypeChecker {
           if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
             && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
           {
-            try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: currentSpan))
+            try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
           }
         }
       } else {
@@ -165,7 +165,7 @@ extension TypeChecker {
               && inferred != tailType
               && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
             {
-              try handleError(SemanticError(.typeMismatch(expected: inferred.description, got: tailType.description), span: currentSpan))
+              try handleError(SemanticError(.typeMismatch(expected: inferred.description, got: tailType.description), span: blame))
             }
             actualReturnType = inferred
           } else {

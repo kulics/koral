@@ -385,6 +385,21 @@ given MIRVerifier {
                 if self.program.context.contains_generic_parameter(call.result_type) then {
                     return self.fail(function, "call result has unresolved generic type");
                 };
+                // The argument list must match the callee's DECLARATION exactly
+                // (defaults are materialised before this point). A mismatch here
+                // is a compiler bug upstream -- surface it as a verifier error
+                // instead of emitting a call the C compiler will reject.
+                when self.callee_param_count(call.callee, local_types) in {
+                    .Some(expected) then {
+                        if call.arguments.count() != expected then {
+                            return self.fail(
+                                function,
+                                "call carries \(call.arguments.count()) argument(s) but the callee declares \(expected) parameter(s)",
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
                 for argument in call.arguments then {
                     let _ = self.verify_value(function, argument, local_ids, local_types) or return;
                 };
@@ -993,6 +1008,35 @@ given MIRVerifier {
         full.push_string(": ");
         full.push_string(message);
         return Result[Void].Error(full.to_string());
+    };
+
+    /// The declared parameter count behind a call operand (`self` included in
+    /// method types). `None` when the operand is not function-typed.
+    private callee_param_count(
+        self,
+        callee: MIROperand,
+        local_types: Dict[UInt, Type],
+    ): Option[UInt] = {
+        let mutable resolved = Option[Type].None();
+        when callee in {
+            .Function(sym) then {
+                resolved = Option[Type].Some(sym.symbol_type);
+            },
+            .Local(local_id) then {
+                resolved = local_types.get(local_id.raw_value);
+            },
+            .Constant(_) then {},
+        };
+        when resolved in {
+            .Some(t) then {
+                return when t in {
+                    .FunctionType(params, _) then Option[UInt].Some(params.count()),
+                    _ then Option[UInt].None(),
+                };
+            },
+            .None() then {},
+        };
+        return Option[UInt].None();
     };
 
     private mir_local_type_map(self, function: MIRFunction): Dict[UInt, Type] = {

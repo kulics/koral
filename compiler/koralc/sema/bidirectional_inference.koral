@@ -273,13 +273,14 @@ given TypeChecker {
                 cast_span,
                 scope,
             ),
-            .LambdaExpr(params, return_type, body, _) then {
+            .LambdaExpr(params, return_type, body, lambda_span) then {
                 let bidi_result = self.bidi_check_lambda(
                     params,
                     return_type,
                     body,
                     expected,
                     scope,
+                    lambda_span,
                 );
                 let lambda_type = self.build_lambda_function_type(bidi_result);
                 make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
@@ -329,6 +330,7 @@ given TypeChecker {
         body: Expr,
         expected: Type,
         scope: Scope,
+        lambda_span: SourceSpan,
     ): TypedExpr = {
         let fn_info = when expected in {
             .FunctionType(fn_params, ret) then Option[Pair[List[Type], Type]].Some(
@@ -395,8 +397,10 @@ given TypeChecker {
             );
             self.storage.function_return_context.is_inferring = infer_return_type_from_generic_block_returns;
         };
-        let body_expected = if body is .Block(...) then Option[Type].None()
-        else if ret_type is .Unknown() then Option[Type].None()
+        // The body is the return type's value whether it is a block or not
+        // (the seed checks lambda bodies against the return type the same way),
+        // so the block-value rules see the expectation too.
+        let body_expected = if ret_type is .Unknown() then Option[Type].None()
         else Option[Type].Some(ret_type);
         let typed_body = self.check_value_body_expr(body, body_expected, lambda_scope);
         let inferred_return_type = self.storage.function_return_context.inferred_return_type;
@@ -404,7 +408,7 @@ given TypeChecker {
         if not self.is_unresolved_expr_type(ret_type) and not self.contains_generic_parameter(
             ret_type,
         ) then {
-            self.validate_lambda_return_type(ret_type, typed_body);
+            self.validate_lambda_return_type(ret_type, typed_body, lambda_span);
         };
         let actual_ret = if self.is_unresolved_expr_type(ret_type) then {
             if infer_return_type_from_block_returns then {

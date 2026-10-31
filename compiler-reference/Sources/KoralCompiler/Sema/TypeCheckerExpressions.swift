@@ -2176,11 +2176,25 @@ extension TypeChecker {
       defer { currentBlockExpressionDepth -= 1 }
       return try withNewScope {
         let diagnosticsBeforeBlock = diagnosticCollector.errorCountValue
+
+        // The trailing expression of a tail-less block in value position is the
+        // block's PURPOSE, not a pointless statement -- the effect rule does
+        // not speak for it. The block's void type is then free to disagree
+        // with the expectation through the normal mismatch channels.
+        var suppressTrailingEffect = false
+        if tailExpression == nil, usage == .value, let expectedType,
+          expectedType != .void, expectedType != .never, expectedType != .error,
+          !statements.isEmpty
+        {
+          suppressTrailingEffect = true
+        }
+        let trailingIndex = statements.count - 1
+
         var typedStatements: [TypedStatementNode] = []
         var blockType: Type = .void
         var controlFlowTerminator: String? = nil
 
-        for stmt in statements {
+        for (index, stmt) in statements.enumerated() {
           if let controlFlowTerminator {
             throw SemanticError(
               .generic("unreachable statement after \(controlFlowTerminator)"),
@@ -2188,7 +2202,15 @@ extension TypeChecker {
             )
           }
 
-          let typedStmt = try checkStatement(stmt)
+          var typedStmt: TypedStatementNode
+          if suppressTrailingEffect, index == trailingIndex,
+            case .expression(let lastValue, _) = stmt,
+            !sourceExpressionIsControlForm(lastValue)
+          {
+            typedStmt = .expression(try inferTypedExpression(lastValue, usage: .statement))
+          } else {
+            typedStmt = try checkStatement(stmt)
+          }
           typedStatements.append(typedStmt)
 
           if let terminator = statementTerminatorName(typedStmt) {

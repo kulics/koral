@@ -10,6 +10,17 @@ extension TypeChecker {
     return sourceExpressionIsObviouslyPureStatement(expr)
   }
 
+  /// Control-flow and block forms stand as statements in their own right --
+  /// they never participate in the `;`-value trap diagnosis.
+  func sourceExpressionIsControlForm(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .ifExpression, .whenExpression, .whileExpression, .forExpression, .blockExpression:
+      return true
+    default:
+      return false
+    }
+  }
+
   func sourceExpressionIsObviouslyPureStatement(_ expr: ExpressionNode) -> Bool {
     switch expr {
     case .integerLiteral,

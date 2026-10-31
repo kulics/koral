@@ -1213,9 +1213,32 @@ given TypeChecker {
         block_span: SourceSpan,
     ): TypedExpr = {
         let diagnostics_before = self.storage.diagnostics.count();
+        // The `;`-value trap: a tail-less block in value position whose last
+        // statement is an expression of exactly the expected type is a dropped
+        // block value. Say so once, at the trailing expression, instead of the
+        // arm/type noise that would otherwise follow. The verdict happens in
+        // loop order so earlier statements are already in scope.
+        // The trailing expression of a tail-less block in value position is the
+        // block's PURPOSE, not a pointless statement -- the effect rule does
+        // not speak for it. The block's Void type is then free to disagree with
+        // the expectation through the normal mismatch channels.
+        let suppress_trailing_effect = when expected in {
+            .Some(expected_t) then {
+                tail_expression is .None() and not statements.is_empty() and not self.contains_generic_parameter(
+                    expected_t,
+                ) and not self.is_unresolved_expr_type(expected_t) and not self.same_expr_type(
+                    expected_t,
+                    Type.VoidType(),
+                ) and not self.same_expr_type(expected_t, Type.NeverType())
+            },
+            .None() then false,
+        };
+        let trailing_index = if statements.is_empty() then UInt(0)
+        else statements.count() - 1;
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
         let mutable explicit_terminator = Option[String].None();
+        let mutable stmt_index: UInt = 0;
         for stmt in statements then {
             if explicit_terminator is .Some(name) then {
                 self.push_statement_diagnostic(
@@ -1223,7 +1246,27 @@ given TypeChecker {
                     "unreachable statement after \(name)",
                 );
             };
-            let ts = self.check_statement(stmt, expected, scope);
+            let mutable ts_opt = Option[TypedStatement].None();
+            if suppress_trailing_effect and stmt_index == trailing_index then {
+                when stmt in {
+                    .ExprStmt(value, _) then {
+                        let value_is_control_form = value is .IfExpr(...) or is .WhenExpr(...) or is .WhileExpr(...) or is .ForExpr(...) or is .Block(...);
+                        if not value_is_control_form then {
+                            ts_opt = Option[TypedStatement].Some(
+                                TypedStatement.ExprStmt(
+                                    self.check_expr_core_ref(value, .None(), scope),
+                                    expr_span(value),
+                                ),
+                            );
+                        };
+                    },
+                    _ then {},
+                };
+            };
+            let ts = when ts_opt in {
+                .Some(s) then s,
+                .None() then self.check_statement(stmt, expected, scope),
+            };
             typed_stmts.push(ts);
             when self.statement_terminator_name(ts) in {
                 .Some(name) then {
@@ -1234,6 +1277,7 @@ given TypeChecker {
                 },
                 .None() then {},
             };
+            stmt_index += 1;
         };
         let mutable typed_tail = Option[TypedExpr].None();
         let mutable block_type = Type.VoidType();

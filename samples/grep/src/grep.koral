@@ -104,74 +104,108 @@ let parse_args(args: List[String]): Result[Config] = {
         while j < arg.count() then {
             let ch = arg.substring(j..<(j + 1));
             j += 1;
-            if ch == "n" then {
-                config.flags.line_numbers = true;
-            } else if ch == "i" then {
-                config.flags.ignore_case = true;
-            } else if ch == "v" then {
-                config.flags.invert = true;
-            } else if ch == "c" then {
-                config.flags.count_only = true;
-            } else if ch == "l" then {
-                config.flags.files_with_matches = true;
-            } else if ch == "L" then {
-                config.flags.files_without_matches = true;
-            } else if ch == "h" then {
-                config.flags.no_filename = true;
-            } else if ch == "o" then {
-                config.flags.only_matching = true;
-            } else if ch == "q" then {
-                config.flags.quiet = true;
-            } else if ch == "x" then {
-                config.flags.whole_line = true;
-            } else if ch == "w" then {
-                config.flags.word_match = true;
-            } else if ch == "r" then {
-                config.flags.recursive = true;
-            } else if ch == "e" then {
-                if i >= args.count() then {
-                    return Result[Config].Error("option requires an argument -- 'e'");
-                };
-                config.patterns.push(args[i]);
-                have_pattern_source = true;
-                i += 1;
-            } else if ch == "f" then {
-                if i >= args.count() then {
-                    return Result[Config].Error("option requires an argument -- 'f'");
-                };
-                config.pattern_files.push(args[i]);
-                have_pattern_source = true;
-                i += 1;
-            } else if ch == "A" or ch == "B" or ch == "C" or ch == "m" then {
-                // A number: the rest of the cluster, or the next argument.
-                let rest = arg.substring(j..<(arg.count()));
-                let mutable text = rest;
-                if rest.count() > 0 then {
-                    j = arg.count();
-                } else {
+            when ch in {
+                "n" then {
+                    config.flags.line_numbers = true;
+                },
+                "i" then {
+                    config.flags.ignore_case = true;
+                },
+                "v" then {
+                    config.flags.invert = true;
+                },
+                "c" then {
+                    config.flags.count_only = true;
+                },
+                "l" then {
+                    config.flags.files_with_matches = true;
+                },
+                "L" then {
+                    config.flags.files_without_matches = true;
+                },
+                "h" then {
+                    config.flags.no_filename = true;
+                },
+                "o" then {
+                    config.flags.only_matching = true;
+                },
+                "q" then {
+                    config.flags.quiet = true;
+                },
+                "x" then {
+                    config.flags.whole_line = true;
+                },
+                "w" then {
+                    config.flags.word_match = true;
+                },
+                "r" then {
+                    config.flags.recursive = true;
+                },
+                "e" then {
                     if i >= args.count() then {
                         return Result[Config].Error(
-                            "option requires an argument -- '\(ch)'",
+                            "option requires an argument -- 'e'",
                         );
                     };
-                    text = args[i];
+                    config.patterns.push(args[i]);
+                    have_pattern_source = true;
                     i += 1;
-                };
-                let n = parse_count(text) or else {
-                    return Result[Config].Error("invalid count argument -- '\(text)'");
-                };
-                if ch == "A" then {
-                    config.flags.after_context = n;
-                } else if ch == "B" then {
-                    config.flags.before_context = n;
-                } else if ch == "C" then {
-                    config.flags.after_context = n;
-                    config.flags.before_context = n;
-                } else {
-                    config.flags.max_count = n;
-                };
-            } else {
-                return Result[Config].Error("invalid option -- '\(ch)'");
+                },
+                "f" then {
+                    if i >= args.count() then {
+                        return Result[Config].Error(
+                            "option requires an argument -- 'f'",
+                        );
+                    };
+                    config.pattern_files.push(args[i]);
+                    have_pattern_source = true;
+                    i += 1;
+                },
+                "A" or "B" or "C" or "m" then {
+                    // A number: the rest of the cluster, or the next argument.
+                    // The arm blocks yield their TRAILING EXPRESSION (no `;`
+                    // on it) -- a block's tail is its value.
+                    let rest = arg.substring(j..<(arg.count()));
+                    let text = when rest.count() > 0 in {
+                        true then {
+                            j = arg.count();
+                            rest
+                        },
+                        false then {
+                            if i >= args.count() then {
+                                return Result[Config].Error(
+                                    "option requires an argument -- '\(ch)'",
+                                );
+                            };
+                            let value = args[i];
+                            i += 1;
+                            value
+                        },
+                    };
+                    let n = parse_count(text) or else {
+                        return Result[Config].Error(
+                            "invalid count argument -- '\(text)'",
+                        );
+                    };
+                    when ch in {
+                        "A" then {
+                            config.flags.after_context = n;
+                        },
+                        "B" then {
+                            config.flags.before_context = n;
+                        },
+                        "C" then {
+                            config.flags.after_context = n;
+                            config.flags.before_context = n;
+                        },
+                        _ then {
+                            config.flags.max_count = n;
+                        },
+                    };
+                },
+                _ then {
+                    return Result[Config].Error("invalid option -- '\(ch)'");
+                },
             };
         };
     };
@@ -237,9 +271,14 @@ let word_hit(patterns: List[Regex], subject: String): Bool = {
 
 /// A line is selected when the pattern test passes, XOR-ed with `-v`.
 let line_selected(patterns: List[Regex], flags: Flags, subject: String): Bool = {
-    let hit = if flags.word_match then word_hit(patterns, subject)
-    else any_match(patterns, subject);
-    return if flags.invert then not hit else hit;
+    let hit = when flags.word_match in {
+        true then word_hit(patterns, subject),
+        false then any_match(patterns, subject),
+    };
+    return when flags.invert in {
+        true then not hit,
+        false then hit,
+    };
 };
 
 /// Collect patterns from `-e`/bare patterns plus `-f` files (one per line).
@@ -465,9 +504,24 @@ let usage(): Void = {
     );
 };
 
+/// `-L` flips what counts as a hit for the exit code.
+let exit_relevant(flags: Flags, selected: Bool): Bool = {
+    return when flags.files_without_matches in {
+        true then not selected,
+        false then selected,
+    };
+};
+
 let main(): Int = {
     let argv = args();
-    let config = parse_args(argv) or else as e in {
+    // Shape dispatch by list pattern: nothing beyond the program name is a
+    // usage complaint.
+    let parsed = when argv in {
+        [] then Result[Config].Error("no pattern given"),
+        [_] then Result[Config].Error("no pattern given"),
+        [_, ...] then parse_args(argv),
+    };
+    let config = parsed or else as e in {
         eprintln("grep: \(e.message())");
         usage();
         return 2;
@@ -501,8 +555,7 @@ let main(): Int = {
             eprintln("grep: \(e.message())");
             return 2;
         };
-        let relevant = if config.flags.files_without_matches then not selected
-        else selected;
+        let relevant = exit_relevant(config.flags, selected);
         any_relevant = relevant;
     } else {
         let show_name = not config.flags.no_filename and (inputs.count() > 1 or config.flags.recursive);
@@ -522,8 +575,7 @@ let main(): Int = {
                 eprintln("grep: \(path): \(e.message())");
                 return 2;
             };
-            let relevant = if config.flags.files_without_matches then not selected
-            else selected;
+            let relevant = exit_relevant(config.flags, selected);
             if relevant then {
                 any_relevant = true;
             };
