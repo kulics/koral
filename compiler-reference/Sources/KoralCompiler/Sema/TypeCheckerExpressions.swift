@@ -4477,8 +4477,21 @@ extension TypeChecker {
             }
           }
         }
+        // A case-shaped member names no static method (uppercase members are
+        // never methods), so the call names nothing: `Box2[Int, String].Bar(1)`
+        // is the same objection the enum spelling gets, with the noun the
+        // struct base earns. A lowercase member is a static miss the
+        // member-value typing already reports.
+        if isASCIITypeStyleIdentifier(memberName) {
+          let renderedArgs = resolvedArgs.map { "\($0)" }.joined(separator: ", ")
+          let spelling = renderedArgs.isEmpty ? baseName : "\(baseName)[\(renderedArgs)]"
+          throw SemanticError(
+            .generic("Member '\(memberName)' not found in type '\(spelling)'"),
+            span: currentSpan
+          )
+        }
       }
-      
+
       // Check if it's a generic enum with a case constructor or static method
       if let template = currentScope.lookupGenericEnumTemplate(baseName) {
         // Validate type argument count
@@ -7227,7 +7240,11 @@ extension TypeChecker {
       }
     }
 
-    throw SemanticError.undefinedMember(methodName, typeName)
+    // Spell the receiver the way the call wrote it: `Res[Int].bogus(1)` says
+    // `in type 'Res[Int]'`, not `in type 'Res'`.
+    let renderedTypeArgs = resolvedTypeArgs.map { "\($0)" }.joined(separator: ", ")
+    let spelledTypeName = renderedTypeArgs.isEmpty ? typeName : "\(typeName)[\(renderedTypeArgs)]"
+    throw SemanticError.undefinedMember(methodName, spelledTypeName)
   }
   
   func inferGenericEnumStaticMethodCall(
@@ -7317,7 +7334,11 @@ extension TypeChecker {
       }
     }
     
-    throw SemanticError.undefinedMember(methodName, typeName)
+    // Spell the receiver the way the call wrote it: `Res[Int].bogus(1)` says
+    // `in type 'Res[Int]'`, not `in type 'Res'`.
+    let renderedTypeArgs = resolvedTypeArgs.map { "\($0)" }.joined(separator: ", ")
+    let spelledTypeName = renderedTypeArgs.isEmpty ? typeName : "\(typeName)[\(renderedTypeArgs)]"
+    throw SemanticError.undefinedMember(methodName, spelledTypeName)
   }
 
   private func inferGenericTypeArgsForStaticMethodCall(
@@ -7654,7 +7675,11 @@ extension TypeChecker {
       }
     }
     
-    throw SemanticError.undefinedMember(methodName, typeName)
+    // Spell the receiver the way the call wrote it: `Res[Int].bogus(1)` says
+    // `in type 'Res[Int]'`, not `in type 'Res'`.
+    let renderedTypeArgs = resolvedTypeArgs.map { "\($0)" }.joined(separator: ", ")
+    let spelledTypeName = renderedTypeArgs.isEmpty ? typeName : "\(typeName)[\(renderedTypeArgs)]"
+    throw SemanticError.undefinedMember(methodName, spelledTypeName)
   }
 
   private func inferStaticGenericMethodCallOnConcreteType(

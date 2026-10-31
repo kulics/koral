@@ -697,33 +697,78 @@ given TypeChecker {
                 )
             },
             .EnumCase(case_name, elements, span) then {
-                // A dot-form name is a struct destructure or a case of the
-                // subject. Anything else names nothing, and the seed says so
-                // at the enclosing `when`: `Enum case 'Bogus' not found in
-                // type 'Shape'`. The lowering stays silent -- the caller owns
-                // the anchor -- and the pattern degrades to a wildcard that
-                // claims no coverage.
-                // A poisoned subject disagrees with nothing: the complaint
-                // its poison came from has said everything, and a case-miss
-                // on top is the same cascade as anywhere else.
-                if not self.is_unresolved_expr_type(subject_type) and self.struct_pattern_def_id(
-                    case_name,
-                ) == def_id_invalid() and not self.static_member_is_enum_case(
+                let pattern_def_id = self.struct_pattern_def_id(case_name);
+                let name_is_nominal = pattern_def_id != def_id_invalid();
+                let case_exists = self.static_member_is_enum_case(
                     subject_type,
                     case_name,
-                ) then {
-                    if self.storage.pattern_case_miss is .None() then {
-                        self.storage.pattern_case_miss = Option[PatternCaseMiss].Some(
-                            PatternCaseMiss(
-                                case_name,
-                                self.pattern_case_miss_type_label(subject_type),
-                            ),
+                );
+                let subject_is_struct = when subject_type in {
+                    .StructureType(_) then true,
+                    .GenericStruct(_, _) then true,
+                    _ then false,
+                };
+                let subject_is_enum = when subject_type in {
+                    .EnumType(_) then true,
+                    .GenericEnum(_, _) then true,
+                    _ then false,
+                };
+                // The dot-form on an enum subject names a CASE of it, full
+                // stop: `.Point(a, b)` over `Shape` names no such case,
+                // whether or not `Point` is a type somewhere else. On other
+                // subjects the name is a struct-destructure claim, and a
+                // claim the subject cannot meet is refused with the claim's
+                // own words. The lowering stays silent -- the caller owns the
+                // anchor -- and the pattern degrades to a wildcard that
+                // claims no coverage.
+                let mutable miss_message = Option[String].None();
+                let mutable miss_span = Option[SourceSpan].None();
+                if subject_is_enum and not case_exists then {
+                    miss_message = Option[String].Some(
+                        "Enum case '\(case_name)' not found in type '\(self.pattern_case_miss_type_label(
+                            subject_type,
+                        ))'",
+                    );
+                } else if subject_is_struct and not name_is_nominal then {
+                    miss_message = Option[String].Some(
+                        "Enum case '\(case_name)' not found in type '\(self.pattern_case_miss_type_label(
+                            subject_type,
+                        ))'",
+                    );
+                } else if not subject_is_struct and not subject_is_enum then {
+                    if name_is_nominal then {
+                        miss_message = Option[String].Some(
+                            "Type mismatch: expected Enum Type, got \(type_to_string(subject_type))",
+                        );
+                    } else {
+                        miss_message = Option[String].Some(
+                            "Enum case '\(case_name)' not found in type '\(self.pattern_case_miss_type_label(
+                                subject_type,
+                            ))'",
                         );
                     };
-                    return TypedPattern.Wildcard();
+                } else if subject_is_struct and name_is_nominal and pattern_def_id != self.nominal_decl_def_id(
+                    subject_type,
+                ) then {
+                    miss_message = Option[String].Some(
+                        "Type mismatch: expected \(case_name), got \(type_to_string(subject_type))",
+                    );
+                    miss_span = Option[SourceSpan].Some(span);
                 };
-                // When subject is a struct type, redirect .StructName(...) to StructPattern
-                let pattern_def_id = self.struct_pattern_def_id(case_name);
+                when miss_message in {
+                    .Some(message) then {
+                        // A poisoned subject disagrees with nothing: the
+                        // complaint its poison came from has said everything,
+                        // and the pattern keeps the ordinary lowering below
+                        // rather than a wildcard (a wildcard beside a real `_`
+                        // arm reads as a duplicate).
+                        if not self.is_unresolved_expr_type(subject_type) then {
+                            self.record_pattern_case_miss(message, miss_span);
+                            return TypedPattern.Wildcard();
+                        };
+                    },
+                    .None() then {},
+                };
                 let struct_param_specs = self.get_struct_pattern_param_specs(
                     subject_type,
                     pattern_def_id,
@@ -1868,9 +1913,17 @@ given TypeChecker {
         return type_to_string(inner_type);
     };
 
-    /// Consume the first unresolvable dot-form name a lowering met, if any.
-    /// One miss per `when` is the seed's shape: it throws at the first bad
-    /// case and never reaches the rest of the arms.
+    /// The first complaint a lowering met, recorded once per `when`: the seed
+    /// throws at the first bad pattern and never reaches the rest of the arms.
+    record_pattern_case_miss(self, message: String, span: Option[SourceSpan]): Void = {
+        if self.storage.pattern_case_miss is .None() then {
+            self.storage.pattern_case_miss = Option[PatternCaseMiss].Some(
+                PatternCaseMiss(message, span),
+            );
+        };
+    };
+
+    /// Consume the first complaint a lowering met, if any.
     take_pattern_case_miss(self): Option[PatternCaseMiss] = {
         let miss = self.storage.pattern_case_miss;
         self.storage.pattern_case_miss = Option[PatternCaseMiss].None();
