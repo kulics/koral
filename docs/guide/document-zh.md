@@ -1314,7 +1314,7 @@ let chained = opt and then as v in half(v);  // Some(21) —— 类型是 Option
 type Config(window: Window);
 type Window(title: String);
 let cfg = Option[Config].Some(Config(Window("untitled")));
-let title = cfg and then .window.title or else "none";   // Some("untitled")
+let title = cfg and then .window.title or else "none";   // "untitled"
 
 // 为 Result 的错误命名。
 let parsed = Result[String].Error("bad input");
@@ -2391,7 +2391,7 @@ given[T: Ord] Cursor[T] {
 
 工具方法可用在：
 
-- 泛型约束上下文（如 `[T Trait]`）
+- 泛型约束上下文（如 `[T: Trait]`）
 - trait object 上下文
 - 显式实现该 trait 的具体类型
 

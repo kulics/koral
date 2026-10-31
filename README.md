@@ -9,7 +9,7 @@ There is no garbage collector and no manual `free`. Nominal types come in exactl
 ## Why Koral is shaped this way
 
 - **Explicit statement boundaries.** Every statement ends with `;`, newlines are insignificant, and there is no automatic semicolon insertion. A generator emits one statement at a time; a reviewer sees exactly where each one ends.
-- **The declaration fixes the call shape.** A positional parameter (`name Type`) is passed by position, a named parameter (`name: Type`) by label, and there is no optional-label form — a generated call site cannot drift into a half-labeled variant. Destructuring follows the same rules.
+- **The declaration fixes the call shape.** A positional parameter (`name: Type`) is passed by position, a named parameter (`name: Type =`) by label, and there is no optional-label form — a generated call site cannot drift into a half-labeled variant. Destructuring follows the same rules.
 - **One import form.** `using` has a single spelling; the specifier's shape decides the meaning (`"./helpers.koral"` merges a file, `"std/io"` imports a module). There are no globs; `as` renames one symbol.
 - **A module-level name has one owner.** A second, different declaration under the same spelling — from a top-level declaration, another import, or the prelude — is an error, not silent shadowing. Renaming is always explicit.
 - **Errors flow through the expression.** `or else`, `and then` and `or return` handle absence and failure inline; the language has no `throw` / `try` / `catch`. A reviewer never has to scan a call graph to see where an error can travel.

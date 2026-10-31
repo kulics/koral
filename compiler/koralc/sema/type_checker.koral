@@ -99,7 +99,16 @@ type mutable TypeCheckerStorage(
     /// applies there and nowhere else: a function body may freely call forward
     /// to any global.
     mutable in_global_init: Bool,
+    /// The first unresolvable dot-form name a pattern lowering met. The
+    /// when/is checker consumes it (`take_pattern_case_miss`) and reports it
+    /// at ITS span -- the seed blames the whole `when`, not the pattern -- so
+    /// the lowering itself stays silent and cannot race the caller's anchor.
+    mutable pattern_case_miss: Option[PatternCaseMiss],
 );
+
+/// A dot-form pattern name that is neither a struct destructure nor a case of
+/// the subject. Reported once per `when`, at the `when`.
+type PatternCaseMiss(case_name: String, type_name: String);
 
 public type mutable TypeChecker(mutable storage: TypeCheckerStorage);
 
@@ -302,6 +311,7 @@ given TypeChecker {
             Option[SourceSpan].None(),
             Set[String].new(),
             false,
+            Option[PatternCaseMiss].None(),
         );
         return TypeChecker(s);
     };

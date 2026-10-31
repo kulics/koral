@@ -889,6 +889,25 @@ given TypeChecker {
         };
     };
 
+    /// The receiver type as the call spelled it: `Res`, or `Res[Int, String]`
+    /// when the call carried type arguments. Diagnostics name the type the
+    /// reader wrote, not the resolved form.
+    static_receiver_type_spelling(self, type_name: String, type_args: List[TypeNode]): String = {
+        if type_args.is_empty() then {
+            return type_name;
+        };
+        let mutable out = type_name + "[";
+        let mutable idx: UInt = 0;
+        for ta in type_args then {
+            if idx > UInt(0) then {
+                out = out + ", ";
+            };
+            out = out + type_node_spelling(ta);
+            idx = idx + UInt(1);
+        };
+        return out + "]";
+    };
+
     check_static_method_call_ref(
         self,
         type_name: String,
@@ -1119,6 +1138,71 @@ given TypeChecker {
         };
         if raw_static_sig_opt is .Some(_) and static_sig_opt is .None() and enum_constructor_type_opt is .None() then {
             return self.empty_typed_block(Type.Unknown());
+        };
+        // Neither a registered static method nor an enum case: the call names
+        // nothing. Say so once and stop -- the old fall-through fabricated a
+        // call that `check` accepted and `build` lowered into invalid C
+        // (`Int.parse` without `using "std/text"`). Swift reports
+        // `Member 'parse' not found in type 'Int'` at the type-name span.
+        if raw_static_sig_opt is .None() and enum_constructor_type_opt is .None() then {
+            // A bound type parameter resolves its statics elsewhere in this
+            // flow (`T.zero()` behind `T: Zero`), so its miss here means
+            // nothing -- the ordinary fall-through still finds the method.
+            let receiver_is_param_like = when declared_receiver_type in {
+                .GenericParameter(_) then true,
+                .TypeVar(_) then true,
+                _ then false,
+            };
+            // The fall-through below has lookups of its own -- registered
+            // specs carry tool methods through conformance, and the trait
+            // entity spellings (`Box[Int](MyEq[Box[Int]]).neq(a, b)`) ride
+            // through this very function with the receiver's own method
+            // table answering. A miss at THIS lookup is not yet a miss at
+            // the call.
+            let fallthrough_resolves = not self.resolve_static_call_param_specs(
+                effective_type_name,
+                method_name,
+            ).is_empty() or self.resolve_method_signature(
+                declared_receiver_type,
+                method_name,
+            ) is .Some(_);
+            if not receiver_is_param_like and not fallthrough_resolves and not self.is_unresolved_expr_type(
+                declared_receiver_type,
+            ) then {
+                if not self.storage.diagnostics.has_error_at(
+                    self.storage.file_path,
+                    type_name_span,
+                ) then {
+                    let face_hint = self.method_face_hint(
+                        self.extension_template_key(
+                            self.normalize_method_receiver_type(declared_receiver_type),
+                        ),
+                        method_name,
+                    );
+                    // The noun follows the member's shape: an uppercase one
+                    // is a case construction (`Res[Int].Bogus(1)` lands here
+                    // with its type arguments spelled out), a lowercase one
+                    // is a static method (`Int.parse`).
+                    let base_message = when self.is_upper_first_char(method_name) in {
+                        true then "Enum case '\(method_name)' not found in type '\(self.static_receiver_type_spelling(
+                            effective_type_name,
+                            type_args,
+                        ))'",
+                        false then "Member '\(method_name)' not found in type '\(self.static_receiver_type_spelling(
+                            effective_type_name,
+                            type_args,
+                        ))'",
+                    };
+                    self.push_diagnostic_at_span(
+                        when face_hint in {
+                            .Some(hint) then "\(base_message). \(hint)",
+                            .None() then base_message,
+                        },
+                        type_name_span,
+                    );
+                };
+                return self.empty_typed_block(Type.Unknown());
+            };
         };
         let static_param_types = when static_sig_opt in {
             .Some(sig) then {
@@ -3001,9 +3085,51 @@ given TypeChecker {
                                                 Type.Unknown(),
                                             );
                                         };
+                                        // A bare template spelling (`Res.Ok(1)`)
+                                        // pins its type arguments from the
+                                        // call's own arguments -- the same rule
+                                        // implicit struct construction follows
+                                        // -- where the expected type has not
+                                        // already supplied an instance.
+                                        let mutable construction_type = canonical;
+                                        when canonical in {
+                                            .EnumType(template_probe) then when self.storage.generic_templates.enum_by_def_id(
+                                                template_probe,
+                                            ) in {
+                                                .Some(enum_template) then {
+                                                    if not enum_template.type_parameters.is_empty() then {
+                                                        let loose_args = self.check_implicit_member_args(
+                                                            call_args,
+                                                            List[Type].new(),
+                                                            scope,
+                                                            Option[SourceSpan].Some(expr_span(callee)),
+                                                        );
+                                                        when self.infer_generic_enum_constructor_type(
+                                                            template_probe,
+                                                            member_name,
+                                                            loose_args,
+                                                            expr_span(callee),
+                                                        ) in {
+                                                            .Some(instance) then {
+                                                                construction_type = instance;
+                                                            },
+                                                            .None() then {
+                                                                return self.empty_typed_block(Type.Unknown());
+                                                            },
+                                                        };
+                                                    };
+                                                },
+                                                .None() then {},
+                                            },
+                                            _ then {},
+                                        };
+                                        let concrete_field_types = self.get_enum_case_field_types(
+                                            construction_type,
+                                            member_name,
+                                        );
                                         let typed_args = self.check_implicit_member_args(
                                             call_args,
-                                            field_types,
+                                            concrete_field_types,
                                             scope,
                                             Option[SourceSpan].Some(expr_span(callee)),
                                         );
@@ -3011,13 +3137,58 @@ given TypeChecker {
                                             member_name,
                                             call_args,
                                             typed_args,
-                                            field_types,
+                                            concrete_field_types,
                                         );
                                         return self.lower_enum_constructor_expr(
-                                            canonical,
+                                            construction_type,
                                             member_name,
                                             typed_args,
                                         );
+                                    };
+                                    // The receiver is a type and the member is
+                                    // neither an enum case nor a static method:
+                                    // the call names nothing. Say so instead of
+                                    // falling through to the pair of baffling
+                                    // complaints the member-value typing used
+                                    // to produce (`Member 'Bogus' not found` +
+                                    // `Type 'Shape' cannot be used as an
+                                    // expression`).
+                                    if self.resolve_static_method_signature_for_receiver(
+                                        base_name,
+                                        resolved_type,
+                                        member_name,
+                                    ) is .None() then {
+                                        // A bound type parameter resolves its
+                                        // members elsewhere in the flow
+                                        // (`T.zero()` behind `T: Zero`); its
+                                        // miss here means nothing.
+                                        let receiver_is_param_like = when resolved_type in {
+                                            .GenericParameter(_) then true,
+                                            .TypeVar(_) then true,
+                                            _ then false,
+                                        };
+                                        if not receiver_is_param_like and not self.is_unresolved_expr_type(
+                                            resolved_type,
+                                        ) then {
+                                            if not self.storage.diagnostics.has_error_at(
+                                                self.storage.file_path,
+                                                expr_span(callee),
+                                            ) then {
+                                                let enum_noun = when resolved_type in {
+                                                    .EnumType(_) then true,
+                                                    .GenericEnum(_, _) then true,
+                                                    _ then false,
+                                                };
+                                                self.push_diagnostic_at_span(
+                                                    when enum_noun in {
+                                                        true then "Enum case '\(member_name)' not found in type '\(base_name)'",
+                                                        false then "Member '\(member_name)' not found in type '\(base_name)'",
+                                                    },
+                                                    expr_span(callee),
+                                                );
+                                            };
+                                            return self.empty_typed_block(Type.Unknown());
+                                        };
                                     };
                                 },
                                 .None() then {},
@@ -3101,6 +3272,31 @@ given TypeChecker {
                                                 member_name,
                                                 typed_args,
                                             );
+                                        };
+                                        // The explicit-args spelling of the
+                                        // same hole as the bare form: the
+                                        // member names no case and no static
+                                        // method, so the call names nothing.
+                                        // (`Res[Int].Bogus(1)` used to check
+                                        // clean and die in the backend.)
+                                        if self.resolve_static_method_signature_for_receiver(
+                                            base_name,
+                                            enum_type,
+                                            member_name,
+                                        ) is .None() then {
+                                            if not self.storage.diagnostics.has_error_at(
+                                                self.storage.file_path,
+                                                expr_span(callee),
+                                            ) then {
+                                                self.push_diagnostic_at_span(
+                                                    "Enum case '\(member_name)' not found in type '\(self.static_receiver_type_spelling(
+                                                        base_name,
+                                                        type_args,
+                                                    ))'",
+                                                    expr_span(callee),
+                                                );
+                                            };
+                                            return self.empty_typed_block(Type.Unknown());
                                         };
                                     };
                                 },
@@ -5271,5 +5467,72 @@ given TypeChecker {
             },
             _ then Option[Type].None(),
         };
+    };
+
+    /// The instance a bare enum-case construction (`Res.Ok(1)`) builds when the
+    /// expected type did not name one: every type parameter pinned by the
+    /// call's own arguments, the same rule `infer_generic_struct_constructor_return_type_for_def_id`
+    /// follows for implicit struct construction. An unbound parameter is the
+    /// ordinary missing-inference error, not a silently half-built template
+    /// form.
+    infer_generic_enum_constructor_type(
+        self,
+        template_def_id: DefId,
+        case_name: String,
+        typed_args: List[TypedExpr],
+        call_span: SourceSpan,
+    ): Option[Type] = {
+        let enum_template = self.storage.generic_templates.enum_by_def_id(template_def_id) or else {
+            return Option[Type].None();
+        };
+        if enum_template.type_parameters.is_empty() then {
+            return Option[Type].None();
+        };
+        let field_types = self.get_enum_case_field_types(
+            Type.EnumType(template_def_id),
+            case_name,
+        );
+        let mutable bindings = Dict[String, Type].new();
+        let mutable field_index: UInt = 0;
+        let field_limit = if field_types.count() < typed_args.count() then field_types.count()
+        else typed_args.count();
+        while field_index < field_limit then {
+            let mutable arg_type = self.concretize_default_literal_type(
+                typed_args[field_index].expr_type,
+            );
+            self.infer_type_bindings(field_types[field_index], arg_type, bindings);
+            field_index += 1;
+        };
+        let mutable resolved_args = List[Type].new();
+        for type_parameter in enum_template.type_parameters then {
+            // A binding of a parameter to ITSELF learns nothing, exactly as in
+            // the struct rule.
+            let bound_ok = when bindings.get(type_parameter.name) in {
+                .None() then false,
+                .Some(bound_type) then when bound_type in {
+                    .GenericParameter(bound_name) then bound_name != type_parameter.name,
+                    _ then true,
+                },
+            };
+            if not bound_ok then {
+                if not self.storage.diagnostics.has_error_at(
+                    self.storage.file_path,
+                    call_span,
+                ) then {
+                    self.push_diagnostic_at_span(
+                        "Type mismatch: expected inferred type for \(type_parameter.name), got unknown",
+                        call_span,
+                    );
+                };
+                return Option[Type].None();
+            };
+            when bindings.get(type_parameter.name) in {
+                .Some(bound_type) then resolved_args.push(bound_type),
+                .None() then {
+                    return Option[Type].None();
+                },
+            };
+        };
+        return Option[Type].Some(Type.GenericEnum(template_def_id, resolved_args));
     };
 };

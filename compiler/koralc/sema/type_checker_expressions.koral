@@ -477,13 +477,23 @@ given TypeChecker {
             else false;
             let is_type_name = if fallback_type_opt is .Some(_) then true
             else resolved_named_is_type;
-            let is_upper = self.is_upper_first_char(name);
             let mutable fallback_type = if resolved_named_type_opt is .Some(t) then t
             else if fallback_type_opt is .Some(t) then t else Type.Unknown();
             if is_type_name then {
                 self.check_type_visibility(fallback_type, name, scope, span);
             };
-            if not is_type_name and not is_upper then {
+            // A capitalized name is no more exempt than any other: `Some(4)`
+            // names nothing and must say so (Swift reports `Undefined variable:
+            // Some` here). The uppercase silence was the residue of the era of
+            // first-class enum constructors, which `enum constructor
+            // first-class rejection` removed -- it let `Some(4)` check clean
+            // and then die as invalid C in the backend. A complaint already
+            // standing at this place (the module-prefix objection claims the
+            // same spelling) has said everything.
+            if not is_type_name and not self.storage.diagnostics.has_error_at(
+                self.storage.file_path,
+                span,
+            ) then {
                 // `it` names nothing now. Point at the form that does, rather
                 // than leave a reader guessing where the implicit binding went.
                 if name == "it" then {
@@ -1165,6 +1175,29 @@ given TypeChecker {
             .MemberPath(_, _, _) then {
                 when self.split_member_path_call_callee(callee) in {
                     .Some(parts) then {
+                        // The module-prefix shape (`Time.DateTime()` where
+                        // `Time` names no type and no value) is refused HERE
+                        // too, before the base is typed: typing it first would
+                        // file the complaint under `Undefined variable: Time`
+                        // instead of the module-prefix objection the seed
+                        // makes. Same rule as `check_member_dispatch_expr_ref`.
+                        when parts.first in {
+                            .Identifier(receiver_name, receiver_span) then {
+                                if self.is_upper_first_char(receiver_name) and scope.lookup_type(
+                                    receiver_name,
+                                ) is .None() and scope.lookup(receiver_name) is .None() and not self.storage.diagnostics.has_error_at(
+                                    self.storage.file_path,
+                                    expr_span(callee),
+                                ) then {
+                                    self.push_diagnostic_at_span(
+                                        "Module-prefixed access is not supported; import the symbol explicitly with using \"package/subpath\" { Symbol }",
+                                        expr_span(callee),
+                                    );
+                                    return self.empty_typed_block(Type.Unknown());
+                                };
+                            },
+                            _ then {},
+                        };
                         // A type name here is the receiver of static access or
                         // an enum constructor call, not a bare value.
                         let raw_typed_receiver = when parts.first in {

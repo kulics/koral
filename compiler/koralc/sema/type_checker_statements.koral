@@ -531,6 +531,29 @@ given TypeChecker {
                         pattern_subject_type,
                         arm_scope,
                     );
+                    // Pattern first, exactly as in `check_when_expr_ref`: a
+                    // case name that names nothing is the seed's throw point,
+                    // anchored at the whole `when` statement, and nothing
+                    // behind it is checked.
+                    let lowered_pattern_ref = self.lower_typed_pattern(
+                        arm_pattern_ref,
+                        if needs_raw_subject then typed_subj.expr_type
+                        else self.peel_pointer_pattern_subject(typed_subj.expr_type),
+                        arm_scope,
+                    );
+                    when self.take_pattern_case_miss() in {
+                        .Some(miss) then {
+                            self.push_diagnostic_at_span(
+                                "Enum case '\(miss.case_name)' not found in type '\(miss.type_name)'",
+                                span,
+                            );
+                            return TypedStatement.ExprStmt(
+                                self.empty_typed_block(Type.Unknown()),
+                                span,
+                            );
+                        },
+                        .None() then {},
+                    };
                     // Arm guard: bindings are in scope; a false guard falls
                     // through to the next arm. Checked the way an if/while
                     // condition is: `is` conjuncts may bind, and the names
@@ -548,12 +571,6 @@ given TypeChecker {
                     let typed_body = self.check_statement_body_expr(arm.body, arm_scope);
                     let typed_arm_type = self.concretize_default_literal_type(
                         typed_body.expr_type,
-                    );
-                    let lowered_pattern_ref = self.lower_typed_pattern(
-                        arm_pattern_ref,
-                        if needs_raw_subject then typed_subj.expr_type
-                        else self.peel_pointer_pattern_subject(typed_subj.expr_type),
-                        arm_scope,
                     );
                     // A guarded arm covers nothing for exhaustiveness.
                     if typed_guard is .None() then {

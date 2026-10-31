@@ -697,6 +697,31 @@ given TypeChecker {
                 )
             },
             .EnumCase(case_name, elements, span) then {
+                // A dot-form name is a struct destructure or a case of the
+                // subject. Anything else names nothing, and the seed says so
+                // at the enclosing `when`: `Enum case 'Bogus' not found in
+                // type 'Shape'`. The lowering stays silent -- the caller owns
+                // the anchor -- and the pattern degrades to a wildcard that
+                // claims no coverage.
+                // A poisoned subject disagrees with nothing: the complaint
+                // its poison came from has said everything, and a case-miss
+                // on top is the same cascade as anywhere else.
+                if not self.is_unresolved_expr_type(subject_type) and self.struct_pattern_def_id(
+                    case_name,
+                ) == def_id_invalid() and not self.static_member_is_enum_case(
+                    subject_type,
+                    case_name,
+                ) then {
+                    if self.storage.pattern_case_miss is .None() then {
+                        self.storage.pattern_case_miss = Option[PatternCaseMiss].Some(
+                            PatternCaseMiss(
+                                case_name,
+                                self.pattern_case_miss_type_label(subject_type),
+                            ),
+                        );
+                    };
+                    return TypedPattern.Wildcard();
+                };
                 // When subject is a struct type, redirect .StructName(...) to StructPattern
                 let pattern_def_id = self.struct_pattern_def_id(case_name);
                 let struct_param_specs = self.get_struct_pattern_param_specs(
@@ -1818,6 +1843,40 @@ given TypeChecker {
     /// The DECLARATION a struct pattern names, resolved once from its source
     /// spelling through this module's imports. Everything below compares this
     /// DefId; the spelling survives only to print diagnostics.
+    /// The name a pattern-case complaint calls its subject: the declaration's
+    /// base name, never an instantiation (`Res`, not `Res[Int]`) -- the seed's
+    /// `Enum case '...' not found in type '...'` spelling.
+    pattern_case_miss_type_label(self, subject_type: Type): String = {
+        let inner_type = when subject_type in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            _ then subject_type,
+        };
+        let declared = self.nominal_decl_def_id(inner_type);
+        if declared != def_id_invalid() then {
+            when self.context().get_name(declared) in {
+                .Some(name) then {
+                    return name;
+                },
+                .None() then {},
+            };
+        };
+        return type_to_string(inner_type);
+    };
+
+    /// Consume the first unresolvable dot-form name a lowering met, if any.
+    /// One miss per `when` is the seed's shape: it throws at the first bad
+    /// case and never reaches the rest of the arms.
+    take_pattern_case_miss(self): Option[PatternCaseMiss] = {
+        let miss = self.storage.pattern_case_miss;
+        self.storage.pattern_case_miss = Option[PatternCaseMiss].None();
+        return miss;
+    };
+
     struct_pattern_def_id(self, type_name: String): DefId = {
         when self.resolve_type_name_binding(type_name) in {
             .Some(t) then {

@@ -101,14 +101,16 @@ given TypeChecker {
                     };
                 };
                 if not supports_or_else then {
-                    let operand_type_name = when typed_op.expr_type in {
-                        .TypeVar(_) then "Int",
-                        _ then type_to_string(typed_op.expr_type),
+                    if not self.is_aborted_call_poison(typed_op) then {
+                        let operand_type_name = when typed_op.expr_type in {
+                            .TypeVar(_) then "Int",
+                            _ then type_to_string(typed_op.expr_type),
+                        };
+                        self.push_diagnostic(
+                            "'or else' can only be used with Option or Result types, got '\(operand_type_name)'",
+                            span,
+                        );
                     };
-                    self.push_diagnostic(
-                        "'or else' can only be used with Option or Result types, got '\(operand_type_name)'",
-                        span,
-                    );
                     return typed_op;
                 };
                 let mutable success_type = self.infer_or_else_success_type(
@@ -371,14 +373,16 @@ given TypeChecker {
                     };
 
                     if not is_result and not is_option then {
-                        let operand_type_name = when typed_op.expr_type in {
-                            .TypeVar(_) then "Int",
-                            _ then type_to_string(typed_op.expr_type),
+                        if not self.is_aborted_call_poison(typed_op) then {
+                            let operand_type_name = when typed_op.expr_type in {
+                                .TypeVar(_) then "Int",
+                                _ then type_to_string(typed_op.expr_type),
+                            };
+                            self.push_diagnostic(
+                                "'or return' can only be used with Option or Result types, got '\(operand_type_name)'",
+                                span,
+                            );
                         };
-                        self.push_diagnostic(
-                            "'or return' can only be used with Option or Result types, got '\(operand_type_name)'",
-                            span,
-                        );
                         return typed_op;
                     };
 
@@ -432,11 +436,13 @@ given TypeChecker {
                     typed_op.expr_type,
                     "Result",
                 ) then {
-                    let operand_type_name = type_to_string(typed_op.expr_type);
-                    self.push_diagnostic(
-                        "'and then' can only be used with Option or Result types, got '\(operand_type_name)'",
-                        span,
-                    );
+                    if not self.is_aborted_call_poison(typed_op) then {
+                        let operand_type_name = type_to_string(typed_op.expr_type);
+                        self.push_diagnostic(
+                            "'and then' can only be used with Option or Result types, got '\(operand_type_name)'",
+                            span,
+                        );
+                    };
                     return typed_op;
                 };
                 let mutable inner_type = self.extract_option_result_inner(
@@ -623,6 +629,23 @@ given TypeChecker {
         };
     };
 
+    /// Whether an operand is the poison an aborted sub-expression leaves
+    /// behind (the empty block `empty_typed_block` returns). That abort is the
+    /// seed's throw point: `Int.parse(s) or return` reports the missing member
+    /// and NOTHING else, because the flow complaint is never reached. A merely
+    /// degraded operand -- an undefined name -- continues into the flow
+    /// complaint, which the seed does print (`undefined_thing or return`
+    /// reports both).
+    is_aborted_call_poison(self, typed_op: TypedExpr): Bool = {
+        if not self.is_unresolved_expr_type(typed_op.expr_type) then {
+            return false;
+        };
+        return when typed_op.expr_kind in {
+            .Block(statements, tail_expression) then statements.is_empty() and tail_expression is .None(),
+            _ then false,
+        };
+    };
+
     check_when_expr_ref(
         self,
         expr: Expr,
@@ -730,6 +753,30 @@ given TypeChecker {
                         pattern_check_subject_type,
                         arm_scope,
                     );
+                    // The pattern is lowered BEFORE the arm's body: a
+                    // pattern that names no case is the seed's throw point,
+                    // and the seed never reaches the body (or any later arm)
+                    // behind it. First miss wins, anchored at the whole
+                    // `when`, and the coverage check is skipped with it.
+                    let lowered_pattern_ref = self.lower_typed_pattern(
+                        arm_pattern_ref,
+                        if desugared_is_when and not needs_raw_subject then {
+                            self.peel_pointer_pattern_subject(typed_subj.expr_type)
+                        } else {
+                            typed_subj.expr_type
+                        },
+                        arm_scope,
+                    );
+                    when self.take_pattern_case_miss() in {
+                        .Some(miss) then {
+                            self.push_diagnostic_at_span(
+                                "Enum case '\(miss.case_name)' not found in type '\(miss.type_name)'",
+                                span,
+                            );
+                            return self.empty_typed_block(Type.Unknown());
+                        },
+                        .None() then {},
+                    };
                     // Arm guard: bindings are in scope; a false guard falls
                     // through to the next arm. The guard is checked the way an
                     // if/while condition is: `is` conjuncts may bind, and the
@@ -843,15 +890,6 @@ given TypeChecker {
                             },
                         };
                     };
-                    let lowered_pattern_ref = self.lower_typed_pattern(
-                        arm_pattern_ref,
-                        if desugared_is_when and not needs_raw_subject then {
-                            self.peel_pointer_pattern_subject(typed_subj.expr_type)
-                        } else {
-                            typed_subj.expr_type
-                        },
-                        arm_scope,
-                    );
                     let arm_complained = self.storage.diagnostics.count() > diag_before_arm;
                     if arm_complained then {
                         any_arm_complained = true;
@@ -1549,12 +1587,15 @@ given TypeChecker {
         scope: Scope,
     ): TypedExpr = {
         return when expr in {
-            .IfExpr(condition, then_branch, else_branch, _) then {
+            .IfExpr(condition, then_branch, else_branch, if_span) then {
+                // The whole `if` is what the desugared `when` answers for:
+                // its complaints must anchor at the `if`, exactly where the
+                // seed's ambient span sits.
                 let lowered_opt = self.lower_if_condition_with_bindings(
                     condition,
                     then_branch,
                     else_branch,
-                    unknown_span(),
+                    if_span,
                     scope,
                 );
                 when lowered_opt in {
@@ -2159,7 +2200,10 @@ given TypeChecker {
                     .Identifier(base_name, _) then {
                         if not path.is_empty() and self.is_upper_first_char(base_name) and scope.lookup_type(
                             base_name,
-                        ) is .None() and scope.lookup(base_name) is .None() then {
+                        ) is .None() and scope.lookup(base_name) is .None() and not self.storage.diagnostics.has_error_at(
+                            self.storage.file_path,
+                            expr_span(expr),
+                        ) then {
                             self.push_diagnostic(
                                 "Module-prefixed access is not supported; import the symbol explicitly with using \"package/subpath\" { Symbol }",
                                 expr_span(expr),

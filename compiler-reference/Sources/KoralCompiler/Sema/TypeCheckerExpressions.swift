@@ -61,7 +61,13 @@ extension TypeChecker {
           !path.isEmpty,
           isASCIITypeStyleIdentifier(baseName),
           currentScope.lookup(baseName, sourceFile: currentSourceFile) == nil,
-          currentScope.lookupType(baseName, sourceFile: currentSourceFile) == nil else {
+          currentScope.lookupType(baseName, sourceFile: currentSourceFile) == nil,
+          // A bare generic template name (`Res` in `Res.Ok(1)`) lives in the
+          // template registry, not the type table. It is a TYPE-style name all
+          // the same -- reading it as a module prefix sent every bare generic
+          // enum construction to `Module-prefixed access is not supported`.
+          currentScope.lookupGenericEnumTemplate(baseName) == nil,
+          currentScope.lookupGenericStructTemplate(baseName) == nil else {
       return false
     }
 
@@ -4580,9 +4586,19 @@ extension TypeChecker {
             }
           }
         }
+        // The explicit-args spelling of the bare form's hole: the member
+        // names no case and no static method, so the call names nothing.
+        if isASCIITypeStyleIdentifier(memberName) {
+          let renderedArgs = resolvedArgs.map { "\($0)" }.joined(separator: ", ")
+          let spelling = renderedArgs.isEmpty ? baseName : "\(baseName)[\(renderedArgs)]"
+          throw SemanticError(
+            .generic("Enum case '\(memberName)' not found in type '\(spelling)'"),
+            span: currentSpan
+          )
+        }
       }
     }
-    
+
     // Check if callee is a generic instantiation (Constructor call or Function call)
     if case .genericInstantiation(let base, let args, _) = callee {
       return try inferGenericInstantiationCall(base: base, args: args, arguments: arguments, callArgs: callArgs, span: callee.span)
@@ -4623,6 +4639,17 @@ extension TypeChecker {
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
+        // A case-shaped member that names no case is the construction's
+        // throw point: `Shape.Bogus(1.0)` reports the bad case name and
+        // nothing else. A lowercase member may still be a static method the
+        // fallback resolves (`Shape.area(...)`), so only the case-shaped
+        // spelling is claimed here.
+        if isASCIITypeStyleIdentifier(memberName) {
+          throw SemanticError(
+            .generic("Enum case '\(memberName)' not found in type '\(baseName)'"),
+            span: currentSpan
+          )
+        }
       case .genericEnum(let tplDefId, let typeArgs):
         if let template = currentScope.genericEnumTemplate(defId: tplDefId),
            let c = template.cases.first(where: { $0.name == memberName }) {
@@ -4659,8 +4686,23 @@ extension TypeChecker {
           )
           return .enumConstruction(type: baseType, caseName: memberName, arguments: typedArgs)
         }
+        if isASCIITypeStyleIdentifier(memberName) {
+          throw SemanticError(
+            .generic("Enum case '\(memberName)' not found in type '\(baseName)'"),
+            span: currentSpan
+          )
+        }
       default:
-        break
+        // Same objection on a non-enum receiver: a case-shaped member names
+        // nothing else (`Foo.Bar(2)` -- uppercase members are never static
+        // methods), and the fallback's `types have no value` complaint is a
+        // worse answer to the actual mistake.
+        if isASCIITypeStyleIdentifier(memberName) {
+          throw SemanticError(
+            .generic("Member '\(memberName)' not found in type '\(baseName)'"),
+            span: currentSpan
+          )
+        }
       }
     }
 
@@ -4721,6 +4763,89 @@ extension TypeChecker {
 
           return .enumConstruction(type: type, caseName: memberName, arguments: typedArgs)
         }
+      }
+
+      // Argument-pinned construction: `Res.Ok(1)` with no expected type
+      // builds `Res[Int]` from the call's own arguments -- the same rule
+      // implicit struct construction follows. A parameter the arguments do
+      // not pin is the ordinary missing-inference error, and a name that is
+      // no case at all says so.
+      if let c = template.cases.first(where: { $0.name == memberName }) {
+        let plan = try planConstructorArguments(
+          callArgs,
+          fieldNames: c.parameters.map { $0.name },
+          fieldIsNamed: c.parameters.map { $0.named },
+          fieldDefaults: c.parameters.map { $0.defaultValue },
+          constructorDescription: "\(baseName).\(memberName)",
+          parentName: memberName
+        )
+        // The arguments aim NOTHING -- they PIN the parameters, exactly as in
+        // implicit struct construction -- so they are typed bare.
+        var bindings: [String: Type] = [:]
+        for (planned, param) in zip(plan.orderedCallArgs, c.parameters) {
+          guard let plannedArg = planned, let argExpr = plannedArg.expression else { continue }
+          let typedArg = try inferTypedExpression(argExpr)
+          let paramType = try withNewScope {
+            for typeParam in template.typeParameters {
+              try currentScope.defineType(typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            return try resolveTypeNode(param.type)
+          }
+          _ = unifyTypes(paramType, typedArg.type, bindings: &bindings)
+        }
+        var resolvedArgs: [Type] = []
+        for typeParam in template.typeParameters {
+          let bound = bindings[typeParam.name]
+          let learnsSomething: Bool
+          if case .some(.genericParameter(let boundName)) = bound {
+            learnsSomething = boundName != typeParam.name
+          } else {
+            learnsSomething = bound != nil
+          }
+          guard learnsSomething, let boundType = bound else {
+            throw SemanticError.typeMismatch(
+              expected: "inferred type for \(typeParam.name)",
+              got: "unknown"
+            )
+          }
+          resolvedArgs.append(boundType)
+        }
+        try enforceGenericConstraints(typeParameters: template.typeParameters, args: resolvedArgs)
+        if !resolvedArgs.contains(where: { context.containsGenericParameter($0) }) {
+          recordInstantiation(InstantiationRequest(
+            kind: .enumType(template: template, args: resolvedArgs),
+            sourceLine: currentLine,
+            sourceFileName: currentFileName
+          ))
+        }
+        let type = genericEnumType(template: baseName, args: resolvedArgs)
+        var substitution: [String: Type] = [:]
+        for (i, param) in template.typeParameters.enumerated() {
+          substitution[param.name] = resolvedArgs[i]
+        }
+        let resolvedParams = try withNewScope {
+          for (paramName, paramType) in substitution {
+            try currentScope.defineType(paramName, type: paramType)
+          }
+          return try c.parameters.map { param -> Parameter in
+            let paramType = try resolveTypeNode(param.type)
+            return Parameter(type: paramType, kind: .byVal)
+          }
+        }
+        let typedArgs = try typeCheckConstructorArguments(
+          plan: plan,
+          members: zip(c.parameters, resolvedParams).map { source, resolved in
+            (name: source.name, type: resolved.type, named: source.named, defaultValue: source.defaultValue)
+          },
+          constructorDescription: "\(baseName).\(memberName)",
+          parentName: memberName
+        )
+        return .enumConstruction(type: type, caseName: memberName, arguments: typedArgs)
+      } else if isASCIITypeStyleIdentifier(memberName) {
+        throw SemanticError(
+          .generic("Enum case '\(memberName)' not found in type '\(baseName)'"),
+          span: currentSpan
+        )
       }
     }
     // Resolve Callee (Check Enum Constructor). This is a QUERY, not an

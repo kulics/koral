@@ -1338,7 +1338,7 @@ let chained = opt and then as v in half(v);  // Some(21) — type Option[Int]
 type Config(window: Window);
 type Window(title: String);
 let cfg = Option[Config].Some(Config(Window("untitled")));
-let title = cfg and then .window.title or else "none";   // Some("untitled")
+let title = cfg and then .window.title or else "none";   // "untitled"
 
 // Naming the error on a Result.
 let parsed = Result[String].Error("bad input");

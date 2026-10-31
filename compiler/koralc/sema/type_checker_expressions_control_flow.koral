@@ -543,7 +543,15 @@ given TypeChecker {
                         true,
                     ),
                 );
-                Expr.WhenExpr(subject, arms, actual_span)
+                // The desugared `when` answers for the WHOLE `if ... is`:
+                // its complaints anchor at the `if`, exactly where the seed's
+                // ambient span sits (`if s is .Bogus(r) then ...` blames
+                // 2:25, the `if`, not 2:28, the subject).
+                Expr.WhenExpr(
+                    subject,
+                    arms,
+                    if is_known_span(fallback_span) then fallback_span else actual_span,
+                )
             },
             _ then Expr.IfExpr(condition, then_expr, else_expr, fallback_span),
         };
@@ -571,7 +579,11 @@ given TypeChecker {
                         true,
                     ),
                 );
-                let when_expr = Expr.WhenExpr(subject, arms, actual_span);
+                let when_expr = Expr.WhenExpr(
+                    subject,
+                    arms,
+                    if is_known_span(fallback_span) then fallback_span else actual_span,
+                );
                 Expr.WhileExpr(
                     Expr.BoolLiteral(true, actual_span),
                     when_expr,

@@ -298,8 +298,36 @@ extension TypeChecker {
       return (.variable(symbol: symbol), [(name, mutable, subjectType)])
 
     case .enumCase(let caseName, let subPatternArgs, let span):
+      // A dot-form name is a struct destructure or a case of the subject.
+      // Anything else names nothing, and the complaint names the SUBJECT's
+      // base type whatever its kind (`Enum case 'Bogus' not found in type
+      // 'Point'` / `'Int'` / `'Res'`), thrown where the seed's ambient span
+      // sits: the whole `when`/`if`.
+      let caseMissSubjectLabel: String
+      switch subjectType {
+      case .structure(let defId):
+        caseMissSubjectLabel = context.getName(defId) ?? subjectType.description
+      case .genericStruct(let tplDefId, _):
+        caseMissSubjectLabel = Type.spelling(tplDefId)
+      case .`enum`(let defId):
+        caseMissSubjectLabel = context.getName(defId) ?? subjectType.description
+      case .genericEnum(let tplDefId, _):
+        caseMissSubjectLabel = Type.spelling(tplDefId)
+      default:
+        caseMissSubjectLabel = subjectType.description
+      }
+      let caseMissNameResolves =
+        currentScope.lookupType(caseName, sourceFile: currentSourceFile) != nil
+        || currentScope.lookupGenericStructTemplate(caseName) != nil
+        || currentScope.lookupGenericEnumTemplate(caseName) != nil
+
       switch subjectType {
       case .structure, .genericStruct:
+        if !caseMissNameResolves {
+          throw SemanticError(
+            .generic("Enum case '\(caseName)' not found in type '\(caseMissSubjectLabel)'")
+          )
+        }
         return try checkPattern(.structPattern(typeName: caseName, elements: subPatternArgs, span: span), subjectType: subjectType)
       default:
         break
@@ -346,6 +374,11 @@ extension TypeChecker {
         }
         
       default:
+        if !caseMissNameResolves {
+          throw SemanticError(
+            .generic("Enum case '\(caseName)' not found in type '\(caseMissSubjectLabel)'")
+          )
+        }
         throw SemanticError.typeMismatch(expected: "Enum Type", got: subjectType.description)
       }
 
