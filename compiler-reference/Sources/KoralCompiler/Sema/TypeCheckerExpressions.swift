@@ -655,7 +655,7 @@ extension TypeChecker {
     if expr.type == expectedType {
       return expr
     }
-    return .castExpression(expression: expr, type: expectedType)
+    return .castExpression(expression: expr, type: expectedType, span: expr.span)
   }
 
   /// Applies the standard coercion chain to a typed argument that doesn't match the expected type.
@@ -826,7 +826,7 @@ extension TypeChecker {
       case .int, .uint:
         return .castExpression(
           expression: .intrinsicCall(.nullPtr(resultType: .pointer(element: .void))),
-          type: targetType)
+          type: targetType, span: innerExpr.span)
       default:
         if isTraitObjectCastTarget(targetType) {
           throw SemanticError(.generic(
@@ -894,7 +894,7 @@ extension TypeChecker {
       let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
       if isValidAsCast(from: typedInner.type, to: targetType) {
         // Cast always produces an rvalue.
-        return .castExpression(expression: typedInner, type: targetType)
+        return .castExpression(expression: typedInner, type: targetType, span: innerExpr.span)
       }
       throw SemanticError.invalidOperation(
         op: "cast",
@@ -910,7 +910,7 @@ extension TypeChecker {
       let typedInner = autoDereferenceValueContext(try inferTypedExpression(innerExpr))
       if isPointerCastType(typedInner.type) {
         if targetType == .int || targetType == .uint {
-          return .castExpression(expression: typedInner, type: targetType)
+          return .castExpression(expression: typedInner, type: targetType, span: innerExpr.span)
         }
       } else if isIntegerScalarType(typedInner.type) || isFloatScalarType(typedInner.type) {
         throw SemanticError(.generic(
@@ -2278,7 +2278,7 @@ extension TypeChecker {
         }
       }
 
-      return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight)
+      return try buildArithmeticExpression(op: op, lhs: typedLeft, rhs: typedRight, span: left.span)
 
     case .comparisonExpression(let left, let op, let right, _):
       let (typedLeft, typedRight) = try inferJoinedBinaryOperands(
@@ -2380,17 +2380,17 @@ extension TypeChecker {
       let typedExpr = autoDereferenceValueContext(try inferTypedExpression(expr))
       if typedExpr.type.isPlainIntegerType {
         let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
-        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type, span: expr.span)
       }
       if typedExpr.type.isWrappingIntegerType {
         // Negation wraps like every other wrapping subtraction: MIN negates to
         // MIN, never a panic.
         let zero: TypedExpressionNode = .integerLiteral(value: "0", type: typedExpr.type)
-        return .wrappingArithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+        return .wrappingArithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type, span: expr.span)
       }
       if isFloatType(typedExpr.type) {
         let zero: TypedExpressionNode = .floatLiteral(value: "0", type: typedExpr.type)
-        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type)
+        return .arithmeticExpression(left: zero, op: .minus, right: typedExpr, type: typedExpr.type, span: expr.span)
       }
       if let call = try buildOperatorMethodCall(
         base: typedExpr,
@@ -2434,7 +2434,7 @@ extension TypeChecker {
         throw SemanticError.typeMismatch(
           expected: "Matching Integer Types", got: "\(typedLeft.type) \(op) \(typedRight.type)")
       }
-      return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: typedLeft.type)
+      return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: typedLeft.type, span: left.span)
 
     case .bitwiseNotExpression(let expr, _):
       let typedExpr = try inferTypedExpression(expr)
@@ -4061,7 +4061,7 @@ extension TypeChecker {
       )
     }
     // Cast always produces an rvalue.
-    return .castExpression(expression: typedInner, type: targetType)
+    return .castExpression(expression: typedInner, type: targetType, span: innerExpr.span)
   }
 
   /// `(T)(args)` -- the call family keyed on the RESOLVED target type (aliases
@@ -8166,7 +8166,8 @@ extension TypeChecker {
   func buildArithmeticExpression(
     op: ArithmeticOperator,
     lhs: TypedExpressionNode,
-    rhs: TypedExpressionNode
+    rhs: TypedExpressionNode,
+    span: SourceSpan
   ) throws -> TypedExpressionNode {
     // An operand that already failed has no type to compute with: stay silent
     // rather than pile a second complaint on the first.
@@ -8205,9 +8206,9 @@ extension TypeChecker {
 
       if left.type == right.type {
         if left.type.isWrappingIntegerType {
-          return .wrappingArithmeticExpression(left: left, op: op, right: right, type: left.type)
+          return .wrappingArithmeticExpression(left: left, op: op, right: right, type: left.type, span: span)
         }
-        return .arithmeticExpression(left: left, op: op, right: right, type: left.type)
+        return .arithmeticExpression(left: left, op: op, right: right, type: left.type, span: span)
       }
 
       let opName: String
@@ -8240,7 +8241,7 @@ extension TypeChecker {
       var offset = right
       offset = try coerceLiteral(offset, to: .uint)
       if offset.type == .uint {
-        return .arithmeticExpression(left: left, op: op, right: offset, type: left.type)
+        return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
         op: op == .plus ? "plus" : "minus",
@@ -8251,7 +8252,7 @@ extension TypeChecker {
       var offset = right
       offset = try coerceLiteral(offset, to: .uint)
       if offset.type == .uint {
-        return .arithmeticExpression(left: left, op: op, right: offset, type: left.type)
+        return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
         op: op == .plus ? "plus" : "minus",
@@ -8707,7 +8708,8 @@ extension TypeChecker {
             || valueMutationAllowed
             || (isLastMember && currentType.isTypeMutable(in: context))
           if !member.mutable && !canTraverseImmutableIntermediate(member.type, isLastMember: isLastMember) {
-            throw SemanticError.assignToImmutable(memberName)
+            throw SemanticError.immutableFieldAssignment(
+              type: context.getName(defId) ?? typeToLookup.description, field: memberName)
           }
           if isLastMember && member.mutable && !currentAllowsMutation {
             throw SemanticError.assignToImmutable(memberName)
@@ -8768,7 +8770,7 @@ extension TypeChecker {
             || valueMutationAllowed
             || (isLastMember && currentType.isTypeMutable(in: context))
           if !param.mutable && !canTraverseImmutableIntermediate(memberType, isLastMember: isLastMember) {
-            throw SemanticError.assignToImmutable(memberName)
+            throw SemanticError.immutableFieldAssignment(type: Type.spelling(tplDefId), field: memberName)
           }
           if isLastMember && param.mutable && !currentAllowsMutation {
             throw SemanticError.assignToImmutable(memberName)
@@ -8972,7 +8974,8 @@ extension TypeChecker {
         left: totalExpr,
         op: .plus,
         right: partCount,
-        type: uintType
+        type: uintType,
+        span: .unknown
       )
     }
 
@@ -8987,7 +8990,8 @@ extension TypeChecker {
       left: totalVar,
       op: .plus,
       right: oneUInt,
-      type: uintType
+      type: uintType,
+      span: .unknown
     )
     let dataAlloc = TypedExpressionNode.intrinsicCall(
       .allocMemory(count: capExpr, resultType: mutBytePtrType)
@@ -9022,7 +9026,8 @@ extension TypeChecker {
         left: dataVar,
         op: .plus,
         right: offsetVar,
-        type: mutBytePtrType
+        type: mutBytePtrType,
+        span: .unknown
       )
       let sourceExpr = try buildConcreteMethodCall(
         base: partExpr,
@@ -9038,13 +9043,15 @@ extension TypeChecker {
         left: offsetVar,
         op: .plus,
         right: partLenVar,
-        type: uintType
+        type: uintType,
+        span: .unknown
       )
       statements.append(
         .assignment(
           target: .variable(identifier: offsetSymbol),
           operator: nil,
-          value: newOffset
+          value: newOffset,
+          span: .unknown
         )
       )
     }
@@ -9055,7 +9062,8 @@ extension TypeChecker {
       left: finalData,
       op: .plus,
       right: finalTotal,
-      type: mutBytePtrType
+      type: mutBytePtrType,
+      span: .unknown
     )
     let zeroByte = TypedExpressionNode.integerLiteral(value: "0", type: .uint8)
     let initExpr = TypedExpressionNode.intrinsicCall(
@@ -9421,7 +9429,7 @@ extension TypeChecker {
     let advanceValue = try buildNullaryMethodCall(
       on: succCall, methodName: "unwrap", returnType: elementType)
     let advance = TypedStatementNode.assignment(
-      target: iterVarExpr, operator: nil, value: advanceValue)
+      target: iterVarExpr, operator: nil, value: advanceValue, span: .unknown)
 
     let typedPattern = try typeCheckForBinding(pattern, elementType: elementType)
 

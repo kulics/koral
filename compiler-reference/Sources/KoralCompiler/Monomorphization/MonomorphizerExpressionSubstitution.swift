@@ -72,26 +72,29 @@ extension Monomorphizer {
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: substituteType(type, substitution: substitution))
             
-        case .castExpression(let expression, let type):
+        case .castExpression(let expression, let type, let span):
             return .castExpression(
                 expression: substituteTypesInExpression(expression, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
+                type: substituteType(type, substitution: substitution),
+                span: span
             )
-            
-        case .arithmeticExpression(let left, let op, let right, let type):
+
+        case .arithmeticExpression(let left, let op, let right, let type, let span):
             return .arithmeticExpression(
                 left: substituteTypesInExpression(left, substitution: substitution),
                 op: op,
                 right: substituteTypesInExpression(right, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
+                type: substituteType(type, substitution: substitution),
+                span: span
             )
 
-        case .wrappingArithmeticExpression(let left, let op, let right, let type):
+        case .wrappingArithmeticExpression(let left, let op, let right, let type, let span):
             return .wrappingArithmeticExpression(
                 left: substituteTypesInExpression(left, substitution: substitution),
                 op: op,
                 right: substituteTypesInExpression(right, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
+                type: substituteType(type, substitution: substitution),
+                span: span
             )
 
         case .comparisonExpression(let left, let op, let right, let type):
@@ -136,12 +139,13 @@ extension Monomorphizer {
                 type: substituteType(type, substitution: substitution)
             )
             
-        case .bitwiseExpression(let left, let op, let right, let type):
+        case .bitwiseExpression(let left, let op, let right, let type, let span):
             return .bitwiseExpression(
                 left: substituteTypesInExpression(left, substitution: substitution),
                 op: op,
                 right: substituteTypesInExpression(right, substitution: substitution),
-                type: substituteType(type, substitution: substitution)
+                type: substituteType(type, substitution: substitution),
+                span: span
             )
 
             
@@ -801,11 +805,12 @@ extension Monomorphizer {
             )
 
             
-        case .assignment(let target, let op, let value):
+        case .assignment(let target, let op, let value, let span):
             return .assignment(
                 target: substituteTypesInExpression(target, substitution: substitution),
                 operator: op,
-                value: substituteTypesInExpression(value, substitution: substitution)
+                value: substituteTypesInExpression(value, substitution: substitution),
+                span: span
             )
             
         case .expression(let expr):

@@ -654,7 +654,7 @@ given MIRFunctionBuilder {
                 );
                 let operand = self.lower_operand_for_expected_type(inner, source_type);
                 let result = self.materialize(
-                    MIRValue.Cast(operand, target_type),
+                    MIRValue.Cast(operand, target_type, typed_expr_span_at(inner, self.context)),
                     target_type,
                 );
                 Option[MIRExprResult].Some(
@@ -2169,8 +2169,7 @@ given MIRFunctionBuilder {
                     tag,
                     MIRBinaryOperator.Comparison(ComparisonOperator.NotEqual()),
                     MIROperand.Constant(MIRConstant.Integer("0", Type.IntType())),
-                    Type.BoolType(),
-                ),
+                    Type.BoolType(), unknown_span()),
             ),
             Type.BoolType(),
         );
@@ -2197,8 +2196,7 @@ given MIRFunctionBuilder {
                     operand,
                     MIRBinaryOperator.Comparison(ComparisonOperator.Equal()),
                     MIROperand.Constant(MIRConstant.Boolean(false)),
-                    Type.BoolType(),
-                ),
+                    Type.BoolType(), unknown_span()),
             ),
             result_type,
         );
@@ -2516,8 +2514,7 @@ given MIRFunctionBuilder {
                         MIROperand.Constant(
                             MIRConstant.Integer(from_end.to_string(), Type.UIntType()),
                         ),
-                        Type.UIntType(),
-                    ),
+                        Type.UIntType(), unknown_span()),
                 ),
                 Type.UIntType(),
             );
@@ -2631,8 +2628,7 @@ given MIRFunctionBuilder {
                     MIROperand.Constant(
                         MIRConstant.Integer(bound.to_string(), Type.UIntType()),
                     ),
-                    Type.BoolType(),
-                ),
+                    Type.BoolType(), unknown_span()),
             ),
             Type.BoolType(),
         );
@@ -2651,8 +2647,7 @@ given MIRFunctionBuilder {
                         MIRUnaryOperation(
                             MIRUnaryOperator.LogicalNot(),
                             length_condition,
-                            Type.BoolType(),
-                        ),
+                            Type.BoolType(), unknown_span()),
                     ),
                     Type.BoolType(),
                 );
@@ -2708,8 +2703,7 @@ given MIRFunctionBuilder {
                         slots_result,
                         MIRBinaryOperator.LogicalAnd(),
                         slot_condition,
-                        Type.BoolType(),
-                    ),
+                        Type.BoolType(), unknown_span()),
                 ),
                 Type.BoolType(),
             );
@@ -2723,8 +2717,7 @@ given MIRFunctionBuilder {
                     MIRUnaryOperation(
                         MIRUnaryOperator.LogicalNot(),
                         slots_result,
-                        Type.BoolType(),
-                    ),
+                        Type.BoolType(), unknown_span()),
                 ),
                 Type.BoolType(),
             );
@@ -2818,8 +2811,7 @@ given MIRFunctionBuilder {
                 subject_operand,
                 MIRBinaryOperator.Comparison(op),
                 expected,
-                Type.BoolType(),
-            ),
+                Type.BoolType(), unknown_span()),
         );
         // Reuse a single comparison result local across all arms when available.
         // This significantly reduces MIR local count for pattern-heavy code.
@@ -2922,7 +2914,7 @@ given MIRFunctionBuilder {
         right: MIROperand,
     ): MIROperand = {
         let value = MIRValue.Binary(
-            MIRBinaryOperation(left, op, right, Type.BoolType()),
+            MIRBinaryOperation(left, op, right, Type.BoolType(), unknown_span()),
         );
         if self.pattern_comparison_local is .Some(local_id) then {
             self.append_statement(MIRStatement.Assign(MIRPlace.Local(local_id), value));
@@ -2934,7 +2926,7 @@ given MIRFunctionBuilder {
     private pattern_maybe_negate(self, operand: MIROperand, negated: Bool): MIROperand = {
         if negated then {
             let value = MIRValue.Unary(
-                MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, Type.BoolType()),
+                MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, Type.BoolType(), unknown_span()),
             );
             if self.pattern_comparison_local is .Some(local_id) then {
                 self.append_statement(
@@ -2983,8 +2975,7 @@ given MIRFunctionBuilder {
                 tag_operand,
                 MIRBinaryOperator.Comparison(ComparisonOperator.Equal()),
                 expected_tag,
-                Type.BoolType(),
-            ),
+                Type.BoolType(), unknown_span()),
         );
         // Reuse comparison local when available to reduce MIR local count.
         let tag_condition = when self.pattern_comparison_local in {
@@ -3886,7 +3877,7 @@ given MIRFunctionBuilder {
         let right_operand = self.lower_operand_for_expected_type(right, right_expected);
         let result = self.materialize(
             MIRValue.Binary(
-                MIRBinaryOperation(left_operand, operator_kind, right_operand, result_type),
+                MIRBinaryOperation(left_operand, operator_kind, right_operand, result_type, typed_expr_span_at(left, self.context)),
             ),
             result_type,
         );
@@ -3962,10 +3953,10 @@ given MIRFunctionBuilder {
         ) else self.lower_operand(inner);
         let value = when op in {
             .Not() then MIRValue.Unary(
-                MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, result_type),
+                MIRUnaryOperation(MIRUnaryOperator.LogicalNot(), operand, result_type, unknown_span()),
             ),
             .BitwiseNot() then MIRValue.Unary(
-                MIRUnaryOperation(MIRUnaryOperator.BitwiseNot(), operand, result_type),
+                MIRUnaryOperation(MIRUnaryOperator.BitwiseNot(), operand, result_type, unknown_span()),
             ),
             .Negate() then MIRValue.Binary(
                 MIRBinaryOperation(
@@ -3977,8 +3968,7 @@ given MIRFunctionBuilder {
                     ),
                     MIRBinaryOperator.Arithmetic(ArithmeticOperator.Subtract(), true),
                     operand,
-                    result_type,
-                ),
+                    result_type, typed_expr_span_at(inner, self.context)),
             ),
         };
         let result = self.materialize(value, result_type);
@@ -5968,7 +5958,7 @@ given MIRFunctionBuilder {
             .TraitMethodCall(call) then call.result_type,
             .Ref(place, kind, _) then self.type_of_ref(place, kind),
             .Pointer(place) then Type.PointerType(self.place_type(place)),
-            .Cast(_, target_type) then target_type,
+            .Cast(_, target_type, _) then target_type,
             .Intrinsic(node) then self.mir_intrinsic_result_type(node),
             .Lambda(lambda) then lambda.lambda_type,
         };

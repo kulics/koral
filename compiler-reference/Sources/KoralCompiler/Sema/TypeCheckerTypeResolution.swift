@@ -1148,10 +1148,10 @@ extension TypeChecker {
     switch (expected, expr.type) {
     case (.reference(let expectedInner), .mutableReference(let actualInner))
       where expectedInner == actualInner:
-      return .castExpression(expression: expr, type: expected)
+      return .castExpression(expression: expr, type: expected, span: expr.span)
     case (.pointer(let expectedElement), .mutablePointer(let actualElement))
       where expectedElement == actualElement:
-      return .castExpression(expression: expr, type: expected)
+      return .castExpression(expression: expr, type: expected, span: expr.span)
     default:
       break
     }

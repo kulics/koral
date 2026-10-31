@@ -805,10 +805,10 @@ private final class MIRFunctionBuilder {
         elseBranch: elseBranch,
         type: type
       )
-    case .arithmeticExpression(let left, let op, let right, let type):
-      return lowerBinary(left: left, right: right, type: type, operatorKind: .arithmetic(op, checked: true))
-    case .wrappingArithmeticExpression(let left, let op, let right, let type):
-      return lowerBinary(left: left, right: right, type: type, operatorKind: .wrappingArithmetic(op))
+    case .arithmeticExpression(let left, let op, let right, let type, let span):
+      return lowerBinary(left: left, right: right, type: type, operatorKind: .arithmetic(op, checked: true), span: span)
+    case .wrappingArithmeticExpression(let left, let op, let right, let type, let span):
+      return lowerBinary(left: left, right: right, type: type, operatorKind: .wrappingArithmetic(op), span: span)
     case .comparisonExpression(let left, let op, let right, let type):
       return lowerBinary(left: left, right: right, type: type, operatorKind: .comparison(op))
     case .isExpression(let subject, let pattern, let type):
@@ -819,16 +819,16 @@ private final class MIRFunctionBuilder {
       return lowerShortCircuit(left: left, right: right, type: type, shortCircuitValue: false)
     case .orExpression(let left, let right, let type):
       return lowerShortCircuit(left: left, right: right, type: type, shortCircuitValue: true)
-    case .bitwiseExpression(let left, let op, let right, let type):
+    case .bitwiseExpression(let left, let op, let right, let type, let span):
       let checkedShift = op == .shiftLeft || op == .shiftRight
-      return lowerBinary(left: left, right: right, type: type, operatorKind: .bitwise(op, checkedShift: checkedShift))
+      return lowerBinary(left: left, right: right, type: type, operatorKind: .bitwise(op, checkedShift: checkedShift), span: span)
     case .notExpression(let inner, let type):
       return lowerUnary(inner: inner, type: type, operatorKind: .logicalNot)
     case .bitwiseNotExpression(let inner, let type):
       return lowerUnary(inner: inner, type: type, operatorKind: .bitwiseNot)
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, let span):
       let operand = lowerOperand(inner)
-      let result = materialize(.cast(operand, to: type), type: type)
+      let result = materialize(.cast(operand, to: type, span: span), type: type)
       return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
     case .typeConstruction(let identifier, _, let arguments, let type):
       let values = arguments.map { lowerValue($0) }
@@ -1039,8 +1039,8 @@ private final class MIRFunctionBuilder {
         tupleValue: tupleValue,
         bindings: bindings
       )
-    case .assignment(let target, let operatorKind, let value):
-      lowerAssignment(target: target, operatorKind: operatorKind, value: value)
+    case .assignment(let target, let operatorKind, let value, let span):
+      lowerAssignment(target: target, operatorKind: operatorKind, value: value, span: span)
     case .expression(let expression):
       if let result = lowerExpression(expression) {
         if let operand = result.operand {
@@ -1208,14 +1208,15 @@ private final class MIRFunctionBuilder {
   private func lowerAssignment(
     target: TypedExpressionNode,
     operatorKind: CompoundAssignmentOperator?,
-    value: TypedExpressionNode
+    value: TypedExpressionNode,
+    span: SourceSpan
   ) {
     let loweredValue = lowerValue(value)
     guard let place = lowerPlace(target) else {
       fatalError("Unsupported assignment target reached MIR lowering")
     }
     if let operatorKind {
-      append(.compoundAssign(MIRCompoundAssignment(target: place, operatorKind: operatorKind, value: loweredValue)))
+      append(.compoundAssign(MIRCompoundAssignment(target: place, operatorKind: operatorKind, value: loweredValue, span: span)))
     } else {
       append(.assign(place, loweredValue))
     }
@@ -3709,12 +3710,13 @@ private final class MIRFunctionBuilder {
     left: TypedExpressionNode,
     right: TypedExpressionNode,
     type: Type,
-    operatorKind: MIRBinaryOperator
+    operatorKind: MIRBinaryOperator,
+    span: SourceSpan = .unknown
   ) -> MIRExprResult {
     let leftOperand = lowerOperand(left)
     let rightOperand = lowerOperand(right)
     let result = materialize(
-      .binary(MIRBinaryOperation(left: leftOperand, operatorKind: operatorKind, right: rightOperand, type: type)),
+      .binary(MIRBinaryOperation(left: leftOperand, operatorKind: operatorKind, right: rightOperand, type: type, span: span)),
       type: type
     )
     return MIRExprResult(type: type, category: .rvalue, operand: result, place: nil)
@@ -4238,7 +4240,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func lowerBorrowedSourceValue(_ expression: TypedExpressionNode) -> MIRValue {
-    if case .castExpression(let inner, let targetType) = expression,
+    if case .castExpression(let inner, let targetType, _) = expression,
        isOwnershipPreservingBorrowCast(sourceType: inner.type, targetType: targetType) {
       return lowerBorrowedSourceValue(inner)
     }
@@ -4358,7 +4360,7 @@ private final class MIRFunctionBuilder {
         case .derefExpression(let inner, let type),
           .unsafeDerefExpression(let inner, let type):
       return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, _):
       switch (inner.type, type) {
       case (.reference, .reference),
            (.reference, .mutableReference),

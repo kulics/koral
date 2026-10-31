@@ -2910,6 +2910,26 @@ given CodeGen {
         return name.to_string();
     };
 
+    /// The raw panic location of a span: `"file:line:col"`, empty when the
+    /// span knows no place.
+    public panic_loc_string(self, span: SourceSpan): String = {
+        if not is_known_span(span) then {
+            return "";
+        };
+        let start = span.start;
+        let mutable loc = when start.file in {
+            .Some(f) then f + ":",
+            .None() then "",
+        };
+        return loc + start.line.to_string() + ":" + start.column.to_string();
+    };
+
+    /// The C string literal for a panic location. Backslashes and quotes are
+    /// escaped so a Windows path survives the round trip into C.
+    public panic_loc_literal(self, span: SourceSpan): String = {
+        return self.panic_loc_literal_str(self.panic_loc_string(span));
+    };
+
     public next_temp_with_call_2(
         self,
         c_type: String,
@@ -2930,6 +2950,53 @@ given CodeGen {
         self.buffer.push_string(second_arg);
         self.buffer.push_string(");\n");
         return name.to_string();
+    };
+
+    /// A checked operation's call: like `next_temp_with_call_2` with the
+    /// panic location every runtime check takes. The location is always
+    /// passed -- empty rather than omitted, because the signature takes it.
+    public next_temp_with_located_call_2(
+        self,
+        c_type: String,
+        func_name: String,
+        first_arg: String,
+        second_arg: String,
+        loc: String,
+    ): String = {
+        let name = self.next_temp();
+        self.add_indent();
+        self.buffer.push_string(c_type);
+        self.buffer.push_rune(' ');
+        self.buffer.push_string(name);
+        self.buffer.push_string(" = ");
+        self.buffer.push_string(func_name);
+        self.buffer.push_rune('(');
+        self.buffer.push_string(first_arg);
+        self.buffer.push_string(", ");
+        self.buffer.push_string(second_arg);
+        self.buffer.push_string(", ");
+        self.buffer.push_string(self.panic_loc_literal_str(loc));
+        self.buffer.push_string(");\n");
+        return name.to_string();
+    };
+
+    /// Quote a raw `file:line:col` as a C string literal.
+    public panic_loc_literal_str(self, loc: String): String = {
+        let mutable out = StringBuilder.new();
+        out.push_rune('"');
+        for r in loc.to_runes() then {
+            if r == '\\' then {
+                out.push_rune('\\');
+                out.push_rune('\\');
+            } else if r == '"' then {
+                out.push_rune('\\');
+                out.push_rune('"');
+            } else {
+                out.push_rune(r);
+            };
+        };
+        out.push_rune('"');
+        return out.to_string();
     };
 
     public push_joined_strings(self, values: List[String], separator: String): Void = {

@@ -686,26 +686,29 @@ extension Monomorphizer {
         case .booleanLiteral(let value, let type):
             return .booleanLiteral(value: value, type: resolveParameterizedType(type))
             
-        case .castExpression(let expression, let type):
+        case .castExpression(let expression, let type, let span):
             return .castExpression(
                 expression: resolveTypesInExpression(expression),
-                type: resolveParameterizedType(type)
+                type: resolveParameterizedType(type),
+                span: span
             )
-            
-        case .arithmeticExpression(let left, let op, let right, let type):
+
+        case .arithmeticExpression(let left, let op, let right, let type, let span):
             return .arithmeticExpression(
                 left: resolveTypesInExpression(left),
                 op: op,
                 right: resolveTypesInExpression(right),
-                type: resolveParameterizedType(type)
+                type: resolveParameterizedType(type),
+                span: span
             )
 
-        case .wrappingArithmeticExpression(let left, let op, let right, let type):
+        case .wrappingArithmeticExpression(let left, let op, let right, let type, let span):
             return .wrappingArithmeticExpression(
                 left: resolveTypesInExpression(left),
                 op: op,
                 right: resolveTypesInExpression(right),
-                type: resolveParameterizedType(type)
+                type: resolveParameterizedType(type),
+                span: span
             )
 
         case .comparisonExpression(let left, let op, let right, let type):
@@ -750,12 +753,13 @@ extension Monomorphizer {
                 type: resolveParameterizedType(type)
             )
             
-        case .bitwiseExpression(let left, let op, let right, let type):
+        case .bitwiseExpression(let left, let op, let right, let type, let span):
             return .bitwiseExpression(
                 left: resolveTypesInExpression(left),
                 op: op,
                 right: resolveTypesInExpression(right),
-                type: resolveParameterizedType(type)
+                type: resolveParameterizedType(type),
+                span: span
             )
             
         case .bitwiseNotExpression(let expression, let type):
@@ -1531,11 +1535,12 @@ extension Monomorphizer {
                 bindings: newBindings
             )
             
-        case .assignment(let target, let op, let value):
+        case .assignment(let target, let op, let value, let span):
             return .assignment(
                 target: resolveTypesInExpression(target),
                 operator: op,
-                value: resolveTypesInExpression(value)
+                value: resolveTypesInExpression(value),
+                span: span
             )
             
         case .expression(let expr):

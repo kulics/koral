@@ -105,7 +105,7 @@ extension TypeChecker {
      case .methodReference(let base, _, _, _, _),
         .traitMethodPlaceholder(_, _, _, _, let base, _, _):
       return typedExpressionHasObservableStatementEffect(base)
-    case .castExpression(let inner, _),
+    case .castExpression(let inner, _, _),
          .notExpression(let inner, _),
          .bitwiseNotExpression(let inner, _),
          .derefExpression(let inner, _),
@@ -118,12 +118,12 @@ extension TypeChecker {
       if typedExpressionHasObservableStatementEffect(inner) {
         return true
       }
-    case .arithmeticExpression(let left, _, let right, _),
-         .wrappingArithmeticExpression(let left, _, let right, _),
+    case .arithmeticExpression(let left, _, let right, _, _),
+         .wrappingArithmeticExpression(let left, _, let right, _, _),
          .comparisonExpression(let left, _, let right, _),
          .andExpression(let left, let right, _),
          .orExpression(let left, let right, _),
-         .bitwiseExpression(let left, _, let right, _):
+         .bitwiseExpression(let left, _, let right, _, _):
       if typedExpressionHasObservableStatementEffect(left) || typedExpressionHasObservableStatementEffect(right) {
         return true
       }
@@ -531,7 +531,7 @@ extension TypeChecker {
               ptrExpr = typedBase
             }
             let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-              left: ptrExpr, op: .plus, right: index, type: baseStructType)
+              left: ptrExpr, op: .plus, right: index, type: baseStructType, span: span)
               let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
 
             var typedRhs = try inferTypedExpression(value)
@@ -541,14 +541,14 @@ extension TypeChecker {
             }
 
             if let arithmeticOp = compoundOpToArithmeticOp(op) {
-              let newValue = try buildArithmeticExpression(op: arithmeticOp, lhs: derefTarget, rhs: typedRhs)
-              return .assignment(target: derefTarget, operator: nil, value: newValue)
+              let newValue = try buildArithmeticExpression(op: arithmeticOp, lhs: derefTarget, rhs: typedRhs, span: span)
+              return .assignment(target: derefTarget, operator: nil, value: newValue, span: span)
             } else if let _ = compoundOpToBitwiseOp(op) {
               if element != .error && typedRhs.type != .error && (!isIntegerScalarType(element) || element != typedRhs.type) {
                 throw SemanticError.typeMismatch(
                   expected: "Matching Integer Types", got: "\(element) \(op) \(typedRhs.type)")
               }
-              return .assignment(target: derefTarget, operator: op, value: typedRhs)
+              return .assignment(target: derefTarget, operator: op, value: typedRhs, span: span)
             } else {
               fatalError("Unknown compound assignment operator")
             }
@@ -614,7 +614,8 @@ extension TypeChecker {
             newValueExpr = try buildArithmeticExpression(
               op: arithmeticOp,
               lhs: .variable(identifier: oldSym),
-              rhs: .variable(identifier: rhsSym)
+              rhs: .variable(identifier: rhsSym),
+              span: span
             )
             if newValueExpr.type != .error && elementType != .error && newValueExpr.type != elementType {
               throw SemanticError.typeMismatch(
@@ -629,7 +630,8 @@ extension TypeChecker {
               left: .variable(identifier: oldSym),
               op: bitwiseOp,
               right: .variable(identifier: rhsSym),
-              type: elementType
+              type: elementType,
+              span: span
             )
           } else {
             fatalError("Unknown compound assignment operator")
@@ -659,13 +661,14 @@ extension TypeChecker {
           let newValueExpr = try buildArithmeticExpression(
             op: arithmeticOp,
             lhs: typedTarget,
-            rhs: typedValue
+            rhs: typedValue,
+            span: span
           )
           if newValueExpr.type != .error && typedTarget.type != .error && newValueExpr.type != typedTarget.type {
             throw SemanticError.typeMismatch(
               expected: typedTarget.type.description, got: newValueExpr.type.description)
           }
-          return .assignment(target: typedTarget, operator: nil, value: newValueExpr)
+          return .assignment(target: typedTarget, operator: nil, value: newValueExpr, span: span)
         } else if let _ = compoundOpToBitwiseOp(op) {
           if typedTarget.type != .error && typedValue.type != .error && (!isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type) {
             throw SemanticError.typeMismatch(
@@ -675,7 +678,7 @@ extension TypeChecker {
           fatalError("Unknown compound assignment operator")
         }
 
-        return .assignment(target: typedTarget, operator: op, value: typedValue)
+        return .assignment(target: typedTarget, operator: op, value: typedValue, span: span)
       }
 
       // Simple assignment
@@ -721,7 +724,7 @@ extension TypeChecker {
             ptrExpr = typedBase
           }
           let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-            left: ptrExpr, op: .plus, right: index, type: baseStructType)
+            left: ptrExpr, op: .plus, right: index, type: baseStructType, span: span)
           let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
 
           var typedValue = try inferTypedExpression(value)
@@ -729,7 +732,7 @@ extension TypeChecker {
           if typedValue.type != .never && typedValue.type != .error && element != .error && typedValue.type != element {
             throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
           }
-          return .assignment(target: derefTarget, operator: nil, value: typedValue)
+          return .assignment(target: derefTarget, operator: nil, value: typedValue, span: span)
         }
 
         let expectedValueType: Type
@@ -813,7 +816,7 @@ extension TypeChecker {
           expected: typedTarget.type.description, got: typedValue.type.description)
       }
 
-      return .assignment(target: typedTarget, operator: nil, value: typedValue)
+      return .assignment(target: typedTarget, operator: nil, value: typedValue, span: span)
 
     case .expression(let expr, let span):
       self.currentSpan = span

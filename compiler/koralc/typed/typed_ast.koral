@@ -356,3 +356,112 @@ public let typed_expr_value_category(expr: TypedExpr): ValueCategory = {
         _ then ValueCategory.RValue(),
     };
 };
+
+/// Where a typed expression was written. `expr.span` when it knows;
+/// otherwise the walk below finds the nearest subtree that does -- the same
+/// answer the type checker's own diagnostics blame.
+public let typed_expr_span_at(expr: TypedExpr, context: CompilerContext): SourceSpan = {
+        if is_known_span(expr.span) then {
+            return expr.span;
+        };
+        return when expr.expr_kind in {
+            .Variable(symbol) then context.get_span(symbol.def_id) or else unknown_span(
+            ),
+            .CastExpr(_, inner) then typed_expr_span_at(inner, context),
+            .Unary(_, inner) then typed_expr_span_at(inner, context),
+            .RefExpr(inner) then typed_expr_span_at(inner, context),
+            .PtrExpr(inner) then typed_expr_span_at(inner, context),
+            .DerefExpr(inner) then typed_expr_span_at(inner, context),
+            .UnsafeDerefExpr(inner) then typed_expr_span_at(inner, context),
+            .ArithmeticExpr(left, _, _) then typed_expr_span_at(left, context),
+            .ComparisonExpr(left, _, _) then typed_expr_span_at(left, context),
+            .BitwiseExpr(left, _, _) then typed_expr_span_at(left, context),
+            .AndExpr(left, _) then typed_expr_span_at(left, context),
+            .OrExpr(left, _) then typed_expr_span_at(left, context),
+            .IsExpr(subject, _, _) then {
+                let subject_span = typed_expr_span_at(subject, context);
+                if is_known_span(subject_span) then subject_span else unknown_span()
+            },
+            .Call(callee, _) then typed_expr_span_at(callee, context),
+            .GenericCall(function_symbol, _, args) then {
+                let function_span = context.get_span(function_symbol.def_id) or else unknown_span(
+                );
+                if is_known_span(function_span) then function_span
+                else if args.is_empty() then unknown_span()
+                else {
+                    let first_arg = (args[UInt(0)]);
+                    typed_expr_span_at(first_arg, context)
+                }
+            },
+            .MemberPath(base, _) then typed_expr_span_at(base, context),
+            .MethodReference(base, _, method, _, _, _) then {
+                let base_span = typed_expr_span_at(base, context);
+                if is_known_span(base_span) then base_span
+                else context.get_span(method.def_id) or else unknown_span()
+            },
+            .Block(statements, tail_expression) then if statements.is_empty() then {
+                when tail_expression in {
+                    .Some(tail) then typed_expr_span_at(tail, context),
+                    .None() then unknown_span(),
+                }
+            } else when statements[UInt(0)] in {
+                .LetStmt(_, _, span) then span,
+                .TupleLetStmt(_, _, _, span) then span,
+                .AssignmentStmt(_, _, span) then span,
+                .ExprStmt(_, span) then span,
+                .IfStmt(_, _, _, span) then span,
+                .WhileStmt(_, _, span) then span,
+                .WhenStmt(_, _, span) then span,
+                .ReturnStmt(_, span) then span,
+                .BreakStmt(span) then span,
+                .ContinueStmt(span) then span,
+                .DeferStmt(_, span) then span,
+            },
+            .IfExpr(condition, _, _) then typed_expr_span_at(condition, context),
+            .WhenExpr(subject, _) then typed_expr_span_at(subject, context),
+            .LambdaExpr(_, _, body) then typed_expr_span_at(body, context),
+            .StaticMethodCall(_, _, method, _, _, args) then {
+                let method_span = context.get_span(method.def_id) or else unknown_span(
+                );
+                if is_known_span(method_span) then method_span
+                else if args.is_empty() then unknown_span()
+                else {
+                    let first_arg = (args[UInt(0)]);
+                    typed_expr_span_at(first_arg, context)
+                }
+            },
+            .TypeConstruction(identifier, _, args) then {
+                let type_span = context.get_span(identifier.def_id) or else unknown_span(
+                );
+                if is_known_span(type_span) then type_span
+                else if args.is_empty() then unknown_span()
+                else {
+                    let first_arg = (args[UInt(0)]);
+                    typed_expr_span_at(first_arg, context)
+                }
+            },
+            .EnumConstruction(_, _, args) then if args.is_empty() then unknown_span()
+            else {
+                let first_arg = (args[UInt(0)]);
+                typed_expr_span_at(first_arg, context)
+            },
+            .TraitMethodPlaceholder(base, _, method, _, _, _) then {
+                let base_span = typed_expr_span_at(base, context);
+                if is_known_span(base_span) then base_span
+                else context.get_span(method.def_id) or else unknown_span()
+            },
+            .TraitObjectConversion(inner, _, _) then typed_expr_span_at(inner, context),
+            .TraitMethodCall(receiver, _, _, _, _) then typed_expr_span_at(receiver, context),
+            .GenericInstantiation(base_type, _) then when base_type in {
+                .StructureType(def_id) then context.get_span(def_id) or else unknown_span(
+                ),
+                .EnumType(def_id) then context.get_span(def_id) or else unknown_span(
+                ),
+                .OpaqueType(def_id) then context.get_span(def_id) or else unknown_span(
+                ),
+                _ then unknown_span(),
+            },
+            _ then unknown_span(),
+        };
+    };
+

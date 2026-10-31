@@ -241,7 +241,7 @@ final class MIRFunctionCodeEmitter {
         }
       case .ref(let place, _, _):
         walkPlace(place)
-      case .cast(let operand, _):
+      case .cast(let operand, _, _):
         walkOperand(operand)
       case .intrinsic(let intrinsic):
         walkIntrinsic(intrinsic)
@@ -498,7 +498,7 @@ final class MIRFunctionCodeEmitter {
         if case .local(let localID) = place {
           markUnsafe(localID)
         }
-      case .cast(let operand, _):
+      case .cast(let operand, _, _):
         walkOperand(operand)
       case .intrinsic:
         break
@@ -518,7 +518,7 @@ final class MIRFunctionCodeEmitter {
         return localID
       case .placeRead(.local(let localID), _):
         return localID
-      case .cast(.local(let localID), _):
+      case .cast(.local(let localID), _, _):
         return localID
       default:
         return nil
@@ -895,7 +895,7 @@ final class MIRFunctionCodeEmitter {
       let op: BitwiseOperator = assignment.operatorKind == .shiftLeft ? .shiftLeft : .shiftRight
       let functionName = codeGen.shiftFuncName(op: op, type: targetType)
       codeGen.addIndent()
-      codeGen.appendToBuffer("\(access.path) = \(functionName)(\(access.path), \(valueEmission.expression));\n")
+      codeGen.appendToBuffer("\(access.path) = \(functionName)(\(access.path), \(valueEmission.expression), \(codeGen.panicLocLiteral(assignment.span)));\n")
     } else {
       let op = codeGen.compoundOpToC(assignment.operatorKind)
       codeGen.addIndent()
@@ -1143,8 +1143,8 @@ final class MIRFunctionCodeEmitter {
       return emitReference(place: place, kind: kind, allocation: allocation)
     case .pointer(let place):
       return emitPointer(place)
-    case .cast(let operand, let type):
-      return emitCastOperand(operand, targetType: type)
+    case .cast(let operand, let type, let span):
+      return emitCastOperand(operand, targetType: type, span: span)
     case .intrinsic(let intrinsic):
       return emitIntrinsic(intrinsic)
     case .lambda(let lambda):
@@ -1453,20 +1453,21 @@ final class MIRFunctionCodeEmitter {
     let right = emitOperandExpression(operation.right)
     let resultType = operation.type
     let cType = codeGen.cTypeName(resultType)
+    let locLiteral = codeGen.panicLocLiteral(operation.span)
 
     let expression: String
     switch operation.operatorKind {
     case .arithmetic(let op, let checked):
       if checked && resultType.isIntegerType {
         let functionName = codeGen.checkedArithmeticFuncName(op: op, type: resultType)
-        expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right))")
+        expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right), \(locLiteral))")
       } else {
         expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.arithmeticOpToC(op)) \(right)")
       }
     case .wrappingArithmetic(let op):
       expression = codeGen.nextTempWithInit(
         cType: cType,
-        initExpr: codeGen.wrappingArithmeticInitExpr(op: op, left: left, right: right, type: resultType))
+        initExpr: codeGen.wrappingArithmeticInitExpr(op: op, left: left, right: right, type: resultType, locLiteral: locLiteral))
     case .comparison(let op):
       expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.comparisonOpToC(op)) \(right)")
     case .logicalAnd:
@@ -1476,7 +1477,7 @@ final class MIRFunctionCodeEmitter {
     case .bitwise(let op, let checkedShift):
       if checkedShift && resultType.isIntegerType {
         let functionName = codeGen.shiftFuncName(op: op, type: resultType)
-        expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right))")
+        expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(functionName)(\(left), \(right), \(locLiteral))")
       } else {
         expression = codeGen.nextTempWithInit(cType: cType, initExpr: "\(left) \(codeGen.bitwiseOpToC(op)) \(right)")
       }
@@ -2005,7 +2006,7 @@ final class MIRFunctionCodeEmitter {
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: type))
   }
 
-  private func emitCastOperand(_ operand: MIROperand, targetType: Type) -> MIRValueEmission {
+  private func emitCastOperand(_ operand: MIROperand, targetType: Type, span: SourceSpan) -> MIRValueEmission {
     let sourceEmission = emitOperandValue(operand)
     let sourceType = resolver.type(of: operand) ?? targetType
 
@@ -2013,7 +2014,7 @@ final class MIRFunctionCodeEmitter {
       return sourceEmission
     }
 
-    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType)
+    let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType, span: span)
     emitCleanups(sourceEmission.cleanups)
     return MIRValueEmission(expression: expression, cleanups: cleanupForTemporaryResult(expression: expression, type: targetType))
   }
@@ -2448,10 +2449,13 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
-  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type) -> String {
+  private func emitScalarOrPointerCast(expression: String, sourceType: Type, targetType: Type, span: SourceSpan) -> String {
     if sourceType == targetType {
       return expression
     }
+    // Every runtime check below panics with the source place of the
+    // conversion -- the same anchor the reference compiler bakes in.
+    let locLiteral = codeGen.panicLocLiteral(span)
 
     func isFloat(_ type: Type) -> Bool {
       switch type {
@@ -2512,7 +2516,8 @@ final class MIRFunctionCodeEmitter {
         // truncated-toward-zero value takes the target width's low bits.
         return codeGen.nextTempWithInit(
           cType: targetCType,
-          initExpr: "(\(targetCType))__koral_wrapping_bits_from_f64((double)\(expression), (unsigned)(sizeof(\(targetCType)) * 8))")
+          initExpr: "(\(targetCType))__koral_wrapping_bits_from_f64((double)\(expression), (unsigned)(sizeof(\(targetCType)) * 8), \(locLiteral))"
+        )
       }
       // Integer -> Wrapping is a pure C cast: narrowing takes the low bits,
       // widening sign/zero-extends. It never panics.
@@ -2525,7 +2530,7 @@ final class MIRFunctionCodeEmitter {
       codeGen.appendToBuffer("if (!(\(floatValue) >= (double)\(minMacro) && \(floatValue) <= (double)\(maxMacro))) {\n")
       codeGen.withIndent {
         codeGen.addIndent()
-        codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+        codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
       }
       codeGen.addIndent()
       codeGen.appendToBuffer("}\n")
@@ -2552,7 +2557,7 @@ final class MIRFunctionCodeEmitter {
         codeGen.appendToBuffer("if (((\(sourceCType))\(converted)) != (\(sourceCType))\(sourceValue)) {\n")
         codeGen.withIndent {
           codeGen.addIndent()
-          codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+          codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
         }
         codeGen.addIndent()
         codeGen.appendToBuffer("}\n")
@@ -2561,7 +2566,7 @@ final class MIRFunctionCodeEmitter {
           codeGen.appendToBuffer("if (\(sourceValue) < 0) {\n")
           codeGen.withIndent {
             codeGen.addIndent()
-            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
           }
           codeGen.addIndent()
           codeGen.appendToBuffer("}\n")
@@ -2571,7 +2576,7 @@ final class MIRFunctionCodeEmitter {
           codeGen.appendToBuffer("if ((unsigned long long)\(sourceValue) > (unsigned long long)\(maxMacro)) {\n")
           codeGen.withIndent {
             codeGen.addIndent()
-            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow();\n")
+            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
           }
           codeGen.addIndent()
           codeGen.appendToBuffer("}\n")
@@ -2730,7 +2735,7 @@ final class MIRFunctionCodeEmitter {
       if ownership == .move {
         consumeMovedPlace(place)
       }
-    case .cast(let operand, let targetType):
+    case .cast(let operand, let targetType, _):
       let sourceType = resolver.type(of: operand) ?? targetType
       guard isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) else {
         break

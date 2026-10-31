@@ -193,7 +193,7 @@ indirect enum MIRValue {
   case traitMethodCall(MIRTraitMethodCall)
   case ref(MIRPlace, kind: MIRReferenceKind, allocation: MIRReferenceAllocation)
   case pointer(MIRPlace)
-  case cast(MIROperand, to: Type)
+  case cast(MIROperand, to: Type, span: SourceSpan)
   case intrinsic(MIRIntrinsic)
   case lambda(MIRLambda)
 }
@@ -224,6 +224,9 @@ struct MIRBinaryOperation {
   let operatorKind: MIRBinaryOperator
   let right: MIROperand
   let type: Type
+  /// The panic anchor of a checked operation (see `TypedExpressionNode.span`).
+  /// Defaults to `.unknown` for the operations that cannot panic.
+  var span: SourceSpan = .unknown
 }
 
 enum MIRBinaryOperator {
@@ -263,6 +266,8 @@ struct MIRCompoundAssignment {
   let target: MIRPlace
   let operatorKind: CompoundAssignmentOperator
   let value: MIRValue
+  /// The panic anchor of a checked shift (see `TypedStatementNode.assignment`).
+  var span: SourceSpan = .unknown
 }
 
 struct MIRCall {

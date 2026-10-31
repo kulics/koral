@@ -1682,9 +1682,9 @@ given TypeChecker {
                 // diagnosed; mutability is not the rule that applies to it.
                 if not self.assignment_target_has_unresolved_member(typed_target) then {
                     when self.first_immutable_field_in_assignment_target(typed_target) in {
-                        .Some(name) then {
+                        .Some(field_hit) then {
                             self.push_diagnostic(
-                                "Cannot assign to immutable variable: \(name)",
+                                "Cannot assign to immutable field '\(field_hit.first)' of type '\(field_hit.second)'",
                                 span,
                             );
                         },
@@ -2451,7 +2451,13 @@ given TypeChecker {
         };
     };
 
-    first_immutable_field_in_assignment_target(self, target: TypedExpr): Option[String] = {
+    /// The first non-mutable segment an assignment must write through, and
+    /// the type that owns it: `v.a = 5` blames field `a` of `Val`, not some
+    /// "immutable variable".
+    first_immutable_field_in_assignment_target(
+        self,
+        target: TypedExpr,
+    ): Option[Pair[String, String]] = {
         return when target.expr_kind in {
             .MemberPath(base, path) then {
                 let prior = self.first_immutable_field_in_assignment_target(base);
@@ -2471,14 +2477,19 @@ given TypeChecker {
                         ) or self.is_type_mutable_nominal(segment_type);
                     };
                     if not segment.is_mutable() and not can_traverse_immutable_segment then {
-                        return Option[String].Some(self.context().symbol_name(segment));
+                        return Option[Pair[String, String]].Some(
+                            Pair(
+                                self.context().symbol_name(segment),
+                                self.nominal_type_label(current),
+                            ),
+                        );
                     };
                     current = segment_type;
                     idx += 1;
                 };
-                return Option[String].None();
+                return Option[Pair[String, String]].None();
             },
-            _ then Option[String].None(),
+            _ then Option[Pair[String, String]].None(),
         };
     };
 };

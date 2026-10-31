@@ -54,11 +54,18 @@ public final class SourceManager: @unchecked Sendable {
     ///   - lineNumber: The line number (1-based)
     /// - Returns: The line content, or nil if not found
     public func getLine(_ fileName: String, lineNumber: Int) -> String? {
-        guard let file = files[fileName],
-              lineNumber > 0 && lineNumber <= file.lines.count else {
-            return nil
+        if let file = files[fileName], lineNumber > 0 && lineNumber <= file.lines.count {
+            return String(file.lines[lineNumber - 1])
         }
-        return String(file.lines[lineNumber - 1])
+        // A diagnostic's file name is the path its span recorded; the module
+        // loader registers display names. Read the file itself rather than
+        // let a snippet vanish over a naming difference.
+        if !hasFile(fileName),
+           let content = try? String(contentsOfFile: fileName, encoding: .utf8) {
+            loadFile(name: fileName, content: content)
+            return getLine(fileName, lineNumber: lineNumber)
+        }
+        return nil
     }
     
     /// Gets a source file by name.

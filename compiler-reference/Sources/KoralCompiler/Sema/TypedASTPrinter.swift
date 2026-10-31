@@ -138,7 +138,7 @@ public func printTypedAST(_ node: TypedProgram) {
         printTypedExpression(tupleValue)
       }
 
-    case .assignment(let target, let op, let value):
+    case .assignment(let target, let op, let value, _):
       if let op {
         print("\(indent)Assignment: \(op)")
       } else {
@@ -257,7 +257,7 @@ public func printTypedAST(_ node: TypedProgram) {
     case .booleanLiteral(let value, let type):
       print("\(indent)BoolLiteral: \(value) : \(type)")
 
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, _):
       print("\(indent)CastExpression: expr as \(type)")
       withIndent {
         print("\(indent)Operand:")
@@ -283,7 +283,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .arithmeticExpression(let left, let op, let right, let type):
+    case .arithmeticExpression(let left, let op, let right, let type, _):
       print("\(indent)ArithmeticExpression: \(op) : \(type)")
       withIndent {
         print("\(indent)Left:")
@@ -296,7 +296,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .wrappingArithmeticExpression(let left, let op, let right, let type):
+    case .wrappingArithmeticExpression(let left, let op, let right, let type, _):
       print("\(indent)WrappingArithmeticExpression: \(op) : \(type)")
       withIndent {
         print("\(indent)Left:")
@@ -322,7 +322,7 @@ public func printTypedAST(_ node: TypedProgram) {
         }
       }
 
-    case .bitwiseExpression(let left, let op, let right, let type):
+    case .bitwiseExpression(let left, let op, let right, let type, _):
       print("\(indent)BitwiseExpression: \(op) : \(type)")
       withIndent {
         print("\(indent)Left:")

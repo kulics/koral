@@ -1126,6 +1126,37 @@ public class CodeGen {
     return name
   }
 
+  /// The raw panic location of a span: `"file:line:col"`, empty when the span
+  /// knows no place. Byte-for-byte the reference compiler's spelling -- the
+  /// two must bake the same string into the same checked call.
+  func panicLocString(_ span: SourceSpan) -> String {
+    guard span.isKnown else { return "" }
+    var loc = ""
+    if let file = span.start.fileName {
+      loc += file + ":"
+    }
+    return "\(loc)\(span.start.line):\(span.start.column)"
+  }
+
+  /// The C string literal for a panic location. Backslashes and quotes are
+  /// escaped so a Windows path survives the round trip into C.
+  func panicLocLiteral(_ span: SourceSpan) -> String {
+    return panicLocLiteralStr(panicLocString(span))
+  }
+
+  /// Quote a raw `file:line:col` as a C string literal.
+  func panicLocLiteralStr(_ loc: String) -> String {
+    var out = "\""
+    for ch in loc {
+      if ch == "\\" || ch == "\"" {
+        out.append("\\")
+      }
+      out.append(ch)
+    }
+    out += "\""
+    return out
+  }
+
   func arithmeticOpToC(_ op: ArithmeticOperator) -> String {
     switch op {
     case .plus: return "+"
@@ -1209,7 +1240,7 @@ public class CodeGen {
   /// modular by construction. Division and remainder keep the plain family's
   /// divide-by-zero panic and additionally wrap `MIN / -1` to `MIN`
   /// (`MIN % -1` to `0`) instead of the C undefined result.
-  func wrappingArithmeticInitExpr(op: ArithmeticOperator, left: String, right: String, type: Type) -> String {
+  func wrappingArithmeticInitExpr(op: ArithmeticOperator, left: String, right: String, type: Type, locLiteral: String) -> String {
     let cType = cTypeName(type)
     let unsignedType = wrappingUnsignedOpTypeName(type)
     switch op {
@@ -1223,14 +1254,14 @@ public class CodeGen {
       return "(\(cType))((\(unsignedType))(\(left)) \(opC) (\(unsignedType))(\(right)))"
     case .divide:
       if isSignedWrappingIntegerType(type) {
-        return "((\(right)) == -1 ? (\(cType))((\(unsignedType))0 - (\(unsignedType))(\(left))) : koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right)))"
+        return "((\(right)) == -1 ? (\(cType))((\(unsignedType))0 - (\(unsignedType))(\(left))) : koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right), \(locLiteral)))"
       }
-      return "koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right))"
+      return "koral_checked_div_\(integerRuntimeTypeSuffix(type))(\(left), \(right), \(locLiteral))"
     case .remainder:
       if isSignedWrappingIntegerType(type) {
-        return "((\(right)) == -1 ? (\(cType))0 : koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right)))"
+        return "((\(right)) == -1 ? (\(cType))0 : koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right), \(locLiteral)))"
       }
-      return "koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right))"
+      return "koral_checked_mod_\(integerRuntimeTypeSuffix(type))(\(left), \(right), \(locLiteral))"
     }
   }
 

@@ -104,6 +104,10 @@ public struct DiagnosticRenderer {
     }
     
     /// Renders the source code snippet with error pointer.
+    ///
+    /// The one shape every diagnostic renders: the line the span starts on
+    /// and a caret at its column. A single caret -- not a span-width pointer
+    /// -- so two compilers cannot disagree on span ends.
     private func renderSourceSnippet(_ error: DiagnosticError) -> String? {
         guard let sourceManager = sourceManager else {
             return nil
@@ -119,42 +123,16 @@ public struct DiagnosticRenderer {
         }
         
         var output = ""
-        
-        // Line number gutter
-        let lineNumStr = String(span.start.line)
-        let gutterWidth = lineNumStr.count + 1
-        
-        // Empty gutter line
-        output += String(repeating: " ", count: gutterWidth) + " |\n"
-        
-        // Source line
-        output += " \(lineNumStr) | \(line)\n"
-        
-        // Error pointer line
-        let padding = String(repeating: " ", count: gutterWidth) + " | "
-        let pointerPadding = String(repeating: " ", count: max(0, span.start.column - 1))
-        
-        // Calculate pointer length
-        let pointerLength: Int
-        if span.start.line == span.end.line {
-            pointerLength = max(1, span.end.column - span.start.column + 1)
-        } else {
-            // Multi-line span: just point to the start
-            pointerLength = 1
+        output += "  |\n"
+        output += "  | \(line)\n"
+        if span.start.column > 0 {
+            let padding = String(repeating: " ", count: span.start.column - 1)
+            output += "  | \(padding)^"
         }
-        
-        let pointer: String
-        if pointerLength == 1 {
-            pointer = "^"
-        } else {
-            pointer = "^" + String(repeating: "~", count: pointerLength - 1)
-        }
-        
-        output += "\(padding)\(pointerPadding)\(pointer)\n"
         
         return output
     }
-}
+    }
 
 // MARK: - Convenience Extensions
 

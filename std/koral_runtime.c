@@ -168,14 +168,30 @@ CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
-void __koral_panic_numeric_conversion_overflow(void) {
-    fprintf(stderr, "Panic: numeric conversion overflow\n");
+static void __koral_panic_print(const char* msg, const char* loc) {
+    if (loc != NULL && loc[0] != '\0') {
+        fprintf(stderr, "Panic: %s at %s\n", msg, loc);
+    } else {
+        fprintf(stderr, "Panic: %s\n", msg);
+    }
     abort();
 }
 
-uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits) {
+void __koral_panic_numeric_conversion_overflow(const char* loc) {
+    __koral_panic_print("numeric conversion overflow", loc);
+}
+
+void __koral_panic_division_by_zero(const char* loc) {
+    __koral_panic_print("division by zero", loc);
+}
+
+void __koral_panic_remainder_by_zero(const char* loc) {
+    __koral_panic_print("remainder by zero", loc);
+}
+
+uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits, const char* loc) {
     if (!isfinite(v)) {
-        __koral_panic_numeric_conversion_overflow();
+        __koral_panic_numeric_conversion_overflow(loc);
     }
     // fmod is exact in IEEE 754: the remainder of the value modulo 2^N is the
     // two's-complement low bits of the truncated integer. The C cast below
@@ -190,39 +206,32 @@ uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits) {
     return (uint64_t)r;
 }
 
-void __koral_panic_overflow_add(void) {
-    fprintf(stderr, "Panic: integer overflow in addition\n");
-    abort();
+void __koral_panic_overflow_add(const char* loc) {
+    __koral_panic_print("integer overflow in addition", loc);
 }
 
-void __koral_panic_overflow_sub(void) {
-    fprintf(stderr, "Panic: integer overflow in subtraction\n");
-    abort();
+void __koral_panic_overflow_sub(const char* loc) {
+    __koral_panic_print("integer overflow in subtraction", loc);
 }
 
-void __koral_panic_overflow_mul(void) {
-    fprintf(stderr, "Panic: integer overflow in multiplication\n");
-    abort();
+void __koral_panic_overflow_mul(const char* loc) {
+    __koral_panic_print("integer overflow in multiplication", loc);
 }
 
-void __koral_panic_overflow_div(void) {
-    fprintf(stderr, "Panic: integer overflow in division\n");
-    abort();
+void __koral_panic_overflow_div(const char* loc) {
+    __koral_panic_print("integer overflow in division", loc);
 }
 
-void __koral_panic_overflow_mod(void) {
-    fprintf(stderr, "Panic: integer overflow in modulo\n");
-    abort();
+void __koral_panic_overflow_mod(const char* loc) {
+    __koral_panic_print("integer overflow in modulo", loc);
 }
 
-void __koral_panic_overflow_neg(void) {
-    fprintf(stderr, "Panic: integer overflow in negation\n");
-    abort();
+void __koral_panic_overflow_neg(const char* loc) {
+    __koral_panic_print("integer overflow in negation", loc);
 }
 
-void __koral_panic_overflow_shift(void) {
-    fprintf(stderr, "Panic: integer overflow in shift\n");
-    abort();
+void __koral_panic_overflow_shift(const char* loc) {
+    __koral_panic_print("integer overflow in shift", loc);
 }
 
 uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precision, int alt_form) {

@@ -1440,7 +1440,7 @@ extension TypeChecker {
         ptrExpr = base
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-        left: ptrExpr, op: .plus, right: index, type: structType)
+        left: ptrExpr, op: .plus, right: index, type: structType, span: span)
       return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
     if case .mutablePointer(let element) = structType {
@@ -1460,7 +1460,7 @@ extension TypeChecker {
         ptrExpr = base
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-        left: ptrExpr, op: .plus, right: index, type: structType)
+        left: ptrExpr, op: .plus, right: index, type: structType, span: span)
       return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
 

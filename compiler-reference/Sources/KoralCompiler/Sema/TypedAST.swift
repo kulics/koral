@@ -180,7 +180,8 @@ public indirect enum TypedStatementNode {
     tupleSymbol: Symbol, tupleValue: TypedExpressionNode,
     bindings: [Symbol?])
   case assignment(
-    target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode)
+    target: TypedExpressionNode, operator: CompoundAssignmentOperator?, value: TypedExpressionNode,
+    span: SourceSpan)
   case expression(TypedExpressionNode)
   case ifStatement(
     condition: TypedExpressionNode,
@@ -210,11 +211,13 @@ public indirect enum TypedExpressionNode {
   case stringLiteral(value: String, type: Type)
   case interpolatedString(parts: [TypedInterpolatedPart], type: Type)
   case booleanLiteral(value: Bool, type: Type)
-  case castExpression(expression: TypedExpressionNode, type: Type)
+  case castExpression(expression: TypedExpressionNode, type: Type, span: SourceSpan)
   case arithmeticExpression(
-    left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
+    left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type,
+    span: SourceSpan)
   case wrappingArithmeticExpression(
-    left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type)
+    left: TypedExpressionNode, op: ArithmeticOperator, right: TypedExpressionNode, type: Type,
+    span: SourceSpan)
   case comparisonExpression(
     left: TypedExpressionNode, op: ComparisonOperator, right: TypedExpressionNode, type: Type)
   case andExpression(left: TypedExpressionNode, right: TypedExpressionNode, type: Type)
@@ -231,7 +234,8 @@ public indirect enum TypedExpressionNode {
   /// - type: Always Bool
   case isNotExpression(subject: TypedExpressionNode, pattern: TypedPattern, type: Type)
   case bitwiseExpression(
-    left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type)
+    left: TypedExpressionNode, op: BitwiseOperator, right: TypedExpressionNode, type: Type,
+    span: SourceSpan)
   case bitwiseNotExpression(expression: TypedExpressionNode, type: Type)
   case derefExpression(expression: TypedExpressionNode, type: Type)
   case unsafeDerefExpression(expression: TypedExpressionNode, type: Type)
@@ -521,16 +525,16 @@ extension TypedExpressionNode {
       .stringLiteral(_, let type),
       .interpolatedString(_, let type),
       .booleanLiteral(_, let type),
-      .castExpression(_, let type),
-      .arithmeticExpression(_, _, _, let type),
-      .wrappingArithmeticExpression(_, _, _, let type),
+      .castExpression(_, let type, _),
+      .arithmeticExpression(_, _, _, let type, _),
+      .wrappingArithmeticExpression(_, _, _, let type, _),
       .comparisonExpression(_, _, _, let type),
       .andExpression(_, _, let type),
       .orExpression(_, _, let type),
       .notExpression(_, let type),
       .isExpression(_, _, let type),
       .isNotExpression(_, _, let type),
-      .bitwiseExpression(_, _, _, let type),
+      .bitwiseExpression(_, _, _, let type, _),
       .bitwiseNotExpression(_, let type),
       .derefExpression(_, let type),
       .unsafeDerefExpression(_, let type),
@@ -565,6 +569,30 @@ extension TypedExpressionNode {
     }
   }
 
+  /// Where a checked operation was anchored when the operation node was
+  /// built -- the same place the reference compiler's `typed_expr_span_at`
+  /// blames:
+  ///
+  /// - binary arithmetic / wrapping / bitwise: the LEFT operand as written
+  /// - conversion (`T(x)`): the converted source expression as written
+  /// - negation (desugared to `0 - x`): the negated operand as written
+  /// - compound assignment (desugared): the assignment target as written
+  ///
+  /// `.unknown` for the constructs that carry no stamp (compiler-internal
+  /// synthesis). A panic on an unstamped operation prints without a source
+  /// location rather than with a guessed one.
+  var span: SourceSpan {
+    switch self {
+    case .castExpression(_, _, let span),
+      .arithmeticExpression(_, _, _, _, let span),
+      .wrappingArithmeticExpression(_, _, _, _, let span),
+      .bitwiseExpression(_, _, _, _, let span):
+      return span
+    default:
+      return .unknown
+    }
+  }
+
   var valueCategory: ValueCategory {
     switch self {
     case .variable:
@@ -582,7 +610,7 @@ extension TypedExpressionNode {
       return .rvalue
     case .ptrExpression:
       return .rvalue
-    case .castExpression(let inner, let type):
+    case .castExpression(let inner, let type, _):
       // Reference-to-reference casts (identity, ref↔ref mutable) preserve the
       // underlying value category because the C representation is identical
       // (struct __koral_Ref). All other casts produce rvalues.
