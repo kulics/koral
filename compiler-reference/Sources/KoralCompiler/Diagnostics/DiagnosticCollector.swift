@@ -293,6 +293,11 @@ public class DiagnosticCollector {
     
     /// 从 SemanticError 添加诊断
     public func addSemanticError(_ error: SemanticError, isPrimary: Bool = true) {
+        // A poisoned-side mismatch disagrees with nothing -- that side's own
+        // complaint is already on the record.
+        if error.isPoisonedTypeMismatch {
+            return
+        }
         self.error(
             error.messageWithoutLocation,
             at: error.span,

@@ -248,7 +248,7 @@ public class Driver {
     // Register source with source manager for error rendering
     sourceManager.loadFile(name: fileName, content: source)
     
-    let lexer = Lexer(input: source)
+    let lexer = Lexer(input: source, start: SourceLocation(line: 1, column: 1, fileName: fileName))
     let parser = Parser(lexer: lexer)
     do {
       let ast = try parser.parse()

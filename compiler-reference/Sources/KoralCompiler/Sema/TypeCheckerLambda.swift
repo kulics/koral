@@ -138,7 +138,7 @@ extension TypeChecker {
         // Verify body type matches declared return type
         // A body that already complained about itself has no reliable type to
         // disagree about: `() -> { 1; }` against `Func() Int` is ONE mistake.
-        if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
+        if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
           && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
         {
           try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
@@ -151,7 +151,7 @@ extension TypeChecker {
         } else {
           actualReturnType = expected
           // Verify body type matches expected return type
-          if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error
+          if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
             && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
           {
             try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
@@ -161,7 +161,7 @@ extension TypeChecker {
         if inferReturnTypeFromBlockReturns {
           if let inferred = inferredFunctionReturnType {
             let tailType = typedBody.type
-            if tailType != .never && tailType != .error && tailType != .void
+            if tailType != .never && tailType != .error && inferred != .error && tailType != .void
               && inferred != tailType
               && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
             {

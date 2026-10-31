@@ -1372,7 +1372,7 @@ extension TypeChecker {
         finalBase = implicitRef
       } else if let implicitDeref = makeImplicitDereference(resolvedBase, expectedType: firstParam.type) {
         finalBase = implicitDeref
-      } else {
+      } else if firstParam.type != .error && resolvedBase.type != .error {
         throw SemanticError.typeMismatch(
           expected: firstParam.type.description,
           got: resolvedBase.type.description
@@ -1384,7 +1384,7 @@ extension TypeChecker {
     for i in 0..<coercedArgs.count {
       let param = params[i + 1]
       coercedArgs[i] = try coerceLiteral(coercedArgs[i], to: param.type)
-      if coercedArgs[i].type != param.type {
+      if coercedArgs[i].type != .error && param.type != .error && coercedArgs[i].type != param.type {
         throw SemanticError.typeMismatch(
           expected: param.type.description,
           got: coercedArgs[i].type.description
@@ -1429,7 +1429,7 @@ extension TypeChecker {
       }
       var index = args[0]
       index = try coerceLiteral(index, to: .uint)
-      if index.type != .uint {
+      if index.type != .uint && index.type != .error {
         throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
       }
       let ptrExpr: TypedExpressionNode
@@ -1449,7 +1449,7 @@ extension TypeChecker {
       }
       var index = args[0]
       index = try coerceLiteral(index, to: .uint)
-      if index.type != .uint {
+      if index.type != .uint && index.type != .error {
         throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
       }
       let ptrExpr: TypedExpressionNode

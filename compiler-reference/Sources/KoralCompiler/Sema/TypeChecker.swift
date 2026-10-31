@@ -1773,7 +1773,7 @@ public class TypeChecker {
         typedBody = implicitDeref
       }
       typedBody = try coerceLiteral(typedBody, to: returnType)
-      if typedBody.type != .never && typedBody.type != .error && typedBody.type != returnType {
+      if typedBody.type != .never && typedBody.type != .error && returnType != .error && typedBody.type != returnType {
         throw SemanticError.typeMismatch(
           expected: returnType.description, got: typedBody.type.description)
       }

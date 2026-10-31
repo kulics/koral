@@ -439,7 +439,7 @@ extension TypeChecker {
         var typedArg = try inferTypedExpression(expression, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)
         // An argument that already failed disagrees with nothing.
-        if typedArg.type != .error && typedArg.type != member.type {
+        if typedArg.type != .error && member.type != .error && typedArg.type != member.type {
           throw SemanticError.typeMismatch(
             expected: member.type.description,
             got: typedArg.type.description
@@ -453,7 +453,7 @@ extension TypeChecker {
       if let defaultExpr = member.defaultValue {
         var typedArg = try inferTypedExpression(defaultExpr, expectedType: member.type)
         typedArg = try coerceLiteral(typedArg, to: member.type)
-        if typedArg.type != .error && typedArg.type != member.type {
+        if typedArg.type != .error && member.type != .error && typedArg.type != member.type {
           throw SemanticError.typeMismatch(
             expected: member.type.description,
             got: typedArg.type.description

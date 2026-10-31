@@ -407,6 +407,7 @@ public class Lexer {
   private let input: String
   private var position: String.Index
   private var _line: Int = 1
+  private var _fileName: String? = nil
   private var _column: Int = 1
   
   // Token start position tracking
@@ -441,12 +442,12 @@ public class Lexer {
   
   // Current location as SourceLocation
   public var currentLocation: SourceLocation {
-    SourceLocation(line: _line, column: _column)
+    SourceLocation(line: _line, column: _column, fileName: _fileName)
   }
   
   // Token start location
   public var tokenStartLocation: SourceLocation {
-    SourceLocation(line: _tokenStartLine, column: _tokenStartColumn)
+    SourceLocation(line: _tokenStartLine, column: _tokenStartColumn, fileName: _fileName)
   }
   
   // Token span from start to current position
@@ -471,6 +472,7 @@ public class Lexer {
     self._column = start.column
     self._tokenStartLine = start.line
     self._tokenStartColumn = start.column
+    self._fileName = start.fileName
   }
 
   public func saveState() -> State {

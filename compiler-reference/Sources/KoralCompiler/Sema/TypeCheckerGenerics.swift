@@ -119,7 +119,7 @@ extension TypeChecker {
     case .identifier(let name, _):
       if typeParams.contains(name) {
         if let existing = inferred[name] {
-          if existing != type {
+          if existing != type && existing != .error && type != .error {
             throw SemanticError.typeMismatch(expected: existing.description, got: type.description)
           }
         } else if case .genericParameter(let boundName) = type, boundName == name,

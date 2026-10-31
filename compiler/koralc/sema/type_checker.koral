@@ -421,11 +421,24 @@ given TypeChecker {
     /// again for the same expression -- a second generic instantiation attempt,
     /// a receiver rewrite, a re-check of the same binding -- must not multiply
     /// its message.
+    /// A mismatch with a poisoned side ("?" -- the unknown type) disagrees
+    /// with nothing: that side's own complaint is already on the record.
+    /// Weak references render as `?Name`, so only a bare `?` counts.
+    message_is_poisoned_mismatch(self, message: String): Bool = {
+        if not message.starts_with("Type mismatch: ") and not message.contains(" does not explicitly implement trait ") and not message.contains("Type ? does not") and not message.contains("Type Unknown does not") then {
+            return false;
+        };
+        return message.contains("expected ?,") or message.contains("expected Unknown,") or message.ends_with("got ?") or message.contains("got ?,") or message.contains("got ? ") or message.ends_with("got Unknown") or message.contains("got Unknown,") or message.contains("trait [?]") or message.contains("trait [Unknown]") or message.ends_with("trait ?") or message.ends_with("trait Unknown");
+    };
+
     push_diagnostic(self, message: String, span: SourceSpan): Void = {
         // A message that arrives without a location is a problem at whatever
         // construct the walker is inside -- see `current_span`. A message that
         // arrives with one keeps it: the call site knows better than the cursor
         // which token is at fault.
+        if self.message_is_poisoned_mismatch(message) then {
+            return;
+        };
         let effective = if is_known_span(span) then span else self.storage.current_span;
         if self.already_reported_diagnostic(message, effective) then {
             return;

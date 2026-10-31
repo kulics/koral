@@ -42,18 +42,28 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
 
     /// Convenience initializer that uses the current semantic context span.
     public init(_ kind: Kind) {
-        self.init(kind, fileName: SemanticErrorContext.currentFileName, span: SemanticErrorContext.currentSpan)
+        self.init(kind, fileName: SemanticErrorContext.currentSpan.fileName ?? SemanticErrorContext.currentFileName, span: SemanticErrorContext.currentSpan)
     }
     
+    /// A mismatch with a poisoned side ("?" -- the error type) disagrees with
+    /// nothing: that side's own complaint is already on the record.
+    public var isPoisonedTypeMismatch: Bool {
+        if case .typeMismatch(let expected, let got) = kind {
+            return expected == "?" || got == "?"
+        }
+        return false
+    }
+
     public init(_ kind: Kind, fileName: String, span: SourceSpan) {
         self.kind = kind
         self.fileName = fileName
         self.span = span
     }
     
-    /// Convenience initializer with span from context
+    /// Convenience initializer with span from context. The span knows its own
+    /// file; the ambient file is only the fallback for synthesized spans.
     public init(_ kind: Kind, span: SourceSpan) {
-        self.init(kind, fileName: SemanticErrorContext.currentFileName, span: span)
+        self.init(kind, fileName: span.fileName ?? SemanticErrorContext.currentFileName, span: span)
     }
     
     // Column number

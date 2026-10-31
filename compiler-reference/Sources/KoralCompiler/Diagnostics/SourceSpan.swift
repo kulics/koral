@@ -44,6 +44,9 @@ public struct SourceSpan: Equatable, Hashable, Sendable {
         end: .unknown
     )
     
+    /// The file this span points into (from its start location).
+    public var fileName: String? { start.fileName }
+
     /// Whether this span has known location information.
     public var isKnown: Bool {
         start.isKnown && end.isKnown

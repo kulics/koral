@@ -220,7 +220,7 @@ extension TypeChecker {
       }
 
       let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
-      if typedCondition.type != .bool {
+      if typedCondition.type != .bool && typedCondition.type != .error {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
@@ -287,7 +287,7 @@ extension TypeChecker {
       }
 
       let typedCondition = autoDereferenceValueContext(try inferTypedExpression(condition))
-      if typedCondition.type != .bool {
+      if typedCondition.type != .bool && typedCondition.type != .error {
         throw SemanticError.typeMismatch(
           expected: "Bool", got: typedCondition.type.description)
       }
@@ -519,7 +519,7 @@ extension TypeChecker {
             }
             var index = typedArgs[0]
             index = try coerceLiteral(index, to: .uint)
-            if index.type != .uint {
+            if index.type != .uint && index.type != .error {
               throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
             }
             let ptrExpr: TypedExpressionNode
@@ -536,7 +536,7 @@ extension TypeChecker {
 
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
-            if typedRhs.type != .never && typedRhs.type != .error && typedRhs.type != element {
+            if typedRhs.type != .never && typedRhs.type != .error && element != .error && typedRhs.type != element {
               throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
             }
 
@@ -544,7 +544,7 @@ extension TypeChecker {
               let newValue = try buildArithmeticExpression(op: arithmeticOp, lhs: derefTarget, rhs: typedRhs)
               return .assignment(target: derefTarget, operator: nil, value: newValue)
             } else if let _ = compoundOpToBitwiseOp(op) {
-              if !isIntegerScalarType(element) || element != typedRhs.type {
+              if element != .error && typedRhs.type != .error && (!isIntegerScalarType(element) || element != typedRhs.type) {
                 throw SemanticError.typeMismatch(
                   expected: "Matching Integer Types", got: "\(element) \(op) \(typedRhs.type)")
               }
@@ -601,7 +601,7 @@ extension TypeChecker {
 
           var typedRhs = try inferTypedExpression(value)
           typedRhs = try coerceLiteral(typedRhs, to: elementType)
-          if typedRhs.type != .never && typedRhs.type != .error && typedRhs.type != elementType {
+          if typedRhs.type != .never && typedRhs.type != .error && elementType != .error && typedRhs.type != elementType {
             throw SemanticError.typeMismatch(
               expected: elementType.description, got: typedRhs.type.description)
           }
@@ -616,12 +616,12 @@ extension TypeChecker {
               lhs: .variable(identifier: oldSym),
               rhs: .variable(identifier: rhsSym)
             )
-            if newValueExpr.type != elementType {
+            if newValueExpr.type != .error && elementType != .error && newValueExpr.type != elementType {
               throw SemanticError.typeMismatch(
                 expected: elementType.description, got: newValueExpr.type.description)
             }
           } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
-            if !isIntegerScalarType(elementType) || elementType != typedRhs.type {
+            if elementType != .error && typedRhs.type != .error && (!isIntegerScalarType(elementType) || elementType != typedRhs.type) {
               throw SemanticError.typeMismatch(
                 expected: "Matching Integer Types", got: "\(elementType) \(op) \(typedRhs.type)")
             }
@@ -650,7 +650,7 @@ extension TypeChecker {
         var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
         typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != typedValue.type {
+        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error && typedTarget.type != typedValue.type {
           throw SemanticError.typeMismatch(
             expected: typedTarget.type.description, got: typedValue.type.description)
         }
@@ -661,13 +661,13 @@ extension TypeChecker {
             lhs: typedTarget,
             rhs: typedValue
           )
-          if newValueExpr.type != typedTarget.type {
+          if newValueExpr.type != .error && typedTarget.type != .error && newValueExpr.type != typedTarget.type {
             throw SemanticError.typeMismatch(
               expected: typedTarget.type.description, got: newValueExpr.type.description)
           }
           return .assignment(target: typedTarget, operator: nil, value: newValueExpr)
         } else if let _ = compoundOpToBitwiseOp(op) {
-          if !isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type {
+          if typedTarget.type != .error && typedValue.type != .error && (!isIntegerScalarType(typedTarget.type) || typedTarget.type != typedValue.type) {
             throw SemanticError.typeMismatch(
               expected: "Matching Integer Types", got: "\(typedTarget.type) \(op) \(typedValue.type)")
           }
@@ -709,7 +709,7 @@ extension TypeChecker {
             }
           var index = typedArgs[0]
           index = try coerceLiteral(index, to: .uint)
-          if index.type != .uint {
+          if index.type != .uint && index.type != .error {
             throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
           }
           let ptrExpr: TypedExpressionNode
@@ -726,7 +726,7 @@ extension TypeChecker {
 
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)
-          if typedValue.type != .never && typedValue.type != .error && typedValue.type != element {
+          if typedValue.type != .never && typedValue.type != .error && element != .error && typedValue.type != element {
             throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
           }
           return .assignment(target: derefTarget, operator: nil, value: typedValue)
@@ -784,7 +784,7 @@ extension TypeChecker {
 
         var typedValue = try inferTypedExpression(value)
         typedValue = try coerceLiteral(typedValue, to: expectedValueType)
-        if typedValue.type != .never && typedValue.type != .error && typedValue.type != expectedValueType {
+        if typedValue.type != .never && typedValue.type != .error && expectedValueType != .error && typedValue.type != expectedValueType {
           throw SemanticError.typeMismatch(
             expected: expectedValueType.description, got: typedValue.type.description)
         }
@@ -808,7 +808,7 @@ extension TypeChecker {
       var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
       typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-      if typedValue.type != .never && typedValue.type != .error && typedTarget.type != typedValue.type {
+      if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error && typedTarget.type != typedValue.type {
         throw SemanticError.typeMismatch(
           expected: typedTarget.type.description, got: typedValue.type.description)
       }

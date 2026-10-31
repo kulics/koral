@@ -534,7 +534,7 @@ public class ModuleResolver {
           // the path is the actionable part, and the OS reason is noise.
           throw PackageManifestError.message("Failed to read file: \(file)")
         }
-        let lexer = Lexer(input: source)
+        let lexer = Lexer(input: source, start: SourceLocation(line: 1, column: 1, fileName: file))
         let parser = Parser(lexer: lexer)
 
         let ast: ASTNode

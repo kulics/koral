@@ -15,9 +15,21 @@ public struct DiagnosticError: Error, Sendable {
 
   public init(stage: Stage, fileName: String, underlying: Error, sourceManager: SourceManager? = nil) {
     self.stage = stage
-    self.fileName = fileName
     self.underlying = underlying
     self.sourceManager = sourceManager
+    // The span knows its own file; the caller's file is only the fallback for
+    // spans that were synthesized rather than lexed.
+    self.fileName = DiagnosticError.spanFile(of: underlying) ?? fileName
+  }
+
+  private static func spanFile(of error: Error) -> String? {
+    if let semantic = error as? SemanticError {
+      return semantic.fileName
+    }
+    if let parser = error as? ParserError {
+      return parser.span.fileName
+    }
+    return nil
   }
 
   /// Renders the error for CLI output with source code snippet if available.
