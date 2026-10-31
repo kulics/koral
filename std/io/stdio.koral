@@ -1,0 +1,174 @@
+using "std" { ... };
+// ============================================================================
+// std.io - Standard Stream Handles
+// ============================================================================
+// Provides: Stdin (Reader), Stdout (Writer), Stderr (Writer),
+//           stdin(), stdout(), stderr()
+// Unbuffered, byte-faithful handles over fd 0/1/2. Buffering lives in
+// BufReader/BufWriter; line/`ToString` convenience stays in std root
+// (scanln, print family). See docs/design/stdio-design.md.
+// ============================================================================
+
+/// Read from a file descriptor (POSIX read wrapper, unbuffered)
+let foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
+
+/// Write to a file descriptor (POSIX write wrapper, unbuffered)
+let foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
+
+/// Check whether a file descriptor refers to a console/terminal
+let foreign __koral_isatty(fd: Int32): Int32;
+
+/// Put a file descriptor in binary mode (no-op on POSIX; required on Windows
+/// so the three standard streams do not translate newlines)
+let foreign __koral_set_binary_mode(fd: Int32): Int32;
+
+// ============================================================================
+// Stdin Type
+// ============================================================================
+
+/// Process standard input (fd 0) as a byte stream.
+/// Unbuffered: every `read` is one OS read; wrap in `BufReader` for
+/// line-oriented or chunked consumption. Acquire via `stdin()` -- the private
+/// handle makes the literal unusable outside this file.
+public type mutable Stdin(private handle: Int32);
+
+given Stdin {
+
+    /// Returns the underlying OS file descriptor (0).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
+    public fd(self): Int = Int(self.handle);
+
+    /// Whether the stream is attached to a console/terminal.
+    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+};
+
+given Stdin: Reader {
+
+    // Unbuffered: directly calls the OS read, errors returned immediately.
+    // Returns the number of bytes transferred; `Ok(0)` means EOF.
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+        let span = into.slice_spec(span);
+        let start = span.start();
+        let end = span.end();
+        if end <= start then {
+            return Result[UInt].Ok(0);
+        };
+        let data_ptr = into.borrow_mut_ptr() + start;
+        let n = __koral_read(self.handle, data_ptr, span.len());
+        if n < 0 then {
+            return Result[UInt].Error(last_error_message());
+        };
+        return Result[UInt].Ok(UInt(n));
+    };
+};
+
+// ============================================================================
+// Stdout Type
+// ============================================================================
+
+/// Process standard output (fd 1) as a byte stream.
+/// Write-through and unbuffered, so mixing with `print`/`println` stays
+/// ordered; batch with `BufWriter` for throughput. Acquire via `stdout()` --
+/// the private handle makes the literal unusable outside this file.
+public type mutable Stdout(private handle: Int32);
+
+given Stdout {
+
+    /// Returns the underlying OS file descriptor (1).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
+    public fd(self): Int = Int(self.handle);
+
+    /// Whether the stream is attached to a console/terminal.
+    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+};
+
+given Stdout: Writer {
+
+    // Unbuffered: directly calls the OS write, errors returned immediately.
+    // Returns the number of bytes transferred; short writes are possible.
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+        let span = from.slice_spec(span);
+        let start = span.start();
+        let end = span.end();
+        if end <= start then {
+            return Result[UInt].Ok(0);
+        };
+        let data_ptr = from.borrow_ptr() + start;
+        let n = __koral_write(self.handle, data_ptr, span.len());
+        if n < 0 then {
+            return Result[UInt].Error(last_error_message());
+        };
+        return Result[UInt].Ok(UInt(n));
+    };
+
+    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
+    public flush(self): Result[Void] = Result[Void].Ok({});
+};
+
+// ============================================================================
+// Stderr Type
+// ============================================================================
+
+/// Process standard error (fd 2) as a byte stream.
+/// Write-through and unbuffered like `Stdout` -- stderr is the immediate
+/// stream by universal convention. Acquire via `stderr()` -- the private
+/// handle makes the literal unusable outside this file.
+public type mutable Stderr(private handle: Int32);
+
+given Stderr {
+
+    /// Returns the underlying OS file descriptor (2).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
+    public fd(self): Int = Int(self.handle);
+
+    /// Whether the stream is attached to a console/terminal.
+    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+};
+
+given Stderr: Writer {
+
+    // Unbuffered: directly calls the OS write, errors returned immediately.
+    // Returns the number of bytes transferred; short writes are possible.
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+        let span = from.slice_spec(span);
+        let start = span.start();
+        let end = span.end();
+        if end <= start then {
+            return Result[UInt].Ok(0);
+        };
+        let data_ptr = from.borrow_ptr() + start;
+        let n = __koral_write(self.handle, data_ptr, span.len());
+        if n < 0 then {
+            return Result[UInt].Error(last_error_message());
+        };
+        return Result[UInt].Ok(UInt(n));
+    };
+
+    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
+    public flush(self): Result[Void] = Result[Void].Ok({});
+};
+
+// ============================================================================
+// Standard Stream Accessors
+// ============================================================================
+
+/// The process standard input stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
+public let stdin(): Stdin = {
+    let _ = __koral_set_binary_mode(0);
+    return Stdin(0);
+};
+
+/// The process standard output stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
+public let stdout(): Stdout = {
+    let _ = __koral_set_binary_mode(1);
+    return Stdout(1);
+};
+
+/// The process standard error stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
+public let stderr(): Stderr = {
+    let _ = __koral_set_binary_mode(2);
+    return Stderr(2);
+};

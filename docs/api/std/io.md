@@ -8,7 +8,13 @@
 This page lists the public API of module `Std.Io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
 
 ## Free Functions
-(none)
+```koral
+public let stdin(): Stdin;
+
+public let stdout(): Stdout;
+
+public let stderr(): Stderr;
+```
 
 ## Traits
 ```koral
@@ -45,6 +51,12 @@ public type SeekOrigin {
     End(offset: Int64),
     Current(offset: Int64),
 };
+
+public type mutable Stdin;
+
+public type mutable Stdout;
+
+public type mutable Stderr;
 ```
 
 ## Given Implementations
@@ -109,6 +121,35 @@ given ByteBuffer: Seeker {
 
 given IoError: Error {
     public message(self): String;
+};
+
+given Stdin {
+    public fd(self): Int;
+    public is_terminal(self): Bool;
+};
+
+given Stdin: Reader {
+    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+};
+
+given Stdout {
+    public fd(self): Int;
+    public is_terminal(self): Bool;
+};
+
+given Stdout: Writer {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public flush(self): Result[Void];
+};
+
+given Stderr {
+    public fd(self): Int;
+    public is_terminal(self): Bool;
+};
+
+given Stderr: Writer {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public flush(self): Result[Void];
 };
 
 given Reader {

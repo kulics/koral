@@ -2875,6 +2875,34 @@ given TypeChecker {
                 .GenericInstantiation(base, _, _) then base,
                 _ then self.context().type_display_name(constructor_plan_type),
             };
+            // A hidden field forces a factory method: construction is allowed
+            // only when every field is visible from this call site. The plain
+            // identifier entry checks this at its own arm; generic
+            // instantiations used to skip the check entirely.
+            let construction_def_id = when constructor_plan_type in {
+                .StructureType(def_id) then Option[DefId].Some(def_id),
+                .GenericStruct(tpl_def_id, _) then {
+                    when self.storage.generic_templates.struct_by_def_id(tpl_def_id) in {
+                        .Some(struct_template) then Option[DefId].Some(
+                            struct_template.def_id,
+                        ),
+                        .None() then Option[DefId].None(),
+                    }
+                },
+                _ then Option[DefId].None(),
+            };
+            when construction_def_id in {
+                .Some(def_id) then {
+                    if not self.ensure_struct_construction_access(
+                        ctor_description,
+                        def_id,
+                        expr_span(callee),
+                    ) then {
+                        return self.empty_typed_block(Type.Unknown());
+                    };
+                },
+                .None() then {},
+            };
             call_args = self.normalize_constructor_call_args(
                 call_args,
                 constructor_param_specs,

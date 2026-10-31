@@ -1,0 +1,534 @@
+// grep.koral: koral grep tool entry.
+// Build example: koralc build samples/grep/src/grep.koral -o bin/samples
+// Usage: grep [-nivclhqoxwrL] [-e PATTERN]... [-f FILE]...
+//          [-A NUM] [-B NUM] [-C NUM] [-m NUM] [PATTERN] [FILE...]
+// Patterns are POSIX ERE (the `grep -E` dialect), matching std's Regex.
+// Reads standard input when no FILE is given. A missing trailing newline is
+// preserved on output.
+// Deliberate divergences from GNU grep: `-o` with `-v` is a usage error;
+// `-o` prints each pattern's matches in order without cross-pattern
+// deduplication; `-m` prints the trailing context of the final match.
+// Exit codes: 0 = selected (found for -l/-L), 1 = not found, 2 = error.
+
+using "std" { ... };
+using "std/io" { ... };
+using "std/os" { ... };
+using "std/text" { ... };
+
+// ============================================================================
+// Configuration
+// ============================================================================
+
+type mutable Flags(
+    mutable line_numbers: Bool,
+    mutable ignore_case: Bool,
+    mutable invert: Bool,
+    mutable count_only: Bool,
+    mutable files_with_matches: Bool,
+    mutable files_without_matches: Bool,
+    mutable no_filename: Bool,
+    mutable only_matching: Bool,
+    mutable quiet: Bool,
+    mutable whole_line: Bool,
+    mutable word_match: Bool,
+    mutable recursive: Bool,
+    mutable max_count: UInt,
+    mutable after_context: UInt,
+    mutable before_context: UInt,
+);
+
+type mutable Config(
+    mutable patterns: List[String],
+    mutable pattern_files: List[String],
+    mutable files: List[String],
+    flags: Flags,
+);
+
+/// One buffered line for `-B` context output.
+type LineEntry(no: UInt, text: String);
+
+let new_flags(): Flags =
+    Flags(false, false, false, false, false, false, false, false, false, false, false, false, 0, 0, 0);
+
+/// Parse a numeric option argument (digits only).
+let digits = "0123456789";
+
+let parse_count(arg: String): Option[UInt] = {
+    if arg.count() == 0 then {
+        return Option[UInt].None();
+    };
+    for i in 0..<arg.count() then {
+        if not digits.contains(arg.substring(i..<(i + 1))) then {
+            return Option[UInt].None();
+        };
+    };
+    return when UInt.parse(arg) in {
+        .Ok(n) then Option[UInt].Some(n),
+        .Error(_) then Option[UInt].None(),
+    };
+};
+
+/// Parse argv (index 0 is the program name). Flags may be clustered (`-in`)
+/// and may appear anywhere; numeric flags take the rest of the cluster or the
+/// next argument (`-C2`, `-C 2`). `-e`/`-f` consume the next argument and may
+/// repeat; `--` ends flag parsing. The first bare argument is the pattern
+/// unless `-e`/`-f` already supplied one; the rest are files.
+let parse_args(args: List[String]): Result[Config] = {
+    let mutable config = Config(
+        List[String].new(),
+        List[String].new(),
+        List[String].new(),
+        new_flags(),
+    );
+    let mutable have_pattern_source = false;
+    let mutable no_more_flags = false;
+    let mutable i: UInt = 1;
+    while i < args.count() then {
+        let arg = args[i];
+        i += 1;
+        if no_more_flags or not arg.starts_with("-") or arg == "-" then {
+            if not have_pattern_source and config.patterns.is_empty() and config.pattern_files.is_empty(
+            ) then {
+                config.patterns.push(arg);
+                have_pattern_source = true;
+            } else {
+                config.files.push(arg);
+            };
+            continue;
+        };
+        if arg == "--" then {
+            no_more_flags = true;
+            continue;
+        };
+        let mutable j: UInt = 1;
+        while j < arg.count() then {
+            let ch = arg.substring(j..<(j + 1));
+            j += 1;
+            if ch == "n" then {
+                config.flags.line_numbers = true;
+            } else if ch == "i" then {
+                config.flags.ignore_case = true;
+            } else if ch == "v" then {
+                config.flags.invert = true;
+            } else if ch == "c" then {
+                config.flags.count_only = true;
+            } else if ch == "l" then {
+                config.flags.files_with_matches = true;
+            } else if ch == "L" then {
+                config.flags.files_without_matches = true;
+            } else if ch == "h" then {
+                config.flags.no_filename = true;
+            } else if ch == "o" then {
+                config.flags.only_matching = true;
+            } else if ch == "q" then {
+                config.flags.quiet = true;
+            } else if ch == "x" then {
+                config.flags.whole_line = true;
+            } else if ch == "w" then {
+                config.flags.word_match = true;
+            } else if ch == "r" then {
+                config.flags.recursive = true;
+            } else if ch == "e" then {
+                if i >= args.count() then {
+                    return Result[Config].Error("option requires an argument -- 'e'");
+                };
+                config.patterns.push(args[i]);
+                have_pattern_source = true;
+                i += 1;
+            } else if ch == "f" then {
+                if i >= args.count() then {
+                    return Result[Config].Error("option requires an argument -- 'f'");
+                };
+                config.pattern_files.push(args[i]);
+                have_pattern_source = true;
+                i += 1;
+            } else if ch == "A" or ch == "B" or ch == "C" or ch == "m" then {
+                // A number: the rest of the cluster, or the next argument.
+                let rest = arg.substring(j..<(arg.count()));
+                let mutable text = rest;
+                if rest.count() > 0 then {
+                    j = arg.count();
+                } else {
+                    if i >= args.count() then {
+                        return Result[Config].Error(
+                            "option requires an argument -- '\(ch)'",
+                        );
+                    };
+                    text = args[i];
+                    i += 1;
+                };
+                let n = parse_count(text) or else {
+                    return Result[Config].Error("invalid count argument -- '\(text)'");
+                };
+                if ch == "A" then {
+                    config.flags.after_context = n;
+                } else if ch == "B" then {
+                    config.flags.before_context = n;
+                } else if ch == "C" then {
+                    config.flags.after_context = n;
+                    config.flags.before_context = n;
+                } else {
+                    config.flags.max_count = n;
+                };
+            } else {
+                return Result[Config].Error("invalid option -- '\(ch)'");
+            };
+        };
+    };
+    if config.flags.files_with_matches and config.flags.files_without_matches then {
+        return Result[Config].Error("cannot combine -l and -L");
+    };
+    if config.flags.only_matching and config.flags.invert then {
+        return Result[Config].Error("cannot combine -o and -v");
+    };
+    return Result[Config].Ok(config);
+};
+
+// ============================================================================
+// Patterns and matching
+// ============================================================================
+
+/// Strip one trailing newline so anchors see the line content (grep semantics).
+let line_subject(line: String): String = {
+    if line.ends_with("\n") then {
+        return line.substring(0..<(line.count() - 1));
+    };
+    return line;
+};
+
+let word_chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+
+let is_word_char(ch: String): Bool = {
+    return ch.count() > 0 and word_chars.contains(ch);
+};
+
+/// GNU `-w`: the match must touch a non-word constituent or the line edge.
+let word_bounded(subject: String, m: Match): Bool = {
+    let s = m.start();
+    let e = m.end();
+    if s > 0 and is_word_char(subject.substring((s - 1)..<s)) then {
+        return false;
+    };
+    if e < subject.count() and is_word_char(subject.substring(e..<(e + 1))) then {
+        return false;
+    };
+    return true;
+};
+
+let any_match(patterns: List[Regex], subject: String): Bool = {
+    for re in patterns then {
+        if re.matches(subject) then {
+            return true;
+        };
+    };
+    return false;
+};
+
+let word_hit(patterns: List[Regex], subject: String): Bool = {
+    for re in patterns then {
+        for m in re.find_all(subject) then {
+            if word_bounded(subject, m) then {
+                return true;
+            };
+        };
+    };
+    return false;
+};
+
+/// A line is selected when the pattern test passes, XOR-ed with `-v`.
+let line_selected(patterns: List[Regex], flags: Flags, subject: String): Bool = {
+    let hit = if flags.word_match then word_hit(patterns, subject)
+    else any_match(patterns, subject);
+    return if flags.invert then not hit else hit;
+};
+
+/// Collect patterns from `-e`/bare patterns plus `-f` files (one per line).
+/// `-x` anchors each pattern to the whole line at compile time.
+let compile_patterns(config: Config): Result[List[Regex]] = {
+    let mutable texts = List[String].new();
+    for p in config.patterns then {
+        texts.push(p);
+    };
+    for path in config.pattern_files then {
+        let data = read_text_file(path.into_path()) or return;
+        let reader = BufReader[ByteBuffer].new(ByteBuffer.from_string(data));
+        while true then {
+            let opt = reader.read_line() or return;
+            let line = opt or else {
+                break;
+            };
+            texts.push(line_subject(line));
+        };
+    };
+    let mutable out = List[Regex].new();
+    let flags = if config.flags.ignore_case then RegexFlag.ignore_case()
+    else RegexFlag.none();
+    for p in texts then {
+        let anchored = if config.flags.whole_line then "^(" + p + ")$" else p;
+        let re = Regex.compile_with_flags(anchored, flags) or return;
+        out.push(re);
+    };
+    return Result[List[Regex]].Ok(out);
+};
+
+// ============================================================================
+// Output prefixes
+// ============================================================================
+
+/// Match lines separate file/number with `:`, context lines with `-`.
+let match_prefix(flags: Flags, show_name: Bool, name: String, no: UInt): String = {
+    let mutable p = "";
+    if show_name then {
+        p = name + ":";
+    };
+    if flags.line_numbers then {
+        p = p + no.to_string() + ":";
+    };
+    return p;
+};
+
+let context_prefix(flags: Flags, show_name: Bool, name: String, no: UInt): String = {
+    let mutable p = "";
+    if show_name then {
+        p = name + "-";
+    };
+    if flags.line_numbers then {
+        p = p + no.to_string() + "-";
+    };
+    return p;
+};
+
+// ============================================================================
+// Per-stream driver
+// ============================================================================
+
+/// Run one input stream through the matcher. Ok(true) when any line was
+/// selected. `name` is the display name for `-c`/`-l`/`-L` and filename
+/// prefixes; `show_name` gates the prefix in line output.
+/// Mode precedence: `-q` > `-l`/`-L` > `-c` > normal.
+let grep_stream[R: Reader, W: Writer](
+    patterns: List[Regex],
+    flags: Flags,
+    src: R,
+    name: String =,
+    show_name: Bool =,
+    out: W =,
+): Result[Bool] = {
+    let reader = BufReader[R].new(src);
+    let use_context = flags.before_context > 0 or flags.after_context > 0;
+    let mutable matched = false;
+    let mutable selected_count: UInt = 0;
+    let mutable line_no: UInt = 0;
+    let mutable pending = List[LineEntry].new();
+    let mutable trailing: UInt = 0;
+    let mutable last_printed: UInt = 0;
+    let mutable printed_any = false;
+
+    while true then {
+        let opt = reader.read_line() or return;
+        let line = opt or else {
+            break;
+        };
+        line_no += 1;
+        let subject = line_subject(line);
+        let selected = line_selected(patterns, flags, subject);
+
+        if selected then {
+            matched = true;
+            selected_count += 1;
+
+            if flags.quiet then {
+                break;
+            };
+
+            if flags.files_with_matches or flags.files_without_matches or flags.count_only then {
+                // summarized after the stream ends
+            } else if flags.only_matching then {
+                for re in patterns then {
+                    for m in re.find_all(subject) then {
+                        let prefix = match_prefix(flags, show_name, name, line_no);
+                        out.write_all(from = (prefix + m.text() + "\n").to_bytes()) or return;
+                    };
+                };
+            } else if use_context then {
+                // Flush the before-window, then the match itself. A gap in
+                // line numbers separates groups with `--` (GNU format).
+                let start = if pending.count() > flags.before_context then pending.count(
+                ) - flags.before_context else 0;
+                let mutable k = start;
+                while k < pending.count() then {
+                    let entry = pending[k];
+                    if printed_any and entry.no > last_printed + 1 then {
+                        out.write_all(from = "--\n".to_bytes()) or return;
+                    };
+                    let p = context_prefix(flags, show_name, name, entry.no);
+                    out.write_all(from = (p + entry.text).to_bytes()) or return;
+                    printed_any = true;
+                    last_printed = entry.no;
+                    k += 1;
+                };
+                pending = List[LineEntry].new();
+                if printed_any and line_no > last_printed + 1 then {
+                    out.write_all(from = "--\n".to_bytes()) or return;
+                };
+                let p = match_prefix(flags, show_name, name, line_no);
+                out.write_all(from = (p + line).to_bytes()) or return;
+                printed_any = true;
+                last_printed = line_no;
+                trailing = flags.after_context;
+            } else {
+                let p = match_prefix(flags, show_name, name, line_no);
+                out.write_all(from = (p + line).to_bytes()) or return;
+            };
+        } else if trailing > 0 then {
+            // After-context of a recent match.
+            trailing -= 1;
+            if printed_any and line_no > last_printed + 1 then {
+                out.write_all(from = "--\n".to_bytes()) or return;
+            };
+            let p = context_prefix(flags, show_name, name, line_no);
+            out.write_all(from = (p + line).to_bytes()) or return;
+            printed_any = true;
+            last_printed = line_no;
+        } else if use_context and not flags.quiet and not flags.count_only and not flags.files_with_matches and not flags.files_without_matches then {
+            pending.push(LineEntry(line_no, line));
+        };
+
+        if flags.max_count > 0 and selected_count >= flags.max_count and trailing == 0 then {
+            break;
+        };
+    };
+
+    if flags.files_with_matches then {
+        if matched then {
+            out.write_all(from = (name + "\n").to_bytes()) or return;
+        };
+        return Result[Bool].Ok(matched);
+    };
+    if flags.files_without_matches then {
+        if not matched then {
+            out.write_all(from = (name + "\n").to_bytes()) or return;
+        };
+        return Result[Bool].Ok(matched);
+    };
+    if flags.count_only then {
+        let prefix = if show_name then name + ":" else "";
+        out.write_all(from = (prefix + selected_count.to_string() + "\n").to_bytes()) or return;
+        return Result[Bool].Ok(selected_count > 0);
+    };
+    return Result[Bool].Ok(matched);
+};
+
+// ============================================================================
+// Operands
+// ============================================================================
+
+/// With `-r`, expand directory operands through `walk_dir` into file lists; a
+/// recursive search with no operands starts at `.`.
+let expand_operands(config: Config): Result[List[String]] = {
+    if not config.flags.recursive then {
+        return Result[List[String]].Ok(config.files);
+    };
+    let mutable operands = config.files;
+    if operands.is_empty() then {
+        operands = List[String].new();
+        operands.push(".");
+    };
+    let mutable out = List[String].new();
+    for path in operands then {
+        let info = file_info(path.into_path()) or else as e in {
+            return Result[List[String]].Error(e.message());
+        };
+        if info.is_dir() then {
+            let entries = walk_dir(path.into_path()) or else as e in {
+                return Result[List[String]].Error(e.message());
+            };
+            for entry in entries then {
+                if entry.is_file() then {
+                    out.push(entry.path().to_string());
+                };
+            };
+        } else {
+            out.push(path);
+        };
+    };
+    return Result[List[String]].Ok(out);
+};
+
+// ============================================================================
+// Entry
+// ============================================================================
+
+let usage(): Void = {
+    eprintln(
+        "usage: grep [-nivclhqoxwrL] [-e PATTERN]... [-f FILE]... [-A NUM] [-B NUM] [-C NUM] [-m NUM] [PATTERN] [FILE...]",
+    );
+};
+
+let main(): Int = {
+    let argv = args();
+    let config = parse_args(argv) or else as e in {
+        eprintln("grep: \(e.message())");
+        usage();
+        return 2;
+    };
+    if config.patterns.is_empty() and config.pattern_files.is_empty() then {
+        eprintln("grep: no pattern given");
+        usage();
+        return 2;
+    };
+    let patterns = compile_patterns(config) or else as e in {
+        eprintln("grep: invalid pattern: \(e.message())");
+        return 2;
+    };
+    let inputs = expand_operands(config) or else as e in {
+        eprintln("grep: \(e.message())");
+        return 2;
+    };
+
+    let out = stdout();
+    let mutable any_relevant = false;
+
+    if inputs.count() == 0 then {
+        let selected = grep_stream(
+            patterns,
+            config.flags,
+            stdin(),
+            name = "(standard input)",
+            show_name = false,
+            out = out,
+        ) or else as e in {
+            eprintln("grep: \(e.message())");
+            return 2;
+        };
+        let relevant = if config.flags.files_without_matches then not selected
+        else selected;
+        any_relevant = relevant;
+    } else {
+        let show_name = not config.flags.no_filename and (inputs.count() > 1 or config.flags.recursive);
+        for path in inputs then {
+            let file = open_file(path.into_path(), OpenMode.Read()) or else as e in {
+                eprintln("grep: \(path): \(e.message())");
+                return 2;
+            };
+            let selected = grep_stream(
+                patterns,
+                config.flags,
+                file,
+                name = path,
+                show_name = show_name,
+                out = out,
+            ) or else as e in {
+                eprintln("grep: \(path): \(e.message())");
+                return 2;
+            };
+            let relevant = if config.flags.files_without_matches then not selected
+            else selected;
+            if relevant then {
+                any_relevant = true;
+            };
+        };
+    };
+
+    return if any_relevant then 0 else 1;
+};

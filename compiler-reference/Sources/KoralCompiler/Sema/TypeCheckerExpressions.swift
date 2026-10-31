@@ -4918,8 +4918,15 @@ extension TypeChecker {
       // The first parameter is 'self' (the base), so we check remaining arguments
       let expectedArgCount = params.count - 1
       let placeholderMethods = (try? flattenedTraitMethods(traitName)) ?? [:]
+      var placeholderParams = placeholderMethods[methodName]?.parameters
+      if placeholderParams == nil {
+        // Tool (extension) methods are not in the trait DECLARATION's table;
+        // their parameters carry the labels and defaults the planner needs.
+        let toolMethods = (try? flattenedTraitToolMethods(traitName)) ?? [:]
+        placeholderParams = toolMethods[methodName]?.parameters
+      }
       let placeholderMeta = callParamMeta(
-        from: placeholderMethods[methodName]?.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) } ?? [],
+        from: placeholderParams?.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) } ?? [],
         argumentCount: expectedArgCount
       )
       let arguments = try planCallArgumentExpressions(

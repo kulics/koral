@@ -70,7 +70,8 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`name-resolution.md`](name-resolution.md) —— 名字解析与身份边界 | Implemented | 同上 §15–§24 | 2026-10 |
 | [`std-api-design.md`](std-api-design.md) —— 标准库 API 设计约定 | Implemented | 无单独记录（随 `std/` API 落地） | 2026-10 |
 | [`design-axioms.md`](design-axioms.md) —— 设计公理与复杂度预算 | Accepted | 无独立记录（贯穿性规则，由各设计文档的取舍看护） | 2026-10-24 |
-| [`numeric-families-design.md`](numeric-families-design.md) —— 数值类型家族与转换语义 | Draft（**未施工**；饱和家族仅预留命名与语义空间，落地须单独过闸） | 无（分三期，见文内 `## 实施`） | 2026-10-26 |
+| [`numeric-families-design.md`](numeric-families-design.md) —— 数值类型家族与转换语义 | Implemented（三期已落地；饱和家族仅预留命名与语义空间，落地须单独过闸） | 无单独记录（随两编译器与 `std` 同批） | 2026-10-27 |
+| [`stdio-design.md`](stdio-design.md) —— 标准流句柄 Stdin / Stdout / Stderr | Implemented | 无单独记录（随 `std/io` 落地） | 2026-10-31 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 

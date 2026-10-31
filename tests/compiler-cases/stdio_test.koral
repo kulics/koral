@@ -1,0 +1,34 @@
+// EXPECT: stdio_fd_ok
+// EXPECT: stdio_stdout_ok
+// EXPECT: stdio_bufwriter_ok
+// EXPECT: stdio_stderr_ok
+//
+// Stdin is deliberately not read here: the test process inherits stdin and
+// consuming it would make differential runs nondeterministic. The Stdin read
+// path is covered by samples/grep feeding stdin via IoRedirect.File.
+
+using "std" { ... };
+using "std/io" { ... };
+
+let main(): Void = {
+    let inp = stdin();
+    let out = stdout();
+    let err = stderr();
+
+    assert(inp.fd() == 0, "stdin fd must be 0");
+    assert(out.fd() == 1, "stdout fd must be 1");
+    assert(err.fd() == 2, "stderr fd must be 2");
+    let _ = inp.is_terminal();
+    let _ = out.is_terminal();
+    let _ = err.is_terminal();
+    println("stdio_fd_ok");
+
+    out.write_all(from = "stdio_stdout_ok\n".to_bytes()).unwrap();
+
+    let bw = BufWriter.new(out);
+    bw.write_all(from = "stdio_bufwriter_ok\n".to_bytes()).unwrap();
+    bw.flush().unwrap();
+
+    err.write_all(from = "stdio_stderr_noise\n".to_bytes()).unwrap();
+    println("stdio_stderr_ok");
+};

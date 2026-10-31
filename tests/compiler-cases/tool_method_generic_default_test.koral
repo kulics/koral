@@ -1,0 +1,44 @@
+// EXPECT: tool_method_generic_default_ok
+//
+// Tool (extension) methods on a trait-bounded generic receiver must carry
+// their labels and defaults through both compilers: the call below omits
+// `times` and the declared default fills it. Regression pin -- both compilers
+// once lost labels/defaults on exactly this path (koralc dropped the default
+// at monomorphization, Swift degraded the call to positional placeholders).
+
+using "std" { ... };
+
+trait Greeter {
+    base(self): String;
+};
+
+given Greeter {
+    greet(self, name: String =, times: Int = 1): String = {
+        let mutable out = self.base();
+        let mutable i: Int = 0;
+        while i < times then {
+            out = out + " " + name;
+            i += 1;
+        };
+        return out;
+    };
+};
+
+type G();
+
+given G: Greeter {
+    base(self): String = "hi";
+};
+
+let shout[T: Greeter](t: T): String = {
+    return t.greet(name = "koral");
+};
+
+let main(): Void = {
+    let s = shout(G());
+    if s == "hi koral" then {
+        println("tool_method_generic_default_ok");
+    } else {
+        println("got: " + s);
+    };
+};

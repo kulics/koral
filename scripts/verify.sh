@@ -144,11 +144,13 @@ mkdir -p bin/samples
 "$BOOTSTRAP" build samples/expr-eval/expr_eval.koral -o bin/samples
 "$BOOTSTRAP" build samples/cat/src/cat.koral -o bin/samples
 "$BOOTSTRAP" build samples/sha256sum/src/sha256sum.koral -o bin/samples
+"$BOOTSTRAP" build samples/grep/src/grep.koral -o bin/samples
 
 echo "hello koral" > "$WORK/sample_in.txt"
 "bin/samples/cat$EXE" "$WORK/sample_in.txt" | grep -q "hello koral"
 "bin/samples/sha256sum$EXE" "$WORK/sample_in.txt" | grep -q "  "
 printf '1+2*3\nquit\n' | "bin/samples/expr_eval$EXE" | grep -q "^> 7$"
+printf 'apple\nbanana\n' | "bin/samples/grep$EXE" 'an' | grep -q "^banana$"
 echo "samples OK"
 
 # ── toolchain ─────────────────────────────────────────────────────────────────

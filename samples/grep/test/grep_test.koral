@@ -1,0 +1,581 @@
+// grep_test.koral: single-entry test runner for grep (unit + golden tests).
+// Run from the repository root:
+//   koralc build samples/grep/src/grep.koral -o bin/samples
+//   koralc run samples/grep/test/grep_test.koral
+// Assumes the grep binary is built to bin/samples/grep(.exe).
+// Golden reference: `grep -E` semantics (patterns are POSIX ERE), embedded as
+// expected strings derived from `grep -E` output.
+
+using "std" { ... };
+using "std/io" { ... };
+using "std/os" { ... };
+using "std/proc" { ... };
+
+type TestResult {
+    Pass(),
+    Fail(message: String),
+};
+
+type TestCase(name: String, result: TestResult);
+
+type ProcessOutput(stdout: String, stderr: String, exit_code: Int);
+
+let pass(): TestResult = TestResult.Pass();
+let fail(msg: String): TestResult = TestResult.Fail(msg);
+
+let create_temp_text_file(name: String, content: String): Result[String] = {
+    let path = name.into_path();
+    write_text_file(path, content = content) or return;
+    return Result[String].Ok(name);
+};
+
+let cleanup_temp_file(path: String): Void = {
+    let _ = remove_file(path.into_path());
+};
+
+/// Run grep with optional stdin fed from a text file (IoRedirect.File).
+let run_grep(args: List[String], stdin_file: Option[String]): Result[ProcessOutput] = {
+    let grep_bin = if env("OS") is .Some(os) and os.contains("Windows") then "bin/samples/grep.exe"
+    else "bin/samples/grep";
+    let mutable cmd = Command.new(grep_bin).args(args).set_stdin(IoRedirect.Null());
+    when stdin_file in {
+        .Some(path) then {
+            let f = open_file(path.into_path(), OpenMode.Read()) or return;
+            cmd = Command.new(grep_bin).args(args).set_stdin(IoRedirect.File(f));
+        },
+        .None() then {},
+    };
+    let out = cmd.run_output() or return;
+    let exit_code = out.status.code() or else 0;
+    return Result[ProcessOutput].Ok(ProcessOutput(out.stdout, out.stderr, exit_code));
+};
+
+let assert_eq(actual: String, expected: String, msg: String): TestResult = {
+    if actual == expected then {
+        return pass();
+    };
+    let mutable m = StringBuilder.new();
+    m.push_string(msg);
+    m.push_string(" | expected=");
+    m.push_string(expected);
+    m.push_string(" | actual=");
+    m.push_string(actual);
+    return fail(m.to_string());
+};
+
+let assert_int(actual: Int, expected: Int, msg: String): TestResult = {
+    if actual == expected then {
+        return pass();
+    };
+    return fail(
+        msg + " | expected=" + expected.to_string() + " actual=" + actual.to_string(),
+    );
+};
+
+let assert_true(ok: Bool, msg: String): TestResult = {
+    return if ok then pass() else fail(msg);
+};
+
+let normalize_newlines(s: String): String = {
+    return s.replace_all("\r\n", with = "\n");
+};
+
+let normalize_paths(s: String): String = {
+    return normalize_newlines(s).replace_all("\\", with = "/");
+};
+
+/// Check stdout + exit code against one golden pair.
+let check(
+    out: ProcessOutput,
+    expected_stdout: String,
+    expected_exit: Int,
+    msg: String,
+): TestResult = {
+    let r1 = assert_eq(normalize_newlines(out.stdout), expected_stdout, msg + " output");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_int(out.exit_code, expected_exit, msg + " exit");
+};
+
+// ----------------------------------------------------------------------------
+// Cases: matching and streams
+// ----------------------------------------------------------------------------
+
+let test_stdin_match(): TestResult = {
+    let in_path = create_temp_text_file(
+        "tmp_grep_in_match.txt",
+        "apple\nbanana\ncherry\n",
+    ) or else {
+        return fail("stdin_match setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["an"], Option[String].Some(in_path)) or else {
+        return fail("stdin_match run failed");
+    };
+    return check(out, "banana\n", 0, "stdin_match");
+};
+
+let test_stdin_anchor(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_in_anchor.txt", "apple\nbanana\n") or else {
+        return fail("stdin_anchor setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["^b"], Option[String].Some(in_path)) or else {
+        return fail("stdin_anchor run failed");
+    };
+    return check(out, "banana\n", 0, "stdin_anchor");
+};
+
+let test_stdin_ere(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_in_ere.txt", "abc\naxc\n") or else {
+        return fail("stdin_ere setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["a.c"], Option[String].Some(in_path)) or else {
+        return fail("stdin_ere run failed");
+    };
+    return check(out, "abc\naxc\n", 0, "stdin_ere");
+};
+
+let test_stdin_no_match(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_in_nomatch.txt", "apple\n") or else {
+        return fail("stdin_no_match setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["zzz"], Option[String].Some(in_path)) or else {
+        return fail("stdin_no_match run failed");
+    };
+    return check(out, "", 1, "stdin_no_match");
+};
+
+let test_stdin_no_trailing_newline(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_in_nonl.txt", "x\ny") or else {
+        return fail("stdin_no_trailing_newline setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["y"], Option[String].Some(in_path)) or else {
+        return fail("stdin_no_trailing_newline run failed");
+    };
+    return check(out, "y", 0, "stdin_no_trailing_newline");
+};
+
+let test_file_single(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_file_single.txt", "red\ngreen\nblue\n") or else {
+        return fail("file_single setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["re", in_path], Option[String].None()) or else {
+        return fail("file_single run failed");
+    };
+    return check(out, "red\ngreen\n", 0, "file_single");
+};
+
+let test_multi_file_prefix(): TestResult = {
+    let a = create_temp_text_file("tmp_grep_multi_a.txt", "hit\n") or else {
+        return fail("multi_file_prefix setup a failed");
+    };
+    defer cleanup_temp_file(a);
+    let b = create_temp_text_file("tmp_grep_multi_b.txt", "hit\n") or else {
+        return fail("multi_file_prefix setup b failed");
+    };
+    defer cleanup_temp_file(b);
+    let out = run_grep(["hit", a, b], Option[String].None()) or else {
+        return fail("multi_file_prefix run failed");
+    };
+    return check(out, a + ":hit\n" + b + ":hit\n", 0, "multi_file_prefix");
+};
+
+let test_bad_pattern(): TestResult = {
+    let out = run_grep(["("], Option[String].None()) or else {
+        return fail("bad_pattern run failed");
+    };
+    let r1 = assert_int(out.exit_code, 2, "bad_pattern exit");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_true(out.stderr.contains("invalid pattern"), "bad_pattern stderr");
+};
+
+let test_missing_file(): TestResult = {
+    let out = run_grep(["x", "tmp_grep_no_such_file.txt"], Option[String].None()) or else {
+        return fail("missing_file run failed");
+    };
+    let r1 = assert_int(out.exit_code, 2, "missing_file exit");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_true(
+        out.stderr.contains("tmp_grep_no_such_file.txt"),
+        "missing_file stderr",
+    );
+};
+
+// ----------------------------------------------------------------------------
+// Cases: flags
+// ----------------------------------------------------------------------------
+
+let test_n_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_n.txt", "a\nb\n") or else {
+        return fail("n_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-n", "b"], Option[String].Some(in_path)) or else {
+        return fail("n_flag run failed");
+    };
+    return check(out, "2:b\n", 0, "n_flag");
+};
+
+let test_i_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_i.txt", "Hello\nworld\n") or else {
+        return fail("i_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-i", "hello"], Option[String].Some(in_path)) or else {
+        return fail("i_flag run failed");
+    };
+    return check(out, "Hello\n", 0, "i_flag");
+};
+
+let test_v_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_v.txt", "a\nb\n") or else {
+        return fail("v_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-v", "a"], Option[String].Some(in_path)) or else {
+        return fail("v_flag run failed");
+    };
+    return check(out, "b\n", 0, "v_flag");
+};
+
+let test_c_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_c.txt", "a\nb\na\n") or else {
+        return fail("c_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-c", "a"], Option[String].Some(in_path)) or else {
+        return fail("c_flag run failed");
+    };
+    return check(out, "2\n", 0, "c_flag");
+};
+
+let test_c_no_match(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_c0.txt", "a\n") or else {
+        return fail("c_no_match setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-c", "z"], Option[String].Some(in_path)) or else {
+        return fail("c_no_match run failed");
+    };
+    return check(out, "0\n", 1, "c_no_match");
+};
+
+let test_c_multi(): TestResult = {
+    let a = create_temp_text_file("tmp_grep_cm_a.txt", "hit\n") or else {
+        return fail("c_multi setup a failed");
+    };
+    defer cleanup_temp_file(a);
+    let b = create_temp_text_file("tmp_grep_cm_b.txt", "hit\nhit\n") or else {
+        return fail("c_multi setup b failed");
+    };
+    defer cleanup_temp_file(b);
+    let out = run_grep(["-c", "hit", a, b], Option[String].None()) or else {
+        return fail("c_multi run failed");
+    };
+    return check(out, a + ":1\n" + b + ":2\n", 0, "c_multi");
+};
+
+let test_l_flag(): TestResult = {
+    let a = create_temp_text_file("tmp_grep_l_a.txt", "hit\n") or else {
+        return fail("l_flag setup a failed");
+    };
+    defer cleanup_temp_file(a);
+    let b = create_temp_text_file("tmp_grep_l_b.txt", "miss\n") or else {
+        return fail("l_flag setup b failed");
+    };
+    defer cleanup_temp_file(b);
+    let out = run_grep(["-l", "hit", a, b], Option[String].None()) or else {
+        return fail("l_flag run failed");
+    };
+    return check(out, a + "\n", 0, "l_flag");
+};
+
+let test_L_flag(): TestResult = {
+    let a = create_temp_text_file("tmp_grep_L_a.txt", "hit\n") or else {
+        return fail("L_flag setup a failed");
+    };
+    defer cleanup_temp_file(a);
+    let b = create_temp_text_file("tmp_grep_L_b.txt", "miss\n") or else {
+        return fail("L_flag setup b failed");
+    };
+    defer cleanup_temp_file(b);
+    let out = run_grep(["-L", "hit", a, b], Option[String].None()) or else {
+        return fail("L_flag run failed");
+    };
+    return check(out, b + "\n", 0, "L_flag");
+};
+
+let test_h_flag(): TestResult = {
+    let a = create_temp_text_file("tmp_grep_h_a.txt", "hit\n") or else {
+        return fail("h_flag setup a failed");
+    };
+    defer cleanup_temp_file(a);
+    let b = create_temp_text_file("tmp_grep_h_b.txt", "hit\n") or else {
+        return fail("h_flag setup b failed");
+    };
+    defer cleanup_temp_file(b);
+    let out = run_grep(["-h", "hit", a, b], Option[String].None()) or else {
+        return fail("h_flag run failed");
+    };
+    return check(out, "hit\nhit\n", 0, "h_flag");
+};
+
+let test_e_multi(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_e.txt", "cat\ndog\nbird\n") or else {
+        return fail("e_multi setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-e", "cat", "-e", "bird"], Option[String].Some(in_path)) or else {
+        return fail("e_multi run failed");
+    };
+    return check(out, "cat\nbird\n", 0, "e_multi");
+};
+
+let test_f_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_f_in.txt", "cat\ndog\nbird\n") or else {
+        return fail("f_flag setup input failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let pat_path = create_temp_text_file("tmp_grep_f_pat.txt", "cat\nbird\n") or else {
+        return fail("f_flag setup patterns failed");
+    };
+    defer cleanup_temp_file(pat_path);
+    let out = run_grep(["-f", pat_path], Option[String].Some(in_path)) or else {
+        return fail("f_flag run failed");
+    };
+    return check(out, "cat\nbird\n", 0, "f_flag");
+};
+
+let test_cluster(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_cluster.txt", "Hello\nworld\n") or else {
+        return fail("cluster setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-in", "hello"], Option[String].Some(in_path)) or else {
+        return fail("cluster run failed");
+    };
+    return check(out, "1:Hello\n", 0, "cluster");
+};
+
+let test_no_pattern(): TestResult = {
+    let out = run_grep(["-n"], Option[String].None()) or else {
+        return fail("no_pattern run failed");
+    };
+    let r1 = assert_int(out.exit_code, 2, "no_pattern exit");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_true(out.stderr.contains("usage"), "no_pattern stderr");
+};
+
+// ----------------------------------------------------------------------------
+// Cases: selection shapes and context
+// ----------------------------------------------------------------------------
+
+let test_x_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_x.txt", "cat\ncatalog\n") or else {
+        return fail("x_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-x", "cat"], Option[String].Some(in_path)) or else {
+        return fail("x_flag run failed");
+    };
+    return check(out, "cat\n", 0, "x_flag");
+};
+
+let test_w_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_w.txt", "cat\nconcatenate\n") or else {
+        return fail("w_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-w", "cat"], Option[String].Some(in_path)) or else {
+        return fail("w_flag run failed");
+    };
+    return check(out, "cat\n", 0, "w_flag");
+};
+
+let test_o_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_o.txt", "abcabc\n") or else {
+        return fail("o_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-o", "bc"], Option[String].Some(in_path)) or else {
+        return fail("o_flag run failed");
+    };
+    return check(out, "bc\nbc\n", 0, "o_flag");
+};
+
+let test_A_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_A.txt", "1\n2\n3\n4\n") or else {
+        return fail("A_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-A", "1", "2"], Option[String].Some(in_path)) or else {
+        return fail("A_flag run failed");
+    };
+    return check(out, "2\n3\n", 0, "A_flag");
+};
+
+let test_B_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_B.txt", "1\n2\n3\n4\n") or else {
+        return fail("B_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-B", "1", "3"], Option[String].Some(in_path)) or else {
+        return fail("B_flag run failed");
+    };
+    return check(out, "2\n3\n", 0, "B_flag");
+};
+
+let test_C_groups(): TestResult = {
+    // Real line-number gap between the two matches (2 and 10) so the groups
+    // are non-contiguous and GNU grep separates them with `--`.
+    let in_path = create_temp_text_file(
+        "tmp_grep_C.txt",
+        "a\nhit\nb\nc\nd\ne\nf\ng\nh\nhit\ni\n",
+    ) or else {
+        return fail("C_groups setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-C", "1", "hit"], Option[String].Some(in_path)) or else {
+        return fail("C_groups run failed");
+    };
+    return check(out, "a\nhit\nb\n--\nh\nhit\ni\n", 0, "C_groups");
+};
+
+let test_m_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_m.txt", "a\na\na\n") or else {
+        return fail("m_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let out = run_grep(["-m", "2", "a"], Option[String].Some(in_path)) or else {
+        return fail("m_flag run failed");
+    };
+    return check(out, "a\na\n", 0, "m_flag");
+};
+
+let test_q_flag(): TestResult = {
+    let in_path = create_temp_text_file("tmp_grep_q.txt", "a\n") or else {
+        return fail("q_flag setup failed");
+    };
+    defer cleanup_temp_file(in_path);
+    let hit = run_grep(["-q", "a"], Option[String].Some(in_path)) or else {
+        return fail("q_flag hit run failed");
+    };
+    let r1 = check(hit, "", 0, "q_flag hit");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    let miss = run_grep(["-q", "z"], Option[String].Some(in_path)) or else {
+        return fail("q_flag miss run failed");
+    };
+    return check(miss, "", 1, "q_flag miss");
+};
+
+let test_r_flag(): TestResult = {
+    let base = "tmp_grep_r_dir";
+    create_dir_all(base.into_path().join("sub")) or else {
+        return fail("r_flag setup dir failed");
+    };
+    defer {
+        let _ = remove_dir_all(base.into_path());
+    };
+    let _ = write_text_file(base.into_path().join("a.txt"), content = "hit\n") or else {
+        return fail("r_flag setup a failed");
+    };
+    let _ = write_text_file(base.into_path().join("sub/b.txt"), content = "x\nhit\n") or else {
+        return fail("r_flag setup b failed");
+    };
+    let out = run_grep(["-r", "hit", base], Option[String].None()) or else {
+        return fail("r_flag run failed");
+    };
+    if out.exit_code != 0 then {
+        return fail("r_flag exit");
+    };
+    let norm = normalize_paths(out.stdout);
+    let e1 = normalize_paths(base.into_path().join("a.txt").to_string());
+    let e2 = normalize_paths(base.into_path().join("sub/b.txt").to_string());
+    let r1 = assert_true(norm.contains(e1 + ":hit"), "r_flag entry a");
+    if r1 is .Fail(_) then {
+        return r1;
+    };
+    return assert_true(norm.contains(e2 + ":hit"), "r_flag entry b");
+};
+
+// ----------------------------------------------------------------------------
+// Runner
+// ----------------------------------------------------------------------------
+
+let run_case(name: String, r: TestResult): TestCase = {
+    print("- ");
+    print(name);
+    print(" ... ");
+    when r in {
+        .Pass() then println("ok"),
+        .Fail(msg) then {
+            println("FAIL");
+            println(msg);
+        },
+    };
+    return TestCase(name, r);
+};
+
+let main(): Void = {
+    println("grep tests:");
+    let mutable cases = List[TestCase].new();
+    cases.push(run_case("stdin_match", test_stdin_match()));
+    cases.push(run_case("stdin_anchor", test_stdin_anchor()));
+    cases.push(run_case("stdin_ere", test_stdin_ere()));
+    cases.push(run_case("stdin_no_match", test_stdin_no_match()));
+    cases.push(run_case("stdin_no_trailing_newline", test_stdin_no_trailing_newline()));
+    cases.push(run_case("file_single", test_file_single()));
+    cases.push(run_case("multi_file_prefix", test_multi_file_prefix()));
+    cases.push(run_case("bad_pattern", test_bad_pattern()));
+    cases.push(run_case("missing_file", test_missing_file()));
+    cases.push(run_case("n_flag", test_n_flag()));
+    cases.push(run_case("i_flag", test_i_flag()));
+    cases.push(run_case("v_flag", test_v_flag()));
+    cases.push(run_case("c_flag", test_c_flag()));
+    cases.push(run_case("c_no_match", test_c_no_match()));
+    cases.push(run_case("c_multi", test_c_multi()));
+    cases.push(run_case("l_flag", test_l_flag()));
+    cases.push(run_case("L_flag", test_L_flag()));
+    cases.push(run_case("h_flag", test_h_flag()));
+    cases.push(run_case("e_multi", test_e_multi()));
+    cases.push(run_case("f_flag", test_f_flag()));
+    cases.push(run_case("cluster", test_cluster()));
+    cases.push(run_case("no_pattern", test_no_pattern()));
+    cases.push(run_case("x_flag", test_x_flag()));
+    cases.push(run_case("w_flag", test_w_flag()));
+    cases.push(run_case("o_flag", test_o_flag()));
+    cases.push(run_case("A_flag", test_A_flag()));
+    cases.push(run_case("B_flag", test_B_flag()));
+    cases.push(run_case("C_groups", test_C_groups()));
+    cases.push(run_case("m_flag", test_m_flag()));
+    cases.push(run_case("q_flag", test_q_flag()));
+    cases.push(run_case("r_flag", test_r_flag()));
+
+    let mutable failed = 0;
+    for c in cases then {
+        if c.result is .Fail(_) then {
+            failed += 1;
+        };
+    };
+    println("");
+    if failed == 0 then {
+        println("all grep tests passed");
+    } else {
+        println("\(failed) grep tests failed");
+        exit(1);
+    };
+};

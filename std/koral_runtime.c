@@ -2182,6 +2182,14 @@ int64_t __koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
     return (int64_t)_write(fd, buf, (unsigned int)count);
 }
 
+int32_t __koral_isatty(int32_t fd) {
+    return _isatty(fd) ? 1 : 0;
+}
+
+int32_t __koral_set_binary_mode(int32_t fd) {
+    return _setmode(fd, _O_BINARY) == -1 ? -1 : 0;
+}
+
 int64_t __koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
     return (int64_t)_lseeki64(fd, offset, whence);
 }
@@ -2381,6 +2389,15 @@ int64_t __koral_read(int32_t fd, uint8_t* buf, uint64_t count) {
 
 int64_t __koral_write(int32_t fd, const uint8_t* buf, uint64_t count) {
     return (int64_t)write(fd, buf, (size_t)count);
+}
+
+int32_t __koral_isatty(int32_t fd) {
+    return isatty(fd) ? 1 : 0;
+}
+
+int32_t __koral_set_binary_mode(int32_t fd) {
+    (void)fd;
+    return 0;
 }
 
 int64_t __koral_lseek(int32_t fd, int64_t offset, int32_t whence) {
