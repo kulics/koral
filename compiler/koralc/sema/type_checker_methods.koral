@@ -3505,6 +3505,83 @@ given TypeChecker {
         );
     };
 
+    /// Constraint-driven inference: a type parameter no argument pins down
+    /// can still be determined by a BOUND parameter's constraint. `zip`'s
+    /// `S2: Iterable[U, R2]` with `S2 = List[Rune]` fixes `U` and `R2` from
+    /// List's Iterable conformance -- that is what makes a bare `.zip(xs)`
+    /// inferable. The conformance template's receiver pattern is matched
+    /// against the bound type to instantiate its owner parameters, and its
+    /// trait arguments then unify with the constraint's.
+    bind_type_params_from_constraints(
+        self,
+        type_params: List[TypeParameterDecl],
+        bindings: Dict[String, Type],
+    ): Void = {
+        let mutable param_names = Set[String].new();
+        for tp in type_params then {
+            param_names.insert(tp.name);
+        };
+        let mutable changed = true;
+        while changed then {
+            changed = false;
+            for tp in type_params then {
+                when bindings.get(tp.name) in {
+                    .Some(conforming) then {
+                        for bound in tp.constraints then {
+                            when bound in {
+                                .Trait(trait_def_id, _, _) then {
+                                    let required_nodes = bound_trait_args(bound);
+                                    for tpl in self.storage.generic_trait_conformance_templates then {
+                                        if tpl.trait_def_id != trait_def_id then {
+                                            continue;
+                                        };
+                                        let mutable owner = Dict[String, Type].new();
+                                        self.infer_type_bindings(
+                                            tpl.target_type,
+                                            conforming,
+                                            owner,
+                                        );
+                                        let mutable before = bindings.count();
+                                        let mutable i: UInt = 0;
+                                        while i < required_nodes.count() and i < tpl.trait_arg_types.count() then {
+                                            // The constraint's argument is read as a PARAM NAME when it
+                                            // is one; resolving it as a type would report
+                                            // `Undefined type` for a parameter the call has not bound.
+                                            when required_nodes[i] in {
+                                                .Identifier(name, _) then {
+                                                    if param_names.contains(name) then {
+                                                        let instantiated = self.apply_type_bindings(
+                                                            tpl.trait_arg_types[i],
+                                                            owner,
+                                                        );
+                                                        if not self.contains_generic_parameter(instantiated) then {
+                                                            self.infer_type_bindings(
+                                                                Type.GenericParameter(name),
+                                                                instantiated,
+                                                                bindings,
+                                                            );
+                                                        };
+                                                    };
+                                                },
+                                                _ then {},
+                                            };
+                                            i += 1;
+                                        };
+                                        if bindings.count() > before then {
+                                            changed = true;
+                                        };
+                                    };
+                                },
+                                _ then {},
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+            };
+        };
+    };
+
     resolve_signature_method_type_bindings(
         self,
         receiver_type: Type,
@@ -3577,6 +3654,10 @@ given TypeChecker {
             self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings);
             arg_i += 1;
         };
+        let declared_params = self.storage.method_type_params.get(method.def_id) or else List[
+            TypeParameterDecl,
+        ].new();
+        self.bind_type_params_from_constraints(declared_params, bindings);
         return bindings;
     };
 

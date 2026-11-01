@@ -6051,6 +6051,15 @@ extension TypeChecker {
         // extracts is in first-appearance order and must not be zipped against
         // the declarations.
         let ownTypeParams = methodTypeParamsByDefId[method.defId] ?? []
+        // Constraint-driven inference: a parameter no argument pinned down may
+        // still be fixed by a BOUND parameter's constraint (`S2:
+        // Iterable[U, R2]` with `S2 = List[Rune]` fixes `U` and `R2` from
+        // List's Iterable conformance) -- this is what makes a bare
+        // `.zip(xs)` inferable.
+        if !ownTypeParams.isEmpty {
+          try bindTypeParamsFromConstraints(
+            typeParameters: ownTypeParams, substitution: &methodTypeParamBindings)
+        }
         if !ownTypeParams.isEmpty {
           var orderedArgs: [Type] = []
           var allBound = true
@@ -6067,15 +6076,22 @@ extension TypeChecker {
           }
         }
 
-        // Extract method type args in order from the function type
-        // The order is determined by the order of first appearance in the function type
+        // Extract method type args in the method's DECLARED order -- the order
+        // `obj.m[A, B](...)` writes them in and the order the instantiation
+        // consumes them. The function type's first-appearance order reads
+        // `zip[U, R2, S2]`'s `S2, U, R2` (the `other: S2` parameter before the
+        // return type) and slots every argument one place over. The
+        // first-appearance order only stands in when no declaration list is
+        // recorded.
         let paramNames = extractGenericParameterNames(from: method.type)
         let baseTypeParamNames = extractGenericParameterNames(from: finalBase.type)
         // Filter out type parameters that belong to the base type (type-level parameters)
         let methodLevelParamNames = paramNames.filter { !baseTypeParamNames.contains($0) }
-        let collectedMethodTypeArgs = methodLevelParamNames.compactMap { methodTypeParamBindings[$0] }
-        if !methodLevelParamNames.isEmpty
-            && collectedMethodTypeArgs.count == methodLevelParamNames.count {
+        let declaredNames = ownTypeParams.map { $0.name }
+        let orderedNames = declaredNames.isEmpty ? methodLevelParamNames : declaredNames
+        let collectedMethodTypeArgs = orderedNames.compactMap { methodTypeParamBindings[$0] }
+        if !orderedNames.isEmpty
+            && collectedMethodTypeArgs.count == orderedNames.count {
           inferredMethodTypeArgs = collectedMethodTypeArgs
         } else {
           inferredMethodTypeArgs = nil

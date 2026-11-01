@@ -29,6 +29,52 @@ extension TypeChecker {
     }
   }
 
+  /// Constraint-driven inference (the bootstrap's
+  /// `bind_type_params_from_constraints`): for a parameter whose constraint
+  /// `X: Trait[A...]` names an already-bound `X`, the conformance record's
+  /// declared trait arguments (`given[T] List[T]: Iterable[T, ListIterator[T]]`)
+  /// determine the unbound `A...`. Runs to a fixpoint because chains resolve
+  /// across iterations: `Iterable` yields `R`, then `R`'s own `Iterator` bound
+  /// yields `T`. This is what makes a bare `.zip(xs)` inferable.
+  func bindTypeParamsFromConstraints(
+    typeParameters: [TypeParameterDecl],
+    substitution: inout [String: Type]
+  ) throws {
+    var changed = true
+    while changed {
+      changed = false
+      for param in typeParameters {
+        guard let conforming = substitution[param.name],
+              !context.containsGenericParameter(conforming) else { continue }
+        for constraint in param.constraints {
+          guard case .trait(_, _, let traitArgs) = constraint, !traitArgs.isEmpty else { continue }
+          let requiredDefId = resolveBound(constraint).defId ?? .invalid
+          let required: [Type] = try withNewScope {
+            for genericParam in typeParameters {
+              currentScope.defineGenericParameter(
+                genericParam.name, type: .genericParameter(name: genericParam.name))
+            }
+            return try traitArgs.map { try resolveTypeNode($0) }
+          }
+          for conf in recordedConformances where conf.traitDefId == requiredDefId {
+            var owner: [String: Type] = [:]
+            _ = unifyTypes(conf.selfType, conforming, bindings: &owner)
+            let instArgs = conf.traitTypeArgs.map {
+              SemaUtils.substituteType($0, substitution: owner, context: context)
+            }
+            guard instArgs.count == required.count else { continue }
+            for (expected, actual) in zip(required, instArgs) {
+              guard !context.containsGenericParameter(actual) else { continue }
+              let before = substitution
+              _ = unifyTypes(expected, actual, bindings: &substitution)
+              if before != substitution { changed = true }
+            }
+          }
+        }
+      }
+    }
+  }
+
   func unifyWithTraitInference(
     template: GenericFunctionTemplate,
     arguments: [TypedExpressionNode],
@@ -57,6 +103,12 @@ extension TypeChecker {
       try unify(node: param.type, type: typedArg.type, inferred: &inferred, typeParams: typeParams)
     }
     
+    // Constraint-driven inference from conformance records first (the shared
+    // helper -- see bindTypeParamsFromConstraints). This is what makes a bare
+    // `.zip(xs)` inferable; the method-signature pass below fills anything the
+    // records do not cover.
+    try bindTypeParamsFromConstraints(typeParameters: template.typeParameters, substitution: &inferred)
+
     // Now try to infer remaining type parameters from trait bounds
     // We need to iterate multiple times because some inferences depend on others
     var madeProgress = true
@@ -75,11 +127,10 @@ extension TypeChecker {
             // gives us the trait arguments of that conformance, and therefore
             // `A...`.
             //
-            // Nothing here names a particular trait. The arguments are read off
-            // the conformance itself, by unifying the trait's required method
-            // signatures against the concrete type's. Chains resolve because
-            // this loop repeats: `[T, R]Iterable` yields `R` first, and `R`'s
-            // own `[T]Iterator` bound then yields `T` on the next pass.
+            // The arguments are read off the conformance itself, by unifying
+            // the trait's required method signatures against the concrete
+            // type's. Partial is fine: `[T, R]Iterable` yields `R` first, and
+            // `R`'s own `[T]Iterator` bound then yields `T` on the next pass.
             guard !traitArgs.isEmpty,
                   let concreteSelfType = inferred[typeParam.name],
                   let concreteTraitArgs = try? inferTraitTypeArgumentsFromConformance(
@@ -264,11 +315,10 @@ extension TypeChecker {
             // gives us the trait arguments of that conformance, and therefore
             // `A...`.
             //
-            // Nothing here names a particular trait. The arguments are read off
-            // the conformance itself, by unifying the trait's required method
-            // signatures against the concrete type's. Chains resolve because
-            // this loop repeats: `[T, R]Iterable` yields `R` first, and `R`'s
-            // own `[T]Iterator` bound then yields `T` on the next pass.
+            // The arguments are read off the conformance itself, by unifying
+            // the trait's required method signatures against the concrete
+            // type's. Partial is fine: `[T, R]Iterable` yields `R` first, and
+            // `R`'s own `[T]Iterator` bound then yields `T` on the next pass.
             guard !traitArgs.isEmpty,
                   let concreteSelfType = inferred[typeParam.name],
                   let concreteTraitArgs = try? inferTraitTypeArgumentsFromConformance(

@@ -254,11 +254,16 @@ extension TypeChecker {
         // Avoid duplicates
         if !captures.contains(where: { $0.symbol.defId == defId }) {
           let captureKind: CaptureKind
-          if info.mutable {
+          if info.mutable && name != "self" {
             // Closure capture is copy-only. A mutable binding cannot be captured:
             // the closure would hold a pointer to storage it does not own, so an
             // escaping closure would dangle. Wrap the state in a shared `Cell`
             // (a `type mutable` object) and capture the cell instead.
+            //
+            // The RECEIVER is exempt: `self` cannot be reassigned, and for a
+            // `type mutable` receiver the copy is a handle copy (a retain), so
+            // the closure shares the object the method body already mutates.
+            // Capture it like any immutable binding.
             throw SemanticError(
               .generic("Cannot capture mutable variable '\(name)'; hold the state in a Cell and capture the cell instead"),
               span: nameSpan
