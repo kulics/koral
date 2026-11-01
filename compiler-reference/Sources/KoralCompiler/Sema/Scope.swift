@@ -233,6 +233,20 @@ public class UnifiedScope {
   }
 
   public func defineWithModulePath(_ name: String, _ type: Type, mutable: Bool, modulePath: [String], access: AccessModifier = .internal) {
+    // Complete the collection-time placeholder instead of minting a second
+    // identity: an import binding captured the pass-1 DefId, and allocating a
+    // fresh one here left every `using` that named a VALUE pointing at an
+    // untyped shell whose type never arrived (the value half of the
+    // foreign-symbol identity bug). A declaration has one DefId from
+    // collection to definition.
+    if let map = defIdMap,
+       let existing = map.lookup(modulePath: modulePath, name: name, sourceFile: nil),
+       map.getSymbolType(existing) == nil {
+      let kind: SymbolKind = .variable(mutable ? .MutableValue : .Value)
+      map.addSymbolInfo(defId: existing, type: type, kind: kind, isMutable: mutable)
+      defineScoped(name, existing)
+      return
+    }
     define(name, type, mutable: mutable, modulePath: modulePath, sourceFile: "", access: access)
   }
 
@@ -509,18 +523,11 @@ public class UnifiedScope {
     return nil
   }
 
-  public func isMutable(_ name: String, sourceFile: String? = nil) -> Bool {
-    if let sourceFile {
-      let key = "\(name)@\(sourceFile)"
-      if let defId = privateNames[key], let map = defIdMap {
-        return map.isSymbolMutable(defId) ?? false
-      }
-    }
-    if let defId = names[name] ?? names[DefIdMap.bareKey(name)], let map = defIdMap {
-      return map.isSymbolMutable(defId) ?? false
-    }
-    return parent?.isMutable(name, sourceFile: sourceFile) ?? false
-  }
+  // `isMutable(_ name:)` used to live here. It is gone on purpose: a
+  // name-index mutability query cannot see import-graph bindings (aliases in
+  // particular) and disagreed with the binding `lookup`/`lookupWithInfo`
+  // resolves. Mutability is the RESOLVED binding's flag
+  // (`defIdMap.isSymbolMutable(defId)`), queried at the resolution site.
 
   public func hasFunctionDefinition(_ name: String) -> Bool {
     return names[name] != nil || names[DefIdMap.bareKey(name)] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil

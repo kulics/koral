@@ -1695,6 +1695,7 @@ given TypeChecker {
                                 scope,
                             ) then {
                                 let target_name = self.assignment_target_error_name(
+                                    target,
                                     typed_target,
                                 );
                                 self.push_diagnostic(
@@ -1992,13 +1993,20 @@ given TypeChecker {
         };
     };
 
-    assignment_target_error_name(self, target: TypedExpr): String = {
-        return when target.expr_kind in {
-            .Variable(sym) then self.context().symbol_name(sym),
-            .MemberPath(_, path) then if path.is_empty() then "member"
-            else self.context().symbol_name(path[path.count() - 1]),
-            .DerefExpr(_) then "e",
-            _ then "value",
+    /// The noun the "immutable variable" rule names: the target AS WRITTEN.
+    /// An import alias (`x as y`) is `y` to the reader of `y = v` -- the
+    /// declaring module's spelling never appears in this file, so naming it
+    /// would send the reader looking for a name that is not there.
+    assignment_target_error_name(self, target: Expr, typed_target: TypedExpr): String = {
+        return when target in {
+            .Identifier(name, _) then name,
+            _ then when typed_target.expr_kind in {
+                .Variable(sym) then self.context().symbol_name(sym),
+                .MemberPath(_, path) then if path.is_empty() then "member"
+                else self.context().symbol_name(path[path.count() - 1]),
+                .DerefExpr(_) then "e",
+                _ then "value",
+            },
         };
     };
 

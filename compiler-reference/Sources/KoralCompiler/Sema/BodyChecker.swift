@@ -88,45 +88,79 @@ public class BodyChecker: CompilerPass {
             declarations.append((decl: node, sourceInfo: checker.nodeSourceInfoMap[index], originalIndex: index))
         }
         
-        // Pass 3: 检查函数体并生成 Typed AST
-        for (_, entry) in declarations.enumerated() {
-            let decl = entry.decl
-            let isStdLib = entry.originalIndex < coreGlobalCount
-            checker.isCurrentDeclStdLib = isStdLib
-            let sourceInfo = entry.sourceInfo
-            checker.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? checker.coreFileName : checker.userFileName)
-            checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
-            checker.currentModulePath = sourceInfo?.modulePath ?? []
-            checker.currentPackageID = sourceInfo?.packageID ?? ""
-            checker.currentSpan = decl.span
+        // Pass 3 is two phases, and the split is semantic -- it is the rule
+        // the bootstrap gives a reader: a global initializer meets only the
+        // declarations written before it (a same-module forward reference is
+        // `Undefined variable`), while a function body may name any
+        // declaration in the program, including a global in a module that
+        // sorts after its own. One interleaved pass got that backwards: a
+        // body was checked at its node position and could not see a
+        // later-sorted module's global at all.
+        //
+        // Phase 3a: everything whose checking IS definition -- global values
+        // (initializer included), types, foreign entries -- in node order, so
+        // initializer side effects and diagnostics keep their order.
+        for (_, entry) in declarations.enumerated() where !isBodyBearingDeclaration(entry.decl) {
+            try checkDeclarationEntry(entry)
+        }
 
-            // Each declaration reports its own violations. The constraint
-            // caches otherwise carry one declaration's recorded failure as a
-            // pass, and the next declaration's identical mistake goes unseen.
-            checker.resetDeclarationBoundaryCaches()
-
-            do {
-                let result = try checker.checkGlobalDeclaration(decl)
-                
-                if let typedDecl = result {
-                    typedDeclarations.append(typedDecl)
-                }
-            } catch let error as SemanticError {
-                try? checker.handleError(error)
-                continue
-            } catch {
-                throw error
-            }
+        // Phase 3b: function and method bodies, in node order, after every
+        // declaration exists.
+        for (_, entry) in declarations.enumerated() where isBodyBearingDeclaration(entry.decl) {
+            try checkDeclarationEntry(entry)
         }
         
         let typedProgram = TypedProgram.program(globalNodes: typedDeclarations)
         instantiationRequests = checker.instantiationRequests
-        
+
         return BodyCheckerOutput(
             typedAST: typedProgram,
             instantiationRequests: instantiationRequests,
             typeResolverOutput: typeResolverOutput
         )
+    }
+
+    /// Whether the declaration's checking infers FUNCTION BODIES (its own or
+    /// its methods'). Bodies are phase 3b; everything else -- where checking
+    /// is the definition itself -- is phase 3a.
+    private func isBodyBearingDeclaration(_ decl: GlobalNode) -> Bool {
+        switch decl {
+        case .globalFunctionDeclaration, .givenDeclaration, .givenTraitDeclaration:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func checkDeclarationEntry(
+        _ entry: (decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo?, originalIndex: Int)
+    ) throws {
+        let decl = entry.decl
+        let isStdLib = entry.originalIndex < coreGlobalCount
+        checker.isCurrentDeclStdLib = isStdLib
+        let sourceInfo = entry.sourceInfo
+        checker.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? checker.coreFileName : checker.userFileName)
+        checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
+        checker.currentModulePath = sourceInfo?.modulePath ?? []
+        checker.currentPackageID = sourceInfo?.packageID ?? ""
+        checker.currentSpan = decl.span
+
+        // Each declaration reports its own violations. The constraint
+        // caches otherwise carry one declaration's recorded failure as a
+        // pass, and the next declaration's identical mistake goes unseen.
+        checker.resetDeclarationBoundaryCaches()
+
+        do {
+            let result = try checker.checkGlobalDeclaration(decl)
+
+            if let typedDecl = result {
+                typedDeclarations.append(typedDecl)
+            }
+        } catch let error as SemanticError {
+            try? checker.handleError(error)
+        } catch {
+            throw error
+        }
     }
     
     // MARK: - 公共访问器

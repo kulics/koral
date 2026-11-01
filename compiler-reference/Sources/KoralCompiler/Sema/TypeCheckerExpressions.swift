@@ -8539,12 +8539,34 @@ extension TypeChecker {
   /// Resolves an lvalue expression for assignment
   func resolveLValue(_ expr: ExpressionNode) throws -> TypedExpressionNode {
     switch expr {
-    case .identifier(let name, _):
-      guard let defId = currentScope.lookup(name, sourceFile: currentSourceFile),
-            let type = defIdMap.getSymbolType(defId) else {
+    case .identifier(let name, let nameSpan):
+      // The write path resolves the name exactly the way the read path does
+      // (see the identifier case of inferTypedExpression). A bare `lookup`
+      // plus a name-index `isMutable` were both narrower chains: an import
+      // alias (`using "m" { x as y }`) resolves through the import graph,
+      // which neither consulted, so `y = v` refused a legal write while `y`
+      // read fine -- and a name only the unqualified index holds was writable
+      // without the import the read path demands. Mutability comes from the
+      // resolved binding, never from a second name-index query.
+      guard let resolvedInfo = currentScope.lookupWithInfo(name, sourceFile: currentSourceFile) else {
         throw SemanticError.undefinedVariable(name)
       }
-      guard currentScope.isMutable(name, sourceFile: currentSourceFile) else { throw SemanticError.assignToImmutable(name) }
+      // Same visibility rule and same words as the read path: a name another
+      // module declares is not ours to write until `using` imports it.
+      let isGlobalSymbol = !resolvedInfo.modulePath.isEmpty || resolvedInfo.isPrivate || resolvedInfo.sourceFile != nil
+      let symbolModulePath = isGlobalSymbol ? (resolvedInfo.modulePath.isEmpty ? currentModulePath : resolvedInfo.modulePath) : []
+      if !symbolModulePath.isEmpty && !currentModulePath.isEmpty,
+         !canAccessSymbolDirectly(symbolModulePath: symbolModulePath, currentModulePath: currentModulePath, symbolName: name) {
+        let spec = modulePathToUsingSpecifier(symbolModulePath)
+        throw SemanticError(.generic(
+          "'\(name)' is defined in module '\(spec)'. Import it explicitly with using \"\(spec)\" { \(name) };"
+        ), span: nameSpan)
+      }
+      let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? resolvedInfo.defId
+      guard let type = defIdMap.getSymbolType(defId) else {
+        throw SemanticError.undefinedVariable(name)
+      }
+      guard defIdMap.isSymbolMutable(defId) ?? resolvedInfo.mutable else { throw SemanticError.assignToImmutable(name) }
       let kind = defIdMap.getSymbolKind(defId) ?? .variable(.MutableValue)
       let symbol = Symbol(defId: defId, type: type, kind: kind)
       return .variable(identifier: symbol)

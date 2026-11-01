@@ -1046,23 +1046,42 @@ extension TypeChecker {
       return nil
       
     case .globalVariableDeclaration(let name, _, _, _, _, _, _):
-      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
-         let varType = defIdMap.getSymbolType(defId) {
+      // Resolve the declaring MODULE's own binding, exactly like the function
+      // case above. `currentScope.lookup` is the wrong question here: its
+      // unqualified index is last-wins across modules and it lacks the
+      // bare-key index entirely, so a submodule's `let` looked undeclared and
+      // never entered `publicSymbols` -- no `using` could ever import a VALUE
+      // (reads and writes both said `Undefined variable`), while functions,
+      // traits and types kept working through their own registries.
+      let moduleScoped = defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
+        ?? defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile)
+      // The type may not exist yet: a `let`'s type is settled at its
+      // definition pass, after this table is built. The import machinery only
+      // needs the DefId and the kind -- the type is read at use sites, once
+      // the definition pass has filled it (same DefId: see
+      // `defineWithModulePath`).
+      if let defId = moduleScoped {
         let symbol = Symbol(
           defId: defId,
-          type: varType,
-          kind: .variable(.Value)
+          type: defIdMap.getSymbolType(defId) ?? .error,
+          kind: .variable(defIdMap.isSymbolMutable(defId) ?? false ? .MutableValue : .Value)
         )
         return (name, symbol, nil)
       }
       return nil
     case .foreignLetDeclaration(let name, _, _, _, _, _):
-      if let defId = currentScope.lookup(name, sourceFile: sourceInfo.sourceFile),
-         let varType = defIdMap.getSymbolType(defId) {
+      // Same module-keyed resolution as the variable case above.
+      let moduleScoped = defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
+        ?? defIdMap.lookup(
+          modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile)
+      if let defId = moduleScoped {
         let symbol = Symbol(
           defId: defId,
-          type: varType,
-          kind: .variable(.Value)
+          type: defIdMap.getSymbolType(defId) ?? .error,
+          kind: .variable(defIdMap.isSymbolMutable(defId) ?? false ? .MutableValue : .Value)
         )
         return (name, symbol, nil)
       }
