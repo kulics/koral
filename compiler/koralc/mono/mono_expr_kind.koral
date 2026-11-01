@@ -1,0 +1,871 @@
+// resolve_expr_kind: expression kind resolution for the monomorphization
+// phase.
+
+let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
+    return when expr.expr_kind in {
+        .Variable(symbol) then TypedExprKind.Variable(resolve_symbol_type(mono, symbol)),
+        .IntegerLiteral(value) then TypedExprKind.IntegerLiteral(value),
+        .FloatLiteral(value) then TypedExprKind.FloatLiteral(value),
+        .StringLiteral(value) then TypedExprKind.StringLiteral(value),
+        .BoolLiteral(value) then TypedExprKind.BoolLiteral(value),
+        .CastExpr(target_type, inner) then {
+            let new_target = resolve_parameterized_type(mono, target_type);
+            let resolved_inner = resolve_types_in_expression(mono, inner);
+            TypedExprKind.CastExpr(new_target, resolved_inner)
+        },
+        .TraitObjectConversion(inner, trait_type, concrete_type) then {
+            let new_inner = resolve_types_in_expression(mono, inner);
+            let mutable new_trait_type = resolve_parameterized_type(mono, trait_type);
+            when trait_type in {
+                .TraitObject(original_trait_def_id, original_type_args) then {
+                    let mutable resolved_trait_args = List[Type].new();
+                    for original_type_arg in original_type_args then {
+                        resolved_trait_args.push(
+                            resolve_parameterized_type(mono, original_type_arg),
+                        );
+                    };
+                    new_trait_type = Type.TraitObject(
+                        original_trait_def_id,
+                        resolved_trait_args,
+                    );
+                },
+                _ then {},
+            };
+            let mutable new_concrete_type = resolve_parameterized_type(
+                mono,
+                concrete_type,
+            );
+            when new_trait_type in {
+                .TraitObject(trait_def_id, _) then collect_concrete_vtable_request(
+                    mono,
+                    new_concrete_type,
+                    def_id_spelling(trait_def_id),
+                    trait_def_id,
+                ),
+                _ then {},
+            };
+            TypedExprKind.TraitObjectConversion(
+                new_inner,
+                new_trait_type,
+                new_concrete_type,
+            )
+        },
+        .Unary(op, inner) then {
+            TypedExprKind.Unary(op, resolve_types_in_expression(mono, inner))
+        },
+        .RefExpr(inner) then TypedExprKind.RefExpr(
+            resolve_types_in_expression(mono, inner),
+        ),
+        .PtrExpr(inner) then TypedExprKind.PtrExpr(
+            resolve_types_in_expression(mono, inner),
+        ),
+        .DerefExpr(inner) then TypedExprKind.DerefExpr(
+            resolve_types_in_expression(mono, inner),
+        ),
+        .UnsafeDerefExpr(inner) then TypedExprKind.UnsafeDerefExpr(
+            resolve_types_in_expression(mono, inner),
+        ),
+        .ArithmeticExpr(left, op, right) then {
+            TypedExprKind.ArithmeticExpr(
+                resolve_types_in_expression(mono, left),
+                op,
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .WrappingArithmeticExpr(left, op, right) then {
+            TypedExprKind.WrappingArithmeticExpr(
+                resolve_types_in_expression(mono, left),
+                op,
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .ComparisonExpr(left, op, right) then {
+            TypedExprKind.ComparisonExpr(
+                resolve_types_in_expression(mono, left),
+                op,
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .BitwiseExpr(left, op, right) then {
+            TypedExprKind.BitwiseExpr(
+                resolve_types_in_expression(mono, left),
+                op,
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .AndExpr(left, right) then {
+            TypedExprKind.AndExpr(
+                resolve_types_in_expression(mono, left),
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .OrExpr(left, right) then {
+            TypedExprKind.OrExpr(
+                resolve_types_in_expression(mono, left),
+                resolve_types_in_expression(mono, right),
+            )
+        },
+        .IsExpr(subject, pattern, negated) then {
+            let new_subject = resolve_types_in_expression(mono, subject);
+            TypedExprKind.IsExpr(
+                new_subject,
+                resolve_types_in_pattern(mono, pattern),
+                negated,
+            )
+        },
+        .Call(callee, args) then {
+            let mutable new_callee = resolve_types_in_expression(mono, callee);
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            when new_callee.expr_kind in {
+                .TraitMethodPlaceholder(base, _, method, _, _, _) then {
+                    let receiver = when base.expr_kind in {
+                        .DerefExpr(inner) then when resolve_parameterized_type(
+                            mono,
+                            typed_expr_type(inner),
+                        ) in {
+                            .ReferenceType(ref_inner) then when resolve_parameterized_type(
+                                mono,
+                                ref_inner,
+                            ) in {
+                                .TraitObject(...) then inner,
+                                _ then base,
+                            },
+                            .MutableReferenceType(ref_inner) then when resolve_parameterized_type(
+                                mono,
+                                ref_inner,
+                            ) in {
+                                .TraitObject(...) then inner,
+                                _ then base,
+                            },
+                            _ then base,
+                        },
+                        _ then base,
+                    };
+                    when type_resolution_trait_object_type(
+                        resolve_parameterized_type(mono, receiver.expr_type),
+                    ) in {
+                        .Some(trait_object_type) then when trait_object_type in {
+                            .TraitObject(trait_def_id, _) then {
+                                let method_name = get_semantic_method_name(mono, method);
+                                // The spelling is read from the DECLARATION for the vtable index.
+                                let method_index = vtable_method_index(
+                                    mono,
+                                    def_id_spelling(trait_def_id),
+                                    method_name,
+                                );
+                                if method_index >= 0 then {
+                                    return TypedExprKind.TraitMethodCall(
+                                        receiver,
+                                        trait_object_type,
+                                        method_name,
+                                        method_index,
+                                        new_args,
+                                    );
+                                };
+                            },
+                            _ then {},
+                        },
+                        .None() then {},
+                    };
+                },
+                _ then {},
+            };
+            TypedExprKind.Call(new_callee, new_args)
+        },
+        .GenericCall(function_symbol, type_args, args) then {
+            let new_function_symbol = resolve_symbol_type(mono, function_symbol);
+            let mutable new_type_args = List[Type].new();
+            let mutable contains_generic_type_arg = false;
+            for type_arg in type_args then {
+                let resolved_type_arg = resolve_parameterized_type(mono, type_arg);
+                if has_generic_parameter(resolved_type_arg) then {
+                    contains_generic_type_arg = true;
+                };
+                new_type_args.push(resolved_type_arg);
+            };
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            if contains_generic_type_arg then {
+                return TypedExprKind.GenericCall(
+                    new_function_symbol,
+                    new_type_args,
+                    new_args,
+                );
+            };
+
+            let declared_return_type = resolve_parameterized_type(mono, expr.expr_type);
+            let initial_callee = TypedExpr(
+                TypedExprKind.Variable(new_function_symbol),
+                new_function_symbol.symbol_type,
+                expr.span,
+            );
+            let bound_callee = bind_generic_function_call_callee(
+                mono,
+                initial_callee,
+                new_args,
+                declared_return_type,
+            );
+            let mutable _resolved_return_type = if not has_generic_parameter(
+                declared_return_type,
+            ) then declared_return_type
+            else when bound_callee.expr_type in {
+                .FunctionType(_, return_type_ref) then resolve_parameterized_type(
+                    mono,
+                    return_type_ref,
+                ),
+                _ then declared_return_type,
+            };
+            TypedExprKind.Call(bound_callee, new_args)
+        },
+        .IntrinsicCall(node) then {
+            let new_node = when node in {
+                .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(
+                    resolve_types_in_expression(mono, ref_expr),
+                    resolve_parameterized_type(mono, result_type),
+                ),
+                .UpgradeRef(weak_expr, result_type) then TypedIntrinsic.UpgradeRef(
+                    resolve_types_in_expression(mono, weak_expr),
+                    resolve_parameterized_type(mono, result_type),
+                ),
+                .SpawnThread(out_handle, out_tid, closure, stack_size) then TypedIntrinsic.SpawnThread(
+                    resolve_types_in_expression(mono, out_handle),
+                    resolve_types_in_expression(mono, out_tid),
+                    resolve_types_in_expression(mono, closure),
+                    resolve_types_in_expression(mono, stack_size),
+                ),
+                .AllocMemory(count, result_type) then TypedIntrinsic.AllocMemory(
+                    resolve_types_in_expression(mono, count),
+                    resolve_parameterized_type(mono, result_type),
+                ),
+                .DeallocMemory(pointer_expr) then TypedIntrinsic.DeallocMemory(
+                    resolve_types_in_expression(mono, pointer_expr),
+                ),
+                .CopyMemory(dest, source, count) then TypedIntrinsic.CopyMemory(
+                    resolve_types_in_expression(mono, dest),
+                    resolve_types_in_expression(mono, source),
+                    resolve_types_in_expression(mono, count),
+                ),
+                .MoveMemory(dest, source, count) then TypedIntrinsic.MoveMemory(
+                    resolve_types_in_expression(mono, dest),
+                    resolve_types_in_expression(mono, source),
+                    resolve_types_in_expression(mono, count),
+                ),
+                .InitMemory(pointer_expr, value_expr) then TypedIntrinsic.InitMemory(
+                    resolve_types_in_expression(mono, pointer_expr),
+                    resolve_types_in_expression(mono, value_expr),
+                ),
+                .DeinitMemory(pointer_expr) then TypedIntrinsic.DeinitMemory(
+                    resolve_types_in_expression(mono, pointer_expr),
+                ),
+                .TakeMemory(pointer_expr, result_type) then TypedIntrinsic.TakeMemory(
+                    resolve_types_in_expression(mono, pointer_expr),
+                    resolve_parameterized_type(mono, result_type),
+                ),
+                .NullPtr(result_type) then TypedIntrinsic.NullPtr(
+                    resolve_parameterized_type(mono, result_type),
+                ),
+            };
+            TypedExprKind.IntrinsicCall(new_node)
+        },
+        .MemberPath(base, path) then {
+            TypedExprKind.MemberPath(
+                resolve_types_in_expression(mono, base),
+                resolve_symbol_list(mono, path),
+            )
+        },
+        .MethodReference(base, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
+            let mutable new_base = resolve_types_in_expression(mono, base);
+            let mutable new_receiver_type = resolve_parameterized_type(
+                mono,
+                receiver_type,
+            );
+            let mutable new_method = resolve_symbol_type(mono, method);
+            let mutable new_type_args = List[Type].new();
+            for type_arg in type_args then {
+                new_type_args.push(resolve_parameterized_type(mono, type_arg));
+            };
+            let mutable new_method_type_args = List[Type].new();
+            for method_type_arg in method_type_args then {
+                new_method_type_args.push(
+                    resolve_parameterized_type(mono, method_type_arg),
+                );
+            };
+            let effective_method_type_args = new_method_type_args;
+            let mutable adjusted_base = new_base;
+            let mutable resolved_expression_type = resolve_parameterized_type(
+                mono,
+                method.symbol_type,
+            );
+
+            if not has_generic_parameter(adjusted_base.expr_type) then {
+                let mutable resolved_method_type = resolve_parameterized_type(
+                    mono,
+                    method.symbol_type,
+                );
+                resolved_expression_type = resolved_method_type;
+                let mutable binding_receiver_type = method_lookup_base_type(
+                    mono,
+                    adjusted_base,
+                );
+                // Same distinction as `exact_concrete_bound_method`: a concrete
+                // type is not an emitted symbol. Only a materialized DefId may
+                // be kept as-is; a template's DefId must go through identity
+                // resolution so the specialization is actually instantiated.
+                // "Materialized" means the DefId IS the emitted identity
+                // (`instantiated_method_def_ids`, the same L0 answer
+                // `resolve_method_instance_by_identity` short-circuits on) --
+                // not merely "a FunctionDecl exists somewhere", which is also
+                // true for a template and would keep the template's DefId. That
+                // is what once emitted `List_U32_d57_push` (composed from the
+                // template) next to `List_U32_push_d57` (the instance's minted
+                // name) and failed to link.
+                let exact_concrete_method_match = new_method.def_id.id > 0 and mono.storage.instantiated_method_def_ids.contains(
+                    new_method.def_id.id,
+                ) and not has_generic_parameter(resolved_method_type) and not mono_is_unresolved_expr_type(
+                    mono,
+                    resolved_method_type,
+                ) and method_def_id_matches_receiver_exactly(
+                    mono,
+                    new_method.def_id,
+                    binding_receiver_type,
+                );
+                if exact_concrete_method_match then {
+                    new_method = Symbol(
+                        new_method.def_id,
+                        resolved_method_type,
+                        new_method.kind,
+                    );
+                } else if should_preserve_resolved_method_reference(
+                    mono,
+                    method,
+                    adjusted_base.expr_type,
+                ) then {
+                    new_method = resolve_symbol_type(mono, method);
+                } else {
+                    let logical_method_name = get_semantic_method_name(mono, method);
+                    let mutable rebound_method = bind_receiver_method_symbol(
+                        mono,
+                        binding_receiver_type,
+                        new_method,
+                        Option[Type].Some(resolved_method_type),
+                    );
+                    if rebound_method.def_id.id > 0 then {
+                        let resolved_rebound_method = resolve_symbol_type(
+                            mono,
+                            rebound_method,
+                        );
+                        adjusted_base = align_method_reference_base_for_bound_method(
+                            mono,
+                            adjusted_base,
+                            resolved_rebound_method,
+                        );
+                        new_method = resolved_rebound_method;
+                        resolved_expression_type = resolve_parameterized_type(
+                            mono,
+                            resolved_rebound_method.symbol_type,
+                        );
+                    } else {
+                        when lookup_instantiated_extension_method_symbol(
+                            mono,
+                            adjusted_base.expr_type,
+                            method.def_id,
+                            Option[Type].Some(resolved_method_type),
+                        ) in {
+                            .Some(concrete_method) then {
+                                let mutable cm = concrete_method;
+                                let resolved_concrete_method = resolve_symbol_type(
+                                    mono,
+                                    cm,
+                                );
+                                adjusted_base = align_method_reference_base_for_bound_method(
+                                    mono,
+                                    adjusted_base,
+                                    resolved_concrete_method,
+                                );
+                                new_method = resolved_concrete_method;
+                                resolved_expression_type = resolve_parameterized_type(
+                                    mono,
+                                    resolved_concrete_method.symbol_type,
+                                );
+                            },
+                            .None() then {
+                                // No DefId means no identity to look up. Keep the
+                                // node as the type checker left it and let a later
+                                // stage report it -- re-deriving "which method"
+                                // from a spelling is what this whole pass exists
+                                // to stop doing.
+                            },
+                        };
+                    };
+                };
+            };
+            new_base = adjusted_base;
+            new_receiver_type = resolve_parameterized_type(mono, new_base.expr_type);
+            new_method = Symbol(
+                new_method.def_id,
+                resolved_expression_type,
+                new_method.kind,
+            );
+            let trait_object_type_opt = when resolve_parameterized_type(
+                mono,
+                new_base.expr_type,
+            ) in {
+                .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
+                    Type.TraitObject(trait_def_id, trait_type_args),
+                ),
+                .ReferenceType(inner_ref) then when resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ) in {
+                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
+                        Type.TraitObject(trait_def_id, trait_type_args),
+                    ),
+                    _ then Option[Type].None(),
+                },
+                .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ) in {
+                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
+                        Type.TraitObject(trait_def_id, trait_type_args),
+                    ),
+                    _ then Option[Type].None(),
+                },
+                _ then Option[Type].None(),
+            };
+            when trait_object_type_opt in {
+                .Some(trait_object_type) then {
+                    return TypedExprKind.TraitMethodPlaceholder(
+                        new_base,
+                        trait_object_type,
+                        new_method,
+                        new_method.def_id,
+                        new_method_type_args,
+                        dispatch_callsite,
+                    );
+                },
+                .None() then {},
+            };
+            TypedExprKind.MethodReference(
+                new_base,
+                new_receiver_type,
+                new_method,
+                new_type_args,
+                effective_method_type_args,
+                dispatch_callsite,
+            )
+        },
+        .Block(statements, tail_expression) then {
+            let mutable new_statements = List[TypedStatement].new();
+            for stmt_ref in statements then {
+                new_statements.push(resolve_types_in_statement(mono, stmt_ref));
+            };
+            let new_tail = when tail_expression in {
+                .Some(tail) then Option[TypedExpr].Some(
+                    resolve_types_in_expression(mono, tail),
+                ),
+                .None() then Option[TypedExpr].None(),
+            };
+            TypedExprKind.Block(new_statements, new_tail)
+        },
+        .IfExpr(condition, then_branch, else_branch) then {
+            let new_condition = resolve_types_in_expression(mono, condition);
+            let new_then = resolve_types_in_expression(mono, then_branch);
+            let new_else = when else_branch in {
+                .Some(expr) then Option[TypedExpr].Some(
+                    resolve_types_in_expression(mono, expr),
+                ),
+                .None() then Option[TypedExpr].None(),
+            };
+            TypedExprKind.IfExpr(new_condition, new_then, new_else)
+        },
+        .WhenExpr(subject, arms) then {
+            let new_subject = resolve_types_in_expression(mono, subject);
+            let mutable new_arms = List[TypedWhenArm].new();
+            for arm_ref in arms then {
+                let mutable pattern_bindings = Dict[UInt, Type].new();
+                mono_collect_pattern_binding_types(
+                    mono,
+                    arm_ref.pattern,
+                    new_subject.expr_type,
+                    pattern_bindings,
+                );
+                mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    arm_ref.body,
+                    pattern_bindings,
+                );
+                let new_body = resolve_types_in_expression(mono, arm_ref.body);
+                let mutable new_arm_type = resolve_parameterized_type(
+                    mono,
+                    arm_ref.arm_type,
+                );
+                let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern);
+                let new_guard = when arm_ref.guard in {
+                    .Some(g) then Option[TypedExpr].Some(
+                        resolve_types_in_expression(mono, g),
+                    ),
+                    .None() then Option[TypedExpr].None(),
+                };
+                new_arms.push(
+                    TypedWhenArm(new_pattern, new_guard, new_body, new_arm_type),
+                );
+            };
+            TypedExprKind.WhenExpr(new_subject, new_arms)
+        },
+        .LambdaExpr(params, return_type, body) then {
+            let mutable new_params = List[TypedParam].new();
+            for p in params then {
+                let mutable new_type = resolve_parameterized_type(mono, p.param_type);
+                new_params.push(
+                    TypedParam(p.name, p.is_mutable, new_type, p.named, p.default_value),
+                );
+            };
+            let new_return = resolve_parameterized_type(mono, return_type);
+            TypedExprKind.LambdaExpr(
+                new_params,
+                new_return,
+                resolve_types_in_expression(mono, body),
+            )
+        },
+        .StaticMethodCall(receiver_type, method_name, method, type_args, method_type_args, args) then {
+            resolve_static_method_call_to_call(
+                mono,
+                expr,
+                receiver_type,
+                method_name,
+                method,
+                type_args,
+                method_type_args,
+                args,
+            )
+        },
+        .TypeConstruction(identifier, type_args, args) then {
+            let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
+            let resolved_identifier = if not has_generic_parameter(declared_type) then when declared_type in {
+                .StructureType(def_id) then Symbol(def_id, declared_type, identifier.kind),
+                .EnumType(def_id) then Symbol(def_id, declared_type, identifier.kind),
+                _ then Symbol(identifier.def_id, declared_type, identifier.kind),
+            } else resolve_type_construction_symbol(mono, identifier, type_args, args);
+            let mutable new_type_args = List[Type].new();
+            for type_arg in type_args then {
+                new_type_args.push(resolve_parameterized_type(mono, type_arg));
+            };
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            TypedExprKind.TypeConstruction(resolved_identifier, new_type_args, new_args)
+        },
+        .EnumConstruction(enum_type, case_name, args) then {
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            let mutable resolved_enum_type = resolve_parameterized_type(mono, enum_type);
+            TypedExprKind.EnumConstruction(resolved_enum_type, case_name, new_args)
+        },
+        .TraitMethodPlaceholder(base, trait_type, method, trait_method_def_id, method_type_args, dispatch_callsite) then {
+            let new_base = resolve_types_in_expression(mono, base);
+            let mutable new_trait_type = resolve_parameterized_type(mono, trait_type);
+            let resolved_method = resolve_symbol_type(mono, method);
+            let new_method = Symbol(
+                resolved_method.def_id,
+                resolved_method.symbol_type,
+                resolved_method.kind,
+            );
+            let resolved_method_type = resolve_parameterized_type(mono, expr.expr_type);
+            let lookup_base_type = method_lookup_base_type(mono, new_base);
+            let normalized_expected_method_type = normalize_type_resolution_trait_placeholder_expected_method_type(
+                mono,
+                resolved_method_type,
+                lookup_base_type,
+            );
+            let method_name = get_semantic_method_name(mono, new_method);
+            let mutable resolved_method_type_args = List[Type].new();
+            for method_type_arg in method_type_args then {
+                resolved_method_type_args.push(
+                    resolve_parameterized_type(mono, method_type_arg),
+                );
+            };
+
+            when type_resolution_trait_object_type(lookup_base_type) in {
+                .Some(_) then {
+                    TypedExprKind.TraitMethodPlaceholder(
+                        new_base,
+                        new_trait_type,
+                        new_method,
+                        trait_method_def_id,
+                        resolved_method_type_args,
+                        dispatch_callsite,
+                    )
+                },
+                .None() then {
+                    if not has_generic_parameter(lookup_base_type) and method_name != "" then {
+                        let expected_return_type = when normalized_expected_method_type in {
+                            .FunctionType(_, return_type) then resolve_parameterized_type(
+                                mono,
+                                return_type,
+                            ),
+                            _ then resolved_method_type,
+                        };
+                        let empty_args = List[TypedExpr].new();
+                        let mutable concrete_method_opt = identity_method_instance_option(
+                            mono,
+                            new_method,
+                            lookup_base_type,
+                            resolved_method_type_args,
+                        );
+                        if concrete_method_opt is .None() then {
+                            concrete_method_opt = identity_method_instance_option(
+                                mono,
+                                new_method,
+                                lookup_base_type,
+                                resolved_method_type_args,
+                            );
+                        };
+                        if concrete_method_opt is .None() then {
+                            instantiate_trait_placeholder_method(
+                                mono,
+                                lookup_base_type,
+                                method_name,
+                                resolved_method_type_args,
+                            );
+                            concrete_method_opt = identity_method_instance_option(
+                                mono,
+                                new_method,
+                                lookup_base_type,
+                                resolved_method_type_args,
+                            );
+                            if concrete_method_opt is .None() then {
+                                concrete_method_opt = identity_method_instance_option(
+                                    mono,
+                                    new_method,
+                                    lookup_base_type,
+                                    resolved_method_type_args,
+                                );
+                            };
+                        };
+                        when concrete_method_opt in {
+                            .Some(concrete_method) then {
+                                let concrete_method_type = resolve_parameterized_type(
+                                    mono,
+                                    concrete_method.symbol_type,
+                                );
+                                let adjusted_base = align_method_reference_base_for_bound_method(
+                                    mono,
+                                    new_base,
+                                    concrete_method,
+                                );
+                                return TypedExprKind.MethodReference(
+                                    adjusted_base,
+                                    adjusted_base.expr_type,
+                                    Symbol(
+                                        concrete_method.def_id,
+                                        concrete_method_type,
+                                        concrete_method.kind,
+                                    ),
+                                    List[Type].new(),
+                                    resolved_method_type_args,
+                                    dispatch_callsite,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    };
+                    TypedExprKind.TraitMethodPlaceholder(
+                        new_base,
+                        new_trait_type,
+                        new_method,
+                        trait_method_def_id,
+                        resolved_method_type_args,
+                        dispatch_callsite,
+                    )
+                },
+            }
+        },
+        .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then {
+            let new_receiver = resolve_types_in_expression(mono, receiver);
+            let mutable new_trait_type = resolve_parameterized_type(mono, trait_type);
+            when trait_type in {
+                .TraitObject(original_trait_def_id, original_type_args) then {
+                    let mutable resolved_trait_args = List[Type].new();
+                    for original_type_arg in original_type_args then {
+                        resolved_trait_args.push(
+                            resolve_parameterized_type(mono, original_type_arg),
+                        );
+                    };
+                    new_trait_type = Type.TraitObject(
+                        original_trait_def_id,
+                        resolved_trait_args,
+                    );
+                },
+                _ then {},
+            };
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            let receiver_type = resolve_parameterized_type(mono, new_receiver.expr_type);
+            let semantic_receiver_type = resolve_parameterized_type(
+                mono,
+                typed_expr_type(new_receiver),
+            );
+            let receiver_trait_opt = type_resolution_trait_object_type(receiver_type);
+            let semantic_receiver_trait_opt = type_resolution_trait_object_type(
+                semantic_receiver_type,
+            );
+            if receiver_trait_opt is .Some(_) and semantic_receiver_trait_opt is .Some(_) then {
+                TypedExprKind.TraitMethodCall(
+                    new_receiver,
+                    new_trait_type,
+                    method_name,
+                    method_index,
+                    new_args,
+                )
+            } else {
+                let expected_return_type = resolve_parameterized_type(
+                    mono,
+                    expr.expr_type,
+                );
+                let lookup_source_type = when receiver_trait_opt in {
+                    .Some(_) then semantic_receiver_type,
+                    .None() then receiver_type,
+                };
+                let lookup_base_type = when lookup_source_type in {
+                    .ReferenceType(inner) then resolve_parameterized_type(mono, inner),
+                    .MutableReferenceType(inner) then resolve_parameterized_type(
+                        mono,
+                        inner,
+                    ),
+                    .BorrowedReferenceType(inner) then resolve_parameterized_type(
+                        mono,
+                        inner,
+                    ),
+                    .MutableBorrowedReferenceType(inner) then resolve_parameterized_type(
+                        mono,
+                        inner,
+                    ),
+                    _ then lookup_source_type,
+                };
+                let empty_method_type_args = List[Type].new();
+                instantiate_trait_placeholder_method(
+                    mono,
+                    lookup_base_type,
+                    method_name,
+                    empty_method_type_args,
+                );
+                let dispatch_trait_def_id_opt = when new_trait_type in {
+                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    _ then Option[DefId].None(),
+                };
+                let mutable witness_method_opt = Option[Symbol].None();
+                when new_trait_type in {
+                    .TraitObject(trait_def_id, trait_type_args) then {
+                        // `method_index` is the vtable slot the type checker
+                        // assigned at definition time; `requirement_slots[index]`
+                        // carries the requirement's DECLARATION identity, and the
+                        // witness maps that to the implementation. No spelling is
+                        // consulted -- the name above is display only.
+                        let witness_key = CanonicalTraitRef(
+                            def_id_spelling(trait_def_id),
+                            trait_def_id,
+                            trait_type_args,
+                        ).key(lookup_base_type);
+                        when mono.storage.conformance_witnesses.get(witness_key) in {
+                            .Some(witness) then {
+                                if method_index >= 0 and UInt(method_index) < witness.requirement_slots.count(
+                                ) then {
+                                    let requirement_slot = (witness.requirement_slots[
+                                        UInt(method_index)
+                                    ]);
+                                    when witness.local_implementation_def_ids_by_trait_method_def_id.get(
+                                        requirement_slot.trait_method_def_id,
+                                    ) in {
+                                        .Some(impl_def_id) then {
+                                            witness_method_opt = Option[Symbol].Some(
+                                                resolved_method_symbol(
+                                                    mono,
+                                                    impl_def_id,
+                                                    method_name,
+                                                    expected_return_type,
+                                                ),
+                                            );
+                                        },
+                                        .None() then {},
+                                    };
+                                };
+                            },
+                            .None() then {},
+                        };
+                    },
+                    _ then {},
+                };
+                let concrete_method = when instantiate_trait_target_static_method(
+                    mono,
+                    lookup_base_type,
+                    method_name,
+                    dispatch_trait_def_id_opt,
+                    empty_method_type_args,
+                    new_args,
+                    expected_return_type,
+                ) in {
+                    .Some(method) then Option[Symbol].Some(method),
+                    .None() then witness_method_opt,
+                };
+                // `concrete_method` already falls back to the DefId-keyed
+                // witness lookup; a name-bridged rebind in between would
+                // re-decide "which method" from the spelling.
+                let effective_method = concrete_method;
+                when effective_method in {
+                    .Some(method) then {
+                        let method_type = resolve_parameterized_type(
+                            mono,
+                            method.symbol_type,
+                        );
+                        let adjusted_base = align_method_reference_base_for_bound_method(
+                            mono,
+                            new_receiver,
+                            method,
+                        );
+                        let callee = TypedExpr(
+                            TypedExprKind.MethodReference(
+                                adjusted_base,
+                                adjusted_base.expr_type,
+                                Symbol(method.def_id, method_type, method.kind),
+                                List[Type].new(),
+                                empty_method_type_args,
+                                .None(),
+                            ),
+                            method_type,
+                            adjusted_base.span,
+                        );
+                        TypedExprKind.Call(callee, new_args)
+                    },
+                    .None() then {
+                        TypedExprKind.TraitMethodCall(
+                            new_receiver,
+                            new_trait_type,
+                            method_name,
+                            method_index,
+                            new_args,
+                        )
+                    },
+                }
+            }
+        },
+        .GenericInstantiation(base_type, type_args) then {
+            let mutable new_base_type = resolve_parameterized_type(mono, base_type);
+            let mutable new_type_args = List[Type].new();
+            for type_arg in type_args then {
+                new_type_args.push(resolve_parameterized_type(mono, type_arg));
+            };
+            TypedExprKind.GenericInstantiation(new_base_type, new_type_args)
+        },
+    };
+};

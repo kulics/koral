@@ -1,0 +1,1407 @@
+// Expression rewriting for the monomorphization phase: member fields,
+// member paths, and pattern binding types.
+
+public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): TypedExpr = {
+    if mono.storage.expression_resolve_total_limit > UInt(0) and mono.storage.expression_resolve_total_steps >= mono.storage.expression_resolve_total_limit then {
+        mono.storage.expression_resolve_total_limited = true;
+        return expr;
+    };
+
+    if mono.storage.expression_resolve_limit > UInt(0) and mono.storage.expression_resolve_steps >= mono.storage.expression_resolve_limit then {
+        mono.storage.expression_resolve_limited = true;
+        return expr;
+    };
+    mono.storage.expression_resolve_steps += UInt(1);
+    mono.storage.expression_resolve_total_steps += UInt(1);
+
+    when expr.expr_kind in {
+        .Variable(symbol) then {
+            let new_symbol = resolve_symbol_type(mono, symbol);
+            return TypedExpr(
+                TypedExprKind.Variable(new_symbol),
+                new_symbol.symbol_type,
+                expr.span,
+            );
+        },
+        .RefExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner);
+            let resolved_inner = resolve_parameterized_type(mono, new_inner.expr_type);
+            let resolved_type = when expr.expr_type in {
+                .MutableReferenceType(_) then Type.MutableReferenceType(resolved_inner),
+                .ReferenceType(_) then Type.ReferenceType(resolved_inner),
+                .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(
+                    resolved_inner,
+                ),
+                .WeakReferenceType(_) then Type.WeakReferenceType(resolved_inner),
+                _ then Type.ReferenceType(resolved_inner),
+            };
+            return TypedExpr(TypedExprKind.RefExpr(new_inner), resolved_type, expr.span);
+        },
+        .PtrExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner);
+            let resolved_inner = resolve_parameterized_type(mono, new_inner.expr_type);
+            let resolved_type = when expr.expr_type in {
+                .MutablePointerType(_) then Type.MutablePointerType(resolved_inner),
+                .PointerType(_) then Type.PointerType(resolved_inner),
+                _ then Type.PointerType(resolved_inner),
+            };
+            return TypedExpr(TypedExprKind.PtrExpr(new_inner), resolved_type, expr.span);
+        },
+        .DerefExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner);
+            let resolved_type = when new_inner.expr_type in {
+                .ReferenceType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                .MutableReferenceType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                .WeakReferenceType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                .MutableWeakReferenceType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                .PointerType(inner_ref) then resolve_parameterized_type(mono, inner_ref),
+                .MutablePointerType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                _ then resolve_parameterized_type(mono, expr.expr_type),
+            };
+            return TypedExpr(TypedExprKind.DerefExpr(new_inner), resolved_type, expr.span);
+        },
+        .UnsafeDerefExpr(inner) then {
+            let new_inner = resolve_types_in_expression(mono, inner);
+            let resolved_type = when new_inner.expr_type in {
+                .PointerType(inner_ref) then resolve_parameterized_type(mono, inner_ref),
+                .MutablePointerType(inner_ref) then resolve_parameterized_type(
+                    mono,
+                    inner_ref,
+                ),
+                _ then resolve_parameterized_type(mono, expr.expr_type),
+            };
+            return TypedExpr(
+                TypedExprKind.UnsafeDerefExpr(new_inner),
+                resolved_type,
+                expr.span,
+            );
+        },
+        .Call(callee, args) then {
+            let mutable new_args = List[TypedExpr].new();
+            for arg in args then {
+                new_args.push(resolve_types_in_expression(mono, arg));
+            };
+            let mutable resolved_call_type = resolve_parameterized_type(
+                mono,
+                expr.expr_type,
+            );
+            let resolved_callee = resolve_types_in_expression(mono, callee);
+            let new_callee = normalize_resolved_call_callee(mono, callee, resolved_callee);
+            when resolve_special_call_callee(
+                mono,
+                expr,
+                new_callee,
+                new_args,
+                resolved_call_type,
+            ) in {
+                .Some(resolved_expr) then {
+                    return resolved_expr;
+                },
+                .None() then {},
+            };
+            let mutable bound_callee = bind_generic_function_call_callee(
+                mono,
+                new_callee,
+                new_args,
+                resolved_call_type,
+            );
+            when bound_callee.expr_kind in {
+                .Variable(symbol) then {
+                    let symbol_type_is_generic = has_generic_parameter(
+                        resolve_parameterized_type(mono, symbol.symbol_type),
+                    );
+                    if (symbol.def_id.id == 0 or symbol_type_is_generic) and new_args.count(
+                    ) > UInt(0) then {
+                        let normalized_name = normalize_receiver_call_method_name(
+                            get_semantic_method_name(mono, symbol),
+                        );
+                        let mutable binding_receiver_type = resolve_parameterized_type(
+                            mono,
+                            new_args[UInt(0)].expr_type,
+                        );
+                        if not has_generic_parameter(binding_receiver_type) then {
+                            let mutable method_args = List[TypedExpr].new();
+                            let mutable method_arg_index: UInt = UInt(1);
+                            while method_arg_index < new_args.count() then {
+                                let method_arg = (new_args[method_arg_index]);
+                                method_args.push(method_arg);
+                                method_arg_index += UInt(1);
+                            };
+
+                            let rebound_method_opt = identity_method_instance_option(
+                                mono,
+                                symbol,
+                                binding_receiver_type,
+                                List[Type].new(),
+                            );
+                            let effective_rebound_method_opt = when rebound_method_opt in {
+                                .Some(rebound_method) then Option[Symbol].Some(
+                                    rebound_method,
+                                ),
+                                .None() then {
+                                    let template_name_for_lookup = resolve_static_call_template_name(
+                                        mono,
+                                        binding_receiver_type,
+                                    );
+                                    when identity_method_instance_option(
+                                        mono,
+                                        symbol,
+                                        binding_receiver_type,
+                                        List[Type].new(),
+                                    ) in {
+                                        .Some(rebound_method) then Option[Symbol].Some(
+                                            rebound_method,
+                                        ),
+                                        .None() then enqueue_extension_method_for_static_call(
+                                            mono,
+                                            binding_receiver_type,
+                                            normalized_name,
+                                            symbol.def_id,
+                                            template_name_for_lookup,
+                                            List[Type].new(),
+                                            method_args,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                expr.expr_type,
+                                            ),
+                                        ),
+                                    }
+                                },
+                            };
+                            when effective_rebound_method_opt in {
+                                .Some(rebound_method) then {
+                                    let resolved_type = resolved_callsite_result_type(
+                                        mono,
+                                        expr.expr_type,
+                                        rebound_method,
+                                    );
+                                    let receiver_trait_name_opt = when binding_receiver_type in {
+                                        .TraitObject(trait_def_id, _) then Option[String].Some(
+                                            def_id_spelling(trait_def_id),
+                                        ),
+                                        .ReferenceType(inner_ref) then when resolve_parameterized_type(
+                                            mono,
+                                            inner_ref,
+                                        ) in {
+                                            .TraitObject(trait_def_id, _) then Option[String].Some(
+                                                def_id_spelling(trait_def_id),
+                                            ),
+                                            _ then Option[String].None(),
+                                        },
+                                        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
+                                            mono,
+                                            inner_ref,
+                                        ) in {
+                                            .TraitObject(trait_def_id, _) then Option[String].Some(
+                                                def_id_spelling(trait_def_id),
+                                            ),
+                                            _ then Option[String].None(),
+                                        },
+                                        .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                                            mono,
+                                            inner_ref,
+                                        ) in {
+                                            .TraitObject(trait_def_id, _) then Option[String].Some(
+                                                def_id_spelling(trait_def_id),
+                                            ),
+                                            _ then Option[String].None(),
+                                        },
+                                        .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                                            mono,
+                                            inner_ref,
+                                        ) in {
+                                            .TraitObject(trait_def_id, _) then Option[String].Some(
+                                                def_id_spelling(trait_def_id),
+                                            ),
+                                            _ then Option[String].None(),
+                                        },
+                                        _ then Option[String].None(),
+                                    };
+                                    when receiver_trait_name_opt in {
+                                        .Some(trait_name) then {
+                                            if vtable_method_index(
+                                                mono,
+                                                trait_name,
+                                                normalized_name,
+                                            ) < 0 then {
+                                                let callee_expr = TypedExpr(
+                                                    TypedExprKind.Variable(
+                                                        rebound_method,
+                                                    ),
+                                                    rebound_method.symbol_type,
+                                                    expr.span,
+                                                );
+                                                return TypedExpr(
+                                                    TypedExprKind.Call(
+                                                        callee_expr,
+                                                        new_args,
+                                                    ),
+                                                    resolved_type,
+                                                    expr.span,
+                                                );
+                                            };
+                                        },
+                                        .None() then {},
+                                    };
+                                    let dispatch_callsite = ensure_receiver_dispatch_callsite(
+                                        mono,
+                                        .None(),
+                                        binding_receiver_type,
+                                        rebound_method,
+                                        Option[String].Some(normalized_name),
+                                    );
+                                    let first_arg = new_args[UInt(0)];
+                                    let adapted_receiver = adapt_receiver_expr_for_method(
+                                        mono,
+                                        first_arg,
+                                        rebound_method,
+                                    );
+                                    let rebound_callee = TypedExpr(
+                                        TypedExprKind.MethodReference(
+                                            adapted_receiver,
+                                            adapted_receiver.expr_type,
+                                            rebound_method,
+                                            List[Type].new(),
+                                            List[Type].new(),
+                                            dispatch_callsite,
+                                        ),
+                                        rebound_method.symbol_type,
+                                        expr.span,
+                                    );
+                                    return TypedExpr(
+                                        TypedExprKind.Call(rebound_callee, method_args),
+                                        resolved_type,
+                                        expr.span,
+                                    );
+                                },
+                                .None() then {},
+                            };
+
+                            instantiate_trait_placeholder_method(
+                                mono,
+                                binding_receiver_type,
+                                normalized_name,
+                                List[Type].new(),
+                            );
+                            when lookup_extension_method_def_id(
+                                mono,
+                                binding_receiver_type,
+                                symbol.def_id,
+                                List[Type].new(),
+                            ) in {
+                                .Some(def_id) then {
+                                    let rebound_symbol = resolved_method_symbol(
+                                        mono,
+                                        def_id,
+                                        normalized_name,
+                                        symbol.symbol_type,
+                                    );
+                                    bound_callee = TypedExpr(
+                                        TypedExprKind.Variable(rebound_symbol),
+                                        rebound_symbol.symbol_type,
+                                        expr.span,
+                                    );
+                                },
+                                .None() then {},
+                            };
+                        };
+                    };
+                },
+                _ then {},
+            };
+            let mutable declared_resolved_type = resolve_parameterized_type(
+                mono,
+                expr.expr_type,
+            );
+            let mutable resolved_type = if not has_generic_parameter(
+                declared_resolved_type,
+            ) then declared_resolved_type
+            else when bound_callee.expr_type in {
+                .FunctionType(_, return_type_ref) then resolve_parameterized_type(
+                    mono,
+                    return_type_ref,
+                ),
+                _ then declared_resolved_type,
+            };
+            if bound_callee.expr_kind is .AndExpr(_, _) or is .OrExpr(_, _) then {
+                mono.report_monomorphization_internal_error(
+                    "mono produced invalid call callee: original=\(mono_debug_expr_kind(mono, callee)) resolved=\(mono_debug_expr_kind(mono, new_callee)) bound=\(mono_debug_expr_kind(mono, bound_callee)) result=\(mono.storage.context.get_layout_key(resolved_type)) args=\(new_args.count().to_string())",
+                );
+                return TypedExpr(
+                    TypedExprKind.Block(
+                        List[TypedStatement].new(),
+                        Option[TypedExpr].None(),
+                    ),
+                    resolved_type,
+                    expr.span,
+                );
+            };
+            when callee.expr_kind in {
+                .Variable(original_symbol) then when original_symbol.kind in {
+                    .Function() then {
+                        let bound_is_callable = when bound_callee.expr_kind in {
+                            .Variable(bound_symbol) then when bound_symbol.kind in {
+                                .Function() then true,
+                                _ then false,
+                            },
+                            .MethodReference(_, _, _, _, _, _) then true,
+                            .TraitMethodPlaceholder(_, _, _, _, _, _) then true,
+                            .Call(_, _) then true,
+                            _ then false,
+                        };
+                        if not bound_is_callable then {
+                            mono.report_monomorphization_internal_error(
+                                "mono invalid function callee: original=\(mono_debug_expr_kind(mono, callee)) resolved=\(mono_debug_expr_kind(mono, new_callee)) bound=\(mono_debug_expr_kind(mono, bound_callee)) result=\(mono.storage.context.get_layout_key(resolved_type)) args=\(new_args.count().to_string())",
+                            );
+                            return TypedExpr(
+                                TypedExprKind.Block(
+                                    List[TypedStatement].new(),
+                                    Option[TypedExpr].None(),
+                                ),
+                                resolved_type,
+                                expr.span,
+                            );
+                        };
+                    },
+                    _ then {},
+                },
+                _ then {},
+            };
+            let final_callee = when callee.expr_kind in {
+                .Variable(original_symbol) then when original_symbol.kind in {
+                    .Function() then when bound_callee.expr_kind in {
+                        .Variable(bound_symbol) then {
+                            when bound_symbol.kind in {
+                                .Function() then {
+                                    TypedExpr(
+                                        TypedExprKind.Variable(bound_symbol),
+                                        bound_symbol.symbol_type,
+                                        expr.span,
+                                    )
+                                },
+                                _ then {
+                                    let stable_symbol = resolve_symbol_type(
+                                        mono,
+                                        original_symbol,
+                                    );
+                                    let stable_symbol_ref = stable_symbol;
+                                    TypedExpr(
+                                        TypedExprKind.Variable(stable_symbol_ref),
+                                        stable_symbol.symbol_type,
+                                        unknown_span(),
+                                    )
+                                },
+                            }
+                        },
+                        _ then bound_callee,
+                    },
+                    _ then bound_callee,
+                },
+                _ then bound_callee,
+            };
+            return TypedExpr(
+                TypedExprKind.Call(final_callee, new_args),
+                resolved_type,
+                expr.span,
+            );
+        },
+        _ then {},
+    };
+    let resolved_kind = resolve_expr_kind(mono, expr);
+    let resolved_type = when resolved_kind in {
+        .Variable(symbol) then symbol.symbol_type,
+        .ArithmeticExpr(left, _, right) then {
+            let left_t = left.expr_type;
+            let right_t = right.expr_type;
+            let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
+            let mutable result_type = declared_type;
+            if mono.storage.context.get_layout_key(left_t) == mono.storage.context.get_layout_key(
+                right_t,
+            ) then {
+                result_type = left_t;
+            } else if mono_is_unresolved_expr_type(mono, declared_type) then {
+                if is_concrete_numeric_type(left_t) then {
+                    result_type = left_t;
+                } else if is_concrete_numeric_type(right_t) then {
+                    result_type = right_t;
+                };
+            };
+            result_type
+        },
+        .BitwiseExpr(left, _, right) then {
+            let left_t = left.expr_type;
+            let right_t = right.expr_type;
+            let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
+            let mutable result_type = declared_type;
+            if mono.storage.context.get_layout_key(left_t) == mono.storage.context.get_layout_key(
+                right_t,
+            ) then {
+                result_type = left_t;
+            } else if mono_is_unresolved_expr_type(mono, declared_type) then {
+                if is_concrete_integer_type(left_t) then {
+                    result_type = left_t;
+                } else if is_concrete_integer_type(right_t) then {
+                    result_type = right_t;
+                };
+            };
+            result_type
+        },
+        .WrappingArithmeticExpr(_, _, _) then resolve_parameterized_type(
+            mono,
+            expr.expr_type,
+        ),
+        .MethodReference(_, _, method, _, _, _) then resolve_parameterized_type(
+            mono,
+            method.symbol_type,
+        ),
+        .MemberPath(base, path) then resolve_member_path_type(
+            mono,
+            typed_expr_type(base),
+            path,
+            expr.expr_type,
+        ),
+        .TypeConstruction(identifier, type_args, args) then {
+            let mutable declared_type = resolve_parameterized_type(mono, expr.expr_type);
+            if not has_generic_parameter(declared_type) then declared_type
+            else recover_type_construction_type_resolved(
+                mono,
+                identifier.symbol_type,
+                identifier.def_id,
+                type_args,
+                args,
+            )
+        },
+        _ then resolve_parameterized_type(mono, expr.expr_type),
+    };
+
+    return TypedExpr(resolved_kind, resolved_type, expr.span);
+};
+
+let mono_debug_expr_kind(mono: Monomorphizer, expr: TypedExpr): String = {
+    return when expr.expr_kind in {
+        .Variable(symbol) then "variable:\(symbol.def_id.id):\(mono.storage.context.get_layout_key(symbol.symbol_type))",
+        .MethodReference(base, _, method, _, _, _) then "method-ref:\(method.def_id.id):base=\(mono.storage.context.get_layout_key(base.expr_type))",
+        .Call(callee, args) then "call(callee=\(mono_debug_expr_kind(mono, callee)),args=\(args.count().to_string()))",
+        .StaticMethodCall(receiver_type, method_name, method, _, _, args) then "static:\(method_name)#\(method.def_id.id):receiver=\(mono.storage.context.get_layout_key(receiver_type)):args=\(args.count().to_string())",
+        .MemberPath(base, path) then {
+            let mutable path_builder = StringBuilder.new();
+            let mutable first_segment = true;
+            for segment in path then {
+                if not first_segment then {
+                    path_builder.push_byte('.');
+                };
+                path_builder.push_string(segment.def_id.id.to_string());
+                first_segment = false;
+            };
+            let path_text = path_builder.to_string();
+            "member:\(path_text):base=\(mono.storage.context.get_layout_key(base.expr_type))"
+        },
+        .AndExpr(_, _) then "and",
+        .OrExpr(_, _) then "or",
+        .ComparisonExpr(_, _, _) then "comparison",
+        .ArithmeticExpr(_, _, _) then "arithmetic",
+        .WrappingArithmeticExpr(_, _, _) then "wrapping-arithmetic",
+        .BitwiseExpr(_, _, _) then "bitwise",
+        .Unary(_, _) then "unary",
+        .CastExpr(target_type, inner) then "cast:\(mono.storage.context.get_layout_key(inner.expr_type))->\(mono.storage.context.get_layout_key(target_type))",
+        .RefExpr(inner) then "ref:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .PtrExpr(inner) then "ptr:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .DerefExpr(inner) then "deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .UnsafeDerefExpr(inner) then "unsafe-deref:\(mono.storage.context.get_layout_key(inner.expr_type))",
+        .Block(_, _) then "block",
+        .IfExpr(_, _, _) then "if",
+        .WhenExpr(_, _) then "when",
+        .LambdaExpr(_, _, _) then "lambda",
+        .TypeConstruction(identifier, _, args) then "type:\(identifier.def_id.id):args=\(args.count().to_string())",
+        .EnumConstruction(_, case_name, args) then "enum:\(case_name):args=\(args.count().to_string())",
+        .TraitMethodPlaceholder(_, _, method, _, _, _) then "trait-placeholder:\(method.def_id.id)",
+        .TraitObjectConversion(_, trait_type, _) then "trait-object:\(mono.storage.context.get_layout_key(trait_type))",
+        .TraitMethodCall(_, trait_type, method_name, _, args) then "trait-call:\(method_name):trait=\(mono.storage.context.get_layout_key(trait_type)):args=\(args.count().to_string())",
+        .GenericCall(function_symbol, _, args) then "generic:\(function_symbol.def_id.id):args=\(args.count().to_string())",
+        .IntrinsicCall(_) then "intrinsic",
+        .GenericInstantiation(base_type, _) then "generic-inst:\(mono.storage.context.get_layout_key(base_type))",
+        .IsExpr(...) then "is",
+        .IntegerLiteral(_) then "int",
+        .FloatLiteral(_) then "float",
+        .StringLiteral(_) then "string",
+        .BoolLiteral(_) then "bool",
+    };
+};
+
+let instantiated_extension_method_type_matches_expected_pattern(
+    mono: Monomorphizer,
+    actual: Type,
+    expected: Type,
+): Bool = {
+    if mono.storage.context.get_layout_key(resolve_parameterized_type(mono, actual)) == mono.storage.context.get_layout_key(
+        resolve_parameterized_type(mono, expected),
+    ) then {
+        return true;
+    };
+    when expected.compatible_indirection_inners(actual) in {
+        .Some(inners) then {
+            return instantiated_extension_method_type_matches_expected_pattern(
+                mono,
+                inners.actual_inner,
+                inners.expected_inner,
+            );
+        },
+        .None() then {},
+    };
+    return when expected in {
+        .GenericParameter(_) then true,
+        .FunctionType(expected_params, expected_return) then when actual in {
+            .FunctionType(actual_params, actual_return) then {
+                if actual_params.count() != expected_params.count() then {
+                    return false;
+                };
+                let mutable idx: UInt = 0;
+                while idx < actual_params.count() then {
+                    if not instantiated_extension_method_type_matches_expected_pattern(
+                        mono,
+                        (actual_params[idx]).param_type,
+                        (expected_params[idx]).param_type,
+                    ) then {
+                        return false;
+                    };
+                    idx += UInt(1);
+                };
+                instantiated_extension_method_type_matches_expected_pattern(
+                    mono,
+                    actual_return,
+                    expected_return,
+                )
+            },
+            _ then false,
+        },
+        .GenericStruct(tplDefId, expected_args) then {
+            let actual_args = when actual in {
+                .GenericStruct(actual_def_id, actual_generic_args) then {
+                    if tplDefId != actual_def_id then {
+                        return false;
+                    };
+                    actual_generic_args
+                },
+                .StructureType(def_id) then {
+                    if (mono.storage.context.get_template_name(def_id) or else "") != def_id_spelling(
+                        tplDefId,
+                    ) then {
+                        return false;
+                    };
+                    when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mutable boxed_args = List[Type].new();
+                            for type_arg in type_args then {
+                                boxed_args.push(type_arg);
+                            };
+                            boxed_args
+                        },
+                        .None() then List[Type].new(),
+                    }
+                },
+                _ then {
+                    return false;
+                },
+            };
+            if actual_args.count() != expected_args.count() then {
+                return false;
+            };
+            let mutable idx: UInt = 0;
+            while idx < actual_args.count() then {
+                if not instantiated_extension_method_type_matches_expected_pattern(
+                    mono,
+                    (actual_args[idx]),
+                    (expected_args[idx]),
+                ) then {
+                    return false;
+                };
+                idx += UInt(1);
+            };
+            return true;
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericEnum(expected_def_id, expected_args) then {
+            let actual_args = when actual in {
+                .GenericEnum(actual_def_id, actual_generic_args) then {
+                    if actual_def_id != expected_def_id then {
+                        return false;
+                    };
+                    actual_generic_args
+                },
+                .EnumType(def_id) then {
+                    if mono.storage.context.get_template_def_id(def_id) != expected_def_id then {
+                        return false;
+                    };
+                    when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mutable boxed_args = List[Type].new();
+                            for type_arg in type_args then {
+                                boxed_args.push(type_arg);
+                            };
+                            boxed_args
+                        },
+                        .None() then List[Type].new(),
+                    }
+                },
+                _ then {
+                    return false;
+                },
+            };
+            if actual_args.count() != expected_args.count() then {
+                return false;
+            };
+            let mutable idx: UInt = 0;
+            while idx < actual_args.count() then {
+                if not instantiated_extension_method_type_matches_expected_pattern(
+                    mono,
+                    (actual_args[idx]),
+                    (expected_args[idx]),
+                ) then {
+                    return false;
+                };
+                idx += UInt(1);
+            };
+            return true;
+        },
+        _ then false,
+    };
+};
+
+/// The instantiated extension method for `method_def_id` on `base_type`.
+/// Identity answers; the old version collected candidates by NAME and then
+/// picked one by RETURN TYPE, which §B10 forbids ("禁止遍历候选、禁止按返回类型选择").
+let lookup_instantiated_extension_method_symbol(
+    mono: Monomorphizer,
+    base_type: Type,
+    method_def_id: DefId,
+    expected_method_type_opt: Option[Type],
+): Option[Symbol] = {
+    return when lookup_extension_method_def_id(
+        mono,
+        base_type,
+        method_def_id,
+        List[Type].new(),
+    ) in {
+        .Some(def_id) then {
+            let symbol_type = when mono.storage.context.get_function_type(def_id) in {
+                .Some(function_type) then function_type,
+                .None() then when expected_method_type_opt in {
+                    .Some(expected_method_type) then expected_method_type,
+                    .None() then Type.VoidType(),
+                },
+            };
+            Option[Symbol].Some(Symbol(def_id, symbol_type, SymbolKind.Function()))
+        },
+        .None() then Option[Symbol].None(),
+    };
+};
+
+let resolve_member_field_type(
+    mono: Monomorphizer,
+    base_type: Type,
+    member_name: String,
+    fallback: Type,
+): Type = {
+    let resolved_base = resolve_parameterized_type(mono, base_type);
+    when resolved_base in {
+        .ReferenceType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .MutableReferenceType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .WeakReferenceType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .MutableWeakReferenceType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .PointerType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .MutablePointerType(inner) then {
+            return resolve_member_field_type(mono, inner, member_name, fallback);
+        },
+        .GenericStruct(template_def_id, args) then {
+            if is_std_pair_def_id(mono.storage.context, template_def_id) and args.count() == UInt(
+                2,
+            ) then {
+                when member_name in {
+                    "first" then {
+                        return resolve_parameterized_type(mono, (args[UInt(0)]));
+                    },
+                    "second" then {
+                        return resolve_parameterized_type(mono, (args[UInt(1)]));
+                    },
+                    _ then {},
+                };
+            };
+            when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
+                .Some(template) then {
+                    let mutable subst = Dict[String, Type].new();
+                    let mutable i: UInt = 0;
+                    while i < template.type_parameters.count() and i < args.count() then {
+                        subst.insert(template.type_parameters[i].name, (args[i]));
+                        i += 1;
+                    };
+                    // `args` may be shorter than the parameter list, so the floor
+                    // matters here: an unmentioned parameter must stay itself.
+                    let field_subst = template_substitution(
+                        template.type_parameters,
+                        subst,
+                    );
+                    for field in template.fields then {
+                        if field.name == member_name then {
+                            return resolve_parameterized_type(
+                                mono,
+                                mono.resolve_type_node_impl(
+                                    field.field_type,
+                                    field_subst,
+                                ),
+                            );
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        },
+        .StructureType(def_id) then {
+            when mono.storage.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if field.name == member_name then {
+                            return resolve_parameterized_type(mono, field.field_type);
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        },
+        _ then {},
+    };
+    return resolve_parameterized_type(mono, fallback);
+};
+
+let resolve_member_path_type(
+    mono: Monomorphizer,
+    base_type: Type,
+    path: List[Symbol],
+    fallback: Type,
+): Type = {
+    let _ = base_type;
+    if path.is_empty() then {
+        return resolve_parameterized_type(mono, fallback);
+    };
+    let resolved = resolve_parameterized_type(mono, path[path.count() - 1].symbol_type);
+    return when resolved in {
+        .Unknown() then resolve_parameterized_type(mono, fallback),
+        _ then resolved,
+    };
+};
+
+let mono_enum_case_name_matches(
+    pattern_case_name: String,
+    enum_case_name: String,
+): Bool = {
+    if enum_case_name == pattern_case_name then {
+        return true;
+    };
+    if enum_case_name.ends_with("_" + pattern_case_name) then {
+        return true;
+    };
+
+    let pattern_tail = when pattern_case_name.split_last_once(".") in {
+        .Some(parts) then parts.second,
+        .None() then pattern_case_name,
+    };
+    if enum_case_name == pattern_tail then {
+        return true;
+    };
+    if enum_case_name.ends_with("_" + pattern_tail) then {
+        return true;
+    };
+
+    let enum_tail = when enum_case_name.split_last_once("_") in {
+        .Some(parts) then parts.second,
+        .None() then enum_case_name,
+    };
+    return enum_tail == pattern_tail;
+};
+
+let mono_get_enum_case_field_types(
+    mono: Monomorphizer,
+    subject_type: Type,
+    tag_index: UInt,
+    case_name: String,
+): List[Type] = {
+    let inner_type = when subject_type in {
+        .ReferenceType(inner) then inner,
+        .MutableReferenceType(inner) then inner,
+        .BorrowedReferenceType(inner) then inner,
+        .MutableBorrowedReferenceType(inner) then inner,
+        .WeakReferenceType(inner) then inner,
+        .MutableWeakReferenceType(inner) then inner,
+        _ then subject_type,
+    };
+    return when inner_type in {
+        .EnumType(def_id) then when mono.storage.context.get_enum_cases(def_id) in {
+            .Some(cases) then {
+                let mutable result = List[Type].new();
+                let mutable matched = false;
+                let mutable i: UInt = 0;
+                for case_info in cases then {
+                    let index_match = i == tag_index;
+                    let name_match = mono_enum_case_name_matches(
+                        case_name,
+                        case_info.name,
+                    );
+                    if not matched and (index_match or name_match) then {
+                        for param in case_info.params then {
+                            result.push(
+                                resolve_parameterized_type(mono, param.param_type),
+                            );
+                        };
+                        matched = true;
+                    };
+                    i += 1;
+                };
+                result
+            },
+            .None() then List[Type].new(),
+        },
+        .GenericEnum(template_def_id, args) then {
+            when mono.storage.generic_templates.enum_by_def_id(template_def_id) in {
+                .Some(enum_template) then when mono.storage.context.get_enum_cases(
+                    enum_template.def_id,
+                ) in {
+                    .Some(cases) then {
+                        let mutable bindings = Dict[String, Type].new();
+                        let mutable i: UInt = 0;
+                        let param_count = enum_template.type_parameters.count();
+                        let arg_count = args.count();
+                        let n = if param_count < arg_count then param_count
+                        else arg_count;
+                        while i < n then {
+                            let tp = enum_template.type_parameters[i];
+                            bindings.insert(tp.name, (args[i]));
+                            i += 1;
+                        };
+                        let mutable result = List[Type].new();
+                        let mutable matched = false;
+                        let mutable case_index: UInt = 0;
+                        for case_info in cases then {
+                            let index_match = case_index == tag_index;
+                            let name_match = mono_enum_case_name_matches(
+                                case_name,
+                                case_info.name,
+                            );
+                            if not matched and (index_match or name_match) then {
+                                for param in case_info.params then {
+                                    let mutable concrete_param_type = resolve_parameterized_type(
+                                        mono,
+                                        substitute_type(mono, param.param_type, bindings),
+                                    );
+                                    result.push(concrete_param_type);
+                                };
+                                matched = true;
+                            };
+                            case_index += 1;
+                        };
+                        result
+                    },
+                    .None() then List[Type].new(),
+                },
+                .None() then List[Type].new(),
+            }
+        },
+        _ then List[Type].new(),
+    };
+};
+
+/// The DECLARATION a struct pattern names, resolved once from its source
+/// spelling. See `TypeChecker.struct_pattern_def_id` -- mono has no imports of
+/// its own to consult, so the registry's own resolution answers here.
+let mono_struct_pattern_def_id(mono: Monomorphizer, type_name: String): DefId = {
+    return mono_nominal_decl_def_id(mono_nominal_from_declared_name(mono, type_name));
+};
+
+/// The declaration a `Type.StructureType` stands for: the template it was
+/// instantiated from, or the struct itself when it was never generic.
+let mono_struct_pattern_decl_def_id(mono: Monomorphizer, def_id: DefId): DefId = {
+    let template_def_id = mono.storage.context.get_template_def_id(def_id);
+    if template_def_id == def_id_invalid() then def_id else template_def_id
+};
+
+let mono_get_struct_pattern_field_types(
+    mono: Monomorphizer,
+    subject_type: Type,
+    pattern_def_id: DefId,
+): List[Type] = {
+    let inner_type = when subject_type in {
+        .ReferenceType(inner) then inner,
+        .MutableReferenceType(inner) then inner,
+        .BorrowedReferenceType(inner) then inner,
+        .MutableBorrowedReferenceType(inner) then inner,
+        .WeakReferenceType(inner) then inner,
+        .MutableWeakReferenceType(inner) then inner,
+        _ then subject_type,
+    };
+    return when inner_type in {
+        .StructureType(def_id) then {
+            let mutable result = List[Type].new();
+            if mono_struct_pattern_decl_def_id(mono, def_id) == pattern_def_id then {
+                when mono.storage.context.get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        for field in fields then {
+                            result.push(
+                                resolve_parameterized_type(mono, field.field_type),
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
+            };
+            result
+        },
+        // Identity: the template's DECLARATION.
+        .GenericStruct(template_def_id, args) then {
+            let mutable result = List[Type].new();
+            if template_def_id == pattern_def_id then {
+                when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
+                    .Some(struct_template) then when mono.storage.context.get_struct_fields(
+                        struct_template.def_id,
+                    ) in {
+                        .Some(fields) then {
+                            let mutable bindings = Dict[String, Type].new();
+                            let mutable i: UInt = 0;
+                            let param_count = struct_template.type_parameters.count();
+                            let arg_count = args.count();
+                            let n = if param_count < arg_count then param_count
+                            else arg_count;
+                            while i < n then {
+                                let tp = struct_template.type_parameters[i];
+                                bindings.insert(tp.name, (args[i]));
+                                i += 1;
+                            };
+                            for field in fields then {
+                                result.push(
+                                    resolve_parameterized_type(
+                                        mono,
+                                        substitute_type(mono, field.field_type, bindings),
+                                    ),
+                                );
+                            };
+                        },
+                        .None() then {},
+                    },
+                    .None() then {},
+                };
+            };
+            result
+        },
+        _ then List[Type].new(),
+    };
+};
+
+let mono_collect_pattern_binding_types(
+    mono: Monomorphizer,
+    pattern: TypedPattern,
+    subject_type: Type,
+    bindings: Dict[UInt, Type],
+): Void = {
+    let mutable concrete_subject_type = resolve_parameterized_type(mono, subject_type);
+    when pattern in {
+        .Variable(symbol) then {
+            if mono.storage.context.symbol_name(symbol) != "_" and symbol.def_id.id != 0 then {
+                bindings.insert(symbol.def_id.id, concrete_subject_type);
+            };
+        },
+        .EnumCase(case_name, tag_index, elements) then {
+            let field_types = mono_get_enum_case_field_types(
+                mono,
+                concrete_subject_type,
+                tag_index,
+                case_name,
+            );
+            let mutable i: UInt = 0;
+            for element in elements then {
+                let mutable field_type = when field_types.get(i) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                };
+                mono_collect_pattern_binding_types(
+                    mono,
+                    element.pattern,
+                    field_type,
+                    bindings,
+                );
+                i += 1;
+            };
+        },
+        .StructPattern(type_name, elements) then {
+            let field_types = mono_get_struct_pattern_field_types(
+                mono,
+                concrete_subject_type,
+                mono_struct_pattern_def_id(mono, type_name),
+            );
+            let mutable i: UInt = 0;
+            for element in elements then {
+                let mutable field_type = when field_types.get(i) in {
+                    .Some(t) then t,
+                    .None() then Type.Unknown(),
+                };
+                mono_collect_pattern_binding_types(
+                    mono,
+                    element.pattern,
+                    field_type,
+                    bindings,
+                );
+                i += 1;
+            };
+        },
+        .AndPattern(left, right) then {
+            mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings);
+            mono_collect_pattern_binding_types(
+                mono,
+                right,
+                concrete_subject_type,
+                bindings,
+            );
+        },
+        .OrPattern(left, right) then {
+            mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings);
+            mono_collect_pattern_binding_types(
+                mono,
+                right,
+                concrete_subject_type,
+                bindings,
+            );
+        },
+        .NotPattern(inner) then {
+            mono_collect_pattern_binding_types(
+                mono,
+                inner,
+                concrete_subject_type,
+                bindings,
+            );
+        },
+        _ then {},
+    };
+};
+
+let mono_register_pattern_binding_symbol_type(
+    mono: Monomorphizer,
+    symbol: Symbol,
+    bindings: Dict[UInt, Type],
+): Void = {
+    if symbol.def_id.id == 0 then {
+        return;
+    };
+    when bindings.get(symbol.def_id.id) in {
+        .Some(bound_type) then {
+            let mutable current_type = resolve_symbol_type(mono, symbol).symbol_type;
+            if (mono_is_unresolved_expr_type(mono, current_type) or has_generic_parameter(
+                current_type,
+            )) and not mono_is_unresolved_expr_type(mono, bound_type) and not has_generic_parameter(
+                bound_type,
+            ) then {
+                let symbol_kind = when mono.storage.context.get_symbol_kind(
+                    symbol.def_id,
+                ) in {
+                    .Some(kind) then kind,
+                    .None() then symbol.kind,
+                };
+                let symbol_method_kind = when mono.storage.context.get_symbol_method_kind(
+                    symbol.def_id,
+                ) in {
+                    .Some(kind) then kind,
+                    .None() then MethodKind.Normal(),
+                };
+                let symbol_mutable = when mono.storage.context.get_symbol_mutable(
+                    symbol.def_id,
+                ) in {
+                    .Some(is_mutable) then is_mutable,
+                    .None() then false,
+                };
+                mono.storage.context.set_symbol_info(
+                    symbol.def_id,
+                    SymbolInfo(bound_type, symbol_kind, symbol_method_kind, symbol_mutable),
+                );
+            };
+        },
+        .None() then {},
+    };
+};
+
+let mono_register_pattern_binding_types_in_statement(
+    mono: Monomorphizer,
+    stmt: TypedStatement,
+    bindings: Dict[UInt, Type],
+): Void = {
+    when stmt in {
+        .LetStmt(_, value, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            value,
+            bindings,
+        ),
+        .TupleLetStmt(_, _, value, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            value,
+            bindings,
+        ),
+        .AssignmentStmt(target, value, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, target, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, value, bindings);
+        },
+        .ExprStmt(expr, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            expr,
+            bindings,
+        ),
+        .IfStmt(condition, then_branch, else_branch, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings);
+            when else_branch in {
+                .Some(expr) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    expr,
+                    bindings,
+                ),
+                .None() then {},
+            };
+        },
+        .WhileStmt(condition, body, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, body, bindings);
+        },
+        .WhenStmt(subject, arms, _) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings);
+            for arm_ref in arms then {
+                mono_register_pattern_binding_types_in_expr(mono, arm_ref.body, bindings);
+            };
+        },
+        .ReturnStmt(value, _) then when value in {
+            .Some(expr) then mono_register_pattern_binding_types_in_expr(
+                mono,
+                expr,
+                bindings,
+            ),
+            .None() then {},
+        },
+        .DeferStmt(expr, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            expr,
+            bindings,
+        ),
+        _ then {},
+    }
+};
+
+let mono_register_pattern_binding_types_in_expr(
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    bindings: Dict[UInt, Type],
+): Void = {
+    when expr.expr_kind in {
+        .Variable(symbol) then mono_register_pattern_binding_symbol_type(
+            mono,
+            symbol,
+            bindings,
+        ),
+        .CastExpr(_, inner) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .TraitObjectConversion(inner, _, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .Unary(_, inner) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .RefExpr(inner) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .PtrExpr(inner) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .DerefExpr(inner) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            inner,
+            bindings,
+        ),
+        .ArithmeticExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
+        },
+        .ComparisonExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
+        },
+        .BitwiseExpr(left, _, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
+        },
+        .AndExpr(left, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
+        },
+        .OrExpr(left, right) then {
+            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
+        },
+        .IsExpr(subject, _, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            subject,
+            bindings,
+        ),
+        .Call(callee, args) then {
+            mono_register_pattern_binding_types_in_expr(mono, callee, bindings);
+            for arg in args then {
+                mono_register_pattern_binding_types_in_expr(mono, arg, bindings);
+            };
+        },
+        .MemberPath(base, _) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            base,
+            bindings,
+        ),
+        .Block(statements, tail_expression) then {
+            for stmt_ref in statements then {
+                mono_register_pattern_binding_types_in_statement(mono, stmt_ref, bindings);
+            };
+            when tail_expression in {
+                .Some(tail) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    tail,
+                    bindings,
+                ),
+                .None() then {},
+            }
+        },
+        .IfExpr(condition, then_branch, else_branch) then {
+            mono_register_pattern_binding_types_in_expr(mono, condition, bindings);
+            mono_register_pattern_binding_types_in_expr(mono, then_branch, bindings);
+            when else_branch in {
+                .Some(inner) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    inner,
+                    bindings,
+                ),
+                .None() then {},
+            }
+        },
+        .WhenExpr(subject, arms) then {
+            mono_register_pattern_binding_types_in_expr(mono, subject, bindings);
+            for arm_ref in arms then {
+                mono_register_pattern_binding_types_in_expr(mono, arm_ref.body, bindings);
+            };
+        },
+        .LambdaExpr(_, _, body) then mono_register_pattern_binding_types_in_expr(
+            mono,
+            body,
+            bindings,
+        ),
+        .StaticMethodCall(_, _, _, _, _, args) then for arg in args then {
+            mono_register_pattern_binding_types_in_expr(mono, arg, bindings);
+        },
+        .IntrinsicCall(node) then {
+            when node in {
+                .DowngradeRef(ref_expr, _) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    ref_expr,
+                    bindings,
+                ),
+                .UpgradeRef(weak_expr, _) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    weak_expr,
+                    bindings,
+                ),
+                .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+                    mono_register_pattern_binding_types_in_expr(
+                        mono,
+                        out_handle,
+                        bindings,
+                    );
+                    mono_register_pattern_binding_types_in_expr(mono, out_tid, bindings);
+                    mono_register_pattern_binding_types_in_expr(mono, closure, bindings);
+                    mono_register_pattern_binding_types_in_expr(
+                        mono,
+                        stack_size,
+                        bindings,
+                    );
+                },
+                .AllocMemory(count, _) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    count,
+                    bindings,
+                ),
+                .DeallocMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    pointer_expr,
+                    bindings,
+                ),
+                .CopyMemory(dest, source, count) then {
+                    mono_register_pattern_binding_types_in_expr(mono, dest, bindings);
+                    mono_register_pattern_binding_types_in_expr(mono, source, bindings);
+                    mono_register_pattern_binding_types_in_expr(mono, count, bindings);
+                },
+                .MoveMemory(dest, source, count) then {
+                    mono_register_pattern_binding_types_in_expr(mono, dest, bindings);
+                    mono_register_pattern_binding_types_in_expr(mono, source, bindings);
+                    mono_register_pattern_binding_types_in_expr(mono, count, bindings);
+                },
+                .InitMemory(pointer_expr, value_expr) then {
+                    mono_register_pattern_binding_types_in_expr(
+                        mono,
+                        pointer_expr,
+                        bindings,
+                    );
+                    mono_register_pattern_binding_types_in_expr(
+                        mono,
+                        value_expr,
+                        bindings,
+                    );
+                },
+                .DeinitMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    pointer_expr,
+                    bindings,
+                ),
+                .TakeMemory(pointer_expr, _) then mono_register_pattern_binding_types_in_expr(
+                    mono,
+                    pointer_expr,
+                    bindings,
+                ),
+                .NullPtr(_) then {},
+            };
+        },
+        _ then {},
+    }
+};
+
+// Try to bind a generic top-level function call callee to a concrete instantiated
+// function symbol using call-site argument types.

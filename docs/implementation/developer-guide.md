@@ -610,19 +610,19 @@ agree. Walk this list for each side (koralc file · seed file):
 | Type identity / layout | `sema/compiler_context.koral` (`get_layout_key`, `get_debug_name`, `contains_generic_parameter`) | `CompilerContext` (step 5) |
 | Typed AST shape | `typed/typed_ast.koral` + its printer | `Sema/TypedAST.swift`, `Sema/TypedASTPrinter.swift` |
 | Sema: operators, dispatch, methods | `sema/type_checker_expressions_operators.koral`, `_dispatch.koral`, `_methods.koral`, `type_checker_patterns.koral` | `Sema/TypeCheckerExpressions.swift`, `TypeCheckerMethods.swift`, `TypeCheckerStatements.swift` |
-| Monomorphization | `mono/mono_type_resolution.koral` (`substitute_type` and the resolution walks), `mono_expr_substitution.koral`, `mono_functions.koral`, `mono_types.koral` | `Monomorphization/MonomorphizerTypeResolution.swift`, `MonomorphizerExpressionSubstitution.swift` |
-| MIR | `mir/mir.koral`, `mir/mir_function_builder.koral`, `mir/mir_verifier.koral` | `MIR/MIR.swift`, `MIRLowerer.swift`, `MIRTypeResolver.swift`, `MIRVerifier.swift` |
+| Monomorphization | `mono/mono_type_identity.koral` / `mono_type_resolution.koral` / `mono_type_node.koral` / `mono_conformance.koral` / `mono_receiver_match.koral` / `mono_type_construction.koral` / `mono_method_helpers.koral` / `mono_call_resolution.koral` / `mono_expr_resolution.koral` / `mono_generic_binding.koral` / `mono_expr_kind.koral` / `mono_generic_method.koral` / `mono_static_call.koral` / `mono_global_node.koral` (resolution split by theme), `mono_expr_substitution.koral`, `mono_functions.koral`, `mono_types.koral` | `Monomorphization/MonomorphizerTypeResolution.swift`, `MonomorphizerExpressionSubstitution.swift` |
+| MIR | `mir/mir.koral`, `mir_function_builder.koral` + `mir_lowering_core.koral` / `mir_lowering_control_flow.koral` / `mir_pattern_lowering.koral` / `mir_receiver_lookup.koral` / `mir_method_types.koral` / `mir_lowering_values.koral` / `mir_capture_helpers.koral` (builder split by theme), `mir_verifier.koral` | `MIR/MIR.swift`, `MIRLowerer.swift`, `MIRTypeResolver.swift`, `MIRVerifier.swift` |
 | Codegen | `codegen/codegen.koral`, `codegen/codegen_mir.koral` (type names, copy/drop glue, managed payload, control-block init) | `CodeGen/CodeGen.swift`, `CodeGenMIR.swift` + the `TypeHandler` cluster (steps 2–4) |
 | Runtime | `std/koral_runtime.c` / `std/koral_runtime.h` (representation helpers, refcount protocol) | same files (shared) |
 
-The cost is real: type classification is currently re-derived per phase by
-large `when` switches (`mono/mono_type_resolution.koral` and
-`mir/mir_function_builder.koral` alone are ~13k and ~7k lines), so one new
-family means one edit per row above. Until that duplication is collapsed,
+The cost is real: type classification is re-derived per phase wherever a
+decision re-lists Type cases. Until that duplication is collapsed everywhere,
 treat this table as the definition of done; when touching a row, prefer
-routing the decision through the single-point queries (`get_layout_key`, the
-`TypeHandler` registry) over adding another type switch that later phases
-will have to copy.
+routing the decision through the single-point queries -- `get_layout_key`,
+the `TypeHandler` registry, and the handle-family predicates
+(`type_is_*` in koralc's `sema/type_handler.koral`; `Type.isHandle` /
+`isTrackedHandle` / `isNonWeakHandle` in the seed) -- over adding another
+type switch that later phases will have to copy.
 
 ## Adding a New Semantic Analysis Pass
 

@@ -1,0 +1,1584 @@
+// Generic binding collection and unification for the monomorphization phase.
+
+let bind_generic_function_call_callee(
+    mono: Monomorphizer,
+    callee: TypedExpr,
+    args: List[TypedExpr],
+    expected_return_type: Type,
+): TypedExpr = {
+    when callee.expr_kind in {
+        .Variable(symbol) then {
+            // Swift-aligned fast path: only reuse an existing concrete callee when
+            // the full call shape is already concrete and matches exactly.
+            if symbol.def_id.id > 0 then {
+                when mono.storage.remapped_function_def_ids.get(symbol.def_id.id) in {
+                    .Some(remapped_list) then {
+                        let mutable call_param_types = List[Type].new();
+                        let mutable can_disambiguate = not is_placeholder_inferred_type(
+                            expected_return_type,
+                        );
+                        for arg in args then {
+                            let mutable arg_type = resolve_parameterized_type(
+                                mono,
+                                arg.expr_type,
+                            );
+                            if is_placeholder_inferred_type(arg_type) then {
+                                can_disambiguate = false;
+                            };
+                            call_param_types.push(arg_type);
+                        };
+
+                        if can_disambiguate then {
+                            let mutable expected_call_type = Type.FunctionType(
+                                types_to_param_entries(call_param_types),
+                                resolve_parameterized_type(mono, expected_return_type),
+                            );
+                            for remapped in remapped_list then {
+                                let candidate_def_id = remapped.first;
+                                let mutable candidate_type = resolve_parameterized_type(
+                                    mono,
+                                    remapped.second,
+                                );
+                                if mono.storage.context.get_layout_key(candidate_type) == mono.storage.context.get_layout_key(
+                                    expected_call_type,
+                                ) then {
+                                    let concrete_name = when mono.storage.context.get_name(
+                                        candidate_def_id,
+                                    ) in {
+                                        .Some(name) then name,
+                                        .None() then "<unknown>",
+                                    };
+                                    let concrete_symbol = Symbol(
+                                        candidate_def_id,
+                                        candidate_type,
+                                        SymbolKind.Function(),
+                                    );
+                                    let _ = concrete_name;
+                                    return TypedExpr(
+                                        TypedExprKind.Variable(concrete_symbol),
+                                        candidate_type,
+                                        unknown_span(),
+                                    );
+                                };
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+            };
+
+            // Find generic function template by DefId first to avoid collisions
+            // between helpers that share the same textual name across modules.
+            let template_opt = if symbol.def_id.id > 0 then mono.storage.generic_templates.lookup_function_by_def_id(
+                symbol.def_id,
+            ) else Option[GenericFunctionTemplate].None();
+            let template = when template_opt in {
+                .Some(t) then t,
+                .None() then {
+                    let preferred_module_path = mono.storage.context.get_module_path(
+                        symbol.def_id,
+                    ) or else List[String].new();
+                    let symbol_name = mono.storage.context.symbol_name(symbol);
+                    let by_symbol_name = when mono.storage.generic_templates.resolve_function_name_in_module(
+                        symbol_name,
+                        preferred_module_path,
+                    ) in {
+                        .Some(resolved_name) then mono.storage.generic_templates.lookup_function(
+                            resolved_name,
+                        ),
+                        .None() then Option[GenericFunctionTemplate].None(),
+                    };
+                    let by_def_name = when mono.storage.context.get_name(symbol.def_id) in {
+                        .Some(def_name) then when mono.storage.generic_templates.resolve_function_name_in_module(
+                            def_name,
+                            preferred_module_path,
+                        ) in {
+                            .Some(resolved_name) then mono.storage.generic_templates.lookup_function(
+                                resolved_name,
+                            ),
+                            .None() then Option[GenericFunctionTemplate].None(),
+                        },
+                        .None() then Option[GenericFunctionTemplate].None(),
+                    };
+                    let recovered_template_opt = when by_symbol_name in {
+                        .Some(_) then by_symbol_name,
+                        .None() then by_def_name,
+                    };
+                    when recovered_template_opt in {
+                        .Some(found) then found,
+                        .None() then {
+                            return callee;
+                        },
+                    }
+                },
+            };
+
+            // Symbols may lose template DefId during substitution passes.
+            // Keep name-based binding so generic helper calls can still be
+            // instantiated in monomorphization, matching Swift's call flow.
+            if template.type_parameters.is_empty() then {
+                return callee;
+            };
+
+            let mutable inferred = Dict[String, Type].new();
+            let mutable type_param_names = List[String].new();
+            for tp in template.type_parameters then {
+                type_param_names.push(tp.name);
+            };
+
+            // Infer generic type arguments from template parameter TypeNodes and call args.
+            let mutable i: UInt = 0;
+            while i < template.parameters.count() and i < args.count() then {
+                let expected_node = template.parameters[i].param_type;
+                let arg_expr = args[i];
+                let actual = infer_generic_function_call_argument_type(mono, arg_expr);
+                collect_generic_bindings_from_type_node(
+                    mono,
+                    expected_node,
+                    actual,
+                    template.type_parameters,
+                    inferred,
+                );
+                // Direct inference fallback: if collect_generic_bindings_from_type_node
+                // didn't bind (Dict may not persist), try direct identifier matching.
+                if inferred.count() == 0 then {
+                    when expected_node in {
+                        .Identifier(name, span) then {
+                            if is_type_parameter_name(name, template.type_parameters) and not has_generic_parameter(
+                                actual,
+                            ) then {
+                                inferred.insert(name, actual);
+                            };
+                        },
+                        .Reference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
+                                .ReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                .MutableReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                _ then {},
+                            },
+                            _ then {},
+                        },
+                        .Pointer(inner, _, _) then when inner in {
+                            .Identifier(name, span) then when actual in {
+                                .PointerType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                .MutablePointerType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                _ then {},
+                            },
+                            _ then {},
+                        },
+                        .WeakReference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
+                                .WeakReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                .MutableWeakReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                _ then {},
+                            },
+                            _ then {},
+                        },
+                        .BorrowedReference(inner, _, span) then when inner in {
+                            .Identifier(name, span) then when actual in {
+                                .BorrowedReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                .MutableBorrowedReferenceType(actual_inner) then {
+                                    if is_type_parameter_name(
+                                        name,
+                                        template.type_parameters,
+                                    ) and not has_generic_parameter(actual_inner) then {
+                                        inferred.insert(
+                                            name,
+                                            resolve_parameterized_type(
+                                                mono,
+                                                actual_inner,
+                                            ),
+                                        );
+                                    };
+                                },
+                                _ then {},
+                            },
+                            _ then {},
+                        },
+                        _ then {},
+                    };
+                };
+                i += 1;
+            };
+
+            let concrete_expected_return = resolve_parameterized_type(
+                mono,
+                expected_return_type,
+            );
+            if not has_generic_parameter(concrete_expected_return) then {
+                // The pattern is the template's own signature, so it is resolved
+                // with the template's parameters bound to themselves -- not with
+                // an empty substitution, which lets a bare `T` fall through to
+                // whatever global is called `T`.
+                let self_subst = template_substitution(
+                    template.type_parameters,
+                    Dict[String, Type].new(),
+                );
+                let mutable pattern_param_types = List[Type].new();
+                when template.checked_parameters in {
+                    .Some(checked_params) then {
+                        for param in checked_params then {
+                            pattern_param_types.push(param.symbol_type);
+                        };
+                    },
+                    .None() then {
+                        for param in template.parameters then {
+                            pattern_param_types.push(
+                                resolve_type_node(mono, param.param_type, self_subst),
+                            );
+                        };
+                    },
+                };
+
+                let pattern_return_type = when template.checked_return_type in {
+                    .Some(checked_ret) then checked_ret,
+                    .None() then resolve_type_node(mono, template.return_type, self_subst),
+                };
+
+                let mutable actual_param_types = List[Type].new();
+                for arg in args then {
+                    actual_param_types.push(
+                        infer_generic_function_call_argument_type(mono, arg),
+                    );
+                };
+
+                let mutable pattern_call_type = make_function_type(
+                    pattern_param_types,
+                    pattern_return_type,
+                );
+                let mutable actual_call_type = make_function_type(
+                    actual_param_types,
+                    concrete_expected_return,
+                );
+                let _matched = unify_generic_type_pattern(
+                    mono,
+                    pattern_call_type,
+                    actual_call_type,
+                    type_param_names,
+                    inferred,
+                );
+            };
+
+            // Generic intrinsic functions are runtime-provided, but their symbol
+            // type still needs concrete substitutions so downstream codegen uses
+            // the right ref/weakref/option layouts.
+            let is_intrinsic_template = template.checked_body is .None();
+            if is_intrinsic_template then {
+                let intrinsic_type = when template.checked_return_type in {
+                    .Some(ret_ty) then {
+                        let mutable ps = List[Type].new();
+                        when template.checked_parameters in {
+                            .Some(params) then {
+                                for p in params then {
+                                    let mutable param_type = resolve_parameterized_type(
+                                        mono,
+                                        substitute_type(mono, p.symbol_type, inferred),
+                                    );
+                                    ps.push(param_type);
+                                };
+                            },
+                            .None() then {},
+                        };
+                        let resolved_return = resolve_parameterized_type(
+                            mono,
+                            substitute_type(mono, ret_ty, inferred),
+                        );
+                        make_function_type(ps, resolved_return)
+                    },
+                    .None() then resolve_parameterized_type(
+                        mono,
+                        substitute_type(mono, symbol.symbol_type, inferred),
+                    ),
+                };
+                let intrinsic_symbol = Symbol(
+                    template.def_id,
+                    intrinsic_type,
+                    SymbolKind.Function(),
+                );
+                return TypedExpr(
+                    TypedExprKind.Variable(intrinsic_symbol),
+                    intrinsic_type,
+                    unknown_span(),
+                );
+            };
+
+            let mutable type_args = List[Type].new();
+            for tp in template.type_parameters then {
+                let inferred_arg = when inferred.get(tp.name) in {
+                    .Some(t) then resolve_parameterized_type(mono, t),
+                    .None() then {
+                        // Fallback to expected call return type when template return is this type parameter.
+                        let from_expected_return = when template.return_type in {
+                            .Identifier(ret_name, span) then ret_name == tp.name,
+                            _ then false,
+                        };
+                        let constrained_by_params = template_type_parameter_constrained_by_parameters(
+                            template,
+                            tp.name,
+                        );
+                        if from_expected_return and not constrained_by_params and not has_generic_parameter(
+                            concrete_expected_return,
+                        ) then concrete_expected_return
+                        else Type.GenericParameter(tp.name)
+                    },
+                };
+                let canonical_arg = canonical_type_for_generic_binding(
+                    mono,
+                    inferred_arg,
+                );
+                if has_generic_parameter(canonical_arg) then {
+                    return callee;
+                };
+                type_args.push(canonical_arg);
+            };
+
+            if args_have_generic_parameter(type_args) then {
+                return callee;
+            };
+
+            let instantiated = mono.instantiate_function_impl(template, type_args);
+            if instantiated.mangled_name.is_empty() then {
+                return callee;
+            };
+
+            let bound_symbol = when mono.storage.instantiated_function_symbols.get(
+                instantiated.mangled_name,
+            ) in {
+                .Some(sym) then sym,
+                .None() then {
+                    return callee;
+                },
+            };
+            let mutable concrete_type = when mono.storage.context.get_function_type(
+                bound_symbol.def_id,
+            ) in {
+                .Some(function_type) then function_type,
+                .None() then bound_symbol.symbol_type,
+            };
+            let concrete_symbol = Symbol(
+                bound_symbol.def_id,
+                concrete_type,
+                SymbolKind.Function(),
+            );
+            return TypedExpr(
+                TypedExprKind.Variable(concrete_symbol),
+                concrete_type,
+                unknown_span(),
+            );
+        },
+        _ then {},
+    };
+    return callee;
+};
+
+let infer_generic_function_call_argument_type(
+    mono: Monomorphizer,
+    arg: TypedExpr,
+): Type = {
+    let resolved = resolve_parameterized_type(mono, arg.expr_type);
+    if not has_generic_parameter(resolved) then {
+        return resolved;
+    };
+    return when arg.expr_kind in {
+        .IntegerLiteral(_) then Type.IntType(),
+        .FloatLiteral(_) then Type.Float64Type(),
+        _ then resolved,
+    };
+};
+
+// Collect GenericParameter -> concrete Type bindings by structurally matching a
+// template parameter TypeNode against an actual call-site type.
+//
+// The TypeNode is turned into a SHAPE first (see `resolve_type_node_identity`),
+// so the matcher below compares DECLARATION DefIds and never sees a name.
+let collect_generic_bindings_from_type_node(
+    mono: Monomorphizer,
+    expected_node: TypeNode,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    collect_generic_bindings_from_shape(
+        mono,
+        resolve_type_node_identity(mono, expected_node, type_params),
+        actual,
+        type_params,
+        bindings,
+    );
+};
+
+let collect_generic_bindings_from_shape_args(
+    mono: Monomorphizer,
+    pattern_args: List[Type],
+    actual_args: List[Type],
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    let mutable i: UInt = 0;
+    while i < pattern_args.count() and i < actual_args.count() then {
+        collect_generic_bindings_from_shape(
+            mono,
+            (pattern_args[i]),
+            (actual_args[i]),
+            type_params,
+            bindings,
+        );
+        i += 1;
+    };
+};
+
+let collect_generic_bindings_from_shape(
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    when pattern in {
+        .GenericParameter(name) then {
+            // The actual is still an unbound parameter of this same shape, so
+            // it is not a concrete answer for `name`.
+            when actual in {
+                .GenericParameter(actual_name) then {
+                    if is_type_parameter_name(actual_name, type_params) then {
+                        return;
+                    };
+                },
+                _ then {},
+            };
+            when bindings.get(name) in {
+                .Some(existing) then {
+                    if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(
+                        actual,
+                    ) then {
+                        bindings.insert(name, actual);
+                    };
+                },
+                .None() then {
+                    bindings.insert(name, actual);
+                },
+            };
+        },
+        // A declared reference accepts any kind of reference to the same
+        // referent -- the call site may hand back a borrowed or mutable form.
+        // Its own mutability does not narrow that.
+        .ReferenceType(inner) then collect_generic_bindings_from_any_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .MutableReferenceType(inner) then collect_generic_bindings_from_any_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .BorrowedReferenceType(inner) then collect_generic_bindings_from_borrowed_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .MutableBorrowedReferenceType(inner) then collect_generic_bindings_from_borrowed_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .PointerType(inner) then collect_generic_bindings_from_pointer(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .MutablePointerType(inner) then collect_generic_bindings_from_pointer(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .WeakReferenceType(inner) then collect_generic_bindings_from_weak_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        .MutableWeakReferenceType(inner) then collect_generic_bindings_from_weak_reference(
+            mono,
+            inner,
+            actual,
+            type_params,
+            bindings,
+        ),
+        // Identity: the template's DECLARATION. A materialized layout carries a
+        // DefId link back to the template it was instantiated from, so both
+        // sides settle without going through a name.
+        .GenericStruct(pattern_def_id, pattern_args) then {
+            when actual in {
+                .GenericStruct(actual_def_id, actual_args) then {
+                    if pattern_def_id == actual_def_id then {
+                        collect_generic_bindings_from_shape_args(
+                            mono,
+                            pattern_args,
+                            actual_args,
+                            type_params,
+                            bindings,
+                        );
+                    };
+                },
+                .StructureType(inst_def_id) then {
+                    if mono.storage.context.get_template_def_id(inst_def_id) == pattern_def_id then {
+                        when mono.storage.context.get_type_arguments(inst_def_id) in {
+                            .Some(actual_args) then {
+                                collect_generic_bindings_from_shape_args(
+                                    mono,
+                                    pattern_args,
+                                    actual_args,
+                                    type_params,
+                                    bindings,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    };
+                },
+                _ then {},
+            };
+        },
+        .GenericEnum(pattern_def_id, pattern_args) then {
+            when actual in {
+                .GenericEnum(actual_def_id, actual_args) then {
+                    if pattern_def_id == actual_def_id then {
+                        collect_generic_bindings_from_shape_args(
+                            mono,
+                            pattern_args,
+                            actual_args,
+                            type_params,
+                            bindings,
+                        );
+                    };
+                },
+                .EnumType(inst_def_id) then {
+                    if mono.storage.context.get_template_def_id(inst_def_id) == pattern_def_id then {
+                        when mono.storage.context.get_type_arguments(inst_def_id) in {
+                            .Some(actual_args) then {
+                                collect_generic_bindings_from_shape_args(
+                                    mono,
+                                    pattern_args,
+                                    actual_args,
+                                    type_params,
+                                    bindings,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    };
+                },
+                _ then {},
+            };
+        },
+        .FunctionType(pattern_params, pattern_return) then {
+            when actual in {
+                .FunctionType(fn_params, ret_type) then {
+                    let param_types = param_entry_types(fn_params);
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() and i < param_types.count() then {
+                        collect_generic_bindings_from_shape(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (param_types[i]),
+                            type_params,
+                            bindings,
+                        );
+                        i += 1;
+                    };
+                    collect_generic_bindings_from_shape(
+                        mono,
+                        pattern_return,
+                        ret_type,
+                        type_params,
+                        bindings,
+                    );
+                },
+                _ then {},
+            };
+        },
+        // Any other leaf carries no type parameters, so there is nothing to bind.
+        _ then {},
+    };
+};
+
+// The actual kinds a declared reference accepts. Its own mutability does not
+// narrow them: see `collect_generic_bindings_from_shape`.
+let collect_generic_bindings_from_any_reference(
+    mono: Monomorphizer,
+    inner: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    when actual in {
+        .ReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .MutableReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .BorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        _ then {},
+    };
+};
+
+let collect_generic_bindings_from_borrowed_reference(
+    mono: Monomorphizer,
+    inner: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    when actual in {
+        .BorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        _ then {},
+    };
+};
+
+let collect_generic_bindings_from_pointer(
+    mono: Monomorphizer,
+    inner: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    when actual in {
+        .PointerType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .MutablePointerType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        _ then {},
+    };
+};
+
+let collect_generic_bindings_from_weak_reference(
+    mono: Monomorphizer,
+    inner: Type,
+    actual: Type,
+    type_params: List[TypeParameterDecl],
+    bindings: Dict[String, Type],
+): Void = {
+    when actual in {
+        .WeakReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        .MutableWeakReferenceType(act_inner) then collect_generic_bindings_from_shape(
+            mono,
+            inner,
+            act_inner,
+            type_params,
+            bindings,
+        ),
+        _ then {},
+    };
+};
+
+let is_type_parameter_name(
+    name: String,
+    type_params: List[TypeParameterDecl],
+): Bool = {
+    for tp in type_params then {
+        if tp.name == name then {
+            return true;
+        };
+    };
+    return false;
+};
+
+let type_node_mentions_type_parameter(
+    node: TypeNode,
+    type_param_name: String,
+): Bool = {
+    return when node in {
+        .Identifier(name, span) then name == type_param_name,
+        .Reference(inner, _, span) then type_node_mentions_type_parameter(
+            inner,
+            type_param_name,
+        ),
+        .Pointer(inner, _, span) then type_node_mentions_type_parameter(
+            inner,
+            type_param_name,
+        ),
+        .WeakReference(inner, _, span) then type_node_mentions_type_parameter(
+            inner,
+            type_param_name,
+        ),
+        .BorrowedReference(inner, _, span) then type_node_mentions_type_parameter(
+            inner,
+            type_param_name,
+        ),
+        .Generic(_, args, span) then {
+            for arg in args then {
+                if type_node_mentions_type_parameter(arg, type_param_name) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .FunctionType(param_nodes, ret_node, span) then {
+            for p in param_nodes then {
+                if type_node_mentions_type_parameter(p, type_param_name) then {
+                    return true;
+                };
+            };
+            type_node_mentions_type_parameter(ret_node, type_param_name)
+        },
+        .InferredSelf(span) then false,
+    };
+};
+
+let template_type_parameter_constrained_by_parameters(
+    template: GenericFunctionTemplate,
+    type_param_name: String,
+): Bool = {
+    for param in template.parameters then {
+        if type_node_mentions_type_parameter(param.param_type, type_param_name) then {
+            return true;
+        };
+    };
+    return false;
+};
+
+let is_placeholder_inferred_type(t: Type): Bool = {
+    return when t in {
+        .Unknown() then true,
+        .TypeVar(_) then true,
+        .GenericParameter(_) then true,
+        _ then false,
+    };
+};
+
+let canonical_type_for_generic_binding(mono: Monomorphizer, t: Type): Type = {
+    return when t in {
+        .StructureType(def_id) then {
+            let reconstructed = when mono.storage.context.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mutable canonical_args = List[Type].new();
+                            for type_arg in type_args then {
+                                canonical_args.push(
+                                    canonical_type_for_generic_binding(mono, type_arg),
+                                );
+                            };
+                            Option[Type].Some(
+                                Type.GenericStruct(
+                                    mono.storage.context.get_template_def_id(def_id),
+                                    canonical_args,
+                                ),
+                            )
+                        },
+                        .None() then Option[Type].None(),
+                    }
+                },
+                .None() then when mono.storage.context.get_name(def_id) in {
+                    .Some(type_name) then when mono.storage.layout_to_template_info.get(
+                        type_name,
+                    ) in {
+                        .Some(info) then {
+                            let mutable canonical_args = List[Type].new();
+                            for type_arg in info.args then {
+                                canonical_args.push(
+                                    canonical_type_for_generic_binding(mono, type_arg),
+                                );
+                            };
+                            // RESOLUTION: the layout table maps a mangled name back
+                            // to a template spelling; that spelling is matched to its
+                            // declaration once here. No later comparison reads it.
+                            Option[Type].Some(
+                                Type.GenericStruct(
+                                    generic_struct_def_id(mono, info.base_name),
+                                    canonical_args,
+                                ),
+                            )
+                        },
+                        .None() then Option[Type].None(),
+                    },
+                    .None() then Option[Type].None(),
+                },
+            };
+            when reconstructed in {
+                .Some(reconstructed_type) then reconstructed_type,
+                .None() then when mono.storage.context.lookup_type(def_id) in {
+                    .Some(mapped) then canonical_type_for_generic_binding(mono, mapped),
+                    .None() then t,
+                },
+            }
+        },
+        .EnumType(def_id) then {
+            let reconstructed = when mono.storage.context.get_template_name(def_id) in {
+                .Some(template_name) then {
+                    when mono.storage.context.get_type_arguments(def_id) in {
+                        .Some(type_args) then {
+                            let mutable canonical_args = List[Type].new();
+                            for type_arg in type_args then {
+                                canonical_args.push(
+                                    canonical_type_for_generic_binding(mono, type_arg),
+                                );
+                            };
+                            Option[Type].Some(
+                                Type.GenericEnum(
+                                    mono.storage.context.get_template_def_id(def_id),
+                                    canonical_args,
+                                ),
+                            )
+                        },
+                        .None() then Option[Type].None(),
+                    }
+                },
+                .None() then when mono.storage.context.get_name(def_id) in {
+                    .Some(type_name) then when mono.storage.layout_to_template_info.get(
+                        type_name,
+                    ) in {
+                        .Some(info) then {
+                            let mutable canonical_args = List[Type].new();
+                            for type_arg in info.args then {
+                                canonical_args.push(
+                                    canonical_type_for_generic_binding(mono, type_arg),
+                                );
+                            };
+                            // RESOLUTION: the layout table maps a mangled name back
+                            // to a template spelling; that spelling is matched to its
+                            // declaration once here.
+                            Option[Type].Some(
+                                Type.GenericEnum(
+                                    generic_enum_def_id(mono, info.base_name),
+                                    canonical_args,
+                                ),
+                            )
+                        },
+                        .None() then Option[Type].None(),
+                    },
+                    .None() then Option[Type].None(),
+                },
+            };
+            when reconstructed in {
+                .Some(reconstructed_type) then reconstructed_type,
+                .None() then when mono.storage.context.lookup_type(def_id) in {
+                    .Some(mapped) then canonical_type_for_generic_binding(mono, mapped),
+                    .None() then t,
+                },
+            }
+        },
+        .OpaqueType(def_id) then {
+            when mono.storage.context.lookup_type(def_id) in {
+                .Some(mapped) then canonical_type_for_generic_binding(mono, mapped),
+                .None() then t,
+            }
+        },
+        .ReferenceType(inner_ref) then Type.ReferenceType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .MutableReferenceType(inner_ref) then Type.MutableReferenceType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .WeakReferenceType(inner_ref) then Type.WeakReferenceType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .MutableWeakReferenceType(inner_ref) then Type.MutableWeakReferenceType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .PointerType(inner_ref) then Type.PointerType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .MutablePointerType(inner_ref) then Type.MutablePointerType(
+            canonical_type_for_generic_binding(mono, inner_ref),
+        ),
+        .FunctionType(fn_params, return_type_ref) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable new_params = List[Type].new();
+            for param_type in param_types then {
+                new_params.push(canonical_type_for_generic_binding(mono, param_type));
+            };
+            Type.FunctionType(
+                types_to_param_entries(new_params),
+                canonical_type_for_generic_binding(mono, return_type_ref),
+            )
+        },
+        .GenericStruct(template_def_id, args) then {
+            let mutable new_args = List[Type].new();
+            for arg in args then {
+                new_args.push(canonical_type_for_generic_binding(mono, arg));
+            };
+            Type.GenericStruct(template_def_id, new_args)
+        },
+        .GenericEnum(template_def_id, args) then {
+            let mutable new_args = List[Type].new();
+            for arg in args then {
+                new_args.push(canonical_type_for_generic_binding(mono, arg));
+            };
+            Type.GenericEnum(template_def_id, new_args)
+        },
+        _ then t,
+    };
+};
+
+let is_generic_type_param_name(
+    name: String,
+    type_param_names: List[String],
+): Bool = {
+    for param_name in type_param_names then {
+        if param_name == name then {
+            return true;
+        };
+    };
+    return false;
+};
+
+public let unify_generic_type_pattern(
+    mono: Monomorphizer,
+    pattern: Type,
+    actual: Type,
+    type_param_names: List[String],
+    inferred: Dict[String, Type],
+): Bool = {
+    let normalized_pattern = canonical_type_for_generic_binding(mono, pattern);
+    let normalized_actual = canonical_type_for_generic_binding(mono, actual);
+    return when normalized_pattern in {
+        .GenericParameter(name) then {
+            if not is_generic_type_param_name(name, type_param_names) then mono.storage.context.get_layout_key(
+                normalized_pattern,
+            ) == mono.storage.context.get_layout_key(normalized_actual)
+            else when normalized_actual in {
+                .GenericParameter(actual_name) then {
+                    if is_generic_type_param_name(actual_name, type_param_names) then true
+                    else when inferred.get(name) in {
+                        .Some(existing) then mono.storage.context.get_layout_key(
+                            existing,
+                        ) == mono.storage.context.get_layout_key(normalized_actual),
+                        .None() then {
+                            inferred.insert(name, normalized_actual);
+                            true
+                        },
+                    }
+                },
+                _ then when inferred.get(name) in {
+                    .Some(existing) then mono.storage.context.get_layout_key(existing) == mono.storage.context.get_layout_key(
+                        normalized_actual,
+                    ),
+                    .None() then {
+                        inferred.insert(name, normalized_actual);
+                        true
+                    },
+                },
+            }
+        },
+        .ReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .ReferenceType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        .MutableReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableReferenceType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        .WeakReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .WeakReferenceType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        .MutableWeakReferenceType(pattern_inner) then {
+            when normalized_actual in {
+                .MutableWeakReferenceType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        .PointerType(pattern_inner) then {
+            when normalized_actual in {
+                .PointerType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        .MutablePointerType(pattern_inner) then {
+            when normalized_actual in {
+                .MutablePointerType(actual_inner) then unify_generic_type_pattern(
+                    mono,
+                    pattern_inner,
+                    actual_inner,
+                    type_param_names,
+                    inferred,
+                ),
+                _ then false,
+            }
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericStruct(pattern_def_id, pattern_args) then {
+            let actual_args_opt = when normalized_actual in {
+                .GenericStruct(actual_def_id, actual_args) then {
+                    if actual_def_id == pattern_def_id then Option[List[Type]].Some(
+                        actual_args,
+                    ) else Option[List[Type]].None()
+                },
+                .StructureType(def_id) then {
+                    let layout_args_opt = when mono.storage.context.get_name(def_id) in {
+                        .Some(type_name) then when mono.storage.layout_to_template_info.get(
+                            type_name,
+                        ) in {
+                            .Some(info) then {
+                                // Identity: the instance's link to its template's DECLARATION.
+                                // The layout table only supplies the type arguments.
+                                if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then {
+                                    let mutable args = List[Type].new();
+                                    for type_arg in info.args then {
+                                        args.push(type_arg);
+                                    };
+                                    Option[List[Type]].Some(args)
+                                } else Option[List[Type]].None()
+                            },
+                            .None() then Option[List[Type]].None(),
+                        },
+                        .None() then Option[List[Type]].None(),
+                    };
+                    when layout_args_opt in {
+                        .Some(args) then Option[List[Type]].Some(args),
+                        .None() then when mono.storage.context.lookup_type(def_id) in {
+                            .Some(mapped_type) then when mapped_type in {
+                                // Identity: the instance's link to its template's DECLARATION.
+                                .GenericStruct(_, actual_args) then {
+                                    if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then Option[List[Type]].Some(
+                                        actual_args,
+                                    ) else Option[List[Type]].None()
+                                },
+                                _ then when mono.storage.context.get_template_name(
+                                    def_id,
+                                ) in {
+                                    .Some(template_name) then {
+                                        if mono.storage.context.get_template_def_id(
+                                            def_id,
+                                        ) == pattern_def_id then when mono.storage.context.get_type_arguments(
+                                            def_id,
+                                        ) in {
+                                            .Some(type_args) then {
+                                                let mutable args = List[Type].new();
+                                                for type_arg in type_args then {
+                                                    args.push(type_arg);
+                                                };
+                                                Option[List[Type]].Some(args)
+                                            },
+                                            .None() then Option[List[Type]].None(),
+                                        } else Option[List[Type]].None()
+                                    },
+                                    .None() then Option[List[Type]].None(),
+                                },
+                            },
+                            .None() then when mono.storage.context.get_template_name(
+                                def_id,
+                            ) in {
+                                .Some(template_name) then {
+                                    if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then when mono.storage.context.get_type_arguments(
+                                        def_id,
+                                    ) in {
+                                        .Some(type_args) then {
+                                            let mutable args = List[Type].new();
+                                            for type_arg in type_args then {
+                                                args.push(type_arg);
+                                            };
+                                            Option[List[Type]].Some(args)
+                                        },
+                                        .None() then Option[List[Type]].None(),
+                                    } else Option[List[Type]].None()
+                                },
+                                .None() then Option[List[Type]].None(),
+                            },
+                        },
+                    }
+                },
+                _ then Option[List[Type]].None(),
+            };
+            when actual_args_opt in {
+                .Some(actual_args) then {
+                    if pattern_args.count() != actual_args.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_args.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_args[i]),
+                            (actual_args[i]),
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches
+                },
+                .None() then false,
+            }
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericEnum(pattern_def_id, pattern_args) then {
+            let actual_args_opt = when normalized_actual in {
+                .GenericEnum(actual_def_id, actual_args) then {
+                    if actual_def_id == pattern_def_id then Option[List[Type]].Some(
+                        actual_args,
+                    ) else Option[List[Type]].None()
+                },
+                .EnumType(def_id) then {
+                    let layout_args_opt = when mono.storage.context.get_name(def_id) in {
+                        .Some(type_name) then when mono.storage.layout_to_template_info.get(
+                            type_name,
+                        ) in {
+                            .Some(info) then {
+                                // Identity: the instance's link to its template's DECLARATION.
+                                // The layout table only supplies the type arguments.
+                                if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then {
+                                    let mutable args = List[Type].new();
+                                    for type_arg in info.args then {
+                                        args.push(type_arg);
+                                    };
+                                    Option[List[Type]].Some(args)
+                                } else Option[List[Type]].None()
+                            },
+                            .None() then Option[List[Type]].None(),
+                        },
+                        .None() then Option[List[Type]].None(),
+                    };
+                    when layout_args_opt in {
+                        .Some(args) then Option[List[Type]].Some(args),
+                        .None() then when mono.storage.context.lookup_type(def_id) in {
+                            .Some(mapped_type) then when mapped_type in {
+                                .GenericEnum(_, actual_args) then {
+                                    // Identity: the instance's link to its template's DECLARATION.
+                                    if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then Option[List[Type]].Some(
+                                        actual_args,
+                                    ) else Option[List[Type]].None()
+                                },
+                                _ then when mono.storage.context.get_template_name(
+                                    def_id,
+                                ) in {
+                                    .Some(template_name) then {
+                                        if mono.storage.context.get_template_def_id(
+                                            def_id,
+                                        ) == pattern_def_id then when mono.storage.context.get_type_arguments(
+                                            def_id,
+                                        ) in {
+                                            .Some(type_args) then {
+                                                let mutable args = List[Type].new();
+                                                for type_arg in type_args then {
+                                                    args.push(type_arg);
+                                                };
+                                                Option[List[Type]].Some(args)
+                                            },
+                                            .None() then Option[List[Type]].None(),
+                                        } else Option[List[Type]].None()
+                                    },
+                                    .None() then Option[List[Type]].None(),
+                                },
+                            },
+                            .None() then when mono.storage.context.get_template_name(
+                                def_id,
+                            ) in {
+                                .Some(template_name) then {
+                                    if mono.storage.context.get_template_def_id(def_id) == pattern_def_id then when mono.storage.context.get_type_arguments(
+                                        def_id,
+                                    ) in {
+                                        .Some(type_args) then {
+                                            let mutable args = List[Type].new();
+                                            for type_arg in type_args then {
+                                                args.push(type_arg);
+                                            };
+                                            Option[List[Type]].Some(args)
+                                        },
+                                        .None() then Option[List[Type]].None(),
+                                    } else Option[List[Type]].None()
+                                },
+                                .None() then Option[List[Type]].None(),
+                            },
+                        },
+                    }
+                },
+                _ then Option[List[Type]].None(),
+            };
+            when actual_args_opt in {
+                .Some(actual_args) then {
+                    if pattern_args.count() != actual_args.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_args.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_args[i]),
+                            (actual_args[i]),
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches
+                },
+                .None() then false,
+            }
+        },
+        .FunctionType(pattern_params, pattern_return) then {
+            when normalized_actual in {
+                .FunctionType(actual_params, actual_return) then {
+                    if pattern_params.count() != actual_params.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (actual_params[i]).param_type,
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches and unify_generic_type_pattern(
+                        mono,
+                        pattern_return,
+                        actual_return,
+                        type_param_names,
+                        inferred,
+                    )
+                },
+                _ then false,
+            }
+        },
+        _ then mono.storage.context.get_layout_key(normalized_pattern) == mono.storage.context.get_layout_key(
+            normalized_actual,
+        ),
+    };
+};
+
+// Collect GenericParameter -> concrete Type bindings by structurally matching an
+// expected template type against an actual call-site type.
+let collect_generic_type_bindings(
+    expected: Type,
+    actual: Type,
+    bindings: Dict[String, Type],
+): Void = {
+    when expected in {
+        .GenericParameter(name) then {
+            when bindings.get(name) in {
+                .Some(existing) then {
+                    if is_placeholder_inferred_type(existing) and not is_placeholder_inferred_type(
+                        actual,
+                    ) then {
+                        bindings.insert(name, actual);
+                    };
+                },
+                .None() then {
+                    bindings.insert(name, actual);
+                },
+            };
+        },
+        .ReferenceType(exp_inner) then {
+            when actual in {
+                .ReferenceType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .MutableReferenceType(exp_inner) then {
+            when actual in {
+                .MutableReferenceType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .WeakReferenceType(exp_inner) then {
+            when actual in {
+                .WeakReferenceType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .MutableWeakReferenceType(exp_inner) then {
+            when actual in {
+                .MutableWeakReferenceType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .PointerType(exp_inner) then {
+            when actual in {
+                .PointerType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .MutablePointerType(exp_inner) then {
+            when actual in {
+                .MutablePointerType(act_inner) then collect_generic_type_bindings(
+                    exp_inner,
+                    act_inner,
+                    bindings,
+                ),
+                _ then {},
+            };
+        },
+        .FunctionType(exp_params, exp_ret) then {
+            when actual in {
+                .FunctionType(act_params, act_ret) then {
+                    let mutable i: UInt = 0;
+                    while i < exp_params.count() and i < act_params.count() then {
+                        collect_generic_type_bindings(
+                            (exp_params[i]).param_type,
+                            (act_params[i]).param_type,
+                            bindings,
+                        );
+                        i += 1;
+                    };
+                    collect_generic_type_bindings(exp_ret, act_ret, bindings);
+                },
+                _ then {},
+            };
+        },
+        .GenericStruct(tplDefId, exp_args) then {
+            when actual in {
+                .GenericStruct(actual_def_id, act_args) then {
+                    if tplDefId == actual_def_id then {
+                        let mutable i: UInt = 0;
+                        while i < exp_args.count() and i < act_args.count() then {
+                            collect_generic_type_bindings(
+                                (exp_args[i]),
+                                (act_args[i]),
+                                bindings,
+                            );
+                            i += 1;
+                        };
+                    };
+                },
+                _ then {},
+            };
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericEnum(exp_def_id, exp_args) then {
+            when actual in {
+                .GenericEnum(act_def_id, act_args) then {
+                    if exp_def_id == act_def_id then {
+                        let mutable i: UInt = 0;
+                        while i < exp_args.count() and i < act_args.count() then {
+                            collect_generic_type_bindings(
+                                (exp_args[i]),
+                                (act_args[i]),
+                                bindings,
+                            );
+                            i += 1;
+                        };
+                    };
+                },
+                _ then {},
+            };
+        },
+        _ then {},
+    };
+};
+

@@ -4113,14 +4113,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func isRefLikeType(_ type: Type) -> Bool {
-    switch type {
-    case .reference, .mutableReference,
-         .borrowedReference, .mutableBorrowedReference,
-         .weakReference, .mutableWeakReference:
-      return true
-    default:
-      return false
-    }
+    type.isTrackedHandle
   }
 
   private func passKindForType(_ type: Type) -> PassKind {

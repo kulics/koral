@@ -63,6 +63,35 @@ extension Type {
     }
     return (expected.inner, actual.inner)
   }
+
+  // MARK: - Handle families
+  //
+  // The intrinsic shape of a type's HANDLE form. Decision points compose
+  // these instead of re-listing Type cases -- adding a handle family is one
+  // change here (and one in koralc's `type_handler.koral`), not one edit per
+  // phase. The families map onto `IndirectionFamily`:
+  //
+  //   managedReference  an owned strong reference or a borrow
+  //   weakReference     a weak handle
+  //   rawPointer        a raw address (its NULL is a legal value)
+
+  /// Any handle shape: references + weak + raw pointers.
+  var isHandle: Bool {
+    indirectionCompatibilityInfo != nil
+  }
+
+  /// A handle the runtime tracks: references + weak. A raw pointer's NULL is
+  /// a legal value, so it is not tracked (koralc: `type_is_tracked_handle`).
+  var isTrackedHandle: Bool {
+    guard let info = indirectionCompatibilityInfo else { return false }
+    return info.family != .rawPointer
+  }
+
+  /// A handle that is not a weak reference: references + raw pointers.
+  var isNonWeakHandle: Bool {
+    guard let info = indirectionCompatibilityInfo else { return false }
+    return info.family != .weakReference
+  }
 }
 
 // MARK: - Type Declaration Entities

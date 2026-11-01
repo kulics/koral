@@ -1832,11 +1832,8 @@ given TypeChecker {
             .Some(method) then when method.symbol_type in {
                 .FunctionType(params, _) then {
                     if params.count() > UInt(0) then {
-                        when (params[UInt(0)]).param_type in {
-                            .MutableReferenceType(_) then true,
-                            .MutableBorrowedReferenceType(_) then true,
-                            _ then false,
-                        }
+                        let self_param = (params[UInt(0)]).param_type;
+                        type_is_any_ref(self_param) and type_is_mutable_handle(self_param)
                     } else {
                         false
                     }
@@ -3971,24 +3968,8 @@ given TypeChecker {
             let adjusted_arg = when param_expected in {
                 .None() then typed_arg,
                 .Some(expected_t) then {
-                    let expected_requires_ref_like = when expected_t in {
-                        .ReferenceType(_) then true,
-                        .MutableReferenceType(_) then true,
-                        .BorrowedReferenceType(_) then true,
-                        .MutableBorrowedReferenceType(_) then true,
-                        _ then false,
-                    };
-                    let actual_is_ref_like = when typed_arg.expr_type in {
-                        .ReferenceType(_) then true,
-                        .MutableReferenceType(_) then true,
-                        .BorrowedReferenceType(_) then true,
-                        .MutableBorrowedReferenceType(_) then true,
-                        .WeakReferenceType(_) then true,
-                        .MutableWeakReferenceType(_) then true,
-                        .PointerType(_) then true,
-                        .MutablePointerType(_) then true,
-                        _ then false,
-                    };
+                    let expected_requires_ref_like = type_is_any_ref(expected_t);
+                    let actual_is_ref_like = type_is_handle(typed_arg.expr_type);
                     let expected_is_trait_object_ref = when expected_t in {
                         .ReferenceType(inner) then inner is .TraitObject(...),
                         .MutableReferenceType(inner) then inner is .TraitObject(...),

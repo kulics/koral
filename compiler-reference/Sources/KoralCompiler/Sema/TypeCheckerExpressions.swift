@@ -8615,14 +8615,7 @@ extension TypeChecker {
       }
 
       func isRefLikeType(_ type: Type) -> Bool {
-        switch type {
-        case .reference(_), .mutableReference(_),
-             .borrowedReference(_), .mutableBorrowedReference(_),
-             .pointer(_), .mutablePointer(_):
-          return true
-        default:
-          return false
-        }
+        type.isNonWeakHandle
       }
 
       func isAddressableValueBase(_ expr: TypedExpressionNode) -> Bool {

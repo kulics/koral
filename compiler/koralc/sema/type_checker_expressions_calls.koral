@@ -659,23 +659,11 @@ given TypeChecker {
     };
 
     is_mutable_ref_like_type(self, t: Type): Bool = {
-        return when t in {
-            .MutableReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .MutablePointerType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        };
+        return type_is_mutable_handle(t);
     };
 
     is_read_only_ref_like_type(self, t: Type): Bool = {
-        return when t in {
-            .ReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .PointerType(_) then true,
-            .WeakReferenceType(_) then true,
-            _ then false,
-        };
+        return type_is_handle(t) and not type_is_mutable_handle(t);
     };
 
     can_take_mutable_ref_of_expr(self, expr: TypedExpr): Bool = {
@@ -736,27 +724,11 @@ given TypeChecker {
                 if sym.is_mutable() then {
                     return true;
                 };
-                when sym.symbol_type in {
-                    .ReferenceType(_) then true,
-                    .MutableReferenceType(_) then true,
-                    .BorrowedReferenceType(_) then true,
-                    .MutableBorrowedReferenceType(_) then true,
-                    .PointerType(_) then true,
-                    .MutablePointerType(_) then true,
-                    _ then false,
-                }
+                type_is_any_ref(sym.symbol_type) or type_is_raw_pointer(sym.symbol_type)
             },
             .MemberPath(base, path) then {
                 let mutable current = base.expr_type;
-                let mutable can_take = when current in {
-                    .ReferenceType(_) then true,
-                    .MutableReferenceType(_) then true,
-                    .BorrowedReferenceType(_) then true,
-                    .MutableBorrowedReferenceType(_) then true,
-                    .PointerType(_) then true,
-                    .MutablePointerType(_) then true,
-                    _ then self.can_take_ref_of_expr(base),
-                };
+                let mutable can_take = type_is_any_ref(current) or type_is_raw_pointer(current) or self.can_take_ref_of_expr(base);
                 let mutable idx: UInt = 0;
                 while not can_take and idx < path.count() then {
                     let mutable segment_type = path[idx].symbol_type;
@@ -768,24 +740,8 @@ given TypeChecker {
                 };
                 can_take
             },
-            .DerefExpr(inner) then when inner.expr_type in {
-                .ReferenceType(_) then true,
-                .MutableReferenceType(_) then true,
-                .BorrowedReferenceType(_) then true,
-                .MutableBorrowedReferenceType(_) then true,
-                .PointerType(_) then true,
-                .MutablePointerType(_) then true,
-                _ then false,
-            },
-            .UnsafeDerefExpr(inner) then when inner.expr_type in {
-                .ReferenceType(_) then true,
-                .MutableReferenceType(_) then true,
-                .BorrowedReferenceType(_) then true,
-                .MutableBorrowedReferenceType(_) then true,
-                .PointerType(_) then true,
-                .MutablePointerType(_) then true,
-                _ then false,
-            },
+            .DerefExpr(inner) then type_is_any_ref(inner.expr_type) or type_is_raw_pointer(inner.expr_type),
+            .UnsafeDerefExpr(inner) then type_is_any_ref(inner.expr_type) or type_is_raw_pointer(inner.expr_type),
             _ then false,
         };
     };

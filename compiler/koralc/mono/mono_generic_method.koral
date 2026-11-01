@@ -1,0 +1,504 @@
+// Generic method call binding for the monomorphization phase: extension
+// type-argument inference and semantic method names.
+
+// ── GenericMethodCall binding helper ──────────────────────────────────────────
+
+// inferred_extension_method_actual_arg_type has been deleted.
+// resolve_parameterized_type(mono, arg.expr_type) is now used directly.
+
+let extension_method_has_receiver_param(
+    ext: GenericExtensionMethodTemplate,
+): Bool = {
+    let _ = ext.checked_parameters;
+    return if ext.method.params.is_empty() then false
+    else ext.method.params[UInt(0)].name == "self";
+};
+
+let type_mentions_method_type_params(
+    pattern: Type,
+    type_param_names: List[String],
+): Bool = {
+    return when pattern in {
+        .GenericParameter(name) then {
+            for type_param_name in type_param_names then {
+                if type_param_name == name then {
+                    return true;
+                };
+            };
+            false
+        },
+        .ReferenceType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .MutableReferenceType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .PointerType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .MutablePointerType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .WeakReferenceType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .MutableWeakReferenceType(inner) then type_mentions_method_type_params(
+            inner,
+            type_param_names,
+        ),
+        .FunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            for param_type in param_types then {
+                if type_mentions_method_type_params(param_type, type_param_names) then {
+                    return true;
+                };
+            };
+            type_mentions_method_type_params(return_type, type_param_names)
+        },
+        .GenericStruct(_, args) then {
+            for arg in args then {
+                if type_mentions_method_type_params(arg, type_param_names) then {
+                    return true;
+                };
+            };
+            false
+        },
+        .GenericEnum(_, args) then {
+            for arg in args then {
+                if type_mentions_method_type_params(arg, type_param_names) then {
+                    return true;
+                };
+            };
+            false
+        },
+        _ then false,
+    };
+};
+
+let infer_extension_method_type_args(
+    mono: Monomorphizer,
+    ext: GenericExtensionMethodTemplate,
+    base_type: Type,
+    extension_type_args: List[Type],
+    provided_method_type_args: List[Type],
+    args: List[TypedExpr],
+    expected_return_type: Type,
+): Option[List[Type]] = {
+    if not provided_method_type_args.is_empty() or ext.method.type_params.is_empty() then {
+        return Option[List[Type]].Some(provided_method_type_args);
+    };
+
+    let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
+    let mutable substitution = Dict[String, Type].new();
+    substitution.insert("Self", resolved_base_type);
+
+    let mutable ext_i: UInt = 0;
+    while ext_i < ext.type_params.count() and ext_i < extension_type_args.count() then {
+        substitution.insert(
+            ext.type_params[ext_i].name,
+            resolve_parameterized_type(mono, (extension_type_args[ext_i])),
+        );
+        ext_i += 1;
+    };
+
+    let mutable pattern_param_types = List[Type].new();
+    // The method's own TypeNodes are resolved with the template's parameters
+    // bound to themselves, so one the caller did not substitute stays itself
+    // instead of falling through to a same-named global.
+    let ext_subst = template_substitution(ext.type_params, substitution);
+    let use_checked_signature = when ext.checked_parameters in {
+        .Some(_) then ext.checked_return_type is .Some(_),
+        .None() then false,
+    };
+    let pattern_return_type = if use_checked_signature then {
+        resolve_parameterized_type(
+            mono,
+            substitute_type(
+                mono,
+                ext.checked_return_type or else Type.Unknown(),
+                ext_subst,
+            ),
+        )
+    } else {
+        resolve_parameterized_type(
+            mono,
+            mono.resolve_type_node_impl(ext.method.return_type, ext_subst),
+        )
+    };
+
+    if use_checked_signature then {
+        when ext.checked_parameters in {
+            .Some(checked_params) then {
+                for checked_param in checked_params then {
+                    pattern_param_types.push(
+                        resolve_parameterized_type(
+                            mono,
+                            substitute_type(mono, checked_param.symbol_type, ext_subst),
+                        ),
+                    );
+                };
+            },
+            .None() then {},
+        };
+    } else {
+        for method_param in ext.method.params then {
+            pattern_param_types.push(
+                resolve_parameterized_type(
+                    mono,
+                    mono.resolve_type_node_impl(method_param.param_type, ext_subst),
+                ),
+            );
+        };
+    };
+
+    let mutable actual_param_types = List[Type].new();
+    if extension_method_has_receiver_param(ext) then {
+        actual_param_types.push(base_type);
+    };
+    for arg in args then {
+        actual_param_types.push(resolve_parameterized_type(mono, arg.expr_type));
+    };
+
+    if pattern_param_types.count() != actual_param_types.count() then {
+        return Option[List[Type]].None();
+    };
+
+    let mutable type_param_names = List[String].new();
+    for method_tp in ext.method.type_params then {
+        type_param_names.push(method_tp.name);
+    };
+
+    let mutable method_bindings = Dict[String, Type].new();
+    let mutable i: UInt = 0;
+    while i < pattern_param_types.count() then {
+        // Handle implicit ref/ref mutable conversions: if the pattern has a reference
+        // wrapper but the actual doesn't, wrap the actual to match.
+        // e.g., pattern `ref mutable List[T]` with actual `List[CaseInfo]` becomes
+        //       pattern `ref mutable List[T]` with actual `ref mutable List[CaseInfo]`.
+        let mutable pattern_type = (pattern_param_types[i]);
+        let mutable actual_type = (actual_param_types[i]);
+        let adapted_actual = when pattern_type in {
+            .ReferenceType(_) then when actual_type in {
+                .ReferenceType(_) then actual_type,
+                _ then Type.ReferenceType(actual_type),
+            },
+            .MutableReferenceType(_) then when actual_type in {
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableReferenceType(actual_type),
+            },
+            .BorrowedReferenceType(_) then when actual_type in {
+                .BorrowedReferenceType(_) then actual_type,
+                .ReferenceType(_) then actual_type,
+                _ then Type.BorrowedReferenceType(actual_type),
+            },
+            .MutableBorrowedReferenceType(_) then when actual_type in {
+                .MutableBorrowedReferenceType(_) then actual_type,
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableBorrowedReferenceType(actual_type),
+            },
+            _ then actual_type,
+        };
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_type,
+            adapted_actual,
+            type_param_names,
+            method_bindings,
+        ) then {
+            if type_mentions_method_type_params(pattern_type, type_param_names) then {
+                return Option[List[Type]].None();
+            };
+        };
+        i += 1;
+    };
+
+    let concrete_expected = resolve_parameterized_type(mono, expected_return_type);
+    if not has_generic_parameter(concrete_expected) and not is_placeholder_inferred_type(
+        concrete_expected,
+    ) then {
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_return_type,
+            concrete_expected,
+            type_param_names,
+            method_bindings,
+        ) then {
+            if type_mentions_method_type_params(pattern_return_type, type_param_names) then {
+                return Option[List[Type]].None();
+            };
+        };
+    };
+
+    let mutable method_type_args = List[Type].new();
+    for method_tp in ext.method.type_params then {
+        when method_bindings.get(method_tp.name) in {
+            .Some(bound) then {
+                let concrete_bound = resolve_parameterized_type(mono, bound);
+                if has_generic_parameter(concrete_bound) or is_placeholder_inferred_type(
+                    concrete_bound,
+                ) then {
+                    return Option[List[Type]].None();
+                };
+                method_type_args.push(concrete_bound);
+            },
+            .None() then {
+                return Option[List[Type]].None();
+            },
+        };
+    };
+
+    return Option[List[Type]].Some(method_type_args);
+};
+
+let infer_method_type_args_from_symbol_type(
+    mono: Monomorphizer,
+    method_type: Type,
+    actual_receiver_type: Type,
+    args: List[TypedExpr],
+    expected_return_type: Type,
+    type_param_names: List[String],
+): Option[List[Type]] = {
+    let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
+    let mutable pattern_param_types = List[Type].new();
+    let pattern_return_type = when resolved_method_type in {
+        .FunctionType(fn_params, return_type_ref) then {
+            let param_types = param_entry_types(fn_params);
+            for param_type in param_types then {
+                pattern_param_types.push(resolve_parameterized_type(mono, param_type));
+            };
+            resolve_parameterized_type(mono, return_type_ref)
+        },
+        _ then {
+            return Option[List[Type]].None();
+        },
+    };
+
+    let mutable actual_param_types = List[Type].new();
+    actual_param_types.push(resolve_parameterized_type(mono, actual_receiver_type));
+    for arg in args then {
+        actual_param_types.push(resolve_parameterized_type(mono, arg.expr_type));
+    };
+    if pattern_param_types.count() != actual_param_types.count() then {
+        return Option[List[Type]].None();
+    };
+
+    let mutable method_bindings = Dict[String, Type].new();
+    let mutable i: UInt = 0;
+    while i < pattern_param_types.count() then {
+        let mutable pattern_type = (pattern_param_types[i]);
+        let mutable actual_type = (actual_param_types[i]);
+        let adapted_actual = when pattern_type in {
+            .ReferenceType(_) then when actual_type in {
+                .ReferenceType(_) then actual_type,
+                _ then Type.ReferenceType(actual_type),
+            },
+            .MutableReferenceType(_) then when actual_type in {
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableReferenceType(actual_type),
+            },
+            .BorrowedReferenceType(_) then when actual_type in {
+                .BorrowedReferenceType(_) then actual_type,
+                .ReferenceType(_) then actual_type,
+                _ then Type.BorrowedReferenceType(actual_type),
+            },
+            .MutableBorrowedReferenceType(_) then when actual_type in {
+                .MutableBorrowedReferenceType(_) then actual_type,
+                .MutableReferenceType(_) then actual_type,
+                _ then Type.MutableBorrowedReferenceType(actual_type),
+            },
+            _ then actual_type,
+        };
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_type,
+            adapted_actual,
+            type_param_names,
+            method_bindings,
+        ) then {
+            return Option[List[Type]].None();
+        };
+        i += 1;
+    };
+
+    let concrete_expected = resolve_parameterized_type(mono, expected_return_type);
+    if not has_generic_parameter(concrete_expected) and not is_placeholder_inferred_type(
+        concrete_expected,
+    ) then {
+        if not unify_generic_type_pattern(
+            mono,
+            pattern_return_type,
+            concrete_expected,
+            type_param_names,
+            method_bindings,
+        ) then {
+            return Option[List[Type]].None();
+        };
+    };
+
+    let mutable method_type_args = List[Type].new();
+    for method_type_name in type_param_names then {
+        when method_bindings.get(method_type_name) in {
+            .Some(bound) then {
+                let concrete_bound = resolve_parameterized_type(mono, bound);
+                if has_generic_parameter(concrete_bound) or is_placeholder_inferred_type(
+                    concrete_bound,
+                ) then {
+                    return Option[List[Type]].None();
+                };
+                method_type_args.push(concrete_bound);
+            },
+            .None() then {
+                return Option[List[Type]].None();
+            },
+        };
+    };
+    return Option[List[Type]].Some(method_type_args);
+};
+
+let patched_extension_template_for_type_resolution(
+    template: GenericExtensionMethodTemplate,
+    donor: GenericExtensionMethodTemplate,
+): GenericExtensionMethodTemplate = {
+    return GenericExtensionMethodTemplate(
+        template.type_params,
+        donor.method,
+        template.conformance_trait_name,
+        template.conformance_trait_def_id,
+        template.trait_method_def_id,
+        template.conformance_target_type,
+        template.conformance_trait_args,
+        template.uses_trait_type_params,
+        template.source_file,
+        template.module_path,
+        template.package_id,
+        donor.checked_body,
+        donor.checked_parameters,
+        donor.checked_return_type,
+        if donor.tool_type_params.is_empty() then template.tool_type_params
+        else donor.tool_type_params,
+    );
+};
+
+let make_trait_method_symbol(
+    mono: Monomorphizer,
+    method_name: String,
+    return_type: Type,
+): Symbol = {
+    let def_id = mono.storage.context.allocate_unindexed(method_name, DefKind.Function());
+    return Symbol(
+        def_id,
+        Type.FunctionType(List[FunctionParamEntry].new(), return_type),
+        SymbolKind.Function(),
+    );
+};
+
+// Get the semantic method name for a symbol, using structured defId lookup
+// instead of brute-force registry search.
+// Mirrors Swift's receiverMethodDispatch[method.defId]?.methodName.
+let get_semantic_method_name(mono: Monomorphizer, method: Symbol): String = {
+    // 1. Try receiver_method_dispatch (from sema)
+    if method.def_id.id > 0 then {
+        when mono.receiver_method_dispatch_info(method.def_id) in {
+            .Some(info) then {
+                return info.method_name;
+            },
+            .None() then {},
+        };
+        // 2. Try concrete_callable metadata (from mono)
+        when mono.concrete_callable_info(method.def_id) in {
+            .Some(info) then {
+                return info.logical_name;
+            },
+            .None() then {},
+        };
+        let symbol_name = mono.storage.context.symbol_name(method);
+        if not symbol_name.is_empty() then {
+            return symbol_name;
+        };
+        // 3. Try context name registry
+        when mono.storage.context.get_name(method.def_id) in {
+            .Some(name) then {
+                return name;
+            },
+            .None() then {},
+        };
+    };
+    return mono.storage.context.symbol_name(method);
+};
+
+let normalize_receiver_call_method_name(raw_name: String): String = {
+    let mutable name = raw_name;
+    if name.contains(".") then {
+        let mutable last_segment = StringBuilder.new();
+        for segment in name.split(".") then {
+            last_segment = StringBuilder.new();
+            last_segment.push_string(segment);
+        };
+        if not last_segment.is_empty() then {
+            name = last_segment.to_string();
+        };
+    };
+    if not name.contains("_") then {
+        return name;
+    };
+
+    let mutable found_lower = false;
+    let mutable out = StringBuilder.new();
+    for segment in name.split("_") then {
+        if segment.is_empty() then {
+            continue;
+        };
+        let first = segment.to_runes()[UInt(0)];
+        if not found_lower and first >= 'a' and first <= 'z' then {
+            found_lower = true;
+        };
+        if found_lower then {
+            if not out.is_empty() then {
+                out.push_byte('_');
+            };
+            out.push_string(segment);
+        };
+    };
+    let normalized = out.to_string();
+    return if found_lower and not out.is_empty() and normalized != name then normalized
+    else name;
+};
+
+// normalize_method_name_from_registry has been deleted.
+// All call sites now use get_semantic_method_name() which does O(1) defId lookup
+// instead of O(n) brute-force suffix matching across all extension method templates.
+
+// Try to bind a GenericMethodCall's method symbol to a concrete extension method.
+// Identity only: the definition-time DefId names the method, and the lookup
+// ladder materializes its specialization under a concrete receiver.
+public let try_bind_generic_method_call(
+    mono: Monomorphizer,
+    receiver_type: Type,
+    method: Symbol,
+    args: List[TypedExpr],
+    expected_return_type: Type,
+): Symbol = {
+    let _ = args;
+    let _ = expected_return_type;
+    // Identity only. The definition-time DefId names the method; the lookup
+    // ladder finds (or materializes) that method's specialization under a
+    // concrete receiver. The old body re-derived the answer from the SPELLING
+    // and swept candidates, which is how two same-named methods answered for
+    // each other. When identity cannot resolve, keep the symbol unchanged --
+    // a later stage reports it rather than this inventing an identity.
+    return when identity_method_instance_option(
+        mono,
+        method,
+        receiver_type,
+        List[Type].new(),
+    ) in {
+        .Some(resolved) then resolved,
+        .None() then method,
+    };
+};
+

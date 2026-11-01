@@ -1,0 +1,521 @@
+// Method resolution helpers for the monomorphization phase: unresolved and
+// numeric checks, receiver owners and instantiations, resolved result types.
+
+let mono_is_unresolved_expr_type(mono: Monomorphizer, t: Type): Bool = {
+    return when t in {
+        .VoidType() then true,
+        .GenericStruct(_, args) then {
+            for arg_ref in args then {
+                if mono_is_unresolved_expr_type(mono, arg_ref) then {
+                    return true;
+                };
+            };
+            is_placeholder_inferred_type(t)
+        },
+        .GenericEnum(_, args) then {
+            for arg_ref in args then {
+                if mono_is_unresolved_expr_type(mono, arg_ref) then {
+                    return true;
+                };
+            };
+            is_placeholder_inferred_type(t)
+        },
+        .StructureType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(t);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            if type_name.contains("__") or display_name.contains("__") then {
+                return true;
+            };
+            when mono.storage.context.get_type_arguments(def_id) in {
+                .Some(type_args) then {
+                    for type_arg in type_args then {
+                        if mono_is_unresolved_expr_type(mono, type_arg) then {
+                            return true;
+                        };
+                    };
+                    is_placeholder_inferred_type(t)
+                },
+                .None() then is_placeholder_inferred_type(t),
+            }
+        },
+        .EnumType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(t);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            if type_name.contains("__") or display_name.contains("__") then {
+                return true;
+            };
+            when mono.storage.context.get_type_arguments(def_id) in {
+                .Some(type_args) then {
+                    for type_arg in type_args then {
+                        if mono_is_unresolved_expr_type(mono, type_arg) then {
+                            return true;
+                        };
+                    };
+                    is_placeholder_inferred_type(t)
+                },
+                .None() then is_placeholder_inferred_type(t),
+            }
+        },
+        _ then is_placeholder_inferred_type(t),
+    };
+};
+
+let is_concrete_integer_type(t: Type): Bool = {
+    return when t in {
+        .IntType() then true,
+        .Int8Type() then true,
+        .Int16Type() then true,
+        .Int32Type() then true,
+        .Int64Type() then true,
+        .UIntType() then true,
+        .UInt8Type() then true,
+        .UInt16Type() then true,
+        .UInt32Type() then true,
+        .UInt64Type() then true,
+        .WrappingIntType() then true,
+        .WrappingInt8Type() then true,
+        .WrappingInt16Type() then true,
+        .WrappingInt32Type() then true,
+        .WrappingInt64Type() then true,
+        .WrappingUIntType() then true,
+        .WrappingUInt8Type() then true,
+        .WrappingUInt16Type() then true,
+        .WrappingUInt32Type() then true,
+        .WrappingUInt64Type() then true,
+        _ then false,
+    };
+};
+
+let is_concrete_float_type(t: Type): Bool = {
+    return when t in {
+        .Float32Type() then true,
+        .Float64Type() then true,
+        _ then false,
+    };
+};
+
+let is_concrete_numeric_type(t: Type): Bool = {
+    return is_concrete_integer_type(t) or is_concrete_float_type(t);
+};
+
+let method_semantic_name_from_dispatch(
+    mono: Monomorphizer,
+    method: Symbol,
+): Option[String] = {
+    return Option[String].Some(get_semantic_method_name(mono, method));
+};
+
+let method_semantic_name_from_callsite(
+    mono: Monomorphizer,
+    dispatch_callsite: Option[DefId],
+): Option[String] = {
+    return when dispatch_callsite in {
+        .Some(def_id) then {
+            when mono.receiver_method_dispatch_info(def_id) in {
+                .Some(info) then Option[String].Some(info.method_name),
+                .None() then Option[String].None(),
+            }
+        },
+        .None() then Option[String].None(),
+    };
+};
+
+let make_zero_integer_literal_expr(t: Type): TypedExpr = {
+    return TypedExpr(TypedExprKind.IntegerLiteral("0"), t, unknown_span());
+};
+
+public let push_receiver_owner(owners: List[MethodOwner], candidate: MethodOwner): Void = {
+    if not owners.contains(candidate) then {
+        owners.push(candidate);
+    };
+};
+
+/// Owner identities of a reference/pointer wrapper itself, without recursing
+/// into the wrapped type. Twin of `strict_wrapper_receiver_aliases`, which
+/// returned the wrapper's SPELLINGS ("Ref", "MutRef", "BorrowRef", ...).
+///
+/// A mutable wrapper also yields the immutable owner: a `ref T` method is
+/// callable on a `mut ref T`. `BorrowRef`/`BorrowMutRef` are gone -- nothing was
+/// ever registered under those spellings, because a borrowed reference's owner
+/// is `Builtin("Ref")`/`Builtin("MutRef")`.
+public let strict_wrapper_receiver_owners(t: Type): List[MethodOwner] = {
+    let mutable owners = List[MethodOwner].new();
+    when t in {
+        .ReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+        },
+        .MutableReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+        },
+        .BorrowedReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+        },
+        .MutableBorrowedReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+        },
+        .WeakReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("WeakRef"));
+        },
+        .MutableWeakReferenceType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutWeakRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("WeakRef"));
+        },
+        .PointerType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ptr"));
+        },
+        .MutablePointerType(_) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutPtr"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ptr"));
+        },
+        _ then {},
+    };
+    return owners;
+};
+
+/// Instantiations (owner + type arguments) whose methods answer for
+/// `receiver_type`. This is what an INSTANTIATED method is keyed by: a wrapper
+/// contributes its own built-in owner with the wrapped type as its argument, and
+/// a mutable wrapper also contributes the immutable one.
+public let collect_receiver_instantiations(
+    mono: Monomorphizer,
+    receiver_type: Type,
+    out: List[Pair[MethodOwner, List[Type]]],
+): Void = {
+    let resolved = resolve_parameterized_type(mono, receiver_type);
+    let push = out;
+    when resolved in {
+        .ReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ref"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .MutableReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("MutRef"), inner);
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ref"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .BorrowedReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ref"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("MutRef"), inner);
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ref"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .WeakReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("WeakRef"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .MutableWeakReferenceType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("MutWeakRef"), inner);
+            push_receiver_instantiation(push, MethodOwner.Builtin("WeakRef"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .PointerType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ptr"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        .MutablePointerType(inner) then {
+            push_receiver_instantiation(push, MethodOwner.Builtin("MutPtr"), inner);
+            push_receiver_instantiation(push, MethodOwner.Builtin("Ptr"), inner);
+            collect_receiver_instantiations(mono, inner, out);
+        },
+        _ then {
+            push_receiver_instantiation_pair(
+                out,
+                mono.storage.context.method_owner_and_args(resolved),
+            );
+        },
+    };
+};
+
+public let push_receiver_instantiation(
+    out: List[Pair[MethodOwner, List[Type]]],
+    owner: MethodOwner,
+    inner: Type,
+): Void = {
+    let mutable args = List[Type].new();
+    args.push(inner);
+    push_receiver_instantiation_pair(out, Pair[MethodOwner, List[Type]](owner, args));
+};
+
+public let push_receiver_instantiation_pair(
+    out: List[Pair[MethodOwner, List[Type]]],
+    candidate: Pair[MethodOwner, List[Type]],
+): Void = {
+    for existing in out then {
+        if existing.first == candidate.first and existing.second == candidate.second then {
+            return;
+        };
+    };
+    out.push(candidate);
+};
+
+/// Owner identities whose extension methods answer for `receiver_type`.
+///
+/// A modifier receiver answers through its own closed built-in owner, and a
+/// mutable modifier also through the immutable one (a `ref T` method is callable
+/// on a `mut ref T`). Each wrapper then defers to its inner type's owner.
+///
+/// This used to return SPELLINGS and swept a list of them: `concrete_name` plus
+/// `template_name` for a nominal, `layout_key` plus `type_display_name` for
+/// everything else. With identity keys there is one owner per type.
+public let collect_receiver_owners(
+    mono: Monomorphizer,
+    receiver_type: Type,
+    owners: List[MethodOwner],
+): Void = {
+    let resolved = resolve_parameterized_type(mono, receiver_type);
+    when resolved in {
+        .ReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .MutableReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .BorrowedReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ref"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .WeakReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("WeakRef"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .MutableWeakReferenceType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutWeakRef"));
+            push_receiver_owner(owners, MethodOwner.Builtin("WeakRef"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .PointerType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("Ptr"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        .MutablePointerType(inner) then {
+            push_receiver_owner(owners, MethodOwner.Builtin("MutPtr"));
+            push_receiver_owner(owners, MethodOwner.Builtin("Ptr"));
+            collect_receiver_owners(mono, inner, owners);
+        },
+        _ then {
+            push_receiver_owner(owners, mono.storage.context.method_owner_of(resolved));
+        },
+    };
+};
+
+let prefer_more_concrete_type(
+    mono: Monomorphizer,
+    primary: Type,
+    fallback: Type,
+): Type = {
+    let primary_has_generics = has_generic_parameter(primary);
+    let fallback_has_generics = has_generic_parameter(fallback);
+    let primary_is_unresolved = mono_is_unresolved_expr_type(mono, primary);
+    let fallback_is_unresolved = mono_is_unresolved_expr_type(mono, fallback);
+    let primary_is_placeholder = when primary in {
+        .StructureType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(primary);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        .EnumType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(primary);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        _ then false,
+    };
+    let fallback_is_placeholder = when fallback in {
+        .StructureType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(fallback);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        .EnumType(def_id) then {
+            let display_name = mono.storage.context.type_display_name(fallback);
+            let type_name = mono.storage.context.get_name(def_id) or else display_name;
+            type_name.ends_with("_T") or display_name.ends_with("_T")
+        },
+        _ then false,
+    };
+    let primary_is_parameterized = when primary in {
+        .GenericStruct(...) then true,
+        .GenericEnum(...) then true,
+        .TraitObject(...) then true,
+        _ then false,
+    };
+    let fallback_is_nominal = when fallback in {
+        .StructureType(_) then true,
+        .EnumType(_) then true,
+        _ then false,
+    };
+    if primary_is_parameterized and fallback_is_nominal then {
+        return fallback;
+    };
+    if primary_is_unresolved and not fallback_is_unresolved then {
+        return fallback;
+    };
+    if fallback_is_unresolved and not primary_is_unresolved then {
+        return primary;
+    };
+    if primary_has_generics and not fallback_has_generics then {
+        return fallback;
+    };
+    if primary_is_placeholder and not fallback_is_placeholder then {
+        return fallback;
+    };
+    when primary in {
+        .Unknown() then {
+            return fallback;
+        },
+        _ then {},
+    };
+    return primary;
+};
+
+let resolved_method_return_type(
+    mono: Monomorphizer,
+    method: Symbol,
+    fallback: Type,
+): Type = {
+    let mutable method_return_type = when resolve_parameterized_type(
+        mono,
+        method.symbol_type,
+    ) in {
+        .FunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        _ then resolve_parameterized_type(mono, method.symbol_type),
+    };
+    let mutable fallback_type = resolve_parameterized_type(mono, fallback);
+    return prefer_more_concrete_type(mono, method_return_type, fallback_type);
+};
+
+let resolved_callsite_result_type(
+    mono: Monomorphizer,
+    declared_type: Type,
+    method: Symbol,
+): Type = {
+    let mutable concrete_declared_type = resolve_parameterized_type(mono, declared_type);
+    let mutable method_return_type = resolved_method_return_type(
+        mono,
+        method,
+        concrete_declared_type,
+    );
+    return prefer_more_concrete_type(mono, concrete_declared_type, method_return_type);
+};
+
+let resolved_method_symbol_type(
+    mono: Monomorphizer,
+    def_id: DefId,
+    fallback: Type,
+): Type = {
+    return when mono.storage.context.get_function_type(def_id) in {
+        .Some(function_type) then resolve_parameterized_type(mono, function_type),
+        .None() then resolve_parameterized_type(mono, fallback),
+    };
+};
+
+let resolved_method_symbol(
+    mono: Monomorphizer,
+    def_id: DefId,
+    fallback_name: String,
+    fallback_type: Type,
+): Symbol = {
+    let concrete_name = when mono.storage.context.get_name(def_id) in {
+        .Some(name) then name,
+        .None() then fallback_name,
+    };
+    let mutable concrete_type = resolved_method_symbol_type(mono, def_id, fallback_type);
+    let result = Symbol(def_id, concrete_type, SymbolKind.Function());
+    return result;
+};
+
+let method_has_compatible_ref_like_receiver(
+    mono: Monomorphizer,
+    method_type: Type,
+    base_type: Type,
+): Bool = {
+    let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
+    let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
+    return when resolved_method_type in {
+        .FunctionType(fn_params, _) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.is_empty() then {
+                return false;
+            };
+            let mutable first_param_type = resolve_parameterized_type(
+                mono,
+                (param_types[UInt(0)]),
+            );
+            when first_param_type.compatible_indirection_inners(resolved_base_type) in {
+                .Some(inners) then inners.expected_inner == inners.actual_inner,
+                .None() then false,
+            }
+        },
+        _ then false,
+    };
+};
+
+let should_preserve_resolved_method_reference(
+    mono: Monomorphizer,
+    method: Symbol,
+    base_type: Type,
+): Bool = {
+    if method.def_id.id == 0 then {
+        return false;
+    };
+    if get_semantic_method_name(mono, method) == "to_string" then {
+        return false;
+    };
+    let mutable resolved_method_type = resolve_parameterized_type(
+        mono,
+        method.symbol_type,
+    );
+    if not method_has_compatible_ref_like_receiver(mono, resolved_method_type, base_type) then {
+        return false;
+    };
+    if has_generic_parameter(resolved_method_type) then {
+        return false;
+    };
+    return when mono.receiver_method_dispatch_info(method.def_id) in {
+        .Some(info) then is_ref_wrapper_owner(info.owner),
+        .None() then false,
+    };
+};
+
+let is_ref_wrapper_owner_method(mono: Monomorphizer, method: Symbol): Bool = {
+    return when mono.receiver_method_dispatch_info(method.def_id) in {
+        .Some(info) then is_ref_wrapper_owner(info.owner),
+        .None() then false,
+    };
+};
+
+let unwrap_ref_like_receiver_type_for_value_lookup(
+    mono: Monomorphizer,
+    receiver_type: Type,
+): Option[Type] = {
+    let mutable resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
+    return when resolved_receiver_type in {
+        .ReferenceType(inner) then Option[Type].Some(
+            resolve_parameterized_type(mono, inner),
+        ),
+        .MutableReferenceType(inner) then Option[Type].Some(
+            resolve_parameterized_type(mono, inner),
+        ),
+        .BorrowedReferenceType(inner) then Option[Type].Some(
+            resolve_parameterized_type(mono, inner),
+        ),
+        .MutableBorrowedReferenceType(inner) then Option[Type].Some(
+            resolve_parameterized_type(mono, inner),
+        ),
+        _ then Option[Type].None(),
+    };
+};
+

@@ -1,0 +1,453 @@
+// MIR captures and ownership: synthetic symbols, capture places,
+// ownership uses, and small type helpers.
+
+given MIRFunctionBuilder {
+    make_synthetic_symbol(self, name: String, symbol_type: Type): Symbol = {
+        return Symbol(
+            self.context.allocate_unindexed(name, DefKind.Variable()),
+            symbol_type,
+            SymbolKind.Variable(VariableKind.Value()),
+        );
+    };
+
+    capture_place(self, symbol: Symbol): MIRPlace = {
+        let name = self.context.symbol_name(symbol);
+        // Declaration identity decides the place. The name-keyed tables are
+        // only a last resort for synthetic symbols that have no DefId entry —
+        // consulting them earlier routes a `let c` to the place of an unrelated
+        // pattern binding that happens to be called `c` (for_loop_nested).
+        when self.pattern_place_by_def_id.get(symbol.def_id.id) in {
+            .Some(place) then {
+                return place;
+            },
+            .None() then {},
+        };
+        when self.local_by_def_id.get(symbol.def_id.id) in {
+            .Some(local_id) then {
+                return MIRPlace.Local(local_id);
+            },
+            .None() then {},
+        };
+        when self.pattern_place_by_name.get(name) in {
+            .Some(place) then {
+                return place;
+            },
+            .None() then {},
+        };
+        return when self.parameter_local_by_name.get(name) in {
+            .Some(local_id) then {
+                self.local_by_def_id.insert(symbol.def_id.id, local_id);
+                MIRPlace.Local(local_id)
+            },
+            .None() then MIRPlace.Global(symbol.def_id),
+        };
+    };
+
+    collect_captures(
+        self,
+        expr: TypedExpr,
+        params: List[TypedParam],
+        out: List[Symbol],
+    ): Void = {
+        let mutable param_names = Set[String].new();
+        for p in params then {
+            param_names.insert(p.name);
+        };
+        self.collect_captures_expr(expr, param_names, out);
+    };
+
+    private collect_captures_expr(
+        self,
+        expr: TypedExpr,
+        param_names: Set[String],
+        out: List[Symbol],
+    ): Void = {
+        when expr.expr_kind in {
+            .Variable(symbol) then {
+                let name = self.context.symbol_name(symbol);
+                let is_local_capture = if self.pattern_place_by_def_id.get(
+                    symbol.def_id.id,
+                ) is .Some(_) then true
+                else if self.pattern_place_by_name.get(name) is .Some(_) then true
+                else if self.local_by_def_id.get(symbol.def_id.id) is .Some(_) then true
+                else when self.parameter_local_by_name.get(name) in {
+                    .Some(local_id) then {
+                        self.local_by_def_id.insert(symbol.def_id.id, local_id);
+                        true
+                    },
+                    .None() then false,
+                };
+                if not param_names.contains(name) and is_local_capture then {
+                    let mutable seen = false;
+                    let mutable capture_index: UInt = 0;
+                    while capture_index < out.count() then {
+                        if out[capture_index].def_id.id == symbol.def_id.id then {
+                            seen = true;
+                        };
+                        capture_index += 1;
+                    };
+                    if not seen then {
+                        out.push(symbol);
+                    };
+                };
+            },
+            .Block(statements, tail_expression) then {
+                for stmt in statements then {
+                    self.collect_captures_stmt(stmt, param_names, out);
+                };
+                when tail_expression in {
+                    .Some(tail) then self.collect_captures_expr(tail, param_names, out),
+                    .None() then {},
+                };
+            },
+            .IfExpr(c, t, e) then {
+                self.collect_captures_expr(c, param_names, out);
+                self.collect_captures_expr(t, param_names, out);
+                when e in {
+                    .Some(x) then self.collect_captures_expr(x, param_names, out),
+                    .None() then {},
+                };
+            },
+            .WhenExpr(subject, arms) then {
+                self.collect_captures_expr(subject, param_names, out);
+                for arm in arms then {
+                    self.collect_captures_expr(arm.body, param_names, out);
+                };
+            },
+            .Call(callee, args) then {
+                self.collect_captures_expr(callee, param_names, out);
+                for arg in args then {
+                    self.collect_captures_expr(arg, param_names, out);
+                };
+            },
+            .GenericCall(_, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            .StaticMethodCall(_, _, _, _, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            .TraitMethodCall(receiver, _, _, _, args) then {
+                self.collect_captures_expr(receiver, param_names, out);
+                for arg in args then {
+                    self.collect_captures_expr(arg, param_names, out);
+                };
+            },
+            .TraitObjectConversion(inner, _, _) then self.collect_captures_expr(
+                inner,
+                param_names,
+                out,
+            ),
+            .MethodReference(base, _, _, _, _, _) then self.collect_captures_expr(
+                base,
+                param_names,
+                out,
+            ),
+            .TraitMethodPlaceholder(base, _, _, _, _, _) then self.collect_captures_expr(
+                base,
+                param_names,
+                out,
+            ),
+            .RefExpr(inner) then self.collect_captures_expr(inner, param_names, out),
+            .PtrExpr(inner) then self.collect_captures_expr(inner, param_names, out),
+            .DerefExpr(inner) then self.collect_captures_expr(inner, param_names, out),
+            .UnsafeDerefExpr(inner) then self.collect_captures_expr(
+                inner,
+                param_names,
+                out,
+            ),
+            .CastExpr(_, inner) then self.collect_captures_expr(inner, param_names, out),
+            .Unary(_, inner) then self.collect_captures_expr(inner, param_names, out),
+            .MemberPath(base, _) then self.collect_captures_expr(base, param_names, out),
+            .ArithmeticExpr(l, _, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            .WrappingArithmeticExpr(l, _, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            .ComparisonExpr(l, _, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            .BitwiseExpr(l, _, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            .AndExpr(l, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            .OrExpr(l, r) then {
+                self.collect_captures_expr(l, param_names, out);
+                self.collect_captures_expr(r, param_names, out);
+            },
+            // Constructors carry their field values as sub-expressions. Missing
+            // these meant `TypeConstruction`/`EnumConstruction` fell through to
+            // the default arm and their arguments were never walked, so a
+            // captured closure used as a constructor argument was reported as
+            // no capture at all -- and codegen then read it as an uninitialised
+            // local.
+            .TypeConstruction(_, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            .EnumConstruction(_, _, args) then for arg in args then {
+                self.collect_captures_expr(arg, param_names, out);
+            },
+            // Only type arguments, no expressions.
+            .GenericInstantiation(_, _) then {},
+            .IntegerLiteral(_) then {},
+            .FloatLiteral(_) then {},
+            .StringLiteral(_) then {},
+            .BoolLiteral(_) then {},
+            .IsExpr(subject, _, _) then self.collect_captures_expr(
+                subject,
+                param_names,
+                out,
+            ),
+            .LambdaExpr(_, _, body) then self.collect_captures_expr(
+                body,
+                param_names,
+                out,
+            ),
+            .IntrinsicCall(node) then self.collect_captures_intrinsic(
+                node,
+                param_names,
+                out,
+            ),
+        };
+    };
+
+    private collect_captures_intrinsic(
+        self,
+        node: TypedIntrinsic,
+        param_names: Set[String],
+        out: List[Symbol],
+    ): Void = {
+        when node in {
+            .DowngradeRef(ref_expr, _) then self.collect_captures_expr(
+                ref_expr,
+                param_names,
+                out,
+            ),
+            .UpgradeRef(weak_expr, _) then self.collect_captures_expr(
+                weak_expr,
+                param_names,
+                out,
+            ),
+            .SpawnThread(a, b, c, d) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+                self.collect_captures_expr(d, param_names, out);
+            },
+            .AllocMemory(count, _) then self.collect_captures_expr(
+                count,
+                param_names,
+                out,
+            ),
+            .DeallocMemory(p) then self.collect_captures_expr(p, param_names, out),
+            .CopyMemory(a, b, c) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+            },
+            .MoveMemory(a, b, c) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+                self.collect_captures_expr(c, param_names, out);
+            },
+            .InitMemory(a, b) then {
+                self.collect_captures_expr(a, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+            },
+            .DeinitMemory(p) then self.collect_captures_expr(p, param_names, out),
+            .TakeMemory(p, _) then self.collect_captures_expr(p, param_names, out),
+            .NullPtr(_) then {},
+        };
+    };
+
+    private collect_captures_stmt(
+        self,
+        stmt: TypedStatement,
+        param_names: Set[String],
+        out: List[Symbol],
+    ): Void = {
+        when stmt in {
+            .LetStmt(_, value, _) then self.collect_captures_expr(value, param_names, out),
+            .TupleLetStmt(_, _, value, _) then self.collect_captures_expr(
+                value,
+                param_names,
+                out,
+            ),
+            .AssignmentStmt(target, value, _) then {
+                self.collect_captures_expr(target, param_names, out);
+                self.collect_captures_expr(value, param_names, out);
+            },
+            .ExprStmt(expr, _) then self.collect_captures_expr(expr, param_names, out),
+            .IfStmt(c, t, e, _) then {
+                self.collect_captures_expr(c, param_names, out);
+                self.collect_captures_expr(t, param_names, out);
+                when e in {
+                    .Some(x) then self.collect_captures_expr(x, param_names, out),
+                    .None() then {},
+                }
+            },
+            .WhileStmt(c, b, _) then {
+                self.collect_captures_expr(c, param_names, out);
+                self.collect_captures_expr(b, param_names, out);
+            },
+            .WhenStmt(subject, arms, _) then {
+                self.collect_captures_expr(subject, param_names, out);
+                for arm in arms then {
+                    self.collect_captures_expr(arm.body, param_names, out);
+                };
+            },
+            .ReturnStmt(value, _) then when value in {
+                .Some(expr) then self.collect_captures_expr(expr, param_names, out),
+                .None() then {},
+            },
+            .DeferStmt(expr, _) then self.collect_captures_expr(expr, param_names, out),
+            _ then {},
+        };
+    };
+
+    ownership_use(self, expression: TypedExpr): MIROwnershipUse = {
+        return if typed_expr_value_category(expression) is .LValue() then MIROwnershipUse.Copy(
+        ) else MIROwnershipUse.Move();
+    };
+
+    reference_kind(self, t: Type): MIRReferenceKind = {
+        return when t in {
+            .MutableReferenceType(_) then MIRReferenceKind.Mutable(),
+            .WeakReferenceType(_) then MIRReferenceKind.Weak(),
+            .MutableWeakReferenceType(_) then MIRReferenceKind.MutableWeak(),
+            _ then MIRReferenceKind.Shared(),
+        };
+    };
+
+    is_ownership_preserving_place_cast(
+        self,
+        source_type: Type,
+        target_type: Type,
+    ): Bool = {
+        let _ = self;
+        return when source_type in {
+            .ReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            _ then source_type == target_type,
+        };
+    };
+
+    recover_type_construction_result_type(
+        self,
+        identifier: Symbol,
+        args: List[TypedExpr],
+        fallback: Type,
+    ): Type = {
+        if not self.context.contains_generic_parameter(fallback) then {
+            return fallback;
+        };
+
+        let identifier_type = identifier.symbol_type;
+        if not self.context.contains_generic_parameter(identifier_type) then {
+            return identifier_type;
+        };
+
+        let type_name = when self.context.get_template_name(identifier.def_id) in {
+            .Some(name) then name,
+            .None() then self.context.get_name(identifier.def_id) or else "",
+        };
+        if args.count() == UInt(2) and is_std_pair_def_id(
+            self.context,
+            self.context.get_template_def_id(identifier.def_id),
+        ) then {
+            let mutable pair_args = List[Type].new();
+            pair_args.push(
+                self.concretize_pair_constructor_arg_type(args[UInt(0)].expr_type),
+            );
+            pair_args.push(
+                self.concretize_pair_constructor_arg_type(args[UInt(1)].expr_type),
+            );
+            let pair_def_id = self.context.get_template_def_id(identifier.def_id);
+            // Std's `Pair` is a LANG ITEM, reached by declaration.
+            return Type.GenericStruct(pair_def_id, pair_args);
+        };
+
+        return fallback;
+    };
+
+    private concretize_pair_constructor_arg_type(self, t: Type): Type = {
+        return when t in {
+            .TypeVar(tv) then when tv.literal_default_kind in {
+                .Some(kind) then when kind in {
+                    .Int() then Type.IntType(),
+                    .Float() then Type.Float64Type(),
+                },
+                .None() then t,
+            },
+            _ then t,
+        };
+    };
+
+    copy_type_args(self, args: List[Type]): List[Type] = {
+        let mutable out = List[Type].new();
+        for arg in args then {
+            out.push(arg);
+        };
+        return out;
+    };
+
+    deref_pointee_type(self, container: Type, fallback: Type): Type = {
+        return when container in {
+            .ReferenceType(inner) then inner,
+            .MutableReferenceType(inner) then inner,
+            .BorrowedReferenceType(inner) then inner,
+            .MutableBorrowedReferenceType(inner) then inner,
+            .WeakReferenceType(inner) then inner,
+            .MutableWeakReferenceType(inner) then inner,
+            .PointerType(inner) then inner,
+            .MutablePointerType(inner) then inner,
+            _ then fallback,
+        };
+    };
+
+    private lookup_field_type(self, t: Type, field_name: String): Type = {
+        return when t in {
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if field.name == field_name then {
+                            return field.field_type;
+                        };
+                    };
+                    Type.Unknown()
+                },
+                .None() then Type.Unknown(),
+            },
+            .ReferenceType(inner) then self.lookup_field_type(inner, field_name),
+            .MutableReferenceType(inner) then self.lookup_field_type(inner, field_name),
+            .BorrowedReferenceType(inner) then self.lookup_field_type(inner, field_name),
+            .MutableBorrowedReferenceType(inner) then self.lookup_field_type(
+                inner,
+                field_name,
+            ),
+            .WeakReferenceType(inner) then self.lookup_field_type(inner, field_name),
+            .MutableWeakReferenceType(inner) then self.lookup_field_type(
+                inner,
+                field_name,
+            ),
+            .PointerType(inner) then self.lookup_field_type(inner, field_name),
+            .MutablePointerType(inner) then self.lookup_field_type(inner, field_name),
+            _ then Type.Unknown(),
+        };
+    };
+
+    type_is_void(self, t: Type): Bool = t is .VoidType();
+    type_is_never(self, t: Type): Bool = t is .NeverType();
+    type_is_void_or_never(self, t: Type): Bool =
+        self.type_is_void(t) or self.type_is_never(t);
+    is_float_type(self, t: Type): Bool = t is .Float32Type() or is .Float64Type();
+};

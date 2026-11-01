@@ -391,159 +391,6 @@ private let infer_type_construction_type_from_args(
     };
 };
 
-private let infer_type_bindings_from_constructor_pattern(
-    mono: Monomorphizer,
-    pattern: Type,
-    concrete: Type,
-    bindings: Dict[String, Type],
-): Void = {
-    let normalized_pattern = resolve_parameterized_type(mono, pattern);
-    let normalized_concrete = resolve_parameterized_type(mono, concrete);
-    when normalized_pattern in {
-        .GenericParameter(name) then {
-            if bindings.get(name) is .None() then {
-                bindings.insert(name, normalized_concrete);
-            };
-        },
-        .ReferenceType(inner) then when normalized_concrete in {
-            .ReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .MutableReferenceType(inner) then when normalized_concrete in {
-            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .PointerType(inner) then when normalized_concrete in {
-            .PointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .MutablePointerType(inner) then when normalized_concrete in {
-            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .WeakReferenceType(inner) then when normalized_concrete in {
-            .WeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .MutableWeakReferenceType(inner) then when normalized_concrete in {
-            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            _ then {},
-        },
-        .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
-            .FunctionType(concrete_params, concrete_return) then {
-                if pattern_params.count() == concrete_params.count() then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_params.count() then {
-                        infer_type_bindings_from_constructor_pattern(
-                            mono,
-                            (pattern_params[i]).param_type,
-                            (concrete_params[i]).param_type,
-                            bindings,
-                        );
-                        i += 1;
-                    };
-                    infer_type_bindings_from_constructor_pattern(
-                        mono,
-                        pattern_return,
-                        concrete_return,
-                        bindings,
-                    );
-                };
-            },
-            _ then {},
-        },
-        .GenericStruct(tplDefId, pattern_args) then when normalized_concrete in {
-            .GenericStruct(actual_def_id, concrete_args) then {
-                // Compare DECLARATIONS. The inner arm rebinds the pattern's
-                // `tplDefId`, so `tplDefId == tplDefId` compared one binding to
-                // itself and let any two templates match.
-                if tplDefId == actual_def_id and pattern_args.count() == concrete_args.count(
-                ) then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_args.count() then {
-                        infer_type_bindings_from_constructor_pattern(
-                            mono,
-                            (pattern_args[i]),
-                            (concrete_args[i]),
-                            bindings,
-                        );
-                        i += 1;
-                    };
-                };
-            },
-            _ then {},
-        },
-        // Identity: the template's DECLARATION, not its spelling.
-        .GenericEnum(pattern_def_id, pattern_args) then when normalized_concrete in {
-            .GenericEnum(concrete_def_id, concrete_args) then {
-                if pattern_def_id == concrete_def_id and pattern_args.count() == concrete_args.count(
-                ) then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_args.count() then {
-                        infer_type_bindings_from_constructor_pattern(
-                            mono,
-                            (pattern_args[i]),
-                            (concrete_args[i]),
-                            bindings,
-                        );
-                        i += 1;
-                    };
-                };
-            },
-            _ then {},
-        },
-        _ then {},
-    }
-};
-
 private let box_each_type(types: List[Type]): List[Type] = {
     let mutable out = List[Type].with_capacity(types.count());
     for t in types then {
@@ -918,66 +765,12 @@ private let normalize_method_symbol_type_for_base(
     let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
     let base_is_nested_ref_like = when resolved_base_type in {
-        .ReferenceType(inner) then when resolve_parameterized_type(mono, inner) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
-        .MutableReferenceType(inner) then when resolve_parameterized_type(mono, inner) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
-        .BorrowedReferenceType(inner) then when resolve_parameterized_type(mono, inner) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
-        .MutableBorrowedReferenceType(inner) then when resolve_parameterized_type(
-            mono,
-            inner,
-        ) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
-        .WeakReferenceType(inner) then when resolve_parameterized_type(mono, inner) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
-        .MutableWeakReferenceType(inner) then when resolve_parameterized_type(
-            mono,
-            inner,
-        ) in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            _ then false,
-        },
+        .ReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
+        .MutableReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
+        .BorrowedReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
+        .MutableBorrowedReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
+        .WeakReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
+        .MutableWeakReferenceType(inner) then type_is_tracked_handle(resolve_parameterized_type(mono, inner)),
         _ then false,
     };
     if base_is_nested_ref_like then {
@@ -2922,18 +2715,6 @@ private let bind_generic_function_type_from_shape(
     }
 };
 
-private let is_type_parameter_name(
-    name: String,
-    type_params: List[TypeParameterDecl],
-): Bool = {
-    for type_param in type_params then {
-        if type_param.name == name then {
-            return true;
-        };
-    };
-    return false;
-};
-
 private let static_method_receiver_key(mono: Monomorphizer, t: Type): String = {
     return when t in {
         .ReferenceType(inner) then static_method_receiver_key(mono, inner),
@@ -2944,62 +2725,6 @@ private let static_method_receiver_key(mono: Monomorphizer, t: Type): String = {
         .MutablePointerType(inner) then static_method_receiver_key(mono, inner),
         _ then mono.storage.context.get_layout_key(t),
     };
-};
-
-private let push_static_method_receiver_alias(
-    alias_list: List[String],
-    alias: String,
-): List[String] = {
-    if alias.is_empty() then {
-        return alias_list;
-    };
-    for existing in alias_list then {
-        if existing == alias then {
-            return alias_list;
-        };
-    };
-    let mutable updated = alias_list;
-    updated.push(alias);
-    return updated;
-};
-
-private let strict_wrapper_receiver_aliases(t: Type): List[String] = {
-    let mutable aliases = List[String].new();
-    when t in {
-        .ReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "Ref");
-        },
-        .MutableReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "MutRef");
-            aliases = push_static_method_receiver_alias(aliases, "Ref");
-        },
-        .BorrowedReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "BorrowRef");
-            aliases = push_static_method_receiver_alias(aliases, "Ref");
-        },
-        .MutableBorrowedReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "BorrowMutRef");
-            aliases = push_static_method_receiver_alias(aliases, "MutRef");
-            aliases = push_static_method_receiver_alias(aliases, "BorrowRef");
-            aliases = push_static_method_receiver_alias(aliases, "Ref");
-        },
-        .WeakReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "WeakRef");
-        },
-        .MutableWeakReferenceType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "MutWeakRef");
-            aliases = push_static_method_receiver_alias(aliases, "WeakRef");
-        },
-        .PointerType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "Ptr");
-        },
-        .MutablePointerType(_) then {
-            aliases = push_static_method_receiver_alias(aliases, "MutPtr");
-            aliases = push_static_method_receiver_alias(aliases, "Ptr");
-        },
-        _ then {},
-    };
-    return aliases;
 };
 
 private let static_method_receiver_aliases(mono: Monomorphizer, t: Type): List[String] = {
@@ -3093,17 +2818,7 @@ private let static_method_receiver_aliases(mono: Monomorphizer, t: Type): List[S
 };
 
 private let receiver_uses_strict_wrapper_dispatch(mono: Monomorphizer, t: Type): Bool = {
-    return when resolve_parameterized_type(mono, t) in {
-        .ReferenceType(_) then true,
-        .MutableReferenceType(_) then true,
-        .BorrowedReferenceType(_) then true,
-        .MutableBorrowedReferenceType(_) then true,
-        .WeakReferenceType(_) then true,
-        .MutableWeakReferenceType(_) then true,
-        .PointerType(_) then true,
-        .MutablePointerType(_) then true,
-        _ then false,
-    };
+    return type_is_handle(resolve_parameterized_type(mono, t));
 };
 
 private let bind_static_method_symbol(
@@ -3287,15 +3002,7 @@ private let finalize_direct_method_candidate(
                 mono,
                 (expected_params[UInt(0)]).param_type,
             );
-            let expected_receiver_is_ref_like = when expected_receiver in {
-                .ReferenceType(_) then true,
-                .MutableReferenceType(_) then true,
-                .BorrowedReferenceType(_) then true,
-                .MutableBorrowedReferenceType(_) then true,
-                .WeakReferenceType(_) then true,
-                .MutableWeakReferenceType(_) then true,
-                _ then false,
-            };
+            let expected_receiver_is_ref_like = type_is_tracked_handle(expected_receiver);
             if not expected_receiver_is_ref_like then {
                 return Option[Symbol].Some(resolved_symbol);
             };

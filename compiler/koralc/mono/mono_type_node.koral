@@ -1,0 +1,429 @@
+// Type-node resolution for the monomorphization phase: template
+// substitution, resolve_type_node, declared-name identity, and builtins.
+
+// ── resolve_type_node ─────────────────────────────────────────────────────────
+
+// The substitution for resolving a template's OWN TypeNodes.
+//
+// A template's parameters are bound to themselves and `override` wins. This
+// floor is what makes the priority below safe: without it a parameter name that
+// `override` does not mention falls past the substitution map into the
+// bare-name concrete-type tables, so a user's `type T` becomes the meaning of
+// std's `[T ...]` parameter and the two types print identically.
+//
+// The parameter list is the authority on "is this name a parameter of the
+// template I am resolving". It is never guessed from the spelling.
+public let template_substitution(
+    type_parameters: List[TypeParameterDecl],
+    override: Dict[String, Type],
+): Dict[String, Type] = {
+    let mutable out = Dict[String, Type].new();
+    for type_param in type_parameters then {
+        out.insert(type_param.name, Type.GenericParameter(type_param.name));
+    };
+    out.insert_dict(override);
+    return out;
+};
+
+// Resolve a TypeNode to a concrete Type using the substitution map.
+//
+// Priority for TypeNode.Identifier:
+//   1. Type substitution map (generic parameter replacement)
+//   2. Built-in types (Int, Bool, String, etc.)
+//   3. Concrete type mutable registry (struct/enum types)
+//
+// Anything resolving a generic template's nodes must pass its parameters
+// through `template_substitution` so step 1 always answers for them.
+public let resolve_type_node(
+    mono: Monomorphizer,
+    node: TypeNode,
+    substitution: Dict[String, Type],
+): Type = {
+    return when node in {
+        // TypeNode.Identifier: priority: substitution map → built-in types → concrete registry
+        //
+        .Identifier(name, span) then {
+            when substitution.get(name) in {
+                .Some(concrete) then {
+                    when concrete in {
+                        .GenericStruct(template_def_id, args) then {
+                            when mono.storage.generic_templates.struct_by_def_id(
+                                template_def_id,
+                            ) in {
+                                .Some(struct_template) then mono.instantiate_struct_impl(
+                                    struct_template,
+                                    args,
+                                ),
+                                .None() then concrete,
+                            }
+                        },
+                        .GenericEnum(template_def_id, args) then {
+                            when mono.storage.generic_templates.enum_by_def_id(
+                                template_def_id,
+                            ) in {
+                                .Some(enum_template) then mono.instantiate_enum_impl(
+                                    enum_template,
+                                    args,
+                                ),
+                                .None() then concrete,
+                            }
+                        },
+                        _ then concrete,
+                    }
+                },
+                .None() then {
+                    when resolve_builtin_type(name) in {
+                        .Some(t) then t,
+                        .None() then {
+                            when mono.storage.generic_templates.concrete_struct_types.get(
+                                name,
+                            ) in {
+                                .Some(t) then t,
+                                .None() then {
+                                    when mono.storage.generic_templates.concrete_enum_types.get(
+                                        name,
+                                    ) in {
+                                        .Some(t) then t,
+                                        .None() then {
+                                            when mono.storage.generic_templates.lookup_struct(
+                                                name,
+                                            ) in {
+                                                .Some(template) then if template.type_parameters.is_empty(
+                                                ) then Type.StructureType(
+                                                    template.def_id,
+                                                ) else Type.GenericParameter(name),
+                                                .None() then {
+                                                    when mono.storage.generic_templates.lookup_enum(
+                                                        name,
+                                                    ) in {
+                                                        .Some(template) then if template.type_parameters.is_empty(
+                                                        ) then Type.EnumType(
+                                                            template.def_id,
+                                                        )
+                                                        else Type.GenericParameter(name),
+                                                        .None() then {
+                                                            // Keep trait identifiers resolvable during monomorphization
+                                                            // so types like Error ref are preserved as trait-object refs.
+                                                            when trait_info_from_registry(
+                                                                mono,
+                                                                name,
+                                                            ) in {
+                                                                .Some(_) then trait_object_type_from_registry(
+                                                                    mono,
+                                                                    name,
+                                                                ),
+                                                                .None() then Type.GenericParameter(
+                                                                    name,
+                                                                ),
+                                                            }
+                                                        },
+                                                    }
+                                                },
+                                            }
+                                        },
+                                    }
+                                },
+                            }
+                        },
+                    }
+                },
+            }
+        },
+        // TypeNode.Generic: recursively resolve type args and instantiate.
+        .Generic(base, args, _) then {
+            let mutable resolved_args = List[Type].new();
+            for arg in args then {
+                let resolved = resolve_type_node(mono, arg, substitution);
+                resolved_args.push(resolved);
+            };
+            if trait_info_from_registry(mono, base) is .Some(_) then {
+                return Type.TraitObject(
+                    trait_def_id_from_registry(mono, base),
+                    resolved_args,
+                );
+            };
+            when mono.storage.generic_templates.lookup_struct(base) in {
+                .Some(struct_template) then mono.instantiate_struct_impl(
+                    struct_template,
+                    resolved_args,
+                ),
+                .None() then {
+                    when mono.storage.generic_templates.lookup_enum(base) in {
+                        .Some(enum_template) then mono.instantiate_enum_impl(
+                            enum_template,
+                            resolved_args,
+                        ),
+                        .None() then Type.GenericStruct(
+                            generic_struct_def_id(mono, base),
+                            resolved_args,
+                        ),
+                    }
+                },
+            }
+        },
+        // TypeNode.Reference: recursively resolve inner type and wrap.
+        .Reference(inner, is_mutable, _) then {
+            let trait_ref_override = when inner in {
+                .Identifier(name, span) then if trait_info_from_registry(mono, name) is .Some(_) then {
+                    let trait_ref_inner = trait_object_type_from_registry(mono, name);
+                    Option[Type].Some(
+                        if is_mutable then Type.MutableReferenceType(trait_ref_inner)
+                        else Type.ReferenceType(trait_ref_inner),
+                    )
+                } else Option[Type].None(),
+                .Generic(base, args, _) then {
+                    if trait_info_from_registry(mono, base) is .Some(_) then {
+                        let mutable resolved_args = List[Type].new();
+                        for arg in args then {
+                            let resolved = resolve_type_node(mono, arg, substitution);
+                            resolved_args.push(resolved);
+                        };
+                        let trait_ref_inner = Type.TraitObject(
+                            trait_def_id_from_registry(mono, base),
+                            resolved_args,
+                        );
+                        Option[Type].Some(
+                            if is_mutable then Type.MutableReferenceType(
+                                trait_ref_inner,
+                            ) else Type.ReferenceType(trait_ref_inner),
+                        )
+                    } else Option[Type].None()
+                },
+                _ then Option[Type].None(),
+            };
+            when trait_ref_override in {
+                .Some(resolved_trait_ref) then resolved_trait_ref,
+                .None() then {
+                    let resolved_inner = resolve_type_node(mono, inner, substitution);
+                    if is_mutable then Type.MutableReferenceType(resolved_inner)
+                    else Type.ReferenceType(resolved_inner)
+                },
+            }
+        },
+        // TypeNode.BorrowedReference: recursively resolve inner type and wrap with lifetime.
+        .BorrowedReference(inner, is_mutable, _) then {
+            let resolved_inner = resolve_type_node(mono, inner, substitution);
+            if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner)
+            else Type.BorrowedReferenceType(resolved_inner)
+        },
+        // TypeNode.Pointer: recursively resolve inner type and wrap.
+        .Pointer(inner, is_mutable, _) then {
+            let resolved_inner = resolve_type_node(mono, inner, substitution);
+            if is_mutable then Type.MutablePointerType(resolved_inner)
+            else Type.PointerType(resolved_inner)
+        },
+        // TypeNode.WeakReference: recursively resolve inner type and wrap.
+        .WeakReference(inner, is_mutable, _) then {
+            let resolved_inner = resolve_type_node(mono, inner, substitution);
+            if is_mutable then Type.MutableWeakReferenceType(resolved_inner)
+            else Type.WeakReferenceType(resolved_inner)
+        },
+        // TypeNode.FunctionType: recursively resolve param types and return type.
+        .FunctionType(param_types, return_type, _) then {
+            let mutable resolved_params = List[Type].new();
+            for pt in param_types then {
+                let resolved = resolve_type_node(mono, pt, substitution);
+                resolved_params.push(resolved);
+            };
+            let resolved_return = resolve_type_node(mono, return_type, substitution);
+            make_function_type(resolved_params, resolved_return)
+        },
+        // TypeNode.InferredSelf: look up `Self` in substitution map.
+        .InferredSelf(_) then {
+            when substitution.get("Self") in {
+                .Some(self_type) then self_type,
+                .None() then Type.Unknown(),
+            }
+        },
+    };
+};
+
+// ── resolve_type_node_identity ───────────────────────────────────────────────
+
+// The `Type` a `TypeNode` denotes as a SHAPE: every nominal base resolved to
+// its DECLARATION DefId, every type parameter left symbolic.
+//
+// This is the ONE place a type node's spelling becomes an identity. A matcher
+// built on the result compares DefIds and never sees a name. Unlike
+// `resolve_type_node` it does NOT instantiate: a declared shape is matched in
+// its generic form, so `Box[T]` stays `GenericStruct(Box's decl, [T])` instead
+// of becoming a materialized layout.
+//
+// A name that is neither a parameter of this shape nor a declared type has no
+// identity to match against, so it resolves to `Unknown` -- the same "nothing
+// to bind" that comparing spellings used to give it.
+// The `Type` a DECLARED name denotes, or `Unknown` when it names nothing.
+//
+// Shared by the shape resolver and the struct-pattern resolver so both ask the
+// same tables in the same order. A non-generic nominal is registered in the
+// concrete-type tables and a generic one in the template registry, so neither
+// table alone answers.
+let mono_nominal_from_declared_name(mono: Monomorphizer, name: String): Type = {
+    when resolve_builtin_type(name) in {
+        .Some(t) then {
+            return t;
+        },
+        .None() then {},
+    };
+    when mono.storage.generic_templates.concrete_struct_types.get(name) in {
+        .Some(t) then {
+            return t;
+        },
+        .None() then {},
+    };
+    when mono.storage.generic_templates.concrete_enum_types.get(name) in {
+        .Some(t) then {
+            return t;
+        },
+        .None() then {},
+    };
+    when mono.storage.generic_templates.lookup_struct(name) in {
+        .Some(template) then {
+            return if template.type_parameters.is_empty() then {
+                Type.StructureType(template.def_id)
+            } else {
+                Type.GenericStruct(template.def_id, List[Type].new())
+            };
+        },
+        .None() then {},
+    };
+    when mono.storage.generic_templates.lookup_enum(name) in {
+        .Some(template) then {
+            return if template.type_parameters.is_empty() then {
+                Type.EnumType(template.def_id)
+            } else {
+                Type.GenericEnum(template.def_id, List[Type].new())
+            };
+        },
+        .None() then {},
+    };
+    let resolved_trait = mono.storage.generic_templates.resolve_trait_name(name) or else name;
+    return when mono.storage.generic_templates.traits.get(resolved_trait) in {
+        .Some(info) then Type.TraitObject(info.def_id, List[Type].new()),
+        .None() then Type.Unknown(),
+    };
+};
+
+/// The DECLARATION a resolved nominal type stands for. Builtins and type
+/// parameters have none, so they report the invalid DefId.
+let mono_nominal_decl_def_id(t: Type): DefId = {
+    return when t in {
+        .StructureType(def_id) then def_id,
+        .EnumType(def_id) then def_id,
+        .GenericStruct(template_def_id, _) then template_def_id,
+        .GenericEnum(template_def_id, _) then template_def_id,
+        .TraitObject(trait_def_id, _) then trait_def_id,
+        _ then def_id_invalid(),
+    };
+};
+
+public let resolve_type_node_identity(
+    mono: Monomorphizer,
+    node: TypeNode,
+    type_params: List[TypeParameterDecl],
+): Type = {
+    return when node in {
+        .Identifier(name, span) then {
+            if is_type_parameter_name(name, type_params) then {
+                Type.GenericParameter(name)
+            } else {
+                mono_nominal_from_declared_name(mono, name)
+            }
+        },
+        .Generic(base, args, span) then {
+            let mutable resolved_args = List[Type].new();
+            for arg in args then {
+                resolved_args.push(resolve_type_node_identity(mono, arg, type_params));
+            };
+            if trait_info_from_registry(mono, base) is .Some(_) then {
+                return Type.TraitObject(
+                    trait_def_id_from_registry(mono, base),
+                    resolved_args,
+                );
+            };
+            when mono.storage.generic_templates.lookup_struct(base) in {
+                .Some(struct_template) then Type.GenericStruct(
+                    struct_template.def_id,
+                    resolved_args,
+                ),
+                .None() then {
+                    when mono.storage.generic_templates.lookup_enum(base) in {
+                        .Some(enum_template) then Type.GenericEnum(
+                            enum_template.def_id,
+                            resolved_args,
+                        ),
+                        .None() then Type.Unknown(),
+                    }
+                },
+            }
+        },
+        .Reference(inner, is_mutable, _) then {
+            let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
+            if is_mutable then Type.MutableReferenceType(resolved_inner)
+            else Type.ReferenceType(resolved_inner)
+        },
+        .BorrowedReference(inner, is_mutable, span) then {
+            let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
+            if is_mutable then Type.MutableBorrowedReferenceType(resolved_inner)
+            else Type.BorrowedReferenceType(resolved_inner)
+        },
+        .Pointer(inner, is_mutable, span) then {
+            let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
+            if is_mutable then Type.MutablePointerType(resolved_inner)
+            else Type.PointerType(resolved_inner)
+        },
+        .WeakReference(inner, is_mutable, span) then {
+            let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
+            if is_mutable then Type.MutableWeakReferenceType(resolved_inner)
+            else Type.WeakReferenceType(resolved_inner)
+        },
+        .FunctionType(param_nodes, ret_node, span) then {
+            let mutable resolved_params = List[Type].new();
+            for pt in param_nodes then {
+                resolved_params.push(resolve_type_node_identity(mono, pt, type_params));
+            };
+            make_function_type(
+                resolved_params,
+                resolve_type_node_identity(mono, ret_node, type_params),
+            )
+        },
+        // `Self` in a shape position is the receiver, not something to bind.
+        .InferredSelf(span) then Type.Unknown(),
+    };
+};
+
+// ── resolve_builtin_type ──────────────────────────────────────────────────────
+
+// Dict a type name string to a built-in Type variant.
+// Returns None if the name is not a built-in type.
+let resolve_builtin_type(name: String): Option[Type] = {
+    return when name in {
+        "Int" then Option[Type].Some(Type.IntType()),
+        "Int8" then Option[Type].Some(Type.Int8Type()),
+        "Int16" then Option[Type].Some(Type.Int16Type()),
+        "Int32" then Option[Type].Some(Type.Int32Type()),
+        "Int64" then Option[Type].Some(Type.Int64Type()),
+        "UInt" then Option[Type].Some(Type.UIntType()),
+        "UInt8" then Option[Type].Some(Type.UInt8Type()),
+        "UInt16" then Option[Type].Some(Type.UInt16Type()),
+        "UInt32" then Option[Type].Some(Type.UInt32Type()),
+        "UInt64" then Option[Type].Some(Type.UInt64Type()),
+        "WrappingInt" then Option[Type].Some(Type.WrappingIntType()),
+        "WrappingInt8" then Option[Type].Some(Type.WrappingInt8Type()),
+        "WrappingInt16" then Option[Type].Some(Type.WrappingInt16Type()),
+        "WrappingInt32" then Option[Type].Some(Type.WrappingInt32Type()),
+        "WrappingInt64" then Option[Type].Some(Type.WrappingInt64Type()),
+        "WrappingUInt" then Option[Type].Some(Type.WrappingUIntType()),
+        "WrappingUInt8" then Option[Type].Some(Type.WrappingUInt8Type()),
+        "WrappingUInt16" then Option[Type].Some(Type.WrappingUInt16Type()),
+        "WrappingUInt32" then Option[Type].Some(Type.WrappingUInt32Type()),
+        "WrappingUInt64" then Option[Type].Some(Type.WrappingUInt64Type()),
+        "Float32" then Option[Type].Some(Type.Float32Type()),
+        "Float64" then Option[Type].Some(Type.Float64Type()),
+        "Bool" then Option[Type].Some(Type.BoolType()),
+        "Void" then Option[Type].Some(Type.VoidType()),
+        "Never" then Option[Type].Some(Type.NeverType()),
+        _ then Option[Type].None(),
+    };
+};
+

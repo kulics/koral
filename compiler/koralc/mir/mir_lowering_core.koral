@@ -1,0 +1,938 @@
+// MIR lowering: the expression and statement entries, declarations,
+// assignment, control exits, and deferred expressions.
+
+given MIRFunctionBuilder {
+    lower_expression(self, expression: TypedExpr): Option[MIRExprResult] = {
+        if self.current_block_is_terminated() then {
+            return Option[MIRExprResult].None();
+        };
+        return when expression.expr_kind in {
+            .IntegerLiteral(value) then Option[MIRExprResult].Some(
+                MIRExprResult(
+                    expression.expr_type,
+                    ValueCategory.RValue(),
+                    Option[MIROperand].Some(
+                        MIROperand.Constant(
+                            MIRConstant.Integer(value, expression.expr_type),
+                        ),
+                    ),
+                    Option[MIRPlace].None(),
+                ),
+            ),
+            .FloatLiteral(value) then Option[MIRExprResult].Some(
+                MIRExprResult(
+                    expression.expr_type,
+                    ValueCategory.RValue(),
+                    Option[MIROperand].Some(
+                        MIROperand.Constant(
+                            MIRConstant.Float(value, expression.expr_type),
+                        ),
+                    ),
+                    Option[MIRPlace].None(),
+                ),
+            ),
+            .StringLiteral(value) then Option[MIRExprResult].Some(
+                MIRExprResult(
+                    expression.expr_type,
+                    ValueCategory.RValue(),
+                    Option[MIROperand].Some(
+                        MIROperand.Constant(
+                            MIRConstant.StringLiteral(value, expression.expr_type),
+                        ),
+                    ),
+                    Option[MIRPlace].None(),
+                ),
+            ),
+            .BoolLiteral(value) then Option[MIRExprResult].Some(
+                MIRExprResult(
+                    Type.BoolType(),
+                    ValueCategory.RValue(),
+                    Option[MIROperand].Some(
+                        MIROperand.Constant(MIRConstant.Boolean(value)),
+                    ),
+                    Option[MIRPlace].None(),
+                ),
+            ),
+            .Variable(symbol) then {
+                when symbol.kind in {
+                    .Function() then Option[MIRExprResult].Some(
+                        MIRExprResult(
+                            symbol.symbol_type,
+                            ValueCategory.RValue(),
+                            Option[MIROperand].Some(MIROperand.Function(symbol)),
+                            Option[MIRPlace].None(),
+                        ),
+                    ),
+                    _ then {
+                        let place = self.lower_place(expression) or else MIRPlace.Global(
+                            symbol.def_id,
+                        );
+                        let declared_type = when place in {
+                            .Local(local_id) then self.type_of_local(local_id),
+                            .Global(_) then symbol.symbol_type,
+                            _ then symbol.symbol_type,
+                        };
+                        // Every reference-like shape behaves alike: deref when
+                        // the declared pointee is the expression's own type,
+                        // keep the place otherwise. In particular a raw-pointer
+                        // local whose expression type is the POINTEE is the
+                        // re-typed `self` of a drop body -- the drop ABI hands
+                        // it in as a pointer while the type system still calls
+                        // it `Self`. A pointer the user declared carries the
+                        // pointer type on both sides and is left alone.
+                        let result_place = when declared_type in {
+                            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref) or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) or .PointerType(inner_ref) or .MutablePointerType(inner_ref) where inner_ref == expression.expr_type then MIRPlace.Deref(
+                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                                inner_ref,
+                            ),
+                            _ then place,
+                        };
+                        Option[MIRExprResult].Some(
+                            MIRExprResult(
+                                expression.expr_type,
+                                typed_expr_value_category(expression),
+                                Option[MIROperand].None(),
+                                Option[MIRPlace].Some(result_place),
+                            ),
+                        )
+                    },
+                }
+            },
+            .Block(statements, tail_expression) then self.lower_block(
+                statements,
+                tail_expression,
+                expression.expr_type,
+            ),
+            .IfExpr(condition, then_branch, else_branch) then self.lower_if_expression(
+                condition,
+                then_branch,
+                else_branch,
+                expression.expr_type,
+            ),
+            .WhenExpr(subject, arms) then self.lower_when_expression(
+                subject,
+                arms,
+                expression.expr_type,
+            ),
+            .ArithmeticExpr(left, op, right) then Option[MIRExprResult].Some(
+                self.lower_binary(
+                    left,
+                    right,
+                    expression.expr_type,
+                    MIRBinaryOperator.Arithmetic(op, true),
+                ),
+            ),
+            .WrappingArithmeticExpr(left, op, right) then Option[MIRExprResult].Some(
+                self.lower_binary(
+                    left,
+                    right,
+                    expression.expr_type,
+                    MIRBinaryOperator.WrappingArithmetic(op),
+                ),
+            ),
+            .ComparisonExpr(left, op, right) then Option[MIRExprResult].Some(
+                self.lower_binary(
+                    left,
+                    right,
+                    expression.expr_type,
+                    MIRBinaryOperator.Comparison(op),
+                ),
+            ),
+            .BitwiseExpr(left, op, right) then Option[MIRExprResult].Some(
+                self.lower_binary(
+                    left,
+                    right,
+                    expression.expr_type,
+                    MIRBinaryOperator.Bitwise(op, true),
+                ),
+            ),
+            .AndExpr(left, right) then self.lower_short_circuit(
+                left,
+                right,
+                expression.expr_type,
+                false,
+            ),
+            .OrExpr(left, right) then self.lower_short_circuit(
+                left,
+                right,
+                expression.expr_type,
+                true,
+            ),
+            .Unary(op, inner) then Option[MIRExprResult].Some(
+                self.lower_unary_or_negate(op, inner, expression.expr_type),
+            ),
+            .CastExpr(target_type, inner) then {
+                let mutable source_type = self.deref_pointee_type(
+                    inner.expr_type,
+                    inner.expr_type,
+                );
+                let operand = self.lower_operand_for_expected_type(inner, source_type);
+                let result = self.materialize(
+                    MIRValue.Cast(operand, target_type, typed_expr_span_at(inner, self.context)),
+                    target_type,
+                );
+                Option[MIRExprResult].Some(
+                    MIRExprResult(
+                        target_type,
+                        ValueCategory.RValue(),
+                        Option[MIROperand].Some(result),
+                        Option[MIRPlace].None(),
+                    ),
+                )
+            },
+            .RefExpr(inner) then self.lower_ref_expression(inner, expression.expr_type),
+            .PtrExpr(inner) then {
+                when self.lower_place(inner) in {
+                    .Some(place) then {
+                        let result = self.materialize(
+                            MIRValue.Pointer(place),
+                            expression.expr_type,
+                        );
+                        Option[MIRExprResult].Some(
+                            MIRExprResult(
+                                expression.expr_type,
+                                ValueCategory.RValue(),
+                                Option[MIROperand].Some(result),
+                                Option[MIRPlace].None(),
+                            ),
+                        )
+                    },
+                    .None() then self.void_result(),
+                }
+            },
+            .DerefExpr(_) then {
+                when self.lower_place(expression) in {
+                    .Some(place) then Option[MIRExprResult].Some(
+                        MIRExprResult(
+                            expression.expr_type,
+                            ValueCategory.LValue(),
+                            Option[MIROperand].None(),
+                            Option[MIRPlace].Some(place),
+                        ),
+                    ),
+                    .None() then self.void_result(),
+                }
+            },
+            .UnsafeDerefExpr(_) then {
+                when self.lower_place(expression) in {
+                    .Some(place) then Option[MIRExprResult].Some(
+                        MIRExprResult(
+                            expression.expr_type,
+                            ValueCategory.LValue(),
+                            Option[MIROperand].None(),
+                            Option[MIRPlace].Some(place),
+                        ),
+                    ),
+                    .None() then self.void_result(),
+                }
+            },
+            .MemberPath(...) then {
+                when self.lower_place(expression) in {
+                    .Some(place) then {
+                        let mutable place_result_type = self.place_type(place);
+                        let result_type = when place_result_type in {
+                            .Unknown() then expression.expr_type,
+                            _ then place_result_type,
+                        };
+                        Option[MIRExprResult].Some(
+                            MIRExprResult(
+                                result_type,
+                                typed_expr_value_category(expression),
+                                Option[MIROperand].None(),
+                                Option[MIRPlace].Some(place),
+                            ),
+                        )
+                    },
+                    .None() then when self.lower_materialized_member_path_place(
+                        expression,
+                    ) in {
+                        .Some(place) then {
+                            let mutable place_result_type = self.place_type(place);
+                            let result_type = when place_result_type in {
+                                .Unknown() then expression.expr_type,
+                                _ then place_result_type,
+                            };
+                            Option[MIRExprResult].Some(
+                                MIRExprResult(
+                                    result_type,
+                                    typed_expr_value_category(expression),
+                                    Option[MIROperand].None(),
+                                    Option[MIRPlace].Some(place),
+                                ),
+                            )
+                        },
+                        .None() then self.void_result(),
+                    },
+                }
+            },
+            .Call(callee, args) then self.lower_call(callee, args, expression.expr_type),
+            .GenericCall(function_symbol, _, args) then self.finish_call_from_typed_args(
+                MIROperand.Function(function_symbol),
+                args,
+                expression.expr_type,
+            ),
+            .StaticMethodCall(receiver_type, method_name, method, _, _, args) then {
+                let resolved_method = self.resolve_static_method_symbol(
+                    receiver_type,
+                    method_name,
+                    method,
+                    args,
+                    expression.expr_type,
+                );
+                self.finish_call_from_typed_args(
+                    MIROperand.Function(resolved_method),
+                    args,
+                    expression.expr_type,
+                )
+            },
+            .TypeConstruction(identifier, _, args) then self.lower_type_construction(
+                identifier,
+                args,
+                expression.expr_type,
+            ),
+            .EnumConstruction(enum_type, case_name, args) then self.lower_enum_construction(
+                enum_type,
+                case_name,
+                args,
+                expression.expr_type,
+            ),
+            .MethodReference(base_expr, _, method, _, _, _) then {
+                // If the method takes only self (1 param), call it with base as receiver.
+                // If it takes more params, return as a function value.
+                let param_count = when method.symbol_type in {
+                    .FunctionType(params, _) then params.count(),
+                    _ then UInt(0),
+                };
+                if param_count <= UInt(1) then {
+                    let result_type = when method.symbol_type in {
+                        .FunctionType(_, ret) then ret,
+                        _ then expression.expr_type,
+                    };
+                    let base_emission = self.lower_value(base_expr);
+                    let mutable call_values = List[MIRValue].new();
+                    let mutable call_ownerships = List[MIROwnershipUse].new();
+                    call_values.push(base_emission);
+                    call_ownerships.push(self.ownership_use(base_expr));
+                    return self.finish_call(
+                        MIROperand.Function(method),
+                        call_values,
+                        call_ownerships,
+                        result_type,
+                    );
+                } else {
+                    Option[MIRExprResult].Some(
+                        MIRExprResult(
+                            expression.expr_type,
+                            ValueCategory.RValue(),
+                            Option[MIROperand].Some(MIROperand.Function(method)),
+                            Option[MIRPlace].None(),
+                        ),
+                    )
+                }
+            },
+            .TraitMethodPlaceholder(_, _, method, _, _, _) then {
+                Option[MIRExprResult].Some(
+                    MIRExprResult(
+                        expression.expr_type,
+                        ValueCategory.RValue(),
+                        Option[MIROperand].Some(MIROperand.Function(method)),
+                        Option[MIRPlace].None(),
+                    ),
+                )
+            },
+            .TraitObjectConversion(inner, trait_type, concrete_type) then self.lower_trait_object_conversion(
+                inner,
+                trait_type,
+                concrete_type,
+                expression.expr_type,
+            ),
+            .TraitMethodCall(receiver, trait_type, method_name, method_index, args) then self.lower_trait_method_call(
+                receiver,
+                trait_type,
+                method_name,
+                method_index,
+                args,
+                expression.expr_type,
+            ),
+            .IntrinsicCall(node) then self.lower_intrinsic_call(node),
+            .LambdaExpr(params, return_type, body) then self.lower_lambda_expression(
+                params,
+                return_type,
+                body,
+                expression.expr_type,
+            ),
+            .GenericInstantiation(_, _) then self.void_result(),
+            .IsExpr(subject, pattern, negated) then Option[MIRExprResult].Some(
+                self.lower_pattern_test(subject, pattern, negated, expression.expr_type),
+            ),
+        };
+    };
+
+    void_result(self): Option[MIRExprResult] = {
+        return Option[MIRExprResult].Some(
+            MIRExprResult(
+                Type.VoidType(),
+                ValueCategory.RValue(),
+                Option[MIROperand].Some(MIROperand.Constant(MIRConstant.Void())),
+                Option[MIRPlace].None(),
+            ),
+        );
+    };
+
+    // Mirrors Swift MIRLowerer block lowering: statements are lowered as
+    // statements, and the optional tail expression produces the block's value.
+    private lower_block(
+        self,
+        statements: List[TypedStatement],
+        tail_expression: Option[TypedExpr],
+        block_type: Type,
+    ): Option[MIRExprResult] = {
+        // Declare the block result before entering the block scope: when the
+        // block's value escapes (e.g. `return { ... }`) the scope exit must not
+        // tear down the local holding it.
+        let has_result = not self.type_is_void_or_never(block_type);
+        let mutable result_local = Option[MIRLocalID].None();
+        if has_result then {
+            let local = self.make_temporary(block_type, "block_result");
+            self.append_statement(MIRStatement.Declare(local.id));
+            result_local = Option[MIRLocalID].Some(local.id);
+        };
+        let scope = self.make_scope_id();
+        self.scope_stack.push(scope);
+        self.append_statement(MIRStatement.ScopeEnter(scope));
+        for stmt in statements then {
+            self.lower_statement(stmt);
+        };
+        // The tail binds like a `let` value so a managed rvalue moves into the
+        // block result instead of being left owned by a temporary.
+        when tail_expression in {
+            .Some(tail) then {
+                if not self.current_block_is_terminated() then {
+                    when result_local in {
+                        .Some(local_id) then {
+                            self.append_statement(
+                                MIRStatement.Assign(
+                                    MIRPlace.Local(local_id),
+                                    self.lower_value(tail),
+                                ),
+                            );
+                        },
+                        .None() then {
+                            let _ = self.lower_expression(tail);
+                        },
+                    };
+                };
+            },
+            .None() then {},
+        };
+        if not self.current_block_is_terminated() then {
+            self.emit_deferred_exprs(scope);
+        };
+        if not self.current_block_is_terminated() then {
+            self.append_statement(MIRStatement.ScopeExit(scope));
+        };
+        let _ = self.scope_stack.pop();
+        self.deferred_exprs_by_scope.remove(scope.raw_value);
+        return when result_local in {
+            .Some(local_id) then Option[MIRExprResult].Some(
+                MIRExprResult(
+                    block_type,
+                    ValueCategory.RValue(),
+                    Option[MIROperand].Some(MIROperand.Local(local_id)),
+                    Option[MIRPlace].None(),
+                ),
+            ),
+            .None() then self.void_result(),
+        };
+    };
+
+    private lower_statement(self, statement: TypedStatement): Void = {
+        if self.current_block_is_terminated() then {
+            return;
+        };
+        when statement in {
+            .LetStmt(symbol, value, _) then self.lower_variable_declaration(
+                symbol,
+                value,
+            ),
+            .TupleLetStmt(pair_type, symbols, value, _) then self.lower_tuple_variable_declaration(
+                pair_type,
+                symbols,
+                value,
+            ),
+            .AssignmentStmt(target, value, _) then self.lower_assignment(target, value),
+            .ExprStmt(expr, _) then {
+                when self.lower_expression(expr) in {
+                    .Some(result) then when result.operand in {
+                        .Some(operand) then self.append_statement(
+                            MIRStatement.Evaluate(MIRValue.Operand(operand)),
+                        ),
+                        .None() then when result.place in {
+                            .Some(place) then self.append_statement(
+                                MIRStatement.Evaluate(
+                                    MIRValue.PlaceRead(place, self.ownership_use(expr)),
+                                ),
+                            ),
+                            .None() then {},
+                        },
+                    },
+                    .None() then {},
+                };
+            },
+            .IfStmt(condition, then_branch, else_branch, _) then {
+                let _ = self.lower_if_expression(
+                    condition,
+                    then_branch,
+                    else_branch,
+                    Type.VoidType(),
+                );
+            },
+            .WhileStmt(condition, body, _) then self.lower_while(condition, body),
+            .WhenStmt(subject, arms, _) then {
+                let _ = self.lower_when_expression(subject, arms, Type.VoidType());
+            },
+            .ReturnStmt(value, _) then self.lower_return(value),
+            .BreakStmt(_) then self.lower_break(),
+            .ContinueStmt(_) then self.lower_continue(),
+            .DeferStmt(expr, _) then {
+                if self.scope_stack.is_empty() then {
+                    let _ = self.lower_expression(expr);
+                } else {
+                    let scope = self.scope_stack[self.scope_stack.count() - UInt(1)];
+                    let mutable finalies = self.deferred_exprs_by_scope.get(
+                        scope.raw_value,
+                    ) or else List[TypedExpr].new();
+                    finalies.push(expr);
+                    self.deferred_exprs_by_scope.insert(scope.raw_value, finalies);
+                };
+            },
+        };
+    };
+
+    private lower_variable_declaration(self, symbol: Symbol, value: TypedExpr): Void = {
+        if self.type_is_void_or_never(value.expr_type) then {
+            let _ = self.lower_expression(value);
+            return;
+        };
+        if symbol.kind is .Variable(variable_kind) and variable_kind is .SubscriptBaseBorrowAlias() then {
+            when self.lower_place(value) in {
+                .Some(place) then {
+                    // Preserve subscript base temps as aliases to the original lvalue.
+                    self.pattern_place_by_def_id.insert(symbol.def_id.id, place);
+                    return;
+                },
+                .None() then {},
+            };
+        };
+        let lowered_value = self.lower_value(value);
+        let mutable lowered_value_type = self.type_of_value(lowered_value);
+        // Defensive guard: if a substituted symbol type drifts from the
+        // lowered MIR value type, prefer the lowered value type so local
+        // declarations stay assignment-compatible.
+        let mutable declared_type = if self.concrete_layout_key_for_type(
+            symbol.symbol_type,
+        ) == self.concrete_layout_key_for_type(lowered_value_type) then symbol.symbol_type
+        else lowered_value_type;
+        let local = self.make_local(
+            self.context.symbol_name(symbol),
+            declared_type,
+            MIRStorage.Local(),
+            Option[Symbol].Some(symbol),
+        );
+        self.local_by_def_id.insert(symbol.def_id.id, local.id);
+        self.append_statement(MIRStatement.Declare(local.id));
+        self.append_statement(
+            MIRStatement.Assign(MIRPlace.Local(local.id), lowered_value),
+        );
+    };
+
+    /// `let (a, b, c) = expr;` -- bind each slot to the struct field at the same
+    /// position. The number of slots equals the number of fields.
+    private lower_tuple_variable_declaration(
+        self,
+        pair_type: Type,
+        symbols: List[Option[Symbol]],
+        value: TypedExpr,
+    ): Void = {
+        let pair_local = self.make_temporary(pair_type, "tuple");
+        self.append_statement(MIRStatement.Declare(pair_local.id));
+        self.append_statement(
+            MIRStatement.Assign(MIRPlace.Local(pair_local.id), self.lower_value(value)),
+        );
+        let pair_place = MIRPlace.Local(pair_local.id);
+        let mutable i: UInt = 0;
+        while i < symbols.count() then {
+            let field_name = self.tuple_field_name_at(pair_type, i);
+            self.lower_pair_binding(symbols[i], pair_place, pair_type, field_name);
+            i += 1;
+        };
+    };
+
+    /// The name of the struct field at position `index`. Identity only: the
+    /// field list comes from the type's DECLARATION, and std's `Pair` is reached
+    /// through its lang-item identity rather than its spelling.
+    private tuple_field_name_at(self, pair_type: Type, index: UInt): String = {
+        return when pair_type in {
+            .GenericStruct(template_def_id, _) then {
+                if is_std_pair_def_id(self.context, template_def_id) then {
+                    return if index == UInt(0) then "first" else "second";
+                };
+                self.declared_field_name_at(template_def_id, index)
+            },
+            .StructureType(def_id) then self.declared_field_name_at(def_id, index),
+            _ then "field_\(index)",
+        };
+    };
+
+    private declared_field_name_at(self, def_id: DefId, index: UInt): String = {
+        return when self.context.get_struct_fields(def_id) in {
+            .Some(fields) then when fields.get(index) in {
+                .Some(field) then field.name,
+                .None() then "field_\(index)",
+            },
+            .None() then "field_\(index)",
+        };
+    };
+
+    private pair_field_type(self, pair_type: Type, field_name: String): Type = {
+        return when pair_type in {
+            // Identity: Std's `Pair` is a LANG ITEM, matched by declaration.
+            .GenericStruct(template_def_id, args) then {
+                if is_std_pair_def_id(self.context, template_def_id) and args.count() == UInt(
+                    2,
+                ) then {
+                    return if field_name == "first" then args[UInt(0)] else args[
+                        UInt(1)
+                    ];
+                };
+                Type.Unknown()
+            },
+            .StructureType(def_id) then when self.context.get_struct_fields(def_id) in {
+                .Some(fields) then {
+                    for field in fields then {
+                        if field.name == field_name then {
+                            return field.field_type;
+                        };
+                    };
+                    Type.Unknown()
+                },
+                .None() then Type.Unknown(),
+            },
+            _ then Type.Unknown(),
+        };
+    };
+
+    private lower_pair_binding(
+        self,
+        symbol: Option[Symbol],
+        pair_place: MIRPlace,
+        pair_type: Type,
+        field_name: String,
+    ): Void = {
+        let field_type = when symbol in {
+            .Some(sym) then sym.symbol_type,
+            .None() then self.pair_field_type(pair_type, field_name),
+        };
+        let field_symbol = self.make_synthetic_symbol(field_name, field_type);
+        let field_place = MIRPlace.Field(pair_place, field_symbol);
+        when symbol in {
+            .Some(sym) then {
+                let local = self.make_local(
+                    self.context.symbol_name(sym),
+                    sym.symbol_type,
+                    MIRStorage.Local(),
+                    Option[Symbol].Some(sym),
+                );
+                self.local_by_def_id.insert(sym.def_id.id, local.id);
+                self.append_statement(MIRStatement.Declare(local.id));
+                self.append_statement(
+                    MIRStatement.Assign(
+                        MIRPlace.Local(local.id),
+                        MIRValue.PlaceRead(field_place, MIROwnershipUse.Move()),
+                    ),
+                );
+            },
+            .None() then {
+                if type_needs_drop(field_type) then {
+                    self.append_statement(MIRStatement.Drop(field_place));
+                };
+            },
+        };
+    };
+
+    private lower_assignment(self, target: TypedExpr, value: TypedExpr): Void = {
+        when self.lower_place(target) in {
+            .Some(place) then self.append_statement(
+                MIRStatement.Assign(place, self.lower_value(value)),
+            ),
+            .None() then {
+                // Swift MIRLowerer never reaches this: a member path whose base is a
+                // call falls back to lowerMaterializedMemberPathPlace. Report instead of
+                // silently discarding the store, which is how `pairs[0].x = 200` lost its write.
+                let _ = self.lower_expression(value);
+                self.report_lowering_error(
+                    "Unsupported assignment target reached MIR lowering",
+                );
+            },
+        };
+    };
+
+    private lower_return(self, value: Option[TypedExpr]): Void = {
+        when value in {
+            .Some(expr) then {
+                if self.type_is_never(expr.expr_type) then {
+                    let _ = self.lower_expression(expr);
+                    self.terminate(MIRTerminator.Unreachable());
+                    return;
+                };
+                when expr.expr_kind in {
+                    .RefExpr(inner) then when self.lower_place(inner) in {
+                        .Some(place) then {
+                            let kind = self.reference_kind(expr.expr_type);
+                            // Swift MIRLowerer `case .return` with a referenceExpression always
+                            // uses .heapOwnedMove: the returned owned reference takes the pointee
+                            // out of the place, which is about to go out of scope.
+                            let operand = self.materialize(
+                                MIRValue.Ref(
+                                    place,
+                                    kind,
+                                    MIRReferenceAllocation.HeapOwnedMove(),
+                                ),
+                                expr.expr_type,
+                            );
+                            self.emit_scope_exits(UInt(0));
+                            self.terminate(
+                                MIRTerminator.ReturnValue(
+                                    Option[MIROperand].Some(operand),
+                                ),
+                            );
+                            return;
+                        },
+                        .None() then {},
+                    },
+                    _ then {},
+                };
+                let result = self.lower_expression(expr);
+                if self.current_block_is_terminated() then {
+                    return;
+                };
+                when self.return_operand(result) in {
+                    .Some(operand) then {
+                        self.emit_scope_exits(UInt(0));
+                        self.terminate(
+                            MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
+                        );
+                    },
+                    .None() then self.terminate(MIRTerminator.Unreachable()),
+                };
+            },
+            .None() then {
+                self.emit_scope_exits(UInt(0));
+                self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
+            },
+        };
+    };
+
+    private lower_break(self): Void = {
+        if self.loop_stack.is_empty() then {
+            return;
+        };
+        let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
+        self.emit_scope_exits(loop.scope_depth);
+        self.terminate(MIRTerminator.Goto(loop.break_block));
+    };
+
+    private lower_continue(self): Void = {
+        if self.loop_stack.is_empty() then {
+            return;
+        };
+        let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
+        self.emit_scope_exits(loop.scope_depth);
+        self.terminate(MIRTerminator.Goto(loop.continue_block));
+    };
+
+    private emit_scope_exits(self, base_scope_depth: UInt): Void = {
+        let mutable depth = self.scope_stack.count();
+        while depth > base_scope_depth then {
+            let scope = self.scope_stack[depth - UInt(1)];
+            self.emit_deferred_exprs(scope);
+            if self.current_block_is_terminated() then {
+                return;
+            };
+            self.append_statement(MIRStatement.ScopeExit(scope));
+            depth -= 1;
+        };
+    };
+
+    emit_deferred_exprs(self, scope: MIRScopeID): Void = {
+        let finalies = self.deferred_exprs_by_scope.get(scope.raw_value) or else {
+            return;
+        };
+        let mutable index = finalies.count();
+        while index > UInt(0) then {
+            index -= 1;
+            let defer_expr = finalies[index];
+            let _ = self.lower_expression(defer_expr);
+            if self.current_block_is_terminated() then {
+                return;
+            };
+        };
+    };
+
+    private assign_branch_result(
+        self,
+        result: MIRExprResult,
+        local_id: MIRLocalID,
+    ): Void = {
+        when result.operand in {
+            .Some(operand) then self.append_statement(
+                MIRStatement.Assign(MIRPlace.Local(local_id), MIRValue.Operand(operand)),
+            ),
+            .None() then when result.place in {
+                .Some(place) then self.append_statement(
+                    MIRStatement.Assign(
+                        MIRPlace.Local(local_id),
+                        MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
+                    ),
+                ),
+                .None() then {},
+            },
+        };
+    };
+
+    private lower_if_expression(
+        self,
+        condition: TypedExpr,
+        then_branch: TypedExpr,
+        else_branch: Option[TypedExpr],
+        result_type: Type,
+    ): Option[MIRExprResult] = {
+        let condition_operand = self.lower_operand_for_expected_type(
+            condition,
+            Type.BoolType(),
+        );
+        let condition_block = self.current_block_id();
+        let has_result = not self.type_is_void_or_never(result_type);
+        let mutable result_local = Option[MIRLocalID].None();
+        if has_result then {
+            let local = self.make_temporary(result_type, "if_result");
+            self.append_statement(MIRStatement.Declare(local.id));
+            result_local = Option[MIRLocalID].Some(local.id);
+        };
+        let then_block = self.make_block();
+        let else_block = self.make_block();
+        let join_block = self.make_block();
+        self.set_current_block(condition_block);
+        self.terminate(MIRTerminator.Branch(condition_operand, then_block, else_block));
+        self.set_current_block(then_block);
+        self.lower_branch_body(then_branch, result_local);
+        if not self.current_block_is_terminated() then {
+            self.terminate(MIRTerminator.Goto(join_block));
+        };
+        self.set_current_block(else_block);
+        when else_branch in {
+            .Some(else_expr) then self.lower_branch_body(else_expr, result_local),
+            .None() then {},
+        };
+        if not self.current_block_is_terminated() then {
+            self.terminate(MIRTerminator.Goto(join_block));
+        };
+        self.set_current_block(join_block);
+        return if result_local is .Some(local_id) then Option[MIRExprResult].Some(
+            MIRExprResult(
+                result_type,
+                ValueCategory.RValue(),
+                Option[MIROperand].Some(MIROperand.Local(local_id)),
+                Option[MIRPlace].None(),
+            ),
+        ) else self.void_result();
+    };
+
+    prepare_pattern_subject(
+        self,
+        subject: TypedExpr,
+        name_hint: String,
+    ): Option[Pair[MIRPlace, Option[MIRScopeID]]] = {
+        return when self.lower_expression(subject) in {
+            .Some(result) then when result.place in {
+                .Some(place) then Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
+                    Pair[MIRPlace, Option[MIRScopeID]](place, Option[MIRScopeID].None()),
+                ),
+                .None() then when result.operand in {
+                    .Some(operand) then {
+                        let subject_scope = self.make_scope_id();
+                        self.scope_stack.push(subject_scope);
+                        self.append_statement(MIRStatement.ScopeEnter(subject_scope));
+                        let subject_local = self.make_temporary(
+                            subject.expr_type,
+                            name_hint,
+                        );
+                        self.append_statement(MIRStatement.Declare(subject_local.id));
+                        self.append_statement(
+                            MIRStatement.Assign(
+                                MIRPlace.Local(subject_local.id),
+                                MIRValue.Operand(operand),
+                            ),
+                        );
+                        Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
+                            Pair[MIRPlace, Option[MIRScopeID]](
+                                MIRPlace.Local(subject_local.id),
+                                Option[MIRScopeID].Some(subject_scope),
+                            ),
+                        )
+                    },
+                    .None() then Option[Pair[MIRPlace, Option[MIRScopeID]]].None(),
+                },
+            },
+            .None() then Option[Pair[MIRPlace, Option[MIRScopeID]]].None(),
+        };
+    };
+
+    // Mirrors Swift MIRLowerer.lowerBranchBody: the branch value is bound with
+    // lowerValue so a managed rvalue keeps its ownership instead of being
+    // flattened into an operand whose temporary the branch scope drops.
+    lower_branch_body(
+        self,
+        expression: TypedExpr,
+        result_local: Option[MIRLocalID],
+    ): Void = {
+        when result_local in {
+            .Some(local_id) then {
+                if expression.expr_type is .NeverType() or is .VoidType() then {
+                    let _ = self.lower_expression(expression);
+                    return;
+                };
+                when expression.expr_kind in {
+                    .RefExpr(inner) then when self.lower_place(inner) in {
+                        .Some(place) then {
+                            let kind = self.reference_kind(expression.expr_type);
+                            self.append_statement(
+                                MIRStatement.Assign(
+                                    MIRPlace.Local(local_id),
+                                    MIRValue.Ref(
+                                        place,
+                                        kind,
+                                        MIRReferenceAllocation.HeapOwned(),
+                                    ),
+                                ),
+                            );
+                            return;
+                        },
+                        .None() then {},
+                    },
+                    _ then {},
+                };
+                self.append_statement(
+                    MIRStatement.Assign(
+                        MIRPlace.Local(local_id),
+                        self.lower_value(expression),
+                    ),
+                );
+            },
+            .None() then {
+                let _ = self.lower_expression(expression);
+            },
+        };
+    };
+
+};

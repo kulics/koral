@@ -1,0 +1,685 @@
+// Global node resolution for the monomorphization phase: source params,
+// return types, and given member bodies.
+
+// ── resolve_types_in_global_node ──────────────────────────────────────────────
+
+let resolve_global_node_source_params(
+    mono: Monomorphizer,
+    def_id: DefId,
+    fallback: List[TypedParam],
+): List[TypedParam] = {
+    let param_specs = mono.storage.context.get_param_specs(def_id) or else List[FunctionParamSpec].new(
+    );
+    return when mono.storage.context.get_function_type(def_id) in {
+        .Some(function_type) then when function_type in {
+            .FunctionType(param_entries, _) then {
+                let mutable params = List[TypedParam].new();
+                let mutable index: UInt = 0;
+                for entry in param_entries then {
+                    let spec = if index < param_specs.count() then param_specs[index]
+                    else FunctionParamSpec("", false, false, false, Option[Expr].None());
+                    params.push(
+                        TypedParam(
+                            spec.name,
+                            spec.is_mutable,
+                            entry.param_type,
+                            spec.named,
+                            spec.default_value,
+                        ),
+                    );
+                    index += 1;
+                };
+                params
+            },
+            _ then fallback,
+        },
+        .None() then fallback,
+    };
+};
+
+let resolve_global_node_source_return_type(
+    mono: Monomorphizer,
+    def_id: DefId,
+    fallback: Type,
+): Type = {
+    return mono.storage.context.get_function_return_type(def_id) or else fallback;
+};
+
+let mono_all_given_member_bodies_resolved(
+    mono: Monomorphizer,
+    members: List[TypedGivenMember],
+): Bool = {
+    for member_ref in members then {
+        if not mono.storage.resolved_given_member_body_ids.contains(
+            member_ref.def_id.id,
+        ) then {
+            return false;
+        };
+    };
+    return true;
+};
+
+// Resolve parameterized types in all global nodes.
+// Processes: function params, return types, struct fields, enum case params,
+// and given declaration methods.
+//
+public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): TypedDecl = {
+    return when node in {
+        // FunctionDecl: resolve param types, return type, and body.
+        // Must resolve body types so no GenericStruct/GenericEnum reach CodeGen.
+        .FunctionDecl(access, name, params, return_type, body, span, id) then {
+            if mono.storage.resolved_function_body_ids.contains(id.def_id.id) then {
+                return TypedDecl.FunctionDecl(
+                    access,
+                    name,
+                    params,
+                    return_type,
+                    body,
+                    span,
+                    id,
+                );
+            };
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params);
+            let mutable resolved_params = List[TypedParam].new();
+            for p in source_params then {
+                let mutable resolved_type = resolve_parameterized_type(
+                    mono,
+                    p.param_type,
+                );
+                resolved_params.push(
+                    TypedParam(
+                        p.name,
+                        p.is_mutable,
+                        resolved_type,
+                        p.named,
+                        p.default_value,
+                    ),
+                );
+            };
+            let resolved_return = resolve_parameterized_type(
+                mono,
+                resolve_global_node_source_return_type(mono, id.def_id, return_type),
+            );
+            let source_body = when mono.storage.context.take_concrete_function_body(
+                id.def_id,
+            ) in {
+                .Some(existing_body) then existing_body,
+                .None() then body,
+            };
+            mono.storage.expression_resolve_steps = UInt(0);
+            mono.storage.expression_resolve_limited = false;
+            let resolved_body = resolve_types_in_expression(mono, source_body);
+            let mutable context = mono.storage.context;
+            context.set_concrete_function_body(id.def_id, resolved_body);
+            mono.storage.resolved_function_body_ids.insert(id.def_id.id);
+            TypedDecl.FunctionDecl(
+                access,
+                name,
+                resolved_params,
+                resolved_return,
+                make_zero_integer_literal_expr(resolved_return),
+                span,
+                id,
+            )
+        },
+        // IntrinsicFunctionDecl: resolve param types and return type.
+        .IntrinsicFunctionDecl(access, name, params, return_type, span, id) then {
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params);
+            let mutable resolved_params = List[TypedParam].new();
+            for p in source_params then {
+                let mutable resolved_type = resolve_parameterized_type(
+                    mono,
+                    p.param_type,
+                );
+                resolved_params.push(
+                    TypedParam(
+                        p.name,
+                        p.is_mutable,
+                        resolved_type,
+                        p.named,
+                        p.default_value,
+                    ),
+                );
+            };
+            let resolved_return = resolve_parameterized_type(
+                mono,
+                resolve_global_node_source_return_type(mono, id.def_id, return_type),
+            );
+            TypedDecl.IntrinsicFunctionDecl(
+                access,
+                name,
+                resolved_params,
+                resolved_return,
+                span,
+                id,
+            )
+        },
+        // ForeignFunctionDecl: resolve param types and return type.
+        .ForeignFunctionDecl(access, name, params, return_type, span, id) then {
+            let source_params = resolve_global_node_source_params(mono, id.def_id, params);
+            let mutable resolved_params = List[TypedParam].new();
+            for p in source_params then {
+                let mutable resolved_type = resolve_parameterized_type(
+                    mono,
+                    p.param_type,
+                );
+                resolved_params.push(
+                    TypedParam(
+                        p.name,
+                        p.is_mutable,
+                        resolved_type,
+                        p.named,
+                        p.default_value,
+                    ),
+                );
+            };
+            let resolved_return = resolve_parameterized_type(
+                mono,
+                resolve_global_node_source_return_type(mono, id.def_id, return_type),
+            );
+            TypedDecl.ForeignFunctionDecl(
+                access,
+                name,
+                resolved_params,
+                resolved_return,
+                span,
+                id,
+            )
+        },
+        // TypeStructDecl: resolve field types.
+        .TypeStructDecl(access, name, fields, span, id) then {
+            let source_fields = when mono.storage.context.get_struct_fields(id.def_id) in {
+                .Some(existing) then {
+                    let mutable hydrated = List[TypedField].new();
+                    for field in existing then {
+                        hydrated.push(
+                            TypedField(
+                                field.access,
+                                field.name,
+                                field.is_mutable,
+                                field.field_type,
+                                field.named,
+                                field.default_value,
+                            ),
+                        );
+                    };
+                    hydrated
+                },
+                .None() then fields,
+            };
+            let mutable resolved_fields = List[TypedField].new();
+            for f in source_fields then {
+                let mutable resolved_type = resolve_parameterized_type(
+                    mono,
+                    f.field_type,
+                );
+                resolved_fields.push(
+                    TypedField(
+                        f.access,
+                        f.name,
+                        f.is_mutable,
+                        resolved_type,
+                        f.named,
+                        f.default_value,
+                    ),
+                );
+            };
+            TypedDecl.TypeStructDecl(access, name, resolved_fields, span, id)
+        },
+        // TypeEnumDecl: resolve case param types.
+        .TypeEnumDecl(access, name, cases, span, id) then {
+            let source_cases = when mono.storage.context.get_enum_cases(id.def_id) in {
+                .Some(existing) then {
+                    let mutable hydrated = List[TypedEnumCase].new();
+                    for case_info in existing then {
+                        let mutable fields = List[TypedEnumCaseField].new();
+                        for param in case_info.params then {
+                            fields.push(
+                                TypedEnumCaseField(
+                                    param.name,
+                                    param.param_type,
+                                    param.named,
+                                    param.default_value,
+                                ),
+                            );
+                        };
+                        hydrated.push(TypedEnumCase(case_info.name, fields));
+                    };
+                    hydrated
+                },
+                .None() then cases,
+            };
+            let mutable resolved_cases = List[TypedEnumCase].new();
+            for c in source_cases then {
+                let mutable resolved_fields = List[TypedEnumCaseField].new();
+                for f in c.fields then {
+                    let mutable resolved_type = resolve_parameterized_type(
+                        mono,
+                        f.field_type,
+                    );
+                    resolved_fields.push(
+                        TypedEnumCaseField(f.name, resolved_type, f.named, f.default_value),
+                    );
+                };
+                resolved_cases.push(TypedEnumCase(c.name, resolved_fields));
+            };
+            TypedDecl.TypeEnumDecl(access, name, resolved_cases, span, id)
+        },
+        // GivenDecl: resolve method param types, return types, and bodies.
+        .GivenDecl(target_type, members, span) then {
+            if mono_all_given_member_bodies_resolved(mono, members) then {
+                return TypedDecl.GivenDecl(target_type, members, span);
+            };
+            let resolved_target = resolve_parameterized_type(mono, target_type);
+            let mutable resolved_members = List[TypedGivenMember].new();
+            for m_ref in members then {
+                let source_params = resolve_global_node_source_params(
+                    mono,
+                    m_ref.def_id,
+                    m_ref.params,
+                );
+                let mutable resolved_params = List[TypedParam].new();
+                for p in source_params then {
+                    let mutable resolved_type = resolve_parameterized_type(
+                        mono,
+                        p.param_type,
+                    );
+                    resolved_params.push(
+                        TypedParam(
+                            p.name,
+                            p.is_mutable,
+                            resolved_type,
+                            p.named,
+                            p.default_value,
+                        ),
+                    );
+                };
+                let resolved_return = resolve_parameterized_type(
+                    mono,
+                    resolve_global_node_source_return_type(
+                        mono,
+                        m_ref.def_id,
+                        m_ref.return_type,
+                    ),
+                );
+                if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
+                    resolved_members.push(
+                        TypedGivenMember(
+                            m_ref.def_id,
+                            m_ref.name,
+                            resolved_params,
+                            resolved_return,
+                            Option[TypedExpr].None(),
+                            m_ref.trait_method_def_id,
+                        ),
+                    );
+                    continue;
+                };
+
+                let source_body = when m_ref.body in {
+                    .Some(body) then {
+                        Option[TypedExpr].Some(body)
+                    },
+                    .None() then when mono.storage.context.take_concrete_given_member_body(
+                        m_ref.def_id,
+                    ) in {
+                        .Some(existing_body) then Option[TypedExpr].Some(existing_body),
+                        .None() then Option[TypedExpr].None(),
+                    },
+                };
+                let resolved_body = when source_body in {
+                    .Some(body) then {
+                        mono.storage.expression_resolve_steps = UInt(0);
+                        mono.storage.expression_resolve_limited = false;
+                        let body_result = resolve_types_in_expression(mono, body);
+                        let mutable context = mono.storage.context;
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result);
+                        mono.storage.resolved_given_member_body_ids.insert(
+                            m_ref.def_id.id,
+                        );
+                        Option[TypedExpr].None()
+                    },
+                    .None() then Option[TypedExpr].None(),
+                };
+                resolved_members.push(
+                    TypedGivenMember(
+                        m_ref.def_id,
+                        m_ref.name,
+                        resolved_params,
+                        resolved_return,
+                        resolved_body,
+                        m_ref.trait_method_def_id,
+                    ),
+                );
+            };
+            TypedDecl.GivenDecl(resolved_target, resolved_members, span)
+        },
+        // GivenTraitDecl: resolve method param types, return types, and bodies.
+        .GivenTraitDecl(target_type, trait_name, trait_args, members, span, decl_trait_id) then {
+            if mono_all_given_member_bodies_resolved(mono, members) then {
+                return TypedDecl.GivenTraitDecl(
+                    target_type,
+                    trait_name,
+                    trait_args,
+                    members,
+                    span,
+                    decl_trait_id,
+                );
+            };
+            let resolved_target = resolve_parameterized_type(mono, target_type);
+            let mutable resolved_trait_args = List[Type].new();
+            for trait_arg in trait_args then {
+                resolved_trait_args.push(resolve_parameterized_type(mono, trait_arg));
+            };
+            let mutable resolved_members = List[TypedGivenMember].new();
+            for m_ref in members then {
+                let source_params = resolve_global_node_source_params(
+                    mono,
+                    m_ref.def_id,
+                    m_ref.params,
+                );
+                let mutable resolved_params = List[TypedParam].new();
+                for p in source_params then {
+                    let mutable resolved_type = resolve_parameterized_type(
+                        mono,
+                        p.param_type,
+                    );
+                    resolved_params.push(
+                        TypedParam(
+                            p.name,
+                            p.is_mutable,
+                            resolved_type,
+                            p.named,
+                            p.default_value,
+                        ),
+                    );
+                };
+                let resolved_return = resolve_parameterized_type(
+                    mono,
+                    resolve_global_node_source_return_type(
+                        mono,
+                        m_ref.def_id,
+                        m_ref.return_type,
+                    ),
+                );
+                if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
+                    resolved_members.push(
+                        TypedGivenMember(
+                            m_ref.def_id,
+                            m_ref.name,
+                            resolved_params,
+                            resolved_return,
+                            Option[TypedExpr].None(),
+                            m_ref.trait_method_def_id,
+                        ),
+                    );
+                    continue;
+                };
+                let source_body = when m_ref.body in {
+                    .Some(body) then {
+                        Option[TypedExpr].Some(body)
+                    },
+                    .None() then when mono.storage.context.take_concrete_given_member_body(
+                        m_ref.def_id,
+                    ) in {
+                        .Some(existing_body) then Option[TypedExpr].Some(existing_body),
+                        .None() then Option[TypedExpr].None(),
+                    },
+                };
+                let resolved_body = when source_body in {
+                    .Some(body) then {
+                        mono.storage.expression_resolve_steps = UInt(0);
+                        mono.storage.expression_resolve_limited = false;
+                        let body_result = resolve_types_in_expression(mono, body);
+                        let mutable context = mono.storage.context;
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result);
+                        mono.storage.resolved_given_member_body_ids.insert(
+                            m_ref.def_id.id,
+                        );
+                        Option[TypedExpr].None()
+                    },
+                    .None() then Option[TypedExpr].None(),
+                };
+                resolved_members.push(
+                    TypedGivenMember(
+                        m_ref.def_id,
+                        m_ref.name,
+                        resolved_params,
+                        resolved_return,
+                        resolved_body,
+                        m_ref.trait_method_def_id,
+                    ),
+                );
+            };
+            TypedDecl.GivenTraitDecl(
+                resolved_target,
+                trait_name,
+                resolved_trait_args,
+                resolved_members,
+                span,
+                decl_trait_id,
+            )
+        },
+        // IntrinsicGivenDecl: resolve method param types, return types, and bodies.
+        .IntrinsicGivenDecl(target_type, members, span) then {
+            if mono_all_given_member_bodies_resolved(mono, members) then {
+                return TypedDecl.IntrinsicGivenDecl(target_type, members, span);
+            };
+            let resolved_target = resolve_parameterized_type(mono, target_type);
+            let mutable resolved_members = List[TypedGivenMember].new();
+            for m_ref in members then {
+                let source_params = resolve_global_node_source_params(
+                    mono,
+                    m_ref.def_id,
+                    m_ref.params,
+                );
+                let mutable resolved_params = List[TypedParam].new();
+                for p in source_params then {
+                    let mutable resolved_type = resolve_parameterized_type(
+                        mono,
+                        p.param_type,
+                    );
+                    resolved_params.push(
+                        TypedParam(
+                            p.name,
+                            p.is_mutable,
+                            resolved_type,
+                            p.named,
+                            p.default_value,
+                        ),
+                    );
+                };
+                let resolved_return = resolve_parameterized_type(
+                    mono,
+                    resolve_global_node_source_return_type(
+                        mono,
+                        m_ref.def_id,
+                        m_ref.return_type,
+                    ),
+                );
+                if mono.storage.resolved_given_member_body_ids.contains(m_ref.def_id.id) then {
+                    resolved_members.push(
+                        TypedGivenMember(
+                            m_ref.def_id,
+                            m_ref.name,
+                            resolved_params,
+                            resolved_return,
+                            Option[TypedExpr].None(),
+                            m_ref.trait_method_def_id,
+                        ),
+                    );
+                    continue;
+                };
+                let source_body = when m_ref.body in {
+                    .Some(body) then {
+                        Option[TypedExpr].Some(body)
+                    },
+                    .None() then when mono.storage.context.take_concrete_given_member_body(
+                        m_ref.def_id,
+                    ) in {
+                        .Some(existing_body) then Option[TypedExpr].Some(existing_body),
+                        .None() then Option[TypedExpr].None(),
+                    },
+                };
+                let resolved_body = when source_body in {
+                    .Some(body) then {
+                        mono.storage.expression_resolve_steps = UInt(0);
+                        mono.storage.expression_resolve_limited = false;
+                        let body_result = resolve_types_in_expression(mono, body);
+                        let mutable context = mono.storage.context;
+                        context.set_concrete_given_member_body(m_ref.def_id, body_result);
+                        mono.storage.resolved_given_member_body_ids.insert(
+                            m_ref.def_id.id,
+                        );
+                        Option[TypedExpr].None()
+                    },
+                    .None() then Option[TypedExpr].None(),
+                };
+                resolved_members.push(
+                    TypedGivenMember(
+                        m_ref.def_id,
+                        m_ref.name,
+                        resolved_params,
+                        resolved_return,
+                        resolved_body,
+                        m_ref.trait_method_def_id,
+                    ),
+                );
+            };
+            TypedDecl.IntrinsicGivenDecl(resolved_target, resolved_members, span)
+        },
+        // LetDecl: resolve decl type and initializer expression.
+        .LetDecl(access, name, is_mutable, decl_type, initializer, span, id) then {
+            let mutable resolved_type = resolve_parameterized_type(mono, decl_type);
+            if mono.storage.context.get_concrete_global_initializer(id.def_id) is .Some(_) then {
+                return TypedDecl.LetDecl(
+                    access,
+                    name,
+                    is_mutable,
+                    resolved_type,
+                    TypedExpr(
+                        TypedExprKind.Block(
+                            List[TypedStatement].new(),
+                            Option[TypedExpr].None(),
+                        ),
+                        resolved_type,
+                        unknown_span(),
+                    ),
+                    span,
+                    id,
+                );
+            };
+            let source_initializer = mono.storage.context.take_concrete_global_initializer(
+                id.def_id,
+            ) or else initializer;
+            let resolved_initializer = resolve_types_in_expression(
+                mono,
+                source_initializer,
+            );
+            let mutable context = mono.storage.context;
+            context.set_concrete_global_initializer(id.def_id, resolved_initializer);
+            TypedDecl.LetDecl(
+                access,
+                name,
+                is_mutable,
+                resolved_type,
+                TypedExpr(
+                    TypedExprKind.Block(
+                        List[TypedStatement].new(),
+                        Option[TypedExpr].None(),
+                    ),
+                    resolved_type,
+                    unknown_span(),
+                ),
+                span,
+                id,
+            )
+        },
+        // ForeignLetDecl: resolve decl type.
+        .ForeignLetDecl(access, name, is_mutable, decl_type, span, id) then {
+            let mutable resolved_type = resolve_parameterized_type(mono, decl_type);
+            TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved_type, span, id)
+        },
+        // TypeAliasDecl: resolve target type.
+        .TypeAliasDecl(access, name, target, span) then {
+            let resolved_target = resolve_parameterized_type(mono, target);
+            TypedDecl.TypeAliasDecl(access, name, resolved_target, span)
+        },
+        .IntrinsicTypeDecl(access, name, span) then {
+            TypedDecl.IntrinsicTypeDecl(access, name, span)
+        },
+        .ForeignTypeDecl(access, name, fields, span, id) then {
+            let resolved_fields = when fields in {
+                .Some(existing_fields) then {
+                    let mutable updated_fields = List[TypedField].new();
+                    for field in existing_fields then {
+                        let mutable resolved_type = resolve_parameterized_type(
+                            mono,
+                            field.field_type,
+                        );
+                        updated_fields.push(
+                            TypedField(
+                                field.access,
+                                field.name,
+                                field.is_mutable,
+                                resolved_type,
+                                field.named,
+                                field.default_value,
+                            ),
+                        );
+                    };
+                    Option[List[TypedField]].Some(updated_fields)
+                },
+                .None() then Option[List[TypedField]].None(),
+            };
+            TypedDecl.ForeignTypeDecl(access, name, resolved_fields, span, id)
+        },
+        .UsingDecl(access, path_segments, span) then {
+            TypedDecl.UsingDecl(access, path_segments, span)
+        },
+        .TraitDecl(access, name, members, span) then {
+            let mutable resolved_members = List[TypedTraitMember].new();
+            for member in members then {
+                let mutable resolved_params = List[TypedParam].new();
+                for param in member.params then {
+                    let resolved_type = resolve_parameterized_type(
+                        mono,
+                        param.param_type,
+                    );
+                    resolved_params.push(
+                        TypedParam(
+                            param.name,
+                            param.is_mutable,
+                            resolved_type,
+                            param.named,
+                            param.default_value,
+                        ),
+                    );
+                };
+                let resolved_return = resolve_parameterized_type(
+                    mono,
+                    member.return_type,
+                );
+                resolved_members.push(
+                    TypedTraitMember(
+                        member.def_id,
+                        member.name,
+                        member.has_generic_type_params,
+                        resolved_params,
+                        resolved_return,
+                    ),
+                );
+            };
+            TypedDecl.TraitDecl(access, name, resolved_members, span)
+        },
+        .GenericFunctionDecl(access, name, span) then {
+            TypedDecl.GenericFunctionDecl(access, name, span)
+        },
+        .GenericTypeStructDecl(access, name, span) then {
+            TypedDecl.GenericTypeStructDecl(access, name, span)
+        },
+        .GenericTypeEnumDecl(access, name, span) then {
+            TypedDecl.GenericTypeEnumDecl(access, name, span)
+        },
+    };
+};

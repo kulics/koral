@@ -1,0 +1,364 @@
+// Type-construction recovery and constructor-argument inference for the
+// monomorphization phase.
+
+let resolve_symbol_type(mono: Monomorphizer, symbol: Symbol): Symbol = {
+    let resolved = resolve_parameterized_type(mono, symbol.symbol_type);
+    let registered = when mono.storage.context.get_symbol_type(symbol.def_id) in {
+        .Some(t) then resolve_parameterized_type(mono, t),
+        .None() then resolved,
+    };
+    let chosen = when resolved in {
+        .VoidType() then registered,
+        .Unknown() then registered,
+        _ then when registered in {
+            .VoidType() then resolved,
+            .Unknown() then resolved,
+            _ then prefer_more_concrete_type(mono, resolved, registered),
+        },
+    };
+    return Symbol(symbol.def_id, chosen, symbol.kind);
+};
+
+let resolve_symbol_list(
+    mono: Monomorphizer,
+    symbols: List[Symbol],
+): List[Symbol] = {
+    let mutable resolved = List[Symbol].new();
+    for symbol in symbols then {
+        resolved.push(resolve_symbol_type(mono, symbol));
+    };
+    return resolved;
+};
+
+let recover_type_construction_type_resolved(
+    mono: Monomorphizer,
+    identifier_type: Type,
+    identifier_def_id: DefId,
+    type_args: List[Type],
+    args: List[TypedExpr],
+): Type = {
+    let mutable resolved_identifier_type = resolve_parameterized_type(
+        mono,
+        identifier_type,
+    );
+    when resolved_identifier_type in {
+        .StructureType(_) then {
+            return resolved_identifier_type;
+        },
+        .EnumType(_) then {
+            return resolved_identifier_type;
+        },
+        .GenericStruct(...) then {
+            return resolved_identifier_type;
+        },
+        .GenericEnum(...) then {
+            return resolved_identifier_type;
+        },
+        _ then {},
+    };
+
+    if not type_args.is_empty() then {
+        let mutable boxed_args = List[Type].new();
+        for type_arg in type_args then {
+            boxed_args.push(resolve_parameterized_type(mono, type_arg));
+        };
+
+        let template_name = when mono.storage.context.get_template_name(
+            identifier_def_id,
+        ) in {
+            .Some(name) then name,
+            .None() then mono.storage.context.get_name(identifier_def_id) or else "",
+        };
+
+        if not template_name.is_empty() then {
+            // By DECLARATION -- the instance links to its template.
+            let template_def_id = mono.storage.context.get_template_def_id(
+                identifier_def_id,
+            );
+            when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
+                .Some(template) then {
+                    return resolve_parameterized_type(
+                        mono,
+                        mono.instantiate_struct_impl(template, boxed_args),
+                    );
+                },
+                .None() then {},
+            };
+            when mono.storage.generic_templates.enum_by_def_id(template_def_id) in {
+                .Some(template) then {
+                    return resolve_parameterized_type(
+                        mono,
+                        mono.instantiate_enum_impl(template, boxed_args),
+                    );
+                },
+                .None() then {},
+            };
+        };
+    };
+
+    when infer_type_construction_type_from_args_resolved(mono, identifier_def_id, args) in {
+        .Some(inferred) then {
+            return inferred;
+        },
+        .None() then {},
+    };
+
+    return resolved_identifier_type;
+};
+
+let resolve_type_construction_symbol(
+    mono: Monomorphizer,
+    identifier: Symbol,
+    type_args: List[Type],
+    args: List[TypedExpr],
+): Symbol = {
+    let mutable resolved_type = recover_type_construction_type_resolved(
+        mono,
+        identifier.symbol_type,
+        identifier.def_id,
+        type_args,
+        args,
+    );
+    return when resolved_type in {
+        .StructureType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
+        .EnumType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
+        _ then Symbol(identifier.def_id, resolved_type, identifier.kind),
+    };
+};
+
+let infer_type_construction_type_from_args_resolved(
+    mono: Monomorphizer,
+    identifier_def_id: DefId,
+    args: List[TypedExpr],
+): Option[Type] = {
+    let template_name = when mono.storage.context.get_template_name(identifier_def_id) in {
+        .Some(name) then name,
+        .None() then mono.storage.context.get_name(identifier_def_id) or else "",
+    };
+    if template_name.is_empty() then {
+        return Option[Type].None();
+    };
+
+    if args.count() == UInt(2) and is_std_pair_def_id(
+        mono.storage.context,
+        identifier_def_id,
+    ) then {
+        let mutable pair_args = List[Type].new();
+        pair_args.push(resolve_parameterized_type(mono, args[UInt(0)].expr_type));
+        pair_args.push(resolve_parameterized_type(mono, args[UInt(1)].expr_type));
+        return Option[Type].Some(
+            resolve_parameterized_type(
+                mono,
+                Type.GenericStruct(generic_struct_def_id(mono, "Pair"), pair_args),
+            ),
+        );
+    };
+
+    let template_opt = when mono.storage.generic_templates.resolve_struct_name(
+        template_name,
+    ) in {
+        .Some(resolved_name) then mono.storage.generic_templates.lookup_struct(
+            resolved_name,
+        ),
+        .None() then Option[GenericStructTemplate].None(),
+    };
+
+    return when template_opt in {
+        .Some(template) then {
+            if template.fields.count() != args.count() then {
+                return Option[Type].None();
+            };
+            let mutable bindings = Dict[String, Type].new();
+            // The template's own parameters are bound to THEMSELVES, so a field
+            // typed `T` stays `GenericParameter("T")`. Leaving them unbound made
+            // the resolver fall through to the bare-name concrete-type table and
+            // pick up whatever global happened to be called `T`.
+            let self_subst = template_substitution(
+                template.type_parameters,
+                Dict[String, Type].new(),
+            );
+            let mutable i: UInt = 0;
+            while i < args.count() then {
+                let field_pattern = mono.resolve_type_node_impl(
+                    template.fields[i].field_type,
+                    self_subst,
+                );
+                infer_type_bindings_from_constructor_pattern(
+                    mono,
+                    field_pattern,
+                    resolve_parameterized_type(mono, args[i].expr_type),
+                    bindings,
+                );
+                i += 1;
+            };
+
+            let mutable inferred_args = List[Type].new();
+            for type_param in template.type_parameters then {
+                inferred_args.push(
+                    bindings.get(type_param.name) or else Type.GenericParameter(
+                        type_param.name,
+                    ),
+                );
+            };
+            Option[Type].Some(
+                resolve_parameterized_type(
+                    mono,
+                    Type.GenericStruct(template.def_id, inferred_args),
+                ),
+            )
+        },
+        .None() then Option[Type].None(),
+    };
+};
+
+let infer_type_bindings_from_constructor_pattern(
+    mono: Monomorphizer,
+    pattern: Type,
+    concrete: Type,
+    bindings: Dict[String, Type],
+): Void = {
+    let normalized_pattern = resolve_parameterized_type(mono, pattern);
+    let normalized_concrete = resolve_parameterized_type(mono, concrete);
+    when normalized_pattern in {
+        .GenericParameter(name) then {
+            if bindings.get(name) is .None() then {
+                bindings.insert(name, normalized_concrete);
+            };
+        },
+        .ReferenceType(inner) then when normalized_concrete in {
+            .ReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .MutableReferenceType(inner) then when normalized_concrete in {
+            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .PointerType(inner) then when normalized_concrete in {
+            .PointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .MutablePointerType(inner) then when normalized_concrete in {
+            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .WeakReferenceType(inner) then when normalized_concrete in {
+            .WeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .MutableWeakReferenceType(inner) then when normalized_concrete in {
+            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+                mono,
+                inner,
+                concrete_inner,
+                bindings,
+            ),
+            _ then {},
+        },
+        .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
+            .FunctionType(concrete_params, concrete_return) then {
+                if pattern_params.count() == concrete_params.count() then {
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() then {
+                        infer_type_bindings_from_constructor_pattern(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (concrete_params[i]).param_type,
+                            bindings,
+                        );
+                        i += 1;
+                    };
+                    infer_type_bindings_from_constructor_pattern(
+                        mono,
+                        pattern_return,
+                        concrete_return,
+                        bindings,
+                    );
+                };
+            },
+            _ then {},
+        },
+        .GenericStruct(tplDefId, pattern_args) then when normalized_concrete in {
+            .GenericStruct(actual_def_id, concrete_args) then {
+                // Declarations, not spellings -- and not one binding twice.
+                if tplDefId == actual_def_id and pattern_args.count() == concrete_args.count(
+                ) then {
+                    let mutable i: UInt = 0;
+                    while i < pattern_args.count() then {
+                        infer_type_bindings_from_constructor_pattern(
+                            mono,
+                            (pattern_args[i]),
+                            (concrete_args[i]),
+                            bindings,
+                        );
+                        i += 1;
+                    };
+                };
+            },
+            _ then {},
+        },
+        // Identity: the template's DECLARATION, not its spelling.
+        .GenericEnum(pattern_def_id, pattern_args) then when normalized_concrete in {
+            .GenericEnum(concrete_def_id, concrete_args) then {
+                if pattern_def_id == concrete_def_id and pattern_args.count() == concrete_args.count(
+                ) then {
+                    let mutable i: UInt = 0;
+                    while i < pattern_args.count() then {
+                        infer_type_bindings_from_constructor_pattern(
+                            mono,
+                            (pattern_args[i]),
+                            (concrete_args[i]),
+                            bindings,
+                        );
+                        i += 1;
+                    };
+                };
+            },
+            _ then {},
+        },
+        _ then {},
+    }
+};
+

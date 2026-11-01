@@ -86,6 +86,93 @@ public type mutable TypeMemberInfo(
     access: AccessModifier,
 );
 
+// ── 句柄族（handle families）──────────────────────────────────────────────────
+//
+// 类型的「句柄形态」的内在性质。任何「这是不是引用/指针类类型」的判定都由
+// 这四个族组合而来，而不是各自重新罗列 Type case——新增一个句柄族是这里
+// 一处改动，不是每个阶段各改一遍。四个族是：
+//
+//   owned_ref   强引用（带 strong 计数）
+//   borrowed_ref 借用引用（自己不带计数）
+//   weak_ref    弱句柄（带 weak 计数）
+//   raw_pointer 裸指针（纯地址，无计数）
+//
+// 组合集合（各自的语义）：
+//   type_is_handle           四族全体
+//   type_is_tracked_handle   运行时跟踪的句柄（引用 + 弱；裸指针的 NULL 合法，
+//                            不算被跟踪）
+//   type_is_counted_handle   自带引用计数（强 + 弱）：copy glue 非平凡的集合
+//   type_is_any_ref          一切引用（强 + 借用）
+//   type_is_mutable_handle   各族的 mutable 拼法
+
+/// 强引用句柄（带 strong 计数）。
+public let type_is_owned_ref(t: Type): Bool = {
+    return when t in {
+        .ReferenceType(_) then true,
+        .MutableReferenceType(_) then true,
+        _ then false,
+    };
+};
+
+/// 借用引用句柄（不带自己的计数）。
+public let type_is_borrowed_ref(t: Type): Bool = {
+    return when t in {
+        .BorrowedReferenceType(_) then true,
+        .MutableBorrowedReferenceType(_) then true,
+        _ then false,
+    };
+};
+
+/// 弱句柄（带 weak 计数）。
+public let type_is_weak_ref(t: Type): Bool = {
+    return when t in {
+        .WeakReferenceType(_) then true,
+        .MutableWeakReferenceType(_) then true,
+        _ then false,
+    };
+};
+
+/// 裸指针（纯地址，无计数）。
+public let type_is_raw_pointer(t: Type): Bool = {
+    return when t in {
+        .PointerType(_) then true,
+        .MutablePointerType(_) then true,
+        _ then false,
+    };
+};
+
+/// 一切句柄形态（四族全体）。
+public let type_is_handle(t: Type): Bool = {
+    return type_is_owned_ref(t) or type_is_borrowed_ref(t) or type_is_weak_ref(t) or type_is_raw_pointer(t);
+};
+
+/// 运行时跟踪的句柄：引用 + 弱。裸指针的 NULL 是合法值，不算被跟踪。
+public let type_is_tracked_handle(t: Type): Bool = {
+    return type_is_owned_ref(t) or type_is_borrowed_ref(t) or type_is_weak_ref(t);
+};
+
+/// 自带引用计数（强 + 弱）的句柄：copy glue 非平凡的集合。借用和裸指针
+/// 的 copy 是平凡的。
+public let type_is_counted_handle(t: Type): Bool = {
+    return type_is_owned_ref(t) or type_is_weak_ref(t);
+};
+
+/// 一切引用（强 + 借用），不含弱和裸指针。
+public let type_is_any_ref(t: Type): Bool = {
+    return type_is_owned_ref(t) or type_is_borrowed_ref(t);
+};
+
+/// 各句柄族的 mutable 拼法。
+public let type_is_mutable_handle(t: Type): Bool = {
+    return when t in {
+        .MutableReferenceType(_) then true,
+        .MutableBorrowedReferenceType(_) then true,
+        .MutableWeakReferenceType(_) then true,
+        .MutablePointerType(_) then true,
+        _ then false,
+    };
+};
+
 // ── TypeHandler 查询函数 ──────────────────────────────────────────────────────
 
 /// 检查类型是否需要 copy 函数
@@ -93,14 +180,10 @@ public let type_needs_copy(t: Type): Bool = {
     return when t in {
         .StructureType(_) then true,
         .EnumType(_) then true,
-        .ReferenceType(_) then true,
-        .MutableReferenceType(_) then true,
         .FunctionType(...) then true,
-        .WeakReferenceType(_) then true,
-        .MutableWeakReferenceType(_) then true,
         .GenericStruct(...) then true,
         .GenericEnum(...) then true,
-        _ then false,
+        _ then type_is_counted_handle(t),
     };
 };
 
@@ -109,18 +192,12 @@ public let type_needs_drop(t: Type): Bool = {
     return when t in {
         .StructureType(_) then true,
         .EnumType(_) then true,
-        .ReferenceType(_) then true,
-        .MutableReferenceType(_) then true,
-        .BorrowedReferenceType(_) then true,
-        .MutableBorrowedReferenceType(_) then true,
         .FunctionType(...) then true,
-        .WeakReferenceType(_) then true,
-        .MutableWeakReferenceType(_) then true,
         .GenericStruct(...) then true,
         .GenericEnum(...) then true,
         .TraitObject(...) then true,
         .TypeVar(_) then true,
-        _ then false,
+        _ then type_is_tracked_handle(t),
     };
 };
 

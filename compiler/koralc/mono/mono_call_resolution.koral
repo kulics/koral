@@ -1,0 +1,1881 @@
+// Statement rewriting and method-call resolution for the monomorphization
+// phase.
+
+let resolve_types_in_statement(
+    mono: Monomorphizer,
+    stmt: TypedStatement,
+): TypedStatement = {
+    return when stmt in {
+        .LetStmt(symbol, value, span) then {
+            let new_symbol = resolve_symbol_type(mono, symbol);
+            let resolved_value = resolve_types_in_expression(mono, value);
+            let mutable concrete_symbol_type = resolve_parameterized_type(
+                mono,
+                new_symbol.symbol_type,
+            );
+            let mutable effective_symbol_type = prefer_more_concrete_type(
+                mono,
+                concrete_symbol_type,
+                resolved_value.expr_type,
+            );
+            if mono_is_unresolved_expr_type(mono, concrete_symbol_type) and not mono_is_unresolved_expr_type(
+                mono,
+                resolved_value.expr_type,
+            ) then {
+                effective_symbol_type = resolved_value.expr_type;
+            };
+            if new_symbol.def_id.id > 0 then {
+                let current_registered_type = when mono.storage.context.get_symbol_type(
+                    new_symbol.def_id,
+                ) in {
+                    .Some(existing_type) then resolve_parameterized_type(
+                        mono,
+                        existing_type,
+                    ),
+                    .None() then Type.Unknown(),
+                };
+                let symbol_kind = when mono.storage.context.get_symbol_kind(
+                    new_symbol.def_id,
+                ) in {
+                    .Some(kind) then kind,
+                    .None() then new_symbol.kind,
+                };
+                let symbol_method_kind = when mono.storage.context.get_symbol_method_kind(
+                    new_symbol.def_id,
+                ) in {
+                    .Some(kind) then kind,
+                    .None() then MethodKind.Normal(),
+                };
+                let symbol_mutable = when mono.storage.context.get_symbol_mutable(
+                    new_symbol.def_id,
+                ) in {
+                    .Some(is_mutable) then is_mutable,
+                    .None() then false,
+                };
+                if current_registered_type != effective_symbol_type then {
+                    mono.storage.context.set_symbol_info(
+                        new_symbol.def_id,
+                        SymbolInfo(
+                            effective_symbol_type,
+                            symbol_kind,
+                            symbol_method_kind,
+                            symbol_mutable,
+                        ),
+                    );
+                };
+            };
+            TypedStatement.LetStmt(
+                Symbol(new_symbol.def_id, effective_symbol_type, new_symbol.kind),
+                resolved_value,
+                span,
+            )
+        },
+        .TupleLetStmt(pair_type, symbols, value, span) then {
+            let resolved_pair_type = resolve_parameterized_type(mono, pair_type);
+            let resolved_value = resolve_types_in_expression(mono, value);
+            let new_symbols = List[Option[Symbol]].new();
+            for symbol_opt in symbols then {
+                new_symbols.push(
+                    when symbol_opt in {
+                        .Some(symbol) then {
+                            let resolved_symbol = resolve_symbol_type(mono, symbol);
+                            Option[Symbol].Some(
+                                Symbol(
+                                    resolved_symbol.def_id,
+                                    resolved_symbol.symbol_type,
+                                    resolved_symbol.kind,
+                                ),
+                            )
+                        },
+                        .None() then Option[Symbol].None(),
+                    },
+                );
+            };
+            TypedStatement.TupleLetStmt(
+                resolved_pair_type,
+                new_symbols,
+                resolved_value,
+                span,
+            )
+        },
+        .AssignmentStmt(target, value, span) then {
+            TypedStatement.AssignmentStmt(
+                resolve_types_in_expression(mono, target),
+                resolve_types_in_expression(mono, value),
+                span,
+            )
+        },
+        .ExprStmt(expr, span) then {
+            TypedStatement.ExprStmt(resolve_types_in_expression(mono, expr), span)
+        },
+        .IfStmt(condition, then_branch, else_branch, span) then {
+            let new_else = when else_branch in {
+                .Some(expr) then Option[TypedExpr].Some(
+                    resolve_types_in_expression(mono, expr),
+                ),
+                .None() then Option[TypedExpr].None(),
+            };
+            TypedStatement.IfStmt(
+                resolve_types_in_expression(mono, condition),
+                resolve_types_in_expression(mono, then_branch),
+                new_else,
+                span,
+            )
+        },
+        .WhileStmt(condition, body, span) then {
+
+            TypedStatement.WhileStmt(
+                resolve_types_in_expression(mono, condition),
+                resolve_types_in_expression(mono, body),
+                span,
+            )
+        },
+        .WhenStmt(subject, arms, span) then {
+            let new_subject = resolve_types_in_expression(mono, subject);
+            let mutable new_arms = List[TypedWhenArm].new();
+            for arm_ref in arms then {
+                let new_pattern = resolve_types_in_pattern(mono, arm_ref.pattern);
+                let new_guard = when arm_ref.guard in {
+                    .Some(g) then Option[TypedExpr].Some(
+                        resolve_types_in_expression(mono, g),
+                    ),
+                    .None() then Option[TypedExpr].None(),
+                };
+                let new_body = resolve_types_in_expression(mono, arm_ref.body);
+                new_arms.push(
+                    TypedWhenArm(
+                        new_pattern,
+                        new_guard,
+                        new_body,
+                        resolve_parameterized_type(mono, arm_ref.arm_type),
+                    ),
+                );
+            };
+            TypedStatement.WhenStmt(new_subject, new_arms, span)
+        },
+        .ReturnStmt(value, span) then {
+            let new_value = when value in {
+                .Some(expr) then Option[TypedExpr].Some(
+                    resolve_types_in_expression(mono, expr),
+                ),
+                .None() then Option[TypedExpr].None(),
+            };
+            TypedStatement.ReturnStmt(new_value, span)
+        },
+        .BreakStmt(span) then {
+            TypedStatement.BreakStmt(span)
+        },
+        .ContinueStmt(span) then {
+            TypedStatement.ContinueStmt(span)
+        },
+        .DeferStmt(expr, span) then {
+            TypedStatement.DeferStmt(resolve_types_in_expression(mono, expr), span)
+        },
+    };
+};
+
+// Encapsulates the 5-layer method resolution cascade used in MethodReference handling.
+// Strategies tried in priority order:
+//   1. Extension method instantiation
+//   2. Concrete method cache lookup
+//   3. Generic method rebind
+//   4. Receiver method symbol rebind (with 3 expected-type variants)
+// Final selection prefers concrete > instantiated > generic rebound > rebound.
+let method_symbol_matches_expected_return(
+    mono: Monomorphizer,
+    method_symbol: Symbol,
+    expected_return: Type,
+): Bool = {
+    let concrete_expected_return = resolve_parameterized_type(mono, expected_return);
+    if has_generic_parameter(concrete_expected_return) or mono_is_unresolved_expr_type(
+        mono,
+        concrete_expected_return,
+    ) or is_placeholder_inferred_type(concrete_expected_return) then {
+        return true;
+    };
+    let resolved_method_type = resolve_parameterized_type(
+        mono,
+        method_symbol.symbol_type,
+    );
+    return when resolved_method_type in {
+        .FunctionType(_, return_type_ref) then {
+            let concrete_return = resolve_parameterized_type(mono, return_type_ref);
+            mono.storage.context.get_layout_key(concrete_return) == mono.storage.context.get_layout_key(
+                concrete_expected_return,
+            )
+        },
+        _ then true,
+    };
+};
+
+// Identity-only answer to "which instance is this method's".
+//
+// The definition-time DefId names the method; the lookup ladder
+// (already-instantiated, identity key, instantiate-by-DefId) finds or creates
+// the specialization. Nothing here re-decides the answer from a SPELLING.
+// Returns None when the DefId is missing or the result is still generic -- the
+// caller keeps its node and a later stage reports it, rather than inventing an
+// identity from a name.
+let identity_method_instance_option(
+    mono: Monomorphizer,
+    definition_method: Symbol,
+    receiver_type: Type,
+    method_type_args: List[Type],
+): Option[Symbol] = {
+    return identity_def_id_instance_option(
+        mono,
+        definition_method.def_id,
+        definition_method.symbol_type,
+        receiver_type,
+        method_type_args,
+    );
+};
+
+let identity_def_id_instance_option(
+    mono: Monomorphizer,
+    definition_method_def_id: DefId,
+    definition_method_type: Type,
+    receiver_type: Type,
+    method_type_args: List[Type],
+): Option[Symbol] = {
+    if not definition_method_def_id.is_valid() then {
+        return Option[Symbol].None();
+    };
+    return when resolve_method_instance_by_identity_for_receiver(
+        mono,
+        Symbol(definition_method_def_id, definition_method_type, SymbolKind.Function()),
+        definition_method_type,
+        method_type_args,
+        receiver_type,
+    ) in {
+        .Instantiated(resolved) then {
+            let resolved_type = resolve_parameterized_type(mono, resolved.symbol_type);
+            if not has_generic_parameter(resolved_type) and not mono_is_unresolved_expr_type(
+                mono,
+                resolved_type,
+            ) then {
+                Option[Symbol].Some(
+                    Symbol(resolved.def_id, resolved.symbol_type, SymbolKind.Function()),
+                )
+            } else {
+                Option[Symbol].None()
+            }
+        },
+        .KeepDefinitionTime(_) then Option[Symbol].None(),
+    };
+};
+
+let resolve_concrete_method_call(
+    mono: Monomorphizer,
+    effective_receiver_type: Type,
+    method: Symbol,
+    method_name_for_lookup: String,
+    template_name_for_lookup: String,
+    resolved_method_type_args: List[Type],
+    new_args: List[TypedExpr],
+    resolved_call_type: Type,
+    new_callee: TypedExpr,
+): Symbol = {
+    let effective_method_name = normalize_receiver_call_method_name(
+        method_name_for_lookup,
+    );
+    // Strategy 0: identity first. The definition-time DefId names the method;
+    // every strategy below re-derives an answer from a SPELLING, and is only a
+    // bridge for the case where identity cannot resolve yet. A hit here is the
+    // answer -- no candidate sweep, no return-type selection.
+    if method.def_id.is_valid() then {
+        when resolve_method_instance_by_identity_for_receiver(
+            mono,
+            method,
+            method.symbol_type,
+            resolved_method_type_args,
+            effective_receiver_type,
+        ) in {
+            .Instantiated(resolved) then {
+                let resolved_type = resolve_parameterized_type(
+                    mono,
+                    resolved.symbol_type,
+                );
+                if not has_generic_parameter(resolved_type) and not mono_is_unresolved_expr_type(
+                    mono,
+                    resolved_type,
+                ) then {
+                    return Symbol(
+                        resolved.def_id,
+                        resolved.symbol_type,
+                        SymbolKind.Function(),
+                    );
+                };
+            },
+            .KeepDefinitionTime(_) then {},
+        };
+    };
+    // Strategy 1: direct concrete lookup, matching Swift's preference for
+    // already-materialized concrete methods before speculative instantiation.
+    let concrete_method_lookup = identity_method_instance_option(
+        mono,
+        method,
+        effective_receiver_type,
+        resolved_method_type_args,
+    );
+    when concrete_method_lookup in {
+        .Some(concrete_method) then {
+            let concrete_method_type = resolve_parameterized_type(
+                mono,
+                concrete_method.symbol_type,
+            );
+            let is_safe_fast_path = concrete_method.def_id.id > 0 and not has_generic_parameter(
+                concrete_method_type,
+            ) and not mono_is_unresolved_expr_type(mono, concrete_method_type) and method_symbol_matches_expected_return(
+                mono,
+                concrete_method,
+                resolved_call_type,
+            ) and declared_static_receiver_method_is_materialized(
+                mono,
+                concrete_method.def_id,
+            ) and not (effective_method_name == "to_string" and is_ref_wrapper_owner_method(
+                mono,
+                concrete_method,
+            ));
+            if is_safe_fast_path then {
+                return concrete_method;
+            };
+        },
+        .None() then {},
+    };
+    // Strategy 2: Extension method instantiation
+    let instantiated_method_lookup = enqueue_extension_method_for_static_call(
+        mono,
+        effective_receiver_type,
+        effective_method_name,
+        method.def_id,
+        template_name_for_lookup,
+        resolved_method_type_args,
+        new_args,
+        resolved_call_type,
+    );
+    when instantiated_method_lookup in {
+        .Some(instantiated_method) then {
+            let instantiated_method_type = resolve_parameterized_type(
+                mono,
+                instantiated_method.symbol_type,
+            );
+            let instantiated_is_safe_fast_path = instantiated_method.def_id.id > 0 and not has_generic_parameter(
+                instantiated_method_type,
+            ) and not mono_is_unresolved_expr_type(mono, instantiated_method_type) and method_symbol_matches_expected_return(
+                mono,
+                instantiated_method,
+                resolved_call_type,
+            ) and declared_static_receiver_method_is_materialized(
+                mono,
+                instantiated_method.def_id,
+            ) and method_symbol_receiver_matches(
+                mono,
+                instantiated_method,
+                effective_receiver_type,
+            ) and not (effective_method_name == "to_string" and is_ref_wrapper_owner_method(
+                mono,
+                instantiated_method,
+            ));
+            if instantiated_is_safe_fast_path then {
+                return instantiated_method;
+            };
+        },
+        .None() then {},
+    };
+    // Strategy 3: Generic method rebind
+    let generic_rebound_method = try_bind_generic_method_call(
+        mono,
+        effective_receiver_type,
+        method,
+        new_args,
+        resolved_call_type,
+    );
+    let generic_rebound_matches_receiver = method_def_id_matches_receiver_exactly(
+        mono,
+        generic_rebound_method.def_id,
+        effective_receiver_type,
+    );
+    let generic_rebound_is_concrete = not has_generic_parameter(
+        resolve_parameterized_type(mono, generic_rebound_method.symbol_type),
+    );
+    if generic_rebound_method.def_id.id != method.def_id.id and generic_rebound_is_concrete and generic_rebound_matches_receiver and method_symbol_matches_expected_return(
+        mono,
+        generic_rebound_method,
+        resolved_call_type,
+    ) and declared_static_receiver_method_is_materialized(
+        mono,
+        generic_rebound_method.def_id,
+    ) then {
+        return generic_rebound_method;
+    };
+    // Strategy 4: Receiver method symbol rebind with different expected types
+    let rebound_method = if effective_method_name == "neg" then {
+        let mutable expected_call_param_types = List[Type].new();
+        expected_call_param_types.push(
+            resolve_parameterized_type(mono, effective_receiver_type),
+        );
+        for arg in new_args then {
+            expected_call_param_types.push(
+                resolve_parameterized_type(mono, arg.expr_type),
+            );
+        };
+        let expected_call_type_with_receiver = Type.FunctionType(
+            types_to_param_entries(expected_call_param_types),
+            resolved_call_type,
+        );
+        let rebound_method_with_receiver = bind_receiver_method_symbol(
+            mono,
+            effective_receiver_type,
+            method,
+            Option[Type].Some(expected_call_type_with_receiver),
+        );
+        rebound_method_with_receiver
+    } else method;
+    let wrapper_like_receiver = type_is_handle(resolve_parameterized_type(
+        mono,
+        effective_receiver_type,
+    ));
+    // Final selection: concrete > instantiated > generic rebound > rebound > fallback rebind.
+    let chosen_method = when concrete_method_lookup in {
+        .Some(concrete_method) then when instantiated_method_lookup in {
+            .Some(instantiated_method) then instantiated_method,
+            .None() then concrete_method,
+        },
+        .None() then when instantiated_method_lookup in {
+            .Some(instantiated_method) then instantiated_method,
+            .None() where generic_rebound_method.def_id.id != method.def_id.id and generic_rebound_is_concrete and generic_rebound_matches_receiver then {
+                generic_rebound_method
+            },
+            .None() where rebound_method.def_id.id == method.def_id.id then {
+                if effective_method_name == "index_get" or effective_method_name == "next" or effective_method_name == "borrow_ptr" or effective_method_name == "count" then {
+                    let rebound_fallback = try_bind_generic_method_call(
+                        mono,
+                        effective_receiver_type,
+                        method,
+                        new_args,
+                        resolved_call_type,
+                    );
+                    let rebound_fallback_is_concrete = not has_generic_parameter(
+                        resolve_parameterized_type(mono, rebound_fallback.symbol_type),
+                    );
+                    if rebound_fallback.def_id.id != method.def_id.id and rebound_fallback_is_concrete then {
+                        return rebound_fallback;
+                    };
+                    let mutable method_type_arg_refs = List[Type].new();
+                    for method_type_arg in resolved_method_type_args then {
+                        method_type_arg_refs.push(method_type_arg);
+                    };
+                    instantiate_trait_placeholder_method(
+                        mono,
+                        effective_receiver_type,
+                        effective_method_name,
+                        method_type_arg_refs,
+                    );
+                    when identity_method_instance_option(
+                        mono,
+                        method,
+                        effective_receiver_type,
+                        resolved_method_type_args,
+                    ) in {
+                        .Some(concrete_method) then concrete_method,
+                        .None() then rebound_fallback,
+                    }
+                } else rebound_method
+            },
+            .None() then rebound_method,
+        },
+    };
+    let should_run_post_selection = effective_method_name == "get" or effective_method_name == "borrow_ptr" or effective_method_name == "iterator";
+
+    let receiver_compatible_method = if method_symbol_receiver_matches(
+        mono,
+        chosen_method,
+        effective_receiver_type,
+    ) then {
+        chosen_method
+    } else if not should_run_post_selection then {
+        chosen_method
+    } else {
+        when concrete_method_lookup in {
+            .Some(rebound) where method_symbol_receiver_matches(
+                mono,
+                rebound,
+                effective_receiver_type,
+            ) then {
+                rebound
+            },
+            .Some(rebound) then when identity_method_instance_option(
+                mono,
+                method,
+                effective_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound) then rebound,
+                .None() then when identity_method_instance_option(
+                    mono,
+                    method,
+                    effective_receiver_type,
+                    resolved_method_type_args,
+                ) in {
+                    .Some(rebound) then rebound,
+                    .None() then chosen_method,
+                },
+            },
+            .None() then when identity_method_instance_option(
+                mono,
+                method,
+                effective_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound) then rebound,
+                .None() then when identity_method_instance_option(
+                    mono,
+                    method,
+                    effective_receiver_type,
+                    resolved_method_type_args,
+                ) in {
+                    .Some(rebound) then rebound,
+                    .None() then chosen_method,
+                },
+            },
+        }
+    };
+
+    let preferred_value_method = if effective_method_name == "to_string" and is_ref_wrapper_owner_method(
+        mono,
+        receiver_compatible_method,
+    ) then {
+        when unwrap_ref_like_receiver_type_for_value_lookup(
+            mono,
+            effective_receiver_type,
+        ) in {
+            .Some(value_receiver_type) then {
+                when identity_method_instance_option(
+                    mono,
+                    method,
+                    effective_receiver_type,
+                    resolved_method_type_args,
+                ) in {
+                    .Some(value_method) then value_method,
+                    .None() then when identity_method_instance_option(
+                        mono,
+                        method,
+                        effective_receiver_type,
+                        resolved_method_type_args,
+                    ) in {
+                        .Some(value_method) then value_method,
+                        .None() then receiver_compatible_method,
+                    },
+                }
+            },
+            .None() then receiver_compatible_method,
+        }
+    } else receiver_compatible_method;
+
+    if preferred_value_method.def_id.id > 0 and not has_generic_parameter(
+        resolve_parameterized_type(mono, preferred_value_method.symbol_type),
+    ) and method_symbol_matches_expected_return(
+        mono,
+        preferred_value_method,
+        resolved_call_type,
+    ) and declared_static_receiver_method_is_materialized(
+        mono,
+        preferred_value_method.def_id,
+    ) then {
+        return preferred_value_method;
+    };
+
+    // Hard guard: before returning a generic/unresolved method symbol, force one more
+    // trait-placeholder materialization + concrete lookup pass.
+    let mutable method_type_arg_refs = List[Type].new();
+    for method_type_arg in resolved_method_type_args then {
+        method_type_arg_refs.push(method_type_arg);
+    };
+    instantiate_trait_placeholder_method(
+        mono,
+        effective_receiver_type,
+        effective_method_name,
+        method_type_arg_refs,
+    );
+    when identity_method_instance_option(
+        mono,
+        method,
+        effective_receiver_type,
+        resolved_method_type_args,
+    ) in {
+        .Some(concrete_method) then {
+            if method_symbol_matches_expected_return(
+                mono,
+                concrete_method,
+                resolved_call_type,
+            ) then {
+                return concrete_method;
+            };
+        },
+        .None() then {},
+    };
+
+    if not resolved_method_type_args.is_empty() then {
+        when identity_method_instance_option(
+            mono,
+            method,
+            effective_receiver_type,
+            resolved_method_type_args,
+        ) in {
+            .Some(concrete_method) then {
+                if method_symbol_matches_expected_return(
+                    mono,
+                    concrete_method,
+                    resolved_call_type,
+                ) then {
+                    return concrete_method;
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    when identity_method_instance_option(
+        mono,
+        method,
+        effective_receiver_type,
+        resolved_method_type_args,
+    ) in {
+        .Some(rebound_method) then {
+            if rebound_method.def_id.id > 0 and method_symbol_matches_expected_return(
+                mono,
+                rebound_method,
+                resolved_call_type,
+            ) and declared_static_receiver_method_is_materialized(
+                mono,
+                rebound_method.def_id,
+            ) then {
+                return rebound_method;
+            };
+        },
+        .None() then {},
+    };
+
+    if preferred_value_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+        mono,
+        preferred_value_method.def_id,
+    ) then {
+        return preferred_value_method;
+    };
+
+    if mono.storage.extension_body_resolution_depth == 0 and not has_generic_parameter(
+        effective_receiver_type,
+    ) then {
+        let mutable method_type_arg_refs = List[Type].new();
+        for method_type_arg in resolved_method_type_args then {
+            method_type_arg_refs.push(method_type_arg);
+        };
+        instantiate_trait_placeholder_method(
+            mono,
+            effective_receiver_type,
+            effective_method_name,
+            method_type_arg_refs,
+        );
+        when identity_method_instance_option(
+            mono,
+            method,
+            effective_receiver_type,
+            resolved_method_type_args,
+        ) in {
+            .Some(rebound_method) then {
+                if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                    mono,
+                    rebound_method.def_id,
+                ) then {
+                    return rebound_method;
+                };
+            },
+            .None() then {},
+        };
+
+        let conformance_trait_def_id = when method_trait_conformance_def_id(
+            mono,
+            preferred_value_method,
+        ) in {
+            .Some(id) then id,
+            .None() then def_id_invalid(),
+        };
+        if conformance_trait_def_id.is_valid() then {
+            let mutable method_type_arg_refs = List[Type].new();
+            for method_type_arg in resolved_method_type_args then {
+                method_type_arg_refs.push(method_type_arg);
+            };
+            instantiate_conformance_trait_method_for_type(
+                mono,
+                effective_receiver_type,
+                conformance_trait_def_id,
+                effective_method_name,
+                method_type_arg_refs,
+            );
+            when identity_method_instance_option(
+                mono,
+                method,
+                effective_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound_method) then {
+                    if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                        mono,
+                        rebound_method.def_id,
+                    ) then {
+                        return rebound_method;
+                    };
+                },
+                .None() then {},
+            };
+        } else {
+            instantiate_conformance_trait_methods_for_type(mono, effective_receiver_type);
+            when identity_method_instance_option(
+                mono,
+                method,
+                effective_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound_method) then {
+                    if rebound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                        mono,
+                        rebound_method.def_id,
+                    ) then {
+                        return rebound_method;
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+
+    if preferred_value_method.def_id.id > 0 and not declared_static_receiver_method_is_materialized(
+        mono,
+        preferred_value_method.def_id,
+    ) then {
+        when enqueue_extension_method_for_static_call(
+            mono,
+            effective_receiver_type,
+            effective_method_name,
+            method.def_id,
+            template_name_for_lookup,
+            resolved_method_type_args,
+            new_args,
+            resolved_call_type,
+        ) in {
+            .Some(instantiated_method) then {
+                if instantiated_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                    mono,
+                    instantiated_method.def_id,
+                ) and method_symbol_matches_expected_return(
+                    mono,
+                    instantiated_method,
+                    resolved_call_type,
+                ) then {
+                    return instantiated_method;
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    return preferred_value_method;
+};
+
+let normalize_resolved_call_callee(
+    mono: Monomorphizer,
+    original_callee: TypedExpr,
+    resolved_callee: TypedExpr,
+): TypedExpr = {
+    return when original_callee.expr_kind in {
+        .Variable(original_symbol) then when original_symbol.kind in {
+            .Function() then when resolved_callee.expr_kind in {
+                .Variable(resolved_symbol) then when resolved_symbol.kind in {
+                    .Function() then resolved_callee,
+                    _ then {
+                        let stable_symbol = resolve_symbol_type(mono, original_symbol);
+                        let stable_symbol_ref = stable_symbol;
+                        TypedExpr(
+                            TypedExprKind.Variable(stable_symbol_ref),
+                            stable_symbol.symbol_type,
+                            unknown_span(),
+                        )
+                    },
+                },
+                _ then resolved_callee,
+            },
+            _ then resolved_callee,
+        },
+        _ then resolved_callee,
+    };
+};
+
+let resolve_trait_placeholder_call_callee(
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    base_expr: TypedExpr,
+    trait_type: Type,
+    method: Symbol,
+    method_type_args: List[Type],
+    dispatch_callsite: Option[DefId],
+    new_args: List[TypedExpr],
+    resolved_call_type: Type,
+): Option[TypedExpr] = {
+    let mutable trait_object_type_opt: Option[Type] = Option[Type].None();
+    let mutable base_type = resolve_parameterized_type(mono, base_expr.expr_type);
+    when base_type in {
+        .TraitObject(trait_def_id, trait_type_args) then {
+            trait_object_type_opt = Option[Type].Some(
+                Type.TraitObject(trait_def_id, trait_type_args),
+            );
+        },
+        .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
+            .TraitObject(trait_def_id, trait_type_args) then {
+                trait_object_type_opt = Option[Type].Some(
+                    Type.TraitObject(trait_def_id, trait_type_args),
+                );
+            },
+            _ then {},
+        },
+        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
+            mono,
+            inner_ref,
+        ) in {
+            .TraitObject(trait_def_id, trait_type_args) then {
+                trait_object_type_opt = Option[Type].Some(
+                    Type.TraitObject(trait_def_id, trait_type_args),
+                );
+            },
+            _ then {},
+        },
+        _ then {},
+    };
+    when trait_object_type_opt in {
+        .Some(trait_object_type) then when trait_object_type in {
+            .TraitObject(...) then {
+                let logical_method_name = get_semantic_method_name(mono, method);
+                let method_index = vtable_method_index_for_trait_type(
+                    mono,
+                    trait_object_type,
+                    logical_method_name,
+                );
+                if method_index >= 0 then {
+                    let trait_receiver = when base_expr.expr_kind in {
+                        .DerefExpr(inner) then when resolve_parameterized_type(
+                            mono,
+                            inner.expr_type,
+                        ) in {
+                            .ReferenceType(ref_inner) then when resolve_parameterized_type(
+                                mono,
+                                ref_inner,
+                            ) in {
+                                .TraitObject(...) then inner,
+                                _ then base_expr,
+                            },
+                            .MutableReferenceType(ref_inner) then when resolve_parameterized_type(
+                                mono,
+                                ref_inner,
+                            ) in {
+                                .TraitObject(...) then inner,
+                                _ then base_expr,
+                            },
+                            _ then base_expr,
+                        },
+                        _ then base_expr,
+                    };
+                    return Option[TypedExpr].Some(
+                        TypedExpr(
+                            TypedExprKind.TraitMethodCall(
+                                trait_receiver,
+                                trait_object_type,
+                                logical_method_name,
+                                method_index,
+                                new_args,
+                            ),
+                            resolved_call_type,
+                            expr.span,
+                        ),
+                    );
+                };
+            },
+            _ then {},
+        },
+        .None() then {},
+    };
+
+    when trait_object_type_opt in {
+        .None() then {
+            if not has_generic_parameter(base_type) then {
+                let method_name = get_semantic_method_name(mono, method);
+                let mutable resolved_method_type_args_ref = List[Type].new();
+                for method_type_arg in method_type_args then {
+                    resolved_method_type_args_ref.push(
+                        resolve_parameterized_type(mono, method_type_arg),
+                    );
+                };
+                instantiate_trait_placeholder_method(
+                    mono,
+                    base_type,
+                    method_name,
+                    resolved_method_type_args_ref,
+                );
+                let dispatch_trait_def_id_opt = when trait_type in {
+                    // The DECLARATION the trait-object type names -- handed
+                    // straight through. Spelling it out and resolving it again
+                    // downstream is a DefId -> name -> DefId round-trip.
+                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    _ then Option[DefId].None(),
+                };
+                when instantiate_trait_target_static_method(
+                    mono,
+                    base_type,
+                    method_name,
+                    dispatch_trait_def_id_opt,
+                    resolved_method_type_args_ref,
+                    new_args,
+                    resolved_call_type,
+                ) in {
+                    .Some(trait_target_method) then {
+                        let trait_target_method_type = resolve_parameterized_type(
+                            mono,
+                            trait_target_method.symbol_type,
+                        );
+                        let adapted_base = align_method_reference_base_for_bound_method(
+                            mono,
+                            base_expr,
+                            trait_target_method,
+                        );
+                        let rebound_callee = TypedExpr(
+                            TypedExprKind.MethodReference(
+                                adapted_base,
+                                adapted_base.expr_type,
+                                Symbol(
+                                    trait_target_method.def_id,
+                                    trait_target_method_type,
+                                    trait_target_method.kind,
+                                ),
+                                List[Type].new(),
+                                resolved_method_type_args_ref,
+                                dispatch_callsite,
+                            ),
+                            trait_target_method_type,
+                            adapted_base.span,
+                        );
+                        let call_return_type = when trait_target_method_type in {
+                            .FunctionType(_, ret) then resolve_parameterized_type(
+                                mono,
+                                ret,
+                            ),
+                            _ then resolved_call_type,
+                        };
+                        return Option[TypedExpr].Some(
+                            TypedExpr(
+                                TypedExprKind.Call(rebound_callee, new_args),
+                                call_return_type,
+                                rebound_callee.span,
+                            ),
+                        );
+                    },
+                    .None() then {},
+                };
+                let mutable expected_call_param_types = List[Type].new();
+                expected_call_param_types.push(base_type);
+                for arg in new_args then {
+                    expected_call_param_types.push(
+                        resolve_parameterized_type(mono, arg.expr_type),
+                    );
+                };
+                let expected_call_type = Type.FunctionType(
+                    types_to_param_entries(expected_call_param_types),
+                    resolved_call_type,
+                );
+                let rebound_method = bind_receiver_method_symbol(
+                    mono,
+                    base_type,
+                    method,
+                    Option[Type].Some(expected_call_type),
+                );
+                if rebound_method.def_id.id > 0 and (rebound_method.def_id.id != method.def_id.id or not has_generic_parameter(
+                    resolve_parameterized_type(mono, rebound_method.symbol_type),
+                )) then {
+                    let adapted_base = align_method_reference_base_for_bound_method(
+                        mono,
+                        base_expr,
+                        rebound_method,
+                    );
+                    let rebound_callee = TypedExpr(
+                        TypedExprKind.MethodReference(
+                            adapted_base,
+                            adapted_base.expr_type,
+                            rebound_method,
+                            List[Type].new(),
+                            method_type_args,
+                            dispatch_callsite,
+                        ),
+                        rebound_method.symbol_type,
+                        expr.span,
+                    );
+                    let call_return_type = when rebound_method.symbol_type in {
+                        .FunctionType(_, ret) then resolve_parameterized_type(mono, ret),
+                        _ then resolved_call_type,
+                    };
+                    return Option[TypedExpr].Some(
+                        TypedExpr(
+                            TypedExprKind.Call(rebound_callee, new_args),
+                            call_return_type,
+                            expr.span,
+                        ),
+                    );
+                };
+            };
+        },
+        _ then {},
+    };
+
+    return Option[TypedExpr].None();
+};
+
+let resolve_method_reference_call_callee(
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    new_callee: TypedExpr,
+    resolved_base: TypedExpr,
+    receiver_type: Type,
+    method: Symbol,
+    type_args: List[Type],
+    method_type_args: List[Type],
+    dispatch_callsite: Option[DefId],
+    new_args: List[TypedExpr],
+    resolved_call_type: Type,
+): TypedExpr = {
+    let mutable declared_receiver_type = resolve_parameterized_type(mono, receiver_type);
+    let mutable inferred_receiver_type = resolve_parameterized_type(
+        mono,
+        resolved_base.expr_type,
+    );
+    let effective_receiver_type = when inferred_receiver_type in {
+        .TraitObject(...) then inferred_receiver_type,
+        _ then if mono.storage.context.get_layout_key(declared_receiver_type) != mono.storage.context.get_layout_key(
+            inferred_receiver_type,
+        ) and not has_generic_parameter(inferred_receiver_type) then inferred_receiver_type
+        else declared_receiver_type,
+    };
+    let mutable resolved_method_type_args = List[Type].new();
+    for method_type_arg in method_type_args then {
+        resolved_method_type_args.push(
+            resolve_parameterized_type(mono, method_type_arg),
+        );
+    };
+    let mutable expected_method_type = resolve_parameterized_type(
+        mono,
+        method.symbol_type,
+    );
+    let mutable method_lookup_receiver_type = method_lookup_base_type(
+        mono,
+        resolved_base,
+    );
+    let mutable method_resolution_receiver_type = if mono.storage.context.get_layout_key(
+        method_lookup_receiver_type,
+    ) == mono.storage.context.get_layout_key(effective_receiver_type) then effective_receiver_type
+    else method_lookup_receiver_type;
+    // "Concrete" is not "emitted". A generic method on a concrete receiver
+    // (`List[Shared].clone`) has a fully concrete expected type and a DefId
+    // that matches the receiver, but that DefId is the TEMPLATE's -- nothing
+    // has instantiated it yet. Only a DefId that has actually been materialized
+    // may be used as-is; anything else falls through to identity resolution,
+    // which materializes the specialization and returns ITS DefId.
+    let exact_concrete_bound_method = method.def_id.id > 0 and mono.storage.instantiated_method_def_ids.contains(
+        method.def_id.id,
+    ) and not has_generic_parameter(expected_method_type) and not mono_is_unresolved_expr_type(
+        mono,
+        expected_method_type,
+    ) and method_def_id_matches_receiver_exactly(
+        mono,
+        method.def_id,
+        method_resolution_receiver_type,
+    ) and get_semantic_method_name(mono, method) != "to_string";
+    let preferred_expected_types = if exact_concrete_bound_method then {
+        List[Type].new()
+    } else if resolved_method_type_args.is_empty() and has_generic_parameter(
+        expected_method_type,
+    ) then {
+        let mutable expected_call_param_types = List[Type].new();
+        expected_call_param_types.push(effective_receiver_type);
+        for arg in new_args then {
+            expected_call_param_types.push(
+                resolve_parameterized_type(mono, arg.expr_type),
+            );
+        };
+        let expected_call_type_with_receiver = Type.FunctionType(
+            types_to_param_entries(expected_call_param_types),
+            resolved_call_type,
+        );
+        let mutable expected_call_arg_types = List[Type].new();
+        for arg in new_args then {
+            expected_call_arg_types.push(
+                resolve_parameterized_type(mono, arg.expr_type),
+            );
+        };
+        let expected_call_type_without_receiver = Type.FunctionType(
+            types_to_param_entries(expected_call_arg_types),
+            resolved_call_type,
+        );
+        let mutable expected_types = List[Type].new();
+        expected_types.push(expected_call_type_with_receiver);
+        expected_types.push(expected_method_type);
+        expected_types.push(expected_call_type_without_receiver);
+        expected_types
+    } else {
+        let mutable expected_call_param_types = List[Type].new();
+        expected_call_param_types.push(effective_receiver_type);
+        for arg in new_args then {
+            expected_call_param_types.push(
+                resolve_parameterized_type(mono, arg.expr_type),
+            );
+        };
+        let expected_call_type_with_receiver = Type.FunctionType(
+            types_to_param_entries(expected_call_param_types),
+            resolved_call_type,
+        );
+        let mutable expected_call_arg_types = List[Type].new();
+        for arg in new_args then {
+            expected_call_arg_types.push(
+                resolve_parameterized_type(mono, arg.expr_type),
+            );
+        };
+        let expected_call_type_without_receiver = Type.FunctionType(
+            types_to_param_entries(expected_call_arg_types),
+            resolved_call_type,
+        );
+        let mutable expected_types = List[Type].new();
+        expected_types.push(expected_method_type);
+        expected_types.push(expected_call_type_with_receiver);
+        expected_types.push(expected_call_type_without_receiver);
+        expected_types
+    };
+    let mutable bound_method = if exact_concrete_bound_method then {
+        Symbol(method.def_id, expected_method_type, method.kind)
+    } else method;
+    // Strategy 0: identity first. The definition-time DefId names the method;
+    // every strategy below re-derives an answer from a SPELLING. A concrete hit
+    // here is the answer -- no candidate sweep, no return-type selection -- and
+    // the spelling-based strategies are then skipped entirely.
+    let mutable resolved_by_identity = false;
+    if not exact_concrete_bound_method and method.def_id.is_valid() then {
+        when resolve_method_instance_by_identity_for_receiver(
+            mono,
+            method,
+            expected_method_type,
+            resolved_method_type_args,
+            method_resolution_receiver_type,
+        ) in {
+            .Instantiated(resolved) then {
+                let resolved_type = resolve_parameterized_type(
+                    mono,
+                    resolved.symbol_type,
+                );
+                if not has_generic_parameter(resolved_type) and not mono_is_unresolved_expr_type(
+                    mono,
+                    resolved_type,
+                ) then {
+                    bound_method = Symbol(
+                        resolved.def_id,
+                        resolved.symbol_type,
+                        SymbolKind.Function(),
+                    );
+                    resolved_by_identity = true;
+                };
+            },
+            .KeepDefinitionTime(_) then {},
+        };
+    };
+    if not exact_concrete_bound_method and not resolved_by_identity and not resolved_method_type_args.is_empty(
+    ) then {
+        let method_name_for_lookup = get_semantic_method_name(mono, method);
+        let mutable explicit_lookup_receiver_types = List[Type].new();
+        explicit_lookup_receiver_types.push(effective_receiver_type);
+        when effective_receiver_type in {
+            .ReferenceType(inner) then explicit_lookup_receiver_types.push(
+                resolve_parameterized_type(mono, inner),
+            ),
+            .MutableReferenceType(inner) then explicit_lookup_receiver_types.push(
+                resolve_parameterized_type(mono, inner),
+            ),
+            _ then {},
+        };
+        for lookup_receiver_type in explicit_lookup_receiver_types then {
+            let template_name_for_lookup = resolve_static_call_template_name(
+                mono,
+                lookup_receiver_type,
+            );
+            when identity_method_instance_option(
+                mono,
+                method,
+                lookup_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(concrete_method) then {
+                    bound_method = concrete_method;
+                    break;
+                },
+                .None() then when enqueue_extension_method_for_static_call(
+                    mono,
+                    lookup_receiver_type,
+                    method_name_for_lookup,
+                    method.def_id,
+                    template_name_for_lookup,
+                    resolved_method_type_args,
+                    new_args,
+                    resolved_call_type,
+                ) in {
+                    .Some(instantiated_method) then {
+                        bound_method = instantiated_method;
+                        break;
+                    },
+                    .None() then {},
+                },
+            };
+        };
+    };
+    if not exact_concrete_bound_method and not resolved_by_identity and not should_preserve_resolved_method_reference(
+        mono,
+        method,
+        effective_receiver_type,
+    ) then {
+        let method_name_for_lookup = get_semantic_method_name(mono, method);
+        let template_name_for_lookup = resolve_static_call_template_name(
+            mono,
+            method_resolution_receiver_type,
+        );
+        let mutable resolved_method_type_arg_refs = List[Type].new();
+        for method_type_arg in resolved_method_type_args then {
+            resolved_method_type_arg_refs.push(method_type_arg);
+        };
+        instantiate_trait_placeholder_method(
+            mono,
+            method_resolution_receiver_type,
+            method_name_for_lookup,
+            resolved_method_type_arg_refs,
+        );
+        let resolved_method = resolve_concrete_method_call(
+            mono,
+            method_resolution_receiver_type,
+            method,
+            method_name_for_lookup,
+            template_name_for_lookup,
+            resolved_method_type_args,
+            new_args,
+            resolved_call_type,
+            new_callee,
+        );
+        if resolved_method.def_id.id > 0 and (resolved_method.def_id.id != method.def_id.id or mono.storage.context.symbol_name(
+            resolved_method,
+        ) != mono.storage.context.symbol_name(method)) then {
+            bound_method = resolved_method;
+        };
+        if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(
+            bound_method,
+        ) == mono.storage.context.symbol_name(method) then {
+            when identity_method_instance_option(
+                mono,
+                method,
+                method_resolution_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound_method) then {
+                    bound_method = rebound_method;
+                },
+                .None() then {},
+            };
+        };
+        if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(
+            bound_method,
+        ) == mono.storage.context.symbol_name(method) then {
+            let dispatch_trait_def_id_opt = if method.def_id.id > 0 then when mono.receiver_method_dispatch_info(
+                method.def_id,
+            ) in {
+                .Some(info) then info.conformance_trait_def_id,
+                .None() then Option[DefId].None(),
+            } else Option[DefId].None();
+            when instantiate_trait_target_static_method(
+                mono,
+                method_resolution_receiver_type,
+                method_name_for_lookup,
+                dispatch_trait_def_id_opt,
+                resolved_method_type_args,
+                new_args,
+                resolved_call_type,
+            ) in {
+                .Some(trait_target_method) then {
+                    bound_method = trait_target_method;
+                },
+                .None() then {},
+            };
+        };
+    };
+    if bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(
+        bound_method,
+    ) == mono.storage.context.symbol_name(method) then {
+        when effective_receiver_type in {
+            .ReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            .MutableReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            .BorrowedReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            .MutableBorrowedReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            .WeakReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            .MutableWeakReferenceType(_) then {
+                let wrapper_bound_method = bind_receiver_method_symbol(
+                    mono,
+                    effective_receiver_type,
+                    bound_method,
+                    Option[Type].None(),
+                );
+                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
+                    bound_method = wrapper_bound_method;
+                };
+            },
+            _ then {},
+        };
+    };
+    let bound_method_semantic_name = get_semantic_method_name(mono, bound_method);
+    if bound_method_semantic_name == "to_string" and is_ref_wrapper_owner_method(
+        mono,
+        bound_method,
+    ) then {
+        when unwrap_ref_like_receiver_type_for_value_lookup(
+            mono,
+            method_resolution_receiver_type,
+        ) in {
+            .Some(value_receiver_type) then {
+                let value_template_name = resolve_static_call_template_name(
+                    mono,
+                    value_receiver_type,
+                );
+                let rebound_value_method = resolve_concrete_method_call(
+                    mono,
+                    value_receiver_type,
+                    bound_method,
+                    bound_method_semantic_name,
+                    value_template_name,
+                    resolved_method_type_args,
+                    new_args,
+                    resolved_call_type,
+                    new_callee,
+                );
+                if rebound_value_method.def_id.id > 0 and not is_ref_wrapper_owner_method(
+                    mono,
+                    rebound_value_method,
+                ) then {
+                    bound_method = rebound_value_method;
+                };
+            },
+            .None() then {},
+        };
+    };
+    if not method_symbol_receiver_matches(
+        mono,
+        bound_method,
+        method_resolution_receiver_type,
+    ) then {
+        let fallback_method_name = normalize_receiver_call_method_name(
+            get_semantic_method_name(mono, bound_method),
+        );
+        when identity_method_instance_option(
+            mono,
+            method,
+            method_resolution_receiver_type,
+            resolved_method_type_args,
+        ) in {
+            .Some(rebound_method) then {
+                if method_symbol_receiver_matches(
+                    mono,
+                    rebound_method,
+                    method_resolution_receiver_type,
+                ) then {
+                    bound_method = rebound_method;
+                };
+            },
+            .None() then {
+                when identity_method_instance_option(
+                    mono,
+                    method,
+                    method_resolution_receiver_type,
+                    resolved_method_type_args,
+                ) in {
+                    .Some(rebound_method) then {
+                        if method_symbol_receiver_matches(
+                            mono,
+                            rebound_method,
+                            method_resolution_receiver_type,
+                        ) then {
+                            bound_method = rebound_method;
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+        };
+    };
+    if has_generic_parameter(bound_method.symbol_type) and not has_generic_parameter(
+        method_resolution_receiver_type,
+    ) then {
+        let mutable self_substitution = Dict[String, Type].new();
+        self_substitution.insert("Self", method_resolution_receiver_type);
+        let concretized_method_type = resolve_parameterized_type(
+            mono,
+            substitute_type(mono, bound_method.symbol_type, self_substitution),
+        );
+        bound_method = Symbol(
+            bound_method.def_id,
+            concretized_method_type,
+            bound_method.kind,
+        );
+    };
+    let bound_method_is_materialized = bound_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+        mono,
+        bound_method.def_id,
+    );
+    if mono.storage.extension_body_resolution_depth == 0 and not has_generic_parameter(
+        method_resolution_receiver_type,
+    ) and not bound_method_is_materialized then {
+        let materialize_is_original_method = bound_method.def_id.id == method.def_id.id and mono.storage.context.symbol_name(
+            bound_method,
+        ) == mono.storage.context.symbol_name(method);
+        let rebound_method_name = normalize_receiver_call_method_name(
+            get_semantic_method_name(mono, bound_method),
+        );
+        if not materialize_is_original_method or rebound_method_name == "unwrap" or rebound_method_name == "combine_hash" then {
+            let mutable rebound_method_type_arg_refs = List[Type].new();
+            for rebound_method_type_arg in resolved_method_type_args then {
+                rebound_method_type_arg_refs.push(rebound_method_type_arg);
+            };
+            instantiate_trait_placeholder_method(
+                mono,
+                method_resolution_receiver_type,
+                rebound_method_name,
+                rebound_method_type_arg_refs,
+            );
+            when identity_method_instance_option(
+                mono,
+                method,
+                method_resolution_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound_lookup_method) then {
+                    if rebound_lookup_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                        mono,
+                        rebound_lookup_method.def_id,
+                    ) then {
+                        bound_method = rebound_lookup_method;
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    if bound_method.def_id.id > 0 and not declared_static_receiver_method_is_materialized(
+        mono,
+        bound_method.def_id,
+    ) then {
+        if mono.storage.extension_body_resolution_depth == 0 then {
+            let rebound_method_name = normalize_receiver_call_method_name(
+                get_semantic_method_name(mono, bound_method),
+            );
+            let conformance_trait_def_id = when method_trait_conformance_def_id(
+                mono,
+                bound_method,
+            ) in {
+                .Some(id) then id,
+                .None() then def_id_invalid(),
+            };
+            if conformance_trait_def_id.is_valid() then {
+                let mutable method_type_arg_refs = List[Type].new();
+                for method_type_arg in resolved_method_type_args then {
+                    method_type_arg_refs.push(method_type_arg);
+                };
+                instantiate_conformance_trait_method_for_type(
+                    mono,
+                    method_resolution_receiver_type,
+                    conformance_trait_def_id,
+                    rebound_method_name,
+                    method_type_arg_refs,
+                );
+            };
+            when identity_method_instance_option(
+                mono,
+                method,
+                method_resolution_receiver_type,
+                resolved_method_type_args,
+            ) in {
+                .Some(rebound_lookup_method) then {
+                    if rebound_lookup_method.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                        mono,
+                        rebound_lookup_method.def_id,
+                    ) then {
+                        bound_method = rebound_lookup_method;
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    if bound_method.def_id.id > 0 and not declared_static_receiver_method_is_materialized(
+        mono,
+        bound_method.def_id,
+    ) then {
+        let rebound_method_name = normalize_receiver_call_method_name(
+            get_semantic_method_name(mono, bound_method),
+        );
+        let rebound_template_name = resolve_static_call_template_name(
+            mono,
+            method_resolution_receiver_type,
+        );
+        when enqueue_extension_method_for_static_call(
+            mono,
+            method_resolution_receiver_type,
+            rebound_method_name,
+            method.def_id,
+            rebound_template_name,
+            resolved_method_type_args,
+            new_args,
+            resolved_call_type,
+        ) in {
+            .Some(rebound_materialized) then {
+                if rebound_materialized.def_id.id > 0 and declared_static_receiver_method_is_materialized(
+                    mono,
+                    rebound_materialized.def_id,
+                ) then {
+                    bound_method = rebound_materialized;
+                };
+            },
+            .None() then {},
+        };
+    };
+    let adapted_base = adapt_receiver_expr_for_method(mono, resolved_base, bound_method);
+    let adapted_args = adapt_call_args_for_method(mono, bound_method, new_args);
+    let mutable resolved_type = resolved_callsite_result_type(
+        mono,
+        expr.expr_type,
+        bound_method,
+    );
+    if has_generic_parameter(resolved_type) and not has_generic_parameter(
+        method_resolution_receiver_type,
+    ) then {
+        let mutable self_substitution = Dict[String, Type].new();
+        self_substitution.insert("Self", method_resolution_receiver_type);
+        resolved_type = resolve_parameterized_type(
+            mono,
+            substitute_type(mono, resolved_type, self_substitution),
+        );
+    };
+    let effective_dispatch_callsite = ensure_receiver_dispatch_callsite(
+        mono,
+        dispatch_callsite,
+        effective_receiver_type,
+        bound_method,
+        Option[String].Some(mono.storage.context.symbol_name(method)),
+    );
+    let receiver_trait_name_opt = when effective_receiver_type in {
+        .TraitObject(trait_def_id, _) then Option[String].Some(
+            def_id_spelling(trait_def_id),
+        ),
+        .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
+            .TraitObject(trait_def_id, _) then Option[String].Some(
+                def_id_spelling(trait_def_id),
+            ),
+            _ then Option[String].None(),
+        },
+        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
+            mono,
+            inner_ref,
+        ) in {
+            .TraitObject(trait_def_id, _) then Option[String].Some(
+                def_id_spelling(trait_def_id),
+            ),
+            _ then Option[String].None(),
+        },
+        .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
+            mono,
+            inner_ref,
+        ) in {
+            .TraitObject(trait_def_id, _) then Option[String].Some(
+                def_id_spelling(trait_def_id),
+            ),
+            _ then Option[String].None(),
+        },
+        .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
+            mono,
+            inner_ref,
+        ) in {
+            .TraitObject(trait_def_id, _) then Option[String].Some(
+                def_id_spelling(trait_def_id),
+            ),
+            _ then Option[String].None(),
+        },
+        _ then Option[String].None(),
+    };
+    when receiver_trait_name_opt in {
+        .Some(trait_name) then {
+            let logical_method_name = when effective_dispatch_callsite in {
+                .Some(def_id) then when mono.receiver_method_dispatch_info(def_id) in {
+                    .Some(info) then info.method_name,
+                    .None() then get_semantic_method_name(mono, bound_method),
+                },
+                .None() then get_semantic_method_name(mono, bound_method),
+            };
+            if vtable_method_index(mono, trait_name, logical_method_name) < 0 then {
+                let callee_expr = TypedExpr(
+                    TypedExprKind.Variable(bound_method),
+                    bound_method.symbol_type,
+                    expr.span,
+                );
+                let mutable direct_args = List[TypedExpr].new();
+                direct_args.push(adapted_base);
+                for arg in new_args then {
+                    direct_args.push(arg);
+                };
+                return TypedExpr(
+                    TypedExprKind.Call(callee_expr, direct_args),
+                    resolved_type,
+                    expr.span,
+                );
+            };
+        },
+        .None() then {},
+    };
+    let rebound_callee = TypedExpr(
+        TypedExprKind.MethodReference(
+            adapted_base,
+            adapted_base.expr_type,
+            bound_method,
+            type_args,
+            method_type_args,
+            effective_dispatch_callsite,
+        ),
+        bound_method.symbol_type,
+        adapted_base.span,
+    );
+    return TypedExpr(
+        TypedExprKind.Call(rebound_callee, adapted_args),
+        resolved_type,
+        expr.span,
+    );
+};
+
+let resolve_member_path_call_callee(
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    resolved_base: TypedExpr,
+    path: List[Symbol],
+    new_args: List[TypedExpr],
+): Option[TypedExpr] = {
+    if path.is_empty() then {
+        return Option[TypedExpr].None();
+    };
+    let member_name = mono.storage.context.symbol_name(path[path.count() - 1]);
+    let receiver_expr = if path.count() == 1 then resolved_base
+    else {
+        let mutable receiver_path = List[Symbol].new();
+        let mutable idx: UInt = 0;
+        while idx + 1 < path.count() then {
+            receiver_path.push(path[idx]);
+            idx += 1;
+        };
+        let receiver_type = resolve_member_path_type(
+            mono,
+            resolved_base.expr_type,
+            receiver_path,
+            expr.expr_type,
+        );
+        TypedExpr(
+            TypedExprKind.MemberPath(resolved_base, receiver_path),
+            receiver_type,
+            expr.span,
+        )
+    };
+    let binding_receiver_type = resolve_parameterized_type(mono, receiver_expr.expr_type);
+    let resolved_call_type = resolve_parameterized_type(mono, expr.expr_type);
+    // The path carries the member's definition-time Symbol, so the DefId is
+    // already on hand -- `member_name` above is display only.
+    let member_symbol = path[path.count() - 1];
+    let bound_method_opt = identity_method_instance_option(
+        mono,
+        member_symbol,
+        binding_receiver_type,
+        List[Type].new(),
+    );
+    let effective_bound_method_opt = when bound_method_opt in {
+        .Some(bound_method) then Option[Symbol].Some(bound_method),
+        .None() then {
+            let template_name_for_lookup = resolve_static_call_template_name(
+                mono,
+                binding_receiver_type,
+            );
+            when identity_method_instance_option(
+                mono,
+                member_symbol,
+                binding_receiver_type,
+                List[Type].new(),
+            ) in {
+                .Some(bound_method) then Option[Symbol].Some(bound_method),
+                .None() then enqueue_extension_method_for_static_call(
+                    mono,
+                    binding_receiver_type,
+                    member_name,
+                    member_symbol.def_id,
+                    template_name_for_lookup,
+                    List[Type].new(),
+                    new_args,
+                    resolved_call_type,
+                ),
+            }
+        },
+    };
+    return when effective_bound_method_opt in {
+        .Some(bound_method) then {
+            let adapted_receiver = adapt_receiver_expr_for_method(
+                mono,
+                receiver_expr,
+                bound_method,
+            );
+            let mutable resolved_type = resolved_callsite_result_type(
+                mono,
+                expr.expr_type,
+                bound_method,
+            );
+            if has_generic_parameter(resolved_type) and not has_generic_parameter(
+                binding_receiver_type,
+            ) then {
+                let mutable self_substitution = Dict[String, Type].new();
+                self_substitution.insert("Self", binding_receiver_type);
+                resolved_type = resolve_parameterized_type(
+                    mono,
+                    substitute_type(mono, resolved_type, self_substitution),
+                );
+            };
+            let dispatch_callsite = ensure_receiver_dispatch_callsite(
+                mono,
+                .None(),
+                binding_receiver_type,
+                bound_method,
+                Option[String].Some(member_name),
+            );
+            let rebound_callee = TypedExpr(
+                TypedExprKind.MethodReference(
+                    adapted_receiver,
+                    adapted_receiver.expr_type,
+                    bound_method,
+                    List[Type].new(),
+                    List[Type].new(),
+                    dispatch_callsite,
+                ),
+                bound_method.symbol_type,
+                expr.span,
+            );
+            Option[TypedExpr].Some(
+                TypedExpr(
+                    TypedExprKind.Call(rebound_callee, new_args),
+                    resolved_type,
+                    expr.span,
+                ),
+            )
+        },
+        .None() then Option[TypedExpr].None(),
+    };
+};
+
+let resolve_special_call_callee(
+    mono: Monomorphizer,
+    expr: TypedExpr,
+    new_callee: TypedExpr,
+    new_args: List[TypedExpr],
+    resolved_call_type: Type,
+): Option[TypedExpr] = {
+    return when new_callee.expr_kind in {
+        .TraitMethodPlaceholder(base_expr, trait_type, method, _, method_type_args, dispatch_callsite) then {
+            resolve_trait_placeholder_call_callee(
+                mono,
+                expr,
+                base_expr,
+                trait_type,
+                method,
+                method_type_args,
+                dispatch_callsite,
+                new_args,
+                resolved_call_type,
+            )
+        },
+        .MethodReference(base_expr, receiver_type, method, type_args, method_type_args, dispatch_callsite) then {
+            Option[TypedExpr].Some(
+                resolve_method_reference_call_callee(
+                    mono,
+                    expr,
+                    new_callee,
+                    base_expr,
+                    receiver_type,
+                    method,
+                    type_args,
+                    method_type_args,
+                    dispatch_callsite,
+                    new_args,
+                    resolved_call_type,
+                ),
+            )
+        },
+        .MemberPath(base_expr, path) then {
+            resolve_member_path_call_callee(mono, expr, base_expr, path, new_args)
+        },
+        _ then Option[TypedExpr].None(),
+    };
+};
+

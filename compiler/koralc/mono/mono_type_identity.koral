@@ -1,0 +1,290 @@
+// Def-id identity and substitution for the monomorphization phase: trait and
+// generic declaration lookup, substitute_type, and the identity/extension
+// method lookup keys.
+
+// Type resolution and substitution for the monomorphization phase.
+// Implements substitute_type, resolve_parameterized_type, resolve_type_node,
+// and resolve_types_in_global_node.
+//
+using "std/os" { ... };
+
+/// The trait DECLARATION a method belongs to. Nothing may decide membership
+/// from the spelling (`ReceiverMethodDispatchInfo.conformance_trait_name`,
+/// `ConcreteCallableInfo.trait_conformance`) -- those are display-only.
+let method_trait_conformance_def_id(
+    mono: Monomorphizer,
+    method: Symbol,
+): Option[DefId] = {
+    if method.def_id.id == 0 then {
+        return Option[DefId].None();
+    };
+    return when mono.receiver_method_dispatch_info(method.def_id) in {
+        .Some(info) then info.conformance_trait_def_id,
+        .None() then when mono.storage.concrete_callables_by_def_id.get(method.def_id) in {
+            .Some(info) then info.trait_conformance_def_id,
+            .None() then Option[DefId].None(),
+        },
+    };
+};
+
+let generic_struct_def_id(mono: Monomorphizer, name: String): DefId = {
+    return when mono.storage.generic_templates.lookup_struct(name) in {
+        .Some(template) then template.def_id,
+        .None() then def_id_invalid(),
+    };
+};
+
+let generic_enum_def_id(mono: Monomorphizer, name: String): DefId = {
+    return when mono.storage.generic_templates.lookup_enum(name) in {
+        .Some(template) then template.def_id,
+        .None() then def_id_invalid(),
+    };
+};
+
+/// The trait `name` denotes, through `resolve_trait_name`'s candidate-key
+/// sequence: this module's own declaration first, then each import edge, then
+/// the bare spelling. Going straight at `traits.get(name)` reads the bare
+/// index, which is last-wins across modules and cannot say which `Tag` a name
+/// means -- so a match there can be another module's trait.
+let trait_info_from_registry(
+    mono: Monomorphizer,
+    name: String,
+): Option[TraitDeclInfo] = {
+    return when mono.storage.generic_templates.resolve_trait_name(name) in {
+        .Some(resolved_name) then mono.storage.generic_templates.traits.get(
+            resolved_name,
+        ),
+        .None() then Option[TraitDeclInfo].None(),
+    };
+};
+
+let trait_def_id_from_registry(mono: Monomorphizer, name: String): DefId = {
+    return when trait_info_from_registry(mono, name) in {
+        .Some(info) then info.def_id,
+        .None() then def_id_invalid(),
+    };
+};
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+// ── substitute_type ───────────────────────────────────────────────────────────
+
+// Recursively traverse a Type, replacing GenericParameter with concrete types
+// from the substitution map.
+//
+// Handles all Type variants:
+//   - GenericParameter: look up in substitution map, return concrete type or keep as-is
+//   - FunctionType: substitute param types and return type
+//   - ReferenceType: substitute inner type
+//   - PointerType: substitute inner type
+//   - WeakReferenceType: substitute inner type
+//   - GenericStruct: substitute each type arg
+//   - GenericEnum: substitute each type arg
+//   - All primitive/concrete types: return unchanged
+//
+public let substitute_type(
+    mono: Monomorphizer,
+    t: Type,
+    substitution: Dict[String, Type],
+): Type = {
+    let substituted = when t in {
+        // GenericParameter: look up in substitution map.
+        .GenericParameter(name) then {
+            when substitution.get(name) in {
+                .Some(concrete) then concrete,
+                .None() then t,
+            }
+        },
+        .TraitObject(trait_def_id, trait_args) then {
+            if trait_args.is_empty() then {
+                return t;
+            };
+            let mutable new_trait_args = List[Type].new();
+            for arg in trait_args then {
+                new_trait_args.push(substitute_type(mono, arg, substitution));
+            };
+            Type.TraitObject(trait_def_id, new_trait_args)
+        },
+        // FunctionType: substitute param types and return type.
+        .FunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable new_param_types = List[Type].new();
+            for pt in param_types then {
+                let substituted = substitute_type(mono, pt, substitution);
+                new_param_types.push(substituted);
+            };
+            let mutable new_return_type = substitute_type(mono, return_type, substitution);
+            make_function_type(new_param_types, new_return_type)
+        },
+        // ReferenceType: substitute inner type.
+        .ReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.ReferenceType(new_inner)
+        },
+        .MutableReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.MutableReferenceType(new_inner)
+        },
+        // BorrowedReferenceType: substitute inner type.
+        .BorrowedReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.BorrowedReferenceType(new_inner)
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.MutableBorrowedReferenceType(new_inner)
+        },
+        // PointerType: substitute inner type.
+        .PointerType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.PointerType(new_inner)
+        },
+        .MutablePointerType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.MutablePointerType(new_inner)
+        },
+        // WeakReferenceType: substitute inner type.
+        .WeakReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.WeakReferenceType(new_inner)
+        },
+        .MutableWeakReferenceType(inner) then {
+            let new_inner = substitute_type(mono, inner, substitution);
+            Type.MutableWeakReferenceType(new_inner)
+        },
+        // GenericStruct: substitute each type arg.
+        .GenericStruct(template_def_id, args) then {
+            let mutable new_args = List[Type].new();
+            for a in args then {
+                let substituted = substitute_type(mono, a, substitution);
+                new_args.push(substituted);
+            };
+            Type.GenericStruct(template_def_id, new_args)
+        },
+        // GenericEnum: substitute each type arg.
+        .GenericEnum(template_def_id, args) then {
+            let mutable new_args = List[Type].new();
+            for a in args then {
+                let substituted = substitute_type(mono, a, substitution);
+                new_args.push(substituted);
+            };
+            Type.GenericEnum(template_def_id, new_args)
+        },
+        _ then t,
+    };
+    return resolve_parameterized_type(mono, substituted);
+};
+
+// ── resolve_parameterized_type ────────────────────────────────────────────────
+
+// Resolve a parameterized type mutable (GenericStruct/GenericEnum) to a concrete type.
+//
+// - GenericStruct: look up struct template and instantiate, return concrete StructureType
+// - GenericEnum: look up enum template and instantiate, return concrete EnumType
+// - ReferenceType: recursively resolve inner type and wrap as reference
+// - PointerType: recursively resolve inner type and wrap as pointer
+// - WeakReferenceType: recursively resolve inner type and wrap as weak reference
+// - FunctionType: recursively resolve param types and return type
+// - If type args still contain generic params, preserve original type
+// - All other types: return unchanged
+//
+
+/// The DEFINITION identities an instance may answer under: the method's own
+/// DefId, plus the trait method's DefId when it implements one (rustc's
+/// `trait_item_def_id`). Mirrors Swift's `resolveMethodInstanceByIdentity`
+/// `lookupDefIds`. Registration writes both; lookup tries both. Never a name.
+public let identity_lookup_def_ids(
+    mono: Monomorphizer,
+    method_def_id: DefId,
+): List[DefId] = {
+    let mutable out = List[DefId].new();
+    if not method_def_id.is_valid() then {
+        return out;
+    };
+    out.push(method_def_id);
+    when mono.storage.receiver_method_dispatch.get(method_def_id) in {
+        .Some(info) then {
+            when info.trait_method_def_id in {
+                .Some(trait_item_def_id) then {
+                    if trait_item_def_id != method_def_id and not out.contains(
+                        trait_item_def_id,
+                    ) then {
+                        out.push(trait_item_def_id);
+                    };
+                },
+                .None() then {},
+            };
+        },
+        .None() then {},
+    };
+    return out;
+};
+
+/// Look up an instantiated extension method by the receiver's OWNER IDENTITY
+/// and the method's DECLARATION identity. Mirrors Swift's L1 identity table
+/// lookup on `extensionMethodDefIds: [MethodInstanceKey: DefId]`.
+///
+/// There is one key per (type, method DefId, method type args) -- no alias
+/// sweep and no candidate-name list. The only fallback left is real: a method
+/// registered without method type args is also answerable without them.
+public let lookup_extension_method_def_id(
+    mono: Monomorphizer,
+    base_type: Type,
+    method_def_id: DefId,
+    method_type_args: List[Type],
+): Option[DefId] = {
+    if not method_def_id.is_valid() then {
+        return Option[DefId].None();
+    };
+    let receiver = mono_receiver_lookup_type(mono.storage.context, base_type);
+    for lookup_def_id in identity_lookup_def_ids(mono, method_def_id) then {
+        let key = make_receiver_method_identity_key(
+            mono,
+            receiver,
+            lookup_def_id,
+            method_type_args,
+        );
+        when mono.storage.extension_method_def_ids_by_identity.get(key) in {
+            .Some(def_id) then {
+                if declared_static_receiver_method_is_materialized(mono, def_id) then {
+                    return Option[DefId].Some(def_id);
+                };
+            },
+            .None() then {},
+        };
+        if not method_type_args.is_empty() then {
+            let plain_key = make_receiver_method_identity_key(
+                mono,
+                receiver,
+                lookup_def_id,
+                List[Type].new(),
+            );
+            when mono.storage.extension_method_def_ids_by_identity.get(plain_key) in {
+                .Some(def_id) then {
+                    if declared_static_receiver_method_is_materialized(mono, def_id) then {
+                        return Option[DefId].Some(def_id);
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    return Option[DefId].None();
+};
+
+type ParameterizedTypeWrapperKind {
+    Reference(),
+    MutableReference(),
+    BorrowedReference(),
+    MutableBorrowedReference(),
+    Pointer(),
+    MutablePointer(),
+    WeakReference(),
+    MutableWeakReference(),
+};
+
+type ParameterizedTypeWrapperChain(
+    wrappers: List[ParameterizedTypeWrapperKind],
+    inner: Type,
+);
+
