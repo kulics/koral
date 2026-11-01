@@ -76,26 +76,16 @@ let drop_self_escape_span_in(e: Expr, in_lambda: Bool): Option[SourceSpan] = {
         },
         // A closure captures whatever it mentions; `self` may not be captured.
         .LambdaExpr(_, _, body, _) then drop_self_escape_span_in(body, true),
-        .CastExpr(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
-        .Unary(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
-        .RefExpr(inner, _, _) then drop_self_escape_span_in(inner, in_lambda),
-        .WeakrefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
-        .PtrExpr(inner, _, _) then drop_self_escape_span_in(inner, in_lambda),
-        .DerefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
-        .UnsafeDerefExpr(inner, _) then drop_self_escape_span_in(inner, in_lambda),
-        .NamedArgument(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
+        .CastExpr(_, inner, _) or .Unary(_, inner, _) or .RefExpr(inner, _, _) or .WeakrefExpr(inner, _)
+        or .PtrExpr(inner, _, _) or .DerefExpr(inner, _) or .UnsafeDerefExpr(inner, _)
+        or .NamedArgument(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
         .TraitQualificationExpr(base, _, _) then drop_self_escape_span_in(
             base,
             in_lambda,
         ),
         .OrReturnExpr(operand, _) then drop_self_escape_span_in(operand, in_lambda),
-        .IsExpr(subject, _, _) then drop_self_escape_span_in(subject, in_lambda),
-        .IsNotExpr(subject, _, _) then drop_self_escape_span_in(subject, in_lambda),
-        .StaticMethodCall(_, _, _, args, _) then drop_self_escape_in_list(
-            args,
-            in_lambda,
-        ),
-        .TypeRefStaticMethodCall(_, _, _, args, _) then drop_self_escape_in_list(
+        .IsExpr(subject, _, _) or .IsNotExpr(subject, _, _) then drop_self_escape_span_in(subject, in_lambda),
+        .StaticMethodCall(_, _, _, args, _) or .TypeRefStaticMethodCall(_, _, _, args, _) then drop_self_escape_in_list(
             args,
             in_lambda,
         ),
@@ -269,8 +259,7 @@ let drop_self_escape_in_statements(
 ): Option[SourceSpan] = {
     for statement in statements then {
         let found = when statement in {
-            .LetStmt(_, _, _, value, _) then drop_self_escape_span_in(value, in_lambda),
-            .TupleLetStmt(_, value, _) then drop_self_escape_span_in(value, in_lambda),
+            .LetStmt(_, _, _, value, _) or .TupleLetStmt(_, value, _) then drop_self_escape_span_in(value, in_lambda),
             // `self.x = v` is a receiver write; anything else in the target
             // position is a use like any other.
             .AssignmentStmt(target, _, value, _) then {
@@ -371,8 +360,7 @@ given TypeChecker {
     /// This ensures the nominal layout analysis treats it as managed (ARC-backed).
     mark_explicit_drop_conformance(self, target_type: Type): Void = {
         when target_type in {
-            .StructureType(def_id) then self.context().set_explicit_drop(def_id),
-            .EnumType(def_id) then self.context().set_explicit_drop(def_id),
+            .StructureType(def_id) or .EnumType(def_id) then self.context().set_explicit_drop(def_id),
             // Identity is the carried template DefId. Going
             // DefId -> spelling -> name-keyed lookup -> `template.def_id` is a
             // round trip that can only lose: two same-named templates in
@@ -404,10 +392,7 @@ given TypeChecker {
                 let typed_init = self.check_expr_global_ref(initializer, expected_type);
                 self.storage.in_global_init = prev_in_global_init;
                 self.storage.initialized_globals.insert(name);
-                let resolved = when expected_type in {
-                    .Some(t) then t,
-                    .None() then typed_init.expr_type,
-                };
+                let resolved = expected_type or else typed_init.expr_type;
                 self.validate_signature_type_visibility(
                     name,
                     access,
@@ -1315,14 +1300,15 @@ given TypeChecker {
                                     ) in {
                                         .Some(ti) then {
                                             let targs = resolved_trait_args;
-                                            let mutable tidx: UInt = 0;
-                                            while tidx < ti.type_params.count() and tidx < targs.count(
-                                            ) then {
+                                            for pair in ti.type_params.lazy().zip[
+                                                Type,
+                                                ListIterator[Type],
+                                                List[Type],
+                                            ](targs) then {
                                                 parent_bindings.insert(
-                                                    ti.type_params[tidx],
-                                                    targs[tidx],
+                                                    (pair.first),
+                                                    (pair.second),
                                                 );
-                                                tidx += 1;
                                             };
                                         },
                                         .None() then {},
@@ -1432,13 +1418,13 @@ given TypeChecker {
                             for member in members then {
                                 when trait_methods.get(member.name) in {
                                     .Some(trait_method) then {
-                                        let param_count = if trait_method.params.count() < member.params.count(
-                                        ) then trait_method.params.count()
-                                        else member.params.count();
-                                        let mutable pi: UInt = 1;
-                                        while pi < param_count then {
-                                            let trait_param = trait_method.params[pi];
-                                            let impl_param = member.params[pi];
+                                        for pair in trait_method.params.lazy().zip[
+                                            Param,
+                                            ListIterator[Param],
+                                            List[Param],
+                                        ](member.params).skip(1) then {
+                                            let trait_param = pair.first;
+                                            let impl_param = pair.second;
                                             if trait_param.named and impl_param.named then {
                                                 // The DECLARATION carries its default; presence
                                                 // is whether the parameter has one at all.
@@ -1457,7 +1443,6 @@ given TypeChecker {
                                                     );
                                                 };
                                             };
-                                            pi += 1;
                                         };
                                     },
                                     .None() then {},
@@ -1600,20 +1585,22 @@ given TypeChecker {
                     );
                     return true;
                 };
-                let mutable i: UInt = 0;
-                while i < args.count() then {
-                    let arg_matches = when args[i] in {
-                        .Identifier(arg_name, span) then arg_name == type_params[i].name,
+                for pair in args.lazy().zip[
+                    TypeParameter,
+                    ListIterator[TypeParameter],
+                    List[TypeParameter],
+                ](type_params) then {
+                    let arg_matches = when pair.first in {
+                        .Identifier(arg_name, span) then arg_name == pair.second.name,
                         _ then false,
                     };
                     if not arg_matches then {
                         self.push_diagnostic(
-                            "Invalid operation generic given specialization not supported between types \(type_node_display(args[i])) and ",
+                            "Invalid operation generic given specialization not supported between types \(type_node_display(pair.first)) and ",
                             unknown_span(),
                         );
                         return true;
                     };
-                    i += 1;
                 };
             },
             _ then {},
@@ -1652,9 +1639,7 @@ given TypeChecker {
             return false;
         };
         return when target_type in {
-            .Reference(_, _, span) then true,
-            .Pointer(_, _, span) then true,
-            .WeakReference(_, _, span) then true,
+            .Reference(_, _, span) or .Pointer(_, _, span) or .WeakReference(_, _, span) then true,
             _ then false,
         };
     };

@@ -18,10 +18,8 @@ given TypeChecker {
         return when expr.expr_kind in {
             .Variable(symbol) then if self.context().symbol_name(symbol) == "self" then {
                 when expr.expr_type in {
-                    .ReferenceType(inner) then Option[Type].Some(inner),
-                    .MutableReferenceType(inner) then Option[Type].Some(inner),
-                    .WeakReferenceType(inner) then Option[Type].Some(inner),
-                    .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner)
+                    or .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
                     _ then Option[Type].None(),
                 }
             } else Option[Type].None(),
@@ -97,65 +95,25 @@ given TypeChecker {
     source_expr_is_obviously_pure_statement(self, expr: Expr): Bool = {
         let _ = self;
         return when expr in {
-            .Identifier(_, _) then true,
-            .IntegerLiteral(...) then true,
-            .FloatLiteral(...) then true,
-            .StringLiteral(...) then true,
-            .RuneLiteral(...) then true,
-            .BoolLiteral(...) then true,
-            .NullLiteral(_) then true,
-            .EmptyLiteral(_) then true,
-            .GenericInstantiation(_, _, _) then true,
-            .TypeRef(_, _) then true,
-            .WeakrefExpr(_, _) then false,
-            .InterpolatedString(_, _) then false,
-            .CollectionLiteral(_, _) then false,
-            .DictLiteral(_, _) then false,
-            .LambdaExpr(_, _, _, _) then false,
-            .Call(_, _, _) then false,
-            .GenericMethodCall(_, _, _, _, _) then false,
-            .QualifiedMethodCall(_, _, _, _, _) then false,
-            .QualifiedGenericMethodCall(_, _, _, _, _, _) then false,
-            .StaticMethodCall(_, _, _, _, _) then false,
-            .TypeRefStaticMethodCall(_, _, _, _, _) then false,
-            .Block(...) then false,
-            .IfExpr(_, _, _, _) then false,
-            .WhileExpr(_, _, _) then false,
-            .ForExpr(_, _, _, _, _) then false,
-            .WhenExpr(_, _, _) then false,
-            .ImplicitMemberExpr(_, _, _) then false,
-            .OrElseExpr(_, _, _) then false,
-            .AndThenExpr(_, _, _) then false,
-            .OrReturnExpr(_, _) then false,
-            .FlowReceiver(_) then false,
-            .FlowChainExpr(_, _) then false,
-            .FlowBindExpr(_, _, _) then false,
+            .Identifier(_, _) or .IntegerLiteral(...) or .FloatLiteral(...) or .StringLiteral(...)
+            or .RuneLiteral(...) or .BoolLiteral(...) or .NullLiteral(_) or .EmptyLiteral(_)
+            or .GenericInstantiation(_, _, _) or .TypeRef(_, _) then true,
+            .WeakrefExpr(_, _) or .InterpolatedString(_, _) or .CollectionLiteral(_, _) or .DictLiteral(_, _)
+            or .LambdaExpr(_, _, _, _) or .Call(_, _, _) or .GenericMethodCall(_, _, _, _, _)
+            or .QualifiedMethodCall(_, _, _, _, _) or .QualifiedGenericMethodCall(_, _, _, _, _, _)
+            or .StaticMethodCall(_, _, _, _, _) or .TypeRefStaticMethodCall(_, _, _, _, _) or .Block(...)
+            or .IfExpr(_, _, _, _) or .WhileExpr(_, _, _) or .ForExpr(_, _, _, _, _) or .WhenExpr(_, _, _)
+            or .ImplicitMemberExpr(_, _, _) or .OrElseExpr(_, _, _) or .AndThenExpr(_, _, _)
+            or .OrReturnExpr(_, _) or .FlowReceiver(_) or .FlowChainExpr(_, _) or .FlowBindExpr(_, _, _) then false,
             .CastExpr(_, inner, _) then self.source_expr_is_obviously_pure_statement(
                 inner,
             ),
             .Unary(_, inner, _) then self.source_expr_is_obviously_pure_statement(inner),
-            .RefExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(
+            .RefExpr(inner, _, _) or .PtrExpr(inner, _, _) or .DerefExpr(inner, _)
+            or .UnsafeDerefExpr(inner, _) or .UpgradeExpr(inner, _) or .NamedArgument(_, inner, _) then self.source_expr_is_obviously_pure_statement(
                 inner,
             ),
-            .PtrExpr(inner, _, _) then self.source_expr_is_obviously_pure_statement(
-                inner,
-            ),
-            .DerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(
-                inner,
-            ),
-            .UnsafeDerefExpr(inner, _) then self.source_expr_is_obviously_pure_statement(
-                inner,
-            ),
-            .UpgradeExpr(inner, _) then self.source_expr_is_obviously_pure_statement(
-                inner,
-            ),
-            .NamedArgument(_, inner, _) then self.source_expr_is_obviously_pure_statement(
-                inner,
-            ),
-            .MemberPath(base, _, _) then self.source_expr_is_obviously_pure_statement(
-                base,
-            ),
-            .TraitQualificationExpr(base, _, _) then self.source_expr_is_obviously_pure_statement(
+            .MemberPath(base, _, _) or .TraitQualificationExpr(base, _, _) then self.source_expr_is_obviously_pure_statement(
                 base,
             ),
             .SubscriptExpr(base, args, _) then {
@@ -171,20 +129,11 @@ given TypeChecker {
                 };
                 pure
             },
-            .ArithmeticExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(
-                left,
-            ) and self.source_expr_is_obviously_pure_statement(right),
-            .ComparisonExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(
+            .ArithmeticExpr(left, _, right, _) or .ComparisonExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(
                 left,
             ) and self.source_expr_is_obviously_pure_statement(right),
             .ComparisonChainExpr(_, _, _) then true,
-            .BitwiseExpr(left, _, right, _) then self.source_expr_is_obviously_pure_statement(
-                left,
-            ) and self.source_expr_is_obviously_pure_statement(right),
-            .AndExpr(left, right, _) then self.source_expr_is_obviously_pure_statement(
-                left,
-            ) and self.source_expr_is_obviously_pure_statement(right),
-            .OrExpr(left, right, _) then self.source_expr_is_obviously_pure_statement(
+            .BitwiseExpr(left, _, right, _) or .AndExpr(left, right, _) or .OrExpr(left, right, _) then self.source_expr_is_obviously_pure_statement(
                 left,
             ) and self.source_expr_is_obviously_pure_statement(right),
             .RangeExpr(_, left, right, _) then {
@@ -202,10 +151,7 @@ given TypeChecker {
                 };
                 left_pure and right_pure
             },
-            .IsExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(
-                subject,
-            ),
-            .IsNotExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(
+            .IsExpr(subject, _, _) or .IsNotExpr(subject, _, _) then self.source_expr_is_obviously_pure_statement(
                 subject,
             ),
         };
@@ -213,16 +159,9 @@ given TypeChecker {
 
     typed_expr_has_observable_statement_effect(self, expr: TypedExpr): Bool = {
         let direct_effect = when expr.expr_kind in {
-            .Call(_, _) then true,
-            .GenericCall(_, _, _) then true,
-            .IntrinsicCall(_) then true,
-            .Block(_, _) then true,
-            .IfExpr(_, _, _) then true,
-            .WhenExpr(_, _) then true,
-            .LambdaExpr(_, _, _) then true,
-            .StaticMethodCall(_, _, _, _, _, _) then true,
-            .TraitMethodCall(_, _, _, _, _) then true,
-            .TraitObjectConversion(_, _, _) then true,
+            .Call(_, _) or .GenericCall(_, _, _) or .IntrinsicCall(_) or .Block(_, _) or .IfExpr(_, _, _)
+            or .WhenExpr(_, _) or .LambdaExpr(_, _, _) or .StaticMethodCall(_, _, _, _, _, _)
+            or .TraitMethodCall(_, _, _, _, _) or .TraitObjectConversion(_, _, _) then true,
             _ then false,
         };
         if direct_effect then {
@@ -230,22 +169,14 @@ given TypeChecker {
         };
 
         let nested_effect = when expr.expr_kind in {
-            .MethodReference(base, _, _, _, _, _) then self.typed_expr_has_observable_statement_effect(
-                base,
-            ),
-            .TraitMethodPlaceholder(base, _, _, _, _, _) then self.typed_expr_has_observable_statement_effect(
+            .MethodReference(base, _, _, _, _, _) or .TraitMethodPlaceholder(base, _, _, _, _, _) then self.typed_expr_has_observable_statement_effect(
                 base,
             ),
             .CastExpr(_, inner) then self.typed_expr_has_observable_statement_effect(
                 inner,
             ),
-            .Unary(_, inner) then self.typed_expr_has_observable_statement_effect(inner),
-            .RefExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
-            .PtrExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
-            .DerefExpr(inner) then self.typed_expr_has_observable_statement_effect(
-                inner,
-            ),
-            .UnsafeDerefExpr(inner) then self.typed_expr_has_observable_statement_effect(
+            .Unary(_, inner) or .RefExpr(inner) or .PtrExpr(inner) then self.typed_expr_has_observable_statement_effect(inner),
+            .DerefExpr(inner) or .UnsafeDerefExpr(inner) then self.typed_expr_has_observable_statement_effect(
                 inner,
             ),
             .MemberPath(base, _) then self.typed_expr_has_observable_statement_effect(
@@ -254,22 +185,9 @@ given TypeChecker {
             .IsExpr(subject, _, _) then self.typed_expr_has_observable_statement_effect(
                 subject,
             ),
-            .ArithmeticExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(
-                left,
-            ) or self.typed_expr_has_observable_statement_effect(right),
-            .WrappingArithmeticExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(
-                left,
-            ) or self.typed_expr_has_observable_statement_effect(right),
-            .ComparisonExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(
-                left,
-            ) or self.typed_expr_has_observable_statement_effect(right),
-            .BitwiseExpr(left, _, right) then self.typed_expr_has_observable_statement_effect(
-                left,
-            ) or self.typed_expr_has_observable_statement_effect(right),
-            .AndExpr(left, right) then self.typed_expr_has_observable_statement_effect(
-                left,
-            ) or self.typed_expr_has_observable_statement_effect(right),
-            .OrExpr(left, right) then self.typed_expr_has_observable_statement_effect(
+            .ArithmeticExpr(left, _, right) or .WrappingArithmeticExpr(left, _, right)
+            or .ComparisonExpr(left, _, right) or .BitwiseExpr(left, _, right) or .AndExpr(left, right)
+            or .OrExpr(left, right) then self.typed_expr_has_observable_statement_effect(
                 left,
             ) or self.typed_expr_has_observable_statement_effect(right),
             _ then false,
@@ -473,8 +391,7 @@ given TypeChecker {
                     raw_typed_subj.expr_type,
                 ) then {
                     let strong_type = when raw_typed_subj.expr_type in {
-                        .WeakReferenceType(inner) then inner,
-                        .MutableWeakReferenceType(inner) then inner,
+                        .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then inner,
                         _ then raw_typed_subj.expr_type,
                     };
                     let mutable opt_args = List[Type].new();
@@ -499,12 +416,9 @@ given TypeChecker {
                 let pattern_subject_type = if needs_raw_subject then {
                     typed_subj.expr_type
                 } else when typed_subj.expr_type in {
-                    .MutableReferenceType(inner) then inner,
-                    .ReferenceType(inner) then inner,
-                    .BorrowedReferenceType(inner) then inner,
-                    .MutableBorrowedReferenceType(inner) then inner,
-                    .WeakReferenceType(inner) then inner,
-                    .MutableWeakReferenceType(inner) then inner,
+                    .MutableReferenceType(inner) or .ReferenceType(inner) or .BorrowedReferenceType(inner)
+                    or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                    or .MutableWeakReferenceType(inner) then inner,
                     // The seed's when-STATEMENT reads through a pointer
                     // subject -- `when p in { 5 }` on a `*Int` matches the
                     // pointee -- one indirection, exactly like a reference.
@@ -545,10 +459,7 @@ given TypeChecker {
                         .Some(miss) then {
                             self.push_diagnostic_at_span(
                                 miss.message,
-                                when miss.span in {
-                                    .Some(miss_span) then miss_span,
-                                    .None() then span,
-                                },
+                                miss.span or else span,
                             );
                             return TypedStatement.ExprStmt(
                                 self.empty_typed_block(Type.Unknown()),
@@ -769,15 +680,15 @@ given TypeChecker {
                                 "__index_get",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
-                            let mutable arg_idx: UInt = 0;
-                            for arg in outer_args then {
+                            for pair in outer_args.lazy().enumerate() then {
+                                let arg_idx = pair.first;
+                                let arg = pair.second;
                                 let arg_expected = if arg_idx < param_types.count() then Option[Type].Some(
                                     param_types[arg_idx],
                                 ) else Option[Type].None();
                                 typed_outer_args.push(
                                     self.check_expr_scoped_ref(arg, arg_expected, scope),
                                 );
-                                arg_idx += 1;
                             };
                             let subscript_value = self.build_builtin_subscript_helper_call(
                                 typed_outer_base,
@@ -806,11 +717,7 @@ given TypeChecker {
                                 typed_outer_base.expr_type,
                             );
                             let pointer_expr = when typed_outer_base.expr_type in {
-                                .ReferenceType(_) then make_typed_expr(
-                                    TypedExprKind.DerefExpr(typed_outer_base),
-                                    pointer_base_type,
-                                ),
-                                .MutableReferenceType(_) then make_typed_expr(
+                                .ReferenceType(_) or .MutableReferenceType(_) then make_typed_expr(
                                     TypedExprKind.DerefExpr(typed_outer_base),
                                     pointer_base_type,
                                 ),
@@ -879,11 +786,7 @@ given TypeChecker {
                         scope,
                     );
                     let ptr_expr = when typed_base.expr_type in {
-                        .ReferenceType(_) then make_typed_expr(
-                            TypedExprKind.DerefExpr(typed_base),
-                            base_inner_type,
-                        ),
-                        .MutableReferenceType(_) then make_typed_expr(
+                        .ReferenceType(_) or .MutableReferenceType(_) then make_typed_expr(
                             TypedExprKind.DerefExpr(typed_base),
                             base_inner_type,
                         ),
@@ -1024,13 +927,13 @@ given TypeChecker {
         else set_param_types.count() - UInt(1);
 
         let mutable typed_args = List[TypedExpr].new();
-        let mutable arg_idx: UInt = 0;
-        for arg in args then {
+        for pair in args.lazy().enumerate() then {
+            let arg_idx = pair.first;
+            let arg = pair.second;
             let arg_expected = if arg_idx < expected_index_count then Option[Type].Some(
                 set_param_types[arg_idx],
             ) else Option[Type].None();
             typed_args.push(self.check_expr_scoped_ref(arg, arg_expected, scope));
-            arg_idx += 1;
         };
 
         let mutable expected_value_type = if expected_index_count < set_param_types.count(
@@ -1258,8 +1161,9 @@ given TypeChecker {
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
         let mutable explicit_terminator = Option[String].None();
-        let mutable stmt_index: UInt = 0;
-        for stmt in statements then {
+        for pair in statements.lazy().enumerate() then {
+            let stmt_index = pair.first;
+            let stmt = pair.second;
             if explicit_terminator is .Some(name) then {
                 self.push_statement_diagnostic(
                     stmt,
@@ -1283,10 +1187,7 @@ given TypeChecker {
                     _ then {},
                 };
             };
-            let ts = when ts_opt in {
-                .Some(s) then s,
-                .None() then self.check_statement(stmt, expected, scope),
-            };
+            let ts = ts_opt or else self.check_statement(stmt, expected, scope);
             typed_stmts.push(ts);
             when self.statement_terminator_name(ts) in {
                 .Some(name) then {
@@ -1297,7 +1198,6 @@ given TypeChecker {
                 },
                 .None() then {},
             };
-            stmt_index += 1;
         };
         let mutable typed_tail = Option[TypedExpr].None();
         let mutable block_type = Type.VoidType();
@@ -1357,9 +1257,7 @@ given TypeChecker {
             .ExprStmt(expr_ref, _) then if expr_ref.expr_type is .NeverType() then Option[String].Some(
                 "control flow terminator",
             ) else Option[String].None(),
-            .IfStmt(_, _, _, _) then if self.statement_can_fall_through(stmt) then Option[String].None(
-            ) else Option[String].Some("control flow terminator"),
-            .WhenStmt(_, _, _) then if self.statement_can_fall_through(stmt) then Option[String].None(
+            .IfStmt(_, _, _, _) or .WhenStmt(_, _, _) then if self.statement_can_fall_through(stmt) then Option[String].None(
             ) else Option[String].Some("control flow terminator"),
             _ then Option[String].None(),
         };
@@ -1367,9 +1265,7 @@ given TypeChecker {
 
     statement_can_fall_through(self, stmt: TypedStatement): Bool = {
         return when stmt in {
-            .ReturnStmt(_, _) then false,
-            .BreakStmt(_) then false,
-            .ContinueStmt(_) then false,
+            .ReturnStmt(_, _) or .BreakStmt(_) or .ContinueStmt(_) then false,
             .ExprStmt(expr_ref, _) then expr_ref.expr_type is not .NeverType(),
             .IfStmt(_, then_branch, else_branch, _) then when else_branch in {
                 .Some(else_ref) then not (then_branch.expr_type is .NeverType() and else_ref.expr_type is .NeverType()),
@@ -1478,24 +1374,8 @@ given TypeChecker {
                         },
                         .WeakReferenceType(expected_inner_ref) then {
                             when typed_val.expr_type in {
-                                .WeakReferenceType(actual_inner_ref) then {
-                                    let actual_inner = actual_inner_ref;
-                                    let expected_inner = expected_inner_ref;
-                                    if not self.same_expr_type(
-                                        actual_inner,
-                                        expected_inner,
-                                    ) and (self.is_unresolved_expr_type(actual_inner) or self.contains_generic_parameter(
-                                        actual_inner,
-                                    )) and not self.contains_generic_parameter(
-                                        expected_inner,
-                                    ) then {
-                                        typed_val = make_typed_expr_ref(
-                                            typed_val.expr_kind,
-                                            expected_t,
-                                        );
-                                    };
-                                },
-                                .MutableWeakReferenceType(actual_inner_ref) then {
+                                .WeakReferenceType(actual_inner_ref)
+                                or .MutableWeakReferenceType(actual_inner_ref) then {
                                     let actual_inner = actual_inner_ref;
                                     let expected_inner = expected_inner_ref;
                                     if not self.same_expr_type(
@@ -1595,12 +1475,9 @@ given TypeChecker {
                 } else typed_val;
                 let initial_binding_type = when val_expected in {
                     .Some(t) then t,
-                    .None() then when inferred_value_expected in {
-                        .Some(inferred_t) then inferred_t,
-                        .None() then self.concretize_default_literal_type(
+                    .None() then inferred_value_expected or else self.concretize_default_literal_type(
                             typed_val.expr_type,
                         ),
-                    },
                 };
                 let mutable binding_type = self.concretize_pair_constructor_binding_type(
                     initial_binding_type,
@@ -1641,16 +1518,11 @@ given TypeChecker {
                 // from the subject's DECLARATION, never from a name.
                 let field_types = self.for_tuple_binding_types(pair_type, bindings, span);
                 let mutable symbols = List[Option[Symbol]].new();
-                let mutable i: UInt = 0;
-                while i < bindings.count() then {
-                    let field_type = when field_types.get(i) in {
-                        .Some(t) then t,
-                        .None() then Type.Unknown(),
-                    };
+                for pair in bindings.lazy().enumerate() then {
+                    let field_type = field_types.get(pair.first) or else Type.Unknown();
                     symbols.push(
-                        self.bind_pair_let_symbol(bindings[i], field_type, scope),
+                        self.bind_pair_let_symbol(pair.second, field_type, scope),
                     );
-                    i += 1;
                 };
                 return TypedStatement.TupleLetStmt(pair_type, symbols, typed_val, span);
             },
@@ -2017,10 +1889,8 @@ given TypeChecker {
     assignment_target_root_identifier(self, target: Expr): Option[String] = {
         return when target in {
             .Identifier(name, _) then Option[String].Some(name),
-            .MemberPath(base, _, _) then self.assignment_target_root_identifier(base),
-            .SubscriptExpr(base, _, _) then self.assignment_target_root_identifier(base),
-            .DerefExpr(_, _) then Option[String].None(),
-            .UnsafeDerefExpr(_, _) then Option[String].None(),
+            .MemberPath(base, _, _) or .SubscriptExpr(base, _, _) then self.assignment_target_root_identifier(base),
+            .DerefExpr(_, _) or .UnsafeDerefExpr(_, _) then Option[String].None(),
             _ then Option[String].None(),
         };
     };
@@ -2040,9 +1910,7 @@ given TypeChecker {
                     return true;
                 };
                 let mutable current = base.expr_type;
-                let mutable idx: UInt = 0;
-                while idx < path.count() then {
-                    let segment = path[idx];
+                for segment in path then {
                     let mutable segment_type = segment.symbol_type;
                     if self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(
                         segment_type,
@@ -2050,12 +1918,10 @@ given TypeChecker {
                         return true;
                     };
                     current = segment_type;
-                    idx += 1;
                 };
                 false
             },
-            .DerefExpr(_) then true,
-            .UnsafeDerefExpr(_) then true,
+            .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
             _ then false,
         };
     };
@@ -2077,8 +1943,7 @@ given TypeChecker {
                 return false;
             },
             .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
-            .DerefExpr(_) then true,
-            .UnsafeDerefExpr(_) then true,
+            .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
             _ then false,
         };
     };
@@ -2124,16 +1989,8 @@ given TypeChecker {
             .DerefExpr(inner, span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
                 let result_type = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then {
-                        self.push_diagnostic_at_span(
-                            "Cannot assign through read-only reference of type '\(type_to_string(typed_inner.expr_type))'",
-                            span,
-                        );
-                        inner_ref
-                    },
-                    .BorrowedReferenceType(inner_ref) then {
+                    .MutableReferenceType(inner_ref) or .MutableBorrowedReferenceType(inner_ref) then inner_ref,
+                    .ReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref) then {
                         self.push_diagnostic_at_span(
                             "Cannot assign through read-only reference of type '\(type_to_string(typed_inner.expr_type))'",
                             span,
@@ -2207,11 +2064,7 @@ given TypeChecker {
                 let inferred_base = self.infer_writable_member_base(base, scope);
                 // Peel auto-deref for lvalue resolution (matches Swift behavior)
                 let typed_base = when inferred_base.expr_kind in {
-                    .DerefExpr(inner_ref) then make_typed_expr_ref(
-                        inner_ref.expr_kind,
-                        inner_ref.expr_type,
-                    ),
-                    .UnsafeDerefExpr(inner_ref) then make_typed_expr_ref(
+                    .DerefExpr(inner_ref) or .UnsafeDerefExpr(inner_ref) then make_typed_expr_ref(
                         inner_ref.expr_kind,
                         inner_ref.expr_type,
                     ),
@@ -2224,12 +2077,9 @@ given TypeChecker {
                 let mutable typed_path = List[Symbol].new();
                 for member in path then {
                     let inner_type = when current_type in {
-                        .MutableReferenceType(inner) then inner,
-                        .ReferenceType(inner) then inner,
-                        .BorrowedReferenceType(inner) then inner,
-                        .MutableBorrowedReferenceType(inner) then inner,
-                        .PointerType(inner) then inner,
-                        .MutablePointerType(inner) then inner,
+                        .MutableReferenceType(inner) or .ReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) or .PointerType(inner)
+                        or .MutablePointerType(inner) then inner,
                         _ then current_type,
                     };
                     let member_type = self.resolve_member_type(inner_type, member);
@@ -2286,15 +2136,15 @@ given TypeChecker {
                                 "__index_get",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
-                            let mutable arg_idx: UInt = 0;
-                            for arg in outer_args then {
+                            for pair in outer_args.lazy().enumerate() then {
+                                let arg_idx = pair.first;
+                                let arg = pair.second;
                                 let arg_expected = if arg_idx < param_types.count() then Option[Type].Some(
                                     param_types[arg_idx],
                                 ) else Option[Type].None();
                                 typed_outer_args.push(
                                     self.check_expr_scoped_ref(arg, arg_expected, scope),
                                 );
-                                arg_idx += 1;
                             };
                             let subscript_value = self.build_builtin_subscript_helper_call(
                                 typed_outer_base,
@@ -2323,11 +2173,7 @@ given TypeChecker {
                                 typed_outer_base.expr_type,
                             );
                             let pointer_expr = when typed_outer_base.expr_type in {
-                                .ReferenceType(_) then make_typed_expr(
-                                    TypedExprKind.DerefExpr(typed_outer_base),
-                                    pointer_base_type,
-                                ),
-                                .MutableReferenceType(_) then make_typed_expr(
+                                .ReferenceType(_) or .MutableReferenceType(_) then make_typed_expr(
                                     TypedExprKind.DerefExpr(typed_outer_base),
                                     pointer_base_type,
                                 ),
@@ -2362,19 +2208,13 @@ given TypeChecker {
 
     member_is_mutable_for_assignment(self, base_type: Type, member: String): Bool = {
         let inner_type = when base_type in {
-            .MutableReferenceType(inner) then inner,
-            .MutablePointerType(inner) then inner,
-            .ReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
-            .PointerType(inner) then inner,
+            .MutableReferenceType(inner) or .MutablePointerType(inner) or .ReferenceType(inner)
+            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+            or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) or .PointerType(inner) then inner,
             _ then base_type,
         };
         let can_mutate_through_base = when base_type in {
-            .ReferenceType(_) then false,
-            .WeakReferenceType(_) then false,
+            .ReferenceType(_) or .WeakReferenceType(_) then false,
             .MutableWeakReferenceType(_) then true,
             .PointerType(_) then false,
             _ then true,
@@ -2463,10 +2303,9 @@ given TypeChecker {
                     return prior;
                 };
                 let mutable current = base.expr_type;
-                let mutable idx: UInt = 0;
-                while idx < path.count() then {
-                    let segment = path[idx];
-                    let is_last = idx + UInt(1) == path.count();
+                for pair in path.lazy().enumerate() then {
+                    let segment = pair.second;
+                    let is_last = pair.first + UInt(1) == path.count();
                     let segment_type = segment.symbol_type;
                     let mutable can_traverse_immutable_segment = false;
                     if not is_last then {
@@ -2483,7 +2322,6 @@ given TypeChecker {
                         );
                     };
                     current = segment_type;
-                    idx += 1;
                 };
                 return Option[Pair[String, String]].None();
             },

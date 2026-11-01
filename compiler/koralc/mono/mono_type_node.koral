@@ -72,59 +72,56 @@ public let resolve_type_node(
                     }
                 },
                 .None() then {
-                    when resolve_builtin_type(name) in {
-                        .Some(t) then t,
-                        .None() then {
-                            when mono.storage.generic_templates.concrete_struct_types.get(
-                                name,
-                            ) in {
-                                .Some(t) then t,
-                                .None() then {
-                                    when mono.storage.generic_templates.concrete_enum_types.get(
-                                        name,
-                                    ) in {
-                                        .Some(t) then t,
-                                        .None() then {
-                                            when mono.storage.generic_templates.lookup_struct(
-                                                name,
-                                            ) in {
-                                                .Some(template) then if template.type_parameters.is_empty(
-                                                ) then Type.StructureType(
-                                                    template.def_id,
-                                                ) else Type.GenericParameter(name),
-                                                .None() then {
-                                                    when mono.storage.generic_templates.lookup_enum(
-                                                        name,
-                                                    ) in {
-                                                        .Some(template) then if template.type_parameters.is_empty(
-                                                        ) then Type.EnumType(
-                                                            template.def_id,
-                                                        )
-                                                        else Type.GenericParameter(name),
-                                                        .None() then {
-                                                            // Keep trait identifiers resolvable during monomorphization
-                                                            // so types like Error ref are preserved as trait-object refs.
-                                                            when trait_info_from_registry(
+                    resolve_builtin_type(name) or else {
+                        when mono.storage.generic_templates.concrete_struct_types.get(
+                            name,
+                        ) in {
+                            .Some(t) then t,
+                            .None() then {
+                                when mono.storage.generic_templates.concrete_enum_types.get(
+                                    name,
+                                ) in {
+                                    .Some(t) then t,
+                                    .None() then {
+                                        when mono.storage.generic_templates.lookup_struct(
+                                            name,
+                                        ) in {
+                                            .Some(template) then if template.type_parameters.is_empty(
+                                            ) then Type.StructureType(
+                                                template.def_id,
+                                            ) else Type.GenericParameter(name),
+                                            .None() then {
+                                                when mono.storage.generic_templates.lookup_enum(
+                                                    name,
+                                                ) in {
+                                                    .Some(template) then if template.type_parameters.is_empty(
+                                                    ) then Type.EnumType(
+                                                        template.def_id,
+                                                    )
+                                                    else Type.GenericParameter(name),
+                                                    .None() then {
+                                                        // Keep trait identifiers resolvable during monomorphization
+                                                        // so types like Error ref are preserved as trait-object refs.
+                                                        when trait_info_from_registry(
+                                                            mono,
+                                                            name,
+                                                        ) in {
+                                                            .Some(_) then trait_object_type_from_registry(
                                                                 mono,
                                                                 name,
-                                                            ) in {
-                                                                .Some(_) then trait_object_type_from_registry(
-                                                                    mono,
-                                                                    name,
-                                                                ),
-                                                                .None() then Type.GenericParameter(
-                                                                    name,
-                                                                ),
-                                                            }
-                                                        },
-                                                    }
-                                                },
-                                            }
-                                        },
-                                    }
-                                },
-                            }
-                        },
+                                                            ),
+                                                            .None() then Type.GenericParameter(
+                                                                name,
+                                                            ),
+                                                        }
+                                                    },
+                                                }
+                                            },
+                                        }
+                                    },
+                                }
+                            },
+                        }
                     }
                 },
             }
@@ -191,13 +188,10 @@ public let resolve_type_node(
                 },
                 _ then Option[Type].None(),
             };
-            when trait_ref_override in {
-                .Some(resolved_trait_ref) then resolved_trait_ref,
-                .None() then {
-                    let resolved_inner = resolve_type_node(mono, inner, substitution);
-                    if is_mutable then Type.MutableReferenceType(resolved_inner)
-                    else Type.ReferenceType(resolved_inner)
-                },
+            trait_ref_override or else {
+                let resolved_inner = resolve_type_node(mono, inner, substitution);
+                if is_mutable then Type.MutableReferenceType(resolved_inner)
+                else Type.ReferenceType(resolved_inner)
             }
         },
         // TypeNode.BorrowedReference: recursively resolve inner type and wrap with lifetime.
@@ -230,10 +224,7 @@ public let resolve_type_node(
         },
         // TypeNode.InferredSelf: look up `Self` in substitution map.
         .InferredSelf(_) then {
-            when substitution.get("Self") in {
-                .Some(self_type) then self_type,
-                .None() then Type.Unknown(),
-            }
+            substitution.get("Self") or else Type.Unknown()
         },
     };
 };
@@ -308,10 +299,8 @@ let mono_nominal_from_declared_name(mono: Monomorphizer, name: String): Type = {
 /// parameters have none, so they report the invalid DefId.
 let mono_nominal_decl_def_id(t: Type): DefId = {
     return when t in {
-        .StructureType(def_id) then def_id,
-        .EnumType(def_id) then def_id,
-        .GenericStruct(template_def_id, _) then template_def_id,
-        .GenericEnum(template_def_id, _) then template_def_id,
+        .StructureType(def_id) or .EnumType(def_id) then def_id,
+        .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then template_def_id,
         .TraitObject(trait_def_id, _) then trait_def_id,
         _ then def_id_invalid(),
     };

@@ -933,19 +933,8 @@ given TypeChecker {
     trait_extension_self_type(self, resolved_target: Type): Type = {
         return when resolved_target in {
             .TraitObject(...) then Type.GenericParameter("Self"),
-            .ReferenceType(inner) then when inner in {
-                .TraitObject(...) then Type.GenericParameter("Self"),
-                _ then resolved_target,
-            },
-            .MutableReferenceType(inner) then when inner in {
-                .TraitObject(...) then Type.GenericParameter("Self"),
-                _ then resolved_target,
-            },
-            .BorrowedReferenceType(inner) then when inner in {
-                .TraitObject(...) then Type.GenericParameter("Self"),
-                _ then resolved_target,
-            },
-            .MutableBorrowedReferenceType(inner) then when inner in {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then when inner in {
                 .TraitObject(...) then Type.GenericParameter("Self"),
                 _ then resolved_target,
             },
@@ -965,14 +954,15 @@ given TypeChecker {
             trait_ref.trait_def_id,
         ) in {
             .Some(trait_info) then {
-                let mutable index: UInt = 0;
-                while index < trait_info.type_params.count() and index < trait_ref.trait_type_args.count(
-                ) then {
+                for pair in trait_info.type_params.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](trait_ref.trait_type_args) then {
                     substitution.insert(
-                        trait_info.type_params[index].name,
-                        trait_ref.trait_type_args[index],
+                        pair.first.name,
+                        (pair.second),
                     );
-                    index += 1;
                 };
             },
             .None() then {},
@@ -1381,14 +1371,9 @@ given TypeChecker {
 
     statement_span(self, stmt: Statement): SourceSpan = {
         return when stmt in {
-            .LetStmt(_, _, _, _, span) then span,
-            .TupleLetStmt(_, _, span) then span,
-            .AssignmentStmt(_, _, _, span) then span,
-            .ExprStmt(_, span) then span,
-            .ReturnStmt(_, span) then span,
-            .BreakStmt(span) then span,
-            .ContinueStmt(span) then span,
-            .DeferStmt(_, span) then span,
+            .LetStmt(_, _, _, _, span) or .TupleLetStmt(_, _, span) or .AssignmentStmt(_, _, _, span)
+            or .ExprStmt(_, span) or .ReturnStmt(_, span) or .BreakStmt(span) or .ContinueStmt(span)
+            or .DeferStmt(_, span) then span,
         };
     };
 
@@ -1398,21 +1383,13 @@ given TypeChecker {
     /// is, so `check_decl` can record it as the place a diagnostic belongs to.
     decl_span(self, decl: Decl): SourceSpan = {
         return when decl in {
-            .LetDecl(_, _, _, _, _, span, _) then span,
-            .FunctionDecl(_, _, _, _, _, _, span, _) then span,
-            .IntrinsicFunctionDecl(_, _, _, _, _, span, _) then span,
-            .ForeignFunctionDecl(_, _, _, _, span, _) then span,
-            .ForeignLetDecl(_, _, _, _, span, _) then span,
-            .TypeStructDecl(_, _, _, _, _, span, _) then span,
-            .TypeEnumDecl(_, _, _, _, span, _) then span,
-            .TypeAliasDecl(_, _, _, span, _) then span,
-            .IntrinsicTypeDecl(_, _, _, span, _) then span,
-            .ForeignTypeDecl(_, _, _, span, _) then span,
-            .UsingDecl(_, _, _, span) then span,
-            .TraitDecl(_, _, _, _, _, span, _) then span,
-            .GivenDecl(_, _, _, span) then span,
-            .GivenTraitDecl(_, _, _, _, span) then span,
-            .IntrinsicGivenDecl(_, _, _, span) then span,
+            .LetDecl(_, _, _, _, _, span, _) or .FunctionDecl(_, _, _, _, _, _, span, _)
+            or .IntrinsicFunctionDecl(_, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, span, _)
+            or .ForeignLetDecl(_, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, span, _)
+            or .TypeEnumDecl(_, _, _, _, span, _) or .TypeAliasDecl(_, _, _, span, _)
+            or .IntrinsicTypeDecl(_, _, _, span, _) or .ForeignTypeDecl(_, _, _, span, _)
+            or .UsingDecl(_, _, _, span) or .TraitDecl(_, _, _, _, _, span, _) or .GivenDecl(_, _, _, span)
+            or .GivenTraitDecl(_, _, _, _, span) or .IntrinsicGivenDecl(_, _, _, span) then span,
         };
     };
 
@@ -1506,62 +1483,35 @@ given TypeChecker {
 
     // Treat both Unknown and TypeVar as unresolved so they do not leak into codegen.
     is_unresolved_expr_type(self, t: Type): Bool = when t in {
-        .Unknown() then true,
-        .TypeVar(_) then true,
+        .Unknown() or .TypeVar(_) then true,
         _ then false,
     };
 
     is_value_expr_type(self, t: Type): Bool = when t in {
-        .VoidType() then false,
-        .NeverType() then false,
+        .VoidType() or .NeverType() then false,
         _ then not self.is_unresolved_expr_type(t),
     };
 
     is_ffi_compatible_type(self, t: Type): Bool = {
         return when t in {
-            .IntType() then true,
-            .Int8Type() then true,
-            .Int16Type() then true,
-            .Int32Type() then true,
-            .Int64Type() then true,
-            .UIntType() then true,
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .WrappingIntType() then true,
-            .WrappingInt8Type() then true,
-            .WrappingInt16Type() then true,
-            .WrappingInt32Type() then true,
-            .WrappingInt64Type() then true,
-            .WrappingUIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
-            .Float32Type() then true,
-            .Float64Type() then true,
-            .BoolType() then true,
-            .VoidType() then true,
-            .NeverType() then true,
-            .PointerType(_) then true,
-            .MutablePointerType(_) then true,
-            .OpaqueType(_) then true,
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType()
+            or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType()
+            or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+            or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType() or .VoidType()
+            or .NeverType() or .PointerType(_) or .MutablePointerType(_) or .OpaqueType(_) then true,
             _ then false,
         };
     };
 
     contains_borrowed_reference_type(self, t: Type): Bool = {
         return when t in {
-            .BorrowedReferenceType(_) then true,
-            .MutableBorrowedReferenceType(_) then true,
+            .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then true,
             .ReferenceType(inner) then self.contains_borrowed_reference_type(inner),
             .MutableReferenceType(inner) then self.contains_borrowed_reference_type(
                 inner,
             ),
-            .PointerType(inner) then self.contains_borrowed_reference_type(inner),
-            .MutablePointerType(inner) then self.contains_borrowed_reference_type(inner),
-            .WeakReferenceType(inner) then self.contains_borrowed_reference_type(inner),
+            .PointerType(inner) or .MutablePointerType(inner) or .WeakReferenceType(inner) then self.contains_borrowed_reference_type(inner),
             .MutableWeakReferenceType(inner) then self.contains_borrowed_reference_type(
                 inner,
             ),
@@ -1573,23 +1523,7 @@ given TypeChecker {
                 };
                 self.contains_borrowed_reference_type(return_type)
             },
-            .GenericStruct(_, args) then {
-                for arg in args then {
-                    if self.contains_borrowed_reference_type(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .GenericEnum(_, args) then {
-                for arg in args then {
-                    if self.contains_borrowed_reference_type(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .TraitObject(_, args) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
                 for arg in args then {
                     if self.contains_borrowed_reference_type(arg) then {
                         return true;
@@ -1604,12 +1538,8 @@ given TypeChecker {
     contains_never_type(self, t: Type): Bool = {
         return when t in {
             .NeverType() then true,
-            .ReferenceType(inner) then self.contains_never_type(inner),
-            .MutableReferenceType(inner) then self.contains_never_type(inner),
-            .PointerType(inner) then self.contains_never_type(inner),
-            .MutablePointerType(inner) then self.contains_never_type(inner),
-            .WeakReferenceType(inner) then self.contains_never_type(inner),
-            .MutableWeakReferenceType(inner) then self.contains_never_type(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
+            or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.contains_never_type(inner),
             .FunctionType(params, return_type) then {
                 for param in params then {
                     if self.contains_never_type(param.param_type) then {
@@ -1618,23 +1548,7 @@ given TypeChecker {
                 };
                 self.contains_never_type(return_type)
             },
-            .GenericStruct(_, args) then {
-                for arg in args then {
-                    if self.contains_never_type(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .GenericEnum(_, args) then {
-                for arg in args then {
-                    if self.contains_never_type(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .TraitObject(_, args) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
                 for arg in args then {
                     if self.contains_never_type(arg) then {
                         return true;
@@ -1651,8 +1565,7 @@ given TypeChecker {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
             .ReferenceType(_) then "Compiler-internal managed wrapper types cannot be used in foreign functions",
-            .WeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
-            .MutableWeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
             .FunctionType(...) then "Function types cannot be used in foreign functions",
             .GenericParameter(_) then "Generic parameters cannot be used in foreign functions",
             _ then "Type '\(self.context().type_display_name(t))' is not compatible with FFI",
@@ -1697,15 +1610,17 @@ given TypeChecker {
                     if actual_args.count() != expected_args.count() then {
                         return false;
                     };
-                    let mutable index: UInt = 0;
-                    while index < actual_args.count() then {
+                    for pair in actual_args.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](expected_args) then {
                         if not self.same_expr_type(
-                            actual_args[index],
-                            expected_args[index],
+                            (pair.first),
+                            (pair.second),
                         ) then {
                             return false;
                         };
-                        index += 1;
                     };
                     true
                 },
@@ -1723,15 +1638,17 @@ given TypeChecker {
                     if actual_args.count() != expected_args.count() then {
                         return false;
                     };
-                    let mutable index: UInt = 0;
-                    while index < actual_args.count() then {
+                    for pair in actual_args.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](expected_args) then {
                         if not self.same_expr_type(
-                            actual_args[index],
-                            expected_args[index],
+                            (pair.first),
+                            (pair.second),
                         ) then {
                             return false;
                         };
-                        index += 1;
                     };
                     true
                 },
@@ -1743,25 +1660,7 @@ given TypeChecker {
 
     canonicalize_alias_type(self, t: Type): Type = {
         return when t in {
-            .StructureType(def_id) then when self.context().lookup_type(def_id) in {
-                .Some(mapped) then {
-                    if mapped == t then {
-                        return t;
-                    };
-                    return self.canonicalize_alias_type(mapped);
-                },
-                .None() then t,
-            },
-            .EnumType(def_id) then when self.context().lookup_type(def_id) in {
-                .Some(mapped) then {
-                    if mapped == t then {
-                        return t;
-                    };
-                    return self.canonicalize_alias_type(mapped);
-                },
-                .None() then t,
-            },
-            .OpaqueType(def_id) then when self.context().lookup_type(def_id) in {
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then when self.context().lookup_type(def_id) in {
                 .Some(mapped) then {
                     if mapped == t then {
                         return t;
@@ -1881,19 +1780,7 @@ given TypeChecker {
     /// already happened in `display_type_name`; this names what is left.
     display_type_base_name(self, resolved: Type): String = {
         return when resolved in {
-            .StructureType(def_id) then when self.context().get_name(def_id) in {
-                .Some(name) then name,
-                .None() then when self.context().get_original_def_id(def_id) in {
-                    .Some(original_def_id) then when self.context().get_name(
-                        original_def_id,
-                    ) in {
-                        .Some(original_name) then original_name,
-                        .None() then type_to_string(resolved),
-                    },
-                    .None() then type_to_string(resolved),
-                },
-            },
-            .EnumType(def_id) then when self.context().get_name(def_id) in {
+            .StructureType(def_id) or .EnumType(def_id) then when self.context().get_name(def_id) in {
                 .Some(name) then name,
                 .None() then when self.context().get_original_def_id(def_id) in {
                     .Some(original_def_id) then when self.context().get_name(
@@ -1979,11 +1866,8 @@ given TypeChecker {
             return Type.VoidType();
         };
 
-        let else_t = when else_type in {
-            .Some(t) then t,
-            .None() then {
-                return Type.VoidType();
-            },
+        let else_t = else_type or else {
+            return Type.VoidType();
         };
 
         if self.same_expr_type(then_type, else_t) then {
@@ -2213,29 +2097,8 @@ given TypeChecker {
         return when decl in {
             .LetDecl(_, _, _, _, _, _, _) then true,
             .FunctionDecl(_, _, type_params, _, _, _, _, _) then type_params.is_empty(),
-            .GivenDecl(_, type_params, members, _) then {
-                if not type_params.is_empty() then {
-                    return false;
-                };
-                for member in members then {
-                    if not member.type_params.is_empty() then {
-                        return false;
-                    };
-                };
-                true
-            },
-            .GivenTraitDecl(_, type_params, _, members, _) then {
-                if not type_params.is_empty() then {
-                    return false;
-                };
-                for member in members then {
-                    if not member.type_params.is_empty() then {
-                        return false;
-                    };
-                };
-                true
-            },
-            .IntrinsicGivenDecl(_, type_params, members, _) then {
+            .GivenDecl(_, type_params, members, _) or .GivenTraitDecl(_, type_params, _, members, _)
+            or .IntrinsicGivenDecl(_, type_params, members, _) then {
                 if not type_params.is_empty() then {
                     return false;
                 };
@@ -2393,9 +2256,8 @@ given TypeChecker {
                     else when pair.first.decl in {
                         .FunctionDecl(_, _, _, _, _, _, _, _) then skip_function_decl_check,
                         .LetDecl(_, _, _, _, _, _, _) then skip_let_decl_check,
-                        .GivenDecl(_, _, _, _) then skip_given_decl_check,
-                        .GivenTraitDecl(_, _, _, _, _) then skip_given_decl_check,
-                        .IntrinsicGivenDecl(_, _, _, _) then skip_given_decl_check,
+                        .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
+                        or .IntrinsicGivenDecl(_, _, _, _) then skip_given_decl_check,
                         _ then false,
                     };
                     if not skip_this_decl then {
@@ -2535,13 +2397,8 @@ given TypeChecker {
                     .None() then {},
                 };
             },
-            .GivenDecl(_, members, _) then {
-                self.refresh_concrete_given_member_body_list(subst, members);
-            },
-            .GivenTraitDecl(_, _, _, members, _, _) then {
-                self.refresh_concrete_given_member_body_list(subst, members);
-            },
-            .IntrinsicGivenDecl(_, members, _) then {
+            .GivenDecl(_, members, _) or .GivenTraitDecl(_, _, _, members, _, _)
+            or .IntrinsicGivenDecl(_, members, _) then {
                 self.refresh_concrete_given_member_body_list(subst, members);
             },
             _ then {},
@@ -2603,17 +2460,19 @@ given TypeChecker {
                 if args.count() != type_params.count() then {
                     return Option[String].None();
                 };
-                let mutable index: UInt = 0;
-                while index < args.count() then {
-                    let expected_name = type_params[index].name;
-                    let matches = when args[index] in {
+                for pair in type_params.lazy().zip[
+                    TypeNode,
+                    ListIterator[TypeNode],
+                    List[TypeNode],
+                ](args) then {
+                    let expected_name = pair.first.name;
+                    let matches = when pair.second in {
                         .Identifier(actual_name, span) then actual_name == expected_name,
                         _ then false,
                     };
                     if not matches then {
                         return Option[String].None();
                     };
-                    index += 1;
                 };
                 base
             },
@@ -2764,11 +2623,8 @@ given TypeChecker {
             return false;
         };
         visited.insert(trait_def_id.id);
-        let info = when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
-            .Some(existing) then existing,
-            .None() then {
-                return false;
-            },
+        let info = self.storage.trait_registry.get_by_def_id(trait_def_id) or else {
+            return false;
         };
         for m in info.methods then {
             if m.name == method_name then {
@@ -2816,13 +2672,10 @@ given TypeChecker {
             );
         };
         visited.insert(trait_def_id.id);
-        let trait_info = when self.storage.trait_registry.get_by_def_id(trait_def_id) in {
-            .Some(info) then info,
-            .None() then {
-                return Result[Dict[String, TraitToolMethodEntry]].Error(
-                    "Undefined trait: \(trait_name)",
-                );
-            },
+        let trait_info = self.storage.trait_registry.get_by_def_id(trait_def_id) or else {
+            return Result[Dict[String, TraitToolMethodEntry]].Error(
+                "Undefined trait: \(trait_name)",
+            );
         };
 
         let mutable result = Dict[String, TraitToolMethodEntry].new();
@@ -2835,28 +2688,22 @@ given TypeChecker {
             if not parent.def_id.is_valid() then {
                 continue;
             };
-            when self.flattened_trait_tool_methods_in_trait(
+            let parent_methods = self.flattened_trait_tool_methods_in_trait(
                 parent.def_id,
                 parent.name,
                 visited,
-            ) in {
-                .Ok(parent_methods) then {
-                    for entry in parent_methods then {
-                        if result.contains_key(entry.first) then {
-                            let existing = result.get(entry.first) or else entry.second;
-                            if existing.method.def_id != entry.second.method.def_id then {
-                                return Result[Dict[String, TraitToolMethodEntry]].Error(
-                                    "Ambiguous tool method '\(entry.first)' inherited in trait '\(trait_name)'",
-                                );
-                            };
-                            continue;
-                        };
-                        result.insert(entry.first, entry.second);
+            ) or return;
+            for entry in parent_methods then {
+                if result.contains_key(entry.first) then {
+                    let existing = result.get(entry.first) or else entry.second;
+                    if existing.method.def_id != entry.second.method.def_id then {
+                        return Result[Dict[String, TraitToolMethodEntry]].Error(
+                            "Ambiguous tool method '\(entry.first)' inherited in trait '\(trait_name)'",
+                        );
                     };
-                },
-                .Error(error) then {
-                    return Result[Dict[String, TraitToolMethodEntry]].Error(error);
-                },
+                    continue;
+                };
+                result.insert(entry.first, entry.second);
             };
         };
 
@@ -4097,36 +3944,30 @@ given TypeChecker {
         // collapses them into one DefId, and the method table can then no
         // longer tell two declarations apart -- which is exactly what
         // `trait_same_name_method_conflict` has to report.
-        let trait_part = when conformance_trait_name in {
-            .Some(trait_name) then trait_name,
-            .None() then "",
-        };
+        let trait_part = conformance_trait_name or else "";
         let mutable out = List[GivenMember].with_capacity(members.count());
         for member in members then {
             let map_key = "\(self.context().method_owner_of(target_type).display())#\(trait_part)#\(member.name)";
             let member_id = when member.def_id.is_valid() in {
                 true then member.def_id,
-                false then when self.storage.given_member_def_ids.get(map_key) in {
-                    .Some(existing) then existing,
-                    .None() then {
-                        let allocated = self.allocate_unindexed_def_id(
-                            member.name,
-                            DefKind.Function(),
+                false then self.storage.given_member_def_ids.get(map_key) or else {
+                    let allocated = self.allocate_unindexed_def_id(
+                        member.name,
+                        DefKind.Function(),
+                    );
+                    self.storage.given_member_def_ids.insert(map_key, allocated);
+                    // A call site that does not name the trait still needs a
+                    // declaration identity. The first writer wins this
+                    // alias; two same-named trait methods colliding here is
+                    // already an error reported at registration.
+                    let alias_key = "\(self.context().method_owner_of(target_type).display())#\(member.name)";
+                    if not self.storage.given_member_def_ids.contains_key(alias_key) then {
+                        self.storage.given_member_def_ids.insert(
+                            alias_key,
+                            allocated,
                         );
-                        self.storage.given_member_def_ids.insert(map_key, allocated);
-                        // A call site that does not name the trait still needs a
-                        // declaration identity. The first writer wins this
-                        // alias; two same-named trait methods colliding here is
-                        // already an error reported at registration.
-                        let alias_key = "\(self.context().method_owner_of(target_type).display())#\(member.name)";
-                        if not self.storage.given_member_def_ids.contains_key(alias_key) then {
-                            self.storage.given_member_def_ids.insert(
-                                alias_key,
-                                allocated,
-                            );
-                        };
-                        allocated
-                    },
+                    };
+                    allocated
                 },
             };
             out.push(
@@ -4326,14 +4167,7 @@ given TypeChecker {
     };
 
     string_list_contains(self, values: List[String], target: String): Bool = {
-        let mutable index = UInt(0);
-        while index < values.count() then {
-            if values[index] == target then {
-                return true;
-            };
-            index += UInt(1);
-        };
-        return false;
+        return values.lazy().any((x) => x == target);
     };
 
     to_template_type_params(
@@ -4553,10 +4387,7 @@ given TypeChecker {
                 return Type.GenericParameter(name);
             };
         };
-        return when self.storage.global_scope.lookup_type(name) in {
-            .Some(t) then t,
-            .None() then Type.GenericParameter(name),
-        };
+        return self.storage.global_scope.lookup_type(name) or else Type.GenericParameter(name);
     };
 
     /// Declaration identity of the generic template named `base`.
@@ -4568,8 +4399,7 @@ given TypeChecker {
     generic_template_def_id(self, base: String): DefId = {
         let from_global = when self.resolve_type_name_binding(base) in {
             .Some(t) then when t in {
-                .StructureType(def_id) then def_id,
-                .EnumType(def_id) then def_id,
+                .StructureType(def_id) or .EnumType(def_id) then def_id,
                 _ then def_id_invalid(),
             },
             .None() then def_id_invalid(),
@@ -4579,8 +4409,7 @@ given TypeChecker {
         };
         let from_file = when self.lookup_current_file_type_symbol(base) in {
             .Some(t) then when t in {
-                .StructureType(def_id) then def_id,
-                .EnumType(def_id) then def_id,
+                .StructureType(def_id) or .EnumType(def_id) then def_id,
                 _ then def_id_invalid(),
             },
             .None() then def_id_invalid(),
@@ -4721,9 +4550,7 @@ given TypeChecker {
 
     nominal_def_id_for_type(self, t: Type): Option[DefId] = {
         return when t in {
-            .StructureType(def_id) then .Some(def_id),
-            .EnumType(def_id) then .Some(def_id),
-            .OpaqueType(def_id) then .Some(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then .Some(def_id),
             // Identity: the template's DECLARATION, not its spelling.
             .GenericStruct(template_def_id, _) then Option[DefId].Some(template_def_id),
             .GenericEnum(template_def_id, _) then Option[DefId].Some(template_def_id),

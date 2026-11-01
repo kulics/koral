@@ -24,8 +24,7 @@ private let diagnostic_stage_text(stage: DiagnosticStage): String = {
     return when stage in {
         .Lexer() then "lexer error",
         .Parser() then "syntax error",
-        .Semantic() then "error",
-        .Other() then "error",
+        .Semantic() or .Other() then "error",
     };
 };
 
@@ -100,10 +99,7 @@ public let make_diagnostic(
 ): DiagnosticError = {
     // The span knows its own file; the caller's file is only the fallback
     // for spans that were synthesized rather than lexed.
-    let effective_file = when span.start.file in {
-        .Some(span_file) then span_file,
-        .None() then file_path,
-    };
+    let effective_file = span.start.file or else file_path;
     return DiagnosticError(
         stage,
         effective_file,
@@ -124,10 +120,7 @@ public let diagnostic_source_snippet(file_path: String, span: Option[SourceSpan]
         return "";
     };
     let path = if file_path.is_empty() then {
-        when sp.start.file in {
-            .Some(f) then f,
-            .None() then "",
-        }
+        sp.start.file or else ""
     } else file_path;
     if path.is_empty() then {
         return "";
@@ -150,10 +143,8 @@ public let diagnostic_source_snippet(file_path: String, span: Option[SourceSpan]
     out.push_string(text);
     if sp.start.column > UInt(0) then {
         out.push_string("\n  | ");
-        let mutable pad: UInt = 1;
-        while pad < sp.start.column then {
+        for _ in 1..<sp.start.column then {
             out.push_rune(' ');
-            pad += 1;
         };
         out.push_rune('^');
     };

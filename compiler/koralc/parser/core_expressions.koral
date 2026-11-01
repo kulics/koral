@@ -45,10 +45,7 @@ given Parser {
         let mutable depth: UInt = 1; // we already consumed the opening (
         while i < self.tokens.count() and depth > 0 then {
             when self.tokens[i].kind in {
-                .LParen() then {
-                    depth += 1;
-                },
-                .LBracket() then {
+                .LParen() or .LBracket() then {
                     depth += 1;
                 },
                 .RParen() then {
@@ -464,12 +461,8 @@ given Parser {
     member_path_call_receiver_expr(self, base: Expr, path: List[String]): Expr = {
         return if path.count() == 1 then base
         else {
-            let mutable receiver_path = List[String].new();
-            let mutable idx: UInt = 0;
-            while idx + 1 < path.count() then {
-                receiver_path.push(path[idx]);
-                idx += 1;
-            };
+            let receiver_path = if path.is_empty() then List[String].new()
+            else path.sublist(0..<(path.count() - 1));
             Expr.MemberPath(base, receiver_path, self.span_from_expr_start(base))
         };
     };
@@ -492,9 +485,7 @@ given Parser {
         };
 
         self.advance();
-        let first = self.parse_expression_checked("parenthesized expression") or else as e in {
-            return .Error(e);
-        };
+        let first = self.parse_expression_checked("parenthesized expression") or return;
         when self.current().kind in {
             .Comma() then {
                 // There is no tuple/pair literal. A `Pair` is built with its
@@ -799,9 +790,7 @@ given Parser {
         };
 
         while true then {
-            let parsed = self.parse_call_argument(context) or else as e in {
-                return .Error(e);
-            };
+            let parsed = self.parse_call_argument(context) or return;
             args.push(parsed);
             if self.current().kind is .Comma() then {
                 self.advance();
@@ -1510,10 +1499,7 @@ given Parser {
     collect_pattern_until_clause_end(self): Result[PatternNode] = {
         let pattern = self.parse_pattern_or(false) or return;
         when self.current().kind in {
-            .KwThen() then {
-                return .Ok(pattern);
-            },
-            .Semicolon() then {
+            .KwThen() or .Semicolon() then {
                 return .Ok(pattern);
             },
             _ then {
@@ -1543,15 +1529,11 @@ given Parser {
             return .Ok(Expr.EmptyLiteral(self.span_from_start(start)));
         };
 
-        let first = self.parse_expression() or else as e in {
-            return .Error(e);
-        };
+        let first = self.parse_expression() or return;
 
         if self.current().kind is .Colon() then {
             self.advance();
-            let first_value = self.parse_expression() or else as e in {
-                return .Error(e);
-            };
+            let first_value = self.parse_expression() or return;
             let mutable entries = List[ExprPair].new();
             entries.push(ExprPair(first, first_value));
 
@@ -1560,9 +1542,7 @@ given Parser {
                 if self.current().kind is .RBracket() then {
                     break;
                 };
-                let key = self.parse_expression() or else as e in {
-                    return .Error(e);
-                };
+                let key = self.parse_expression() or return;
                 when self.current().kind in {
                     .Colon() then {
                         self.advance();
@@ -1577,9 +1557,7 @@ given Parser {
                         );
                     },
                 };
-                let value = self.parse_expression() or else as e in {
-                    return .Error(e);
-                };
+                let value = self.parse_expression() or return;
                 entries.push(ExprPair(key, value));
             };
 
@@ -1602,9 +1580,7 @@ given Parser {
             if self.current().kind is .RBracket() then {
                 break;
             };
-            let next = self.parse_expression() or else as e in {
-                return .Error(e);
-            };
+            let next = self.parse_expression() or return;
             elements.push(next);
         };
 
@@ -1826,12 +1802,7 @@ given Parser {
                 );
             },
         };
-        when self.reject_non_constructor_call_args(args) in {
-            .Ok(_) then {},
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        self.reject_non_constructor_call_args(args) or return;
         return if method_type_args.is_empty() then .Ok(
             Expr.QualifiedMethodCall(
                 base,
@@ -1867,12 +1838,7 @@ given Parser {
         when base in {
             .MemberPath(receiver_base, path, _) then {
                 if path.is_empty() then {
-                    when self.reject_non_constructor_call_args(args) in {
-                        .Ok(_) then {},
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    self.reject_non_constructor_call_args(args) or return;
                     return .Ok(Expr.Call(base, args, self.span_from_expr_start(base)));
                 };
                 let member = path[path.count() - 1];
@@ -1887,12 +1853,7 @@ given Parser {
                 return when receiver_expr in {
                     .Identifier(type_name, _) then {
                         if not allows_constructor_args then {
-                            when self.reject_non_constructor_call_args(args) in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
+                            self.reject_non_constructor_call_args(args) or return;
                         };
                         let expr = if self.is_upper_first(type_name) and not self.is_upper_first(
                             member,
@@ -1907,12 +1868,7 @@ given Parser {
                     },
                     .GenericInstantiation(type_name, type_args, _) then {
                         if not allows_constructor_args then {
-                            when self.reject_non_constructor_call_args(args) in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
+                            self.reject_non_constructor_call_args(args) or return;
                         };
                         Result[Expr].Ok(
                             Expr.StaticMethodCall(
@@ -1926,12 +1882,7 @@ given Parser {
                     },
                     .MemberPath(_, _, _) then {
                         if not allows_constructor_args then {
-                            when self.reject_non_constructor_call_args(args) in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
+                            self.reject_non_constructor_call_args(args) or return;
                         };
                         let expr = when self.extract_static_dispatch_receiver(
                             receiver_expr,
@@ -1952,12 +1903,7 @@ given Parser {
                         Result[Expr].Ok(expr)
                     },
                     _ then {
-                        when self.reject_non_constructor_call_args(args) in {
-                            .Ok(_) then {},
-                            .Error(e) then {
-                                return .Error(e);
-                            },
-                        };
+                        self.reject_non_constructor_call_args(args) or return;
                         Result[Expr].Ok(
                             Expr.Call(base, args, self.span_from_expr_start(base)),
                         )
@@ -1968,12 +1914,7 @@ given Parser {
         };
 
         if not self.call_target_allows_constructor_argument_syntax(base) then {
-            when self.reject_non_constructor_call_args(args) in {
-                .Ok(_) then {},
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            self.reject_non_constructor_call_args(args) or return;
         };
         return .Ok(Expr.Call(base, args, self.span_from_expr_start(base)));
     };
@@ -1985,9 +1926,7 @@ given Parser {
                 self.parser_error("Subscript expression requires one index argument"),
             );
         };
-        let index = self.parse_expression_checked("subscript index") or else as e in {
-            return .Error(e);
-        };
+        let index = self.parse_expression_checked("subscript index") or return;
         if self.current().kind is .Comma() then {
             return .Error(
                 self.parser_error("Subscript expression supports exactly one index"),
@@ -2078,12 +2017,7 @@ given Parser {
                     );
                 },
             };
-            when self.reject_non_constructor_call_args(args) in {
-                .Ok(_) then {},
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            self.reject_non_constructor_call_args(args) or return;
             return .Ok(
                 Expr.TypeRefStaticMethodCall(
                     base_type_node,
@@ -2115,12 +2049,7 @@ given Parser {
                 },
             };
             if not allows_constructor_args then {
-                when self.reject_non_constructor_call_args(args) in {
-                    .Ok(_) then {},
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                self.reject_non_constructor_call_args(args) or return;
             };
             return .Ok(
                 Expr.StaticMethodCall(
@@ -2150,12 +2079,7 @@ given Parser {
                 },
             };
             if not allows_constructor_args then {
-                when self.reject_non_constructor_call_args(args) in {
-                    .Ok(_) then {},
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                self.reject_non_constructor_call_args(args) or return;
             };
             return .Ok(
                 Expr.StaticMethodCall(
@@ -2183,12 +2107,7 @@ given Parser {
                     );
                 },
             };
-            when self.reject_non_constructor_call_args(args) in {
-                .Ok(_) then {},
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            self.reject_non_constructor_call_args(args) or return;
             return .Ok(
                 Expr.GenericMethodCall(
                     base,

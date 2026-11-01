@@ -19,8 +19,7 @@ given MIRFunctionBuilder {
     pattern_element_type(self, pattern: TypedPattern): Type = {
         return when pattern in {
             .Variable(symbol) then symbol.symbol_type,
-            .TraitObjectType(target_type) then target_type,
-            .TraitObjectTypeBinding(_, target_type) then target_type,
+            .TraitObjectType(target_type) or .TraitObjectTypeBinding(_, target_type) then target_type,
             _ then Type.VoidType(),
         };
     };
@@ -36,12 +35,9 @@ given MIRFunctionBuilder {
                 def_id,
                 self.copy_type_args(args),
             ),
-            .ReferenceType(inner) then self.trait_object_ref(inner),
-            .MutableReferenceType(inner) then self.trait_object_ref(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_ref(inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_object_ref(inner),
-            .WeakReferenceType(inner) then self.trait_object_ref(inner),
-            .MutableWeakReferenceType(inner) then self.trait_object_ref(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then self.trait_object_ref(inner),
             _ then CanonicalTraitRef("", def_id_invalid(), List[Type].new()),
         };
     };
@@ -54,21 +50,15 @@ given MIRFunctionBuilder {
         operator_kind: MIRBinaryOperator,
     ): MIRExprResult = {
         let left_expected = when left.expr_type in {
-            .ReferenceType(inner_ref) then right.expr_type,
-            .MutableReferenceType(inner_ref) then right.expr_type,
-            .BorrowedReferenceType(inner_ref) then right.expr_type,
-            .MutableBorrowedReferenceType(inner_ref) then right.expr_type,
-            .WeakReferenceType(inner_ref) then right.expr_type,
-            .MutableWeakReferenceType(inner_ref) then right.expr_type,
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then right.expr_type,
             _ then left.expr_type,
         };
         let right_expected = when right.expr_type in {
-            .ReferenceType(inner_ref) then left.expr_type,
-            .MutableReferenceType(inner_ref) then left.expr_type,
-            .BorrowedReferenceType(inner_ref) then left.expr_type,
-            .MutableBorrowedReferenceType(inner_ref) then left.expr_type,
-            .WeakReferenceType(inner_ref) then left.expr_type,
-            .MutableWeakReferenceType(inner_ref) then left.expr_type,
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then left.expr_type,
             _ then right.expr_type,
         };
         let left_operand = self.lower_operand_for_expected_type(left, left_expected);
@@ -223,33 +213,28 @@ given MIRFunctionBuilder {
                             let mutable values = List[MIRValue].new();
                             let mutable ownerships = List[MIROwnershipUse].new();
                             values.push(
-                                when receiver_borrow_override in {
-                                    .Some(value) then value,
-                                    .None() then {
-                                        let expected_receiver_type = if method_params.is_empty(
-                                        ) then Option[Type].None()
-                                        else Option[Type].Some(
-                                            (method_params[UInt(0)]).param_type,
-                                        );
-                                        self.lower_call_argument(
-                                            base,
-                                            expected_receiver_type,
-                                        )
-                                    },
+                                receiver_borrow_override or else {
+                                    let expected_receiver_type = if method_params.is_empty(
+                                    ) then Option[Type].None()
+                                    else Option[Type].Some(
+                                        (method_params[UInt(0)]).param_type,
+                                    );
+                                    self.lower_call_argument(
+                                        base,
+                                        expected_receiver_type,
+                                    )
                                 },
                             );
                             ownerships.push(self.ownership_use(base));
-                            let mutable arg_idx: UInt = UInt(0);
-                            while arg_idx < args.count() then {
-                                let _expected = if (arg_idx + UInt(1)) < method_params.count(
+                            for pair in args.lazy().enumerate() then {
+                                let _expected = if (pair.first + UInt(1)) < method_params.count(
                                 ) then Option[Type].Some(
-                                    (method_params[arg_idx + UInt(1)]).param_type,
+                                    (method_params[pair.first + UInt(1)]).param_type,
                                 ) else Option[Type].None();
                                 values.push(
-                                    self.lower_call_argument(args[arg_idx], _expected),
+                                    self.lower_call_argument(pair.second, _expected),
                                 );
-                                ownerships.push(self.ownership_use(args[arg_idx]));
-                                arg_idx += UInt(1);
+                                ownerships.push(self.ownership_use(pair.second));
                             };
                             return self.finish_call(
                                 MIROperand.Function(callable_method),
@@ -462,91 +447,18 @@ given MIRFunctionBuilder {
         let resolved = self.receiver_lookup_type(t);
         return when resolved in {
             .ReferenceType(inner_ref) then when self.receiver_lookup_type(inner_ref) in {
-                .ReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .BorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableBorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .WeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
+                .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
                     inner_ref,
                 ),
                 _ then resolved,
             },
-            .MutableReferenceType(inner_ref) then when self.receiver_lookup_type(
+            .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) then when self.receiver_lookup_type(
                 inner_ref,
             ) in {
-                .ReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .BorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableBorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .WeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                _ then resolved,
-            },
-            .BorrowedReferenceType(inner_ref) then when self.receiver_lookup_type(
-                inner_ref,
-            ) in {
-                .ReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .BorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableBorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .WeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                _ then resolved,
-            },
-            .MutableBorrowedReferenceType(inner_ref) then when self.receiver_lookup_type(
-                inner_ref,
-            ) in {
-                .ReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .BorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableBorrowedReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .WeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
-                    inner_ref,
-                ),
-                .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
+                .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then self.normalized_method_lookup_receiver_type(
                     inner_ref,
                 ),
                 _ then resolved,
@@ -609,14 +521,9 @@ given MIRFunctionBuilder {
             base_type,
         );
         let inner_type = when normalized_base_type in {
-            .MutableReferenceType(inner) then inner,
-            .ReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
-            .MutablePointerType(inner) then inner,
-            .PointerType(inner) then inner,
+            .MutableReferenceType(inner) or .ReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) or .MutablePointerType(inner) or .PointerType(inner) then inner,
             _ then normalized_base_type,
         };
         return when method_type in {
@@ -641,8 +548,7 @@ given MIRFunctionBuilder {
                         _ then Type.ReferenceType(inner_type),
                     },
                     .WeakReferenceType(_) then when normalized_base_type in {
-                        .WeakReferenceType(_) then normalized_base_type,
-                        .MutableWeakReferenceType(_) then normalized_base_type,
+                        .WeakReferenceType(_) or .MutableWeakReferenceType(_) then normalized_base_type,
                         _ then Type.WeakReferenceType(inner_type),
                     },
                     .MutableWeakReferenceType(_) then when normalized_base_type in {
@@ -675,12 +581,9 @@ given MIRFunctionBuilder {
     private receiver_base_lookup_key(self, receiver_type: Type): String = {
         let mutable resolved_type = self.receiver_lookup_type(receiver_type);
         let base_type = when resolved_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then resolved_type,
         };
         return self.concrete_layout_key_for_type(self.receiver_lookup_type(base_type));

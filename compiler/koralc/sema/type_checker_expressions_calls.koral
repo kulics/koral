@@ -54,10 +54,7 @@ given TypeChecker {
             },
         };
         if base_type_opt is .Some(base_type) then {
-            let is_enum = when base_type in {
-                .EnumType(_) then true,
-                _ then false,
-            };
+            let is_enum = base_type is .EnumType(_);
             let mutable type_refs_u = List[Type].new();
             let mutable type_refs_s = List[Type].new();
             for t in resolved_args then {
@@ -215,13 +212,12 @@ given TypeChecker {
                 );
                 return Option[Dict[String, Type]].None();
             };
-            let mutable idx: UInt = 0;
-            while idx < template.type_parameters.count() then {
-                bindings.insert(
-                    template.type_parameters[idx].name,
-                    explicit_type_args[idx],
-                );
-                idx += 1;
+            for pair in template.type_parameters.lazy().zip[
+                Type,
+                ListIterator[Type],
+                List[Type],
+            ](explicit_type_args) then {
+                bindings.insert(pair.first.name, (pair.second));
             };
         };
         return Option[Dict[String, Type]].Some(bindings);
@@ -248,15 +244,13 @@ given TypeChecker {
                 ) in {
                     .Some(fields) then {
                         let mutable bindings = Dict[String, Type].new();
-                        let mutable i: UInt = 0;
-                        let param_count = struct_template.type_parameters.count();
-                        let arg_count = args.count();
-                        let n = if param_count < arg_count then param_count
-                        else arg_count;
-                        while i < n then {
-                            let tp = struct_template.type_parameters[i];
-                            bindings.insert(tp.name, (args[i]));
-                            i += 1;
+                        for pair in struct_template.type_parameters.lazy().zip[
+                            Type,
+                            ListIterator[Type],
+                            List[Type],
+                        ](args) then {
+                            let tp = pair.first;
+                            bindings.insert(tp.name, (pair.second));
                         };
                         let mutable types = List[Type].new();
                         for field in fields then {
@@ -304,13 +298,7 @@ given TypeChecker {
 
     resolved_constructor_type_or_unknown(self, callee: Expr, scope: Scope): Type = {
         return when callee in {
-            .Identifier(name, _) then when self.try_resolve_named_type_in_scope_without_diag(
-                name,
-                scope,
-            ) in {
-                .Some(t) then t,
-                .None() then Type.Unknown(),
-            },
+            .Identifier(name, _) then self.try_resolve_named_type_in_scope_without_diag(name, scope) or else Type.Unknown(),
             .GenericInstantiation(base, type_args, _) then {
                 let resolved_base = self.try_resolve_named_type_in_scope_without_diag(
                     base,
@@ -356,12 +344,7 @@ given TypeChecker {
         };
     };
 
-    option_type_or_unknown(self, value: Option[Type]): Type = {
-        return when value in {
-            .Some(t) then t,
-            .None() then Type.Unknown(),
-        };
-    };
+    option_type_or_unknown(self, value: Option[Type]): Type = value or else Type.Unknown();
 
     resolve_expected_constructor_param_types(
         self,
@@ -482,13 +465,12 @@ given TypeChecker {
                 );
                 return Option[Dict[String, Type]].None();
             };
-            let mutable idx: UInt = 0;
-            while idx < template.type_parameters.count() then {
-                bindings.insert(
-                    template.type_parameters[idx].name,
-                    explicit_type_args[idx],
-                );
-                idx += 1;
+            for pair in template.type_parameters.lazy().zip[
+                Type,
+                ListIterator[Type],
+                List[Type],
+            ](explicit_type_args) then {
+                bindings.insert(pair.first.name, (pair.second));
             };
         } else {
             let mutable generic_scope = Scope.new_child(self.storage.global_scope);
@@ -559,10 +541,7 @@ given TypeChecker {
             // instead of falling through to a same-named global.
             generic_scope.define_generic_param(tp.name);
         };
-        let generic_return_type = when template.checked_return_type in {
-            .Some(return_type) then return_type,
-            .None() then self.resolve_type_in_scope(template.return_type, generic_scope),
-        };
+        let generic_return_type = template.checked_return_type or else self.resolve_type_in_scope(template.return_type, generic_scope);
         when expected in {
             .Some(expected_type) then {
                 bindings = self.infer_type_bindings_persistent(
@@ -706,8 +685,7 @@ given TypeChecker {
                 };
                 false
             },
-            .DerefExpr(inner) then self.is_mutable_ref_like_type(inner.expr_type),
-            .UnsafeDerefExpr(inner) then self.is_mutable_ref_like_type(inner.expr_type),
+            .DerefExpr(inner) or .UnsafeDerefExpr(inner) then self.is_mutable_ref_like_type(inner.expr_type),
             _ then false,
         };
     };
@@ -740,8 +718,7 @@ given TypeChecker {
                 };
                 can_take
             },
-            .DerefExpr(inner) then type_is_any_ref(inner.expr_type) or type_is_raw_pointer(inner.expr_type),
-            .UnsafeDerefExpr(inner) then type_is_any_ref(inner.expr_type) or type_is_raw_pointer(inner.expr_type),
+            .DerefExpr(inner) or .UnsafeDerefExpr(inner) then type_is_any_ref(inner.expr_type) or type_is_raw_pointer(inner.expr_type),
             _ then false,
         };
     };
@@ -750,8 +727,7 @@ given TypeChecker {
         return when expr in {
             .Identifier(name, _) then Option[String].Some(name),
             .StringLiteral(value, _) then Option[String].Some("\"" + value + "\""),
-            .IntegerLiteral(value, _) then Option[String].Some(value),
-            .FloatLiteral(value, _) then Option[String].Some(value),
+            .IntegerLiteral(value, _) or .FloatLiteral(value, _) then Option[String].Some(value),
             .BoolLiteral(value, _) then if value then Option[String].Some("true")
             else Option[String].Some("false"),
             .MemberPath(base, path, _) then if self.render_call_site_expr_text(base) is .Some(base_text) then {
@@ -823,12 +799,9 @@ given TypeChecker {
     function_like_type(self, t: Type): Option[Type] = {
         return when t in {
             .FunctionType(...) then Option[Type].Some(t),
-            .ReferenceType(inner) then self.function_like_type(inner),
-            .MutableReferenceType(inner) then self.function_like_type(inner),
-            .BorrowedReferenceType(inner) then self.function_like_type(inner),
-            .MutableBorrowedReferenceType(inner) then self.function_like_type(inner),
-            .WeakReferenceType(inner) then self.function_like_type(inner),
-            .MutableWeakReferenceType(inner) then self.function_like_type(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then self.function_like_type(inner),
             _ then Option[Type].None(),
         };
     };
@@ -840,13 +813,8 @@ given TypeChecker {
     ): Bool = {
         // Skip validation for method-like callees — self is implicit, validated separately.
         when typed_callee.expr_kind in {
-            .MethodReference(_, _, _, _, _, _) then {
-                return true;
-            },
-            .TraitMethodPlaceholder(_, _, _, _, _, _) then {
-                return true;
-            },
-            .TraitMethodCall(_, _, _, _, _) then {
+            .MethodReference(_, _, _, _, _, _) or .TraitMethodPlaceholder(_, _, _, _, _, _)
+            or .TraitMethodCall(_, _, _, _, _) then {
                 return true;
             },
             _ then {},
@@ -893,10 +861,8 @@ given TypeChecker {
 
     positional_param_specs_for_count(self, count: UInt): List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new();
-        let mutable index: UInt = 0;
-        while index < count then {
+        for _ in 0..<count then {
             specs.push(FunctionParamSpec("", false, false, false, Option[Expr].None()));
-            index += 1;
         };
         return specs;
     };
@@ -906,10 +872,8 @@ given TypeChecker {
         specs: List[FunctionParamSpec],
     ): List[FunctionParamSpec] = {
         let mutable out = List[FunctionParamSpec].new();
-        let mutable index: UInt = 1;
-        while index < specs.count() then {
-            out.push(specs[index]);
-            index += 1;
+        for spec in specs.lazy().skip(1) then {
+            out.push(spec);
         };
         return out;
     };
@@ -947,8 +911,7 @@ given TypeChecker {
 
     owner_type_name_for_type(self, owner_type: Type): Option[String] = {
         return when owner_type in {
-            .StructureType(def_id) then self.context().get_name(def_id),
-            .EnumType(def_id) then self.context().get_name(def_id),
+            .StructureType(def_id) or .EnumType(def_id) then self.context().get_name(def_id),
             // Display only: the spelling is read from the declaration.
             .GenericStruct(template_def_id, _) then Option[String].Some(
                 def_id_spelling(template_def_id),
@@ -957,14 +920,11 @@ given TypeChecker {
                 def_id_spelling(template_def_id),
             ),
             .GenericParameter(name) then Option[String].Some(name),
-            .ReferenceType(inner) then self.owner_type_name_for_type(inner),
-            .MutableReferenceType(inner) then self.owner_type_name_for_type(inner),
-            .BorrowedReferenceType(inner) then self.owner_type_name_for_type(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.owner_type_name_for_type(inner),
             .MutableBorrowedReferenceType(inner) then self.owner_type_name_for_type(
                 inner,
             ),
-            .WeakReferenceType(inner) then self.owner_type_name_for_type(inner),
-            .MutableWeakReferenceType(inner) then self.owner_type_name_for_type(inner),
+            .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.owner_type_name_for_type(inner),
             _ then Option[String].None(),
         };
     };
@@ -982,12 +942,9 @@ given TypeChecker {
         constructor_type: Type,
     ): List[FunctionParamSpec] = {
         let inner_type = when constructor_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then constructor_type,
         };
         return when inner_type in {
@@ -1042,12 +999,9 @@ given TypeChecker {
         case_name: String,
     ): List[FunctionParamSpec] = {
         let inner_type = when enum_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then enum_type,
         };
         return when inner_type in {
@@ -1070,12 +1024,9 @@ given TypeChecker {
 
     static_member_is_enum_case(self, receiver_type: Type, member_name: String): Bool = {
         let inner_type = when receiver_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then receiver_type,
         };
         return when inner_type in {
@@ -1146,8 +1097,7 @@ given TypeChecker {
                     let mutable idx: UInt = if member.params.is_empty() or member.params[
                         UInt(0)
                     ].name != "self" then UInt(0) else UInt(1);
-                    while idx < member.params.count() then {
-                        let p = member.params[idx];
+                    for p in member.params.lazy().skip(idx) then {
                         let has_default = p.default_value is .Some(_);
                         specs.push(
                             FunctionParamSpec(
@@ -1158,7 +1108,6 @@ given TypeChecker {
                                 p.default_value,
                             ),
                         );
-                        idx += 1;
                     };
                     return specs;
                 };
@@ -1362,14 +1311,8 @@ given TypeChecker {
                     ),
                 };
             },
-            .QualifiedMethodCall(_, trait_type_node, method_name, _, _) then {
-                return self.resolve_qualified_method_param_specs(
-                    self.trait_def_id_of(self.type_node_name(trait_type_node)) or else def_id_invalid(
-                    ),
-                    method_name,
-                );
-            },
-            .QualifiedGenericMethodCall(_, trait_type_node, _, method_name, _, _) then {
+            .QualifiedMethodCall(_, trait_type_node, method_name, _, _)
+            or .QualifiedGenericMethodCall(_, trait_type_node, _, method_name, _, _) then {
                 return self.resolve_qualified_method_param_specs(
                     self.trait_def_id_of(self.type_node_name(trait_type_node)) or else def_id_invalid(
                     ),
@@ -1390,9 +1333,8 @@ given TypeChecker {
             .GenericInstantiation(base, _, _) then base,
             .MemberPath(_, path, _) then if path.is_empty() then "function expression"
             else path[path.count() - UInt(1)],
-            .StaticMethodCall(_, _, method_name, _, _) then method_name,
-            .QualifiedMethodCall(_, _, method_name, _, _) then method_name,
-            .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
+            .StaticMethodCall(_, _, method_name, _, _) or .QualifiedMethodCall(_, _, method_name, _, _)
+            or .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
             _ then "function expression",
         };
     };
@@ -1421,21 +1363,17 @@ given TypeChecker {
             when arg in {
                 .NamedArgument(label, _, _) then {
                     seen_named = true;
-                    let mutable field_index: UInt = 0;
-                    let mutable found = false;
-                    while field_index < param_specs.count() then {
-                        if param_specs[field_index].name == label then {
-                            found = true;
-                            break;
-                        };
-                        field_index += 1;
-                    };
-                    if not found then {
+                    let found_index = param_specs.lazy().position((x) => x.name == label);
+                    if found_index is .None() then {
                         self.push_diagnostic_at_span(
                             "Unknown named argument '\(label)' for '\(call_description)'",
                             expr_span(arg),
                         );
                         return Option[List[Expr]].None();
+                    };
+                    let field_index = when found_index in {
+                        .Some(idx) then idx,
+                        .None() then UInt(0),
                     };
                     if not param_specs[field_index].named then {
                         self.push_diagnostic_at_span(
@@ -1501,10 +1439,9 @@ given TypeChecker {
         };
 
         let mutable expressions = List[Expr].new();
-        let mutable index: UInt = 0;
-        while index < param_specs.count() then {
-            let spec = param_specs[index];
-            when ordered[index] in {
+        for pair in param_specs.lazy().enumerate() then {
+            let spec = pair.second;
+            when ordered[pair.first] in {
                 .Some(expr) then expressions.push(expr),
                 .None() then {
                     // The parameter's OWN declaration carries its default.
@@ -1524,7 +1461,6 @@ given TypeChecker {
                     };
                 },
             };
-            index += 1;
         };
         return Option[List[Expr]].Some(expressions);
     };
@@ -1555,8 +1491,9 @@ given TypeChecker {
         args: List[Expr],
         param_specs: List[FunctionParamSpec],
     ): Bool = {
-        let mutable arg_idx: UInt = 0;
-        for arg in args then {
+        for pair in args.lazy().enumerate() then {
+            let arg_idx = pair.first;
+            let arg = pair.second;
             if arg_idx < param_specs.count() then {
                 let spec = param_specs[arg_idx];
                 when arg in {
@@ -1587,7 +1524,6 @@ given TypeChecker {
                     },
                 };
             };
-            arg_idx += 1;
         };
         return true;
     };

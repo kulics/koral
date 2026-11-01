@@ -15,12 +15,9 @@ given TypeChecker {
     as_trait_object_type(self, t: Type): Option[Type] = {
         return when t in {
             .TraitObject(tplDefId, _) then Option[Type].Some(t),
-            .ReferenceType(inner) then self.as_trait_object_type(inner),
-            .MutableReferenceType(inner) then self.as_trait_object_type(inner),
-            .BorrowedReferenceType(inner) then self.as_trait_object_type(inner),
-            .MutableBorrowedReferenceType(inner) then self.as_trait_object_type(inner),
-            .WeakReferenceType(inner) then self.as_trait_object_type(inner),
-            .MutableWeakReferenceType(inner) then self.as_trait_object_type(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then self.as_trait_object_type(inner),
             _ then Option[Type].None(),
         };
     };
@@ -38,14 +35,11 @@ given TypeChecker {
             .TraitObject(trait_def_id, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
             ),
-            .ReferenceType(inner) then self.trait_object_safety_name(inner),
-            .MutableReferenceType(inner) then self.trait_object_safety_name(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_safety_name(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_safety_name(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_safety_name(
                 inner,
             ),
-            .WeakReferenceType(inner) then self.trait_object_safety_name(inner),
-            .MutableWeakReferenceType(inner) then self.trait_object_safety_name(inner),
+            .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.trait_object_safety_name(inner),
             _ then Option[String].None(),
         };
     };
@@ -112,10 +106,13 @@ given TypeChecker {
             if params.count() != resolved_args.count() then {
                 return;
             };
-            let mutable i: UInt = 0;
-            while i < params.count() then {
-                let param = params[i];
-                let bound_type = resolved_args[i];
+            for pair in params.lazy().zip[
+                Type,
+                ListIterator[Type],
+                List[Type],
+            ](resolved_args) then {
+                let param = pair.first;
+                let bound_type = pair.second;
                 // An argument that still mentions a generic parameter cannot be
                 // judged here: `ZipIterator[T, U, R, R2]` inside `LazyView`'s own
                 // body is not yet a concrete type, and its conformance is settled
@@ -147,7 +144,6 @@ given TypeChecker {
                         };
                     };
                 };
-                i = i + 1;
             };
         };
     };
@@ -238,14 +234,11 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_type(inner);
-                        if is_mutable then self.resolve_mutable_reference_type(
-                            resolved_inner,
-                        ) else self.resolve_reference_type(resolved_inner)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_type(inner);
+                    if is_mutable then self.resolve_mutable_reference_type(
+                        resolved_inner,
+                    ) else self.resolve_reference_type(resolved_inner)
                 }
             },
             .BorrowedReference(inner, is_mutable, _) then {
@@ -316,31 +309,28 @@ given TypeChecker {
 
     resolve_type_with_bindings(self, node: TypeNode, bindings: Dict[String, Type]): Type = {
         return when node in {
-            .Identifier(name, span) then when bindings.get(name) in {
-                .Some(bound) then bound,
-                .None() then {
-                    if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
-                        if local_trait is .TraitObject(...) then {
-                            return self.surface_named_type(
-                                self.canonicalize_alias_type(local_trait),
-                            );
-                        };
-                    };
-                    if self.resolve_type_name_binding(name) is .Some(t) then {
-                        // Same gap as `resolve_named_type`: a bare-name table hit
-                        // can still name another module's type, so it needs the
-                        // visibility check too -- not just the last-resort path.
-                        let canonical = self.canonicalize_alias_type(t);
-                        self.check_type_visibility(
-                            canonical,
-                            name,
-                            self.storage.current_scope,
-                            span,
+            .Identifier(name, span) then bindings.get(name) or else {
+                if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
+                    if local_trait is .TraitObject(...) then {
+                        return self.surface_named_type(
+                            self.canonicalize_alias_type(local_trait),
                         );
-                        return self.surface_named_type(canonical);
                     };
-                    self.surface_named_type(self.resolve_named_type(name, span))
-                },
+                };
+                if self.resolve_type_name_binding(name) is .Some(t) then {
+                    // Same gap as `resolve_named_type`: a bare-name table hit
+                    // can still name another module's type, so it needs the
+                    // visibility check too -- not just the last-resort path.
+                    let canonical = self.canonicalize_alias_type(t);
+                    self.check_type_visibility(
+                        canonical,
+                        name,
+                        self.storage.current_scope,
+                        span,
+                    );
+                    return self.surface_named_type(canonical);
+                };
+                self.surface_named_type(self.resolve_named_type(name, span))
             },
             .Reference(inner, is_mutable, span) then {
                 let trait_ref_override = when inner in {
@@ -379,17 +369,14 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_type_with_bindings(
-                            inner,
-                            bindings,
-                        );
-                        if is_mutable then self.resolve_mutable_reference_type(
-                            resolved_inner,
-                        ) else self.resolve_reference_type(resolved_inner)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_type_with_bindings(
+                        inner,
+                        bindings,
+                    );
+                    if is_mutable then self.resolve_mutable_reference_type(
+                        resolved_inner,
+                    ) else self.resolve_reference_type(resolved_inner)
                 }
             },
             .BorrowedReference(inner, is_mutable, _) then {
@@ -448,10 +435,7 @@ given TypeChecker {
                 };
                 return Type.Unknown();
             },
-            .InferredSelf(span) then when bindings.get("Self") in {
-                .Some(bound_self) then bound_self,
-                .None() then self.resolve_type(node),
-            },
+            .InferredSelf(span) then bindings.get("Self") or else self.resolve_type(node),
             .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
@@ -599,14 +583,11 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_type_in_scope(inner, scope);
-                        if is_mutable then self.resolve_mutable_reference_type(
-                            resolved_inner,
-                        ) else self.resolve_reference_type(resolved_inner)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_type_in_scope(inner, scope);
+                    if is_mutable then self.resolve_mutable_reference_type(
+                        resolved_inner,
+                    ) else self.resolve_reference_type(resolved_inner)
                 }
             },
             .Pointer(inner, is_mutable, span) then {
@@ -1031,9 +1012,7 @@ given TypeChecker {
 
     type_module_path(self, t: Type): Option[List[String]] = {
         return when t in {
-            .StructureType(def_id) then self.context().get_module_path(def_id),
-            .EnumType(def_id) then self.context().get_module_path(def_id),
-            .OpaqueType(def_id) then self.context().get_module_path(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.context().get_module_path(def_id),
             // Identity: the template's DECLARATION, not its spelling.
             .GenericStruct(template_def_id, _) then self.context().get_module_path(
                 template_def_id,

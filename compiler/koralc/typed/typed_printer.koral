@@ -2,10 +2,8 @@
 
 private let indent(level: UInt): String = {
     let mutable out = StringBuilder.new();
-    let mutable i: UInt = 0;
-    while i < level then {
+    for _ in 0..<level then {
         out.push_string("  ");
-        i += 1;
     };
     return out.to_string();
 };
@@ -100,17 +98,10 @@ private let type_display_with_depth(
 ): String = {
     if depth >= 12 then {
         return when t in {
-            .StructureType(def_id) then when type_names.get(def_id.id) in {
-                .Some(name) then name,
-                .None() then "struct#\(def_id.id)",
-            },
-            .EnumType(def_id) then when type_names.get(def_id.id) in {
-                .Some(name) then name,
-                .None() then "enum#\(def_id.id)",
-            },
+            .StructureType(def_id) then type_names.get(def_id.id) or else "struct#\(def_id.id)",
+            .EnumType(def_id) then type_names.get(def_id.id) or else "enum#\(def_id.id)",
             .OpaqueType(def_id) then "opaque#\(def_id.id)",
-            .GenericStruct(tplDefId, _) then "\(def_id_spelling(tplDefId))[...]",
-            .GenericEnum(tplDefId, _) then "\(def_id_spelling(tplDefId))[...]",
+            .GenericStruct(tplDefId, _) or .GenericEnum(tplDefId, _) then "\(def_id_spelling(tplDefId))[...]",
             .FunctionType(...) then "(...) -> ...",
             .ReferenceType(_) then "...",
             .MutableReferenceType(_) then "mutable ...",
@@ -169,39 +160,16 @@ private let type_display_with_depth(
             out.push_string(type_display_with_depth(return_type, type_names, depth + 1));
             out.to_string()
         },
-        .StructureType(def_id) then when type_names.get(def_id.id) in {
-            .Some(name) then name,
-            .None() then "struct#\(def_id.id)",
-        },
-        .EnumType(def_id) then when type_names.get(def_id.id) in {
-            .Some(name) then name,
-            .None() then "enum#\(def_id.id)",
-        },
+        .StructureType(def_id) then type_names.get(def_id.id) or else "struct#\(def_id.id)",
+        .EnumType(def_id) then type_names.get(def_id.id) or else "enum#\(def_id.id)",
         .ReferenceType(inner) then "ref \(type_display_with_depth(inner, type_names, depth + 1))",
-        .MutableReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
-        .BorrowedReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
-        .MutableBorrowedReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
+        .MutableReferenceType(inner) or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then "\(type_display_with_depth(inner, type_names, depth + 1))",
         .PointerType(inner) then "*\(type_display_with_depth(inner, type_names, depth + 1))",
         .MutablePointerType(inner) then "*mutable \(type_display_with_depth(inner, type_names, depth + 1))",
-        .WeakReferenceType(inner) then "?\(type_display_with_depth(inner, type_names, depth + 1))",
-        .MutableWeakReferenceType(inner) then "?\(type_display_with_depth(inner, type_names, depth + 1))",
+        .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then "?\(type_display_with_depth(inner, type_names, depth + 1))",
         .OpaqueType(def_id) then "opaque#\(def_id.id)",
         .GenericParameter(name) then name,
-        .GenericStruct(tplDefId, args) then {
-            let mutable out = StringBuilder.new();
-            out.push_string("\(def_id_spelling(tplDefId))[");
-            let mutable first = true;
-            for arg in args then {
-                if not first then {
-                    out.push_string(", ");
-                };
-                out.push_string(type_display_with_depth(arg, type_names, depth + 1));
-                first = false;
-            };
-            out.push_byte(']');
-            out.to_string()
-        },
-        .GenericEnum(tplDefId, args) then {
+        .GenericStruct(tplDefId, args) or .GenericEnum(tplDefId, args) then {
             let mutable out = StringBuilder.new();
             out.push_string("\(def_id_spelling(tplDefId))[");
             let mutable first = true;

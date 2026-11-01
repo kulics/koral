@@ -4,7 +4,7 @@
 let mono_is_unresolved_expr_type(mono: Monomorphizer, t: Type): Bool = {
     return when t in {
         .VoidType() then true,
-        .GenericStruct(_, args) then {
+        .GenericStruct(_, args) or .GenericEnum(_, args) then {
             for arg_ref in args then {
                 if mono_is_unresolved_expr_type(mono, arg_ref) then {
                     return true;
@@ -12,33 +12,7 @@ let mono_is_unresolved_expr_type(mono: Monomorphizer, t: Type): Bool = {
             };
             is_placeholder_inferred_type(t)
         },
-        .GenericEnum(_, args) then {
-            for arg_ref in args then {
-                if mono_is_unresolved_expr_type(mono, arg_ref) then {
-                    return true;
-                };
-            };
-            is_placeholder_inferred_type(t)
-        },
-        .StructureType(def_id) then {
-            let display_name = mono.storage.context.type_display_name(t);
-            let type_name = mono.storage.context.get_name(def_id) or else display_name;
-            if type_name.contains("__") or display_name.contains("__") then {
-                return true;
-            };
-            when mono.storage.context.get_type_arguments(def_id) in {
-                .Some(type_args) then {
-                    for type_arg in type_args then {
-                        if mono_is_unresolved_expr_type(mono, type_arg) then {
-                            return true;
-                        };
-                    };
-                    is_placeholder_inferred_type(t)
-                },
-                .None() then is_placeholder_inferred_type(t),
-            }
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             let display_name = mono.storage.context.type_display_name(t);
             let type_name = mono.storage.context.get_name(def_id) or else display_name;
             if type_name.contains("__") or display_name.contains("__") then {
@@ -62,34 +36,18 @@ let mono_is_unresolved_expr_type(mono: Monomorphizer, t: Type): Bool = {
 
 let is_concrete_integer_type(t: Type): Bool = {
     return when t in {
-        .IntType() then true,
-        .Int8Type() then true,
-        .Int16Type() then true,
-        .Int32Type() then true,
-        .Int64Type() then true,
-        .UIntType() then true,
-        .UInt8Type() then true,
-        .UInt16Type() then true,
-        .UInt32Type() then true,
-        .UInt64Type() then true,
-        .WrappingIntType() then true,
-        .WrappingInt8Type() then true,
-        .WrappingInt16Type() then true,
-        .WrappingInt32Type() then true,
-        .WrappingInt64Type() then true,
-        .WrappingUIntType() then true,
-        .WrappingUInt8Type() then true,
-        .WrappingUInt16Type() then true,
-        .WrappingUInt32Type() then true,
-        .WrappingUInt64Type() then true,
+        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType()
+        or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType()
+        or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
+        or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+        or .WrappingUInt64Type() then true,
         _ then false,
     };
 };
 
 let is_concrete_float_type(t: Type): Bool = {
     return when t in {
-        .Float32Type() then true,
-        .Float64Type() then true,
+        .Float32Type() or .Float64Type() then true,
         _ then false,
     };
 };
@@ -321,12 +279,7 @@ let prefer_more_concrete_type(
     let primary_is_unresolved = mono_is_unresolved_expr_type(mono, primary);
     let fallback_is_unresolved = mono_is_unresolved_expr_type(mono, fallback);
     let primary_is_placeholder = when primary in {
-        .StructureType(def_id) then {
-            let display_name = mono.storage.context.type_display_name(primary);
-            let type_name = mono.storage.context.get_name(def_id) or else display_name;
-            type_name.ends_with("_T") or display_name.ends_with("_T")
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             let display_name = mono.storage.context.type_display_name(primary);
             let type_name = mono.storage.context.get_name(def_id) or else display_name;
             type_name.ends_with("_T") or display_name.ends_with("_T")
@@ -334,12 +287,7 @@ let prefer_more_concrete_type(
         _ then false,
     };
     let fallback_is_placeholder = when fallback in {
-        .StructureType(def_id) then {
-            let display_name = mono.storage.context.type_display_name(fallback);
-            let type_name = mono.storage.context.get_name(def_id) or else display_name;
-            type_name.ends_with("_T") or display_name.ends_with("_T")
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             let display_name = mono.storage.context.type_display_name(fallback);
             let type_name = mono.storage.context.get_name(def_id) or else display_name;
             type_name.ends_with("_T") or display_name.ends_with("_T")
@@ -347,14 +295,11 @@ let prefer_more_concrete_type(
         _ then false,
     };
     let primary_is_parameterized = when primary in {
-        .GenericStruct(...) then true,
-        .GenericEnum(...) then true,
-        .TraitObject(...) then true,
+        .GenericStruct(...) or .GenericEnum(...) or .TraitObject(...) then true,
         _ then false,
     };
     let fallback_is_nominal = when fallback in {
-        .StructureType(_) then true,
-        .EnumType(_) then true,
+        .StructureType(_) or .EnumType(_) then true,
         _ then false,
     };
     if primary_is_parameterized and fallback_is_nominal then {
@@ -428,10 +373,7 @@ let resolved_method_symbol(
     fallback_name: String,
     fallback_type: Type,
 ): Symbol = {
-    let concrete_name = when mono.storage.context.get_name(def_id) in {
-        .Some(name) then name,
-        .None() then fallback_name,
-    };
+    let concrete_name = mono.storage.context.get_name(def_id) or else fallback_name;
     let mutable concrete_type = resolved_method_symbol_type(mono, def_id, fallback_type);
     let result = Symbol(def_id, concrete_type, SymbolKind.Function());
     return result;
@@ -503,16 +445,8 @@ let unwrap_ref_like_receiver_type_for_value_lookup(
 ): Option[Type] = {
     let mutable resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     return when resolved_receiver_type in {
-        .ReferenceType(inner) then Option[Type].Some(
-            resolve_parameterized_type(mono, inner),
-        ),
-        .MutableReferenceType(inner) then Option[Type].Some(
-            resolve_parameterized_type(mono, inner),
-        ),
-        .BorrowedReferenceType(inner) then Option[Type].Some(
-            resolve_parameterized_type(mono, inner),
-        ),
-        .MutableBorrowedReferenceType(inner) then Option[Type].Some(
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) then Option[Type].Some(
             resolve_parameterized_type(mono, inner),
         ),
         _ then Option[Type].None(),

@@ -67,9 +67,7 @@ given MIRVerifier {
             };
         };
         let mutable seen_methods = Set[String].new();
-        let mutable index: UInt = 0;
-        while index < vtable.methods.count() then {
-            let method = vtable.methods[index];
+        for method in vtable.methods then {
             if method.name.is_empty() then {
                 return Result[Void].Error(
                     "MIR verification failed in trait vtable \(vtable.trait_name): empty method name",
@@ -91,9 +89,7 @@ given MIRVerifier {
                 },
                 .None() then {},
             };
-            let mutable param_index: UInt = 0;
-            while param_index < method.parameters.count() then {
-                let param = method.parameters[param_index];
+            for param in method.parameters then {
                 when param.param_type in {
                     .Some(param_type) then if self.program.context.contains_generic_parameter(
                         param_type,
@@ -113,9 +109,7 @@ given MIRVerifier {
                         "MIR verification failed in trait vtable \(vtable.trait_name).\(method.name): self slot name mismatch",
                     );
                 };
-                param_index += 1;
             };
-            index += 1;
         };
         return Result[Void].Ok({});
     };
@@ -203,17 +197,14 @@ given MIRVerifier {
                 Result[Void].Ok({})
             },
             .Drop(place) then self.verify_place(function, place, local_ids, local_types),
-            .Retain(value) then self.verify_value(function, value, local_ids, local_types),
-            .Release(value) then self.verify_value(function, value, local_ids, local_types),
+            .Retain(value) or .Release(value) then self.verify_value(function, value, local_ids, local_types),
             .Evaluate(value) then self.verify_value(
                 function,
                 value,
                 local_ids,
                 local_types,
             ),
-            .ScopeEnter(_) then Result[Void].Ok({}),
-            .ScopeExit(_) then Result[Void].Ok({}),
-            .DebugSource(_) then Result[Void].Ok({}),
+            .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then Result[Void].Ok({}),
         };
     };
 
@@ -291,17 +282,7 @@ given MIRVerifier {
                 };
                 Result[Void].Ok({})
             },
-            .Deref(base, pointee) then {
-                let _ = self.verify_value(function, base, local_ids, local_types) or return;
-                if self.program.context.contains_generic_parameter(pointee) then {
-                    return self.fail(
-                        function,
-                        "place projection has unresolved generic type",
-                    );
-                };
-                Result[Void].Ok({})
-            },
-            .PointerElement(base, pointee) then {
+            .Deref(base, pointee) or .PointerElement(base, pointee) then {
                 let _ = self.verify_value(function, base, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(pointee) then {
                     return self.fail(
@@ -582,25 +563,13 @@ given MIRVerifier {
                 local_ids,
                 local_types,
             ),
-            .CopyMemory(dest, source, count) then {
+            .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
                 let _ = self.verify_value(function, dest, local_ids, local_types) or return;
                 let _ = self.verify_value(function, source, local_ids, local_types) or return;
                 let _ = self.verify_value(function, count, local_ids, local_types) or return;
                 Result[Void].Ok({})
             },
-            .MoveMemory(dest, source, count) then {
-                let _ = self.verify_value(function, dest, local_ids, local_types) or return;
-                let _ = self.verify_value(function, source, local_ids, local_types) or return;
-                let _ = self.verify_value(function, count, local_ids, local_types) or return;
-                Result[Void].Ok({})
-            },
-            .DowngradeRef(value, _) then self.verify_value(
-                function,
-                value,
-                local_ids,
-                local_types,
-            ),
-            .UpgradeRef(value, _) then self.verify_value(
+            .DowngradeRef(value, _) or .UpgradeRef(value, _) then self.verify_value(
                 function,
                 value,
                 local_ids,
@@ -937,9 +906,7 @@ given MIRVerifier {
                     CanonicalTraitRef(def_id_spelling(trait_def_id), trait_def_id, copied),
                 )
             },
-            .ReferenceType(inner) then self.trait_object_reference_info(inner),
-            .MutableReferenceType(inner) then self.trait_object_reference_info(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_reference_info(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_reference_info(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_reference_info(
                 inner,
             ),
@@ -949,10 +916,8 @@ given MIRVerifier {
 
     private referenced_type(self, t: Type): Option[Type] = {
         return when t in {
-            .ReferenceType(inner) then Option[Type].Some(inner),
-            .MutableReferenceType(inner) then Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
             _ then Option[Type].None(),
         };
     };
@@ -967,14 +932,9 @@ given MIRVerifier {
         if left.count() != right.count() then {
             return false;
         };
-        let mutable index: UInt = 0;
-        while index < left.count() then {
-            if left[index] != right[index] then {
-                return false;
-            };
-            index += 1;
-        };
-        return true;
+        return left.lazy().zip[Type, ListIterator[Type], List[Type]](
+            right,
+        ).all((pair) => pair.first == pair.second);
     };
 
     /// Identity of a vtable: (trait DECLARATION, trait arguments, concrete
@@ -1057,9 +1017,7 @@ given MIRVerifier {
             .Local(local_id) then local_types.get(local_id.raw_value) or else Type.Unknown(
             ),
             .Constant(constant) then when constant in {
-                .Integer(_, constant_type) then constant_type,
-                .Float(_, constant_type) then constant_type,
-                .StringLiteral(_, constant_type) then constant_type,
+                .Integer(_, constant_type) or .Float(_, constant_type) or .StringLiteral(_, constant_type) then constant_type,
                 .Boolean(_) then Type.BoolType(),
                 .Void() then Type.VoidType(),
             },
@@ -1119,12 +1077,9 @@ given MIRVerifier {
             ),
             .Cast(_, target_type, _) then target_type,
             .Intrinsic(node) then when node in {
-                .AllocMemory(_, result_type) then result_type,
-                .DowngradeRef(_, result_type) then result_type,
-                .UpgradeRef(_, result_type) then result_type,
-                .TakeMemory(_, result_type) then result_type,
-                .NullPtr(result_type) then result_type,
-                .TraitObjectDowncast(_, result_type) then result_type,
+                .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
+                or .TakeMemory(_, result_type) or .NullPtr(result_type)
+                or .TraitObjectDowncast(_, result_type) then result_type,
                 _ then Type.Unknown(),
             },
             .Lambda(lambda) then lambda.lambda_type,

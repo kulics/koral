@@ -29,9 +29,7 @@ given TypeDeclaration {
     /// 获取类型声明的 C 名称
     c_name(self): String = {
         return when self in {
-            .Structure(name, _, _, _) then name,
-            .Enum(name, _, _, _) then name,
-            .ForeignStructure(name, _, _) then name,
+            .Structure(name, _, _, _) or .Enum(name, _, _, _) or .ForeignStructure(name, _, _) then name,
         };
     };
 };
@@ -255,24 +253,18 @@ given CodeGen {
                 },
             };
         };
-        return when self.c_identifier_opt(def_id) in {
-            .Some(name) then name,
-            .None() then self.sanitize_codegen_identifier(
+        return self.c_identifier_opt(def_id) or else self.sanitize_codegen_identifier(
                 self.context.get_name(def_id) or else "T_\(def_id.id)",
-            ),
-        };
+            );
     };
 
     c_name_for_def_id(self, def_id: DefId): String = {
         return when self.c_identifier_opt(def_id) in {
             .Some(name) then name,
-            .None() then when self.context.get_cname(def_id) in {
-                .Some(name) then name,
-                .None() then when self.context.get_name(def_id) in {
+            .None() then self.context.get_cname(def_id) or else when self.context.get_name(def_id) in {
                     .Some(name) then self.sanitize_codegen_identifier(name),
                     .None() then "T_\(def_id.id)",
                 },
-            },
         };
     };
 
@@ -372,13 +364,8 @@ given CodeGen {
     trait_name_of_trait_type(self, trait_type: Type): String = {
         return when trait_type in {
             .ReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
-            .MutableReferenceType(inner_ref) then self.trait_name_of_trait_type(
-                inner_ref,
-            ),
-            .BorrowedReferenceType(inner_ref) then self.trait_name_of_trait_type(
-                inner_ref,
-            ),
-            .MutableBorrowedReferenceType(inner_ref) then self.trait_name_of_trait_type(
+            .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) then self.trait_name_of_trait_type(
                 inner_ref,
             ),
             .WeakReferenceType(inner_ref) then self.trait_name_of_trait_type(inner_ref),
@@ -406,10 +393,7 @@ given CodeGen {
             return t;
         };
         return when t in {
-            .GenericParameter(name) then when bindings.get(name) in {
-                .Some(bound) then bound,
-                .None() then t,
-            },
+            .GenericParameter(name) then bindings.get(name) or else t,
             .ReferenceType(inner_ref) then Type.ReferenceType(
                 self.apply_codegen_type_bindings(inner_ref, bindings),
             ),
@@ -470,17 +454,15 @@ given CodeGen {
         target_args: List[Type],
         base_args: List[Type],
     ): Void = {
-        let mutable i: UInt = 0;
-        let n = if target_args.count() < base_args.count() then target_args.count()
-        else base_args.count();
-        while i < n then {
-            when (target_args[i]) in {
+        for pair in target_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+            base_args,
+        ) then {
+            when (pair.first) in {
                 .GenericParameter(name) then {
-                    bindings.insert(name, (base_args[i]));
+                    bindings.insert(name, (pair.second));
                 },
                 _ then {},
             };
-            i += 1;
         };
     };
 
@@ -667,9 +649,7 @@ given CodeGen {
         return when requested_result_type in {
             .Unknown() then symbol_type,
             .VoidType() then when symbol_type in {
-                .VoidType() then requested_result_type,
-                .NeverType() then requested_result_type,
-                .Unknown() then requested_result_type,
+                .VoidType() or .NeverType() or .Unknown() then requested_result_type,
                 _ then symbol_type,
             },
             _ then requested_result_type,
@@ -871,12 +851,10 @@ given CodeGen {
         if actual.count() != expected.count() then {
             return false;
         };
-        let mutable i: UInt = 0;
-        while i < actual.count() then {
-            if self.type_stable_key(actual[i]) != self.type_stable_key(expected[i]) then {
+        for pair in actual.lazy().zip[Type, ListIterator[Type], List[Type]](expected) then {
+            if self.type_stable_key(pair.first) != self.type_stable_key(pair.second) then {
                 return false;
             };
-            i += 1;
         };
         return true;
     };
@@ -1027,12 +1005,9 @@ given CodeGen {
         };
 
         let receiver_base_type = when concrete_receiver_type in {
-            .ReferenceType(inner_ref) then inner_ref,
-            .MutableReferenceType(inner_ref) then inner_ref,
-            .BorrowedReferenceType(inner_ref) then inner_ref,
-            .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-            .WeakReferenceType(inner_ref) then inner_ref,
-            .MutableWeakReferenceType(inner_ref) then inner_ref,
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then inner_ref,
             _ then concrete_receiver_type,
         };
         let receiver_base_key = self.receiver_owner(receiver_base_type);
@@ -1050,12 +1025,9 @@ given CodeGen {
                     receiver_param_type,
                 );
                 let param_base_type = when concrete_param_type in {
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
+                    .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                    or .BorrowedReferenceType(inner_ref) or .MutableBorrowedReferenceType(inner_ref)
+                    or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then inner_ref,
                     _ then concrete_param_type,
                 };
                 self.receiver_owner(param_base_type) == receiver_base_key
@@ -1116,13 +1088,11 @@ given CodeGen {
 
     def_ids_named(self, name: String): List[DefId] = {
         let mutable out = List[DefId].new();
-        let mutable id: UInt = 1;
-        while id < self.context.next_def_id() then {
+        for id in 1..<self.context.next_def_id() then {
             let def_id = DefId(id);
             if self.context.get_name(def_id) is .Some(found_name) and found_name == name then {
                 out.push(def_id);
             };
-            id += 1;
         };
         return out;
     };
@@ -1132,8 +1102,7 @@ given CodeGen {
         for def_id in self.def_ids_named(name) then {
             when self.context.get_kind(def_id) in {
                 .Some(kind) then when kind in {
-                    .TypeDef(_) then out.push(def_id),
-                    .GenericTemplate(_) then out.push(def_id),
+                    .TypeDef(_) or .GenericTemplate(_) then out.push(def_id),
                     _ then {},
                 },
                 .None() then {},
@@ -1148,9 +1117,7 @@ given CodeGen {
             return true;
         };
         return when symbol.symbol_type in {
-            .StructureType(type_def_id) then type_def_id == def_id,
-            .OpaqueType(type_def_id) then type_def_id == def_id,
-            .EnumType(type_def_id) then type_def_id == def_id,
+            .StructureType(type_def_id) or .OpaqueType(type_def_id) or .EnumType(type_def_id) then type_def_id == def_id,
             _ then false,
         };
     };
@@ -1213,12 +1180,9 @@ given CodeGen {
             self.concretize_codegen_type(t),
         );
         let base_type = when concrete_type in {
-            .ReferenceType(inner_ref) then inner_ref,
-            .MutableReferenceType(inner_ref) then inner_ref,
-            .BorrowedReferenceType(inner_ref) then inner_ref,
-            .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-            .WeakReferenceType(inner_ref) then inner_ref,
-            .MutableWeakReferenceType(inner_ref) then inner_ref,
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then inner_ref,
             _ then concrete_type,
         };
         return self.receiver_owner(base_type);
@@ -1440,12 +1404,7 @@ given CodeGen {
                     };
                 };
 
-                let selected_method_name = when selected_method_name_opt in {
-                    .Some(name) then name,
-                    .None() then {
-                        return Option[String].None();
-                    },
-                };
+                let selected_method_name = selected_method_name_opt or return;
                 let owner_c_name = self.emitted_type_c_name_fallback(owner_type);
                 Option[String].Some(
                     self.compose_method_c_name(owner_c_name, selected_method_name),
@@ -1654,9 +1613,7 @@ given CodeGen {
     index_foreign_type_symbol(self, identifier: Symbol, out: Set[UInt]): Void = {
         out.insert(identifier.def_id.id);
         when identifier.symbol_type in {
-            .StructureType(type_def_id) then out.insert(type_def_id.id),
-            .OpaqueType(type_def_id) then out.insert(type_def_id.id),
-            .EnumType(type_def_id) then out.insert(type_def_id.id),
+            .StructureType(type_def_id) or .OpaqueType(type_def_id) or .EnumType(type_def_id) then out.insert(type_def_id.id),
             _ then {},
         };
     };
@@ -1722,16 +1679,10 @@ given CodeGen {
                 .Some(resolved_symbol) then self.callable_c_name(resolved_symbol),
                 .None() then when self.fallback_current_owner_method_c_name(symbol) in {
                     .Some(name) then name,
-                    .None() then when self.callable_c_name_cache.get(symbol.def_id.id) in {
-                        .Some(name) then name,
-                        .None() then self.compute_callable_c_name_uncached(symbol),
-                    },
+                    .None() then self.callable_c_name_cache.get(symbol.def_id.id) or else self.compute_callable_c_name_uncached(symbol),
                 },
             }
-        } else when self.callable_c_name_cache.get(symbol.def_id.id) in {
-            .Some(name) then name,
-            .None() then self.compute_callable_c_name_uncached(symbol),
-        };
+        } else self.callable_c_name_cache.get(symbol.def_id.id) or else self.compute_callable_c_name_uncached(symbol);
 
         let resolved_runes = resolved_name.to_runes();
         let is_generic_placeholder_name = resolved_runes.count() >= 3 and resolved_runes[
@@ -1803,12 +1754,9 @@ given CodeGen {
                 let mutable receiver_type = params[UInt(0)].param_type;
                 Option[Type].Some(
                     when receiver_type in {
-                        .ReferenceType(inner) then inner,
-                        .MutableReferenceType(inner) then inner,
-                        .BorrowedReferenceType(inner) then inner,
-                        .MutableBorrowedReferenceType(inner) then inner,
-                        .WeakReferenceType(inner) then inner,
-                        .MutableWeakReferenceType(inner) then inner,
+                        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                        or .MutableWeakReferenceType(inner) then inner,
                         _ then receiver_type,
                     },
                 )
@@ -1839,7 +1787,7 @@ given CodeGen {
         };
 
         return when t in {
-            .StructureType(def_id) then {
+            .StructureType(def_id) or .EnumType(def_id) then {
                 when self.c_identifier_opt(def_id) in {
                     .Some(name) then Option[String].Some(name),
                     .None() then when self.context.get_name(def_id) in {
@@ -1850,24 +1798,7 @@ given CodeGen {
                     },
                 }
             },
-            .EnumType(def_id) then {
-                when self.c_identifier_opt(def_id) in {
-                    .Some(name) then Option[String].Some(name),
-                    .None() then when self.context.get_name(def_id) in {
-                        .Some(name) then Option[String].Some(
-                            self.sanitize_codegen_identifier(name),
-                        ),
-                        .None() then Option[String].None(),
-                    },
-                }
-            },
-            .GenericStruct(...) then {
-                let layout_key = self.concrete_layout_key_for_type(
-                    self.concretize_codegen_type(t),
-                );
-                Option[String].Some(self.sanitize_codegen_identifier(layout_key))
-            },
-            .GenericEnum(...) then {
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let layout_key = self.concrete_layout_key_for_type(
                     self.concretize_codegen_type(t),
                 );
@@ -1892,28 +1823,9 @@ given CodeGen {
                     },
                 }
             },
-            .ReferenceType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .MutableReferenceType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .BorrowedReferenceType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .MutableBorrowedReferenceType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .PointerType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .MutablePointerType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .WeakReferenceType(_) then Option[String].Some(
-                self.concrete_layout_key_for_type(t),
-            ),
-            .MutableWeakReferenceType(_) then Option[String].Some(
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .PointerType(_) or .MutablePointerType(_)
+            or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then Option[String].Some(
                 self.concrete_layout_key_for_type(t),
             ),
             .IntType() then Option[String].Some("Int"),
@@ -1949,41 +1861,17 @@ given CodeGen {
         };
 
         return when t in {
-            .ReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .MutableReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .BorrowedReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .MutableBorrowedReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .PointerType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .MutablePointerType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .WeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
-                inner_ref,
-            ),
-            .MutableWeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .PointerType(inner_ref)
+            or .MutablePointerType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then self.receiver_type_lookup_name_fallback(
                 inner_ref,
             ),
             .StructureType(def_id) then {
-                when self.context.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then "T_\(def_id.id)",
-                }
+                self.context.get_name(def_id) or else "T_\(def_id.id)"
             },
             .EnumType(def_id) then {
-                when self.context.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then "U_\(def_id.id)",
-                }
+                self.context.get_name(def_id) or else "U_\(def_id.id)"
             },
             // Display: the spelling comes from the declaration.
             .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
@@ -2017,10 +1905,7 @@ given CodeGen {
                     .Some(mapped_type) then self.receiver_type_lookup_name_fallback(
                         mapped_type,
                     ),
-                    .None() then when self.context.get_name(def_id) in {
-                        .Some(name) then name,
-                        .None() then self.context.type_display_name(t),
-                    },
+                    .None() then self.context.get_name(def_id) or else self.context.type_display_name(t),
                 }
             },
             _ then "Unknown",
@@ -2038,10 +1923,7 @@ given CodeGen {
 
     uses_managed_nominal_representation(self, t: Type): Bool = {
         return when t in {
-            .StructureType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
-            .EnumType(_) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
-            .GenericStruct(...) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
-            .GenericEnum(...) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
+            .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then self.context.nominal_layout_kind_for_type(t) is .Managed(),
             _ then false,
         };
     };
@@ -2073,17 +1955,7 @@ given CodeGen {
 
     /// 比较两个模块路径是否相等
     module_paths_equal(self, a: List[String], b: List[String]): Bool = {
-        if a.count() != b.count() then {
-            return false;
-        };
-        let mutable i: UInt = 0;
-        while i < a.count() then {
-            if a[i] != b[i] then {
-                return false;
-            };
-            i += 1;
-        };
-        return true;
+        return a.equals(b);
     };
 
     // 查找类型定义的 DefId（TypeDef 类型，排除函数/变量）
@@ -2097,9 +1969,7 @@ given CodeGen {
 
     target_type_module_path(self, target_type: Type): List[String] = {
         return when target_type in {
-            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
-            ),
-            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            .StructureType(def_id) or .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
                 .Some(mapped_type) then self.target_type_module_path(mapped_type),
@@ -2234,16 +2104,11 @@ given CodeGen {
     /// - 局部变量使用 `{name}_{defId}` 格式
     public qualified_name_value(self, symbol: Symbol): String = {
         if self.is_foreign_function_def_id(symbol.def_id) then {
-            return when self.context.get_cname(symbol.def_id) in {
-                .Some(c_name) then c_name,
-                .None() then self.context.symbol_name(symbol),
-            };
+            return self.context.get_cname(symbol.def_id) or else self.context.symbol_name(symbol);
         };
 
         let is_global = when symbol.kind in {
-            .Function() then true,
-            .TypeSymbol() then true,
-            .Module() then true,
+            .Function() or .TypeSymbol() or .Module() then true,
             .Variable(_) then {
                 let module_path = self.context.get_module_path(symbol.def_id) or else List[String].new(
                 );
@@ -2270,11 +2135,8 @@ given CodeGen {
                     .None() then {},
                 };
             };
-            return when self.c_identifier_opt(symbol.def_id) in {
-                .Some(c_id) then c_id,
-                .None() then {
-                    self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
-                },
+            return self.c_identifier_opt(symbol.def_id) or else {
+                self.sanitize_codegen_identifier(self.context.symbol_name(symbol))
             };
         };
 
@@ -2289,10 +2151,7 @@ given CodeGen {
     /// 获取 Symbol 的 C 标识符（用于声明）
     public c_identifier_for_symbol_value(self, symbol: Symbol): String = {
         if self.is_foreign_function_def_id(symbol.def_id) then {
-            return when self.context.get_cname(symbol.def_id) in {
-                .Some(c_name) then c_name,
-                .None() then self.context.symbol_name(symbol),
-            };
+            return self.context.get_cname(symbol.def_id) or else self.context.symbol_name(symbol);
         };
 
         if self.is_foreign_global_var_def_id(symbol.def_id) then {
@@ -2332,14 +2191,11 @@ given CodeGen {
             _ then {},
         };
 
-        return when self.c_identifier_opt(symbol.def_id) in {
-            .Some(c_id) then c_id,
-            .None() then {
-                let symbol_name = self.context.symbol_name(symbol);
-                let c_name = if symbol_name.starts_with("_k__") then symbol_name
-                else self.sanitize_codegen_identifier(symbol_name);
-                c_name
-            },
+        return self.c_identifier_opt(symbol.def_id) or else {
+            let symbol_name = self.context.symbol_name(symbol);
+            let c_name = if symbol_name.starts_with("_k__") then symbol_name
+            else self.sanitize_codegen_identifier(symbol_name);
+            c_name
         };
     };
 
@@ -2362,22 +2218,9 @@ given CodeGen {
     type_looks_traitlike_for_storage(self, t: Type): Bool = {
         return when t in {
             .TraitObject(...) then true,
-            .ReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
-                inner_ref,
-            ),
-            .MutableReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
-                inner_ref,
-            ),
-            .BorrowedReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
-                inner_ref,
-            ),
-            .MutableBorrowedReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
-                inner_ref,
-            ),
-            .WeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
-                inner_ref,
-            ),
-            .MutableWeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) then self.type_looks_traitlike_for_storage(
                 inner_ref,
             ),
             .OpaqueType(def_id) then when self.context.lookup_type(def_id) in {
@@ -2412,27 +2255,12 @@ given CodeGen {
 
     public storage_c_type_name(self, t: Type): String = {
         let storage_c_type_opt = when t in {
-            .ReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
                 inner_ref,
                 false,
             ),
-            .MutableReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
-                inner_ref,
-                false,
-            ),
-            .BorrowedReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
-                inner_ref,
-                false,
-            ),
-            .MutableBorrowedReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
-                inner_ref,
-                false,
-            ),
-            .WeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
-                inner_ref,
-                true,
-            ),
-            .MutableWeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
+            .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then self.storage_ref_wrapper_c_type_name(
                 inner_ref,
                 true,
             ),
@@ -2443,19 +2271,12 @@ given CodeGen {
             else Option[String].None(),
             _ then Option[String].None(),
         };
-        return when storage_c_type_opt in {
-            .Some(storage_c_type) then storage_c_type,
-            .None() then self.c_type_name(t),
-        };
+        return storage_c_type_opt or else self.c_type_name(t);
     };
 
     nominal_named_c_type_name(self, t: Type): Option[String] = {
         return when t in {
-            .StructureType(def_id) then {
-                let c_name = self.nominal_layout_c_identifier(def_id);
-                Option[String].Some("struct \(c_name)")
-            },
-            .EnumType(def_id) then {
+            .StructureType(def_id) or .EnumType(def_id) then {
                 let c_name = self.nominal_layout_c_identifier(def_id);
                 Option[String].Some("struct \(c_name)")
             },
@@ -2468,7 +2289,8 @@ given CodeGen {
             .TraitObject(...) then {
                 Option[String].Some("struct __koral_TraitRef")
             },
-            .ReferenceType(inner_ref) then {
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) then {
                 when inner_ref in {
                     .TraitObject(...) then Option[String].Some(
                         "struct __koral_TraitRef",
@@ -2476,39 +2298,7 @@ given CodeGen {
                     _ then Option[String].None(),
                 }
             },
-            .MutableReferenceType(inner_ref) then {
-                when inner_ref in {
-                    .TraitObject(...) then Option[String].Some(
-                        "struct __koral_TraitRef",
-                    ),
-                    _ then Option[String].None(),
-                }
-            },
-            .BorrowedReferenceType(inner_ref) then {
-                when inner_ref in {
-                    .TraitObject(...) then Option[String].Some(
-                        "struct __koral_TraitRef",
-                    ),
-                    _ then Option[String].None(),
-                }
-            },
-            .MutableBorrowedReferenceType(inner_ref) then {
-                when inner_ref in {
-                    .TraitObject(...) then Option[String].Some(
-                        "struct __koral_TraitRef",
-                    ),
-                    _ then Option[String].None(),
-                }
-            },
-            .WeakReferenceType(inner_ref) then {
-                when inner_ref in {
-                    .TraitObject(...) then Option[String].Some(
-                        "struct __koral_TraitWeakRef",
-                    ),
-                    _ then Option[String].None(),
-                }
-            },
-            .MutableWeakReferenceType(inner_ref) then {
+            .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then {
                 when inner_ref in {
                     .TraitObject(...) then Option[String].Some(
                         "struct __koral_TraitWeakRef",
@@ -2521,14 +2311,11 @@ given CodeGen {
     };
 
     opaque_fallback_c_type_name(self, def_id: DefId): String = {
-        return when self.c_identifier_opt(def_id) in {
-            .Some(name) then name,
-            .None() then {
-                when self.context.get_name(def_id) in {
-                    .Some(name) then self.sanitize_codegen_identifier(name),
-                    .None() then "opaque_\(def_id.id)",
-                }
-            },
+        return self.c_identifier_opt(def_id) or else {
+            when self.context.get_name(def_id) in {
+                .Some(name) then self.sanitize_codegen_identifier(name),
+                .None() then "opaque_\(def_id.id)",
+            }
         };
     };
 
@@ -2552,18 +2339,7 @@ given CodeGen {
 
     generic_nominal_c_type_name(self, t: Type): Option[String] = {
         return when t in {
-            .GenericStruct(...) then {
-                let layout_key = self.concrete_layout_key_for_type(t);
-                when self.find_type_def_id_by_layout_or_template(t) in {
-                    .Some(def_id) then Option[String].Some(
-                        "struct \(self.nominal_layout_c_identifier(def_id))",
-                    ),
-                    .None() then Option[String].Some(
-                        "struct \(self.sanitize_codegen_identifier(layout_key))",
-                    ),
-                }
-            },
-            .GenericEnum(...) then {
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let layout_key = self.concrete_layout_key_for_type(t);
                 when self.find_type_def_id_by_layout_or_template(t) in {
                     .Some(def_id) then Option[String].Some(
@@ -2596,26 +2372,15 @@ given CodeGen {
 
     reference_like_c_type_name(self, t: Type): Option[String] = {
         return when t in {
-            .ReferenceType(inner_ref) then Option[String].Some(
-                self.ref_wrapper_c_type_name(inner_ref, false),
-            ),
-            .MutableReferenceType(inner_ref) then Option[String].Some(
-                self.ref_wrapper_c_type_name(inner_ref, false),
-            ),
-            .BorrowedReferenceType(inner_ref) then Option[String].Some(
-                self.ref_wrapper_c_type_name(inner_ref, false),
-            ),
-            .MutableBorrowedReferenceType(inner_ref) then Option[String].Some(
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+            or .MutableBorrowedReferenceType(inner_ref) then Option[String].Some(
                 self.ref_wrapper_c_type_name(inner_ref, false),
             ),
             .PointerType(inner) then Option[String].Some("\(self.c_type_name(inner))*"),
             .MutablePointerType(inner) then Option[String].Some(
                 "\(self.c_type_name(inner))*",
             ),
-            .WeakReferenceType(inner_ref) then Option[String].Some(
-                self.ref_wrapper_c_type_name(inner_ref, true),
-            ),
-            .MutableWeakReferenceType(inner_ref) then Option[String].Some(
+            .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then Option[String].Some(
                 self.ref_wrapper_c_type_name(inner_ref, true),
             ),
             .FunctionType(...) then Option[String].Some("struct __koral_Closure"),
@@ -2660,27 +2425,16 @@ given CodeGen {
             return;
         };
         when t in {
-            .ReferenceType(inner) then self.cache_c_type_name(inner),
-            .MutableReferenceType(inner) then self.cache_c_type_name(inner),
-            .BorrowedReferenceType(inner) then self.cache_c_type_name(inner),
-            .MutableBorrowedReferenceType(inner) then self.cache_c_type_name(inner),
-            .WeakReferenceType(inner) then self.cache_c_type_name(inner),
-            .MutableWeakReferenceType(inner) then self.cache_c_type_name(inner),
-            .PointerType(inner) then self.cache_c_type_name(inner),
-            .MutablePointerType(inner) then self.cache_c_type_name(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then self.cache_c_type_name(inner),
             .FunctionType(params, return_type) then {
                 for entry in params then {
                     self.cache_c_type_name(entry.param_type);
                 };
                 self.cache_c_type_name(return_type);
             },
-            .GenericStruct(_, args) then for arg in args then {
-                self.cache_c_type_name(arg);
-            },
-            .GenericEnum(_, args) then for arg in args then {
-                self.cache_c_type_name(arg);
-            },
-            .TraitObject(_, args) then for arg in args then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then for arg in args then {
                 self.cache_c_type_name(arg);
             },
             _ then {},
@@ -2697,10 +2451,7 @@ given CodeGen {
                     };
                     self.cache_c_type_name(return_type);
                 },
-                .ForeignGlobalVariable(_, _, decl_type) then self.cache_c_type_name(
-                    decl_type,
-                ),
-                .GlobalVariable(_, _, _, decl_type) then self.cache_c_type_name(
+                .ForeignGlobalVariable(_, _, decl_type) or .GlobalVariable(_, _, _, decl_type) then self.cache_c_type_name(
                     decl_type,
                 ),
                 .ForeignStruct(_, fields) or .StructDeclaration(_, fields) then {
@@ -2761,10 +2512,7 @@ given CodeGen {
 
     /// 将 Koral Type 映射到 C 类型名称字符串
     public c_type_name(self, t: Type): String = {
-        return when self.c_type_name_cache.get(stable_type_key(t)) in {
-            .Some(name) then name,
-            .None() then self.compute_c_type_name_uncached(t),
-        };
+        return self.c_type_name_cache.get(stable_type_key(t)) or else self.compute_c_type_name_uncached(t);
     };
 
     nominal_type_from_c_type_name(self, c_type: String): Option[Type] = {
@@ -2777,8 +2525,7 @@ given CodeGen {
             return Option[Type].None();
         };
 
-        let mutable id: UInt = 1;
-        while id < self.context.next_def_id() then {
+        for id in 1..<self.context.next_def_id() then {
             let def_id = DefId(id);
             let candidate = self.c_identifier_opt(def_id) or else "";
             if candidate == raw_name then {
@@ -2804,7 +2551,6 @@ given CodeGen {
                     .None() then Option[Type].None(),
                 };
             };
-            id += 1;
         };
         return Option[Type].None();
     };

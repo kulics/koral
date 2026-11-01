@@ -438,10 +438,7 @@ let resolve_concrete_method_call(
     ));
     // Final selection: concrete > instantiated > generic rebound > rebound > fallback rebind.
     let chosen_method = when concrete_method_lookup in {
-        .Some(concrete_method) then when instantiated_method_lookup in {
-            .Some(instantiated_method) then instantiated_method,
-            .None() then concrete_method,
-        },
+        .Some(concrete_method) then instantiated_method_lookup or else concrete_method,
         .None() then when instantiated_method_lookup in {
             .Some(instantiated_method) then instantiated_method,
             .None() where generic_rebound_method.def_id.id != method.def_id.id and generic_rebound_is_concrete and generic_rebound_matches_receiver then {
@@ -866,14 +863,7 @@ let resolve_trait_placeholder_call_callee(
                             mono,
                             inner.expr_type,
                         ) in {
-                            .ReferenceType(ref_inner) then when resolve_parameterized_type(
-                                mono,
-                                ref_inner,
-                            ) in {
-                                .TraitObject(...) then inner,
-                                _ then base_expr,
-                            },
-                            .MutableReferenceType(ref_inner) then when resolve_parameterized_type(
+                            .ReferenceType(ref_inner) or .MutableReferenceType(ref_inner) then when resolve_parameterized_type(
                                 mono,
                                 ref_inner,
                             ) in {
@@ -1196,10 +1186,7 @@ let resolve_method_reference_call_callee(
         let mutable explicit_lookup_receiver_types = List[Type].new();
         explicit_lookup_receiver_types.push(effective_receiver_type);
         when effective_receiver_type in {
-            .ReferenceType(inner) then explicit_lookup_receiver_types.push(
-                resolve_parameterized_type(mono, inner),
-            ),
-            .MutableReferenceType(inner) then explicit_lookup_receiver_types.push(
+            .ReferenceType(inner) or .MutableReferenceType(inner) then explicit_lookup_receiver_types.push(
                 resolve_parameterized_type(mono, inner),
             ),
             _ then {},
@@ -1318,62 +1305,8 @@ let resolve_method_reference_call_callee(
         bound_method,
     ) == mono.storage.context.symbol_name(method) then {
         when effective_receiver_type in {
-            .ReferenceType(_) then {
-                let wrapper_bound_method = bind_receiver_method_symbol(
-                    mono,
-                    effective_receiver_type,
-                    bound_method,
-                    Option[Type].None(),
-                );
-                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
-                    bound_method = wrapper_bound_method;
-                };
-            },
-            .MutableReferenceType(_) then {
-                let wrapper_bound_method = bind_receiver_method_symbol(
-                    mono,
-                    effective_receiver_type,
-                    bound_method,
-                    Option[Type].None(),
-                );
-                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
-                    bound_method = wrapper_bound_method;
-                };
-            },
-            .BorrowedReferenceType(_) then {
-                let wrapper_bound_method = bind_receiver_method_symbol(
-                    mono,
-                    effective_receiver_type,
-                    bound_method,
-                    Option[Type].None(),
-                );
-                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
-                    bound_method = wrapper_bound_method;
-                };
-            },
-            .MutableBorrowedReferenceType(_) then {
-                let wrapper_bound_method = bind_receiver_method_symbol(
-                    mono,
-                    effective_receiver_type,
-                    bound_method,
-                    Option[Type].None(),
-                );
-                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
-                    bound_method = wrapper_bound_method;
-                };
-            },
-            .WeakReferenceType(_) then {
-                let wrapper_bound_method = bind_receiver_method_symbol(
-                    mono,
-                    effective_receiver_type,
-                    bound_method,
-                    Option[Type].None(),
-                );
-                if wrapper_bound_method.def_id.id > 0 and wrapper_bound_method.def_id.id != bound_method.def_id.id then {
-                    bound_method = wrapper_bound_method;
-                };
-            },
-            .MutableWeakReferenceType(_) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
                 let wrapper_bound_method = bind_receiver_method_symbol(
                     mono,
                     effective_receiver_type,
@@ -1635,25 +1568,8 @@ let resolve_method_reference_call_callee(
             ),
             _ then Option[String].None(),
         },
-        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
-            mono,
-            inner_ref,
-        ) in {
-            .TraitObject(trait_def_id, _) then Option[String].Some(
-                def_id_spelling(trait_def_id),
-            ),
-            _ then Option[String].None(),
-        },
-        .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
-            mono,
-            inner_ref,
-        ) in {
-            .TraitObject(trait_def_id, _) then Option[String].Some(
-                def_id_spelling(trait_def_id),
-            ),
-            _ then Option[String].None(),
-        },
-        .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
+        .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+        or .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
             mono,
             inner_ref,
         ) in {
@@ -1725,12 +1641,7 @@ let resolve_member_path_call_callee(
     let member_name = mono.storage.context.symbol_name(path[path.count() - 1]);
     let receiver_expr = if path.count() == 1 then resolved_base
     else {
-        let mutable receiver_path = List[Symbol].new();
-        let mutable idx: UInt = 0;
-        while idx + 1 < path.count() then {
-            receiver_path.push(path[idx]);
-            idx += 1;
-        };
+        let receiver_path = path.sublist(0..<(path.count() - 1));
         let receiver_type = resolve_member_path_type(
             mono,
             resolved_base.expr_type,

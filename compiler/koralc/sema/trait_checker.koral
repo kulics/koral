@@ -173,11 +173,8 @@ given TraitRegistry {
         stack: List[UInt],
         stack_names: List[String],
     ): Result[Void] = {
-        let info = when self.get(trait_name) in {
-            .Some(found) then found,
-            .None() then {
-                return Result[Void].Ok({});
-            },
+        let info = self.get(trait_name) or else {
+            return Result[Void].Ok({});
         };
         if stack.contains(info.def_id.id) then {
             let mutable cycle = StringBuilder.new();
@@ -265,15 +262,9 @@ given TraitRegistry {
             if not parent.def_id.is_valid() then {
                 continue;
             };
-            when self.flatten_methods_for_def(parent.def_id) in {
-                .Ok(parent_methods) then {
-                    for entry in parent_methods then {
-                        result.insert(entry.first, entry.second);
-                    };
-                },
-                .Error(e) then {
-                    return Result[Dict[String, TypedTraitMember]].Error(e);
-                },
+            let parent_methods = self.flatten_methods_for_def(parent.def_id) or return;
+            for entry in parent_methods then {
+                result.insert(entry.first, entry.second);
             };
         };
 
@@ -352,10 +343,10 @@ given TraitRegistry {
                 reasons.push("method '\(m.name)' uses Self in return type");
             };
             // 检查参数（跳过第一个 self 参数）
-            let mutable param_index: UInt = 0;
-            for p in m.params then {
+            for pair in m.params.lazy().enumerate() then {
+                let param_index = pair.first;
+                let p = pair.second;
                 if param_index == UInt(0) and p.name == "self" then {
-                    param_index += UInt(1);
                     continue;
                 };
                 if self.type_uses_self(p.param_type) then {
@@ -363,7 +354,6 @@ given TraitRegistry {
                         "method '\(m.name)' uses Self in parameter '\(p.name)'",
                     );
                 };
-                param_index += UInt(1);
             };
         };
         self.object_safety_cache.insert(cache_key, reasons);
@@ -381,30 +371,10 @@ given TraitRegistry {
     private type_uses_self(self, t: Type): Bool = {
         return when t in {
             .GenericParameter(name) then name == "Self",
-            .ReferenceType(inner) then self.type_uses_self(inner),
-            .MutableReferenceType(inner) then self.type_uses_self(inner),
-            .BorrowedReferenceType(inner) then self.type_uses_self(inner),
-            .MutableBorrowedReferenceType(inner) then self.type_uses_self(inner),
-            .PointerType(inner) then self.type_uses_self(inner),
-            .WeakReferenceType(inner) then self.type_uses_self(inner),
-            .MutableWeakReferenceType(inner) then self.type_uses_self(inner),
-            .GenericStruct(_, args) then {
-                for arg in args then {
-                    if self.type_uses_self(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .GenericEnum(_, args) then {
-                for arg in args then {
-                    if self.type_uses_self(arg) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .TraitObject(_, args) then {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then self.type_uses_self(inner),
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
                 for arg in args then {
                     if self.type_uses_self(arg) then {
                         return true;
@@ -544,13 +514,11 @@ given TraitChecker {
                 if name == "Self" then {
                     self.context.type_display_name(target_type)
                 } else {
-                    let mutable idx: UInt = 0;
-                    while idx < trait_type_params.count() then {
-                        if trait_type_params[idx] == name and idx < trait_type_args.count(
-                        ) then {
+                    for pair in trait_type_params.lazy().enumerate() then {
+                        let idx = pair.first;
+                        if pair.second == name and idx < trait_type_args.count() then {
                             return self.context.type_display_name(trait_type_args[idx]);
                         };
-                        idx += 1;
                     };
                     name
                 }
@@ -652,12 +620,14 @@ given TraitChecker {
                         return Result[Void].Error(message.to_string());
                     };
 
-                    let mutable idx: UInt = 1;
-                    let named_check_end = if required_count < actual_count then required_count
-                    else actual_count;
-                    while idx < named_check_end then {
-                        let trait_param = required.params[idx];
-                        let impl_param = actual.params[idx];
+                    for pair in required.params.lazy().zip[
+                        TypedParam,
+                        ListIterator[TypedParam],
+                        List[TypedParam],
+                    ](actual.params).skip(1).enumerate() then {
+                        let idx = pair.first + UInt(1);
+                        let trait_param = pair.second.first;
+                        let impl_param = pair.second.second;
                         if trait_param.named != impl_param.named then {
                             if trait_param.named then {
                                 let mutable message = StringBuilder.new();
@@ -697,7 +667,6 @@ given TraitChecker {
                             message.push_byte('\'');
                             return Result[Void].Error(message.to_string());
                         };
-                        idx += 1;
                     };
                 },
             };

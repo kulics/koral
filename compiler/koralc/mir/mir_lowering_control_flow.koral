@@ -44,20 +44,16 @@ given MIRFunctionBuilder {
         let subject_type = subject.expr_type;
         // Dereference reference types
         let matched_type = when subject_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
         let mutable enum_count: UInt = 0;
         let mutable literal_count: UInt = 0;
         for arm in arms then {
             when arm.pattern in {
-                .Wildcard() then {},
-                .Variable(_) then {},
+                .Wildcard() or .Variable(_) then {},
                 .EnumCase(_, _, elements) then {
                     if matched_type is not .EnumType(_) then {
                         return false;
@@ -71,26 +67,12 @@ given MIRFunctionBuilder {
                 },
                 .IntegerLiteral(_) then {
                     let is_int = when matched_type in {
-                        .IntType() then true,
-                        .Int8Type() then true,
-                        .Int16Type() then true,
-                        .Int32Type() then true,
-                        .Int64Type() then true,
-                        .UIntType() then true,
-                        .UInt8Type() then true,
-                        .UInt16Type() then true,
-                        .UInt32Type() then true,
-                        .UInt64Type() then true,
-                        .WrappingIntType() then true,
-                        .WrappingInt8Type() then true,
-                        .WrappingInt16Type() then true,
-                        .WrappingInt32Type() then true,
-                        .WrappingInt64Type() then true,
-                        .WrappingUIntType() then true,
-                        .WrappingUInt8Type() then true,
-                        .WrappingUInt16Type() then true,
-                        .WrappingUInt32Type() then true,
-                        .WrappingUInt64Type() then true,
+                        .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type()
+                        or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+                        or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+                        or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType()
+                        or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+                        or .WrappingUInt64Type() then true,
                         _ then false,
                     };
                     if not is_int then {
@@ -178,10 +160,7 @@ given MIRFunctionBuilder {
         for arm in arms then {
             let case_block = self.make_block();
             when arm.pattern in {
-                .Wildcard() then {
-                    default_block = Option[MIRBlockID].Some(case_block);
-                },
-                .Variable(_) then {
+                .Wildcard() or .Variable(_) then {
                     default_block = Option[MIRBlockID].Some(case_block);
                 },
                 _ then {
@@ -196,16 +175,13 @@ given MIRFunctionBuilder {
         };
 
         // Create default block if not explicitly provided
-        let effective_default = when default_block in {
-            .Some(db) then db,
-            .None() then {
-                let unreachable_block = self.make_block();
-                let saved_block = self.current_block_index;
-                self.set_current_block(unreachable_block);
-                self.terminate(MIRTerminator.Unreachable());
-                self.current_block_index = saved_block;
-                unreachable_block
-            },
+        let effective_default = default_block or else {
+            let unreachable_block = self.make_block();
+            let saved_block = self.current_block_index;
+            self.set_current_block(unreachable_block);
+            self.terminate(MIRTerminator.Unreachable());
+            self.current_block_index = saved_block;
+            unreachable_block
         };
 
         // Emit the switch terminator from the original dispatch block.
@@ -221,8 +197,7 @@ given MIRFunctionBuilder {
         // Emit case bodies
         for arm in arms then {
             let case_block = when arm.pattern in {
-                .Wildcard() then default_block,
-                .Variable(_) then default_block,
+                .Wildcard() or .Variable(_) then default_block,
                 .EnumCase(_, tag_index, _) then {
                     let target_value = MIRConstant.Integer(
                         tag_index.to_string(),
@@ -368,15 +343,14 @@ given MIRFunctionBuilder {
         };
         self.pattern_subject_tag = Option[MIROperand].None();
         self.pattern_comparison_local = Option[MIRLocalID].None();
-        let mutable index: UInt = 0;
         let unmatched_trap_block = self.make_block();
-        while index < arms.count() then {
+        for pair in arms.lazy().enumerate() then {
             self.set_current_block(next_test_block);
-            let arm = arms[index];
+            let arm = pair.second;
             // `make_block` moves the cursor, so park the arm's test block first
             // and come back to it before any lowering runs.
             let arm_entry_block = self.current_block_id();
-            let next_block = if index + UInt(1) == arms.count() then unmatched_trap_block
+            let next_block = if pair.first + UInt(1) == arms.count() then unmatched_trap_block
             else self.make_block();
             self.set_current_block(arm_entry_block);
             // An arm whose pattern offers several readings is matched as a
@@ -404,7 +378,6 @@ given MIRFunctionBuilder {
                 );
             };
             next_test_block = next_block;
-            index += 1;
         };
         self.pattern_subject_operand = saved_pattern_subject;
         self.pattern_subject_tag = saved_pattern_tag;
@@ -558,12 +531,11 @@ given MIRFunctionBuilder {
         };
         self.terminate(MIRTerminator.Goto(next_block));
 
-        let mutable alt_index: UInt = 0;
         let mutable test_block = entry_block;
-        while alt_index < alternatives.count() then {
+        for pair in alternatives.lazy().enumerate() then {
             self.set_current_block(test_block);
-            let alternative = alternatives[alt_index];
-            let is_last = alt_index + UInt(1) == alternatives.count();
+            let alternative = pair.second;
+            let is_last = pair.first + UInt(1) == alternatives.count();
             let condition = self.lower_pattern_condition(
                 subject_place,
                 subject_type,
@@ -604,7 +576,6 @@ given MIRFunctionBuilder {
             };
             self.terminate(MIRTerminator.Goto(body_block));
             test_block = fail_block;
-            alt_index += 1;
         };
 
         self.set_current_block(body_block);
@@ -859,8 +830,7 @@ given MIRFunctionBuilder {
         let matched_place = matched_subject.first;
         let matched_type = matched_subject.second;
         let peeled_pointer_subject = when subject_type in {
-            .PointerType(_) then not typed_pattern_requires_raw_subject(pattern),
-            .MutablePointerType(_) then not typed_pattern_requires_raw_subject(pattern),
+            .PointerType(_) or .MutablePointerType(_) then not typed_pattern_requires_raw_subject(pattern),
             _ then false,
         };
         if peeled_pointer_subject then {
@@ -897,8 +867,7 @@ given MIRFunctionBuilder {
         };
 
         let operand = when pattern in {
-            .Wildcard() then self.pattern_bool(true),
-            .Variable(_) then self.pattern_bool(true),
+            .Wildcard() or .Variable(_) then self.pattern_bool(true),
             .BoolLiteral(value) then self.pattern_compare(
                 matched_place,
                 matched_type,
@@ -912,12 +881,9 @@ given MIRFunctionBuilder {
                 let null_operand = when self.lower_intrinsic_call(
                     TypedIntrinsic.NullPtr(result_type),
                 ) in {
-                    .Some(null_result) then when null_result.operand in {
-                        .Some(operand) then operand,
-                        .None() then MIROperand.Constant(
+                    .Some(null_result) then null_result.operand or else MIROperand.Constant(
                             MIRConstant.Integer("0", result_type),
                         ),
-                    },
                     .None() then MIROperand.Constant(
                         MIRConstant.Integer("0", result_type),
                     ),
@@ -1033,12 +999,7 @@ given MIRFunctionBuilder {
                     right_condition,
                 )
             },
-            .TraitObjectType(target_type) then self.lower_trait_object_type_pattern_condition(
-                matched_place,
-                matched_type,
-                target_type,
-            ),
-            .TraitObjectTypeBinding(_, target_type) then self.lower_trait_object_type_pattern_condition(
+            .TraitObjectType(target_type) or .TraitObjectTypeBinding(_, target_type) then self.lower_trait_object_type_pattern_condition(
                 matched_place,
                 matched_type,
                 target_type,
@@ -1049,11 +1010,8 @@ given MIRFunctionBuilder {
                 value,
                 equals_symbol,
             ),
-            .RuneLiteral(_) then self.pattern_bool(false),
-            .NotPattern(_) then self.pattern_bool(false),
-            .WeakBinding(_) then self.pattern_bool(true),
-            .ListPattern(_, _) then self.pattern_bool(true),
-            .RestPattern() then self.pattern_bool(true),
+            .RuneLiteral(_) or .NotPattern(_) then self.pattern_bool(false),
+            .WeakBinding(_) or .ListPattern(_, _) or .RestPattern() then self.pattern_bool(true),
         };
         return self.pattern_maybe_negate(operand, negated);
     };
@@ -1073,13 +1031,11 @@ given MIRFunctionBuilder {
         count_value: MIROperand,
     ): MIROperand = {
         let mutable rest_index = -1;
-        let mutable i: UInt = 0;
-        for element in elements then {
-            if element is .RestPattern() then {
-                rest_index = Int(i);
+        for pair in elements.lazy().enumerate() then {
+            if pair.second is .RestPattern() then {
+                rest_index = Int(pair.first);
                 break;
             };
-            i += 1;
         };
         if rest_index >= 0 and Int(slot_index) > rest_index then {
             let from_end = elements.count() - slot_index;

@@ -550,12 +550,7 @@ given CstParser {
         while self.peek() is .LineComment(_) or is .BlockComment(_) then {
             comments.push(self.eat());
         };
-        when self.eat_decl_semi() in {
-            .Ok(_) then {},
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        self.eat_decl_semi() or return;
         if comments.count() > 0 then {
             return .Ok(.DeclPreSemi(comments, d));
         };
@@ -735,21 +730,11 @@ given CstParser {
     ): Result[CstType] = {
         let mutable args = List[CstTypeArg].new();
         while not self.check(.RParen()) and not self.is_eof() then {
-            let inner = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_type_node() or return;
             let comma = self.eat_comma();
             args.push(CstTypeArg(inner, comma));
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(tok) then tok,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
         if self.check(.Arrow()) then {
             self.eat();
         } else {
@@ -762,12 +747,7 @@ given CstParser {
                 "Parse error: function type must include a return type, e.g. (Int, String) -> Bool",
             );
         };
-        let return_type = when self.parse_type_node() in {
-            .Ok(parsed_type) then parsed_type,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let return_type = self.parse_type_node() or return;
         return .Ok(.Function(lp, args, rp, return_type));
     };
 
@@ -778,12 +758,7 @@ given CstParser {
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat());
             };
-            let inner = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_type_node() or return;
             let ptr_kw = Token.KwPtr();
             let _ = kw;
             if mut_kw is .Some(mk) then {
@@ -804,12 +779,7 @@ given CstParser {
             // `?` takes a type and nothing else: `?mutable T` is not a spelling
             // (weak capability is a `mutable` type-parameter constraint plus
             // `?T`, not a mutable weak reference). `mutable` fails as a type.
-            let inner = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_type_node() or return;
             return .Ok(.Weakref(inner, kw));
         };
 
@@ -829,23 +799,13 @@ given CstParser {
                     "Parse error: A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
                 );
             };
-            let inner = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_type_node() or return;
             if self.check(.Comma()) then {
                 return .Error(
                     "Parse error: A parenthesized type holds exactly one type: write '(T)', or a function type '(A, B) -> R'",
                 );
             };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rp = self.expect(.RParen(), "')'") or return;
             // Keep one paren layer for readability, but collapse duplicate
             // nesting: ((T)) -> (T) -- the same policy as expression `Paren`.
             when inner in {
@@ -865,12 +825,7 @@ given CstParser {
         };
 
         // Simple named type
-        let name = when self.expect_ident("type name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("type name") or return;
         when name in {
             .Ident(n) then {
                 let runes = n.to_runes();
@@ -903,21 +858,11 @@ given CstParser {
             let lb = self.eat();
             let mutable args = List[CstTypeArg].new();
             while not self.check(.RBracket()) and not self.is_eof() then {
-                let inner = when self.parse_type_node() in {
-                    .Ok(parsed_type) then parsed_type,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let inner = self.parse_type_node() or return;
                 let comma = self.eat_comma();
                 args.push(CstTypeArg(inner, comma));
             };
-            let rb = when self.expect(.RBracket(), "']'") in {
-                .Ok(tok) then tok,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBracket(), "']'") or return;
             when t in {
                 .Named(base) then {
                     t = .Generic(lb, args, rb, base);
@@ -1000,20 +945,10 @@ given CstParser {
         if not self.check(.LBracket()) then {
             return .Ok(.None());
         };
-        let lb = when self.expect(.LBracket(), "'['") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBracket(), "'['") or return;
         let mutable params = List[CstGenericParam].new();
         while not self.check(.RBracket()) and not self.is_eof() then {
-            let name = when self.expect_ident("generic parameter name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("generic parameter name") or return;
             // Constraints are spelled `name: C1 and C2`; the colon separates
             // the type parameter from its bounds.
             if not self.check(.Colon()) then {
@@ -1039,23 +974,13 @@ given CstParser {
                     constraints.push(CstType.ConstraintKeyword(self.eat()));
                     continue;
                 };
-                let ct = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let ct = self.parse_type_node() or return;
                 constraints.push(ct);
             };
             let comma = self.eat_comma();
             params.push(CstGenericParam(name, constraints, comma));
         };
-        let rb = when self.expect(.RBracket(), "']'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rb = self.expect(.RBracket(), "']'") or return;
         return .Ok(.Some(CstGenericParams(lb, params, rb)));
     };
 
@@ -1092,12 +1017,7 @@ given CstParser {
                 param_mut = .Some(self.eat());
             };
 
-            let name = when self.expect_ident("parameter name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("parameter name") or return;
 
             // Every parameter is spelled `name: Type`; the colon separates the
             // name from its type. A following `=` marks a NAMED parameter:
@@ -1114,18 +1034,8 @@ given CstParser {
                     "Parse error: expected parameter type after '\(name.to_string())'",
                 );
             };
-            let pt = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let default_value = when self.parse_default_value() in {
-                .Ok(d) then d,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let pt = self.parse_type_node() or return;
+            let default_value = self.parse_default_value() or return;
             // The CST keeps `colon = Some` for named parameters only; the
             // `:` of a positional parameter is spelling, not a label.
             let mutable colon = Option[Token].None();
@@ -1265,12 +1175,7 @@ given CstParser {
     // scope stays tight.
     private parse_flow_bind(self): Result[CstExpr] = {
         let as_kw = self.eat();
-        let name = when self.expect_ident("flow binding name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("flow binding name") or return;
         if not self.check(.KwIn()) then {
             return .Error(self.expected_error("'in' after flow binding name"));
         };
@@ -1379,12 +1284,7 @@ given CstParser {
     };
 
     private parse_is(self): Result[CstExpr] = {
-        let left = when self.parse_range() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let left = self.parse_range() or return;
 
         if not self.check(.KwIs()) then {
             return .Ok(left);
@@ -1395,12 +1295,7 @@ given CstParser {
         if self.check(.KwNot()) then {
             not_kw = .Some(self.eat());
         };
-        let first = when self.parse_single_pattern() in {
-            .Ok(p) then p,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let first = self.parse_single_pattern() or return;
         // `or is` / `and is` continue the same pattern; `or` / `and` alone is
         // the expression operator and ends the chain. The connector is only
         // one when it is followed by `is`.
@@ -1412,12 +1307,7 @@ given CstParser {
             if self.check(.KwNot()) then {
                 link_not = .Some(self.eat());
             };
-            let link_pattern = when self.parse_single_pattern() in {
-                .Ok(p) then p,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let link_pattern = self.parse_single_pattern() or return;
             links.push(CstIsLink(connector, link_is, link_not, link_pattern));
         };
         let pattern = if links.is_empty() then first
@@ -1428,72 +1318,37 @@ given CstParser {
     private parse_not(self): Result[CstExpr] = {
         if self.check(.KwNot()) then {
             let op = self.eat();
-            let operand = when self.parse_is() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let operand = self.parse_is() or return;
             return .Ok(.NotExpr(op, operand));
         };
         return self.parse_is();
     };
 
     private parse_bitwise_or(self): Result[CstExpr] = {
-        let mutable left = when self.parse_bitwise_xor() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_bitwise_xor() or return;
         while self.check(.Pipe()) then {
             let op = self.eat();
-            let right = when self.parse_bitwise_xor() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let right = self.parse_bitwise_xor() or return;
             left = .BinaryOp(left, op, right);
         };
         return .Ok(left);
     };
 
     private parse_bitwise_xor(self): Result[CstExpr] = {
-        let mutable left = when self.parse_bitwise_and() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_bitwise_and() or return;
         while self.check(.Caret()) then {
             let op = self.eat();
-            let right = when self.parse_bitwise_and() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let right = self.parse_bitwise_and() or return;
             left = .BinaryOp(left, op, right);
         };
         return .Ok(left);
     };
 
     private parse_bitwise_and(self): Result[CstExpr] = {
-        let mutable left = when self.parse_shift() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_shift() or return;
         while self.check(.Amp()) then {
             let op = self.eat();
-            let right = when self.parse_shift() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let right = self.parse_shift() or return;
             left = .BinaryOp(left, op, right);
         };
         return .Ok(left);
@@ -1507,24 +1362,14 @@ given CstParser {
             .Ellipsis() then {
                 let op = self.eat();
                 if self.can_start_range_bound() then {
-                    let right = when self.parse_comparison() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_comparison() or return;
                     return .Ok(.RangeExpr(.None(), op, .Some(right)));
                 };
                 return .Ok(.RangeExpr(.None(), op, .None()));
             },
             .EllipsisLt() then {
                 let op = self.eat();
-                let right = when self.parse_comparison() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let right = self.parse_comparison() or return;
                 return .Ok(.RangeExpr(.None(), op, .Some(right)));
             },
             .Range() or .RangeLt() then {
@@ -1540,23 +1385,13 @@ given CstParser {
             _ then {},
         };
 
-        let left = when self.parse_comparison() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let left = self.parse_comparison() or return;
 
         when self.peek() in {
             .Range() then {
                 let op = self.eat();
                 if self.can_start_range_bound() then {
-                    let right = when self.parse_comparison() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_comparison() or return;
                     return .Ok(.RangeExpr(.Some(left), op, .Some(right)));
                 };
                 return .Error(
@@ -1565,23 +1400,13 @@ given CstParser {
             },
             .RangeLt() or .LtRangeLt() then {
                 let op = self.eat();
-                let right = when self.parse_comparison() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let right = self.parse_comparison() or return;
                 return .Ok(.RangeExpr(.Some(left), op, .Some(right)));
             },
             .LtRange() then {
                 let op = self.eat();
                 if self.can_start_range_bound() then {
-                    let right = when self.parse_comparison() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_comparison() or return;
                     return .Ok(.RangeExpr(.Some(left), op, .Some(right)));
                 };
                 return .Error(
@@ -1609,30 +1434,19 @@ given CstParser {
     };
 
     private can_start_range_bound(self): Bool = when self.peek() in {
-        .KwIf() or .KwWhile() or .KwWhen() or .KwFor() then true,
-        .Minus() or .Tilde() or .Amp() or .Star() then true,
-        .Ident(_) or .KwSelf() or .KwSelfType() or .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() or .NullLit() then true,
-        .LBrace() or .LParen() or .LBracket() or .Dot() then true,
+        .KwIf() or .KwWhile() or .KwWhen() or .KwFor() or .Minus() or .Tilde() or .Amp() or .Star()
+        or .Ident(_) or .KwSelf() or .KwSelfType() or .IntLit(_) or .FloatLit(_) or .StrLit(_) or .InterpStr(_) or .BoolTrue() or .BoolFalse() or .NullLit()
+        or .LBrace() or .LParen() or .LBracket() or .Dot() then true,
         _ then false,
     };
 
     private parse_comparison(self): Result[CstExpr] = {
-        let mutable left = when self.parse_bitwise_or() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_bitwise_or() or return;
         while true then {
             when self.peek() in {
                 .EqEq() or .NotEq() or .Gt() or .Lt() or .GtEq() or .LtEq() then {
                     let op = self.eat();
-                    let right = when self.parse_bitwise_or() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_bitwise_or() or return;
                     left = .BinaryOp(left, op, right);
                 },
                 _ then {
@@ -1644,22 +1458,12 @@ given CstParser {
     };
 
     private parse_shift(self): Result[CstExpr] = {
-        let mutable left = when self.parse_additive() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_additive() or return;
         while true then {
             when self.peek() in {
                 .LShift() or .RShift() then {
                     let op = self.eat();
-                    let right = when self.parse_additive() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_additive() or return;
                     left = .BinaryOp(left, op, right);
                 },
                 _ then {
@@ -1671,32 +1475,12 @@ given CstParser {
     };
 
     private parse_additive(self): Result[CstExpr] = {
-        let mutable left = when self.parse_multiplicative() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_multiplicative() or return;
         while true then {
             when self.peek() in {
-                .Plus() then {
+                .Plus() or .Minus() then {
                     let op = self.eat();
-                    let right = when self.parse_multiplicative() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    left = .BinaryOp(left, op, right);
-                },
-                .Minus() then {
-                    let op = self.eat();
-                    let right = when self.parse_multiplicative() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_multiplicative() or return;
                     left = .BinaryOp(left, op, right);
                 },
                 _ then {
@@ -1708,22 +1492,12 @@ given CstParser {
     };
 
     private parse_multiplicative(self): Result[CstExpr] = {
-        let mutable left = when self.parse_cast() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_cast() or return;
         while true then {
             when self.peek() in {
                 .Star() or .Slash() or .Percent() then {
                     let op = self.eat();
-                    let right = when self.parse_cast() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let right = self.parse_cast() or return;
                     left = .BinaryOp(left, op, right);
                 },
                 _ then {
@@ -1752,20 +1526,10 @@ given CstParser {
     /// one takes parentheses, `(self as *T).equals(...)`, and `x as *T.m()`
     /// leaves `.m()` a stray token.
     private parse_cast(self): Result[CstExpr] = {
-        let mutable left = when self.parse_prefix() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_prefix() or return;
         while self.check(.KwAs()) then {
             let as_kw = self.eat();
-            let cast_type = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let cast_type = self.parse_type_node() or return;
             left = .AsCast(left, as_kw, cast_type);
         };
         return .Ok(left);
@@ -1786,12 +1550,7 @@ given CstParser {
         };
 
         if leading_comments.count() > 0 then {
-            let inner = when self.parse_prefix() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_prefix() or return;
             return .Ok(.Commented(leading_comments, inner));
         };
 
@@ -1809,12 +1568,7 @@ given CstParser {
                     return .Ok(.UnaryMinus(op, CstExpr.FloatLit(lit)));
                 },
                 _ then {
-                    let operand = when self.parse_prefix() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let operand = self.parse_prefix() or return;
                     return .Ok(.UnaryMinus(op, operand));
                 },
             };
@@ -1823,12 +1577,7 @@ given CstParser {
         // Bitwise not
         if self.check(.Tilde()) then {
             let op = self.eat();
-            let operand = when self.parse_prefix() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let operand = self.parse_prefix() or return;
             return .Ok(.BitwiseNot(op, operand));
         };
 
@@ -1839,12 +1588,7 @@ given CstParser {
         // `expr as *T`.
         if self.check(.Star()) then {
             let op = self.eat();
-            let operand = when self.parse_prefix() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let operand = self.parse_prefix() or return;
             return .Ok(.Deref(op, operand));
         };
 
@@ -1854,12 +1598,7 @@ given CstParser {
         // written `expr as ?T`.
         if self.check(.KwWeakref()) then {
             let op = self.eat();
-            let operand = when self.parse_prefix() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let operand = self.parse_prefix() or return;
             return .Ok(.Upgrade(op, operand));
         };
 
@@ -1870,12 +1609,7 @@ given CstParser {
             if self.check(.KwMut()) then {
                 mut_kw = .Some(self.eat());
             };
-            let operand = when self.parse_prefix() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let operand = self.parse_prefix() or return;
             return .Ok(.AddressOf(op, mut_kw, operand));
         };
 
@@ -1897,24 +1631,14 @@ given CstParser {
     private parse_qualified_call_suffix(self, base: CstExpr): Result[CstExpr] = {
         let lp = self.eat();
         let trait_type = self.parse_type_node() or return;
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
         if not self.check(.Dot()) then {
             return .Error(
                 "Parse error: A qualified call must include its method call: write 'base(Trait).method(...)'. Casts are written 'Type(expr)' or 'expr as Type', not 'expr(Type)'",
             );
         };
         let dot = self.eat();
-        let method = when self.expect_ident("qualified method name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let method = self.expect_ident("qualified method name") or return;
         let mutable field = CstExpr.FieldAccess(
             .QualifiedTrait(lp, trait_type, rp, base),
             dot,
@@ -1925,21 +1649,11 @@ given CstParser {
             let lb = self.eat();
             let mutable type_args = List[CstTypeArg].new();
             while not self.check(.RBracket()) and not self.is_eof() then {
-                let t = when self.parse_type_node() in {
-                    .Ok(parsed_type) then parsed_type,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let t = self.parse_type_node() or return;
                 let comma = self.eat_comma();
                 type_args.push(CstTypeArg(t, comma));
             };
-            let rb = when self.expect(.RBracket(), "']'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBracket(), "']'") or return;
             field = .GenericInst(field, lb, type_args, rb);
         };
         if not self.check(.LParen()) then {
@@ -1948,28 +1662,13 @@ given CstParser {
             );
         };
         let call_lp = self.eat();
-        let args = when self.parse_call_args() in {
-            .Ok(a) then a,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let call_rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let args = self.parse_call_args() or return;
+        let call_rp = self.expect(.RParen(), "')'") or return;
         return .Ok(.Call(field, call_lp, args, call_rp));
     };
 
     private parse_postfix(self): Result[CstExpr] = {
-        let expr = when self.parse_primary() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let expr = self.parse_primary() or return;
         return self.parse_postfix_suffixes(expr);
     };
 
@@ -1982,28 +1681,13 @@ given CstParser {
             if self.check(.Dot()) then {
                 let dot = self.eat();
 
-                let field = when self.expect_ident("field name") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let field = self.expect_ident("field name") or return;
                 // Check for method call: expr.field(args)
                 if self.check(.LParen()) then {
                     let field_expr = CstExpr.FieldAccess(expr, dot, field);
                     let lp = self.eat();
-                    let args = when self.parse_call_args() in {
-                        .Ok(a) then a,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    let rp = when self.expect(.RParen(), "')'") in {
-                        .Ok(t) then t,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let args = self.parse_call_args() or return;
+                    let rp = self.expect(.RParen(), "')'") or return;
                     expr = .Call(field_expr, lp, args, rp);
                     continue;
                 };
@@ -2027,18 +1711,8 @@ given CstParser {
                     continue;
                 };
                 let call_lp = self.eat();
-                let args = when self.parse_call_args() in {
-                    .Ok(a) then a,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let args = self.parse_call_args() or return;
+                let rp = self.expect(.RParen(), "')'") or return;
                 // `Type(expr)` -- one positional operand -- is the cast
                 // spelling. `Type(a, b)`, `Type(x: 1)`, `Type()` are
                 // constructions and keep the call shape.
@@ -2095,21 +1769,11 @@ given CstParser {
                     let lb = self.eat();
                     let mutable type_args = List[CstTypeArg].new();
                     while not self.check(.RBracket()) and not self.is_eof() then {
-                        let t = when self.parse_type_node() in {
-                            .Ok(parsed_type) then parsed_type,
-                            .Error(e) then {
-                                return .Error(e);
-                            },
-                        };
+                        let t = self.parse_type_node() or return;
                         let comma = self.eat_comma();
                         type_args.push(CstTypeArg(t, comma));
                     };
-                    let rb = when self.expect(.RBracket(), "']'") in {
-                        .Ok(t) then t,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let rb = self.expect(.RBracket(), "']'") or return;
                     expr = .GenericInst(expr, lb, type_args, rb);
                     continue;
                 };
@@ -2122,21 +1786,11 @@ given CstParser {
                 let lb = self.eat();
                 let mutable args = List[CstCallArg].new();
                 while not self.check(.RBracket()) and not self.is_eof() then {
-                    let value = when self.parse_expr_node() in {
-                        .Ok(e) then e,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let value = self.parse_expr_node() or return;
                     let comma = self.eat_comma();
                     args.push(.Value(.None(), .None(), value, comma));
                 };
-                let rb = when self.expect(.RBracket(), "']'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let rb = self.expect(.RBracket(), "']'") or return;
                 if args.count() > 1 then {
                     return .Error(
                         "Parse error: Subscript expression supports exactly one index",
@@ -2191,12 +1845,7 @@ given CstParser {
                     "Parse error: Positional arguments are not allowed after named arguments",
                 );
             };
-            let mutable value = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let mutable value = self.parse_expr_node() or return;
             if leading_comments.count() > 0 then {
                 value = .Commented(leading_comments, value);
             };
@@ -2281,26 +1930,11 @@ given CstParser {
         // Implicit member: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat();
-            let name = when self.expect_ident("member name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("member name") or return;
             if self.check(.LParen()) then {
                 let lp = self.eat();
-                let args = when self.parse_call_args() in {
-                    .Ok(a) then a,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let args = self.parse_call_args() or return;
+                let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.ImplicitMember(dot, name, .Some(lp), args, .Some(rp)));
             };
             return .Ok(
@@ -2334,71 +1968,31 @@ given CstParser {
     };
 
     private parse_collection_literal(self): Result[CstExpr] = {
-        let lb = when self.expect(.LBracket(), "'['") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBracket(), "'['") or return;
 
         if self.check(.RBracket()) then {
-            let rb = when self.expect(.RBracket(), "']'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBracket(), "']'") or return;
             return .Ok(.EmptyLiteral(lb, rb));
         };
 
-        let first = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let first = self.parse_expr_node() or return;
 
         if self.check(.Colon()) then {
             let mutable entries = List[CstDictEntry].new();
             let first_colon = self.eat();
-            let first_value = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let first_value = self.parse_expr_node() or return;
             let first_comma = self.eat_comma();
             entries.push(CstDictEntry(first, first_colon, first_value, first_comma));
 
             while not self.check(.RBracket()) and not self.is_eof() then {
-                let key = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let colon = when self.expect(.Colon(), "':'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let key = self.parse_expr_node() or return;
+                let colon = self.expect(.Colon(), "':'") or return;
+                let value = self.parse_expr_node() or return;
                 let comma = self.eat_comma();
                 entries.push(CstDictEntry(key, colon, value, comma));
             };
 
-            let rb = when self.expect(.RBracket(), "']'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBracket(), "']'") or return;
             return .Ok(.DictLiteral(lb, entries, rb));
         };
 
@@ -2406,22 +2000,12 @@ given CstParser {
         let first_comma = self.eat_comma();
         elements.push(CstCollectionElement(first, first_comma));
         while not self.check(.RBracket()) and not self.is_eof() then {
-            let element = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let element = self.parse_expr_node() or return;
             let comma = self.eat_comma();
             elements.push(CstCollectionElement(element, comma));
         };
 
-        let rb = when self.expect(.RBracket(), "']'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rb = self.expect(.RBracket(), "']'") or return;
         return .Ok(.CollectionLiteral(lb, elements, rb));
     };
 
@@ -2430,12 +2014,7 @@ given CstParser {
     // ========================================================================
 
     private parse_block_expr(self): Result[CstExpr] = {
-        let lb = when self.expect(.LBrace(), "'{'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBrace(), "'{'") or return;
         let mutable items = List[CstItem].new();
         let mutable tail_expr = Option[CstExpr].None();
         let mutable tail_comments = List[Token].new();
@@ -2460,69 +2039,58 @@ given CstParser {
                 };
                 continue;
             };
-            when self.parse_block_item() in {
-                .Ok(item) then {
-                    // Comments may trail the expression before the block's
-                    // `}` -- `v // note` as the tail -- and ride the item.
-                    let mutable pre_semi = List[Token].new();
-                    let mutable stmt = Option[CstStmt].None();
-                    when item in {
-                        .Stmt(s) then {
-                            stmt = .Some(s);
-                        },
-                        .StmtPreSemi(comments, s) then {
-                            pre_semi = comments;
-                            stmt = .Some(s);
-                        },
-                        _ then {},
-                    };
-                    when stmt in {
-                        .Some(s) then {
-                            when s in {
-                                .ExprStmt(expr, semi) then {
-                                    // A bare expression is the block's tail
-                                    // expression and must be last. Anything
-                                    // after it needs a `;` on the earlier one;
-                                    // the compiler reports `expected: '}'` here.
-                                    // Never supply that `;` -- it would turn a
-                                    // tail expression into a statement.
-                                    if semi is .None() then {
-                                        if self.check(.RBrace()) then {
-                                            tail_expr = .Some(expr);
-                                            tail_comments = pre_semi;
-                                        } else {
-                                            return .Error(
-                                                "Parse error: expected ';' after expression statement",
-                                            );
-                                        };
-                                    } else {
-                                        items.push(item);
-                                    };
-                                },
-                                _ then {
-                                    items.push(item);
-                                },
+            let item = self.parse_block_item() or return;
+            // Comments may trail the expression before the block's
+            // `}` -- `v // note` as the tail -- and ride the item.
+            let mutable pre_semi = List[Token].new();
+            let mutable stmt = Option[CstStmt].None();
+            when item in {
+                .Stmt(s) then {
+                    stmt = .Some(s);
+                },
+                .StmtPreSemi(comments, s) then {
+                    pre_semi = comments;
+                    stmt = .Some(s);
+                },
+                _ then {},
+            };
+            when stmt in {
+                .Some(s) then {
+                    when s in {
+                        .ExprStmt(expr, semi) then {
+                            // A bare expression is the block's tail
+                            // expression and must be last. Anything
+                            // after it needs a `;` on the earlier one;
+                            // the compiler reports `expected: '}'` here.
+                            // Never supply that `;` -- it would turn a
+                            // tail expression into a statement.
+                            if semi is .None() then {
+                                if self.check(.RBrace()) then {
+                                    tail_expr = .Some(expr);
+                                    tail_comments = pre_semi;
+                                } else {
+                                    return .Error(
+                                        "Parse error: expected ';' after expression statement",
+                                    );
+                                };
+                            } else {
+                                items.push(item);
                             };
                         },
-                        .None() then {
+                        _ then {
                             items.push(item);
                         },
                     };
                 },
-                .Error(e) then {
-                    return .Error(e);
+                .None() then {
+                    items.push(item);
                 },
             };
             if tail_expr is .Some(_) then {
                 break;
             };
         };
-        let rb = when self.expect(.RBrace(), "'}'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rb = self.expect(.RBrace(), "'}'") or return;
         return .Ok(.Block(lb, items, tail_expr, tail_comments, rb));
     };
 
@@ -2581,24 +2149,9 @@ given CstParser {
         // contents must be exactly one type that ends at the `)`; a trailing
         // comma disqualifies and falls through to the pair-literal error.
         if self.scan_single_type_group_at(self.pos) is .Some(_) then {
-            let lp = when self.expect(.LParen(), "'('") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let inner_type = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let lp = self.expect(.LParen(), "'('") or return;
+            let inner_type = self.parse_type_node() or return;
+            let rp = self.expect(.RParen(), "')'") or return;
             let inner = self.type_as_expr(inner_type);
             // Keep one paren layer for readability, but collapse duplicate
             // nesting: ((T)) -> (T)
@@ -2612,27 +2165,12 @@ given CstParser {
             };
         };
         // Parenthesized expression
-        let lp = when self.expect(.LParen(), "'('") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lp = self.expect(.LParen(), "'('") or return;
         if self.check(.RParen()) then {
-            when self.expect(.RParen(), "')'") in {
-                .Ok(_) then {},
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            self.expect(.RParen(), "')'") or return;
             return .Ok(.Ident(.Ident("()")));
         };
-        let inner = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let inner = self.parse_expr_node() or return;
         if self.check(.Comma()) then {
             // There is no tuple/pair literal. A `Pair` is built with its own
             // constructor, like any other type.
@@ -2640,12 +2178,7 @@ given CstParser {
                 "Parse error: A pair literal is not an expression: construct a Pair with 'Pair(first, second)'",
             );
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
 
         // Keep one paren layer for readability, but collapse duplicate nesting:
         // ((x)) -> (x)
@@ -2662,29 +2195,14 @@ given CstParser {
     /// Parses a lambda whose SHAPE `shape_is_lambda_at` has already confirmed.
     /// Errors are real errors -- there is no alternative to fall back to.
     private parse_lambda_node(self): Result[CstExpr] = {
-        let lp = when self.expect(.LParen(), "'('") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lp = self.expect(.LParen(), "'('") or return;
         let mutable params = List[CstLambdaParam].new();
         while not self.check(.RParen()) and not self.is_eof() then {
-            let name = when self.expect_ident("lambda parameter") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("lambda parameter") or return;
             let mutable pt = Option[CstType].None();
             if self.check(.Colon()) then {
                 self.eat();
-                let t = when self.parse_type_node() in {
-                    .Ok(parsed_type) then parsed_type,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let t = self.parse_type_node() or return;
                 pt = .Some(t);
             };
             // Lambdas are called positionally; only the type may follow.
@@ -2696,23 +2214,13 @@ given CstParser {
             let comma = self.eat_comma();
             params.push(CstLambdaParam(name, pt, comma));
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
 
         // Optional return type: `): Type =>`
         let mutable ret = Option[CstType].None();
         if self.check(.Colon()) then {
             self.eat();
-            let t = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let t = self.parse_type_node() or return;
             ret = .Some(t);
         };
 
@@ -2721,12 +2229,7 @@ given CstParser {
             return .Error("Parse error: expected '=>' in lambda expression");
         };
         let arrow = self.eat();
-        let body = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let body = self.parse_expr_node() or return;
         return .Ok(.Lambda(lp, params, rp, ret, arrow, body));
     };
 
@@ -2735,39 +2238,14 @@ given CstParser {
     // ========================================================================
 
     private parse_if_expr(self): Result[CstExpr] = {
-        let kw = when self.expect(.KwIf(), "'if'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let cond = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwIf(), "'if'") or return;
+        let cond = self.parse_expr_node() or return;
 
-        let then_kw = when self.expect(.KwThen(), "'then'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let then_body = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let then_kw = self.expect(.KwThen(), "'then'") or return;
+        let then_body = self.parse_expr_node() or return;
         if self.check(.KwElse()) then {
             let else_kw = self.eat();
-            let else_body = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let else_body = self.parse_expr_node() or return;
             return .Ok(
                 .If(kw, cond, then_kw, then_body, .Some(else_kw), .Some(else_body)),
             );
@@ -2776,39 +2254,14 @@ given CstParser {
     };
 
     private parse_while_expr(self): Result[CstExpr] = {
-        let kw = when self.expect(.KwWhile(), "'while'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let cond = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwWhile(), "'while'") or return;
+        let cond = self.parse_expr_node() or return;
 
-        let then_kw = when self.expect(.KwThen(), "'then'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let then_kw = self.expect(.KwThen(), "'then'") or return;
         let body = if self.check(.LBrace()) then {
-            when self.parse_block_expr() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            }
+            self.parse_block_expr() or return
         } else {
-            when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            }
+            self.parse_expr_node() or return
         };
         return .Ok(.While(kw, cond, then_kw, body));
     };
@@ -2819,30 +2272,10 @@ given CstParser {
     /// The CST records what was written; whether the pattern can fail is the
     /// compiler's call, not this parser's.
     private parse_for_expr(self): Result[CstExpr] = {
-        let kw = when self.expect(.KwFor(), "'for'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let binding = when self.parse_pattern_node() in {
-            .Ok(p) then p,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let in_kw = when self.expect(.KwIn(), "'in'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let iterable = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwFor(), "'for'") or return;
+        let binding = self.parse_pattern_node() or return;
+        let in_kw = self.expect(.KwIn(), "'in'") or return;
+        let iterable = self.parse_expr_node() or return;
         // Optional guard: `for p in xs where cond then body`. It sits after the
         // iterable, right before `then`, the same slot a `when` arm guard takes
         // before its `then`.
@@ -2850,12 +2283,7 @@ given CstParser {
         let mutable guard = Option[CstExpr].None();
         if self.check(.KwWhere()) then {
             where_kw = .Some(self.eat());
-            let guard_expr = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let guard_expr = self.parse_expr_node() or return;
             guard = .Some(guard_expr);
         } else if self.check(.KwIf()) then {
             // The retired guard spelling, and the one a reader coming from
@@ -2863,47 +2291,17 @@ given CstParser {
             // "expected 'then'", which is true but never names the mistake.
             return .Error("Pattern guards use 'where', not 'if'");
         };
-        let then_kw = when self.expect(.KwThen(), "'then'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let body = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let then_kw = self.expect(.KwThen(), "'then'") or return;
+        let body = self.parse_expr_node() or return;
         return .Ok(.For(kw, binding, in_kw, iterable, where_kw, guard, then_kw, body));
     };
 
     private parse_when_expr(self): Result[CstExpr] = {
-        let kw = when self.expect(.KwWhen(), "'when'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let subject = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let in_kw = when self.expect(.KwIn(), "'in'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwWhen(), "'when'") or return;
+        let subject = self.parse_expr_node() or return;
+        let in_kw = self.expect(.KwIn(), "'in'") or return;
 
-        let lb = when self.expect(.LBrace(), "'{'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBrace(), "'{'") or return;
         let mutable arms = List[CstWhenArm].new();
         while not self.check(.RBrace()) and not self.is_eof() then {
             self.skip_newlines();
@@ -2921,80 +2319,44 @@ given CstParser {
             if self.check(.RBrace()) or self.is_eof() then {
                 break;
             };
-            when self.parse_when_arm() in {
-                .Ok(arm) then {
-                    arms.push(
-                        CstWhenArm(
-                            leading_comments,
-                            arm.pattern,
-                            arm.guard_kw,
-                            arm.guard,
-                            arm.then_kw,
-                            arm.body,
-                            arm.comma,
-                            arm.trailing_comments,
-                        ),
-                    );
-                },
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let arm = self.parse_when_arm() or return;
+            arms.push(
+                CstWhenArm(
+                    leading_comments,
+                    arm.pattern,
+                    arm.guard_kw,
+                    arm.guard,
+                    arm.then_kw,
+                    arm.body,
+                    arm.comma,
+                    arm.trailing_comments,
+                ),
+            );
         };
-        let rb = when self.expect(.RBrace(), "'}'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rb = self.expect(.RBrace(), "'}'") or return;
         return .Ok(.When(kw, subject, in_kw, lb, arms, rb));
     };
 
     private parse_when_arm(self): Result[CstWhenArm] = {
-        let pattern = when self.parse_pattern_node() in {
-            .Ok(p) then p,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let pattern = self.parse_pattern_node() or return;
         // Optional arm guard: `pat where cond then body`. The condition parses
         // like an `if` condition and stops before `then`.
         let mutable guard_kw = Option[Token].None();
         let mutable guard = Option[CstExpr].None();
         if self.check(.KwWhere()) then {
             guard_kw = .Some(self.eat());
-            let guard_expr = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let guard_expr = self.parse_expr_node() or return;
             guard = .Some(guard_expr);
         } else if self.check(.KwIf()) then {
             // The retired guard spelling. Falling through would report
             // "expected 'then'", which is true but never names the mistake.
             return .Error("Pattern guards use 'where', not 'if'");
         };
-        let then_kw = when self.expect(.KwThen(), "'then'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let then_kw = self.expect(.KwThen(), "'then'") or return;
         let body = if self.check(.LBrace()) then {
-            when self.parse_block_expr() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            }
+            self.parse_block_expr() or return
         } else {
-            when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            }
+            self.parse_expr_node() or return
         };
         let comma = self.eat_comma();
         let mutable trailing_comments = List[Token].new();
@@ -3024,8 +2386,7 @@ given CstParser {
     /// already covers them.
     private expect_pattern_value(self, what: String): Result[Token] = {
         return when self.peek() in {
-            .IntLit(_) then .Ok(self.eat()),
-            .FloatLit(_) then .Ok(self.eat()),
+            .IntLit(_) or .FloatLit(_) then .Ok(self.eat()),
             _ then .Error(self.expected_error(what)),
         };
     };
@@ -3043,48 +2404,28 @@ given CstParser {
     };
 
     private parse_or_pattern(self): Result[CstPattern] = {
-        let mutable left = when self.parse_and_pattern() in {
-            .Ok(p) then p,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_and_pattern() or return;
         while self.check(.KwOr()) then {
             let next = self.peek_at_skip_nl(1);
             if next is .KwElse() then {
                 break;
             };
             let op = self.eat();
-            let right = when self.parse_and_pattern() in {
-                .Ok(p) then p,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let right = self.parse_and_pattern() or return;
             left = .OrPattern(left, op, right);
         };
         return .Ok(left);
     };
 
     private parse_and_pattern(self): Result[CstPattern] = {
-        let mutable left = when self.parse_not_pattern() in {
-            .Ok(p) then p,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let mutable left = self.parse_not_pattern() or return;
         while self.check(.KwAnd()) then {
             let next = self.peek_at_skip_nl(1);
             if next is .KwThen() then {
                 break;
             };
             let op = self.eat();
-            let right = when self.parse_not_pattern() in {
-                .Ok(p) then p,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let right = self.parse_not_pattern() or return;
             left = .AndPattern(left, op, right);
         };
         return .Ok(left);
@@ -3093,12 +2434,7 @@ given CstParser {
     private parse_not_pattern(self): Result[CstPattern] = {
         if self.check(.KwNot()) then {
             let op = self.eat();
-            let inner = when self.parse_not_pattern() in {
-                .Ok(p) then p,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let inner = self.parse_not_pattern() or return;
             return .Ok(.NotPattern(op, inner));
         };
         return self.parse_primary_pattern();
@@ -3113,12 +2449,7 @@ given CstParser {
                 if self.check(.Minus()) then {
                     minus = .Some(self.eat());
                 };
-                let value = when self.expect_pattern_value("pattern value") in {
-                    .Ok(v) then v,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let value = self.expect_pattern_value("pattern value") or return;
                 return .Ok(.Comparison(op, minus, value));
             },
             _ then {},
@@ -3127,12 +2458,7 @@ given CstParser {
         // Negative numeric literal: -5, -1.5
         if self.check(.Minus()) then {
             let minus = self.eat();
-            let value = when self.expect_pattern_value("integer or float literal") in {
-                .Ok(v) then v,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let value = self.expect_pattern_value("integer or float literal") or return;
             return when value in {
                 .FloatLit(_) then .Ok(.NegFloatLit(minus, value)),
                 _ then .Ok(.NegIntLit(minus, value)),
@@ -3168,20 +2494,10 @@ given CstParser {
         // `mutable name Type` -- mutable trait-object implementation binding
         if self.check(.KwMut()) then {
             let mut_kw = self.eat();
-            let name = when self.expect_ident("pattern variable name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("pattern variable name") or return;
             if self.check(.Colon()) then {
                 self.eat();
-                let bound = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let bound = self.parse_type_node() or return;
                 return .Ok(.TypeBinding(.Some(mut_kw), name, bound));
             };
             return .Ok(.MutVariable(mut_kw, name));
@@ -3192,32 +2508,12 @@ given CstParser {
         // whose target type is checked.
         if self.check(.KwWeakref()) then {
             let question = self.eat();
-            let name = when self.expect_ident("weak binding name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("weak binding name") or return;
             if self.is_type_start(name) then {
                 // `?TypeName(name)` -- typed binding with a target type check.
-                let lp = when self.expect(.LParen(), "'('") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let bind = when self.expect_ident("weak binding name") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let lp = self.expect(.LParen(), "'('") or return;
+                let bind = self.expect_ident("weak binding name") or return;
+                let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(
                     .WeakBinding(
                         question,
@@ -3235,12 +2531,7 @@ given CstParser {
         // Enum case: .Name or .Name(args)
         if self.check(.Dot()) then {
             let dot = self.eat();
-            let name = when self.expect_ident("enum case name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("enum case name") or return;
             if self.check(.LParen()) then {
                 let lp = self.eat();
                 let mutable args = List[CstPatternArg].new();
@@ -3251,21 +2542,11 @@ given CstParser {
                         label = .Some(self.eat());
                         colon = .Some(self.eat());
                     };
-                    let p = when self.parse_pattern_node() in {
-                        .Ok(parsed_pattern) then parsed_pattern,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let p = self.parse_pattern_node() or return;
                     let comma = self.eat_comma();
                     args.push(CstPatternArg(label, colon, p, comma));
                 };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.EnumCase(dot, name, .Some(lp), args, .Some(rp)));
             };
             return .Ok(
@@ -3289,12 +2570,7 @@ given CstParser {
                 if self.check(.RBracket()) or self.is_eof() then {
                     more = false;
                 } else {
-                    let p = when self.parse_pattern_node() in {
-                        .Ok(parsed_pattern) then parsed_pattern,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let p = self.parse_pattern_node() or return;
                     let sep = self.eat_comma();
                     items.push(CstListPatternItem(p, sep));
                     if not self.sep_has_comma(sep) then {
@@ -3302,12 +2578,7 @@ given CstParser {
                     };
                 };
             };
-            let rb = when self.expect(.RBracket(), "']'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBracket(), "']'") or return;
             return .Ok(.ListPattern(lb, items, rb));
         };
 
@@ -3316,12 +2587,7 @@ given CstParser {
         // `(` groups nothing and is rejected below.
         if self.check(.LParen()) then {
             let lp = self.eat();
-            let first = when self.parse_pattern_node() in {
-                .Ok(parsed_pattern) then parsed_pattern,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let first = self.parse_pattern_node() or return;
             if self.check(.Comma()) then {
                 let mutable items = List[CstTuplePatternItem].new();
                 let mutable current = first;
@@ -3332,21 +2598,11 @@ given CstParser {
                     if not self.sep_has_comma(sep) then {
                         more = false;
                     } else {
-                        let next = when self.parse_pattern_node() in {
-                            .Ok(parsed_pattern) then parsed_pattern,
-                            .Error(e) then {
-                                return .Error(e);
-                            },
-                        };
+                        let next = self.parse_pattern_node() or return;
                         current = next;
                     };
                 };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.TuplePattern(lp, items, rp));
             };
             // `(` in pattern position opens a tuple, which needs at least two
@@ -3361,12 +2617,7 @@ given CstParser {
 
         // Variable or struct pattern: name or Name(args)
         if self.peek() is .Ident(_) then {
-            let name = when self.expect_ident("pattern name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let name = self.expect_ident("pattern name") or return;
             if self.check(.LParen()) then {
                 let lp = self.eat();
                 let mutable args = List[CstPatternArg].new();
@@ -3377,32 +2628,17 @@ given CstParser {
                         label = .Some(self.eat());
                         colon = .Some(self.eat());
                     };
-                    let p = when self.parse_pattern_node() in {
-                        .Ok(parsed_pattern) then parsed_pattern,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let p = self.parse_pattern_node() or return;
                     let comma = self.eat_comma();
                     args.push(CstPatternArg(label, colon, p, comma));
                 };
-                let rp = when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let rp = self.expect(.RParen(), "')'") or return;
                 return .Ok(.StructPattern(name, lp, args, rp));
             };
             // `name: Type` -- trait-object implementation binding
             if self.check(.Colon()) then {
                 self.eat();
-                let bound = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let bound = self.parse_type_node() or return;
                 return .Ok(.TypeBinding(.None(), name, bound));
             };
             return .Ok(.Variable(name));
@@ -3459,12 +2695,7 @@ given CstParser {
         when self.peek() in {
             .KwDefer() then {
                 let kw = self.eat();
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let value = self.parse_expr_node() or return;
                 let term = self.eat_stmt_terminator();
                 return .Ok(self.stmt_item(term, .Defer(kw, value)));
             },
@@ -3478,12 +2709,7 @@ given CstParser {
                     let term = self.eat_stmt_terminator();
                     return .Ok(self.stmt_item(term, .Return(kw, .None())));
                 };
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let value = self.parse_expr_node() or return;
                 let term = self.eat_stmt_terminator();
                 if term.token is .None() then {
                     return .Error("Parse error: expected ';' after return");
@@ -3510,21 +2736,11 @@ given CstParser {
         };
 
         // Expression statement — may be followed by assignment operator
-        let expr = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let expr = self.parse_expr_node() or return;
         when self.peek() in {
             .Eq() or .PlusEq() or .MinusEq() or .StarEq() or .SlashEq() or .PercentEq() or .AmpEq() or .PipeEq() or .CaretEq() or .LShiftEq() or .RShiftEq() then {
                 let op = self.eat();
-                let value = when self.parse_expr_node() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let value = self.parse_expr_node() or return;
                 let term = self.eat_stmt_terminator();
                 if term.token is .None() then {
                     return .Error("Parse error: expected ';' after assignment");
@@ -3539,21 +2755,11 @@ given CstParser {
     };
 
     private parse_var_decl_stmt(self): Result[CstItem] = {
-        let let_kw = when self.expect(.KwLet(), "'let'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let let_kw = self.expect(.KwLet(), "'let'") or return;
 
         if self.check(.LParen()) then {
             let lp = self.eat();
-            let first = when self.parse_pair_binding() in {
-                .Ok(binding) then binding,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let first = self.parse_pair_binding() or return;
             let mutable items = List[CstTupleBindingItem].new();
             let mutable current = first;
             // At least two slots: `let (x) = ...` is not a tuple binding.
@@ -3567,33 +2773,13 @@ given CstParser {
                 if not self.sep_has_comma(sep) then {
                     more = false;
                 } else {
-                    let next = when self.parse_pair_binding() in {
-                        .Ok(binding) then binding,
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let next = self.parse_pair_binding() or return;
                     current = next;
                 };
             };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let eq = when self.expect(.Eq(), "'='") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let value = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rp = self.expect(.RParen(), "')'") or return;
+            let eq = self.expect(.Eq(), "'='") or return;
+            let value = self.parse_expr_node() or return;
             let term = self.eat_stmt_terminator();
             if term.token is .None() then {
                 return .Error("Parse error: expected ';' after let declaration");
@@ -3607,38 +2793,18 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        let name = when self.expect_ident("variable name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("variable name") or return;
 
         // Optional type annotation: `let x: Type = ...`
         let mutable var_type = Option[CstType].None();
         if self.check(.Colon()) then {
             self.eat();
-            let t = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let t = self.parse_type_node() or return;
             var_type = .Some(t);
         };
 
-        let eq = when self.expect(.Eq(), "'='") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let value = when self.parse_expr_node() in {
-            .Ok(e) then e,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let eq = self.expect(.Eq(), "'='") or return;
+        let value = self.parse_expr_node() or return;
         let term = self.eat_stmt_terminator();
         if term.token is .None() then {
             return .Error("Parse error: expected ';' after let declaration");
@@ -3666,12 +2832,7 @@ given CstParser {
             return .Ok(.Leaf(mut_kw, name, .None(), true));
         };
 
-        let name = when self.expect_ident("variable name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("variable name") or return;
 
         // `_` is spelled as an identifier by the tokenizer; it is still the
         // discard slot. The compilers recognise the name the same way.
@@ -3698,12 +2859,7 @@ given CstParser {
         let mutable binding_type = Option[CstType].None();
         if self.check(.Colon()) then {
             self.eat();
-            let t = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let t = self.parse_type_node() or return;
             binding_type = .Some(t);
         };
 
@@ -3716,12 +2872,7 @@ given CstParser {
     /// fewer than two slots.
     private parse_nested_tuple_binding(self): Result[CstPairBinding] = {
         let lp = self.eat();
-        let first = when self.parse_pair_binding() in {
-            .Ok(binding) then binding,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let first = self.parse_pair_binding() or return;
         if self.peek_past_comments() is not .Comma() then {
             return .Error(
                 "Parse error: expected ',' in tuple binding: a parenthesized binding needs at least two slots",
@@ -3736,21 +2887,11 @@ given CstParser {
             if not self.sep_has_comma(sep) then {
                 more = false;
             } else {
-                let next = when self.parse_pair_binding() in {
-                    .Ok(binding) then binding,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let next = self.parse_pair_binding() or return;
                 current = next;
             };
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
         return .Ok(.Nested(lp, items, rp));
     };
 
@@ -3788,12 +2929,7 @@ given CstParser {
                 continue;
             };
             let before = self.pos;
-            let item = when self.parse_top_item() in {
-                .Ok(parsed_item) then parsed_item,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let item = self.parse_top_item() or return;
             if CstParser.item_is_using_decl(item) then {
                 if seen_non_using then {
                     return .Error(
@@ -3818,14 +2954,8 @@ given CstParser {
         // means accepting `using "./x.koral"` without `;`, even though
         // grammar.bnf writes the `;` as mandatory.
         if self.check(.KwUsing()) then {
-            when self.parse_using_decl() in {
-                .Ok(d) then {
-                    return .Ok(.Decl(d));
-                },
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let d = self.parse_using_decl() or return;
+            return .Ok(.Decl(d));
         };
 
         // Determine declaration kind by peeking past every leading access
@@ -3846,44 +2976,20 @@ given CstParser {
         };
         when decl_kw in {
             .KwLet() then {
-                when self.parse_let_decl() in {
-                    .Ok(d) then {
-                        return self.finish_decl_item(d);
-                    },
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let d = self.parse_let_decl() or return;
+                return self.finish_decl_item(d);
             },
             .KwType() then {
-                when self.parse_type_decl() in {
-                    .Ok(d) then {
-                        return self.finish_decl_item(d);
-                    },
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let d = self.parse_type_decl() or return;
+                return self.finish_decl_item(d);
             },
             .KwTrait() then {
-                when self.parse_trait_decl() in {
-                    .Ok(d) then {
-                        return self.finish_decl_item(d);
-                    },
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let d = self.parse_trait_decl() or return;
+                return self.finish_decl_item(d);
             },
             .KwGiven() then {
-                when self.parse_given_decl() in {
-                    .Ok(d) then {
-                        return self.finish_decl_item(d);
-                    },
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let d = self.parse_given_decl() or return;
+                return self.finish_decl_item(d);
             },
             _ then {},
         };
@@ -4185,12 +3291,7 @@ given CstParser {
     /// sequence is printed back with the same line breaks it came with.
     private parse_using_decl(self): Result[CstDecl] = {
         let tokens = self.collect_using_tokens();
-        when self.validate_using_decl_tokens(tokens) in {
-            .Ok(_) then {},
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        self.validate_using_decl_tokens(tokens) or return;
         return .Ok(.Using(tokens));
     };
 
@@ -4232,12 +3333,7 @@ given CstParser {
 
     private parse_let_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
-        let let_kw = when self.expect(.KwLet(), "'let'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let let_kw = self.expect(.KwLet(), "'let'") or return;
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let mods = self.eat_kind_modifiers();
@@ -4256,18 +3352,8 @@ given CstParser {
         mut_kw: Option[Token],
         in_member_context: Bool,
     ): Result[CstDecl] = {
-        let name = when self.expect_ident("declaration name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let gp = when self.parse_generic_params() in {
-            .Ok(g) then g,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("declaration name") or return;
+        let gp = self.parse_generic_params() or return;
 
         // Parameters -- unless the `(` opens a function TYPE's parameter list
         // (`let f (Int) -> Int = value`), which is an annotation, not a
@@ -4278,19 +3364,9 @@ given CstParser {
         let mutable rp = Option[Token].None();
         if self.check(.LParen()) and not self.paren_opens_type_at(self.pos) then {
             lp = .Some(self.eat());
-            params = when self.parse_params() in {
-                .Ok(ps) then ps,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            params = self.parse_params() or return;
             rp = .Some(
-                when self.expect(.RParen(), "')'") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                },
+                self.expect(.RParen(), "')'") or return,
             );
         };
 
@@ -4298,24 +3374,14 @@ given CstParser {
         let mutable ret = Option[CstType].None();
         if self.check(.Colon()) then {
             self.eat();
-            let t = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let t = self.parse_type_node() or return;
             ret = .Some(t);
         };
 
         // = body → function
         if self.check(.Eq()) then {
             let eq = self.eat();
-            let body = when self.parse_expr_node() in {
-                .Ok(e) then e,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let body = self.parse_expr_node() or return;
             return .Ok(
                 .Func(vis, mods, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret, eq, body),
             );
@@ -4347,10 +3413,7 @@ given CstParser {
         };
 
         // Variable declaration (top-level)
-        let lk = when let_kw in {
-            .Some(k) then k,
-            .None() then .KwLet(),
-        };
+        let lk = let_kw or else .KwLet();
         return .Ok(.Var(vis, lk, mut_kw, name, ret));
     };
 
@@ -4360,12 +3423,7 @@ given CstParser {
 
     private parse_type_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
-        let kw = when self.expect(.KwType(), "'type'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwType(), "'type'") or return;
         // `foreign` / `intrinsic` sit immediately after `type`: `type foreign`.
         let mods = self.eat_kind_modifiers();
         // `type` `mutable`? — the two nominal forms the language has
@@ -4374,18 +3432,8 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        let name = when self.expect_ident("type name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let gp = when self.parse_generic_params() in {
-            .Ok(g) then g,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("type name") or return;
+        let gp = self.parse_generic_params() or return;
 
         // Struct body: (fields)
         if self.check(.LParen()) then {
@@ -4425,12 +3473,7 @@ given CstParser {
                 if self.check(.KwMut()) then {
                     field_mut = .Some(self.eat());
                 };
-                let field_name = when self.expect_ident("field name") in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let field_name = self.expect_ident("field name") or return;
                 // `name Type` (positional) and `name: Type` (named) are both
                 // <field> spellings (grammar.bnf). The colon slot is what the
                 // printer reads to keep the distinction.
@@ -4444,18 +3487,8 @@ given CstParser {
                     );
                 };
                 let field_colon_tok = self.eat();
-                let field_type = when self.parse_type_node() in {
-                    .Ok(t) then t,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
-                let default_value = when self.parse_default_value() in {
-                    .Ok(d) then d,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let field_type = self.parse_type_node() or return;
+                let default_value = self.parse_default_value() or return;
                 if default_value is .Some(_) then {
                     field_colon = .Some(field_colon_tok);
                     seen_named_field = true;
@@ -4479,12 +3512,7 @@ given CstParser {
                     ),
                 );
             };
-            let rp = when self.expect(.RParen(), "')'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rp = self.expect(.RParen(), "')'") or return;
             return .Ok(
                 .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Struct(lp, items, rp)),
             );
@@ -4518,12 +3546,7 @@ given CstParser {
                     };
                     continue;
                 };
-                let expr = when self.parse_enum_variant_expr() in {
-                    .Ok(e) then e,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let expr = self.parse_enum_variant_expr() or return;
                 // <variant-list> is `("," <variant>)* ","?` (grammar.bnf), so a
                 // comma is required BETWEEN variants and optional after the last.
                 // Comments that trail a variant before its comma ride as items
@@ -4540,12 +3563,7 @@ given CstParser {
                     .None() then {},
                 };
             };
-            let rb = when self.expect(.RBrace(), "'}'") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let rb = self.expect(.RBrace(), "'}'") or return;
             return .Ok(
                 .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Enum(lb, cases, rb)),
             );
@@ -4556,18 +3574,8 @@ given CstParser {
             if mut_kw is .Some(_) then {
                 return .Error("Parse error: Type alias cannot be marked mutable");
             };
-            let eq = when self.expect(.Eq(), "'='") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let target = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let eq = self.expect(.Eq(), "'='") or return;
+            let target = self.parse_type_node() or return;
             return .Ok(
                 .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Alias(eq, target)),
             );
@@ -4578,12 +3586,7 @@ given CstParser {
     };
 
     private parse_enum_variant_expr(self): Result[CstExpr] = {
-        let name = when self.expect_ident("enum variant name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("enum variant name") or return;
 
         let mutable fields = List[CstEnumField].new();
         // Positional payload fields must come before named ones -- see
@@ -4593,12 +3596,7 @@ given CstParser {
         // A variant declaration always writes its parens -- `Red()`, never bare
         // `Red` -- so the declaration matches the expression (`.Red()`) and
         // pattern (`.Red()`) spellings.
-        let lp = when self.expect(.LParen(), "'('") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lp = self.expect(.LParen(), "'('") or return;
         while not self.check(.RParen()) and not self.is_eof() then {
             // A comment between payload fields is documentation on the
             // field that follows it, not a field name. Keep it.
@@ -4606,12 +3604,7 @@ given CstParser {
             while self.peek() is .LineComment(_) or is .BlockComment(_) then {
                 comments.push(self.eat());
             };
-            let field_name = when self.expect_ident("enum field name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let field_name = self.expect_ident("enum field name") or return;
             // `name: Type` separates the field name from its type; a following
             // `=` marks a named field (`name: Type =` required,
             // `name: Type = value` defaulted).
@@ -4622,18 +3615,8 @@ given CstParser {
                 );
             };
             let field_colon_tok = self.eat();
-            let field_type = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let default_value = when self.parse_default_value() in {
-                .Ok(d) then d,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let field_type = self.parse_type_node() or return;
+            let default_value = self.parse_default_value() or return;
             if default_value is .Some(_) then {
                 field_colon = .Some(field_colon_tok);
                 seen_named_field = true;
@@ -4654,12 +3637,7 @@ given CstParser {
                 ),
             );
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
 
         return .Ok(.EnumVariant(name, lp, fields, rp));
     };
@@ -4670,67 +3648,27 @@ given CstParser {
 
     private parse_trait_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
-        let kw = when self.expect(.KwTrait(), "'trait'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let name = when self.expect_ident("trait name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let gp = when self.parse_generic_params() in {
-            .Ok(g) then g,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwTrait(), "'trait'") or return;
+        let name = self.expect_ident("trait name") or return;
+        let gp = self.parse_generic_params() or return;
 
         // Super traits: `Name: Super and Super2 {` -- the colon separates the
         // trait from its parents.
         let mutable supers = List[CstType].new();
         if self.check(.Colon()) then {
             self.eat();
-            let first = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let first = self.parse_type_node() or return;
             supers.push(first);
             while self.check(.KwAnd()) then {
                 self.eat();
-                let next = when self.parse_type_node() in {
-                    .Ok(parsed_type) then parsed_type,
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                let next = self.parse_type_node() or return;
                 supers.push(next);
             };
         };
 
-        let lb = when self.expect(.LBrace(), "'{'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let members = when self.parse_trait_members() in {
-            .Ok(ms) then ms,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let rb = when self.expect(.RBrace(), "'}'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBrace(), "'{'") or return;
+        let members = self.parse_trait_members() or return;
+        let rb = self.expect(.RBrace(), "'}'") or return;
         return .Ok(.Trait(vis, kw, gp, name, supers, lb, members, rb));
     };
 
@@ -4765,44 +3703,18 @@ given CstParser {
                 };
                 continue;
             };
-            when self.parse_trait_method_sig() in {
-                .Ok(d) then {
-                    when self.eat_decl_semi() in {
-                        .Ok(_) then {},
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
-                    members.push(CstItem.Decl(d));
-                },
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let d = self.parse_trait_method_sig() or return;
+            self.eat_decl_semi() or return;
+            members.push(CstItem.Decl(d));
         };
         return .Ok(members);
     };
 
     private parse_trait_method_sig(self): Result[CstDecl] = {
         let vis = self.eat_vis();
-        let name = when self.expect_ident("method name") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let gp = when self.parse_generic_params() in {
-            .Ok(g) then g,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let lp = when self.expect(.LParen(), "'('") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let name = self.expect_ident("method name") or return;
+        let gp = self.parse_generic_params() or return;
+        let lp = self.expect(.LParen(), "'('") or return;
         let mutable params = List[CstTraitMethodParam].new();
         let mutable first: UInt = 1;
         // Positional params must come before named params -- see parse_params.
@@ -4829,30 +3741,15 @@ given CstParser {
             if self.check(.KwMut()) then {
                 param_mut = .Some(self.eat());
             };
-            let pname = when self.expect_ident("parameter name") in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let pname = self.expect_ident("parameter name") or return;
             if not self.check(.Colon()) then {
                 return .Error(
                     "Parse error: expected ':' after parameter name '\(pname.to_string())'",
                 );
             };
             let colon_tok = self.eat();
-            let pt = when self.parse_type_node() in {
-                .Ok(t) then t,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            let default_value = when self.parse_default_value() in {
-                .Ok(d) then d,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let pt = self.parse_type_node() or return;
+            let default_value = self.parse_default_value() or return;
             let mutable colon = Option[Token].None();
             if default_value is .Some(_) then {
                 colon = .Some(colon_tok);
@@ -4866,22 +3763,12 @@ given CstParser {
             params.push(.NamedParam(pname, param_mut, colon, pt, default_value, comma));
             first = 0;
         };
-        let rp = when self.expect(.RParen(), "')'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let rp = self.expect(.RParen(), "')'") or return;
         // Return type: `): Type`
         let mutable ret = Option[CstType].None();
         if self.check(.Colon()) then {
             self.eat();
-            let t = when self.parse_type_node() in {
-                .Ok(parsed_type) then parsed_type,
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            let t = self.parse_type_node() or return;
             ret = .Some(t);
         };
         return .Ok(.TraitMethod(vis, gp, name, lp, params, rp, ret));
@@ -4893,66 +3780,26 @@ given CstParser {
 
     private parse_given_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
-        let kw = when self.expect(.KwGiven(), "'given'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let kw = self.expect(.KwGiven(), "'given'") or return;
         // `intrinsic` sits immediately after `given`: `given intrinsic Int`.
         let mods = self.eat_kind_modifiers();
-        let gp = when self.parse_generic_params() in {
-            .Ok(g) then g,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let gp = self.parse_generic_params() or return;
 
         // Target type (may be complex like [T, R]EnumerateStream)
-        let target = when self.parse_type_node() in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let target = self.parse_type_node() or return;
 
         // Conformance: `given Target: Trait { ... }` -- the colon separates
         // the target type from the trait it satisfies.
         let mutable as_kw = Option[Token].None();
         let mutable trait_type = Option[CstType].None();
         if self.check(.Colon()) then {
-            as_kw = when self.expect(.Colon(), "':'") in {
-                .Ok(t) then .Some(t),
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
-            trait_type = when self.parse_type_node() in {
-                .Ok(t) then .Some(t),
-                .Error(e) then {
-                    return .Error(e);
-                },
-            };
+            as_kw = .Some(self.expect(.Colon(), "':'") or return);
+            trait_type = .Some(self.parse_type_node() or return);
         };
 
-        let lb = when self.expect(.LBrace(), "'{'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let members = when self.parse_member_items() in {
-            .Ok(ms) then ms,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
-        let rb = when self.expect(.RBrace(), "'}'") in {
-            .Ok(t) then t,
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        let lb = self.expect(.LBrace(), "'{'") or return;
+        let members = self.parse_member_items() or return;
+        let rb = self.expect(.RBrace(), "'}'") or return;
         return .Ok(
             .Given(vis, mods, kw, gp, target, as_kw, trait_type, lb, members, rb),
         );
@@ -4995,37 +3842,15 @@ given CstParser {
             let kw = self.peek_at_skip_nl(offset);
             when kw in {
                 .KwLet() then {
-                    when self.parse_let_decl() in {
-                        .Ok(d) then {
-                            when self.eat_decl_semi() in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
-                            members.push(CstItem.Decl(d));
-                        },
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let d = self.parse_let_decl() or return;
+                    self.eat_decl_semi() or return;
+                    members.push(CstItem.Decl(d));
                 },
                 _ then {
                     // Method without let keyword
-                    when self.parse_member_no_let() in {
-                        .Ok(d) then {
-                            when self.eat_decl_semi() in {
-                                .Ok(_) then {},
-                                .Error(e) then {
-                                    return .Error(e);
-                                },
-                            };
-                            members.push(CstItem.Decl(d));
-                        },
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    let d = self.parse_member_no_let() or return;
+                    self.eat_decl_semi() or return;
+                    members.push(CstItem.Decl(d));
                 },
             };
         };

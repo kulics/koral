@@ -529,23 +529,17 @@ given DefIdMap {
     /// The innermost type's name, resolved through the declaration name table.
     private type_base_name(self, inner: Type): String = {
         return when inner in {
-            .StructureType(def_id) then when self.names.get(def_id.id) in {
-                .Some(name) then name,
-                .None() then {
-                    let mutable out = StringBuilder.new();
-                    out.push_string("struct#");
-                    out.push_string(def_id.id.to_string());
-                    out.to_string()
-                },
+            .StructureType(def_id) then self.names.get(def_id.id) or else {
+                let mutable out = StringBuilder.new();
+                out.push_string("struct#");
+                out.push_string(def_id.id.to_string());
+                out.to_string()
             },
-            .EnumType(def_id) then when self.names.get(def_id.id) in {
-                .Some(name) then name,
-                .None() then {
-                    let mutable out = StringBuilder.new();
-                    out.push_string("enum#");
-                    out.push_string(def_id.id.to_string());
-                    out.to_string()
-                },
+            .EnumType(def_id) then self.names.get(def_id.id) or else {
+                let mutable out = StringBuilder.new();
+                out.push_string("enum#");
+                out.push_string(def_id.id.to_string());
+                out.to_string()
             },
             _ then type_to_string(inner),
         };
@@ -680,14 +674,8 @@ given DefIdMap {
         if self.names.get(id.id) is .Some(name) then {
             let is_private = if self.access_modifiers.get(id.id) is .Some(a) then a is .Private()
             else false;
-            let source_file = when self.source_files.get(id.id) in {
-                .Some(sf) then sf,
-                .None() then "",
-            };
-            let module_path = when self.module_paths.get(id.id) in {
-                .Some(mp) then mp,
-                .None() then List[String].new(),
-            };
+            let source_file = self.source_files.get(id.id) or else "";
+            let module_path = self.module_paths.get(id.id) or else List[String].new();
 
             let mutable result = StringBuilder.new();
             let mutable needs_separator = false;
@@ -771,8 +759,7 @@ given DefIdMap {
         if end_exclusive <= start_id then {
             return;
         };
-        let mutable id = start_id;
-        while id < end_exclusive then {
+        for id in start_id..<end_exclusive then {
             when self.kinds.get(id) in {
                 .Some(kind) then when kind in {
                     .Variable() then {
@@ -782,7 +769,6 @@ given DefIdMap {
                 },
                 .None() then {},
             };
-            id += 1;
         };
     };
 
@@ -921,10 +907,7 @@ given DefIdMap {
     };
 
     public is_struct_mutable(self, id: DefId): Bool = {
-        return when self.struct_mutables.get(id.id) in {
-            .Some(v) then v,
-            .None() then false,
-        };
+        return self.struct_mutables.get(id.id) or else false;
     };
 
     // ── Explicit Drop Conformance ──────────────────────────────────────
@@ -980,18 +963,8 @@ given DefIdMap {
     /// 检查类型是否包含需要 Drop 的子类型
     private type_has_nontrivial_drop(self, t: Type): Bool = {
         return when t in {
-            .StructureType(def_id) then self.has_nontrivial_nominal_drop(def_id),
-            .EnumType(def_id) then self.has_nontrivial_nominal_drop(def_id),
-            .GenericStruct(template_def_id, _) then {
-                let def_id = if template_def_id.is_valid() then Option[DefId].Some(
-                    template_def_id,
-                ) else Option[DefId].None();
-                return when def_id in {
-                    .Some(d) then self.has_nontrivial_nominal_drop(d),
-                    .None() then false,
-                };
-            },
-            .GenericEnum(template_def_id, _) then {
+            .StructureType(def_id) or .EnumType(def_id) then self.has_nontrivial_nominal_drop(def_id),
+            .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then {
                 let def_id = if template_def_id.is_valid() then Option[DefId].Some(
                     template_def_id,
                 ) else Option[DefId].None();
@@ -1139,14 +1112,12 @@ let split_type_string_wrappers(t: Type): TypeStringWrapperChain = {
 /// Objects") and a `type mutable` as its own name -- so they contribute nothing.
 let type_string_wrapper_prefix(kind: TypeStringWrapperKind): String = {
     return when kind in {
-        .Reference() then "",
-        .MutableReference() then "",
+        .Reference() or .MutableReference() then "",
         .BorrowedReference() then "ref ",
         .MutableBorrowedReference() then "ref mutable ",
         .Pointer() then "*",
         .MutablePointer() then "*mutable ",
-        .WeakReference() then "?",
-        .MutableWeakReference() then "?",
+        .WeakReference() or .MutableWeakReference() then "?",
     };
 };
 
@@ -1359,15 +1330,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
         // whenever one is registered; the id form is the last resort.
         .StructureType(def_id) then def_id_spelling(def_id),
         .EnumType(def_id) then def_id_spelling(def_id),
-        .ReferenceType(inner) then {
-            if depth > UInt(200) then {
-                return "...";
-            };
-            let mutable out = StringBuilder.new();
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
-            out.to_string()
-        },
-        .MutableReferenceType(inner) then {
+        .ReferenceType(inner) or .MutableReferenceType(inner) then {
             if depth > UInt(200) then {
                 return "...";
             };
@@ -1411,16 +1374,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             out.push_string(type_to_string_impl(inner, depth + UInt(1)));
             out.to_string()
         },
-        .WeakReferenceType(inner) then {
-            if depth > UInt(200) then {
-                return "?...";
-            };
-            let mutable out = StringBuilder.new();
-            out.push_string("?");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
-            out.to_string()
-        },
-        .MutableWeakReferenceType(inner) then {
+        .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
             if depth > UInt(200) then {
                 return "?...";
             };
@@ -1431,27 +1385,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
         },
         .OpaqueType(def_id) then def_id_spelling(def_id),
         .GenericParameter(name) then name,
-        .GenericStruct(template_def_id, args) then {
-            let template = def_id_spelling(template_def_id);
-            if depth > UInt(200) then {
-                return template + "[...]";
-            };
-            let next_depth = depth + UInt(1);
-            let mutable out = StringBuilder.new();
-            out.push_string(template);
-            out.push_byte('[');
-            let mutable first = true;
-            for item in args then {
-                if not first then {
-                    out.push_string(", ");
-                };
-                out.push_string(type_to_string_impl(item, next_depth));
-                first = false;
-            };
-            out.push_byte(']');
-            return out.to_string();
-        },
-        .GenericEnum(template_def_id, args) then {
+        .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
             let template = def_id_spelling(template_def_id);
             if depth > UInt(200) then {
                 return template + "[...]";

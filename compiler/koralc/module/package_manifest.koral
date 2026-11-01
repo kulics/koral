@@ -154,8 +154,7 @@ given PackageRegistry {
     /// Every name `owner` can write, for error messages.
     public known_names(self, owner: LoadedPackage): List[String] = {
         let mutable names: List[String] = [owner.self_name, "std"];
-        let mutable iter = owner.manifest.dependencies.iterator();
-        while iter.next() is .Some(entry) then {
+        for entry in owner.manifest.dependencies then {
             names.push(entry.first);
         };
         return names;
@@ -197,11 +196,9 @@ private let hex32_padded(value: WrappingUInt32): String = {
     let digits = "0123456789abcdef";
     let mutable v: UInt = UInt(value);
     let mutable nibbles = List[UInt].new();
-    let mutable i = 0;
-    while i < 8 then {
+    for _ in 0..<8 then {
         nibbles.push(v % 16);
         v = v / 16;
-        i += 1;
     };
     let mutable out = StringBuilder.new();
     let mutable k: UInt = nibbles.count();
@@ -252,16 +249,10 @@ public let entry_relative_path(entry_file: String, package_root: String): String
         common += UInt(1);
     };
     let mutable parts = List[String].new();
-    let mutable up: UInt = common;
-    while up < root_parts.count() then {
+    for _ in common..<root_parts.count() then {
         parts.push("..");
-        up += UInt(1);
     };
-    let mutable rest: UInt = common;
-    while rest < entry_parts.count() then {
-        parts.push(entry_parts[rest]);
-        rest += UInt(1);
-    };
+    parts.push_list(entry_parts, span = common..<entry_parts.count());
     return parts.join_to_string("/");
 };
 
@@ -274,11 +265,7 @@ private let drop_last_extension(segment: String): String = {
         return segment;
     };
     let mutable kept = List[String].new();
-    let mutable i: UInt = 0;
-    while i + UInt(1) < pieces.count() then {
-        kept.push(pieces[i]);
-        i += UInt(1);
-    };
+    kept.push_list(pieces, span = 0..<(pieces.count() - UInt(1)));
     return kept.join_to_string(".");
 };
 
@@ -500,8 +487,7 @@ public let root_view_name(
     // A dependency is named by the root's `dependencies` key -- which is what
     // the root's own source writes for it, and so what its modules are called
     // from where the build is standing.
-    let mutable iter = root.manifest.dependencies.iterator();
-    while iter.next() is .Some(entry) then {
+    for entry in root.manifest.dependencies then {
         if entry.second.source == package.identity then {
             return entry.first;
         };
@@ -641,8 +627,7 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
             // Sorted: the message names the two keys that fight, and which
             // one is "first" must not depend on hash iteration order.
             let mutable dep_keys = List[String].new();
-            let mutable key_iter = dep_obj.iterator();
-            while key_iter.next() is .Some(e) then {
+            for e in dep_obj then {
                 dep_keys.push(e.first);
             };
             dep_keys.sort();
@@ -759,8 +744,7 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
 
     let mutable modules = Dict[String, PackageModuleConfig].new();
     let mutable seen_entries = Set[String].new();
-    let mutable iter = modules_obj.iterator();
-    while iter.next() is .Some(module_entry) then {
+    for module_entry in modules_obj then {
         let module_name = module_entry.first;
         let module_fields = List[String].new();
         module_fields.push("requires");
@@ -990,8 +974,7 @@ public let load_package_registry(
         next = next + 1;
 
         let mutable dep_keys: List[String] = [];
-        let mutable dep_iter = owner.manifest.dependencies.iterator();
-        while dep_iter.next() is .Some(entry) then {
+        for entry in owner.manifest.dependencies then {
             dep_keys.push(entry.first);
         };
         // Sorted so the load order does not depend on hash iteration order.

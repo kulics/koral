@@ -78,10 +78,8 @@ given Printer {
                 break;
             };
         };
-        let mutable j: UInt = 0;
-        while j < end then {
-            self.output.push_string(runes[j].to_string());
-            j += 1;
+        for r in runes.lazy().take(end) then {
+            self.output.push_string(r.to_string());
         };
         self.line = StringBuilder.new();
         self.strip_limit = 0;
@@ -168,10 +166,8 @@ given Printer {
         };
         end -= 1;
         let mutable out = StringBuilder.new();
-        let mutable j: UInt = 0;
-        while j < end then {
-            out.push_string(runes[j].to_string());
-            j += 1;
+        for r in runes.lazy().take(end) then {
+            out.push_string(r.to_string());
         };
         self.line = out;
         if self.strip_limit > self.line.count() then {
@@ -218,9 +214,7 @@ given Printer {
             self.at_line_start = false;
         };
         let runes = text.to_runes();
-        let mutable i: UInt = 0;
-        while i < runes.count() then {
-            let r = runes[i];
+        for r in runes then {
             if r.to_uint32() == 10 then {
                 self.strip_limit = self.line.count();
                 self.flush_line();
@@ -229,7 +223,6 @@ given Printer {
             } else {
                 self.line.push_string(r.to_string());
             };
-            i += 1;
         };
         self.strip_limit = self.line.count();
     };
@@ -240,8 +233,7 @@ given Printer {
 
     private print_type(self, t: CstType): Void = when t in {
         .Named(name) then self.write_token(name),
-        .SelfType(kw) then self.write_token(kw),
-        .ConstraintKeyword(kw) then self.write_token(kw),
+        .SelfType(kw) or .ConstraintKeyword(kw) then self.write_token(kw),
         .Paren(lp, inner, rp) then {
             self.write_token(lp);
             self.print_type(inner);
@@ -296,11 +288,7 @@ given Printer {
             self.write_space();
             self.print_type(return_type);
         },
-        .Ptr(inner, kw) then {
-            self.write_token(kw);
-            self.print_type(inner);
-        },
-        .Weakref(inner, kw) then {
+        .Ptr(inner, kw) or .Weakref(inner, kw) then {
             self.write_token(kw);
             self.print_type(inner);
         },
@@ -355,9 +343,7 @@ given Printer {
             self.write_token(minus);
             self.write_token(t);
         },
-        .PatStrLit(t) then self.write_token(t),
-        .PatBoolLit(t) then self.write_token(t),
-        .PatNullLit(t) then self.write_token(t),
+        .PatStrLit(t) or .PatBoolLit(t) or .PatNullLit(t) then self.write_token(t),
         .EnumCase(dot, name, lp, args, rp) then {
             self.write_token(dot);
             self.write_token(name);
@@ -493,15 +479,8 @@ given Printer {
     // ========================================================================
 
     public print_expr(self, e: CstExpr): Void = when e in {
-        .IntLit(t) then self.write_token(t),
-        .FloatLit(t) then self.write_token(t),
-        .StrLit(t) then self.write_token(t),
-        .InterpStr(t) then self.write_token(t),
-        .BoolLit(t) then self.write_token(t),
-        .NullLit(t) then self.write_token(t),
-        .Ident(t) then self.write_token(t),
-        .SelfExpr(t) then self.write_token(t),
-        .UnderscoreExpr(t) then self.write_token(t),
+        .IntLit(t) or .FloatLit(t) or .StrLit(t) or .InterpStr(t) or .BoolLit(t) or .NullLit(t) or .Ident(t)
+        or .SelfExpr(t) or .UnderscoreExpr(t) then self.write_token(t),
         .Commented(comments, inner) then {
             for comment in comments then {
                 self.write_token(comment);
@@ -516,15 +495,7 @@ given Printer {
             self.write_space();
             self.print_expr(right);
         },
-        .UnaryMinus(op, operand) then {
-            self.write_token(op);
-            self.print_expr(operand);
-        },
-        .Deref(op, operand) then {
-            self.write_token(op);
-            self.print_expr(operand);
-        },
-        .Upgrade(op, operand) then {
+        .UnaryMinus(op, operand) or .Deref(op, operand) or .Upgrade(op, operand) then {
             self.write_token(op);
             self.print_expr(operand);
         },
@@ -1031,20 +1002,17 @@ given Printer {
     ): Void = {
         self.write_newline();
         self.indent += 1;
-        let mutable i: UInt = 0;
-        while i < items.count() then {
-            if items[i] is .BlankLine() then {
+        for pair in items.lazy().enumerate() then {
+            if pair.second is .BlankLine() then {
                 self.write_newline();
-                i += 1;
                 continue;
             };
-            self.print_item(items[i]);
-            if not self.next_is_trailing_comment(items, i) then {
+            self.print_item(pair.second);
+            if not self.next_is_trailing_comment(items, pair.first) then {
                 if not self.at_line_start then {
                     self.write_newline();
                 };
             };
-            i += 1;
         };
         if tail_expr is .Some(expr) then {
             self.print_expr(expr);
@@ -2235,20 +2203,17 @@ given Printer {
         };
         self.write_newline();
         self.indent += 1;
-        let mutable i: UInt = 0;
-        while i < members.count() then {
-            if members[i] is .BlankLine() then {
+        for pair in members.lazy().enumerate() then {
+            if pair.second is .BlankLine() then {
                 self.write_newline();
-                i += 1;
                 continue;
             };
-            self.print_item(members[i]);
-            if not self.next_is_trailing_comment(members, i) then {
+            self.print_item(pair.second);
+            if not self.next_is_trailing_comment(members, pair.first) then {
                 if not self.at_line_start then {
                     self.write_newline();
                 };
             };
-            i += 1;
         };
         self.indent -= 1;
         self.write_token(rb);
@@ -2265,20 +2230,17 @@ given Printer {
     //  comment that belonged on a code line could end up on its own line, and
     /// the next pass would then separate it with a blank.
     public print_file(self, items: List[CstItem]): Void = {
-        let mutable i: UInt = 0;
-        while i < items.count() then {
-            if items[i] is .BlankLine() then {
+        for pair in items.lazy().enumerate() then {
+            if pair.second is .BlankLine() then {
                 self.write_newline();
-                i += 1;
                 continue;
             };
-            self.print_item(items[i]);
-            if not self.next_is_trailing_comment(items, i) then {
+            self.print_item(pair.second);
+            if not self.next_is_trailing_comment(items, pair.first) then {
                 if not self.at_line_start then {
                     self.write_newline();
                 };
             };
-            i += 1;
         };
     };
 
@@ -2298,15 +2260,8 @@ given Printer {
     // ========================================================================
 
     private estimate_expr_length(self, e: CstExpr): UInt = when e in {
-        .IntLit(tok) then tok.to_string().count(),
-        .FloatLit(tok) then tok.to_string().count(),
-        .StrLit(tok) then tok.to_string().count(),
-        .InterpStr(tok) then tok.to_string().count(),
-        .BoolLit(tok) then tok.to_string().count(),
-        .NullLit(tok) then tok.to_string().count(),
-        .Ident(tok) then tok.to_string().count(),
-        .SelfExpr(tok) then tok.to_string().count(),
-        .UnderscoreExpr(tok) then tok.to_string().count(),
+        .IntLit(tok) or .FloatLit(tok) or .StrLit(tok) or .InterpStr(tok) or .BoolLit(tok) or .NullLit(tok)
+        or .Ident(tok) or .SelfExpr(tok) or .UnderscoreExpr(tok) then tok.to_string().count(),
         .Commented(comments, inner) then {
             let mutable sum = self.estimate_expr_length(inner);
             for comment in comments then {
@@ -2316,9 +2271,7 @@ given Printer {
         },
         .BinaryOp(left, op, right) then self.estimate_expr_length(left) + 1 + op.to_string(
         ).count() + 1 + self.estimate_expr_length(right),
-        .UnaryMinus(_, operand) then 1 + self.estimate_expr_length(operand),
-        .Deref(_, operand) then 1 + self.estimate_expr_length(operand),
-        .Upgrade(_, operand) then 1 + self.estimate_expr_length(operand),
+        .UnaryMinus(_, operand) or .Deref(_, operand) or .Upgrade(_, operand) then 1 + self.estimate_expr_length(operand),
         .AddressOf(_, mut_kw, operand) then {
             let mutable prefix: UInt = 1;
             if mut_kw is .Some(mk) then {
@@ -2936,13 +2889,9 @@ given Printer {
     /// the `foreign` / `intrinsic` qualifiers sit after the declaration keyword
     /// and never carry visibility.
     public decl_visibility(d: CstDecl): Option[Token] = when d in {
-        .Func(v, _, _, _, _, _, _, _, _, _, _, _) then v,
-        .ForeignDecl(v, _, _, _, _, _, _, _, _, _) then v,
-        .Type(v, _, _, _, _, _, _) then v,
-        .Given(v, _, _, _, _, _, _, _, _, _) then v,
-        .Var(v, _, _, _, _) then v,
-        .Trait(v, _, _, _, _, _, _, _) then v,
-        .TraitMethod(v, _, _, _, _, _, _) then v,
+        .Func(v, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _)
+        or .Type(v, _, _, _, _, _, _) or .Given(v, _, _, _, _, _, _, _, _, _) or .Var(v, _, _, _, _)
+        or .Trait(v, _, _, _, _, _, _, _) or .TraitMethod(v, _, _, _, _, _, _) then v,
         .Using(_) then Option[Token].None(),
     };
 
@@ -3006,12 +2955,7 @@ private let validate_call_args(args: List[CstCallArg]): Result[Void] = {
 
 private let validate_item_list(items: List[CstItem]): Result[Void] = {
     for item in items then {
-        when validate_item(item) in {
-            .Ok(_) then {},
-            .Error(e) then {
-                return .Error(e);
-            },
-        };
+        validate_item(item) or return;
     };
     return .Ok({});
 };
@@ -3024,16 +2968,14 @@ private let validate_type_body(body: CstTypeBody): Result[Void] = when body in {
 private let validate_decl(decl: CstDecl): Result[Void] = when decl in {
     .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
     .Type(_, _, _, _, _, _, body) then validate_type_body(body),
-    .Trait(_, _, _, _, _, _, members, _) then validate_item_list(members),
-    .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
+    .Trait(_, _, _, _, _, _, members, _) or .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
     .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok(
         {},
     ),
 };
 
 private let validate_stmt(stmt: CstStmt): Result[Void] = when stmt in {
-    .VarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
-    .TupleVarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
+    .VarDecl(_, _, _, _, _, value) or .TupleVarDecl(_, _, _, _, _, value) then validate_expr_usage(value, false),
     .Assignment(target, _, value) then {
         validate_expr_usage(target, false) or return;
         return validate_expr_usage(value, false);
@@ -3041,8 +2983,7 @@ private let validate_stmt(stmt: CstStmt): Result[Void] = when stmt in {
     .ExprStmt(expr, _) then validate_expr_usage(expr, true),
     .Defer(_, value) then validate_expr_usage(value, true),
     .Return(_, value) then validate_optional_expr_usage(value, false),
-    .Break(_) then .Ok({}),
-    .Continue(_) then .Ok({}),
+    .Break(_) or .Continue(_) then .Ok({}),
 };
 
 private let validate_item(item: CstItem): Result[Void] = when item in {
@@ -3066,9 +3007,7 @@ private let validate_expr_usage(expr: CstExpr, statement_context: Bool): Result[
     ),
     .AddressOf(_, _, operand) then validate_expr_usage(operand, false),
     .IsExpr(subject, _, _, _) then validate_expr_usage(subject, false),
-    .TypeCast(_, _, _, operand) then validate_expr_usage(operand, false),
-    .AsCast(operand, _, _) then validate_expr_usage(operand, false),
-    .QualifiedTrait(_, _, _, operand) then validate_expr_usage(operand, false),
+    .TypeCast(_, _, _, operand) or .AsCast(operand, _, _) or .QualifiedTrait(_, _, _, operand) then validate_expr_usage(operand, false),
     .Paren(_, inner, _) then validate_expr_usage(inner, false),
     .FieldAccess(base, _, _) then validate_expr_usage(base, false),
     // The elided receiver carries nothing to validate; a chain's arguments and

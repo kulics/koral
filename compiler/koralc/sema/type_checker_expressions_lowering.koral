@@ -10,11 +10,7 @@ given TypeChecker {
             return false;
         };
         return when receiver.expr_type in {
-            .ReferenceType(inner) then self.type_matches_expected_pattern(
-                expected_self,
-                inner,
-            ),
-            .BorrowedReferenceType(inner) then self.type_matches_expected_pattern(
+            .ReferenceType(inner) or .BorrowedReferenceType(inner) then self.type_matches_expected_pattern(
                 expected_self,
                 inner,
             ),
@@ -149,19 +145,7 @@ given TypeChecker {
                             );
                         };
                         when receiver.expr_type in {
-                            .ReferenceType(actual_inner) then {
-                                if self.type_matches_expected_pattern(
-                                    inner,
-                                    actual_inner,
-                                ) then {
-                                    self.push_diagnostic_at_span(
-                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                        self.typed_expr_span(receiver),
-                                    );
-                                    return receiver;
-                                };
-                            },
-                            .BorrowedReferenceType(actual_inner) then {
+                            .ReferenceType(actual_inner) or .BorrowedReferenceType(actual_inner) then {
                                 if self.type_matches_expected_pattern(
                                     inner,
                                     actual_inner,
@@ -207,19 +191,7 @@ given TypeChecker {
                             return receiver;
                         };
                         when receiver.expr_type in {
-                            .ReferenceType(actual_inner) then {
-                                if self.type_matches_expected_pattern(
-                                    inner,
-                                    actual_inner,
-                                ) then {
-                                    self.push_diagnostic_at_span(
-                                        "Type mismatch: expected \(self.display_type_name(expected_self)), got \(self.display_type_name(receiver.expr_type))",
-                                        self.typed_expr_span(receiver),
-                                    );
-                                    return receiver;
-                                };
-                            },
-                            .BorrowedReferenceType(actual_inner) then {
+                            .ReferenceType(actual_inner) or .BorrowedReferenceType(actual_inner) then {
                                 if self.type_matches_expected_pattern(
                                     inner,
                                     actual_inner,
@@ -256,20 +228,9 @@ given TypeChecker {
 
     receiver_is_addressable_without_temp(self, receiver: TypedExpr): Bool = {
         return when receiver.expr_kind in {
-            .Variable(_) then true,
-            .MemberPath(...) then true,
-            .DerefExpr(inner_ref) then when inner_ref.expr_kind in {
-                .Variable(_) then true,
-                .MemberPath(...) then true,
-                .DerefExpr(_) then true,
-                .UnsafeDerefExpr(_) then true,
-                _ then false,
-            },
-            .UnsafeDerefExpr(inner_ref) then when inner_ref.expr_kind in {
-                .Variable(_) then true,
-                .MemberPath(...) then true,
-                .DerefExpr(_) then true,
-                .UnsafeDerefExpr(_) then true,
+            .Variable(_) or .MemberPath(...) then true,
+            .DerefExpr(inner_ref) or .UnsafeDerefExpr(inner_ref) then when inner_ref.expr_kind in {
+                .Variable(_) or .MemberPath(...) or .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
                 _ then false,
             },
             _ then false,
@@ -287,50 +248,11 @@ given TypeChecker {
     ): Bool = {
         return when expected_self_type in {
             .Some(expected_self) then when expected_self in {
-                .ReferenceType(inner) then {
+                .ReferenceType(inner) or .BorrowedReferenceType(inner) then {
                     when receiver.expr_type in {
-                        .ReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableReferenceType(_) then {
-                            return false;
-                        },
-                        .BorrowedReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableBorrowedReferenceType(_) then {
-                            return false;
-                        },
-                        .WeakReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableWeakReferenceType(_) then {
-                            return false;
-                        },
-                        _ then {},
-                    };
-                    self.type_matches_expected_pattern(inner, receiver.expr_type) and not self.receiver_is_addressable_without_temp(
-                        receiver,
-                    )
-                },
-                .BorrowedReferenceType(inner) then {
-                    when receiver.expr_type in {
-                        .ReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableReferenceType(_) then {
-                            return false;
-                        },
-                        .BorrowedReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableBorrowedReferenceType(_) then {
-                            return false;
-                        },
-                        .WeakReferenceType(_) then {
-                            return false;
-                        },
-                        .MutableWeakReferenceType(_) then {
+                        .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                        or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+                        or .MutableWeakReferenceType(_) then {
                             return false;
                         },
                         _ then {},
@@ -428,19 +350,8 @@ given TypeChecker {
                         typed_base.expr_type,
                     );
                     let pointer_expr = when typed_base.expr_type in {
-                        .ReferenceType(_) then make_typed_expr(
-                            TypedExprKind.DerefExpr(typed_base),
-                            pointer_base_type,
-                        ),
-                        .MutableReferenceType(_) then make_typed_expr(
-                            TypedExprKind.DerefExpr(typed_base),
-                            pointer_base_type,
-                        ),
-                        .BorrowedReferenceType(_) then make_typed_expr(
-                            TypedExprKind.DerefExpr(typed_base),
-                            pointer_base_type,
-                        ),
-                        .MutableBorrowedReferenceType(_) then make_typed_expr(
+                        .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                        or .MutableBorrowedReferenceType(_) then make_typed_expr(
                             TypedExprKind.DerefExpr(typed_base),
                             pointer_base_type,
                         ),
@@ -491,36 +402,15 @@ given TypeChecker {
         let mutable static_sig_opt = Option[Symbol].None();
         let mutable static_bindings = Dict[String, Type].new();
         when receiver_type in {
-            .GenericStruct(tplDefId, type_args) then {
+            .GenericStruct(tplDefId, type_args) or .GenericEnum(tplDefId, type_args) then {
                 effective_type_name = def_id_spelling(tplDefId);
                 for arg in type_args then {
                     receiver_type_args.push(arg);
                 };
             },
-            .GenericEnum(tplDefId, type_args) then {
-                effective_type_name = def_id_spelling(tplDefId);
-                for arg in type_args then {
-                    receiver_type_args.push(arg);
-                };
-            },
-            .StructureType(def_id) then {
-                effective_type_name = when self.context().get_template_name(def_id) in {
-                    .Some(template_name) then template_name,
-                    .None() then self.context().get_name(def_id) or else "",
-                };
-                when self.context().get_type_arguments(def_id) in {
-                    .Some(type_args) then {
-                        for arg in type_args then {
-                            receiver_type_args.push(arg);
-                        };
-                    },
-                    .None() then {},
-                };
-            },
-            .EnumType(def_id) then {
-                effective_type_name = when self.context().get_template_name(def_id) in {
-                    .Some(template_name) then template_name,
-                    .None() then self.context().get_name(def_id) or else "",
+            .StructureType(def_id) or .EnumType(def_id) then {
+                effective_type_name = self.context().get_template_name(def_id) or else {
+                    self.context().get_name(def_id) or else ""
                 };
                 when self.context().get_type_arguments(def_id) in {
                     .Some(type_args) then {
@@ -665,17 +555,7 @@ given TypeChecker {
         constructed_type: Type,
     ): Symbol = {
         return when source_type in {
-            .StructureType(def_id) then Symbol(
-                def_id,
-                constructed_type,
-                SymbolKind.TypeSymbol(),
-            ),
-            .EnumType(def_id) then Symbol(
-                def_id,
-                constructed_type,
-                SymbolKind.TypeSymbol(),
-            ),
-            .OpaqueType(def_id) then Symbol(
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then Symbol(
                 def_id,
                 constructed_type,
                 SymbolKind.TypeSymbol(),
@@ -733,12 +613,8 @@ given TypeChecker {
             method_name,
         );
         let normalized_receiver_type = when receiver.expr_type in {
-            .MutableReferenceType(inner) then inner,
-            .ReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .MutableReferenceType(inner) or .ReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+            or .BorrowedReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then inner,
             _ then receiver.expr_type,
         };
         self.maybe_record_extension_method_instantiation(
@@ -751,9 +627,7 @@ given TypeChecker {
             method_name,
         ) in {
             .Some(method) then method,
-            .None() then when initial_method_opt in {
-                .Some(method) then method,
-                .None() then self.make_method_symbol_for_receiver(
+            .None() then initial_method_opt or else self.make_method_symbol_for_receiver(
                     adapted_receiver.expr_type,
                     method_name,
                     self.resolve_method_return_type(
@@ -761,7 +635,6 @@ given TypeChecker {
                         method_name,
                     ),
                 ),
-            },
         };
         let param_types = self.resolve_method_param_types_with_method_type_args(
             adapted_receiver.expr_type,
@@ -769,8 +642,9 @@ given TypeChecker {
             List[Type].new(),
         );
         let mutable typed_args = List[TypedExpr].new();
-        let mutable arg_index: UInt = 0;
-        for arg_ref in args then {
+        for pair in args.lazy().enumerate() then {
+            let arg_index = pair.first;
+            let arg_ref = pair.second;
             let expected_arg_type = when param_types.get(arg_index) in {
                 .Some(param_type) then Option[Type].Some(param_type),
                 .None() then Option[Type].None(),
@@ -778,7 +652,6 @@ given TypeChecker {
             typed_args.push(
                 self.adapt_expr_to_expected_type(arg_ref, expected_arg_type),
             );
-            arg_index += UInt(1);
         };
         let return_type = self.resolve_method_return_type_for_call(
             adapted_receiver.expr_type,
@@ -1339,20 +1212,16 @@ given TypeChecker {
         let count = bindings.count();
         if self.is_weak_reference_type(element_type) then {
             let mutable opaque_slots = List[Type].new();
-            let mutable i: UInt = 0;
-            while i < count then {
+            for _ in 0..<count then {
                 opaque_slots.push(Type.Unknown());
-                i += 1;
             };
             return opaque_slots;
         };
         // A reference is an alias of the referent, so it peels. A weak handle is
         // not: it is a HANDLE, opaque until `upgrade`d, with no fields.
         let inner_type = when element_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then inner,
             _ then element_type,
         };
         // Identity comes from the subject's own DECLARATION, never from a name.
@@ -1374,10 +1243,8 @@ given TypeChecker {
                 "Type mismatch: expected a struct with \(count) fields, got \(type_to_string(inner_type))",
                 span,
             );
-            let mutable i: UInt = 0;
-            while i < count then {
+            for _ in 0..<count then {
                 out.push(Type.Unknown());
-                i += 1;
             };
             return out;
         };
@@ -1586,10 +1453,8 @@ given TypeChecker {
         // `upgrade`d, so `for x in <a ?List[Int]>` must report "not iterable"
         // rather than iterate the referent behind the handle.
         let iterable_type = when typed_iter.expr_type in {
-            .MutableReferenceType(inner) then inner,
-            .ReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
+            .MutableReferenceType(inner) or .ReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+            or .BorrowedReferenceType(inner) then inner,
             _ then typed_iter.expr_type,
         };
         let mutable iter_item_type = self.infer_for_pattern_item_type(iterable_type);

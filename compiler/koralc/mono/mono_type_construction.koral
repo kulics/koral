@@ -8,11 +8,9 @@ let resolve_symbol_type(mono: Monomorphizer, symbol: Symbol): Symbol = {
         .None() then resolved,
     };
     let chosen = when resolved in {
-        .VoidType() then registered,
-        .Unknown() then registered,
+        .VoidType() or .Unknown() then registered,
         _ then when registered in {
-            .VoidType() then resolved,
-            .Unknown() then resolved,
+            .VoidType() or .Unknown() then resolved,
             _ then prefer_more_concrete_type(mono, resolved, registered),
         },
     };
@@ -42,16 +40,7 @@ let recover_type_construction_type_resolved(
         identifier_type,
     );
     when resolved_identifier_type in {
-        .StructureType(_) then {
-            return resolved_identifier_type;
-        },
-        .EnumType(_) then {
-            return resolved_identifier_type;
-        },
-        .GenericStruct(...) then {
-            return resolved_identifier_type;
-        },
-        .GenericEnum(...) then {
+        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then {
             return resolved_identifier_type;
         },
         _ then {},
@@ -120,8 +109,7 @@ let resolve_type_construction_symbol(
         args,
     );
     return when resolved_type in {
-        .StructureType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
-        .EnumType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
+        .StructureType(def_id) or .EnumType(def_id) then Symbol(def_id, resolved_type, identifier.kind),
         _ then Symbol(identifier.def_id, resolved_type, identifier.kind),
     };
 };
@@ -131,9 +119,8 @@ let infer_type_construction_type_from_args_resolved(
     identifier_def_id: DefId,
     args: List[TypedExpr],
 ): Option[Type] = {
-    let template_name = when mono.storage.context.get_template_name(identifier_def_id) in {
-        .Some(name) then name,
-        .None() then mono.storage.context.get_name(identifier_def_id) or else "",
+    let template_name = mono.storage.context.get_template_name(identifier_def_id) or else {
+        mono.storage.context.get_name(identifier_def_id) or else ""
     };
     if template_name.is_empty() then {
         return Option[Type].None();
@@ -177,19 +164,21 @@ let infer_type_construction_type_from_args_resolved(
                 template.type_parameters,
                 Dict[String, Type].new(),
             );
-            let mutable i: UInt = 0;
-            while i < args.count() then {
+            for pair in template.fields.lazy().zip[
+                TypedExpr,
+                ListIterator[TypedExpr],
+                List[TypedExpr],
+            ](args) then {
                 let field_pattern = mono.resolve_type_node_impl(
-                    template.fields[i].field_type,
+                    pair.first.field_type,
                     self_subst,
                 );
                 infer_type_bindings_from_constructor_pattern(
                     mono,
                     field_pattern,
-                    resolve_parameterized_type(mono, args[i].expr_type),
+                    resolve_parameterized_type(mono, pair.second.expr_type),
                     bindings,
                 );
-                i += 1;
             };
 
             let mutable inferred_args = List[Type].new();
@@ -226,13 +215,7 @@ let infer_type_bindings_from_constructor_pattern(
             };
         },
         .ReferenceType(inner) then when normalized_concrete in {
-            .ReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+            .ReferenceType(concrete_inner) or .MutableReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
                 mono,
                 inner,
                 concrete_inner,
@@ -250,13 +233,7 @@ let infer_type_bindings_from_constructor_pattern(
             _ then {},
         },
         .PointerType(inner) then when normalized_concrete in {
-            .PointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+            .PointerType(concrete_inner) or .MutablePointerType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
                 mono,
                 inner,
                 concrete_inner,
@@ -274,13 +251,7 @@ let infer_type_bindings_from_constructor_pattern(
             _ then {},
         },
         .WeakReferenceType(inner) then when normalized_concrete in {
-            .WeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
-                mono,
-                inner,
-                concrete_inner,
-                bindings,
-            ),
-            .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
+            .WeakReferenceType(concrete_inner) or .MutableWeakReferenceType(concrete_inner) then infer_type_bindings_from_constructor_pattern(
                 mono,
                 inner,
                 concrete_inner,
@@ -300,15 +271,17 @@ let infer_type_bindings_from_constructor_pattern(
         .FunctionType(pattern_params, pattern_return) then when normalized_concrete in {
             .FunctionType(concrete_params, concrete_return) then {
                 if pattern_params.count() == concrete_params.count() then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_params.count() then {
+                    for pair in pattern_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](concrete_params) then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
-                            (pattern_params[i]).param_type,
-                            (concrete_params[i]).param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                             bindings,
                         );
-                        i += 1;
                     };
                     infer_type_bindings_from_constructor_pattern(
                         mono,
@@ -325,15 +298,15 @@ let infer_type_bindings_from_constructor_pattern(
                 // Declarations, not spellings -- and not one binding twice.
                 if tplDefId == actual_def_id and pattern_args.count() == concrete_args.count(
                 ) then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_args.count() then {
+                    for pair in pattern_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        concrete_args,
+                    ) then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
-                            (pattern_args[i]),
-                            (concrete_args[i]),
+                            (pair.first),
+                            (pair.second),
                             bindings,
                         );
-                        i += 1;
                     };
                 };
             },
@@ -344,15 +317,15 @@ let infer_type_bindings_from_constructor_pattern(
             .GenericEnum(concrete_def_id, concrete_args) then {
                 if pattern_def_id == concrete_def_id and pattern_args.count() == concrete_args.count(
                 ) then {
-                    let mutable i: UInt = 0;
-                    while i < pattern_args.count() then {
+                    for pair in pattern_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        concrete_args,
+                    ) then {
                         infer_type_bindings_from_constructor_pattern(
                             mono,
-                            (pattern_args[i]),
-                            (concrete_args[i]),
+                            (pair.first),
+                            (pair.second),
                             bindings,
                         );
-                        i += 1;
                     };
                 };
             },

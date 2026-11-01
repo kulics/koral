@@ -78,14 +78,10 @@ let vtable_method_index(
         ordered,
         seen,
     );
-    let mutable idx: UInt = 0;
-    while idx < ordered.count() then {
-        if ordered[idx] == method_name then {
-            return Int(idx);
-        };
-        idx += 1;
+    return when ordered.lazy().position((x) => x == method_name) in {
+        .Some(idx) then Int(idx),
+        .None() then -1,
     };
-    return -1;
 };
 
 let vtable_method_index_for_trait_type(
@@ -133,14 +129,10 @@ let vtable_method_index_for_trait_type(
             seen,
         );
     };
-    let mutable idx: UInt = 0;
-    while idx < ordered.count() then {
-        if ordered[idx] == method_name then {
-            return Int(idx);
-        };
-        idx += 1;
+    return when ordered.lazy().position((x) => x == method_name) in {
+        .Some(idx) then Int(idx),
+        .None() then -1,
     };
-    return -1;
 };
 
 let expr_is_type_symbol(expr: TypedExpr): Bool = {
@@ -161,12 +153,9 @@ let method_lookup_base_type(mono: Monomorphizer, base: TypedExpr): Type = {
         _ then {},
     };
     return when base.expr_type in {
-        .ReferenceType(inner) then inner,
-        .MutableReferenceType(inner) then inner,
-        .BorrowedReferenceType(inner) then inner,
-        .MutableBorrowedReferenceType(inner) then inner,
-        .WeakReferenceType(inner) then inner,
-        .MutableWeakReferenceType(inner) then inner,
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) then inner,
         _ then base.expr_type,
     };
 };
@@ -176,25 +165,8 @@ let type_resolution_trait_object_type(t: Type): Option[Type] = {
         .TraitObject(trait_def_id, type_args) then Option[Type].Some(
             Type.TraitObject(trait_def_id, type_args),
         ),
-        .ReferenceType(inner) then when inner in {
-            .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-                Type.TraitObject(trait_def_id, type_args),
-            ),
-            _ then Option[Type].None(),
-        },
-        .MutableReferenceType(inner) then when inner in {
-            .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-                Type.TraitObject(trait_def_id, type_args),
-            ),
-            _ then Option[Type].None(),
-        },
-        .BorrowedReferenceType(inner) then when inner in {
-            .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-                Type.TraitObject(trait_def_id, type_args),
-            ),
-            _ then Option[Type].None(),
-        },
-        .MutableBorrowedReferenceType(inner) then when inner in {
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) then when inner in {
             .TraitObject(trait_def_id, type_args) then Option[Type].Some(
                 Type.TraitObject(trait_def_id, type_args),
             ),
@@ -237,11 +209,7 @@ let normalize_type_resolution_trait_placeholder_expected_method_type(
             normalized_params.push(
                 FunctionParamEntry(normalized_receiver, first_param.pass_kind),
             );
-            let mutable idx: UInt = UInt(1);
-            while idx < params.count() then {
-                normalized_params.push(params[idx]);
-                idx += UInt(1);
-            };
+            normalized_params.push_list(params, span = 1..<params.count());
             Type.FunctionType(
                 normalized_params,
                 resolve_parameterized_type(mono, return_type),
@@ -311,14 +279,9 @@ let static_dispatch_receiver_expr(expr: TypedExpr): TypedExpr = {
     return when expr.expr_kind in {
         .TraitObjectConversion(inner, _, _) then inner,
         .RefExpr(inner) then when inner.expr_type in {
-            .ReferenceType(_) then inner,
-            .MutableReferenceType(_) then inner,
-            .BorrowedReferenceType(_) then inner,
-            .MutableBorrowedReferenceType(_) then inner,
-            .WeakReferenceType(_) then inner,
-            .MutableWeakReferenceType(_) then inner,
-            .PointerType(_) then inner,
-            .MutablePointerType(_) then inner,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_)
+            or .PointerType(_) or .MutablePointerType(_) then inner,
             _ then expr,
         },
         _ then expr,
@@ -350,8 +313,7 @@ let register_given_decl_method_identities(
     let resolved_target = resolve_parameterized_type(mono, target_type);
     let is_trait_target = when resolved_target in {
         .TraitObject(_, _) then true,
-        .ReferenceType(inner) then resolve_parameterized_type(mono, inner) is .TraitObject(_, _),
-        .MutableReferenceType(inner) then resolve_parameterized_type(mono, inner) is .TraitObject(_, _),
+        .ReferenceType(inner) or .MutableReferenceType(inner) then resolve_parameterized_type(mono, inner) is .TraitObject(_, _),
         _ then false,
     };
     if is_trait_target then {
@@ -564,23 +526,8 @@ let adapt_receiver_expr_for_method(
     let effective_current_type = when current_expr.expr_kind in {
         .Variable(symbol) then when resolve_parameterized_type(mono, symbol.symbol_type) in {
             .ReferenceType(_) then resolve_parameterized_type(mono, symbol.symbol_type),
-            .MutableReferenceType(_) then resolve_parameterized_type(
-                mono,
-                symbol.symbol_type,
-            ),
-            .BorrowedReferenceType(_) then resolve_parameterized_type(
-                mono,
-                symbol.symbol_type,
-            ),
-            .MutableBorrowedReferenceType(_) then resolve_parameterized_type(
-                mono,
-                symbol.symbol_type,
-            ),
-            .WeakReferenceType(_) then resolve_parameterized_type(
-                mono,
-                symbol.symbol_type,
-            ),
-            .MutableWeakReferenceType(_) then resolve_parameterized_type(
+            .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_)
+            or .WeakReferenceType(_) or .MutableWeakReferenceType(_) then resolve_parameterized_type(
                 mono,
                 symbol.symbol_type,
             ),
@@ -634,42 +581,9 @@ let adapt_receiver_expr_for_method(
                         effective_current_type,
                     ) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .BorrowedReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .WeakReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableWeakReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .PointerType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutablePointerType(_) then TypedExpr(
+                            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+                            or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then TypedExpr(
                                 current_expr.expr_kind,
                                 expected_self_type,
                                 current_expr.span,
@@ -681,41 +595,8 @@ let adapt_receiver_expr_for_method(
                             ),
                         }
                     } else when effective_current_type in {
-                        .MutableReferenceType(actual_inner) then {
-                            let mutable actual_inner_type = resolve_parameterized_type(
-                                mono,
-                                actual_inner,
-                            );
-                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
-                                actual_inner_type,
-                            ) then {
-                                TypedExpr(
-                                    current_expr.expr_kind,
-                                    expected_self_type,
-                                    current_expr.span,
-                                )
-                            } else {
-                                current_expr
-                            }
-                        },
-                        .BorrowedReferenceType(actual_inner) then {
-                            let mutable actual_inner_type = resolve_parameterized_type(
-                                mono,
-                                actual_inner,
-                            );
-                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
-                                actual_inner_type,
-                            ) then {
-                                TypedExpr(
-                                    current_expr.expr_kind,
-                                    expected_self_type,
-                                    current_expr.span,
-                                )
-                            } else {
-                                current_expr
-                            }
-                        },
-                        .MutableBorrowedReferenceType(actual_inner) then {
+                        .MutableReferenceType(actual_inner) or .BorrowedReferenceType(actual_inner)
+                        or .MutableBorrowedReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(
                                 mono,
                                 actual_inner,
@@ -741,42 +622,9 @@ let adapt_receiver_expr_for_method(
                         effective_current_type,
                     ) then {
                         when effective_current_type in {
-                            .ReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .BorrowedReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableBorrowedReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .WeakReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutableWeakReferenceType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .PointerType(_) then TypedExpr(
-                                current_expr.expr_kind,
-                                expected_self_type,
-                                current_expr.span,
-                            ),
-                            .MutablePointerType(_) then TypedExpr(
+                            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+                            or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then TypedExpr(
                                 current_expr.expr_kind,
                                 expected_self_type,
                                 current_expr.span,
@@ -788,41 +636,8 @@ let adapt_receiver_expr_for_method(
                             ),
                         }
                     } else when effective_current_type in {
-                        .ReferenceType(actual_inner) then {
-                            let mutable actual_inner_type = resolve_parameterized_type(
-                                mono,
-                                actual_inner,
-                            );
-                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
-                                actual_inner_type,
-                            ) then {
-                                TypedExpr(
-                                    current_expr.expr_kind,
-                                    expected_self_type,
-                                    current_expr.span,
-                                )
-                            } else {
-                                current_expr
-                            }
-                        },
-                        .MutableReferenceType(actual_inner) then {
-                            let mutable actual_inner_type = resolve_parameterized_type(
-                                mono,
-                                actual_inner,
-                            );
-                            if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
-                                actual_inner_type,
-                            ) then {
-                                TypedExpr(
-                                    current_expr.expr_kind,
-                                    expected_self_type,
-                                    current_expr.span,
-                                )
-                            } else {
-                                current_expr
-                            }
-                        },
-                        .MutableBorrowedReferenceType(actual_inner) then {
+                        .ReferenceType(actual_inner) or .MutableReferenceType(actual_inner)
+                        or .MutableBorrowedReferenceType(actual_inner) then {
                             let mutable actual_inner_type = resolve_parameterized_type(
                                 mono,
                                 actual_inner,
@@ -843,21 +658,7 @@ let adapt_receiver_expr_for_method(
                     }
                 },
                 _ then when effective_current_type in {
-                    .ReferenceType(inner) then {
-                        let mutable inner_type = resolve_parameterized_type(mono, inner);
-                        if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
-                            expected_self_type,
-                        ) then {
-                            TypedExpr(
-                                TypedExprKind.DerefExpr(current_expr),
-                                expected_self_type,
-                                current_expr.span,
-                            )
-                        } else {
-                            current_expr
-                        }
-                    },
-                    .MutableReferenceType(inner) then {
+                    .ReferenceType(inner) or .MutableReferenceType(inner) then {
                         let mutable inner_type = resolve_parameterized_type(mono, inner);
                         if mono.storage.context.get_layout_key(inner_type) == mono.storage.context.get_layout_key(
                             expected_self_type,
@@ -928,15 +729,14 @@ let adapt_call_args_for_method(
     };
     let param_offset = if param_types.count() == args.count() + UInt(1) then UInt(1)
     else UInt(0);
-    let mutable arg_index: UInt = 0;
-    while arg_index < args.count() then {
+    for pair in args.lazy().enumerate() then {
+        let arg_index = pair.first;
         let mutable expected_param_type = if arg_index + param_offset < param_types.count(
-        ) then (param_types[arg_index + param_offset]) else args[arg_index].expr_type;
-        let arg_expr = args[arg_index];
+        ) then (param_types[arg_index + param_offset]) else pair.second.expr_type;
+        let arg_expr = pair.second;
         adapted_args.push(
             adapt_call_arg_for_expected_param(mono, arg_expr, expected_param_type),
         );
-        arg_index += UInt(1);
     };
     return adapted_args;
 };
@@ -944,27 +744,7 @@ let adapt_call_args_for_method(
 let resolve_alias_receiver_match_type(mono: Monomorphizer, t: Type): Type = {
     let resolved = resolve_parameterized_type(mono, t);
     return when resolved in {
-        .StructureType(def_id) then when mono.storage.context.lookup_type(def_id) in {
-            .Some(mapped) then {
-                let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(
-                    resolved,
-                ) then resolved
-                else resolve_alias_receiver_match_type(mono, resolved_mapped)
-            },
-            .None() then resolved,
-        },
-        .EnumType(def_id) then when mono.storage.context.lookup_type(def_id) in {
-            .Some(mapped) then {
-                let resolved_mapped = resolve_parameterized_type(mono, mapped);
-                if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(
-                    resolved,
-                ) then resolved
-                else resolve_alias_receiver_match_type(mono, resolved_mapped)
-            },
-            .None() then resolved,
-        },
-        .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
+        .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped) then {
                 let resolved_mapped = resolve_parameterized_type(mono, mapped);
                 if mono.storage.context.get_layout_key(resolved_mapped) == mono.storage.context.get_layout_key(
@@ -1054,22 +834,8 @@ let receiver_param_matches_actual_receiver(
     let resolved_actual = resolve_alias_receiver_match_type(mono, actual_receiver_type);
     return when resolved_expected in {
         .ReferenceType(inner_ref) then when resolved_actual in {
-            .ReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .BorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
+            .ReferenceType(actual_inner) or .MutableReferenceType(actual_inner)
+            or .BorrowedReferenceType(actual_inner) or .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
                 mono,
                 inner_ref,
                 actual_inner,
@@ -1077,12 +843,7 @@ let receiver_param_matches_actual_receiver(
             _ then receiver_match_keys_equal(mono, inner_ref, resolved_actual),
         },
         .MutableReferenceType(inner_ref) then when resolved_actual in {
-            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
+            .MutableReferenceType(actual_inner) or .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
                 mono,
                 inner_ref,
                 actual_inner,
@@ -1090,22 +851,8 @@ let receiver_param_matches_actual_receiver(
             _ then receiver_match_keys_equal(mono, inner_ref, resolved_actual),
         },
         .BorrowedReferenceType(inner_ref) then when resolved_actual in {
-            .BorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .ReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
+            .BorrowedReferenceType(actual_inner) or .ReferenceType(actual_inner)
+            or .MutableReferenceType(actual_inner) or .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
                 mono,
                 inner_ref,
                 actual_inner,
@@ -1113,12 +860,7 @@ let receiver_param_matches_actual_receiver(
             _ then receiver_match_keys_equal(mono, inner_ref, resolved_actual),
         },
         .MutableBorrowedReferenceType(inner_ref) then when resolved_actual in {
-            .MutableBorrowedReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableReferenceType(actual_inner) then receiver_match_keys_equal(
+            .MutableBorrowedReferenceType(actual_inner) or .MutableReferenceType(actual_inner) then receiver_match_keys_equal(
                 mono,
                 inner_ref,
                 actual_inner,
@@ -1126,12 +868,7 @@ let receiver_param_matches_actual_receiver(
             _ then receiver_match_keys_equal(mono, inner_ref, resolved_actual),
         },
         .WeakReferenceType(inner_ref) then when resolved_actual in {
-            .WeakReferenceType(actual_inner) then receiver_match_keys_equal(
-                mono,
-                inner_ref,
-                actual_inner,
-            ),
-            .MutableWeakReferenceType(actual_inner) then receiver_match_keys_equal(
+            .WeakReferenceType(actual_inner) or .MutableWeakReferenceType(actual_inner) then receiver_match_keys_equal(
                 mono,
                 inner_ref,
                 actual_inner,
@@ -1256,14 +993,15 @@ let resolve_concrete_qualified_trait_member(
             let mutable bindings = Dict[String, Type].new();
             bindings.insert("Self", resolved_concrete_type);
 
-            let mutable trait_arg_index: UInt = 0;
-            while trait_arg_index < trait_info.type_params.count() and trait_arg_index < trait_type_args.count(
-            ) then {
+            for pair in trait_info.type_params.lazy().zip[
+                Type,
+                ListIterator[Type],
+                List[Type],
+            ](trait_type_args) then {
                 bindings.insert(
-                    trait_info.type_params[trait_arg_index].name,
-                    (trait_type_args[trait_arg_index]),
+                    pair.first.name,
+                    (pair.second),
                 );
-                trait_arg_index += 1;
             };
 
             let mutable found_member: Option[TypedTraitMember] = Option[TypedTraitMember].None(
@@ -1406,12 +1144,9 @@ let ensure_receiver_dispatch_callsite(
         return dispatch_callsite;
     };
 
-    let callsite_def_id = when dispatch_callsite in {
-        .Some(existing) then existing,
-        .None() then {
-            let callsite_name = "__receiver_dispatch_\(mono.storage.context.symbol_name(method))_\(mono.storage.context.next_def_id())";
-            mono.storage.context.allocate(callsite_name, DefKind.Function())
-        },
+    let callsite_def_id = dispatch_callsite or else {
+        let callsite_name = "__receiver_dispatch_\(mono.storage.context.symbol_name(method))_\(mono.storage.context.next_def_id())";
+        mono.storage.context.allocate(callsite_name, DefKind.Function())
     };
 
     let effective_logical_method_name = logical_method_name or else mono.storage.context.symbol_name(

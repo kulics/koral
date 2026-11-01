@@ -157,10 +157,7 @@ given CodeGen {
                 },
                 .Given(target_type, trait_name, trait_type_args, methods, _) then {
                     if self.type_contains_generic(target_type) then {
-                        let trait_label = when trait_name in {
-                            .Some(name) then name,
-                            .None() then "",
-                        };
+                        let trait_label = trait_name or else "";
                         panic(
                             internal_compiler_error(
                                 "Generic given target reached codegen: \(trait_label) on \(self.context.type_display_name(target_type))",
@@ -239,7 +236,7 @@ given CodeGen {
 
     is_concrete_nominal_instance(self, t: Type): Bool = {
         return when t in {
-            .GenericStruct(_, type_args) then {
+            .GenericStruct(_, type_args) or .GenericEnum(_, type_args) then {
                 let mutable concrete = true;
                 for type_arg_ref in type_args then {
                     if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(
@@ -250,39 +247,7 @@ given CodeGen {
                 };
                 concrete
             },
-            .GenericEnum(_, type_args) then {
-                let mutable concrete = true;
-                for type_arg_ref in type_args then {
-                    if has_generic_parameter(type_arg_ref) or is_placeholder_inferred_type(
-                        type_arg_ref,
-                    ) then {
-                        concrete = false;
-                    };
-                };
-                concrete
-            },
-            .StructureType(def_id) then {
-                when self.context.get_template_name(def_id) in {
-                    .Some(_) then {
-                        when self.context.get_type_arguments(def_id) in {
-                            .Some(type_args) then {
-                                let mutable concrete = true;
-                                for type_arg in type_args then {
-                                    if has_generic_parameter(type_arg) or is_placeholder_inferred_type(
-                                        type_arg,
-                                    ) then {
-                                        concrete = false;
-                                    };
-                                };
-                                concrete
-                            },
-                            .None() then false,
-                        }
-                    },
-                    .None() then true,
-                }
-            },
-            .EnumType(def_id) then {
+            .StructureType(def_id) or .EnumType(def_id) then {
                 when self.context.get_template_name(def_id) in {
                     .Some(_) then {
                         when self.context.get_type_arguments(def_id) in {
@@ -549,16 +514,7 @@ given CodeGen {
     emit_type_forward_declarations(self, declarations: List[TypeDeclaration]): Void = {
         for decl in declarations then {
             when decl in {
-                .Structure(name, _, _, _) then {
-                    self.buffer.push_string("struct \(name);\n");
-                    self.buffer.push_string(
-                        "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n",
-                    );
-                    self.buffer.push_string(
-                        "void __koral_\(name)_drop(struct \(name)* self);\n",
-                    );
-                },
-                .Enum(name, _, _, _) then {
+                .Structure(name, _, _, _) or .Enum(name, _, _, _) then {
                     self.buffer.push_string("struct \(name);\n");
                     self.buffer.push_string(
                         "struct \(name) __koral_\(name)_copy(const struct \(name) *self);\n",
@@ -581,15 +537,7 @@ given CodeGen {
     ): Void = {
         for decl in declarations then {
             when decl in {
-                .Structure(name, _, _, managed) then {
-                    if not managed then {
-                        continue;
-                    };
-                    self.buffer.push_string("struct \(name) {\n");
-                    self.buffer.push_string("    void* ptr;\n");
-                    self.buffer.push_string("};\n\n");
-                },
-                .Enum(name, _, _, managed) then {
+                .Structure(name, _, _, managed) or .Enum(name, _, _, managed) then {
                     if not managed then {
                         continue;
                     };
@@ -831,26 +779,12 @@ given CodeGen {
                 let returns_int_like = when self.user_main_return_type in {
                     .Some(ret_type) then {
                         when ret_type in {
-                            .IntType() then true,
-                            .Int8Type() then true,
-                            .Int16Type() then true,
-                            .Int32Type() then true,
-                            .Int64Type() then true,
-                            .UIntType() then true,
-                            .UInt8Type() then true,
-                            .UInt16Type() then true,
-                            .UInt32Type() then true,
-                            .UInt64Type() then true,
-                            .WrappingIntType() then true,
-                            .WrappingInt8Type() then true,
-                            .WrappingInt16Type() then true,
-                            .WrappingInt32Type() then true,
-                            .WrappingInt64Type() then true,
-                            .WrappingUIntType() then true,
-                            .WrappingUInt8Type() then true,
-                            .WrappingUInt16Type() then true,
-                            .WrappingUInt32Type() then true,
-                            .WrappingUInt64Type() then true,
+                            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type()
+                            or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+                            or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+                            or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingUIntType()
+                            or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+                            or .WrappingUInt64Type() then true,
                             _ then false,
                         }
                     },
@@ -954,14 +888,12 @@ given CodeGen {
                 };
                 let mutable result = StringBuilder.new();
                 let mutable first = true;
-                let mutable index: UInt = 0;
-                while index < params.count() then {
+                for param in params then {
                     if not first then {
                         result.push_string(", ");
                     };
-                    result.push_string(self.c_type_name(params[index].param_type));
+                    result.push_string(self.c_type_name(param.param_type));
                     first = false;
-                    index += 1;
                 };
                 result.to_string()
             },

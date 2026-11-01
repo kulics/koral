@@ -137,8 +137,7 @@ private let load_string_dict_field(
     };
 
     let mutable out = Dict[String, String].new();
-    let mutable iter = obj.iterator();
-    while iter.next() is .Some(entry) then {
+    for entry in obj then {
         let str_value = entry.second.as_string() or else {
             return .Error(
                 "error: '\(field_name).\(entry.first)' in \(context) must be a string",
@@ -186,16 +185,12 @@ public let module_key_for_full_name(
 ): Result[String] = {
     let mutable head = full_name;
     let mutable subpath = "";
-    if full_name.contains("/") then {
-        let mutable idx: UInt = 0;
-        while idx < full_name.count() then {
-            if full_name[idx] == '/' then {
-                head = full_name.substring(.Until(idx));
-                subpath = full_name.substring(.From(idx + 1));
-                break;
-            };
-            idx += 1;
-        };
+    when full_name.find("/") in {
+        .Some(idx) then {
+            head = full_name.substring(.Until(idx));
+            subpath = full_name.substring(.From(idx + 1));
+        },
+        .None() then {},
     };
 
     if head != config.package then {
@@ -294,8 +289,7 @@ public let load_config(project_dir: String): Result[ProjectConfig] = {
     };
 
     let mutable modules = Dict[String, ModuleConfig].new();
-    let mutable module_iter = modules_obj.iterator();
-    while module_iter.next() is .Some(module_entry) then {
+    for module_entry in modules_obj then {
         let module_name = module_entry.first;
         if not is_valid_module_key(module_name) then {
             return .Error(
@@ -344,8 +338,7 @@ public let load_config(project_dir: String): Result[ProjectConfig] = {
         let deps_obj = deps_ref.as_object() or else {
             return .Error("error: 'dependencies' must be an object in koral.json");
         };
-        let mutable iter = deps_obj.iterator();
-        while iter.next() is .Some(dep_entry) then {
+        for dep_entry in deps_obj then {
             let dep_key = dep_entry.first;
             let dep_json = dep_entry.second;
 
@@ -405,8 +398,7 @@ public let load_config(project_dir: String): Result[ProjectConfig] = {
         let exclude_arr = exclude_ref.as_array() or else {
             return .Error("error: 'exclude' must be an array of strings in koral.json");
         };
-        let mutable exclude_iter = exclude_arr.iterator();
-        while exclude_iter.next() is .Some(item) then {
+        for item in exclude_arr then {
             let path = item.as_string() or else {
                 return .Error(
                     "error: 'exclude' must be an array of strings in koral.json",
@@ -431,8 +423,7 @@ public let save_config(project_dir: String, config: ProjectConfig): Result[Void]
 
     if not config.dependencies.is_empty() then {
         let mutable deps_obj = Dict[String, JsonValue].new();
-        let mutable dep_iter = config.dependencies.iterator();
-        while dep_iter.next() is .Some(dep_entry) then {
+        for dep_entry in config.dependencies then {
             let dep = dep_entry.second;
             let mutable dep_json = Dict[String, JsonValue].new();
             dep_json.insert("source", JsonValue.String(dep.source));
@@ -443,8 +434,7 @@ public let save_config(project_dir: String, config: ProjectConfig): Result[Void]
     };
 
     let mutable modules_obj = Dict[String, JsonValue].new();
-    let mutable module_iter = config.modules.iterator();
-    while module_iter.next() is .Some(module_entry) then {
+    for module_entry in config.modules then {
         let module = module_entry.second;
         let mutable module_json = Dict[String, JsonValue].new();
         module_json.insert("entry", JsonValue.String(module.entry));

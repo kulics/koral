@@ -41,14 +41,9 @@ public type TypeNode {
 /// Where a type is written.
 public let type_node_span(node: TypeNode): SourceSpan = {
     return when node in {
-        .Identifier(_, span) then span,
-        .Reference(_, _, span) then span,
-        .BorrowedReference(_, _, span) then span,
-        .Pointer(_, _, span) then span,
-        .WeakReference(_, _, span) then span,
-        .Generic(_, _, span) then span,
-        .InferredSelf(span) then span,
-        .FunctionType(_, _, span) then span,
+        .Identifier(_, span) or .Reference(_, _, span) or .BorrowedReference(_, _, span)
+        or .Pointer(_, _, span) or .WeakReference(_, _, span) or .Generic(_, _, span) or .InferredSelf(span)
+        or .FunctionType(_, _, span) then span,
     };
 };
 
@@ -139,10 +134,8 @@ public let type_node_name(node: TypeNode): String = {
     return when node in {
         .Identifier(name, _) then name,
         .Generic(base, _, _) then base,
-        .Reference(inner, _, _) then type_node_name(inner),
-        .BorrowedReference(inner, _, _) then type_node_name(inner),
-        .Pointer(inner, _, _) then type_node_name(inner),
-        .WeakReference(inner, _, _) then type_node_name(inner),
+        .Reference(inner, _, _) or .BorrowedReference(inner, _, _) or .Pointer(inner, _, _)
+        or .WeakReference(inner, _, _) then type_node_name(inner),
         .InferredSelf(_) then "self",
         .FunctionType(_, _, _) then "fn",
     };
@@ -420,41 +413,28 @@ public type Decl {
 ///
 /// `given` blocks and `using` bind nothing under their own name.
 public let decl_name(decl: Decl): Option[String] = when decl in {
-    .LetDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
-    .FunctionDecl(_, name, _, _, _, _, _, _) then Option[String].Some(name),
-    .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
-    .ForeignFunctionDecl(_, name, _, _, _, _) then Option[String].Some(name),
-    .ForeignLetDecl(_, name, _, _, _, _) then Option[String].Some(name),
-    .TypeStructDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
-    .TypeEnumDecl(_, name, _, _, _, _) then Option[String].Some(name),
-    .TypeAliasDecl(_, name, _, _, _) then Option[String].Some(name),
-    .IntrinsicTypeDecl(_, name, _, _, _) then Option[String].Some(name),
-    .ForeignTypeDecl(_, name, _, _, _) then Option[String].Some(name),
-    .TraitDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
-    .UsingDecl(_, _, _, _) then Option[String].None(),
-    .GivenDecl(_, _, _, _) then Option[String].None(),
-    .GivenTraitDecl(_, _, _, _, _) then Option[String].None(),
-    .IntrinsicGivenDecl(_, _, _, _) then Option[String].None(),
+    .LetDecl(_, name, _, _, _, _, _) or .FunctionDecl(_, name, _, _, _, _, _, _)
+    or .IntrinsicFunctionDecl(_, name, _, _, _, _, _) or .ForeignFunctionDecl(_, name, _, _, _, _)
+    or .ForeignLetDecl(_, name, _, _, _, _) or .TypeStructDecl(_, name, _, _, _, _, _)
+    or .TypeEnumDecl(_, name, _, _, _, _) or .TypeAliasDecl(_, name, _, _, _)
+    or .IntrinsicTypeDecl(_, name, _, _, _) or .ForeignTypeDecl(_, name, _, _, _)
+    or .TraitDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    .UsingDecl(_, _, _, _) or .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
+    or .IntrinsicGivenDecl(_, _, _, _) then Option[String].None(),
 };
 
 /// Where a declaration's name is written -- see `Decl`.
 public let decl_name_span(decl: Decl): SourceSpan = {
     return when decl in {
-        .LetDecl(_, _, _, _, _, _, name_span) then name_span,
-        .FunctionDecl(_, _, _, _, _, _, _, name_span) then name_span,
-        .IntrinsicFunctionDecl(_, _, _, _, _, _, name_span) then name_span,
-        .ForeignFunctionDecl(_, _, _, _, _, name_span) then name_span,
-        .ForeignLetDecl(_, _, _, _, _, name_span) then name_span,
-        .TypeStructDecl(_, _, _, _, _, _, name_span) then name_span,
-        .TypeEnumDecl(_, _, _, _, _, name_span) then name_span,
-        .TypeAliasDecl(_, _, _, _, name_span) then name_span,
-        .IntrinsicTypeDecl(_, _, _, _, name_span) then name_span,
-        .ForeignTypeDecl(_, _, _, _, name_span) then name_span,
+        .LetDecl(_, _, _, _, _, _, name_span) or .FunctionDecl(_, _, _, _, _, _, _, name_span)
+        or .IntrinsicFunctionDecl(_, _, _, _, _, _, name_span)
+        or .ForeignFunctionDecl(_, _, _, _, _, name_span) or .ForeignLetDecl(_, _, _, _, _, name_span)
+        or .TypeStructDecl(_, _, _, _, _, _, name_span) or .TypeEnumDecl(_, _, _, _, _, name_span)
+        or .TypeAliasDecl(_, _, _, _, name_span) or .IntrinsicTypeDecl(_, _, _, _, name_span)
+        or .ForeignTypeDecl(_, _, _, _, name_span) then name_span,
         .UsingDecl(_, _, _, span) then span,
         .TraitDecl(_, _, _, _, _, _, name_span) then name_span,
-        .GivenDecl(_, _, _, span) then span,
-        .GivenTraitDecl(_, _, _, _, span) then span,
-        .IntrinsicGivenDecl(_, _, _, span) then span,
+        .GivenDecl(_, _, _, span) or .GivenTraitDecl(_, _, _, _, span) or .IntrinsicGivenDecl(_, _, _, span) then span,
     };
 };
 
@@ -464,23 +444,16 @@ public let decl_name_span(decl: Decl): SourceSpan = {
 /// no level. This is what an `import` consults to decide whether a name can be
 /// brought into another file at all (§3.3).
 public let decl_access(decl: Decl): Option[AccessModifier] = when decl in {
-    .LetDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .FunctionDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .LetDecl(access, _, _, _, _, _, _) or .FunctionDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
     .IntrinsicFunctionDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(
         access,
     ),
-    .ForeignFunctionDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .ForeignLetDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .TypeStructDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .TypeEnumDecl(access, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .TypeAliasDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
-    .IntrinsicTypeDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
-    .ForeignTypeDecl(access, _, _, _, _) then Option[AccessModifier].Some(access),
-    .TraitDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .UsingDecl(_, _, _, _) then Option[AccessModifier].None(),
-    .GivenDecl(_, _, _, _) then Option[AccessModifier].None(),
-    .GivenTraitDecl(_, _, _, _, _) then Option[AccessModifier].None(),
-    .IntrinsicGivenDecl(_, _, _, _) then Option[AccessModifier].None(),
+    .ForeignFunctionDecl(access, _, _, _, _, _) or .ForeignLetDecl(access, _, _, _, _, _)
+    or .TypeStructDecl(access, _, _, _, _, _, _) or .TypeEnumDecl(access, _, _, _, _, _)
+    or .TypeAliasDecl(access, _, _, _, _) or .IntrinsicTypeDecl(access, _, _, _, _)
+    or .ForeignTypeDecl(access, _, _, _, _) or .TraitDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .UsingDecl(_, _, _, _) or .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
+    or .IntrinsicGivenDecl(_, _, _, _) then Option[AccessModifier].None(),
 };
 
 /// One item of a `using` import list: `Name`, or `Name as Alias`.
@@ -719,84 +692,34 @@ public let span_across_patterns(left: PatternNode, right: PatternNode): SourceSp
 
 public let pattern_span(pattern: PatternNode): SourceSpan = {
     return when pattern in {
-        .Wildcard(span) then span,
-        .Variable(_, _, span) then span,
-        .BoolLiteral(_, span) then span,
-        .NullLiteral(span) then span,
-        .IntegerLiteral(_, span) then span,
-        .NegativeIntegerLiteral(_, span) then span,
-        .FloatLiteral(_, span) then span,
-        .StringLiteral(_, span) then span,
-        .RuneLiteral(_, span) then span,
-        .TraitObjectType(_, span) then span,
-        .TraitObjectTypeBinding(_, _, _, span) then span,
-        .EnumCase(_, _, span) then span,
-        .StructPattern(_, _, span) then span,
-        .TuplePattern(_, span) then span,
-        .ListPattern(_, span) then span,
-        .RestPattern(span) then span,
-        .ComparisonPattern(_, _, _, span) then span,
-        .AndPattern(_, _, span) then span,
-        .OrPattern(_, _, span) then span,
-        .NotPattern(_, span) then span,
-        .WeakBinding(_, _, span) then span,
+        .Wildcard(span) or .Variable(_, _, span) or .BoolLiteral(_, span) or .NullLiteral(span)
+        or .IntegerLiteral(_, span) or .NegativeIntegerLiteral(_, span) or .FloatLiteral(_, span)
+        or .StringLiteral(_, span) or .RuneLiteral(_, span) or .TraitObjectType(_, span)
+        or .TraitObjectTypeBinding(_, _, _, span) or .EnumCase(_, _, span) or .StructPattern(_, _, span)
+        or .TuplePattern(_, span) or .ListPattern(_, span) or .RestPattern(span)
+        or .ComparisonPattern(_, _, _, span) or .AndPattern(_, _, span) or .OrPattern(_, _, span)
+        or .NotPattern(_, span) or .WeakBinding(_, _, span) then span,
     };
 };
 
 public let expr_span(expr: Expr): SourceSpan = {
     return when expr in {
-        .Identifier(_, span) then span,
-        .IntegerLiteral(_, span) then span,
-        .FloatLiteral(_, span) then span,
-        .StringLiteral(_, span) then span,
-        .RuneLiteral(_, span) then span,
-        .InterpolatedString(_, span) then span,
-        .BoolLiteral(_, span) then span,
-        .NullLiteral(span) then span,
-        .CastExpr(_, _, span) then span,
-        .TypeRef(_, span) then span,
-        .Unary(_, _, span) then span,
-        .RefExpr(_, _, span) then span,
-        .WeakrefExpr(_, span) then span,
-        .PtrExpr(_, _, span) then span,
-        .UpgradeExpr(_, span) then span,
-        .DerefExpr(_, span) then span,
-        .UnsafeDerefExpr(_, span) then span,
-        .ArithmeticExpr(_, _, _, span) then span,
-        .ComparisonExpr(_, _, _, span) then span,
-        .ComparisonChainExpr(_, _, span) then span,
-        .BitwiseExpr(_, _, _, span) then span,
-        .AndExpr(_, _, span) then span,
-        .OrExpr(_, _, span) then span,
-        .RangeExpr(_, _, _, span) then span,
-        .OrElseExpr(_, _, span) then span,
-        .OrReturnExpr(_, span) then span,
-        .AndThenExpr(_, _, span) then span,
-        .FlowReceiver(span) then span,
-        .FlowChainExpr(_, span) then span,
-        .FlowBindExpr(_, _, span) then span,
-        .IsExpr(_, _, span) then span,
-        .IsNotExpr(_, _, span) then span,
-        .CollectionLiteral(_, span) then span,
-        .DictLiteral(_, span) then span,
-        .EmptyLiteral(span) then span,
-        .NamedArgument(_, _, span) then span,
-        .Call(_, _, span) then span,
-        .MemberPath(_, _, span) then span,
-        .TraitQualificationExpr(_, _, span) then span,
-        .GenericMethodCall(_, _, _, _, span) then span,
-        .QualifiedMethodCall(_, _, _, _, span) then span,
-        .QualifiedGenericMethodCall(_, _, _, _, _, span) then span,
-        .GenericInstantiation(_, _, span) then span,
-        .StaticMethodCall(_, _, _, _, span) then span,
-        .TypeRefStaticMethodCall(_, _, _, _, span) then span,
-        .SubscriptExpr(_, _, span) then span,
-        .Block(_, _, span) then span,
-        .IfExpr(_, _, _, span) then span,
-        .WhileExpr(_, _, span) then span,
-        .ForExpr(_, _, _, _, span) then span,
-        .WhenExpr(_, _, span) then span,
-        .LambdaExpr(_, _, _, span) then span,
-        .ImplicitMemberExpr(_, _, span) then span,
+        .Identifier(_, span) or .IntegerLiteral(_, span) or .FloatLiteral(_, span) or .StringLiteral(_, span)
+        or .RuneLiteral(_, span) or .InterpolatedString(_, span) or .BoolLiteral(_, span)
+        or .NullLiteral(span) or .CastExpr(_, _, span) or .TypeRef(_, span) or .Unary(_, _, span)
+        or .RefExpr(_, _, span) or .WeakrefExpr(_, span) or .PtrExpr(_, _, span) or .UpgradeExpr(_, span)
+        or .DerefExpr(_, span) or .UnsafeDerefExpr(_, span) or .ArithmeticExpr(_, _, _, span)
+        or .ComparisonExpr(_, _, _, span) or .ComparisonChainExpr(_, _, span) or .BitwiseExpr(_, _, _, span)
+        or .AndExpr(_, _, span) or .OrExpr(_, _, span) or .RangeExpr(_, _, _, span) or .OrElseExpr(_, _, span)
+        or .OrReturnExpr(_, span) or .AndThenExpr(_, _, span) or .FlowReceiver(span)
+        or .FlowChainExpr(_, span) or .FlowBindExpr(_, _, span) or .IsExpr(_, _, span)
+        or .IsNotExpr(_, _, span) or .CollectionLiteral(_, span) or .DictLiteral(_, span)
+        or .EmptyLiteral(span) or .NamedArgument(_, _, span) or .Call(_, _, span) or .MemberPath(_, _, span)
+        or .TraitQualificationExpr(_, _, span) or .GenericMethodCall(_, _, _, _, span)
+        or .QualifiedMethodCall(_, _, _, _, span) or .QualifiedGenericMethodCall(_, _, _, _, _, span)
+        or .GenericInstantiation(_, _, span) or .StaticMethodCall(_, _, _, _, span)
+        or .TypeRefStaticMethodCall(_, _, _, _, span) or .SubscriptExpr(_, _, span) or .Block(_, _, span)
+        or .IfExpr(_, _, _, span) or .WhileExpr(_, _, span) or .ForExpr(_, _, _, _, span)
+        or .WhenExpr(_, _, span) or .LambdaExpr(_, _, _, span) or .ImplicitMemberExpr(_, _, span) then span,
     };
 };

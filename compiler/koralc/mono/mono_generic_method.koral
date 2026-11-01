@@ -27,27 +27,8 @@ let type_mentions_method_type_params(
             };
             false
         },
-        .ReferenceType(inner) then type_mentions_method_type_params(
-            inner,
-            type_param_names,
-        ),
-        .MutableReferenceType(inner) then type_mentions_method_type_params(
-            inner,
-            type_param_names,
-        ),
-        .PointerType(inner) then type_mentions_method_type_params(
-            inner,
-            type_param_names,
-        ),
-        .MutablePointerType(inner) then type_mentions_method_type_params(
-            inner,
-            type_param_names,
-        ),
-        .WeakReferenceType(inner) then type_mentions_method_type_params(
-            inner,
-            type_param_names,
-        ),
-        .MutableWeakReferenceType(inner) then type_mentions_method_type_params(
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
+        or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then type_mentions_method_type_params(
             inner,
             type_param_names,
         ),
@@ -60,15 +41,7 @@ let type_mentions_method_type_params(
             };
             type_mentions_method_type_params(return_type, type_param_names)
         },
-        .GenericStruct(_, args) then {
-            for arg in args then {
-                if type_mentions_method_type_params(arg, type_param_names) then {
-                    return true;
-                };
-            };
-            false
-        },
-        .GenericEnum(_, args) then {
+        .GenericStruct(_, args) or .GenericEnum(_, args) then {
             for arg in args then {
                 if type_mentions_method_type_params(arg, type_param_names) then {
                     return true;
@@ -174,14 +147,15 @@ let infer_extension_method_type_args(
     };
 
     let mutable method_bindings = Dict[String, Type].new();
-    let mutable i: UInt = 0;
-    while i < pattern_param_types.count() then {
+    for pair in pattern_param_types.lazy().zip[Type, ListIterator[Type], List[Type]](
+        actual_param_types,
+    ) then {
         // Handle implicit ref/ref mutable conversions: if the pattern has a reference
         // wrapper but the actual doesn't, wrap the actual to match.
         // e.g., pattern `ref mutable List[T]` with actual `List[CaseInfo]` becomes
         //       pattern `ref mutable List[T]` with actual `ref mutable List[CaseInfo]`.
-        let mutable pattern_type = (pattern_param_types[i]);
-        let mutable actual_type = (actual_param_types[i]);
+        let mutable pattern_type = (pair.first);
+        let mutable actual_type = (pair.second);
         let adapted_actual = when pattern_type in {
             .ReferenceType(_) then when actual_type in {
                 .ReferenceType(_) then actual_type,
@@ -192,13 +166,11 @@ let infer_extension_method_type_args(
                 _ then Type.MutableReferenceType(actual_type),
             },
             .BorrowedReferenceType(_) then when actual_type in {
-                .BorrowedReferenceType(_) then actual_type,
-                .ReferenceType(_) then actual_type,
+                .BorrowedReferenceType(_) or .ReferenceType(_) then actual_type,
                 _ then Type.BorrowedReferenceType(actual_type),
             },
             .MutableBorrowedReferenceType(_) then when actual_type in {
-                .MutableBorrowedReferenceType(_) then actual_type,
-                .MutableReferenceType(_) then actual_type,
+                .MutableBorrowedReferenceType(_) or .MutableReferenceType(_) then actual_type,
                 _ then Type.MutableBorrowedReferenceType(actual_type),
             },
             _ then actual_type,
@@ -214,7 +186,6 @@ let infer_extension_method_type_args(
                 return Option[List[Type]].None();
             };
         };
-        i += 1;
     };
 
     let concrete_expected = resolve_parameterized_type(mono, expected_return_type);
@@ -288,10 +259,11 @@ let infer_method_type_args_from_symbol_type(
     };
 
     let mutable method_bindings = Dict[String, Type].new();
-    let mutable i: UInt = 0;
-    while i < pattern_param_types.count() then {
-        let mutable pattern_type = (pattern_param_types[i]);
-        let mutable actual_type = (actual_param_types[i]);
+    for pair in pattern_param_types.lazy().zip[Type, ListIterator[Type], List[Type]](
+        actual_param_types,
+    ) then {
+        let mutable pattern_type = (pair.first);
+        let mutable actual_type = (pair.second);
         let adapted_actual = when pattern_type in {
             .ReferenceType(_) then when actual_type in {
                 .ReferenceType(_) then actual_type,
@@ -302,13 +274,11 @@ let infer_method_type_args_from_symbol_type(
                 _ then Type.MutableReferenceType(actual_type),
             },
             .BorrowedReferenceType(_) then when actual_type in {
-                .BorrowedReferenceType(_) then actual_type,
-                .ReferenceType(_) then actual_type,
+                .BorrowedReferenceType(_) or .ReferenceType(_) then actual_type,
                 _ then Type.BorrowedReferenceType(actual_type),
             },
             .MutableBorrowedReferenceType(_) then when actual_type in {
-                .MutableBorrowedReferenceType(_) then actual_type,
-                .MutableReferenceType(_) then actual_type,
+                .MutableBorrowedReferenceType(_) or .MutableReferenceType(_) then actual_type,
                 _ then Type.MutableBorrowedReferenceType(actual_type),
             },
             _ then actual_type,
@@ -322,7 +292,6 @@ let infer_method_type_args_from_symbol_type(
         ) then {
             return Option[List[Type]].None();
         };
-        i += 1;
     };
 
     let concrete_expected = resolve_parameterized_type(mono, expected_return_type);

@@ -18,10 +18,8 @@ public type ExhaustivenessChecker(
 
 private let render_list_shape(slots: Int, rest: Bool): String = {
     let mutable parts = List[String].new();
-    let mutable i = 0;
-    while i < slots then {
+    for _ in 0..<slots then {
         parts.push("_");
-        i += 1;
     };
     if rest then {
         parts.push("...");
@@ -367,8 +365,7 @@ given ExhaustivenessChecker {
                     let type_name = type_to_string(self.subject_type);
                     // Unknown 类型和 TypeVar 跳过穷举性检查
                     when self.subject_type in {
-                        .Unknown() then {},
-                        .TypeVar(_) then {},
+                        .Unknown() or .TypeVar(_) then {},
                         _ then {
                             let message = self.missing_catchall_message(type_name);
                             return Result[Void].Error(message.to_string());
@@ -635,12 +632,7 @@ given ExhaustivenessChecker {
     /// intersects: exactly the coverage semantics of the pattern itself.
     private pattern_int_spans(self, pattern: TypedPattern): List[PatternSpace] = {
         return when pattern in {
-            .Wildcard() then {
-                let mutable spans = List[PatternSpace].new();
-                spans.push(PatternSpace.IntRange(false, 0, false, 0));
-                spans
-            },
-            .Variable(_) then {
+            .Wildcard() or .Variable(_) then {
                 let mutable spans = List[PatternSpace].new();
                 spans.push(PatternSpace.IntRange(false, 0, false, 0));
                 spans
@@ -794,10 +786,7 @@ given ExhaustivenessChecker {
             // range cannot hold "everything except a hole"), so an unchanged
             // space says nothing about the pattern being covered already.
             .IntegerLiteral(_) then true,
-            .NegativeIntegerLiteral(_) then true,
-            .FloatLiteral(_) then true,
-            .StringLiteral(_, _) then true,
-            .ComparisonPattern(_, _) then true,
+            .NegativeIntegerLiteral(_) or .FloatLiteral(_) or .StringLiteral(_, _) or .ComparisonPattern(_, _) then true,
             .ListPattern(_, elements) then {
                 for element in elements then {
                     if not typed_pattern_is_irrefutable(element) then {
@@ -806,7 +795,7 @@ given ExhaustivenessChecker {
                 };
                 false
             },
-            .EnumCase(_, _, elements) then {
+            .EnumCase(_, _, elements) or .StructPattern(_, elements) then {
                 for element in elements then {
                     if self.coverage_is_approximate(element.pattern) then {
                         return true;
@@ -814,18 +803,7 @@ given ExhaustivenessChecker {
                 };
                 false
             },
-            .StructPattern(_, elements) then {
-                for element in elements then {
-                    if self.coverage_is_approximate(element.pattern) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .AndPattern(left, right) then self.coverage_is_approximate(left) or self.coverage_is_approximate(
-                right,
-            ),
-            .OrPattern(left, right) then self.coverage_is_approximate(left) or self.coverage_is_approximate(
+            .AndPattern(left, right) or .OrPattern(left, right) then self.coverage_is_approximate(left) or self.coverage_is_approximate(
                 right,
             ),
             .NotPattern(inner) then self.coverage_is_approximate(inner),
@@ -839,17 +817,17 @@ given ExhaustivenessChecker {
         let mutable catchall_index: UInt = 0;
         let mutable catchall_pattern_desc = StringBuilder.new();
         catchall_pattern_desc.push_string("");
-        let mutable pattern_index: UInt = 0;
         let mutable remaining_space = self.initial_finite_pattern_space();
         let mutable seen_patterns = Set[String].new();
 
-        for p in self.patterns.iterator() then {
+        for pair in self.patterns.lazy().enumerate() then {
+            let pattern_index = pair.first;
+            let p = pair.second;
             // An invented arm -- the synthetic else of a desugared if-is /
             // while-is -- still counts for coverage but draws no complaint of
             // its own: nothing anyone wrote is "already covered" by it, and it
             // never stands as the catchall a later pattern would follow.
             if self.synthetic_indices.contains(pattern_index) then {
-                pattern_index += 1;
                 continue;
             };
             // Skip duplicate check for patterns with variable bindings --
@@ -909,7 +887,6 @@ given ExhaustivenessChecker {
                 catchall_index = pattern_index;
                 catchall_pattern_desc = StringBuilder.new();
                 catchall_pattern_desc.push_string(pattern_description(p, self.context));
-                pattern_index += 1;
                 continue;
             };
 
@@ -930,8 +907,6 @@ given ExhaustivenessChecker {
                     covered_trait_object_types.insert(type_name);
                 };
             };
-
-            pattern_index += 1;
         };
 
         return Result[Void].Ok({});
@@ -1095,12 +1070,10 @@ given ExhaustivenessChecker {
     ): Type = {
         return when t in {
             .GenericParameter(name) then {
-                let mutable idx: UInt = 0;
-                while idx < param_names.count() then {
-                    if param_names[idx] == name and idx < args.count() then {
-                        return args[idx];
+                for pair in param_names.lazy().enumerate() then {
+                    if pair.second == name and pair.first < args.count() then {
+                        return (args[pair.first]);
                     };
-                    idx += 1;
                 };
                 t
             },
@@ -1145,12 +1118,10 @@ given ExhaustivenessChecker {
             .ListLengths(_, covered_exact, covered_tail_from) then {
                 when covered_tail_from in {
                     .Some(tail) then {
-                        let mutable length = 0;
-                        while length < tail then {
+                        for length in 0..<tail then {
                             if not covered_exact.contains(length) then {
                                 return false;
                             };
-                            length += 1;
                         };
                         true
                     },
@@ -1187,15 +1158,17 @@ given ExhaustivenessChecker {
                         if left_fields.count() != right_fields.count() then {
                             return false;
                         };
-                        let mutable idx: UInt = 0;
-                        while idx < left_fields.count() then {
+                        for pair in left_fields.lazy().zip[
+                            PatternSpace,
+                            ListIterator[PatternSpace],
+                            List[PatternSpace],
+                        ](right_fields) then {
                             if not self.pattern_space_equals(
-                                left_fields[idx],
-                                right_fields[idx],
+                                (pair.first),
+                                (pair.second),
                             ) then {
                                 return false;
                             };
-                            idx += 1;
                         };
                     };
                     true
@@ -1406,8 +1379,7 @@ given ExhaustivenessChecker {
         subject_type: Type,
     ): PatternSpace = {
         return when pattern in {
-            .Wildcard() then PatternSpace.Empty(),
-            .Variable(_) then PatternSpace.Empty(),
+            .Wildcard() or .Variable(_) then PatternSpace.Empty(),
             .BoolLiteral(value) then self.subtract_bool(space, value),
             // A literal or comparison claims nothing here: one contiguous
             // range cannot express "everything except a hole", so any
@@ -1415,9 +1387,7 @@ given ExhaustivenessChecker {
             // Integer coverage is judged by `pattern_int_spans` instead --
             // the same stance the reference compiler takes.
             .IntegerLiteral(_) then space,
-            .NegativeIntegerLiteral(_) then space,
-            .NullLiteral(_) then space,
-            .ComparisonPattern(_, _) then space,
+            .NegativeIntegerLiteral(_) or .NullLiteral(_) or .ComparisonPattern(_, _) then space,
             .EnumCase(case_name, _, elements) then self.subtract_enum_case(
                 space,
                 case_name,
@@ -1544,16 +1514,13 @@ given ExhaustivenessChecker {
         subject_type: Type,
     ): Bool = {
         return when pattern in {
-            .Wildcard() then true,
-            .Variable(_) then true,
+            .Wildcard() or .Variable(_) then true,
             .BoolLiteral(_) then space is .BoolValues(_, _),
             // A literal or comparison subtracts nothing (one contiguous range
             // cannot hold "everything except a hole"), so an unchanged space
             // says nothing about the pattern being covered already.
             .IntegerLiteral(_) then false,
-            .NegativeIntegerLiteral(_) then false,
-            .NullLiteral(_) then false,
-            .ComparisonPattern(_, _) then false,
+            .NegativeIntegerLiteral(_) or .NullLiteral(_) or .ComparisonPattern(_, _) then false,
             .EnumCase(case_name, _, elements) then {
                 let case_fields = when space in {
                     .Full(_) then self.enum_case_map_for_type(subject_type).get(
@@ -1570,27 +1537,24 @@ given ExhaustivenessChecker {
                 if case_fields.count() != elements.count() then {
                     return false;
                 };
-                let mutable idx: UInt = 0;
-                while idx < elements.count() then {
-                    let field_space = case_fields[idx];
+                for pair in case_fields.lazy().zip[
+                    TypedPatternElement,
+                    ListIterator[TypedPatternElement],
+                    List[TypedPatternElement],
+                ](elements) then {
+                    let field_space = pair.first;
                     let mutable field_type = self.pattern_space_type(field_space);
                     if not self.can_precisely_subtract_pattern(
                         field_space,
-                        elements[idx].pattern,
+                        pair.second.pattern,
                         field_type,
                     ) then {
                         return false;
                     };
-                    idx += 1;
                 };
                 true
             },
-            .OrPattern(left, right) then self.can_precisely_subtract_pattern(
-                space,
-                left,
-                subject_type,
-            ) and self.can_precisely_subtract_pattern(space, right, subject_type),
-            .AndPattern(left, right) then self.can_precisely_subtract_pattern(
+            .OrPattern(left, right) or .AndPattern(left, right) then self.can_precisely_subtract_pattern(
                 space,
                 left,
                 subject_type,
@@ -1685,13 +1649,15 @@ given ExhaustivenessChecker {
             return fields;
         };
         let mutable result = List[PatternSpace].new();
-        let mutable idx: UInt = 0;
-        while idx < fields.count() then {
-            let field_space = fields[idx];
-            let element = elements[idx];
+        for pair in fields.lazy().zip[
+            TypedPatternElement,
+            ListIterator[TypedPatternElement],
+            List[TypedPatternElement],
+        ](elements) then {
+            let field_space = pair.first;
+            let element = pair.second;
             let mutable field_type = self.pattern_space_type(field_space);
             result.push(self.subtract_pattern(field_space, element.pattern, field_type));
-            idx += 1;
         };
         return result;
     };
@@ -1699,8 +1665,7 @@ given ExhaustivenessChecker {
     private pattern_space_type(self, space: PatternSpace): Type = {
         let _ = self;
         return when space in {
-            .Full(t) then t,
-            .ListLengths(t, _, _) then t,
+            .Full(t) or .ListLengths(t, _, _) then t,
             .BoolValues(_, _) then Type.BoolType(),
             .EnumCases(_, _) then Type.Unknown(),
             _ then Type.Unknown(),
@@ -1829,12 +1794,10 @@ given ExhaustivenessChecker {
             },
         };
         let mutable result = List[String].new();
-        let mutable length = 0;
-        while length < tail_start then {
+        for length in 0..<tail_start then {
             if not covered_exact.contains(length) then {
                 result.push(render_list_shape(length, false));
             };
-            length += 1;
         };
         if covered_tail_from is .None() then {
             result.push(render_list_shape(tail_start, true));
@@ -2134,10 +2097,8 @@ given ExhaustivenessChecker {
 // 判断模式是否为 catchall（通配符或绑定模式）
 public let is_catchall(pattern: TypedPattern): Bool = {
     return when pattern in {
-        .Wildcard() then true,
-        .Variable(_) then true,
-        .TraitObjectType(_) then false,
-        .TraitObjectTypeBinding(_, _) then false,
+        .Wildcard() or .Variable(_) then true,
+        .TraitObjectType(_) or .TraitObjectTypeBinding(_, _) then false,
         .OrPattern(left, right) then is_catchall(left) or is_catchall(right),
         .AndPattern(left, right) then is_catchall(left) and is_catchall(right),
         .NotPattern(_) then false,
@@ -2315,10 +2276,7 @@ public let collect_trait_object_types(
 ): Set[String] = {
     let mutable covered = Set[String].new();
     when pattern in {
-        .TraitObjectType(target_type) then {
-            covered.insert(context.type_display_name(target_type));
-        },
-        .TraitObjectTypeBinding(_, target_type) then {
+        .TraitObjectType(target_type) or .TraitObjectTypeBinding(_, target_type) then {
             covered.insert(context.type_display_name(target_type));
         },
         .OrPattern(left, right) then {

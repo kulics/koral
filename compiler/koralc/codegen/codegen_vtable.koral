@@ -227,10 +227,10 @@ given CodeGen {
 
         when self.program.trait_by_def_id(trait_def_id) in {
             .Some(info) then {
-                let mutable idx: UInt = 0;
-                while idx < info.type_params.count() and idx < trait_type_args.count() then {
-                    bindings.insert(info.type_params[idx].name, trait_type_args[idx]);
-                    idx += 1;
+                for pair in info.type_params.lazy().zip[Type, ListIterator[Type], List[Type]](
+                    trait_type_args,
+                ) then {
+                    bindings.insert(pair.first.name, pair.second);
                 };
             },
             .None() then {},
@@ -367,10 +367,7 @@ given CodeGen {
                 }
             },
             .InferredSelf(span) then {
-                when bindings.get("Self") in {
-                    .Some(bound) then bound,
-                    .None() then Type.Unknown(),
-                }
+                bindings.get("Self") or else Type.Unknown()
             },
             .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
@@ -430,28 +427,9 @@ given CodeGen {
             self.concretize_codegen_type(t),
         );
         return when resolved in {
-            .ReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .MutableReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .BorrowedReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .MutableBorrowedReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .WeakReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .MutableWeakReferenceType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .PointerType(inner) then self.normalize_vtable_receiver_type(
-                self.concretize_codegen_type(inner),
-            ),
-            .MutablePointerType(inner) then self.normalize_vtable_receiver_type(
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then self.normalize_vtable_receiver_type(
                 self.concretize_codegen_type(inner),
             ),
             _ then resolved,
@@ -662,16 +640,10 @@ given CodeGen {
 
     type_module_path(self, t: Type): List[String] = {
         return when t in {
-            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
-            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
-            ),
-            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
-            ),
-            .ReferenceType(inner) then self.type_module_path(inner),
-            .MutableReferenceType(inner) then self.type_module_path(inner),
-            .BorrowedReferenceType(inner) then self.type_module_path(inner),
-            .MutableBorrowedReferenceType(inner) then self.type_module_path(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then self.type_module_path(inner),
             _ then List[String].new(),
         };
     };
@@ -993,8 +965,7 @@ given CodeGen {
         );
 
         let has_copy = when wrapper_self_type in {
-            .StructureType(_) then true,
-            .EnumType(_) then true,
+            .StructureType(_) or .EnumType(_) then true,
             _ then false,
         };
 
@@ -1027,8 +998,7 @@ given CodeGen {
                         actual_param_type,
                     ) then {
                         actual_arg = when actual_param_type in {
-                            .StructureType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
-                            .EnumType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
+                            .StructureType(def_id) or .EnumType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
                             _ then "*(\(actual_c_type)*)\(extra).ptr",
                         };
                     };
@@ -1045,8 +1015,7 @@ given CodeGen {
             self.vtable_method_return_type(member),
         );
         let dynamic_trait_self_wrapper = when wrapper_self_type in {
-            .ReferenceType(inner_ref) then inner_ref is .TraitObject(...),
-            .MutableReferenceType(inner_ref) then inner_ref is .TraitObject(...),
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then inner_ref is .TraitObject(...),
             _ then false,
         };
 
@@ -1220,9 +1189,9 @@ given CodeGen {
         concrete_type: Type,
     ): List[MIRTraitVTableMethod] = {
         let mutable members = members;
-        let mutable idx: UInt = 0;
-        while idx < members.count() then {
-            let member = members[idx];
+        for pair in members.lazy().enumerate() then {
+            let idx = pair.first;
+            let member = pair.second;
             when self.resolve_method_def_id(
                 concrete_type,
                 trait_name,
@@ -1242,11 +1211,10 @@ given CodeGen {
                                 actual_method_def_id,
                             );
                             let mutable params = List[MIRTraitVTableParameter].new();
-                            let mutable param_index: UInt = 0;
                             let param_count = self.function_type_param_count(
                                 function_type,
                             );
-                            while param_index < param_count then {
+                            for param_index in 0..<param_count then {
                                 let mutable param_type = self.function_type_param_type(
                                     function_type,
                                     param_index,
@@ -1283,7 +1251,6 @@ given CodeGen {
                                         is_self,
                                     ),
                                 );
-                                param_index += 1;
                             };
                             members[idx] = MIRTraitVTableMethod(
                                 member.trait_method_def_id,
@@ -1300,7 +1267,6 @@ given CodeGen {
                 },
                 .None() then {},
             };
-            idx += 1;
         };
         return members;
     };
@@ -1402,14 +1368,9 @@ given CodeGen {
             return false;
         };
         return when first.param_type in {
-            .ReferenceType(_) then false,
-            .MutableReferenceType(_) then false,
-            .BorrowedReferenceType(_) then false,
-            .MutableBorrowedReferenceType(_) then false,
-            .WeakReferenceType(_) then false,
-            .MutableWeakReferenceType(_) then false,
-            .PointerType(_) then false,
-            .MutablePointerType(_) then false,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_)
+            or .PointerType(_) or .MutablePointerType(_) then false,
             _ then true,
         };
     };
@@ -1511,17 +1472,18 @@ given CodeGen {
         // Identity: the parent constraint carries the declaration it names.
         when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
-                let mutable idx: UInt = 0;
-                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count(
-                ) then {
+                for pair in parent_info.type_params.lazy().zip[
+                    TypeNode,
+                    ListIterator[TypeNode],
+                    List[TypeNode],
+                ](parent.type_arg_nodes) then {
                     result.insert(
-                        parent_info.type_params[idx].name,
+                        pair.first.name,
                         self.resolve_type_node_for_vtable(
-                            parent.type_arg_nodes[idx],
+                            pair.second,
                             bindings,
                         ),
                     );
-                    idx += 1;
                 };
             },
             .None() then {},
@@ -1546,14 +1508,9 @@ given CodeGen {
             let is_self = param.name == "self";
             if param_index == 0 and is_self then {
                 self_by_value = when bound_type in {
-                    .ReferenceType(_) then false,
-                    .MutableReferenceType(_) then false,
-                    .BorrowedReferenceType(_) then false,
-                    .MutableBorrowedReferenceType(_) then false,
-                    .WeakReferenceType(_) then false,
-                    .MutableWeakReferenceType(_) then false,
-                    .PointerType(_) then false,
-                    .MutablePointerType(_) then false,
+                    .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                    or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+                    or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then false,
                     _ then true,
                 };
             };
@@ -1597,10 +1554,8 @@ given CodeGen {
             .TraitObject(trait_def_id, args) then Option[CanonicalTraitRef].Some(
                 CanonicalTraitRef(def_id_spelling(trait_def_id), trait_def_id, args),
             ),
-            .ReferenceType(inner) then self.trait_target_ref(inner),
-            .MutableReferenceType(inner) then self.trait_target_ref(inner),
-            .BorrowedReferenceType(inner) then self.trait_target_ref(inner),
-            .MutableBorrowedReferenceType(inner) then self.trait_target_ref(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then self.trait_target_ref(inner),
             _ then Option[CanonicalTraitRef].None(),
         };
     };
@@ -1608,19 +1563,10 @@ given CodeGen {
     trait_conversion_source_concrete_type(self, t: Type): Option[Type] = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
-            .MutableReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .StructureType(_) then Option[Type].Some(t),
-            .EnumType(_) then Option[Type].Some(t),
-            .OpaqueType(_) then Option[Type].Some(t),
-            .GenericStruct(...) then Option[Type].Some(t),
-            .GenericEnum(...) then Option[Type].Some(t),
+            .StructureType(_) or .EnumType(_) or .OpaqueType(_) or .GenericStruct(...) or .GenericEnum(...) then Option[Type].Some(t),
             _ then Option[Type].None(),
         };
     };
@@ -1639,9 +1585,7 @@ given CodeGen {
         return when operand in {
             .Local(local) then local_types.get(local.raw_value) or else Type.Unknown(),
             .Constant(constant) then when constant in {
-                .Integer(_, constant_type) then constant_type,
-                .Float(_, constant_type) then constant_type,
-                .StringLiteral(_, constant_type) then constant_type,
+                .Integer(_, constant_type) or .Float(_, constant_type) or .StringLiteral(_, constant_type) then constant_type,
                 .Boolean(_) then Type.BoolType(),
                 .Void() then Type.VoidType(),
             },
@@ -1691,12 +1635,9 @@ given CodeGen {
             ),
             .Cast(_, target_type, _) then target_type,
             .Intrinsic(node) then when node in {
-                .AllocMemory(_, result_type) then result_type,
-                .DowngradeRef(_, result_type) then result_type,
-                .UpgradeRef(_, result_type) then result_type,
-                .TakeMemory(_, result_type) then result_type,
-                .NullPtr(result_type) then result_type,
-                .TraitObjectDowncast(_, result_type) then result_type,
+                .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
+                or .TakeMemory(_, result_type) or .NullPtr(result_type)
+                or .TraitObjectDowncast(_, result_type) then result_type,
                 _ then Type.Unknown(),
             },
             .Lambda(lambda) then lambda.lambda_type,
@@ -1912,7 +1853,7 @@ given CodeGen {
                 local_types,
                 requests,
             ),
-            .CopyMemory(dest, source, count) then {
+            .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
                 self.collect_implicit_trait_object_vtable_requests_in_value(
                     dest,
                     local_types,
@@ -1929,29 +1870,7 @@ given CodeGen {
                     requests,
                 );
             },
-            .MoveMemory(dest, source, count) then {
-                self.collect_implicit_trait_object_vtable_requests_in_value(
-                    dest,
-                    local_types,
-                    requests,
-                );
-                self.collect_implicit_trait_object_vtable_requests_in_value(
-                    source,
-                    local_types,
-                    requests,
-                );
-                self.collect_implicit_trait_object_vtable_requests_in_value(
-                    count,
-                    local_types,
-                    requests,
-                );
-            },
-            .DowngradeRef(value, _) then self.collect_implicit_trait_object_vtable_requests_in_value(
-                value,
-                local_types,
-                requests,
-            ),
-            .UpgradeRef(value, _) then self.collect_implicit_trait_object_vtable_requests_in_value(
+            .DowngradeRef(value, _) or .UpgradeRef(value, _) then self.collect_implicit_trait_object_vtable_requests_in_value(
                 value,
                 local_types,
                 requests,
@@ -2030,17 +1949,7 @@ given CodeGen {
                 local_types,
                 requests,
             ),
-            .Retain(value) then self.collect_implicit_trait_object_vtable_requests_in_value(
-                value,
-                local_types,
-                requests,
-            ),
-            .Release(value) then self.collect_implicit_trait_object_vtable_requests_in_value(
-                value,
-                local_types,
-                requests,
-            ),
-            .Evaluate(value) then self.collect_implicit_trait_object_vtable_requests_in_value(
+            .Retain(value) or .Release(value) or .Evaluate(value) then self.collect_implicit_trait_object_vtable_requests_in_value(
                 value,
                 local_types,
                 requests,
@@ -2063,29 +1972,13 @@ given CodeGen {
                 pointer,
                 out,
             ),
-            .CopyMemory(dest, source, count) then {
+            .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
                 self.collect_trait_object_conversions_in_value(dest, out);
                 self.collect_trait_object_conversions_in_value(source, out);
                 self.collect_trait_object_conversions_in_value(count, out);
             },
-            .MoveMemory(dest, source, count) then {
-                self.collect_trait_object_conversions_in_value(dest, out);
-                self.collect_trait_object_conversions_in_value(source, out);
-                self.collect_trait_object_conversions_in_value(count, out);
-            },
-            .DowngradeRef(value, _) then self.collect_trait_object_conversions_in_value(
-                value,
-                out,
-            ),
-            .UpgradeRef(value, _) then self.collect_trait_object_conversions_in_value(
-                value,
-                out,
-            ),
-            .TraitObjectMatches(value, _, _, _, _) then self.collect_trait_object_conversions_in_value(
-                value,
-                out,
-            ),
-            .TraitObjectDowncast(value, _) then self.collect_trait_object_conversions_in_value(
+            .DowngradeRef(value, _) or .UpgradeRef(value, _) or .TraitObjectMatches(value, _, _, _, _)
+            or .TraitObjectDowncast(value, _) then self.collect_trait_object_conversions_in_value(
                 value,
                 out,
             ),
@@ -2093,11 +1986,7 @@ given CodeGen {
                 self.collect_trait_object_conversions_in_value(pointer, out);
                 self.collect_trait_object_conversions_in_value(value, out);
             },
-            .DeinitMemory(pointer) then self.collect_trait_object_conversions_in_value(
-                pointer,
-                out,
-            ),
-            .TakeMemory(pointer, _) then self.collect_trait_object_conversions_in_value(
+            .DeinitMemory(pointer) or .TakeMemory(pointer, _) then self.collect_trait_object_conversions_in_value(
                 pointer,
                 out,
             ),
@@ -2168,15 +2057,7 @@ given CodeGen {
                 assignment.value,
                 out,
             ),
-            .Retain(value) then self.collect_trait_object_conversions_in_value(
-                value,
-                out,
-            ),
-            .Release(value) then self.collect_trait_object_conversions_in_value(
-                value,
-                out,
-            ),
-            .Evaluate(value) then self.collect_trait_object_conversions_in_value(
+            .Retain(value) or .Release(value) or .Evaluate(value) then self.collect_trait_object_conversions_in_value(
                 value,
                 out,
             ),
@@ -2291,35 +2172,25 @@ given CodeGen {
             };
         };
 
-        // 按 vtable 身份排序（插入排序）。身份含 trait 的 DECLARATION，两个
+        // 按 vtable 身份排序。身份含 trait 的 DECLARATION，两个
         // 同名 trait 才不会在第一步就比成相等。
-        let n = sorted_requests.count();
-        let mutable i: UInt = 1;
-        while i < n then {
-            let key_req = sorted_requests[i];
-            let key_str = self.trait_vtable_identity_key(
-                key_req.concrete_type,
-                key_req.trait_def_id,
-                key_req.trait_type_args,
-            );
-            let mutable j = i;
-            while j > 0 then {
-                let prev = sorted_requests[j - 1];
-                let prev_str = self.trait_vtable_identity_key(
-                    prev.concrete_type,
-                    prev.trait_def_id,
-                    prev.trait_type_args,
-                );
-                if prev_str > key_str then {
-                    sorted_requests[j] = prev;
-                    j -= 1;
-                } else {
-                    break;
-                };
-            };
-            sorted_requests[j] = key_req;
-            i += 1;
+        let mutable keyed_requests = List[Pair[String, VtableCodegenRequest]].new();
+        for req in sorted_requests then {
+            keyed_requests.push(Pair[String, VtableCodegenRequest](
+                self.trait_vtable_identity_key(
+                    req.concrete_type,
+                    req.trait_def_id,
+                    req.trait_type_args,
+                ),
+                req,
+            ));
         };
+        keyed_requests.sort_by((p) => p.first);
+        let mutable resorted = List[VtableCodegenRequest].new();
+        for keyed in keyed_requests then {
+            resorted.push(keyed.second);
+        };
+        sorted_requests = resorted;
 
         // 追踪已生成的 vtable 结构体（每个 trait 只生成一次）
         let mutable generated_vtable_structs = Set[String].new();
@@ -2336,12 +2207,9 @@ given CodeGen {
 
             // 获取具体类型的 C 标识符
             let concrete_c_name_opt = self.concrete_type_c_name(concrete_type);
-            let concrete_c_name = when concrete_c_name_opt in {
-                .Some(name) then name,
-                .None() then {
-                    // 无法获取 C 名称，跳过
-                    continue;
-                },
+            let concrete_c_name = concrete_c_name_opt or else {
+                // 无法获取 C 名称，跳过
+                continue;
             };
 
             // MIR carries the ordered vtable method layout. Synthesized implicit
@@ -2453,16 +2321,11 @@ given CodeGen {
         let normalized_concrete_type = concrete_type;
         let trait_object_like_source = when normalized_concrete_type in {
             .TraitObject(...) then true,
-            .ReferenceType(inner) then inner is .TraitObject(...),
-            .MutableReferenceType(inner) then inner is .TraitObject(...),
-            .BorrowedReferenceType(inner) then inner is .TraitObject(...),
-            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
             _ then false,
         };
-        let concrete_c_name = when self.concrete_type_c_name(normalized_concrete_type) in {
-            .Some(name) then name,
-            .None() then self.c_type_name(normalized_concrete_type),
-        };
+        let concrete_c_name = self.concrete_type_c_name(normalized_concrete_type) or else self.c_type_name(normalized_concrete_type);
         let vtable_name = self.vtable_instance_name_with_args(
             trait_name,
             trait_def_id,

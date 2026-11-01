@@ -52,11 +52,8 @@ given MIRFunctionBuilder {
 
     intrinsic_result_type(self, intrinsic_node: TypedIntrinsic): Type = {
         return when intrinsic_node in {
-            .AllocMemory(_, result_type) then result_type,
-            .DowngradeRef(_, result_type) then result_type,
-            .UpgradeRef(_, result_type) then result_type,
-            .TakeMemory(_, result_type) then result_type,
-            .NullPtr(result_type) then result_type,
+            .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
+            or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
             _ then Type.VoidType(),
         };
@@ -393,27 +390,8 @@ given MIRFunctionBuilder {
             },
             .MemberPath(base, path) then {
                 let mutable base_place = when base.expr_type in {
-                    .ReferenceType(inner) then MIRPlace.Deref(
-                        self.lower_borrowed_source_value(base),
-                        inner,
-                    ),
-                    .MutableReferenceType(inner) then MIRPlace.Deref(
-                        self.lower_borrowed_source_value(base),
-                        inner,
-                    ),
-                    .WeakReferenceType(inner) then MIRPlace.Deref(
-                        self.lower_borrowed_source_value(base),
-                        inner,
-                    ),
-                    .MutableWeakReferenceType(inner) then MIRPlace.Deref(
-                        self.lower_borrowed_source_value(base),
-                        inner,
-                    ),
-                    .PointerType(inner) then MIRPlace.Deref(
-                        self.lower_borrowed_source_value(base),
-                        inner,
-                    ),
-                    .MutablePointerType(inner) then MIRPlace.Deref(
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner)
+                    or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then MIRPlace.Deref(
                         self.lower_borrowed_source_value(base),
                         inner,
                     ),
@@ -428,56 +406,10 @@ given MIRFunctionBuilder {
                 let mutable current_type = self.place_type(base_place);
                 for segment in path then {
                     when current_type in {
-                        .ReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .BorrowedReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableBorrowedReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .WeakReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableWeakReferenceType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .PointerType(inner) then {
-                            base_place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutablePointerType(inner) then {
+                        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                        or .MutableWeakReferenceType(inner) or .PointerType(inner)
+                        or .MutablePointerType(inner) then {
                             base_place = MIRPlace.Deref(
                                 MIRValue.PlaceRead(base_place, MIROwnershipUse.Borrow()),
                                 inner,
@@ -491,16 +423,7 @@ given MIRFunctionBuilder {
                 };
                 Option[MIRPlace].Some(base_place)
             },
-            .DerefExpr(inner) then {
-                let pointee = self.deref_pointee_type(
-                    inner.expr_type,
-                    expression.expr_type,
-                );
-                Option[MIRPlace].Some(
-                    MIRPlace.Deref(self.lower_borrowed_source_value(inner), pointee),
-                )
-            },
-            .UnsafeDerefExpr(inner) then {
+            .DerefExpr(inner) or .UnsafeDerefExpr(inner) then {
                 let pointee = self.deref_pointee_type(
                     inner.expr_type,
                     expression.expr_type,
@@ -547,12 +470,7 @@ given MIRFunctionBuilder {
         return when expression.expr_kind in {
             .MemberPath(base, path) then {
                 let lowered_base = self.lower_expression(base);
-                let base_result = when lowered_base in {
-                    .Some(result) then result,
-                    .None() then {
-                        return Option[MIRPlace].None();
-                    },
-                };
+                let base_result = lowered_base or return;
                 let base_place = when base_result.place in {
                     .Some(place) then Option[MIRPlace].Some(place),
                     .None() then when base_result.operand in {
@@ -578,65 +496,14 @@ given MIRFunctionBuilder {
                         .None() then Option[MIRPlace].None(),
                     },
                 };
-                let mutable place = when base_place in {
-                    .Some(existing_place) then existing_place,
-                    .None() then {
-                        return Option[MIRPlace].None();
-                    },
-                };
+                let mutable place = base_place or return;
                 let mutable current_type = self.place_type(place);
                 for field in path then {
                     when current_type in {
-                        .ReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .BorrowedReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableBorrowedReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .WeakReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutableWeakReferenceType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .PointerType(inner) then {
-                            place = MIRPlace.Deref(
-                                MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                                inner,
-                            );
-                            current_type = inner;
-                        },
-                        .MutablePointerType(inner) then {
+                        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                        or .MutableWeakReferenceType(inner) or .PointerType(inner)
+                        or .MutablePointerType(inner) then {
                             place = MIRPlace.Deref(
                                 MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                                 inner,

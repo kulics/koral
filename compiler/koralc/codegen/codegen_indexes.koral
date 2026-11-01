@@ -125,10 +125,7 @@ private let collect_c_name_collision_entries(
                 _ then {},
             };
         },
-        .ForeignFunction(identifier, _, _) then {
-            push_foreign_c_name_entry(context, identifier.def_id, out);
-        },
-        .ForeignGlobalVariable(identifier, _, _) then {
+        .ForeignFunction(identifier, _, _) or .ForeignGlobalVariable(identifier, _, _) then {
             push_foreign_c_name_entry(context, identifier.def_id, out);
         },
         .StructDeclaration(identifier, _) then {
@@ -145,16 +142,12 @@ private let collect_c_name_collision_entries(
                 _ then {},
             };
         },
-        .Function(identifier, _, _, _) then {
-            push_plain_c_name_entry(context, identifier.def_id, out);
-        },
-        .GlobalVariable(identifier, _, _, _) then {
+        .Function(identifier, _, _, _) or .GlobalVariable(identifier, _, _, _) then {
             push_plain_c_name_entry(context, identifier.def_id, out);
         },
         .Given(target_type, _, _, methods, _) then {
             when target_type in {
-                .StructureType(def_id) then push_plain_c_name_entry(context, def_id, out),
-                .EnumType(def_id) then push_plain_c_name_entry(context, def_id, out),
+                .StructureType(def_id) or .EnumType(def_id) then push_plain_c_name_entry(context, def_id, out),
                 _ then {},
             };
             for method in methods then {
@@ -183,9 +176,8 @@ private let push_foreign_c_name_entry(
     def_id: DefId,
     out: List[CNameCollisionEntry],
 ): Void = {
-    let c_name = when context.get_cname(def_id) in {
-        .Some(cname) then cname,
-        .None() then context.get_name(def_id) or else "T_\(def_id.id)",
+    let c_name = context.get_cname(def_id) or else {
+        context.get_name(def_id) or else "T_\(def_id.id)"
     };
     push_c_name_entry(context, def_id, c_name, out);
 };
@@ -229,14 +221,7 @@ private let is_compiler_minted_c_name(c_name: String): Bool = {
     if runes[UInt(1)] != '_' then {
         return false;
     };
-    let mutable i: UInt = 2;
-    while i < runes.count() then {
-        if runes[i] < '0' or runes[i] > '9' then {
-            return false;
-        };
-        i += 1;
-    };
-    return true;
+    return runes.lazy().skip(2).all((r) => r >= '0' and r <= '9');
 };
 
 /// 码点序比较：与 UTF-8 字节序同序（UTF-8 保序），与 Swift 端

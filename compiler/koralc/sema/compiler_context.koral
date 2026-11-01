@@ -182,10 +182,7 @@ given CompilerContext {
     };
 
     public is_symbol_mutable(self, def_id: DefId): Bool = {
-        return when self.def_id_map.get_symbol_mutable(def_id) in {
-            .Some(v) then v,
-            .None() then false,
-        };
+        return self.def_id_map.get_symbol_mutable(def_id) or else false;
     };
 
     // ── DefId 查找 ────────────────────────────────────────────────────────
@@ -313,9 +310,7 @@ given CompilerContext {
                     span,
                 ),
             },
-            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
-                .Some(existing) then existing,
-                .None() then self.def_id_map.allocate_full(
+            _ then self.def_id_map.lookup(module_path, name, Option[String].None()) or else self.def_id_map.allocate_full(
                     name,
                     def_kind,
                     module_path,
@@ -324,7 +319,6 @@ given CompilerContext {
                     access,
                     span,
                 ),
-            },
         };
 
         self.def_id_map.set_symbol_info(
@@ -377,9 +371,7 @@ given CompilerContext {
                     span,
                 ),
             },
-            _ then when self.def_id_map.lookup(module_path, name, Option[String].None()) in {
-                .Some(existing) then existing,
-                .None() then self.def_id_map.allocate_full(
+            _ then self.def_id_map.lookup(module_path, name, Option[String].None()) or else self.def_id_map.allocate_full(
                     name,
                     def_kind,
                     module_path,
@@ -388,7 +380,6 @@ given CompilerContext {
                     access,
                     span,
                 ),
-            },
         };
 
         self.def_id_map.set_symbol_info(
@@ -431,16 +422,12 @@ given CompilerContext {
         for entry in self.def_id_map.enum_cases.iterator() then {
             if entry.first == raw_id then {
                 let cases = entry.second;
-                let mutable idx: UInt = 0;
-                for case_info in cases then {
-                    if case_info.name == case_name or case_info.name.ends_with(
-                        ".\(case_name)",
-                    ) then {
-                        return idx;
-                    };
-                    idx += UInt(1);
+                return when cases.lazy().position(
+                    (x) => x.name == case_name or x.name.ends_with(".\(case_name)"),
+                ) in {
+                    .Some(idx) then idx,
+                    .None() then zero,
                 };
-                return zero;
             };
         };
         return zero;
@@ -666,9 +653,7 @@ given CompilerContext {
 
     private requires_managed_nominal_layout_type(self, t: Type): Bool = {
         return when t in {
-            .StructureType(def_id) then self.requires_managed_nominal_layout_def(def_id),
-            .EnumType(def_id) then self.requires_managed_nominal_layout_def(def_id),
-            .OpaqueType(def_id) then self.requires_managed_nominal_layout_def(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.requires_managed_nominal_layout_def(def_id),
             .GenericStruct(template_def_id, _) then {
                 // Identity is the carried `template_def_id` and nothing else.
                 // An invalid one is an error state, not a cue to re-resolve by
@@ -823,21 +808,7 @@ given CompilerContext {
     private direct_nominal_value_dependencies_in_type(self, t: Type): List[DefId] = {
         let mutable result = List[DefId].new();
         when t in {
-            .StructureType(def_id) then {
-                if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(
-                    def_id,
-                ) then {
-                    result.push(def_id);
-                };
-            },
-            .EnumType(def_id) then {
-                if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(
-                    def_id,
-                ) then {
-                    result.push(def_id);
-                };
-            },
-            .OpaqueType(def_id) then {
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
                 if not self.is_struct_mutable(def_id) and not self.has_explicit_drop(
                     def_id,
                 ) then {
@@ -931,10 +902,7 @@ given CompilerContext {
     };
 
     public is_generic_instantiation(self, def_id: DefId): Bool = {
-        return when self.def_id_map.get_generic_instantiation(def_id) in {
-            .Some(v) then v,
-            .None() then false,
-        };
+        return self.def_id_map.get_generic_instantiation(def_id) or else false;
     };
 
     public get_type_arguments(self, def_id: DefId): Option[List[Type]] = {
@@ -975,10 +943,7 @@ given CompilerContext {
         };
         return when self.def_id_map.lookup_type(def_id) in {
             .Some(mapped) then when mapped in {
-                .GenericStruct(tplDefId, _) then Option[String].Some(
-                    def_id_spelling(tplDefId),
-                ),
-                .GenericEnum(tplDefId, _) then Option[String].Some(
+                .GenericStruct(tplDefId, _) or .GenericEnum(tplDefId, _) then Option[String].Some(
                     def_id_spelling(tplDefId),
                 ),
                 _ then Option[String].None(),
@@ -1010,13 +975,8 @@ given CompilerContext {
     public method_owner_of(self, t: Type): MethodOwner = {
         return when t in {
             .TraitObject(trait_def_id, _) then self.method_owner_decl(trait_def_id),
-            .StructureType(def_id) then self.method_owner_decl(def_id),
-            .EnumType(def_id) then self.method_owner_decl(def_id),
-            .OpaqueType(def_id) then self.method_owner_decl(def_id),
-            .GenericStruct(template_def_id, _) then self.method_owner_decl(
-                template_def_id,
-            ),
-            .GenericEnum(template_def_id, _) then self.method_owner_decl(
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.method_owner_decl(def_id),
+            .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then self.method_owner_decl(
                 template_def_id,
             ),
             .ReferenceType(_) then MethodOwner.Builtin("Ref"),
@@ -1084,23 +1044,11 @@ given CompilerContext {
     /// instance and `GenericStruct` of the template) land on the same pair.
     public method_owner_and_args(self, t: Type): Pair[MethodOwner, List[Type]] = {
         return when t in {
-            .GenericStruct(template_def_id, args) then Pair[MethodOwner, List[Type]](
+            .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then Pair[MethodOwner, List[Type]](
                 self.method_owner_decl(template_def_id),
                 args,
             ),
-            .GenericEnum(template_def_id, args) then Pair[MethodOwner, List[Type]](
-                self.method_owner_decl(template_def_id),
-                args,
-            ),
-            .StructureType(def_id) then Pair[MethodOwner, List[Type]](
-                self.method_owner_decl(def_id),
-                self.get_type_arguments(def_id) or else List[Type].new(),
-            ),
-            .EnumType(def_id) then Pair[MethodOwner, List[Type]](
-                self.method_owner_decl(def_id),
-                self.get_type_arguments(def_id) or else List[Type].new(),
-            ),
-            .OpaqueType(def_id) then Pair[MethodOwner, List[Type]](
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then Pair[MethodOwner, List[Type]](
                 self.method_owner_decl(def_id),
                 self.get_type_arguments(def_id) or else List[Type].new(),
             ),
@@ -1270,23 +1218,8 @@ given CompilerContext {
     /// 获取类型的人类可读名称
     public get_type_name(self, t: Type): String = {
         return when t in {
-            .StructureType(def_id) then {
-                when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then "<unknown>",
-                }
-            },
-            .EnumType(def_id) then {
-                when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then "<unknown>",
-                }
-            },
-            .OpaqueType(def_id) then {
-                when self.def_id_map.get_name(def_id) in {
-                    .Some(name) then name,
-                    .None() then "<unknown>",
-                }
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
+                self.def_id_map.get_name(def_id) or else "<unknown>"
             },
             .ModuleType(info) then {
                 if info.module_path.is_empty() then "<module>"
@@ -1345,33 +1278,8 @@ given CompilerContext {
             .MutablePointerType(inner) then "*mutable \(self.get_debug_name(inner))",
             .WeakReferenceType(inner) then "?*\(self.get_debug_name(inner))",
             .MutableWeakReferenceType(inner) then "?*mutable \(self.get_debug_name(inner))",
-            .StructureType(def_id) then {
-                let base_name = when self.def_id_map.get_name(def_id) in {
-                    .Some(n) then n,
-                    .None() then "<unknown>",
-                };
-                when self.def_id_map.get_type_arguments(def_id) in {
-                    .Some(args) where not args.is_empty() then {
-                        let mutable arg_parts = List[String].new();
-                        for a in args then {
-                            arg_parts.push(self.get_debug_name(a));
-                        };
-                        let args_str = join_strings(arg_parts, ", ");
-                        let mutable out = StringBuilder.new();
-                        out.push_string(base_name);
-                        out.push_byte('[');
-                        out.push_string(args_str);
-                        out.push_byte(']');
-                        out.to_string()
-                    },
-                    _ then base_name,
-                }
-            },
-            .EnumType(def_id) then {
-                let base_name = when self.def_id_map.get_name(def_id) in {
-                    .Some(n) then n,
-                    .None() then "<unknown>",
-                };
+            .StructureType(def_id) or .EnumType(def_id) then {
+                let base_name = self.def_id_map.get_name(def_id) or else "<unknown>";
                 when self.def_id_map.get_type_arguments(def_id) in {
                     .Some(args) where not args.is_empty() then {
                         let mutable arg_parts = List[String].new();
@@ -1390,10 +1298,7 @@ given CompilerContext {
                 }
             },
             .OpaqueType(def_id) then {
-                when self.def_id_map.get_name(def_id) in {
-                    .Some(n) then n,
-                    .None() then "<unknown>",
-                }
+                self.def_id_map.get_name(def_id) or else "<unknown>"
             },
             .ModuleType(info) then {
                 if info.module_path.is_empty() then "<module>"
@@ -1466,21 +1371,9 @@ given CompilerContext {
                 };
                 false
             },
-            .ReferenceType(inner) then self.contains_type_variable(inner),
-            .MutableReferenceType(inner) then self.contains_type_variable(inner),
-            .PointerType(inner) then self.contains_type_variable(inner),
-            .MutablePointerType(inner) then self.contains_type_variable(inner),
-            .WeakReferenceType(inner) then self.contains_type_variable(inner),
-            .MutableWeakReferenceType(inner) then self.contains_type_variable(inner),
-            .GenericStruct(_, args) then {
-                for a in args then {
-                    if self.contains_type_variable(a) then {
-                        return true;
-                    };
-                };
-                false
-            },
-            .GenericEnum(_, args) then {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
+            or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.contains_type_variable(inner),
+            .GenericStruct(_, args) or .GenericEnum(_, args) then {
                 for a in args then {
                     if self.contains_type_variable(a) then {
                         return true;
@@ -1562,9 +1455,7 @@ given CompilerContext {
             .MutableWeakReferenceType(inner) then "MW_\(self.get_layout_key(inner))",
             .BorrowedReferenceType(inner) then "BR_\(self.get_layout_key(inner))",
             .MutableBorrowedReferenceType(inner) then "MBR_\(self.get_layout_key(inner))",
-            .StructureType(def_id) then self.layout_key_for_def_id(def_id),
-            .EnumType(def_id) then self.layout_key_for_def_id(def_id),
-            .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.layout_key_for_def_id(def_id),
             .GenericParameter(name) then "Param_\(name)",
             .GenericStruct(template_def_id, args) then {
                 if args.is_empty() and template_def_id.is_valid() and not self.is_generic_instantiation(
@@ -1672,10 +1563,7 @@ given CompilerContext {
         // `make_layout_name` 的产物（`SendChannel_..._d378`），里面带着实参了，
         // 再拼一次就把同一组实参数两遍，同一个类型会因到达路径不同拼出两个键。
         if self.def_id_map.get_type_arguments(def_id) is .Some(args) then {
-            let is_inst = when self.def_id_map.get_generic_instantiation(def_id) in {
-                .Some(v) then v,
-                .None() then false,
-            };
+            let is_inst = self.def_id_map.get_generic_instantiation(def_id) or else false;
             if not is_inst and not args.is_empty() then {
                 let mutable arg_keys = List[String].new();
                 for a in args then {

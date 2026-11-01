@@ -339,29 +339,10 @@ given Parser {
     // Range bounds start at the comparison-operand layer, not the full expression grammar.
     can_start_range_bound(self, kind: TokenKind): Bool = {
         return when kind in {
-            .Identifier(_) then true,
-            .IntegerLiteral(_) then true,
-            .DurationLiteral(_, _) then true,
-            .FloatLiteral(_) then true,
-            .StringLiteral(_) then true,
-            .InterpolatedString(_) then true,
-            .RuneLiteral(_) then true,
-            .KwTrue() then true,
-            .KwFalse() then true,
-            .KwNull() then true,
-            .LParen() then true,
-            .LBrace() then true,
-            .LBracket() then true,
-            .Minus() then true,
-            .Tilde() then true,
-            .Star() then true,
-            .Ampersand() then true,
-            .KwIf() then true,
-            .KwWhile() then true,
-            .KwFor() then true,
-            .KwWhen() then true,
-            .KwSelf() then true,
-            .Dot() then true,
+            .Identifier(_) or .IntegerLiteral(_) or .DurationLiteral(_, _) or .FloatLiteral(_)
+            or .StringLiteral(_) or .InterpolatedString(_) or .RuneLiteral(_) or .KwTrue() or .KwFalse()
+            or .KwNull() or .LParen() or .LBrace() or .LBracket() or .Minus() or .Tilde() or .Star()
+            or .Ampersand() or .KwIf() or .KwWhile() or .KwFor() or .KwWhen() or .KwSelf() or .Dot() then true,
             _ then false,
         };
     };
@@ -370,36 +351,18 @@ given Parser {
     // 判断字符串首字母是否大写（用于区分类型名和变量名）
     is_upper_first(self, s: String): Bool = {
         let runes = s.to_runes();
-        if runes.is_empty() then {
-            return false;
+        return when runes.lazy().skip_while((c) => c == '_').first() in {
+            .Some(ch) then ch.is_ascii_uppercase(),
+            .None() then false,
         };
-        let mutable i: UInt = 0;
-        while i < runes.count() then {
-            let ch = runes[i];
-            if ch == '_' then {
-                i += 1;
-                continue;
-            };
-            return ch.is_ascii_uppercase();
-        };
-        return false;
     };
 
     is_lower_first(self, s: String): Bool = {
         let runes = s.to_runes();
-        if runes.is_empty() then {
-            return false;
+        return when runes.lazy().skip_while((c) => c == '_').first() in {
+            .Some(ch) then ch.is_ascii_lowercase(),
+            .None() then false,
         };
-        let mutable i: UInt = 0;
-        while i < runes.count() then {
-            let ch = runes[i];
-            if ch == '_' then {
-                i += 1;
-                continue;
-            };
-            return ch.is_ascii_lowercase();
-        };
-        return false;
     };
 
     is_valid_value_name(self, s: String): Bool = {
@@ -432,15 +395,7 @@ given Parser {
         if not first.is_ascii_lowercase() then {
             return false;
         };
-        let mutable i: UInt = 1;
-        while i < runes.count() then {
-            let ch = runes[i];
-            if not ch.is_ascii_lowercase() and not ch.is_ascii_digit() and ch != '_' then {
-                return false;
-            };
-            i += 1;
-        };
-        return true;
+        return runes.lazy().skip(1).all((c) => c.is_ascii_lowercase() or c.is_ascii_digit() or c == '_');
     };
 
     invalid_variable_name_error(self, name: String): String =
@@ -488,8 +443,7 @@ given Parser {
 
     should_continue_postfix_after_expression(self): Bool = {
         return when self.current().kind in {
-            .LParen() then true,
-            .LBracket() then true,
+            .LParen() or .LBracket() then true,
             .Dot() then self.can_continue_dot_postfix(),
             _ then false,
         };
@@ -834,12 +788,7 @@ given Parser {
                         name_span,
                     ),
                 ),
-                .GivenDecl(_, _, _, _) then .Error(
-                    self.parser_error_at_current(
-                        "foreign given declaration is not supported",
-                    ),
-                ),
-                .GivenTraitDecl(_, _, _, _, _) then .Error(
+                .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _) then .Error(
                     self.parser_error_at_current(
                         "foreign given declaration is not supported",
                     ),
@@ -886,9 +835,7 @@ given Parser {
 
     is_type_start(self): Bool = {
         return when self.current().kind in {
-            .Star() then true,
-            .QuestionMark() then true,
-            .KwSelfType() then true,
+            .Star() or .QuestionMark() or .KwSelfType() then true,
             // A function type opens with its parameter list: `(T1, T2) -> R`.
             .LParen() then true,
             .Identifier(_) then true,
@@ -914,8 +861,7 @@ given Parser {
             return false;
         };
         return when self.tokens[index + 1].kind in {
-            .KwMut() then true,
-            .KwSelfType() then true,
+            .KwMut() or .KwSelfType() then true,
             .Identifier(name) then self.is_upper_first(name),
             _ then false,
         };
@@ -2652,17 +2598,9 @@ given Parser {
 
     is_assignment_operator(self): Bool = {
         return when self.current().kind in {
-            .Assign() then true,
-            .PlusAssign() then true,
-            .MinusAssign() then true,
-            .StarAssign() then true,
-            .SlashAssign() then true,
-            .PercentAssign() then true,
-            .AmpersandAssign() then true,
-            .PipeAssign() then true,
-            .CaretAssign() then true,
-            .LeftShiftAssign() then true,
-            .RightShiftAssign() then true,
+            .Assign() or .PlusAssign() or .MinusAssign() or .StarAssign() or .SlashAssign()
+            or .PercentAssign() or .AmpersandAssign() or .PipeAssign() or .CaretAssign() or .LeftShiftAssign()
+            or .RightShiftAssign() then true,
             _ then false,
         };
     };

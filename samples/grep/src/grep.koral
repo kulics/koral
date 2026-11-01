@@ -394,9 +394,7 @@ let grep_stream[R: Reader, W: Writer](
                 // line numbers separates groups with `--` (GNU format).
                 let start = if pending.count() > flags.before_context then pending.count(
                 ) - flags.before_context else 0;
-                let mutable k = start;
-                while k < pending.count() then {
-                    let entry = pending[k];
+                for entry in pending.lazy().skip(start) then {
                     if printed_any and entry.no > last_printed + 1 then {
                         out.write_all(from = "--\n".to_bytes()) or return;
                     };
@@ -404,7 +402,6 @@ let grep_stream[R: Reader, W: Writer](
                     out.write_all(from = (p + entry.text).to_bytes()) or return;
                     printed_any = true;
                     last_printed = entry.no;
-                    k += 1;
                 };
                 pending = List[LineEntry].new();
                 if printed_any and line_no > last_printed + 1 then {
@@ -517,8 +514,7 @@ let main(): Int = {
     // Shape dispatch by list pattern: nothing beyond the program name is a
     // usage complaint.
     let parsed = when argv in {
-        [] then Result[Config].Error("no pattern given"),
-        [_] then Result[Config].Error("no pattern given"),
+        [] or [_] then Result[Config].Error("no pattern given"),
         [_, ...] then parse_args(argv),
     };
     let config = parsed or else as e in {

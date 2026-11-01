@@ -82,16 +82,8 @@ given MIRFunctionBuilder {
 
     private ref_like_base_layout_key(self, t: Type): Option[String] = {
         return when t in {
-            .ReferenceType(inner) then Option[String].Some(
-                self.concrete_layout_key_for_type(inner),
-            ),
-            .MutableReferenceType(inner) then Option[String].Some(
-                self.concrete_layout_key_for_type(inner),
-            ),
-            .BorrowedReferenceType(inner) then Option[String].Some(
-                self.concrete_layout_key_for_type(inner),
-            ),
-            .MutableBorrowedReferenceType(inner) then Option[String].Some(
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then Option[String].Some(
                 self.concrete_layout_key_for_type(inner),
             ),
             _ then Option[String].None(),
@@ -135,17 +127,17 @@ given MIRFunctionBuilder {
                     ) then {
                         return false;
                     };
-                    let mutable idx: UInt = 1;
-                    while idx < actual_params.count() then {
-                        let mutable actual_param_type = (actual_params[idx]).param_type;
-                        let mutable expected_param_type = (expected_params[idx]).param_type;
+                    for pair in actual_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](expected_params).skip(1) then {
                         if not self.call_param_types_match(
-                            actual_param_type,
-                            expected_param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                         ) then {
                             return false;
                         };
-                        idx += 1;
                     };
                     true
                 },
@@ -171,17 +163,17 @@ given MIRFunctionBuilder {
                     ) then {
                         return false;
                     };
-                    let mutable idx: UInt = 0;
-                    while idx < actual_params.count() then {
-                        let mutable actual_param_type = (actual_params[idx]).param_type;
-                        let mutable expected_param_type = (expected_params[idx]).param_type;
+                    for pair in actual_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](expected_params) then {
                         if not self.call_param_types_match(
-                            actual_param_type,
-                            expected_param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                         ) then {
                             return false;
                         };
-                        idx += 1;
                     };
                     true
                 },
@@ -207,17 +199,17 @@ given MIRFunctionBuilder {
                     ) then {
                         return false;
                     };
-                    let mutable idx: UInt = 0;
-                    while idx < actual_params.count() then {
-                        let mutable actual_param_type = (actual_params[idx]).param_type;
-                        let mutable expected_param_type = (expected_params[idx]).param_type;
+                    for pair in actual_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](expected_params) then {
                         if not self.call_param_types_match(
-                            actual_param_type,
-                            expected_param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                         ) then {
                             return false;
                         };
-                        idx += 1;
                     };
                     true
                 },
@@ -265,17 +257,17 @@ given MIRFunctionBuilder {
                     // trait-object conversion.
                     let _ = expected_first;
 
-                    let mutable idx: UInt = UInt(1);
-                    while idx < actual_params.count() then {
-                        let actual_param_type = (actual_params[idx]).param_type;
-                        let expected_param_type = (expected_params[idx]).param_type;
+                    for pair in actual_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](expected_params).skip(1) then {
                         if not self.call_param_types_match(
-                            actual_param_type,
-                            expected_param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                         ) then {
                             return false;
                         };
-                        idx += UInt(1);
                     };
                     true
                 },
@@ -293,15 +285,13 @@ given MIRFunctionBuilder {
         let param_types = self.function_parameter_types(callee);
         let mutable values = List[MIRValue].new();
         let mutable ownerships = List[MIROwnershipUse].new();
-        let mutable index: UInt = 0;
-        while index < args.count() then {
-            let mutable expected_type = if index < param_types.count() then Option[Type].Some(
-                param_types[index],
+        for pair in args.lazy().enumerate() then {
+            let mutable expected_type = if pair.first < param_types.count() then Option[Type].Some(
+                param_types[pair.first],
             ) else Option[Type].None();
-            let arg = args[index];
+            let arg = pair.second;
             values.push(self.lower_call_argument(arg, expected_type));
             ownerships.push(self.ownership_use(arg));
-            index += 1;
         };
         return Pair[List[MIRValue], List[MIROwnershipUse]](values, ownerships);
     };
@@ -376,16 +366,9 @@ given MIRFunctionBuilder {
                         when base.expr_kind in {
                             .RefExpr(inner) then {
                                 let allow_unwrap_ref_expr_receiver = when expected_receiver_type in {
-                                    .ReferenceType(expected_inner) then not self.is_ref_like_type(
-                                        expected_inner,
-                                    ),
-                                    .MutableReferenceType(expected_inner) then not self.is_ref_like_type(
-                                        expected_inner,
-                                    ),
-                                    .BorrowedReferenceType(expected_inner) then not self.is_ref_like_type(
-                                        expected_inner,
-                                    ),
-                                    .MutableBorrowedReferenceType(expected_inner) then not self.is_ref_like_type(
+                                    .ReferenceType(expected_inner) or .MutableReferenceType(expected_inner)
+                                    or .BorrowedReferenceType(expected_inner)
+                                    or .MutableBorrowedReferenceType(expected_inner) then not self.is_ref_like_type(
                                         expected_inner,
                                     ),
                                     _ then true,
@@ -412,38 +395,24 @@ given MIRFunctionBuilder {
                             _ then false,
                         };
                         let expected_inner_ref_like = when expected_receiver_type in {
-                            .ReferenceType(expected_inner) then self.is_ref_like_type(
-                                expected_inner,
-                            ),
-                            .MutableReferenceType(expected_inner) then self.is_ref_like_type(
-                                expected_inner,
-                            ),
-                            .BorrowedReferenceType(expected_inner) then self.is_ref_like_type(
-                                expected_inner,
-                            ),
-                            .MutableBorrowedReferenceType(expected_inner) then self.is_ref_like_type(
+                            .ReferenceType(expected_inner) or .MutableReferenceType(expected_inner)
+                            or .BorrowedReferenceType(expected_inner)
+                            or .MutableBorrowedReferenceType(expected_inner) then self.is_ref_like_type(
                                 expected_inner,
                             ),
                             _ then false,
                         };
                         let base_is_uint8_like = when base.expr_type in {
                             .UInt8Type() then true,
-                            .ReferenceType(inner) then inner is .UInt8Type(),
-                            .MutableReferenceType(inner) then inner is .UInt8Type(),
-                            .BorrowedReferenceType(inner) then inner is .UInt8Type(),
-                            .MutableBorrowedReferenceType(inner) then inner is .UInt8Type(),
+                            .ReferenceType(inner) or .MutableReferenceType(inner)
+                            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then inner is .UInt8Type(),
                             _ then false,
                         };
                         let needs_ref_u8_on_int_nested_receiver = method_symbol_name == "Ref_UInt8_to_string" and not base_is_uint8_like;
                         let base_inner_is_ref_like = when base.expr_type in {
                             .ReferenceType(inner) then self.is_ref_like_type(inner),
-                            .MutableReferenceType(inner) then self.is_ref_like_type(
-                                inner,
-                            ),
-                            .BorrowedReferenceType(inner) then self.is_ref_like_type(
-                                inner,
-                            ),
-                            .MutableBorrowedReferenceType(inner) then self.is_ref_like_type(
+                            .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                            or .MutableBorrowedReferenceType(inner) then self.is_ref_like_type(
                                 inner,
                             ),
                             _ then false,
@@ -474,10 +443,10 @@ given MIRFunctionBuilder {
                             when self.lower_place(base) in {
                                 .Some(place) then {
                                     let inner_ref_type = when expected_receiver_type in {
-                                        .ReferenceType(expected_inner) then expected_inner,
-                                        .MutableReferenceType(expected_inner) then expected_inner,
-                                        .BorrowedReferenceType(expected_inner) then expected_inner,
-                                        .MutableBorrowedReferenceType(expected_inner) then expected_inner,
+                                        .ReferenceType(expected_inner)
+                                        or .MutableReferenceType(expected_inner)
+                                        or .BorrowedReferenceType(expected_inner)
+                                        or .MutableBorrowedReferenceType(expected_inner) then expected_inner,
                                         _ then Type.Unknown(),
                                     };
                                     let inner_ref_local = self.make_temporary(
@@ -586,11 +555,7 @@ given MIRFunctionBuilder {
                                 pass_kind_from_type(context_receiver),
                             ),
                         );
-                        let mutable i: UInt = 1;
-                        while i < symbol_params.count() then {
-                            merged_params.push(symbol_params[i]);
-                            i += 1;
-                        };
+                        merged_params.push_list(symbol_params, span = 1..<symbol_params.count());
                         let mutable return_type = if self.context.contains_generic_parameter(
                             context_return,
                         ) then symbol_return else context_return;
@@ -631,10 +596,7 @@ given MIRFunctionBuilder {
     ): Bool = {
         return when expected_type in {
             .ReferenceType(expected_inner) then when declared_type in {
-                .ReferenceType(actual_inner) then self.receiver_lookup_type(
-                    actual_inner,
-                ) == self.receiver_lookup_type(expected_inner),
-                .MutableReferenceType(actual_inner) then self.receiver_lookup_type(
+                .ReferenceType(actual_inner) or .MutableReferenceType(actual_inner) then self.receiver_lookup_type(
                     actual_inner,
                 ) == self.receiver_lookup_type(expected_inner),
                 _ then false,
@@ -646,10 +608,7 @@ given MIRFunctionBuilder {
                 _ then false,
             },
             .WeakReferenceType(expected_inner) then when declared_type in {
-                .WeakReferenceType(actual_inner) then self.receiver_lookup_type(
-                    actual_inner,
-                ) == self.receiver_lookup_type(expected_inner),
-                .MutableWeakReferenceType(actual_inner) then self.receiver_lookup_type(
+                .WeakReferenceType(actual_inner) or .MutableWeakReferenceType(actual_inner) then self.receiver_lookup_type(
                     actual_inner,
                 ) == self.receiver_lookup_type(expected_inner),
                 _ then false,
@@ -947,9 +906,7 @@ given MIRFunctionBuilder {
             .Local(local) then self.type_of_local(local),
             .Function(symbol) then symbol.symbol_type,
             .Constant(constant) then when constant in {
-                .Integer(_, t) then t,
-                .Float(_, t) then t,
-                .StringLiteral(_, t) then t,
+                .Integer(_, t) or .Float(_, t) or .StringLiteral(_, t) then t,
                 .Boolean(_) then Type.BoolType(),
                 .Void() then Type.VoidType(),
             },
@@ -989,11 +946,8 @@ given MIRFunctionBuilder {
     private mir_intrinsic_result_type(self, node: MIRIntrinsic): Type = {
         let _ = self;
         return when node in {
-            .AllocMemory(_, result_type) then result_type,
-            .DowngradeRef(_, result_type) then result_type,
-            .UpgradeRef(_, result_type) then result_type,
-            .TakeMemory(_, result_type) then result_type,
-            .NullPtr(result_type) then result_type,
+            .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
+            or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
             _ then Type.VoidType(),
         };

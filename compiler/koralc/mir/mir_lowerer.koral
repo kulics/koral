@@ -112,12 +112,12 @@ public let lower_monomorphized_program_releasing_source(
     let mutable builder_program = prepared.builder_program;
     let mutable lowerer = MIRLowerer.new(builder_program, context);
     let mutable functions = List[MIRFunction].new();
-    let mutable item_index: UInt = 0;
-    for item in prepared.work_items then {
+    for pair in prepared.work_items.lazy().enumerate() then {
+        let item = pair.second;
         if mir_progress_enabled() then {
             let mutable message = StringBuilder.new();
             message.push_string("[mir-work] lowering index=");
-            message.push_string(item_index.to_string());
+            message.push_string(pair.first.to_string());
             message.push_string(" name=");
             message.push_string(context.symbol_name(item.identifier));
             message.push_string(" file=");
@@ -130,12 +130,11 @@ public let lower_monomorphized_program_releasing_source(
         if mir_progress_enabled() then {
             let mutable message = StringBuilder.new();
             message.push_string("[mir-work] lowered index=");
-            message.push_string(item_index.to_string());
+            message.push_string(pair.first.to_string());
             message.push_string(" name=");
             message.push_string(context.symbol_name(item.identifier));
             trace_mir_progress(message.to_string());
         };
-        item_index += 1;
     };
     let lowered = MIRProgram(
         prepared.metadata_program.globals,
@@ -171,11 +170,9 @@ given MIRLowerer {
             key.push_string(stable_type_key(request.concrete_type));
             key.push_string("|");
             key.push_string(request.trait_name);
-            let mutable i: UInt = 0;
-            while i < request.trait_type_args.count() then {
+            for arg in request.trait_type_args then {
                 key.push_string("|");
-                key.push_string(stable_type_key(request.trait_type_args[i]));
-                i += 1;
+                key.push_string(stable_type_key(arg));
             };
             if seen.contains(key.to_string()) then {
                 continue;
@@ -254,29 +251,7 @@ given MIRLowerer {
                 .TypeEnumDecl(_, _, cases, _, identifier) then {
                     collected_globals.push(MIRGlobal.EnumDeclaration(identifier, cases));
                 },
-                .GivenDecl(target_type, members, _) then {
-                    let mutable method_symbols = List[Symbol].new();
-                    for member_ref in members then {
-                        let symbol = self.make_given_member_symbol(member_ref);
-                        if not self.context.contains_generic_parameter(
-                            symbol.symbol_type,
-                        ) then {
-                            method_symbols.push(symbol);
-                        };
-                    };
-                    if not self.context.contains_generic_parameter(target_type) then {
-                        collected_globals.push(
-                            MIRGlobal.Given(
-                                target_type,
-                                Option[String].None(),
-                                List[Type].new(),
-                                method_symbols,
-                                Option[DefId].None(),
-                            ),
-                        );
-                    };
-                },
-                .IntrinsicGivenDecl(target_type, members, _) then {
+                .GivenDecl(target_type, members, _) or .IntrinsicGivenDecl(target_type, members, _) then {
                     let mutable method_symbols = List[Symbol].new();
                     for member_ref in members then {
                         let symbol = self.make_given_member_symbol(member_ref);
@@ -330,19 +305,12 @@ given MIRLowerer {
                         );
                     };
                 },
-                .GenericFunctionDecl(_, name, _) then collected_globals.push(
+                .GenericFunctionDecl(_, name, _) or .GenericTypeStructDecl(_, name, _)
+                or .GenericTypeEnumDecl(_, name, _) then collected_globals.push(
                     MIRGlobal.TemplatePlaceholder(name),
                 ),
-                .GenericTypeStructDecl(_, name, _) then collected_globals.push(
-                    MIRGlobal.TemplatePlaceholder(name),
-                ),
-                .GenericTypeEnumDecl(_, name, _) then collected_globals.push(
-                    MIRGlobal.TemplatePlaceholder(name),
-                ),
-                .TraitDecl(_, _, _, _) then {},
-                .TypeAliasDecl(_, _, _, _) then {},
-                .IntrinsicTypeDecl(_, _, _) then {},
-                .UsingDecl(_, _, _) then {},
+                .TraitDecl(_, _, _, _) or .TypeAliasDecl(_, _, _, _) or .IntrinsicTypeDecl(_, _, _)
+                or .UsingDecl(_, _, _) then {},
             };
         };
 
@@ -1001,25 +969,16 @@ given MIRLowerer {
             return false;
         };
         return when first.param_type in {
-            .ReferenceType(_) then false,
-            .MutableReferenceType(_) then false,
-            .BorrowedReferenceType(_) then false,
-            .MutableBorrowedReferenceType(_) then false,
-            .WeakReferenceType(_) then false,
-            .MutableWeakReferenceType(_) then false,
-            .PointerType(_) then false,
-            .MutablePointerType(_) then false,
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_)
+            or .PointerType(_) or .MutablePointerType(_) then false,
             _ then true,
         };
     };
 
     type_module_path(self, t: Type): List[String] = {
         return when t in {
-            .StructureType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
-            ),
-            .EnumType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
-            ),
-            .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.context.get_module_path(def_id) or else List[String].new(
             ),
             _ then List[String].new(),
         };
@@ -1128,17 +1087,18 @@ given MIRLowerer {
         // Identity: the parent constraint carries the declaration it names.
         when self.program.trait_by_def_id(parent.def_id) in {
             .Some(parent_info) then {
-                let mutable idx: UInt = 0;
-                while idx < parent_info.type_params.count() and idx < parent.type_arg_nodes.count(
-                ) then {
+                for pair in parent_info.type_params.lazy().zip[
+                    TypeNode,
+                    ListIterator[TypeNode],
+                    List[TypeNode],
+                ](parent.type_arg_nodes) then {
                     result.insert(
-                        parent_info.type_params[idx].name,
+                        pair.first.name,
                         self.resolve_trait_type_node_with_bindings(
-                            parent.type_arg_nodes[idx],
+                            pair.second,
                             bindings,
                         ),
                     );
-                    idx += 1;
                 };
             },
             .None() then {},
@@ -1265,14 +1225,12 @@ given MIRLowerer {
         bindings.insert("Self", request.concrete_type);
         when self.program.trait_by_def_id(request.trait_def_id) in {
             .Some(trait_info) then {
-                let mutable index: UInt = 0;
-                while index < trait_info.type_params.count() and index < request.trait_type_args.count(
-                ) then {
-                    bindings.insert(
-                        trait_info.type_params[index].name,
-                        (request.trait_type_args[index]),
-                    );
-                    index += 1;
+                for pair in trait_info.type_params.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](request.trait_type_args) then {
+                    bindings.insert(pair.first.name, (pair.second));
                 };
             },
             .None() then {},
@@ -1286,10 +1244,7 @@ given MIRLowerer {
             return t;
         };
         return when t in {
-            .GenericParameter(name) then when bindings.get(name) in {
-                .Some(bound) then bound,
-                .None() then t,
-            },
+            .GenericParameter(name) then bindings.get(name) or else t,
             .ReferenceType(inner) then Type.ReferenceType(
                 self.apply_type_bindings(inner, bindings),
             ),
@@ -1385,14 +1340,9 @@ given MIRLowerer {
             let is_self = param.name == "self";
             if first and is_self then {
                 self_by_value = when param.param_type in {
-                    .ReferenceType(_) then false,
-                    .MutableReferenceType(_) then false,
-                    .BorrowedReferenceType(_) then false,
-                    .MutableBorrowedReferenceType(_) then false,
-                    .WeakReferenceType(_) then false,
-                    .MutableWeakReferenceType(_) then false,
-                    .PointerType(_) then false,
-                    .MutablePointerType(_) then false,
+                    .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+                    or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+                    or .MutableWeakReferenceType(_) or .PointerType(_) or .MutablePointerType(_) then false,
                     _ then true,
                 };
             };

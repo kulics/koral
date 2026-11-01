@@ -328,17 +328,14 @@ private let diagnostic_stage_label(stage: DiagnosticStage): String = {
     return when stage in {
         .Lexer() then "lexer error",
         .Parser() then "syntax error",
-        .Semantic() then "error",
-        .Other() then "error",
+        .Semantic() or .Other() then "error",
     };
 };
 
 private let sanitize_module_artifact_name(module_name: String): String = {
     let mutable out = StringBuilder.new();
-    let mutable i: UInt = 0;
     let mutable pending_sep = false;
-    while i < module_name.count() then {
-        let ch = module_name[i];
+    for ch in module_name.bytes() then {
         if ch == ':' or ch == '/' then {
             if not pending_sep then {
                 out.push_string("__");
@@ -348,7 +345,6 @@ private let sanitize_module_artifact_name(module_name: String): String = {
             out.push_byte(ch);
             pending_sep = false;
         };
-        i += 1;
     };
     return out.to_string();
 };
@@ -603,10 +599,7 @@ private let prepare_package_compilation(
 
     // The default build target is the main module -- the one declared under the
     // `modules` key `"."`. A package with no main module has no default (§5.1).
-    let mutable target_full_name = when options.target_module_name in {
-        .Some(name) then name,
-        .None() then "",
-    };
+    let mutable target_full_name = options.target_module_name or else "";
     if target_full_name.is_empty() then {
         // The default build target is the main module (§5.1). A package with
         // no main module has no default -- the caller has to say which one.

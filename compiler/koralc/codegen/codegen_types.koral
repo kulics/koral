@@ -16,9 +16,7 @@
 
 private let is_void_like_type(t: Type): Bool = {
     return when t in {
-        .VoidType() then true,
-        .Unknown() then true,
-        .GenericParameter(_) then true,
+        .VoidType() or .Unknown() or .GenericParameter(_) then true,
         _ then false,
     };
 };
@@ -39,35 +37,9 @@ given CodeGen {
         seen.insert(visit_key);
 
         when concrete_type in {
-            .ReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .MutableReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .BorrowedReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .MutableBorrowedReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .PointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .MutablePointerType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .WeakReferenceType(inner) then {
-                self.register_type_declaration_for_used_type(decl_map, seen, inner);
-                return;
-            },
-            .MutableWeakReferenceType(inner) then {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner)
+            or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
                 self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
@@ -206,12 +178,7 @@ given CodeGen {
                         );
                     };
                 },
-                .ForeignGlobalVariable(_, _, decl_type) then self.register_type_declaration_for_used_type(
-                    decl_map,
-                    seen,
-                    decl_type,
-                ),
-                .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(
+                .ForeignGlobalVariable(_, _, decl_type) or .GlobalVariable(_, _, _, decl_type) then self.register_type_declaration_for_used_type(
                     decl_map,
                     seen,
                     decl_type,
@@ -271,9 +238,7 @@ given CodeGen {
                         );
                     };
                 },
-                .TraitVTable(_) then {},
-                .TemplatePlaceholder(_) then {},
-                .ForeignType(_) then {},
+                .TraitVTable(_) or .TemplatePlaceholder(_) or .ForeignType(_) then {},
             };
         };
 
@@ -1052,10 +1017,7 @@ given CodeGen {
                 concrete,
             ),
             .EnumType(_) then not self.uses_managed_nominal_representation(concrete),
-            .GenericStruct(...) then not self.uses_managed_nominal_representation(
-                concrete,
-            ),
-            .GenericEnum(...) then not self.uses_managed_nominal_representation(
+            .GenericStruct(...) or .GenericEnum(...) then not self.uses_managed_nominal_representation(
                 concrete,
             ),
             _ then false,
@@ -1122,14 +1084,7 @@ given CodeGen {
             return;
         };
         when concrete in {
-            .StructureType(_) then self.record_direct_type_dependency(
-                deps,
-                seen,
-                decl_map,
-                self_name,
-                concrete,
-            ),
-            .EnumType(_) then self.record_direct_type_dependency(
+            .StructureType(_) or .EnumType(_) then self.record_direct_type_dependency(
                 deps,
                 seen,
                 decl_map,
@@ -1161,13 +1116,9 @@ given CodeGen {
             // those edges creates artificial cycles for container/storage types
             // like List[T], Dict[K,V], and recursive token/pattern graphs.
             .PointerType(_) then {},
-            .MutablePointerType(_) then {},
-            .ReferenceType(_) then {},
-            .MutableReferenceType(_) then {},
-            .BorrowedReferenceType(_) then {},
-            .MutableBorrowedReferenceType(_) then {},
-            .WeakReferenceType(_) then {},
-            .MutableWeakReferenceType(_) then {},
+            .MutablePointerType(_) or .ReferenceType(_) or .MutableReferenceType(_)
+            or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) or .WeakReferenceType(_)
+            or .MutableWeakReferenceType(_) then {},
             _ then {},
         };
     };
@@ -1224,10 +1175,7 @@ given CodeGen {
     /// 从 Type 中提取 C 类型名称（仅对 StructureType 和 EnumType 有效）
     c_name_for_type(self, t: Type): Option[String] = {
         return when t in {
-            .StructureType(_) then self.concrete_type_c_name_fallback(t),
-            .EnumType(_) then self.concrete_type_c_name_fallback(t),
-            .GenericStruct(...) then self.concrete_type_c_name_fallback(t),
-            .GenericEnum(...) then self.concrete_type_c_name_fallback(t),
+            .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then self.concrete_type_c_name_fallback(t),
             _ then Option[String].None(),
         };
     };
@@ -1260,23 +1208,12 @@ given CodeGen {
     };
 };
 
-/// 对字符串列表进行字典序排序（插入排序）
+/// 对字符串列表进行字典序排序
 let sort_strings(list: List[String]): List[String] = {
     let mutable result = List[String].new();
     for s in list then {
         result.push(s);
     };
-    let n = result.count();
-    let mutable i: UInt = 1;
-    while i < n then {
-        let key = result[i];
-        let mutable j = i;
-        while j > 0 and result[j - 1] > key then {
-            result[j] = result[j - 1];
-            j -= 1;
-        };
-        result[j] = key;
-        i += 1;
-    };
+    result.sort();
     return result;
 };

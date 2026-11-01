@@ -87,10 +87,7 @@ public let mono_receiver_lookup_type(context: CompilerContext, t: Type): Type = 
 /// Used as the type-name component in method lookup keys ("typeName.methodName").
 let mono_type_simple_name(context: CompilerContext, t: Type): String = {
     return when t in {
-        .StructureType(def_id) then context.get_name(def_id) or else context.type_display_name(
-            t,
-        ),
-        .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(
+        .StructureType(def_id) or .EnumType(def_id) then context.get_name(def_id) or else context.type_display_name(
             t,
         ),
         .OpaqueType(def_id) then {
@@ -105,10 +102,8 @@ let mono_type_simple_name(context: CompilerContext, t: Type): String = {
         .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
         // Display: the spelling comes from the declaration.
         .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
-        .ReferenceType(inner) then mono_type_simple_name(context, inner),
-        .MutableReferenceType(inner) then mono_type_simple_name(context, inner),
-        .BorrowedReferenceType(inner) then mono_type_simple_name(context, inner),
-        .MutableBorrowedReferenceType(inner) then mono_type_simple_name(context, inner),
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) then mono_type_simple_name(context, inner),
         .PointerType(_) then "Ptr",
         .MutablePointerType(_) then "MutPtr",
         .WeakReferenceType(_) then "WeakRef",
@@ -304,17 +299,7 @@ private let concrete_receiver_lookup_aliases(
     );
 
     when t in {
-        .StructureType(def_id) then {
-            aliases = push_concrete_receiver_lookup_alias(
-                aliases,
-                context.get_name(def_id) or else "",
-            );
-            aliases = push_concrete_receiver_lookup_alias(
-                aliases,
-                context.get_template_name(def_id) or else "",
-            );
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             aliases = push_concrete_receiver_lookup_alias(
                 aliases,
                 context.get_name(def_id) or else "",
@@ -580,22 +565,12 @@ public type mutable Monomorphizer(mutable storage: MonomorphizerStorage);
 private let is_non_generic_decl(decl: TypedDecl): Bool = {
     return when decl in {
         .UsingDecl(_, _, _) then false,
-        .ForeignFunctionDecl(_, _, _, _, _, _) then true,
-        .ForeignTypeDecl(_, _, _, _, _) then true,
-        .ForeignLetDecl(_, _, _, _, _, _) then true,
-        .LetDecl(_, _, _, _, _, _, _) then true,
-        .FunctionDecl(_, _, _, _, _, _, _) then true,
-        .TypeStructDecl(_, _, _, _, _) then true,
-        .TypeEnumDecl(_, _, _, _, _) then true,
-        .GivenDecl(target_type, members, _) then {
-            let _ = members;
-            not has_generic_parameter(target_type)
-        },
-        .GivenTraitDecl(target_type, _, _, members, _, _) then {
-            let _ = members;
-            not has_generic_parameter(target_type)
-        },
-        .IntrinsicGivenDecl(target_type, members, _) then {
+        .ForeignFunctionDecl(_, _, _, _, _, _) or .ForeignTypeDecl(_, _, _, _, _)
+        or .ForeignLetDecl(_, _, _, _, _, _) or .LetDecl(_, _, _, _, _, _, _)
+        or .FunctionDecl(_, _, _, _, _, _, _) or .TypeStructDecl(_, _, _, _, _)
+        or .TypeEnumDecl(_, _, _, _, _) then true,
+        .GivenDecl(target_type, members, _) or .GivenTraitDecl(target_type, _, _, members, _, _)
+        or .IntrinsicGivenDecl(target_type, members, _) then {
             let _ = members;
             not has_generic_parameter(target_type)
         },
@@ -630,9 +605,7 @@ private let given_members_have_generic_parameter(members: List[TypedGivenMember]
 
 private let is_source_given_decl(decl: TypedDecl): Bool = {
     return when decl in {
-        .GivenDecl(_, _, _) then true,
-        .GivenTraitDecl(_, _, _, _, _, _) then true,
-        .IntrinsicGivenDecl(_, _, _) then true,
+        .GivenDecl(_, _, _) or .GivenTraitDecl(_, _, _, _, _, _) or .IntrinsicGivenDecl(_, _, _) then true,
         _ then false,
     };
 };
@@ -662,9 +635,7 @@ private let instantiation_kind_profile_name(kind: InstantiationKind): String = {
 // populate `remappedFunctionDefIds` which other nodes need for method lookup.
 private let mono_decl_given_priority(decl: TypedDecl): UInt = {
     return when decl in {
-        .GivenDecl(_, _, _) then UInt(0),
-        .GivenTraitDecl(_, _, _, _, _, _) then UInt(0),
-        .IntrinsicGivenDecl(_, _, _) then UInt(0),
+        .GivenDecl(_, _, _) or .GivenTraitDecl(_, _, _, _, _, _) or .IntrinsicGivenDecl(_, _, _) then UInt(0),
         _ then UInt(1),
     };
 };
@@ -743,14 +714,10 @@ private let mono_decl_dedup_key(mono: Monomorphizer, decl: TypedDecl): Option[St
 /// Extract the DefId from a TypedDecl node's embedded identifier, if present.
 let decl_def_id(decl: TypedDecl): Option[DefId] = {
     return when decl in {
-        .FunctionDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .IntrinsicFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .ForeignFunctionDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .LetDecl(_, _, _, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .ForeignLetDecl(_, _, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .TypeStructDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .TypeEnumDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
-        .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
+        .FunctionDecl(_, _, _, _, _, _, id) or .IntrinsicFunctionDecl(_, _, _, _, _, id)
+        or .ForeignFunctionDecl(_, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
+        or .ForeignLetDecl(_, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
+        or .TypeEnumDecl(_, _, _, _, id) or .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
         _ then Option[DefId].None(),
     };
 };
@@ -1005,10 +972,7 @@ given Monomorphizer {
         // Resolve OpaqueType to underlying type before computing canonical key.
         let resolved_type = when target_type in {
             .OpaqueType(def_id) then {
-                when self.storage.context.lookup_type(def_id) in {
-                    .Some(underlying) then underlying,
-                    .None() then target_type,
-                }
+                self.storage.context.lookup_type(def_id) or else target_type
             },
             _ then target_type,
         };
@@ -1145,14 +1109,7 @@ given Monomorphizer {
             .Some(args) then args,
             .None() then when mapped_type in {
                 .Some(mapped) then when mapped in {
-                    .GenericStruct(_, args) then {
-                        let mutable unpacked = List[Type].new();
-                        for arg in args then {
-                            unpacked.push(arg);
-                        };
-                        unpacked
-                    },
-                    .GenericEnum(_, args) then {
+                    .GenericStruct(_, args) or .GenericEnum(_, args) then {
                         let mutable unpacked = List[Type].new();
                         for arg in args then {
                             unpacked.push(arg);
@@ -1299,10 +1256,8 @@ given Monomorphizer {
         // Seed forced Drop-method instantiation for already-materialized
         // concrete generic nominal types tracked only in CompilerContext.
         // removed noisy phase logging
-        let mutable seed_def_id: UInt = 1;
-        while seed_def_id < self.storage.context.next_def_id() then {
+        for seed_def_id in 1..<self.storage.context.next_def_id() then {
             self.enqueue_forced_drop_request_for_type_def(DefId(seed_def_id));
-            seed_def_id += 1;
         };
         // removed noisy phase logging
         // ── Seed extension_method_def_ids_by_identity from GivenDecl nodes ────
@@ -1749,10 +1704,7 @@ given Monomorphizer {
                                     _ then {},
                                 };
                             };
-                            selected_def_id = when matched in {
-                                .Some(def_id) then def_id,
-                                .None() then (candidates[UInt(0)]).first,
-                            };
+                            selected_def_id = matched or else (candidates[UInt(0)]).first;
                         };
                     },
                     .None() then {},
@@ -1787,10 +1739,7 @@ given Monomorphizer {
                                     _ then {},
                                 };
                             };
-                            selected_def_id = when matched in {
-                                .Some(def_id) then def_id,
-                                .None() then (candidates[UInt(0)]).first,
-                            };
+                            selected_def_id = matched or else (candidates[UInt(0)]).first;
                         };
                     },
                     .None() then {},
@@ -2187,28 +2136,10 @@ given Monomorphizer {
 
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
-                .FunctionDecl(_, _, _, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .IntrinsicFunctionDecl(_, _, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .ForeignFunctionDecl(_, _, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .LetDecl(_, _, _, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .ForeignLetDecl(_, _, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .TypeStructDecl(_, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .TypeEnumDecl(_, _, _, _, id) then {
-                    materialized.insert(id.def_id.id);
-                },
-                .ForeignTypeDecl(_, _, _, _, id) then {
+                .FunctionDecl(_, _, _, _, _, _, id) or .IntrinsicFunctionDecl(_, _, _, _, _, id)
+                or .ForeignFunctionDecl(_, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
+                or .ForeignLetDecl(_, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
+                or .TypeEnumDecl(_, _, _, _, id) or .ForeignTypeDecl(_, _, _, _, id) then {
                     materialized.insert(id.def_id.id);
                 },
                 .GivenDecl(target_type, members, _) then {
@@ -2295,8 +2226,7 @@ given Monomorphizer {
 
     private build_codegen_type_def_id_name_index(self): Dict[String, List[DefId]] = {
         let mutable index = Dict[String, List[DefId]].new();
-        let mutable id: UInt = 1;
-        while id < self.storage.context.next_def_id() then {
+        for id in 1..<self.storage.context.next_def_id() then {
             let def_id = DefId(id);
             let is_type = if self.storage.context.get_kind(def_id) is .Some(kind) then kind is .TypeDef(_) or is .GenericTemplate(_)
             else false;
@@ -2318,7 +2248,6 @@ given Monomorphizer {
                     );
                 };
             };
-            id += 1;
         };
         return index;
     };
@@ -2407,23 +2336,7 @@ given Monomorphizer {
                     },
                 }
             },
-            .GenericStruct(...) then {
-                let layout_name = mono_concrete_layout_key_for_type(
-                    self.storage.context,
-                    t,
-                );
-                when self.find_codegen_type_def_id(type_def_ids_by_name, layout_name) in {
-                    .Some(def_id) then when self.codegen_identifier_for_def_id(
-                        c_identifier_by_def_id,
-                        def_id,
-                    ) in {
-                        .Some(name) then name,
-                        .None() then layout_name,
-                    },
-                    .None() then layout_name,
-                }
-            },
-            .GenericEnum(...) then {
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let layout_name = mono_concrete_layout_key_for_type(
                     self.storage.context,
                     t,
@@ -2451,9 +2364,8 @@ given Monomorphizer {
                         def_id,
                     ) in {
                         .Some(name) then name,
-                        .None() then when self.storage.context.get_cname(def_id) in {
-                            .Some(name) then name,
-                            .None() then self.storage.context.get_name(def_id) or else "opaque_\(def_id.id)",
+                        .None() then self.storage.context.get_cname(def_id) or else {
+                            self.storage.context.get_name(def_id) or else "opaque_\(def_id.id)"
                         },
                     },
                 }
@@ -2492,13 +2404,8 @@ given Monomorphizer {
     private collect_codegen_foreign_def_ids(self, foreign_def_ids: Set[UInt]): Void = {
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
-                .ForeignFunctionDecl(_, _, _, _, _, id) then {
-                    foreign_def_ids.insert(id.def_id.id);
-                },
-                .ForeignLetDecl(_, _, _, _, _, id) then {
-                    foreign_def_ids.insert(id.def_id.id);
-                },
-                .ForeignTypeDecl(_, _, _, _, id) then {
+                .ForeignFunctionDecl(_, _, _, _, _, id) or .ForeignLetDecl(_, _, _, _, _, id)
+                or .ForeignTypeDecl(_, _, _, _, id) then {
                     foreign_def_ids.insert(id.def_id.id);
                 },
                 _ then {},
@@ -2515,19 +2422,8 @@ given Monomorphizer {
         // First pass: register c identifiers for all nodes that carry an identifier.
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
-                .GivenDecl(_, _, _) then {},
-                .GivenTraitDecl(_, _, _, _, _, _) then {},
-                .FunctionDecl(_, name, _, _, _, _, fn_id) then {
-                    c_identifier_by_def_id.insert(
-                        fn_id.def_id.id,
-                        self.codegen_emitted_identifier_for_def(
-                            fn_id.def_id,
-                            name,
-                            foreign_def_ids,
-                        ),
-                    );
-                },
-                .IntrinsicFunctionDecl(_, name, _, _, _, fn_id) then {
+                .GivenDecl(_, _, _) or .GivenTraitDecl(_, _, _, _, _, _) then {},
+                .FunctionDecl(_, name, _, _, _, _, fn_id) or .IntrinsicFunctionDecl(_, name, _, _, _, fn_id) then {
                     c_identifier_by_def_id.insert(
                         fn_id.def_id.id,
                         self.codegen_emitted_identifier_for_def(
@@ -2546,17 +2442,7 @@ given Monomorphizer {
                 .ForeignTypeDecl(_, name, _, _, type_id) then {
                     c_identifier_by_def_id.insert(type_id.def_id.id, name);
                 },
-                .TypeStructDecl(_, name, _, _, type_id) then {
-                    c_identifier_by_def_id.insert(
-                        type_id.def_id.id,
-                        self.codegen_emitted_identifier_for_def(
-                            type_id.def_id,
-                            name,
-                            foreign_def_ids,
-                        ),
-                    );
-                },
-                .TypeEnumDecl(_, name, _, _, type_id) then {
+                .TypeStructDecl(_, name, _, _, type_id) or .TypeEnumDecl(_, name, _, _, type_id) then {
                     c_identifier_by_def_id.insert(
                         type_id.def_id.id,
                         self.codegen_emitted_identifier_for_def(
@@ -2645,16 +2531,10 @@ given Monomorphizer {
 private let mono_type_name(t: Type, context: CompilerContext): String = {
     return when t in {
         .StructureType(def_id) then {
-            when context.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then "struct#\(def_id.id)",
-            }
+            context.get_name(def_id) or else "struct#\(def_id.id)"
         },
         .EnumType(def_id) then {
-            when context.get_name(def_id) in {
-                .Some(name) then name,
-                .None() then "enum#\(def_id.id)",
-            }
+            context.get_name(def_id) or else "enum#\(def_id.id)"
         },
         _ then type_to_string(t),
     };

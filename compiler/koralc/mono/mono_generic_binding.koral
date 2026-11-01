@@ -72,45 +72,39 @@ let bind_generic_function_call_callee(
             let template_opt = if symbol.def_id.id > 0 then mono.storage.generic_templates.lookup_function_by_def_id(
                 symbol.def_id,
             ) else Option[GenericFunctionTemplate].None();
-            let template = when template_opt in {
-                .Some(t) then t,
-                .None() then {
-                    let preferred_module_path = mono.storage.context.get_module_path(
-                        symbol.def_id,
-                    ) or else List[String].new();
-                    let symbol_name = mono.storage.context.symbol_name(symbol);
-                    let by_symbol_name = when mono.storage.generic_templates.resolve_function_name_in_module(
-                        symbol_name,
+            let template = template_opt or else {
+                let preferred_module_path = mono.storage.context.get_module_path(
+                    symbol.def_id,
+                ) or else List[String].new();
+                let symbol_name = mono.storage.context.symbol_name(symbol);
+                let by_symbol_name = when mono.storage.generic_templates.resolve_function_name_in_module(
+                    symbol_name,
+                    preferred_module_path,
+                ) in {
+                    .Some(resolved_name) then mono.storage.generic_templates.lookup_function(
+                        resolved_name,
+                    ),
+                    .None() then Option[GenericFunctionTemplate].None(),
+                };
+                let by_def_name = when mono.storage.context.get_name(symbol.def_id) in {
+                    .Some(def_name) then when mono.storage.generic_templates.resolve_function_name_in_module(
+                        def_name,
                         preferred_module_path,
                     ) in {
                         .Some(resolved_name) then mono.storage.generic_templates.lookup_function(
                             resolved_name,
                         ),
                         .None() then Option[GenericFunctionTemplate].None(),
-                    };
-                    let by_def_name = when mono.storage.context.get_name(symbol.def_id) in {
-                        .Some(def_name) then when mono.storage.generic_templates.resolve_function_name_in_module(
-                            def_name,
-                            preferred_module_path,
-                        ) in {
-                            .Some(resolved_name) then mono.storage.generic_templates.lookup_function(
-                                resolved_name,
-                            ),
-                            .None() then Option[GenericFunctionTemplate].None(),
-                        },
-                        .None() then Option[GenericFunctionTemplate].None(),
-                    };
-                    let recovered_template_opt = when by_symbol_name in {
-                        .Some(_) then by_symbol_name,
-                        .None() then by_def_name,
-                    };
-                    when recovered_template_opt in {
-                        .Some(found) then found,
-                        .None() then {
-                            return callee;
-                        },
-                    }
-                },
+                    },
+                    .None() then Option[GenericFunctionTemplate].None(),
+                };
+                let recovered_template_opt = when by_symbol_name in {
+                    .Some(_) then by_symbol_name,
+                    .None() then by_def_name,
+                };
+                recovered_template_opt or else {
+                    return callee;
+                }
             };
 
             // Symbols may lose template DefId during substitution passes.
@@ -127,10 +121,13 @@ let bind_generic_function_call_callee(
             };
 
             // Infer generic type arguments from template parameter TypeNodes and call args.
-            let mutable i: UInt = 0;
-            while i < template.parameters.count() and i < args.count() then {
-                let expected_node = template.parameters[i].param_type;
-                let arg_expr = args[i];
+            for pair in template.parameters.lazy().zip[
+                TypedExpr,
+                ListIterator[TypedExpr],
+                List[TypedExpr],
+            ](args) then {
+                let expected_node = pair.first.param_type;
+                let arg_expr = pair.second;
                 let actual = infer_generic_function_call_argument_type(mono, arg_expr);
                 collect_generic_bindings_from_type_node(
                     mono,
@@ -152,21 +149,7 @@ let bind_generic_function_call_callee(
                         },
                         .Reference(inner, _, span) then when inner in {
                             .Identifier(name, span) then when actual in {
-                                .ReferenceType(actual_inner) then {
-                                    if is_type_parameter_name(
-                                        name,
-                                        template.type_parameters,
-                                    ) and not has_generic_parameter(actual_inner) then {
-                                        inferred.insert(
-                                            name,
-                                            resolve_parameterized_type(
-                                                mono,
-                                                actual_inner,
-                                            ),
-                                        );
-                                    };
-                                },
-                                .MutableReferenceType(actual_inner) then {
+                                .ReferenceType(actual_inner) or .MutableReferenceType(actual_inner) then {
                                     if is_type_parameter_name(
                                         name,
                                         template.type_parameters,
@@ -186,21 +169,7 @@ let bind_generic_function_call_callee(
                         },
                         .Pointer(inner, _, _) then when inner in {
                             .Identifier(name, span) then when actual in {
-                                .PointerType(actual_inner) then {
-                                    if is_type_parameter_name(
-                                        name,
-                                        template.type_parameters,
-                                    ) and not has_generic_parameter(actual_inner) then {
-                                        inferred.insert(
-                                            name,
-                                            resolve_parameterized_type(
-                                                mono,
-                                                actual_inner,
-                                            ),
-                                        );
-                                    };
-                                },
-                                .MutablePointerType(actual_inner) then {
+                                .PointerType(actual_inner) or .MutablePointerType(actual_inner) then {
                                     if is_type_parameter_name(
                                         name,
                                         template.type_parameters,
@@ -220,21 +189,7 @@ let bind_generic_function_call_callee(
                         },
                         .WeakReference(inner, _, span) then when inner in {
                             .Identifier(name, span) then when actual in {
-                                .WeakReferenceType(actual_inner) then {
-                                    if is_type_parameter_name(
-                                        name,
-                                        template.type_parameters,
-                                    ) and not has_generic_parameter(actual_inner) then {
-                                        inferred.insert(
-                                            name,
-                                            resolve_parameterized_type(
-                                                mono,
-                                                actual_inner,
-                                            ),
-                                        );
-                                    };
-                                },
-                                .MutableWeakReferenceType(actual_inner) then {
+                                .WeakReferenceType(actual_inner) or .MutableWeakReferenceType(actual_inner) then {
                                     if is_type_parameter_name(
                                         name,
                                         template.type_parameters,
@@ -254,21 +209,8 @@ let bind_generic_function_call_callee(
                         },
                         .BorrowedReference(inner, _, span) then when inner in {
                             .Identifier(name, span) then when actual in {
-                                .BorrowedReferenceType(actual_inner) then {
-                                    if is_type_parameter_name(
-                                        name,
-                                        template.type_parameters,
-                                    ) and not has_generic_parameter(actual_inner) then {
-                                        inferred.insert(
-                                            name,
-                                            resolve_parameterized_type(
-                                                mono,
-                                                actual_inner,
-                                            ),
-                                        );
-                                    };
-                                },
-                                .MutableBorrowedReferenceType(actual_inner) then {
+                                .BorrowedReferenceType(actual_inner)
+                                or .MutableBorrowedReferenceType(actual_inner) then {
                                     if is_type_parameter_name(
                                         name,
                                         template.type_parameters,
@@ -289,7 +231,6 @@ let bind_generic_function_call_callee(
                         _ then {},
                     };
                 };
-                i += 1;
             };
 
             let concrete_expected_return = resolve_parameterized_type(
@@ -321,10 +262,7 @@ let bind_generic_function_call_callee(
                     },
                 };
 
-                let pattern_return_type = when template.checked_return_type in {
-                    .Some(checked_ret) then checked_ret,
-                    .None() then resolve_type_node(mono, template.return_type, self_subst),
-                };
+                let pattern_return_type = template.checked_return_type or else resolve_type_node(mono, template.return_type, self_subst);
 
                 let mutable actual_param_types = List[Type].new();
                 for arg in args then {
@@ -505,16 +443,16 @@ let collect_generic_bindings_from_shape_args(
     type_params: List[TypeParameterDecl],
     bindings: Dict[String, Type],
 ): Void = {
-    let mutable i: UInt = 0;
-    while i < pattern_args.count() and i < actual_args.count() then {
+    for pair in pattern_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+        actual_args,
+    ) then {
         collect_generic_bindings_from_shape(
             mono,
-            (pattern_args[i]),
-            (actual_args[i]),
+            (pair.first),
+            (pair.second),
             type_params,
             bindings,
         );
-        i += 1;
     };
 };
 
@@ -567,42 +505,21 @@ let collect_generic_bindings_from_shape(
             type_params,
             bindings,
         ),
-        .BorrowedReferenceType(inner) then collect_generic_bindings_from_borrowed_reference(
+        .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then collect_generic_bindings_from_borrowed_reference(
             mono,
             inner,
             actual,
             type_params,
             bindings,
         ),
-        .MutableBorrowedReferenceType(inner) then collect_generic_bindings_from_borrowed_reference(
+        .PointerType(inner) or .MutablePointerType(inner) then collect_generic_bindings_from_pointer(
             mono,
             inner,
             actual,
             type_params,
             bindings,
         ),
-        .PointerType(inner) then collect_generic_bindings_from_pointer(
-            mono,
-            inner,
-            actual,
-            type_params,
-            bindings,
-        ),
-        .MutablePointerType(inner) then collect_generic_bindings_from_pointer(
-            mono,
-            inner,
-            actual,
-            type_params,
-            bindings,
-        ),
-        .WeakReferenceType(inner) then collect_generic_bindings_from_weak_reference(
-            mono,
-            inner,
-            actual,
-            type_params,
-            bindings,
-        ),
-        .MutableWeakReferenceType(inner) then collect_generic_bindings_from_weak_reference(
+        .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then collect_generic_bindings_from_weak_reference(
             mono,
             inner,
             actual,
@@ -680,16 +597,16 @@ let collect_generic_bindings_from_shape(
             when actual in {
                 .FunctionType(fn_params, ret_type) then {
                     let param_types = param_entry_types(fn_params);
-                    let mutable i: UInt = 0;
-                    while i < pattern_params.count() and i < param_types.count() then {
+                    for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        param_types,
+                    ) then {
                         collect_generic_bindings_from_shape(
                             mono,
-                            (pattern_params[i]).param_type,
-                            (param_types[i]),
+                            (pair.first).param_type,
+                            (pair.second),
                             type_params,
                             bindings,
                         );
-                        i += 1;
                     };
                     collect_generic_bindings_from_shape(
                         mono,
@@ -717,28 +634,8 @@ let collect_generic_bindings_from_any_reference(
     bindings: Dict[String, Type],
 ): Void = {
     when actual in {
-        .ReferenceType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .MutableReferenceType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .BorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+        .ReferenceType(act_inner) or .MutableReferenceType(act_inner) or .BorrowedReferenceType(act_inner)
+        or .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
             mono,
             inner,
             act_inner,
@@ -757,14 +654,7 @@ let collect_generic_bindings_from_borrowed_reference(
     bindings: Dict[String, Type],
 ): Void = {
     when actual in {
-        .BorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
+        .BorrowedReferenceType(act_inner) or .MutableBorrowedReferenceType(act_inner) then collect_generic_bindings_from_shape(
             mono,
             inner,
             act_inner,
@@ -783,14 +673,7 @@ let collect_generic_bindings_from_pointer(
     bindings: Dict[String, Type],
 ): Void = {
     when actual in {
-        .PointerType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .MutablePointerType(act_inner) then collect_generic_bindings_from_shape(
+        .PointerType(act_inner) or .MutablePointerType(act_inner) then collect_generic_bindings_from_shape(
             mono,
             inner,
             act_inner,
@@ -809,14 +692,7 @@ let collect_generic_bindings_from_weak_reference(
     bindings: Dict[String, Type],
 ): Void = {
     when actual in {
-        .WeakReferenceType(act_inner) then collect_generic_bindings_from_shape(
-            mono,
-            inner,
-            act_inner,
-            type_params,
-            bindings,
-        ),
-        .MutableWeakReferenceType(act_inner) then collect_generic_bindings_from_shape(
+        .WeakReferenceType(act_inner) or .MutableWeakReferenceType(act_inner) then collect_generic_bindings_from_shape(
             mono,
             inner,
             act_inner,
@@ -845,19 +721,8 @@ let type_node_mentions_type_parameter(
 ): Bool = {
     return when node in {
         .Identifier(name, span) then name == type_param_name,
-        .Reference(inner, _, span) then type_node_mentions_type_parameter(
-            inner,
-            type_param_name,
-        ),
-        .Pointer(inner, _, span) then type_node_mentions_type_parameter(
-            inner,
-            type_param_name,
-        ),
-        .WeakReference(inner, _, span) then type_node_mentions_type_parameter(
-            inner,
-            type_param_name,
-        ),
-        .BorrowedReference(inner, _, span) then type_node_mentions_type_parameter(
+        .Reference(inner, _, span) or .Pointer(inner, _, span) or .WeakReference(inner, _, span)
+        or .BorrowedReference(inner, _, span) then type_node_mentions_type_parameter(
             inner,
             type_param_name,
         ),
@@ -895,9 +760,7 @@ let template_type_parameter_constrained_by_parameters(
 
 let is_placeholder_inferred_type(t: Type): Bool = {
     return when t in {
-        .Unknown() then true,
-        .TypeVar(_) then true,
-        .GenericParameter(_) then true,
+        .Unknown() or .TypeVar(_) or .GenericParameter(_) then true,
         _ then false,
     };
 };
@@ -1527,14 +1390,16 @@ let collect_generic_type_bindings(
         .FunctionType(exp_params, exp_ret) then {
             when actual in {
                 .FunctionType(act_params, act_ret) then {
-                    let mutable i: UInt = 0;
-                    while i < exp_params.count() and i < act_params.count() then {
+                    for pair in exp_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](act_params) then {
                         collect_generic_type_bindings(
-                            (exp_params[i]).param_type,
-                            (act_params[i]).param_type,
+                            (pair.first).param_type,
+                            (pair.second).param_type,
                             bindings,
                         );
-                        i += 1;
                     };
                     collect_generic_type_bindings(exp_ret, act_ret, bindings);
                 },
@@ -1545,14 +1410,14 @@ let collect_generic_type_bindings(
             when actual in {
                 .GenericStruct(actual_def_id, act_args) then {
                     if tplDefId == actual_def_id then {
-                        let mutable i: UInt = 0;
-                        while i < exp_args.count() and i < act_args.count() then {
+                        for pair in exp_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+                            act_args,
+                        ) then {
                             collect_generic_type_bindings(
-                                (exp_args[i]),
-                                (act_args[i]),
+                                (pair.first),
+                                (pair.second),
                                 bindings,
                             );
-                            i += 1;
                         };
                     };
                 },
@@ -1564,14 +1429,14 @@ let collect_generic_type_bindings(
             when actual in {
                 .GenericEnum(act_def_id, act_args) then {
                     if exp_def_id == act_def_id then {
-                        let mutable i: UInt = 0;
-                        while i < exp_args.count() and i < act_args.count() then {
+                        for pair in exp_args.lazy().zip[Type, ListIterator[Type], List[Type]](
+                            act_args,
+                        ) then {
                             collect_generic_type_bindings(
-                                (exp_args[i]),
-                                (act_args[i]),
+                                (pair.first),
+                                (pair.second),
                                 bindings,
                             );
-                            i += 1;
                         };
                     };
                 },

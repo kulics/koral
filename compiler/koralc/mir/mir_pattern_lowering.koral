@@ -81,14 +81,12 @@ given MIRFunctionBuilder {
     ): MIROperand = {
         let mutable rest_index = -1;
         let mutable fixed_slot_indices = List[UInt].new();
-        let mutable i: UInt = 0;
-        for element in elements then {
-            if element is .RestPattern() then {
-                rest_index = Int(i);
+        for pair in elements.lazy().enumerate() then {
+            if pair.second is .RestPattern() then {
+                rest_index = Int(pair.first);
             } else {
-                fixed_slot_indices.push(i);
+                fixed_slot_indices.push(pair.first);
             };
-            i += 1;
         };
         let bound = fixed_slot_indices.count();
         let length_op = if rest_index < 0 then ComparisonOperator.Equal()
@@ -234,8 +232,7 @@ given MIRFunctionBuilder {
         let trait_def_id = trait_ref.trait_def_id;
         let trait_args = trait_ref.trait_type_args;
         let concrete_type = when target_type in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) then inner,
             .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then target_type,
             _ then Type.Unknown(),
         };
@@ -424,23 +421,20 @@ given MIRFunctionBuilder {
     ): MIROperand = {
         // Reuse the cached tag operand when available to avoid creating redundant
         // temporaries across when/if branches (matches Swift compiler optimization).
-        let tag_operand = when self.pattern_subject_tag in {
-            .Some(cached) then cached,
-            .None() then {
-                let subject_source = when self.pattern_subject_operand in {
-                    .Some(op) then MIRValue.Operand(op),
-                    .None() then MIRValue.PlaceRead(
-                        subject_place,
-                        MIROwnershipUse.Borrow(),
-                    ),
-                };
-                let tag_value = MIRValue.EnumTag(
-                    MIREnumTag(subject_source, subject_type),
-                );
-                let tag = self.materialize(tag_value, Type.IntType());
-                self.pattern_subject_tag = Option[MIROperand].Some(tag);
-                tag
-            },
+        let tag_operand = self.pattern_subject_tag or else {
+            let subject_source = when self.pattern_subject_operand in {
+                .Some(op) then MIRValue.Operand(op),
+                .None() then MIRValue.PlaceRead(
+                    subject_place,
+                    MIROwnershipUse.Borrow(),
+                ),
+            };
+            let tag_value = MIRValue.EnumTag(
+                MIREnumTag(subject_source, subject_type),
+            );
+            let tag = self.materialize(tag_value, Type.IntType());
+            self.pattern_subject_tag = Option[MIROperand].Some(tag);
+            tag
         };
         let expected_tag = MIROperand.Constant(
             MIRConstant.Integer(tag_index.to_string(), Type.IntType()),
@@ -501,7 +495,6 @@ given MIRFunctionBuilder {
 
                 self.set_current_block(payload_block);
                 let mutable payload_result = self.pattern_bool(true);
-                let mutable idx: UInt = 0;
                 // The cached tag and comparison local describe the SUBJECT we just
                 // tested. A nested payload is a different value with its own tag, so
                 // clear both before recursing -- otherwise the inner pattern
@@ -513,19 +506,19 @@ given MIRFunctionBuilder {
                 self.pattern_subject_operand = Option[MIROperand].None();
                 self.pattern_subject_tag = Option[MIROperand].None();
                 self.pattern_comparison_local = Option[MIRLocalID].None();
-                while idx < elements.count() then {
-                    let param = case_info.params[idx];
+                for pair in elements.lazy().enumerate() then {
+                    let param = case_info.params[pair.first];
                     let payload_place = MIRPlace.EnumPayload(
                         subject_place,
                         case_name,
                         param.name,
-                        idx,
+                        pair.first,
                         param.param_type,
                     );
                     let payload_condition = self.lower_pattern_condition(
                         payload_place,
                         param.param_type,
-                        elements[idx].pattern,
+                        pair.second.pattern,
                         false,
                     );
                     payload_result = self.pattern_binary(
@@ -536,7 +529,6 @@ given MIRFunctionBuilder {
                     self.pattern_subject_operand = Option[MIROperand].None();
                     self.pattern_subject_tag = Option[MIROperand].None();
                     self.pattern_comparison_local = Option[MIRLocalID].None();
-                    idx += 1;
                 };
                 self.pattern_subject_operand = saved_nested_source;
                 self.pattern_subject_tag = saved_nested_tag;
@@ -607,7 +599,6 @@ given MIRFunctionBuilder {
                     return self.pattern_bool(false);
                 };
                 let mutable condition = self.pattern_bool(true);
-                let mutable idx: UInt = 0;
                 // Same as for enum payloads: a nested field is a different value,
                 // so the cached subject tag/comparison must not leak into it.
                 let saved_nested_source = self.pattern_subject_operand;
@@ -616,11 +607,15 @@ given MIRFunctionBuilder {
                 self.pattern_subject_operand = Option[MIROperand].None();
                 self.pattern_subject_tag = Option[MIROperand].None();
                 self.pattern_comparison_local = Option[MIRLocalID].None();
-                while idx < elements.count() then {
+                for pair in elements.lazy().zip[
+                    StructField,
+                    ListIterator[StructField],
+                    List[StructField],
+                ](fields) then {
                     self.pattern_subject_operand = Option[MIROperand].None();
                     self.pattern_subject_tag = Option[MIROperand].None();
                     self.pattern_comparison_local = Option[MIRLocalID].None();
-                    let field = fields[idx];
+                    let field = pair.second;
                     let field_symbol = self.make_synthetic_symbol(
                         field.name,
                         field.field_type,
@@ -629,7 +624,7 @@ given MIRFunctionBuilder {
                     let field_condition = self.lower_pattern_condition(
                         field_place,
                         field.field_type,
-                        elements[idx].pattern,
+                        pair.first.pattern,
                         false,
                     );
                     condition = self.pattern_binary(
@@ -637,7 +632,6 @@ given MIRFunctionBuilder {
                         MIRBinaryOperator.LogicalAnd(),
                         field_condition,
                     );
-                    idx += 1;
                 };
                 self.pattern_subject_operand = saved_nested_source;
                 self.pattern_subject_tag = saved_nested_tag;
@@ -672,42 +666,9 @@ given MIRFunctionBuilder {
     ): Pair[MIRPlace, Type] = {
         let _ = self;
         return when subject_type in {
-            .ReferenceType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .MutableReferenceType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .BorrowedReferenceType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .MutableBorrowedReferenceType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .WeakReferenceType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .MutableWeakReferenceType(inner) then Pair[MIRPlace, Type](
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then Pair[MIRPlace, Type](
                 MIRPlace.Deref(
                     MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
                     inner,
@@ -735,14 +696,7 @@ given MIRFunctionBuilder {
         };
         let matched = self.pattern_match_place(place, subject_type);
         return when matched.second in {
-            .PointerType(inner) then Pair[MIRPlace, Type](
-                MIRPlace.Deref(
-                    MIRValue.PlaceRead(matched.first, MIROwnershipUse.Borrow()),
-                    inner,
-                ),
-                inner,
-            ),
-            .MutablePointerType(inner) then Pair[MIRPlace, Type](
+            .PointerType(inner) or .MutablePointerType(inner) then Pair[MIRPlace, Type](
                 MIRPlace.Deref(
                     MIRValue.PlaceRead(matched.first, MIROwnershipUse.Borrow()),
                     inner,
@@ -757,11 +711,8 @@ given MIRFunctionBuilder {
         let _ = self;
         return when place in {
             .Deref(_, _) then true,
-            .Field(base, _) then self.goes_through_deref(base),
-            .EnumPayload(base, _, _, _, _) then self.goes_through_deref(base),
-            .Local(_) then false,
-            .Global(_) then false,
-            .PointerElement(_, _) then false,
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then self.goes_through_deref(base),
+            .Local(_) or .Global(_) or .PointerElement(_, _) then false,
         };
     };
 
@@ -996,14 +947,13 @@ given MIRFunctionBuilder {
                         if not (case_info.params.count() == elements.count()) then {
                             return;
                         };
-                        let mutable idx: UInt = 0;
-                        while idx < elements.count() then {
-                            let param = case_info.params[idx];
+                        for pair in elements.lazy().enumerate() then {
+                            let param = case_info.params[pair.first];
                             let payload_place = MIRPlace.EnumPayload(
                                 matched_place,
                                 case_name,
                                 param.name,
-                                idx,
+                                pair.first,
                                 param.param_type,
                             );
                             let resolved_place = if self.goes_through_deref(
@@ -1030,12 +980,11 @@ given MIRFunctionBuilder {
                                 payload_place
                             };
                             self.apply_pattern_bindings(
-                                elements[idx].pattern,
+                                pair.second.pattern,
                                 resolved_place,
                                 param.param_type,
                                 mode,
                             );
-                            idx += 1;
                         };
                     },
                     .None() then {
@@ -1051,15 +1000,14 @@ given MIRFunctionBuilder {
                             ),
                             _ then List[EnumCaseParam].new(),
                         };
-                        let mutable idx: UInt = 0;
-                        while idx < elements.count() then {
-                            let elem = elements[idx];
+                        for pair in elements.lazy().enumerate() then {
+                            let elem = pair.second;
                             let mutable elem_type = self.pattern_element_type(
                                 elem.pattern,
                             );
                             if elem_type is not .VoidType() then {
-                                let field_name = if idx < generic_params.count() then {
-                                    generic_params[idx].name
+                                let field_name = if pair.first < generic_params.count() then {
+                                    generic_params[pair.first].name
                                 } else if generic_params.count() == UInt(1) then {
                                     "value"
                                 } else {
@@ -1069,7 +1017,7 @@ given MIRFunctionBuilder {
                                     matched_place,
                                     case_name,
                                     field_name,
-                                    idx,
+                                    pair.first,
                                     elem_type,
                                 );
                                 let resolved_place = if self.goes_through_deref(
@@ -1099,7 +1047,6 @@ given MIRFunctionBuilder {
                                     mode,
                                 );
                             };
-                            idx += 1;
                         };
                     },
                 };
@@ -1117,21 +1064,23 @@ given MIRFunctionBuilder {
                         if fields.count() < elements.count() then {
                             return;
                         };
-                        let mutable idx: UInt = 0;
-                        while idx < elements.count() then {
-                            let field = fields[idx];
+                        for pair in elements.lazy().zip[
+                            StructField,
+                            ListIterator[StructField],
+                            List[StructField],
+                        ](fields) then {
+                            let field = pair.second;
                             let field_symbol = self.make_synthetic_symbol(
                                 field.name,
                                 field.field_type,
                             );
                             let field_place = MIRPlace.Field(matched_place, field_symbol);
                             self.apply_pattern_bindings(
-                                elements[idx].pattern,
+                                pair.first.pattern,
                                 field_place,
                                 field.field_type,
                                 mode,
                             );
-                            idx += 1;
                         };
                     },
                     .None() then {},
@@ -1179,21 +1128,19 @@ given MIRFunctionBuilder {
                 self.pattern_subject_operand = Option[MIROperand].None();
                 self.pattern_subject_tag = Option[MIROperand].None();
                 self.pattern_comparison_local = Option[MIRLocalID].None();
-                let mutable slot_index: UInt = 0;
-                for element in elements then {
-                    if element is .RestPattern() then {
-                        slot_index += 1;
+                for pair in elements.lazy().enumerate() then {
+                    if pair.second is .RestPattern() then {
                         continue;
                     };
                     let element_place = self.materialize_list_slot(
                         matched_place,
                         ops,
-                        slot_index,
+                        pair.first,
                         elements,
                         count_value,
                     );
                     self.apply_pattern_bindings(
-                        element,
+                        pair.second,
                         element_place,
                         ops.element_type,
                         mode,
@@ -1201,7 +1148,6 @@ given MIRFunctionBuilder {
                     self.pattern_subject_operand = Option[MIROperand].None();
                     self.pattern_subject_tag = Option[MIROperand].None();
                     self.pattern_comparison_local = Option[MIRLocalID].None();
-                    slot_index += 1;
                 };
                 self.pattern_subject_operand = saved_slot_source;
                 self.pattern_subject_tag = saved_slot_tag;

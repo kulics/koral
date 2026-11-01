@@ -100,14 +100,8 @@ given CodeGen {
     /// - 借用：不拥有，什么都不做。
     public append_release_handle_statement(self, handle_type: Type, value: String): Void = {
         when handle_type in {
-            .BorrowedReferenceType(_) then {},
-            .MutableBorrowedReferenceType(_) then {},
-            .WeakReferenceType(_) then {
-                self.buffer.push_string("__koral_weak_release((");
-                self.buffer.push_string(value);
-                self.buffer.push_string(").control);\n");
-            },
-            .MutableWeakReferenceType(_) then {
+            .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {},
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
                 self.buffer.push_string("__koral_weak_release((");
                 self.buffer.push_string(value);
                 self.buffer.push_string(").control);\n");
@@ -118,20 +112,7 @@ given CodeGen {
                     "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
                 );
             },
-            .ReferenceType(inner) then {
-                if self.is_trait_object_type(inner) then {
-                    self.append_release_value_line(
-                        value,
-                        "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
-                    );
-                } else {
-                    self.append_release_value_line(
-                        value,
-                        self.drop_function_pointer(inner),
-                    );
-                };
-            },
-            .MutableReferenceType(inner) then {
+            .ReferenceType(inner) or .MutableReferenceType(inner) then {
                 if self.is_trait_object_type(inner) then {
                     self.append_release_value_line(
                         value,
@@ -186,9 +167,7 @@ given CodeGen {
         return when var_type in {
             // managed 名义 wrapper 是 `struct X { void* ptr; }`，单字。
             .StructureType(_) then self.uses_managed_nominal_representation(var_type),
-            .EnumType(_) then self.uses_managed_nominal_representation(var_type),
-            .GenericStruct(...) then self.uses_managed_nominal_representation(var_type),
-            .GenericEnum(...) then self.uses_managed_nominal_representation(var_type),
+            .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then self.uses_managed_nominal_representation(var_type),
             // 引用 + 弱句柄有空位（type_is_tracked_handle）。Int/Float 全位模式
             // 有效；Closure 是三字；TraitRef 是两字；裸指针的 NULL 合法；
             // 值布局枚举（包括已用 niche 布局的）不带空位 —— 嵌套 Option[Option[T]]
@@ -200,8 +179,7 @@ given CodeGen {
     /// 承载 niche 的那个字段的「置空」语句。`field_path` 是该字段的完整 C 路径。
     niche_null_assignment(self, var_type: Type, field_path: String): String = {
         return when var_type in {
-            .WeakReferenceType(_) then "\(field_path).control = NULL;\n",
-            .MutableWeakReferenceType(_) then "\(field_path).control = NULL;\n",
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "\(field_path).control = NULL;\n",
             _ then "\(field_path).ptr = NULL;\n",
         };
     };
@@ -209,8 +187,7 @@ given CodeGen {
     /// 「值为空」的 C 条件表达式。
     niche_null_test(self, var_type: Type, value_expr: String): String = {
         return when var_type in {
-            .WeakReferenceType(_) then "(\(value_expr).control == NULL)",
-            .MutableWeakReferenceType(_) then "(\(value_expr).control == NULL)",
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "(\(value_expr).control == NULL)",
             _ then "(\(value_expr).ptr == NULL)",
         };
     };
@@ -319,20 +296,8 @@ given CodeGen {
             return "NULL";
         };
         return when var_type in {
-            .StructureType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
-            .EnumType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
-            .GenericStruct(...) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(
-                    var_type,
-                ) in {
-                    .Some(def_id) then self.c_name_for_def_id(def_id),
-                    .None() then self.sanitize_codegen_identifier(
-                        self.context.get_layout_key(var_type),
-                    ),
-                };
-                "(__koral_Dtor)__koral_\(type_name)_drop"
-            },
-            .GenericEnum(...) then {
+            .StructureType(def_id) or .EnumType(def_id) then "(__koral_Dtor)__koral_\(self.c_name_for_def_id(def_id))_drop",
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -344,11 +309,9 @@ given CodeGen {
                 "(__koral_Dtor)__koral_\(type_name)_drop"
             },
             .FunctionType(...) then "(__koral_Dtor)__koral_closure_drop",
-            .WeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
-            .MutableWeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
             .TraitObject(...) then "(__koral_Dtor)__koral_traitref_drop",
-            .ReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
-            .MutableReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
+            .ReferenceType(_) or .MutableReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
                     .Some(mapped) then self.drop_function_pointer(mapped),
@@ -412,8 +375,7 @@ given CodeGen {
             .EnumType(def_id) then {
                 self.append_drop_call_line(self.c_name_for_def_id(def_id), value);
             },
-            .BorrowedReferenceType(_) then {},
-            .MutableBorrowedReferenceType(_) then {},
+            .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {},
             .ReferenceType(_) then self.append_release_handle_statement(var_type, value),
             .MutableReferenceType(_) then self.append_release_handle_statement(
                 var_type,
@@ -424,11 +386,7 @@ given CodeGen {
                 self.buffer.push_string(value);
                 self.buffer.push_string(");\n");
             },
-            .WeakReferenceType(_) then self.append_release_handle_statement(
-                var_type,
-                value,
-            ),
-            .MutableWeakReferenceType(_) then self.append_release_handle_statement(
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then self.append_release_handle_statement(
                 var_type,
                 value,
             ),
@@ -445,18 +403,7 @@ given CodeGen {
                     .None() then {},
                 };
             },
-            .GenericStruct(...) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(
-                    var_type,
-                ) in {
-                    .Some(def_id) then self.c_name_for_def_id(def_id),
-                    .None() then self.sanitize_codegen_identifier(
-                        self.context.get_layout_key(var_type),
-                    ),
-                };
-                self.append_drop_call_line(type_name, value);
-            },
-            .GenericEnum(...) then {
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -498,19 +445,7 @@ given CodeGen {
                 self.add_indent();
                 self.append_copy_call_line(self.c_name_for_def_id(def_id), source, dest);
             },
-            .ReferenceType(_) then {
-                self.add_indent();
-                self.append_assignment_line(dest, source);
-                self.add_indent();
-                self.append_release_control_line("__koral_retain", dest);
-            },
-            .MutableReferenceType(_) then {
-                self.add_indent();
-                self.append_assignment_line(dest, source);
-                self.add_indent();
-                self.append_release_control_line("__koral_retain", dest);
-            },
-            .TraitObject(...) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(...) then {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
@@ -524,13 +459,7 @@ given CodeGen {
                 self.buffer.push_string(dest);
                 self.buffer.push_string(");\n");
             },
-            .WeakReferenceType(_) then {
-                self.add_indent();
-                self.append_assignment_line(dest, source);
-                self.add_indent();
-                self.append_release_control_line("__koral_weak_retain", dest);
-            },
-            .MutableWeakReferenceType(_) then {
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
@@ -557,19 +486,7 @@ given CodeGen {
                     },
                 };
             },
-            .GenericStruct(...) then {
-                let type_name = when self.find_type_def_id_by_layout_or_template(
-                    var_type,
-                ) in {
-                    .Some(def_id) then self.c_name_for_def_id(def_id),
-                    .None() then self.sanitize_codegen_identifier(
-                        self.context.get_layout_key(var_type),
-                    ),
-                };
-                self.add_indent();
-                self.append_copy_call_line(type_name, source, dest);
-            },
-            .GenericEnum(...) then {
+            .GenericStruct(...) or .GenericEnum(...) then {
                 let type_name = when self.find_type_def_id_by_layout_or_template(
                     var_type,
                 ) in {
@@ -605,8 +522,7 @@ given CodeGen {
 
     public type_is_void_or_never(self, t: Type): Bool = {
         return when t in {
-            .VoidType() then true,
-            .NeverType() then true,
+            .VoidType() or .NeverType() then true,
             _ then false,
         };
     };

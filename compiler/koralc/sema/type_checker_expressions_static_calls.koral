@@ -68,13 +68,12 @@ given TypeChecker {
                     template_def_id,
                 );
                 let mutable bindings = Dict[String, Type].new();
-                let mutable index: UInt = 0;
-                let param_count = parameter_names.count();
-                let arg_count = args.count();
-                let n = if param_count < arg_count then param_count else arg_count;
-                while index < n then {
-                    bindings.insert(parameter_names[index], args[index]);
-                    index += 1;
+                for pair in parameter_names.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](args) then {
+                    bindings.insert((pair.first), (pair.second));
                 };
                 let mutable types = List[Type].new();
                 for field in fields then {
@@ -95,8 +94,9 @@ given TypeChecker {
     ): List[TypedExpr] = {
         let expected_types = self.type_construction_arg_types(constructed_type);
         let mutable typed_args = List[TypedExpr].new();
-        let mutable index: UInt = 0;
-        for arg in args then {
+        for pair in args.lazy().enumerate() then {
+            let index = pair.first;
+            let arg = pair.second;
             let mutable expected_type = if index < expected_types.count() then Option[Type].Some(
                 expected_types[index],
             ) else Option[Type].None();
@@ -135,7 +135,6 @@ given TypeChecker {
                 };
             };
             typed_args.push(adapted);
-            index += 1;
         };
         return typed_args;
     };
@@ -261,13 +260,7 @@ given TypeChecker {
             .BoolType() then TypeNode.Identifier("Bool", unknown_span()),
             .VoidType() then TypeNode.Identifier("Void", unknown_span()),
             .NeverType() then TypeNode.Identifier("Never", unknown_span()),
-            .StructureType(def_id) then TypeNode.Identifier(
-                self.context().get_name(def_id) or else self.context().type_display_name(
-                    t,
-                ),
-                unknown_span(),
-            ),
-            .EnumType(def_id) then TypeNode.Identifier(
+            .StructureType(def_id) or .EnumType(def_id) then TypeNode.Identifier(
                 self.context().get_name(def_id) or else self.context().type_display_name(
                     t,
                 ),
@@ -367,10 +360,7 @@ given TypeChecker {
     dispatches_via_trait_object_for_static_call(self, receiver_type: Type): Bool = {
         return when receiver_type in {
             .TraitObject(...) then true,
-            .ReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(
-                inner,
-            ),
-            .MutableReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(
+            .ReferenceType(inner) or .MutableReferenceType(inner) then self.dispatches_via_trait_object_for_static_call(
                 inner,
             ),
             _ then false,
@@ -434,12 +424,9 @@ given TypeChecker {
                 else {
                     let mutable receiver_path = List[Symbol].new();
                     let mutable receiver_type = base_ref.expr_type;
-                    let mutable idx: UInt = 0;
-                    while idx + 1 < path.count() then {
-                        let segment = path[idx];
+                    for segment in path.sublist(0..<(path.count() - 1)) then {
                         receiver_path.push(segment);
                         receiver_type = segment.symbol_type;
-                        idx += 1;
                     };
                     make_typed_expr(
                         TypedExprKind.MemberPath(base_ref, receiver_path),
@@ -604,8 +591,7 @@ given TypeChecker {
         let pointer_arg = args[UInt(0)];
         let pointer_expr = self.check_expr_scoped_ref(pointer_arg, .None(), scope);
         let result_type = when pointer_expr.expr_type in {
-            .PointerType(inner) then inner,
-            .MutablePointerType(inner) then inner,
+            .PointerType(inner) or .MutablePointerType(inner) then inner,
             _ then self.first_type_arg_or_unknown(intrinsic_type_args),
         };
         // Deref bound check removed: in the simplified type system,
@@ -628,12 +614,7 @@ given TypeChecker {
         scope: Scope,
     ): TypedExpr = {
         return when pointer_type in {
-            .PointerType(inner) then self.check_expr_scoped_ref(
-                value_expr,
-                Option[Type].Some(inner),
-                scope,
-            ),
-            .MutablePointerType(inner) then self.check_expr_scoped_ref(
+            .PointerType(inner) or .MutablePointerType(inner) then self.check_expr_scoped_ref(
                 value_expr,
                 Option[Type].Some(inner),
                 scope,
@@ -696,13 +677,8 @@ given TypeChecker {
     ): Type = {
         let normalized = when receiver_type in {
             .ReferenceType(inner) then self.trait_object_type_for_static_call(inner) or else inner,
-            .MutableReferenceType(inner) then self.trait_object_type_for_static_call(
-                inner,
-            ) or else inner,
-            .BorrowedReferenceType(inner) then self.trait_object_type_for_static_call(
-                inner,
-            ) or else inner,
-            .MutableBorrowedReferenceType(inner) then self.trait_object_type_for_static_call(
+            .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then self.trait_object_type_for_static_call(
                 inner,
             ) or else inner,
             .WeakReferenceType(inner) then self.trait_object_type_for_static_call(inner) or else inner,
@@ -726,11 +702,7 @@ given TypeChecker {
     trait_method_call_receiver(self, base: TypedExpr): TypedExpr = {
         return when base.expr_kind in {
             .DerefExpr(inner) then when inner.expr_type in {
-                .ReferenceType(inner_ref) then when inner_ref in {
-                    .TraitObject(...) then inner,
-                    _ then base,
-                },
-                .MutableReferenceType(inner_ref) then when inner_ref in {
+                .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then when inner_ref in {
                     .TraitObject(...) then inner,
                     _ then base,
                 },
@@ -766,10 +738,9 @@ given TypeChecker {
         typed_args: List[TypedExpr],
         expected_types: List[Type],
     ): Void = {
-        let mutable arg_i: UInt = 0;
-        while arg_i < typed_args.count() then {
-            let typed_arg = typed_args[arg_i];
-            when expected_types.get(arg_i) in {
+        for pair in typed_args.lazy().enumerate() then {
+            let typed_arg = pair.second;
+            when expected_types.get(pair.first) in {
                 .Some(expected_t) then {
                     if not self.same_expr_type(typed_arg.expr_type, expected_t) and not self.type_matches_expected_pattern(
                         expected_t,
@@ -794,7 +765,6 @@ given TypeChecker {
                 },
                 .None() then {},
             };
-            arg_i += 1;
         };
     };
 
@@ -853,8 +823,8 @@ given TypeChecker {
             method_type_args,
             Option[Type].None(),
         );
-        let mutable index: UInt = 0;
-        while index < owner_params.count() then {
+        for pair in owner_params.lazy().enumerate() then {
+            let index = pair.first;
             let mutable pinned = false;
             when declared_args.get(index) in {
                 .Some(arg_type) then {
@@ -867,7 +837,7 @@ given TypeChecker {
                 .None() then {},
             };
             if not pinned then {
-                when bindings.get(owner_params[index]) in {
+                when bindings.get(pair.second) in {
                     .Some(bound_type) then {
                         if not self.is_unresolved_expr_type(bound_type) and not self.contains_generic_parameter(
                             bound_type,
@@ -885,7 +855,6 @@ given TypeChecker {
                 );
                 return;
             };
-            index += 1;
         };
     };
 
@@ -968,15 +937,13 @@ given TypeChecker {
         };
         let mutable receiver_type_args = List[Type].new();
         let mutable method_type_args = List[Type].new();
-        let mutable resolved_type_arg_idx: UInt = 0;
-        while resolved_type_arg_idx < resolved_type_args.count() then {
-            let resolved_type_arg = resolved_type_args[resolved_type_arg_idx];
-            if resolved_type_arg_idx < receiver_type_param_count then {
+        for pair in resolved_type_args.lazy().enumerate() then {
+            let resolved_type_arg = pair.second;
+            if pair.first < receiver_type_param_count then {
                 receiver_type_args.push(resolved_type_arg);
             } else {
                 method_type_args.push(resolved_type_arg);
             };
-            resolved_type_arg_idx += 1;
         };
         let mutable receiver_type_arg_refs = List[Type].new();
         for rt in receiver_type_args then {
@@ -1006,10 +973,7 @@ given TypeChecker {
             receiver_type_args,
         );
         let declared_receiver_type = when raw_declared_receiver_type in {
-            .Unknown() then when scoped_receiver_type_opt in {
-                .Some(scoped_receiver_type) then scoped_receiver_type,
-                .None() then raw_declared_receiver_type,
-            },
+            .Unknown() then scoped_receiver_type_opt or else raw_declared_receiver_type,
             _ then raw_declared_receiver_type,
         };
         let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(
@@ -1149,8 +1113,7 @@ given TypeChecker {
             // flow (`T.zero()` behind `T: Zero`), so its miss here means
             // nothing -- the ordinary fall-through still finds the method.
             let receiver_is_param_like = when declared_receiver_type in {
-                .GenericParameter(_) then true,
-                .TypeVar(_) then true,
+                .GenericParameter(_) or .TypeVar(_) then true,
                 _ then false,
             };
             // The fall-through below has lookups of its own -- registered
@@ -1216,12 +1179,10 @@ given TypeChecker {
                     expected,
                 );
                 let mutable bound_params = List[Type].new();
-                let mutable param_i: UInt = 0;
-                while param_i < self.method_param_count(sig) then {
+                for param_i in 0..<self.method_param_count(sig) then {
                     let mutable param_type = self.method_param_type(sig, param_i) or else Type.Unknown(
                     );
                     bound_params.push(self.apply_type_bindings(param_type, bindings));
-                    param_i += 1;
                 };
                 bound_params
             },
@@ -1316,12 +1277,9 @@ given TypeChecker {
                 .DerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(inner_ref) then inner_ref,
-                        .MutableReferenceType(inner_ref) then inner_ref,
-                        .WeakReferenceType(inner_ref) then inner_ref,
-                        .MutableWeakReferenceType(inner_ref) then inner_ref,
-                        .PointerType(inner_ref) then inner_ref,
-                        .MutablePointerType(inner_ref) then inner_ref,
+                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                        or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                        or .PointerType(inner_ref) or .MutablePointerType(inner_ref) then inner_ref,
                         _ then Type.Unknown(),
                     };
                     make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
@@ -1329,12 +1287,9 @@ given TypeChecker {
                 .UnsafeDerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(inner_ref) then inner_ref,
-                        .MutableReferenceType(inner_ref) then inner_ref,
-                        .WeakReferenceType(inner_ref) then inner_ref,
-                        .MutableWeakReferenceType(inner_ref) then inner_ref,
-                        .PointerType(inner_ref) then inner_ref,
-                        .MutablePointerType(inner_ref) then inner_ref,
+                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                        or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                        or .PointerType(inner_ref) or .MutablePointerType(inner_ref) then inner_ref,
                         _ then Type.Unknown(),
                     };
                     make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
@@ -1388,10 +1343,9 @@ given TypeChecker {
                 // unresolved type is not. The static spelling checks its
                 // arguments here because it never reaches that loop -- and the
                 // first explicit argument is the receiver.
-                let mutable mismatch_i: UInt = 0;
-                while mismatch_i < typed_args.count() then {
-                    let typed_arg = typed_args[mismatch_i];
-                    when static_param_types.get(mismatch_i) in {
+                for pair in typed_args.lazy().enumerate() then {
+                    let typed_arg = pair.second;
+                    when static_param_types.get(pair.first) in {
                         .Some(expected_t) then {
                             if not self.same_expr_type(typed_arg.expr_type, expected_t) and not self.type_matches_expected_pattern(
                                 expected_t,
@@ -1416,7 +1370,6 @@ given TypeChecker {
                         },
                         .None() then {},
                     };
-                    mismatch_i += 1;
                 };
                 when static_sig_opt in {
                     .Some(sig) then self.reject_unpinned_owner_type_arguments(
@@ -1537,20 +1490,14 @@ given TypeChecker {
                     _ then resolved_ret_type,
                 };
                 let ret_type = when with_type_args in {
-                    .Unknown() then when expected in {
-                        .Some(et) then et,
-                        .None() then with_type_args,
-                    },
+                    .Unknown() then expected or else with_type_args,
                     _ then with_type_args,
                 };
-                let method_symbol = when static_sig_opt in {
-                    .Some(sig) then sig,
-                    .None() then self.make_method_symbol_for_receiver(
+                let method_symbol = static_sig_opt or else self.make_method_symbol_for_receiver(
                         declared_receiver_type,
                         method_name,
                         ret_type,
-                    ),
-                };
+                    );
                 return make_typed_expr(
                     TypedExprKind.StaticMethodCall(
                         receiver_type,
@@ -1632,8 +1579,9 @@ given TypeChecker {
                     call_span,
                 ) in {
                     .Some(planned_args) then {
-                        let mutable arg_idx: UInt = 0;
-                        for a in planned_args then {
+                        for pair in planned_args.lazy().enumerate() then {
+                            let arg_idx = pair.first;
+                            let a = pair.second;
                             let param_expected = when self.method_param_type(
                                 sig,
                                 arg_idx,
@@ -1651,7 +1599,6 @@ given TypeChecker {
                                 param_expected,
                                 Option[SourceSpan].Some(call_span),
                             );
-                            arg_idx += 1;
                         };
                     },
                     .None() then {},
@@ -1888,16 +1835,9 @@ given TypeChecker {
 
     is_unsigned_integer_type(self, t: Type): Bool = {
         return when t in {
-            .UIntType() then true,
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .WrappingUIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
+            .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+            or .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -1918,10 +1858,7 @@ given TypeChecker {
         // A construction blames its CALL for an argument's range violation
         // (the reference compiler coerces after checking and names the
         // construct it is inside); every other path names the literal.
-        let blame = when self.storage.range_blame_span in {
-            .Some(blame_span) then blame_span,
-            .None() then span,
-        };
+        let blame = self.storage.range_blame_span or else span;
         // Several paths ask about the same literal (the literal itself, then
         // the declaration that gives it a type). One diagnostic per span: the
         // seed reports it once and the two must agree verbatim.
@@ -1931,11 +1868,7 @@ given TypeChecker {
         let i64max = UInt64(9223372036854775807);
         let u64max = i64max * UInt64(2) + UInt64(1);
         let bounds = when target_type in {
-            .IntType() or .WrappingIntType() then Pair[UInt64, UInt64](
-                i64max + UInt64(1),
-                i64max,
-            ),
-            .Int64Type() or .WrappingInt64Type() then Pair[UInt64, UInt64](
+            .IntType() or .WrappingIntType() or .Int64Type() or .WrappingInt64Type() then Pair[UInt64, UInt64](
                 i64max + UInt64(1),
                 i64max,
             ),
@@ -1951,11 +1884,7 @@ given TypeChecker {
                 UInt64(2147483648),
                 UInt64(2147483647),
             ),
-            .UIntType() or .WrappingUIntType() then Pair[UInt64, UInt64](
-                UInt64(0),
-                u64max,
-            ),
-            .UInt64Type() or .WrappingUInt64Type() then Pair[UInt64, UInt64](
+            .UIntType() or .WrappingUIntType() or .UInt64Type() or .WrappingUInt64Type() then Pair[UInt64, UInt64](
                 UInt64(0),
                 u64max,
             ),
@@ -2050,19 +1979,8 @@ given TypeChecker {
     /// the pointee, the same auto-dereference the implicit coercions do.
     as_cast_auto_deref(self, expr: TypedExpr): TypedExpr = {
         return when expr.expr_type in {
-            .ReferenceType(inner) then make_typed_expr(
-                TypedExprKind.DerefExpr(expr),
-                inner,
-            ),
-            .MutableReferenceType(inner) then make_typed_expr(
-                TypedExprKind.DerefExpr(expr),
-                inner,
-            ),
-            .BorrowedReferenceType(inner) then make_typed_expr(
-                TypedExprKind.DerefExpr(expr),
-                inner,
-            ),
-            .MutableBorrowedReferenceType(inner) then make_typed_expr(
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then make_typed_expr(
                 TypedExprKind.DerefExpr(expr),
                 inner,
             ),
@@ -2073,9 +1991,7 @@ given TypeChecker {
     /// Strips managed-reference wrappers to find the value underneath.
     as_cast_peel_ref_wrappers(self, t: Type): Type = {
         return when t in {
-            .ReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
-            .MutableReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
-            .BorrowedReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.as_cast_peel_ref_wrappers(inner),
             .MutableBorrowedReferenceType(inner) then self.as_cast_peel_ref_wrappers(
                 inner,
             ),
@@ -2087,11 +2003,7 @@ given TypeChecker {
     as_cast_trait_object_target(self, t: Type): Option[Type] = {
         return when t in {
             .TraitObject(_, _) then Option[Type].Some(t),
-            .ReferenceType(inner) then when inner in {
-                .TraitObject(_, _) then Option[Type].Some(inner),
-                _ then Option[Type].None(),
-            },
-            .MutableReferenceType(inner) then when inner in {
+            .ReferenceType(inner) or .MutableReferenceType(inner) then when inner in {
                 .TraitObject(_, _) then Option[Type].Some(inner),
                 _ then Option[Type].None(),
             },
@@ -2104,16 +2016,9 @@ given TypeChecker {
     is_pointer_weak_or_trait_cast_target(self, t: Type): Bool = {
         let canonical = self.canonicalize_alias_type(t);
         return when canonical in {
-            .PointerType(_) then true,
-            .MutablePointerType(_) then true,
-            .WeakReferenceType(_) then true,
-            .MutableWeakReferenceType(_) then true,
-            .TraitObject(...) then true,
-            .ReferenceType(inner) then when inner in {
-                .TraitObject(...) then true,
-                _ then false,
-            },
-            .MutableReferenceType(inner) then when inner in {
+            .PointerType(_) or .MutablePointerType(_) or .WeakReferenceType(_) or .MutableWeakReferenceType(_)
+            or .TraitObject(...) then true,
+            .ReferenceType(inner) or .MutableReferenceType(inner) then when inner in {
                 .TraitObject(...) then true,
                 _ then false,
             },
@@ -2125,8 +2030,7 @@ given TypeChecker {
     as_cast_source_is_pointer(self, from: Type): Bool = {
         let source = self.canonicalize_alias_type(from);
         return when source in {
-            .PointerType(_) then true,
-            .MutablePointerType(_) then true,
+            .PointerType(_) or .MutablePointerType(_) then true,
             _ then false,
         };
     };
@@ -2187,8 +2091,7 @@ given TypeChecker {
             // unrelated mutable types.
             if result_type is not .Unknown() then {
                 let weak_referent = when target in {
-                    .WeakReferenceType(r) then r,
-                    .MutableWeakReferenceType(r) then r,
+                    .WeakReferenceType(r) or .MutableWeakReferenceType(r) then r,
                     _ then Type.Unknown(),
                 };
                 if not self.same_expr_type(typed_inner.expr_type, weak_referent) then {
@@ -2273,10 +2176,7 @@ given TypeChecker {
         span: SourceSpan,
         scope: Scope,
     ): TypedExpr = {
-        let trait_obj = when self.as_cast_trait_object_target(target) in {
-            .Some(trait_object_type) then trait_object_type,
-            .None() then target,
-        };
+        let trait_obj = self.as_cast_trait_object_target(target) or else target;
         if call_args.count() != 1 then {
             self.push_diagnostic_at_span(
                 "A cast takes exactly one positional argument: write 'Type(expr)'",
@@ -2429,15 +2329,7 @@ given TypeChecker {
                         // not be aimed is a consequence, not a second mistake.
                         return self.empty_typed_block(Type.Unknown());
                     },
-                    .PointerType(_) then {
-                        return make_typed_expr(
-                            TypedExprKind.IntrinsicCall(
-                                TypedIntrinsic.NullPtr(resolved_target),
-                            ),
-                            resolved_target,
-                        );
-                    },
-                    .MutablePointerType(_) then {
+                    .PointerType(_) or .MutablePointerType(_) then {
                         return make_typed_expr(
                             TypedExprKind.IntrinsicCall(
                                 TypedIntrinsic.NullPtr(resolved_target),
@@ -2943,9 +2835,7 @@ given TypeChecker {
         let probe_is_constructor_type = constructor_type_probe is .StructureType(_) or is .GenericStruct(...);
         let constructor_plan_type = when expected in {
             .Some(expected_t) then when expected_t in {
-                .StructureType(_) then if probe_is_constructor_type then expected_t
-                else constructor_type_probe,
-                .GenericStruct(...) then if probe_is_constructor_type then expected_t
+                .StructureType(_) or .GenericStruct(...) then if probe_is_constructor_type then expected_t
                 else constructor_type_probe,
                 _ then constructor_type_probe,
             },
@@ -3161,8 +3051,7 @@ given TypeChecker {
                                         // (`T.zero()` behind `T: Zero`); its
                                         // miss here means nothing.
                                         let receiver_is_param_like = when resolved_type in {
-                                            .GenericParameter(_) then true,
-                                            .TypeVar(_) then true,
+                                            .GenericParameter(_) or .TypeVar(_) then true,
                                             _ then false,
                                         };
                                         if not receiver_is_param_like and not self.is_unresolved_expr_type(
@@ -3173,8 +3062,7 @@ given TypeChecker {
                                                 expr_span(callee),
                                             ) then {
                                                 let enum_noun = when resolved_type in {
-                                                    .EnumType(_) then true,
-                                                    .GenericEnum(_, _) then true,
+                                                    .EnumType(_) or .GenericEnum(_, _) then true,
                                                     _ then false,
                                                 };
                                                 self.push_diagnostic_at_span(
@@ -3384,8 +3272,9 @@ given TypeChecker {
                                                             let expected_count = if param_types.count(
                                                             ) > UInt(0) then param_types.count(
                                                             ) - UInt(1) else UInt(0);
-                                                            let mutable a_idx: UInt = 0;
-                                                            for a in call_args then {
+                                                            for pair in call_args.lazy().enumerate() then {
+                                                                let a_idx = pair.first;
+                                                                let a = pair.second;
                                                                 let arg_expected = if a_idx < expected_count then Option[Type].Some(
                                                                     param_types[
                                                                         a_idx + UInt(1)
@@ -3399,7 +3288,6 @@ given TypeChecker {
                                                                         scope,
                                                                     ),
                                                                 );
-                                                                a_idx += 1;
                                                             };
                                                             return make_typed_expr(
                                                                 TypedExprKind.Call(
@@ -3469,8 +3357,9 @@ given TypeChecker {
                                                             let expected_count = if param_types.count(
                                                             ) > UInt(0) then param_types.count(
                                                             ) - UInt(1) else UInt(0);
-                                                            let mutable a_idx: UInt = 0;
-                                                            for a in call_args then {
+                                                            for pair in call_args.lazy().enumerate() then {
+                                                                let a_idx = pair.first;
+                                                                let a = pair.second;
                                                                 let arg_expected = if a_idx < expected_count then Option[Type].Some(
                                                                     param_types[
                                                                         a_idx + UInt(1)
@@ -3484,7 +3373,6 @@ given TypeChecker {
                                                                         scope,
                                                                     ),
                                                                 );
-                                                                a_idx += 1;
                                                             };
                                                             return make_typed_expr(
                                                                 TypedExprKind.Call(
@@ -3515,10 +3403,7 @@ given TypeChecker {
             _ then {},
         };
 
-        let typed_callee = when self.typed_generic_function_callee_for_call(callee) in {
-            .Some(resolved_callee) then resolved_callee,
-            .None() then self.check_call_callee_expr_ref(callee, scope),
-        };
+        let typed_callee = self.typed_generic_function_callee_for_call(callee) or else self.check_call_callee_expr_ref(callee, scope);
         when callee in {
             .MemberPath(_, path, _) then {
                 if not path.is_empty() and path[path.count() - UInt(1)] == "drop" then {
@@ -3636,10 +3521,8 @@ given TypeChecker {
                     .FunctionType(params, _) then param_entry_types(params),
                     _ then List[Type].new(),
                 };
-                let mutable param_i: UInt = 1;
-                while param_i < param_types.count() then {
-                    method_param_types_for_inference.push((param_types[param_i]));
-                    param_i += 1;
+                for param_type in param_types.lazy().skip(1) then {
+                    method_param_types_for_inference.push((param_type));
                 };
                 method_call_bindings = bound_bindings;
                 has_method_call_bindings = true;
@@ -3675,12 +3558,10 @@ given TypeChecker {
                                 .FunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
-                            let mutable param_i: UInt = 1;
-                            while param_i < param_types.count() then {
+                            for param_type in param_types.lazy().skip(1) then {
                                 method_param_types_for_inference.push(
-                                    (param_types[param_i]),
+                                    (param_type),
                                 );
-                                param_i += 1;
                             };
                             method_call_bindings = self.resolve_signature_method_type_bindings(
                                 receiver_type,
@@ -3726,12 +3607,10 @@ given TypeChecker {
                                 .FunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
-                            let mutable param_i: UInt = 1;
-                            while param_i < param_types.count() then {
+                            for param_type in param_types.lazy().skip(1) then {
                                 method_param_types_for_inference.push(
-                                    (param_types[param_i]),
+                                    (param_type),
                                 );
-                                param_i += 1;
                             };
                             method_call_bindings = self.resolve_signature_method_type_bindings(
                                 receiver_type,
@@ -3761,17 +3640,7 @@ given TypeChecker {
                 ),
                 _ then List[Type].new(),
             },
-            .GenericInstantiation(_, _) then self.resolve_expected_constructor_param_types(
-                callee,
-                expected,
-                scope,
-            ),
-            .StaticMethodCall(_, _, _, _, _, _) then self.resolve_expected_constructor_param_types(
-                callee,
-                expected,
-                scope,
-            ),
-            .MemberPath(...) then self.resolve_expected_constructor_param_types(
+            .GenericInstantiation(_, _) or .StaticMethodCall(_, _, _, _, _, _) or .MemberPath(...) then self.resolve_expected_constructor_param_types(
                 callee,
                 expected,
                 scope,
@@ -3892,12 +3761,9 @@ given TypeChecker {
                 .DerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(inner_ref) then inner_ref,
-                        .MutableReferenceType(inner_ref) then inner_ref,
-                        .WeakReferenceType(inner_ref) then inner_ref,
-                        .MutableWeakReferenceType(inner_ref) then inner_ref,
-                        .PointerType(inner_ref) then inner_ref,
-                        .MutablePointerType(inner_ref) then inner_ref,
+                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                        or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                        or .PointerType(inner_ref) or .MutablePointerType(inner_ref) then inner_ref,
                         _ then Type.Unknown(),
                     };
                     make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
@@ -3905,12 +3771,9 @@ given TypeChecker {
                 .UnsafeDerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                     let inner_t = when typed_inner.expr_type in {
-                        .ReferenceType(inner_ref) then inner_ref,
-                        .MutableReferenceType(inner_ref) then inner_ref,
-                        .WeakReferenceType(inner_ref) then inner_ref,
-                        .MutableWeakReferenceType(inner_ref) then inner_ref,
-                        .PointerType(inner_ref) then inner_ref,
-                        .MutablePointerType(inner_ref) then inner_ref,
+                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                        or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                        or .PointerType(inner_ref) or .MutablePointerType(inner_ref) then inner_ref,
                         _ then Type.Unknown(),
                     };
                     make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
@@ -3928,37 +3791,8 @@ given TypeChecker {
                     param_expected,
                     scope,
                 ),
-                .MemberPath(_, _, _) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .StaticMethodCall(_, _, _, _, _) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .IntegerLiteral(...) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .FloatLiteral(...) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .BoolLiteral(...) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .StringLiteral(...) then self.check_expr_scoped_ref(
-                    a,
-                    param_expected,
-                    scope,
-                ),
-                .RuneLiteral(...) then self.check_expr_scoped_ref(
+                .MemberPath(_, _, _) or .StaticMethodCall(_, _, _, _, _) or .IntegerLiteral(...)
+                or .FloatLiteral(...) or .BoolLiteral(...) or .StringLiteral(...) or .RuneLiteral(...) then self.check_expr_scoped_ref(
                     a,
                     param_expected,
                     scope,
@@ -3971,10 +3805,8 @@ given TypeChecker {
                     let expected_requires_ref_like = type_is_any_ref(expected_t);
                     let actual_is_ref_like = type_is_handle(typed_arg.expr_type);
                     let expected_is_trait_object_ref = when expected_t in {
-                        .ReferenceType(inner) then inner is .TraitObject(...),
-                        .MutableReferenceType(inner) then inner is .TraitObject(...),
-                        .BorrowedReferenceType(inner) then inner is .TraitObject(...),
-                        .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
+                        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
                         _ then false,
                     };
                     if self.same_expr_type(typed_arg.expr_type, expected_t) then typed_arg
@@ -4057,11 +3889,7 @@ given TypeChecker {
                                 };
                                 let trait_receiver = when base.expr_kind in {
                                     .DerefExpr(inner) then when inner.expr_type in {
-                                        .ReferenceType(inner_ref) then when inner_ref in {
-                                            .TraitObject(...) then inner,
-                                            _ then base,
-                                        },
-                                        .MutableReferenceType(inner_ref) then when inner_ref in {
+                                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then when inner_ref in {
                                             .TraitObject(...) then inner,
                                             _ then base,
                                         },
@@ -4355,13 +4183,10 @@ given TypeChecker {
         else when typed_callee.expr_kind in {
             .Variable(_) then when generic_return_type in {
                 .Some(ret_type) then ret_type,
-                .None() then when generic_struct_constructor_return_type in {
-                    .Some(ret_type) then ret_type,
-                    .None() then when inferred_method_call_info in {
+                .None() then generic_struct_constructor_return_type or else when inferred_method_call_info in {
                         .Some(info) then info.first,
                         .None() then self.resolve_call_return_type(typed_callee_ref),
                     },
-                },
             },
             _ then when generic_return_type in {
                 .Some(ret_type) then ret_type,
@@ -4372,10 +4197,7 @@ given TypeChecker {
             },
         };
         let mutable ret_type = when resolved_ret_type in {
-            .Unknown() then when expected in {
-                .Some(et) then et,
-                .None() then resolved_ret_type,
-            },
+            .Unknown() then expected or else resolved_ret_type,
             _ then resolved_ret_type,
         };
         let inferred_method_type_args_for_call = when inferred_method_call_info in {
@@ -4383,8 +4205,7 @@ given TypeChecker {
             .None() then List[Type].new(),
         };
         let skip_zero_arg_member_expected_refine = args.is_empty() and when typed_callee.expr_kind in {
-            .MethodReference(_, _, _, _, _, _) then true,
-            .MemberPath(...) then true,
+            .MethodReference(_, _, _, _, _, _) or .MemberPath(...) then true,
             _ then false,
         };
         if not skip_zero_arg_member_expected_refine then {
@@ -4484,9 +4305,9 @@ given TypeChecker {
                         if ctor_is_implicit_generic and generic_struct_constructor_return_type is .None() then {
                             constructor_args = typed_args;
                         } else if ctor_is_implicit_generic and constructor_already_normalized then {
-                            let mutable fit_idx: UInt = 0;
-                            while fit_idx < typed_args.count() then {
-                                let arg_node = typed_args[fit_idx];
+                            for pair in typed_args.lazy().enumerate() then {
+                                let fit_idx = pair.first;
+                                let arg_node = pair.second;
                                 if fit_idx < recheck_fields.count() and not self.is_unresolved_expr_type(
                                     arg_node.expr_type,
                                 ) then {
@@ -4528,7 +4349,6 @@ given TypeChecker {
                                 } else {
                                     constructor_args.push(arg_node);
                                 };
-                                fit_idx += 1;
                             };
                         } else {
                             constructor_args = self.recheck_type_construction_args(
@@ -4660,21 +4480,18 @@ given TypeChecker {
                     .None() then self.resolve_method_self_type(base_type, method_name),
                 };
                 let mutable prepared_base_binding = cached_materialized_receiver_binding;
-                let adapted_base = when cached_adapted_base_expr in {
-                    .Some(cached) then cached,
-                    .None() then {
-                        let prepared_base = self.prepare_call_receiver(
-                            base,
-                            expected_self_type,
-                        );
-                        prepared_base_binding = prepared_base.second;
-                        cached_materialized_receiver_binding = prepared_base.second;
-                        self.adapt_receiver_to_expected_self_type_for_method(
-                            prepared_base.first,
-                            expected_self_type,
-                            method_name,
-                        )
-                    },
+                let adapted_base = cached_adapted_base_expr or else {
+                    let prepared_base = self.prepare_call_receiver(
+                        base,
+                        expected_self_type,
+                    );
+                    prepared_base_binding = prepared_base.second;
+                    cached_materialized_receiver_binding = prepared_base.second;
+                    self.adapt_receiver_to_expected_self_type_for_method(
+                        prepared_base.first,
+                        expected_self_type,
+                        method_name,
+                    )
                 };
                 let inferred_method_type_args = if not callee_method_type_args.is_empty() then callee_method_type_args
                 else inferred_method_type_args_for_call;
@@ -4694,14 +4511,11 @@ given TypeChecker {
                     },
                     _ then ret_type,
                 };
-                let lowered_method_symbol = when direct_method_signature_opt in {
-                    .Some(method_symbol) then method_symbol,
-                    .None() then self.make_method_symbol_for_receiver(
+                let lowered_method_symbol = direct_method_signature_opt or else self.make_method_symbol_for_receiver(
                         base_type,
                         method_name,
                         method_ret_type,
-                    ),
-                };
+                    );
                 let mutable structured_call = Option[TypedExpr].None();
                 let should_lower_to_method_call = self.is_unresolved_expr_type(
                     base_type,
@@ -4965,21 +4779,18 @@ given TypeChecker {
                         ),
                     };
                     let mutable prepared_base_binding = cached_materialized_receiver_binding;
-                    let adapted_base = when cached_adapted_base_expr in {
-                        .Some(cached) then cached,
-                        .None() then {
-                            let prepared_base = self.prepare_call_receiver(
-                                base,
-                                expected_self_type,
-                            );
-                            prepared_base_binding = prepared_base.second;
-                            cached_materialized_receiver_binding = prepared_base.second;
-                            self.adapt_receiver_to_expected_self_type_for_method(
-                                prepared_base.first,
-                                expected_self_type,
-                                method_name,
-                            )
-                        },
+                    let adapted_base = cached_adapted_base_expr or else {
+                        let prepared_base = self.prepare_call_receiver(
+                            base,
+                            expected_self_type,
+                        );
+                        prepared_base_binding = prepared_base.second;
+                        cached_materialized_receiver_binding = prepared_base.second;
+                        self.adapt_receiver_to_expected_self_type_for_method(
+                            prepared_base.first,
+                            expected_self_type,
+                            method_name,
+                        )
                     };
                     let inferred_method_type_args = inferred_method_type_args_for_call;
                     let method_ret_type = when ret_type in {
@@ -4998,14 +4809,11 @@ given TypeChecker {
                         },
                         _ then ret_type,
                     };
-                    let lowered_method_symbol = when direct_method_signature_opt in {
-                        .Some(method_symbol) then method_symbol,
-                        .None() then self.make_method_symbol_for_receiver(
+                    let lowered_method_symbol = direct_method_signature_opt or else self.make_method_symbol_for_receiver(
                             adapted_base.expr_type,
                             method_name,
                             method_ret_type,
-                        ),
-                    };
+                        );
                     let mutable structured_call = Option[TypedExpr].None();
                     let should_lower_to_method_call = self.is_unresolved_expr_type(
                         base_type,
@@ -5335,9 +5143,7 @@ given TypeChecker {
                 _ then Option[TypedExpr].None(),
             },
         };
-        let result = when structured_call_opt in {
-            .Some(structured_call) then structured_call,
-            .None() then if typed_callee.expr_type is not .FunctionType(...) then {
+        let result = structured_call_opt or else if typed_callee.expr_type is not .FunctionType(...) then {
                 when callee in {
                     .MemberPath(base_expr, path, _) then if not path.is_empty() then self.missing_member_call_expr(
                         typed_callee,
@@ -5358,8 +5164,7 @@ given TypeChecker {
             } else make_typed_expr(
                 TypedExprKind.Call(typed_callee, typed_args),
                 ret_type,
-            ),
-        };
+            );
         return result;
     };
 
@@ -5379,16 +5184,16 @@ given TypeChecker {
             return Option[Type].None();
         };
         let mutable bindings = Dict[String, Type].new();
-        let mutable field_index: UInt = 0;
-        let field_limit = if fields.count() < typed_args.count() then fields.count()
-        else typed_args.count();
-        while field_index < field_limit then {
-            let field = fields[field_index];
+        for pair in fields.lazy().zip[
+            TypedExpr,
+            ListIterator[TypedExpr],
+            List[TypedExpr],
+        ](typed_args) then {
+            let field = pair.first;
             let mutable arg_type = self.concretize_default_literal_type(
-                typed_args[field_index].expr_type,
+                pair.second.expr_type,
             );
             self.infer_type_bindings(field.field_type, arg_type, bindings);
-            field_index += 1;
         };
         let mutable resolved_args = List[Type].new();
         for type_param_name in type_parameter_names then {
@@ -5475,15 +5280,15 @@ given TypeChecker {
             case_name,
         );
         let mutable bindings = Dict[String, Type].new();
-        let mutable field_index: UInt = 0;
-        let field_limit = if field_types.count() < typed_args.count() then field_types.count()
-        else typed_args.count();
-        while field_index < field_limit then {
+        for pair in field_types.lazy().zip[
+            TypedExpr,
+            ListIterator[TypedExpr],
+            List[TypedExpr],
+        ](typed_args) then {
             let mutable arg_type = self.concretize_default_literal_type(
-                typed_args[field_index].expr_type,
+                pair.second.expr_type,
             );
-            self.infer_type_bindings(field_types[field_index], arg_type, bindings);
-            field_index += 1;
+            self.infer_type_bindings((pair.first), arg_type, bindings);
         };
         let mutable resolved_args = List[Type].new();
         for type_parameter in enum_template.type_parameters then {

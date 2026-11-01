@@ -50,19 +50,8 @@ public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): Ty
         .DerefExpr(inner) then {
             let new_inner = resolve_types_in_expression(mono, inner);
             let resolved_type = when new_inner.expr_type in {
-                .ReferenceType(inner_ref) then resolve_parameterized_type(
-                    mono,
-                    inner_ref,
-                ),
-                .MutableReferenceType(inner_ref) then resolve_parameterized_type(
-                    mono,
-                    inner_ref,
-                ),
-                .WeakReferenceType(inner_ref) then resolve_parameterized_type(
-                    mono,
-                    inner_ref,
-                ),
-                .MutableWeakReferenceType(inner_ref) then resolve_parameterized_type(
+                .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+                or .MutableWeakReferenceType(inner_ref) then resolve_parameterized_type(
                     mono,
                     inner_ref,
                 ),
@@ -194,34 +183,9 @@ public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): Ty
                                         .TraitObject(trait_def_id, _) then Option[String].Some(
                                             def_id_spelling(trait_def_id),
                                         ),
-                                        .ReferenceType(inner_ref) then when resolve_parameterized_type(
-                                            mono,
-                                            inner_ref,
-                                        ) in {
-                                            .TraitObject(trait_def_id, _) then Option[String].Some(
-                                                def_id_spelling(trait_def_id),
-                                            ),
-                                            _ then Option[String].None(),
-                                        },
-                                        .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
-                                            mono,
-                                            inner_ref,
-                                        ) in {
-                                            .TraitObject(trait_def_id, _) then Option[String].Some(
-                                                def_id_spelling(trait_def_id),
-                                            ),
-                                            _ then Option[String].None(),
-                                        },
-                                        .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
-                                            mono,
-                                            inner_ref,
-                                        ) in {
-                                            .TraitObject(trait_def_id, _) then Option[String].Some(
-                                                def_id_spelling(trait_def_id),
-                                            ),
-                                            _ then Option[String].None(),
-                                        },
-                                        .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                                        .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                                        or .WeakReferenceType(inner_ref)
+                                        or .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
                                             mono,
                                             inner_ref,
                                         ) in {
@@ -359,9 +323,8 @@ public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): Ty
                                 .Function() then true,
                                 _ then false,
                             },
-                            .MethodReference(_, _, _, _, _, _) then true,
-                            .TraitMethodPlaceholder(_, _, _, _, _, _) then true,
-                            .Call(_, _) then true,
+                            .MethodReference(_, _, _, _, _, _) or .TraitMethodPlaceholder(_, _, _, _, _, _)
+                            or .Call(_, _) then true,
                             _ then false,
                         };
                         if not bound_is_callable then {
@@ -700,10 +663,7 @@ let lookup_instantiated_extension_method_symbol(
         .Some(def_id) then {
             let symbol_type = when mono.storage.context.get_function_type(def_id) in {
                 .Some(function_type) then function_type,
-                .None() then when expected_method_type_opt in {
-                    .Some(expected_method_type) then expected_method_type,
-                    .None() then Type.VoidType(),
-                },
+                .None() then expected_method_type_opt or else Type.VoidType(),
             };
             Option[Symbol].Some(Symbol(def_id, symbol_type, SymbolKind.Function()))
         },
@@ -719,22 +679,8 @@ let resolve_member_field_type(
 ): Type = {
     let resolved_base = resolve_parameterized_type(mono, base_type);
     when resolved_base in {
-        .ReferenceType(inner) then {
-            return resolve_member_field_type(mono, inner, member_name, fallback);
-        },
-        .MutableReferenceType(inner) then {
-            return resolve_member_field_type(mono, inner, member_name, fallback);
-        },
-        .WeakReferenceType(inner) then {
-            return resolve_member_field_type(mono, inner, member_name, fallback);
-        },
-        .MutableWeakReferenceType(inner) then {
-            return resolve_member_field_type(mono, inner, member_name, fallback);
-        },
-        .PointerType(inner) then {
-            return resolve_member_field_type(mono, inner, member_name, fallback);
-        },
-        .MutablePointerType(inner) then {
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then {
             return resolve_member_field_type(mono, inner, member_name, fallback);
         },
         .GenericStruct(template_def_id, args) then {
@@ -754,10 +700,12 @@ let resolve_member_field_type(
             when mono.storage.generic_templates.struct_by_def_id(template_def_id) in {
                 .Some(template) then {
                     let mutable subst = Dict[String, Type].new();
-                    let mutable i: UInt = 0;
-                    while i < template.type_parameters.count() and i < args.count() then {
-                        subst.insert(template.type_parameters[i].name, (args[i]));
-                        i += 1;
+                    for pair in template.type_parameters.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](args) then {
+                        subst.insert(pair.first.name, (pair.second));
                     };
                     // `args` may be shorter than the parameter list, so the floor
                     // matters here: an unmentioned parameter must stay itself.
@@ -850,12 +798,9 @@ let mono_get_enum_case_field_types(
     case_name: String,
 ): List[Type] = {
     let inner_type = when subject_type in {
-        .ReferenceType(inner) then inner,
-        .MutableReferenceType(inner) then inner,
-        .BorrowedReferenceType(inner) then inner,
-        .MutableBorrowedReferenceType(inner) then inner,
-        .WeakReferenceType(inner) then inner,
-        .MutableWeakReferenceType(inner) then inner,
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) then inner,
         _ then subject_type,
     };
     return when inner_type in {
@@ -863,9 +808,9 @@ let mono_get_enum_case_field_types(
             .Some(cases) then {
                 let mutable result = List[Type].new();
                 let mutable matched = false;
-                let mutable i: UInt = 0;
-                for case_info in cases then {
-                    let index_match = i == tag_index;
+                for pair in cases.lazy().enumerate() then {
+                    let case_info = pair.second;
+                    let index_match = pair.first == tag_index;
                     let name_match = mono_enum_case_name_matches(
                         case_name,
                         case_info.name,
@@ -878,7 +823,6 @@ let mono_get_enum_case_field_types(
                         };
                         matched = true;
                     };
-                    i += 1;
                 };
                 result
             },
@@ -891,15 +835,12 @@ let mono_get_enum_case_field_types(
                 ) in {
                     .Some(cases) then {
                         let mutable bindings = Dict[String, Type].new();
-                        let mutable i: UInt = 0;
-                        let param_count = enum_template.type_parameters.count();
-                        let arg_count = args.count();
-                        let n = if param_count < arg_count then param_count
-                        else arg_count;
-                        while i < n then {
-                            let tp = enum_template.type_parameters[i];
-                            bindings.insert(tp.name, (args[i]));
-                            i += 1;
+                        for pair in enum_template.type_parameters.lazy().zip[
+                            Type,
+                            ListIterator[Type],
+                            List[Type],
+                        ](args) then {
+                            bindings.insert(pair.first.name, (pair.second));
                         };
                         let mutable result = List[Type].new();
                         let mutable matched = false;
@@ -953,12 +894,9 @@ let mono_get_struct_pattern_field_types(
     pattern_def_id: DefId,
 ): List[Type] = {
     let inner_type = when subject_type in {
-        .ReferenceType(inner) then inner,
-        .MutableReferenceType(inner) then inner,
-        .BorrowedReferenceType(inner) then inner,
-        .MutableBorrowedReferenceType(inner) then inner,
-        .WeakReferenceType(inner) then inner,
-        .MutableWeakReferenceType(inner) then inner,
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) then inner,
         _ then subject_type,
     };
     return when inner_type in {
@@ -988,15 +926,12 @@ let mono_get_struct_pattern_field_types(
                     ) in {
                         .Some(fields) then {
                             let mutable bindings = Dict[String, Type].new();
-                            let mutable i: UInt = 0;
-                            let param_count = struct_template.type_parameters.count();
-                            let arg_count = args.count();
-                            let n = if param_count < arg_count then param_count
-                            else arg_count;
-                            while i < n then {
-                                let tp = struct_template.type_parameters[i];
-                                bindings.insert(tp.name, (args[i]));
-                                i += 1;
+                            for pair in struct_template.type_parameters.lazy().zip[
+                                Type,
+                                ListIterator[Type],
+                                List[Type],
+                            ](args) then {
+                                bindings.insert(pair.first.name, (pair.second));
                             };
                             for field in fields then {
                                 result.push(
@@ -1040,10 +975,7 @@ let mono_collect_pattern_binding_types(
             );
             let mutable i: UInt = 0;
             for element in elements then {
-                let mutable field_type = when field_types.get(i) in {
-                    .Some(t) then t,
-                    .None() then Type.Unknown(),
-                };
+                let mutable field_type = field_types.get(i) or else Type.Unknown();
                 mono_collect_pattern_binding_types(
                     mono,
                     element.pattern,
@@ -1061,10 +993,7 @@ let mono_collect_pattern_binding_types(
             );
             let mutable i: UInt = 0;
             for element in elements then {
-                let mutable field_type = when field_types.get(i) in {
-                    .Some(t) then t,
-                    .None() then Type.Unknown(),
-                };
+                let mutable field_type = field_types.get(i) or else Type.Unknown();
                 mono_collect_pattern_binding_types(
                     mono,
                     element.pattern,
@@ -1074,16 +1003,7 @@ let mono_collect_pattern_binding_types(
                 i += 1;
             };
         },
-        .AndPattern(left, right) then {
-            mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings);
-            mono_collect_pattern_binding_types(
-                mono,
-                right,
-                concrete_subject_type,
-                bindings,
-            );
-        },
-        .OrPattern(left, right) then {
+        .AndPattern(left, right) or .OrPattern(left, right) then {
             mono_collect_pattern_binding_types(mono, left, concrete_subject_type, bindings);
             mono_collect_pattern_binding_types(
                 mono,
@@ -1154,12 +1074,7 @@ let mono_register_pattern_binding_types_in_statement(
     bindings: Dict[UInt, Type],
 ): Void = {
     when stmt in {
-        .LetStmt(_, value, _) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            value,
-            bindings,
-        ),
-        .TupleLetStmt(_, _, value, _) then mono_register_pattern_binding_types_in_expr(
+        .LetStmt(_, value, _) or .TupleLetStmt(_, _, value, _) then mono_register_pattern_binding_types_in_expr(
             mono,
             value,
             bindings,
@@ -1223,53 +1138,14 @@ let mono_register_pattern_binding_types_in_expr(
             symbol,
             bindings,
         ),
-        .CastExpr(_, inner) then mono_register_pattern_binding_types_in_expr(
+        .CastExpr(_, inner) or .TraitObjectConversion(inner, _, _) or .Unary(_, inner) or .RefExpr(inner)
+        or .PtrExpr(inner) or .DerefExpr(inner) then mono_register_pattern_binding_types_in_expr(
             mono,
             inner,
             bindings,
         ),
-        .TraitObjectConversion(inner, _, _) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            inner,
-            bindings,
-        ),
-        .Unary(_, inner) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            inner,
-            bindings,
-        ),
-        .RefExpr(inner) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            inner,
-            bindings,
-        ),
-        .PtrExpr(inner) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            inner,
-            bindings,
-        ),
-        .DerefExpr(inner) then mono_register_pattern_binding_types_in_expr(
-            mono,
-            inner,
-            bindings,
-        ),
-        .ArithmeticExpr(left, _, right) then {
-            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
-            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
-        },
-        .ComparisonExpr(left, _, right) then {
-            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
-            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
-        },
-        .BitwiseExpr(left, _, right) then {
-            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
-            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
-        },
-        .AndExpr(left, right) then {
-            mono_register_pattern_binding_types_in_expr(mono, left, bindings);
-            mono_register_pattern_binding_types_in_expr(mono, right, bindings);
-        },
-        .OrExpr(left, right) then {
+        .ArithmeticExpr(left, _, right) or .ComparisonExpr(left, _, right) or .BitwiseExpr(left, _, right)
+        or .AndExpr(left, right) or .OrExpr(left, right) then {
             mono_register_pattern_binding_types_in_expr(mono, left, bindings);
             mono_register_pattern_binding_types_in_expr(mono, right, bindings);
         },
@@ -1364,12 +1240,7 @@ let mono_register_pattern_binding_types_in_expr(
                     pointer_expr,
                     bindings,
                 ),
-                .CopyMemory(dest, source, count) then {
-                    mono_register_pattern_binding_types_in_expr(mono, dest, bindings);
-                    mono_register_pattern_binding_types_in_expr(mono, source, bindings);
-                    mono_register_pattern_binding_types_in_expr(mono, count, bindings);
-                },
-                .MoveMemory(dest, source, count) then {
+                .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
                     mono_register_pattern_binding_types_in_expr(mono, dest, bindings);
                     mono_register_pattern_binding_types_in_expr(mono, source, bindings);
                     mono_register_pattern_binding_types_in_expr(mono, count, bindings);
@@ -1386,12 +1257,7 @@ let mono_register_pattern_binding_types_in_expr(
                         bindings,
                     );
                 },
-                .DeinitMemory(pointer_expr) then mono_register_pattern_binding_types_in_expr(
-                    mono,
-                    pointer_expr,
-                    bindings,
-                ),
-                .TakeMemory(pointer_expr, _) then mono_register_pattern_binding_types_in_expr(
+                .DeinitMemory(pointer_expr) or .TakeMemory(pointer_expr, _) then mono_register_pattern_binding_types_in_expr(
                     mono,
                     pointer_expr,
                     bindings,

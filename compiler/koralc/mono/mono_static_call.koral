@@ -8,35 +8,9 @@ let static_method_receiver_key_for_type_resolution(
     t: Type,
 ): String = {
     return when t in {
-        .ReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .MutableReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .BorrowedReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .MutableBorrowedReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .WeakReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .MutableWeakReferenceType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .PointerType(inner) then static_method_receiver_key_for_type_resolution(
-            mono,
-            inner,
-        ),
-        .MutablePointerType(inner) then static_method_receiver_key_for_type_resolution(
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then static_method_receiver_key_for_type_resolution(
             mono,
             inner,
         ),
@@ -91,7 +65,9 @@ let static_method_receiver_aliases_for_type_resolution(
     );
 
     when t in {
-        .ReferenceType(inner) then {
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+        or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then {
             for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
                 aliases = push_static_method_receiver_alias_for_type_resolution(
                     aliases,
@@ -99,95 +75,13 @@ let static_method_receiver_aliases_for_type_resolution(
                 );
             };
         },
-        .MutableReferenceType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .BorrowedReferenceType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .MutableBorrowedReferenceType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .WeakReferenceType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .MutableWeakReferenceType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .PointerType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .MutablePointerType(inner) then {
-            for alias in static_method_receiver_aliases_for_type_resolution(mono, inner) then {
-                aliases = push_static_method_receiver_alias_for_type_resolution(
-                    aliases,
-                    alias,
-                );
-            };
-        },
-        .GenericStruct(tplDefId, _) then {
+        .GenericStruct(tplDefId, _) or .GenericEnum(tplDefId, _) then {
             aliases = push_static_method_receiver_alias_for_type_resolution(
                 aliases,
                 def_id_spelling(tplDefId),
             );
         },
-        .GenericEnum(tplDefId, _) then {
-            aliases = push_static_method_receiver_alias_for_type_resolution(
-                aliases,
-                def_id_spelling(tplDefId),
-            );
-        },
-        .StructureType(def_id) then {
-            when mono.storage.context.get_name(def_id) in {
-                .Some(name) then {
-                    aliases = push_static_method_receiver_alias_for_type_resolution(
-                        aliases,
-                        name,
-                    );
-                    when mono.storage.layout_to_template_info.get(name) in {
-                        .Some(info) then {
-                            aliases = push_static_method_receiver_alias_for_type_resolution(
-                                aliases,
-                                info.base_name,
-                            );
-                        },
-                        .None() then {},
-                    };
-                },
-                .None() then {},
-            };
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             when mono.storage.context.get_name(def_id) in {
                 .Some(name) then {
                     aliases = push_static_method_receiver_alias_for_type_resolution(
@@ -526,32 +420,10 @@ let resolve_static_method_call_to_call(
                                     owner_type,
                                 );
                                 let owner_is_self_param = when receiver_param_type in {
-                                    .ReferenceType(inner_ref) then mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, inner_ref),
-                                    ) == mono.storage.context.get_layout_key(
-                                        normalized_owner_type,
-                                    ),
-                                    .MutableReferenceType(inner_ref) then mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, inner_ref),
-                                    ) == mono.storage.context.get_layout_key(
-                                        normalized_owner_type,
-                                    ),
-                                    .BorrowedReferenceType(inner_ref) then mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, inner_ref),
-                                    ) == mono.storage.context.get_layout_key(
-                                        normalized_owner_type,
-                                    ),
-                                    .MutableBorrowedReferenceType(inner_ref) then mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, inner_ref),
-                                    ) == mono.storage.context.get_layout_key(
-                                        normalized_owner_type,
-                                    ),
-                                    .WeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
-                                        resolve_parameterized_type(mono, inner_ref),
-                                    ) == mono.storage.context.get_layout_key(
-                                        normalized_owner_type,
-                                    ),
-                                    .MutableWeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
+                                    .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                                    or .BorrowedReferenceType(inner_ref)
+                                    or .MutableBorrowedReferenceType(inner_ref)
+                                    or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
                                         resolve_parameterized_type(mono, inner_ref),
                                     ) == mono.storage.context.get_layout_key(
                                         normalized_owner_type,
@@ -584,25 +456,8 @@ let resolve_static_method_call_to_call(
                             .TraitObject(trait_def_id, _) then Option[String].Some(
                                 def_id_spelling(trait_def_id),
                             ),
-                            .ReferenceType(inner_ref) then when resolve_parameterized_type(
-                                mono,
-                                inner_ref,
-                            ) in {
-                                .TraitObject(trait_def_id, _) then Option[String].Some(
-                                    def_id_spelling(trait_def_id),
-                                ),
-                                _ then Option[String].None(),
-                            },
-                            .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
-                                mono,
-                                inner_ref,
-                            ) in {
-                                .TraitObject(trait_def_id, _) then Option[String].Some(
-                                    def_id_spelling(trait_def_id),
-                                ),
-                                _ then Option[String].None(),
-                            },
-                            .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                            or .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
                                 mono,
                                 inner_ref,
                             ) in {
@@ -640,13 +495,7 @@ let resolve_static_method_call_to_call(
                             actual_receiver_expr,
                             sym,
                         );
-                        let mutable method_args = List[TypedExpr].new();
-                        let mutable arg_index: UInt = UInt(1);
-                        while arg_index < new_args.count() then {
-                            let method_arg = (new_args[arg_index]);
-                            method_args.push(method_arg);
-                            arg_index += UInt(1);
-                        };
+                        let method_args = new_args.lazy().skip(1).into_list();
                         let dispatch_callsite = ensure_receiver_dispatch_callsite(
                             mono,
                             Option[DefId].None(),
@@ -721,34 +570,14 @@ let resolve_static_method_call_to_call(
 // type mutable name directly (e.g. "String", "Int").
 let resolve_static_call_template_name(mono: Monomorphizer, t: Type): String = {
     return when t in {
-        .StructureType(def_id) then {
-            let nominal_name = when mono.storage.context.get_name(def_id) in {
-                .Some(n) then n,
-                .None() then type_to_string(t),
-            };
+        .StructureType(def_id) or .EnumType(def_id) then {
+            let nominal_name = mono.storage.context.get_name(def_id) or else type_to_string(t);
             when mono.storage.layout_to_template_info.get(nominal_name) in {
                 .Some(info) then info.base_name,
-                .None() then when mono.storage.context.get_template_name(def_id) in {
-                    .Some(tn) then tn,
-                    .None() then nominal_name,
-                },
+                .None() then mono.storage.context.get_template_name(def_id) or else nominal_name,
             }
         },
-        .EnumType(def_id) then {
-            let nominal_name = when mono.storage.context.get_name(def_id) in {
-                .Some(n) then n,
-                .None() then type_to_string(t),
-            };
-            when mono.storage.layout_to_template_info.get(nominal_name) in {
-                .Some(info) then info.base_name,
-                .None() then when mono.storage.context.get_template_name(def_id) in {
-                    .Some(tn) then tn,
-                    .None() then nominal_name,
-                },
-            }
-        },
-        .GenericStruct(template_def_id, _) then def_id_spelling(template_def_id),
-        .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
+        .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then def_id_spelling(template_def_id),
         .ReferenceType(_) then "Ref",
         .MutableReferenceType(_) then "MutRef",
         .BorrowedReferenceType(_) then "Ref",
@@ -762,10 +591,7 @@ let resolve_static_call_template_name(mono: Monomorphizer, t: Type): String = {
                     mono,
                     mapped_type,
                 ),
-                .None() then when mono.storage.context.get_name(def_id) in {
-                    .Some(n) then n,
-                    .None() then type_to_string(t),
-                },
+                .None() then mono.storage.context.get_name(def_id) or else type_to_string(t),
             }
         },
         .IntType() then "Int",
@@ -798,19 +624,11 @@ let resolve_static_call_template_name(mono: Monomorphizer, t: Type): String = {
 let resolve_static_call_emitted_scope_name(mono: Monomorphizer, t: Type): String = {
     let resolved = resolve_parameterized_type(mono, t);
     return when resolved in {
-        .StructureType(def_id) then when mono.storage.context.get_qualified_name(def_id) in {
-            .Some(name) then name,
-            .None() then mono.storage.context.get_name(def_id) or else resolve_static_call_template_name(
+        .StructureType(def_id) or .EnumType(def_id) then mono.storage.context.get_qualified_name(def_id) or else {
+            mono.storage.context.get_name(def_id) or else resolve_static_call_template_name(
                 mono,
                 resolved,
-            ),
-        },
-        .EnumType(def_id) then when mono.storage.context.get_qualified_name(def_id) in {
-            .Some(name) then name,
-            .None() then mono.storage.context.get_name(def_id) or else resolve_static_call_template_name(
-                mono,
-                resolved,
-            ),
+            )
         },
         .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
             .Some(mapped_type) then resolve_static_call_emitted_scope_name(
@@ -819,8 +637,7 @@ let resolve_static_call_emitted_scope_name(mono: Monomorphizer, t: Type): String
             ),
             .None() then resolve_static_call_template_name(mono, resolved),
         },
-        .GenericStruct(...) then mono.storage.context.get_layout_key(resolved),
-        .GenericEnum(...) then mono.storage.context.get_layout_key(resolved),
+        .GenericStruct(...) or .GenericEnum(...) then mono.storage.context.get_layout_key(resolved),
         _ then resolve_static_call_template_name(mono, resolved),
     };
 };
@@ -1100,30 +917,27 @@ let trait_target_static_candidate_given_decls(
             if mono.storage.fuzzy_given_trait_decls_missing.contains(key) then {
                 return List[TypedDecl].new();
             };
-            when mono.storage.fuzzy_given_trait_decls_cache.get(key) in {
-                .Some(cached) then cached,
-                .None() then {
-                    let mutable matches = List[TypedDecl].new();
-                    for node_ref in mono.storage.source_given_decls then {
-                        when node_ref in {
-                            .GivenTraitDecl(_, _, _, _, _, given_trait_def_id) then {
-                                if trait_identity_matches(
-                                    given_trait_def_id,
-                                    trait_def_id,
-                                ) then {
-                                    matches.push(node_ref);
-                                };
-                            },
-                            _ then {},
-                        };
+            mono.storage.fuzzy_given_trait_decls_cache.get(key) or else {
+                let mutable matches = List[TypedDecl].new();
+                for node_ref in mono.storage.source_given_decls then {
+                    when node_ref in {
+                        .GivenTraitDecl(_, _, _, _, _, given_trait_def_id) then {
+                            if trait_identity_matches(
+                                given_trait_def_id,
+                                trait_def_id,
+                            ) then {
+                                matches.push(node_ref);
+                            };
+                        },
+                        _ then {},
                     };
-                    if matches.is_empty() then {
-                        mono.storage.fuzzy_given_trait_decls_missing.insert(key);
-                    } else {
-                        mono.storage.fuzzy_given_trait_decls_cache.insert(key, matches);
-                    };
-                    matches
-                },
+                };
+                if matches.is_empty() then {
+                    mono.storage.fuzzy_given_trait_decls_missing.insert(key);
+                } else {
+                    mono.storage.fuzzy_given_trait_decls_cache.insert(key, matches);
+                };
+                matches
             }
         },
         .None() then mono.storage.source_given_decls,
@@ -1290,8 +1104,8 @@ let find_declared_static_receiver_method(
                             if param_types.count() != args.count() then {
                                 signature_matches = false;
                             } else {
-                                let mutable arg_i: UInt = 0;
-                                while arg_i < args.count() then {
+                                for pair in args.lazy().enumerate() then {
+                                    let arg_i = pair.first;
                                     let actual_arg_expr = if arg_i == UInt(0) then {
                                         let arg_expr = args[arg_i];
                                         static_dispatch_receiver_expr(arg_expr)
@@ -1314,7 +1128,6 @@ let find_declared_static_receiver_method(
                                         signature_matches = false;
                                         break;
                                     };
-                                    arg_i += 1;
                                 };
                             };
 
@@ -1376,13 +1189,8 @@ let refresh_declared_static_receiver_lookup_index(mono: Monomorphizer): Void = {
     while node_index < mono.storage.generated_nodes.count() then {
         let node_ref = mono.storage.generated_nodes[node_index];
         when node_ref in {
-            .GivenDecl(target_type, members, _) then {
-                index_declared_static_receiver_members(mono, target_type, members);
-            },
-            .GivenTraitDecl(target_type, _, _, members, _, _) then {
-                index_declared_static_receiver_members(mono, target_type, members);
-            },
-            .IntrinsicGivenDecl(target_type, members, _) then {
+            .GivenDecl(target_type, members, _) or .GivenTraitDecl(target_type, _, _, members, _, _)
+            or .IntrinsicGivenDecl(target_type, members, _) then {
                 index_declared_static_receiver_members(mono, target_type, members);
             },
             .FunctionDecl(_, _, _, _, _, _, id) then {
@@ -1403,10 +1211,7 @@ let index_declared_static_receiver_members(
     members: List[TypedGivenMember],
 ): Void = {
     let resolved_target_type = when target_type in {
-        .OpaqueType(def_id) then when mono.storage.context.lookup_type(def_id) in {
-            .Some(underlying) then underlying,
-            .None() then target_type,
-        },
+        .OpaqueType(def_id) then mono.storage.context.lookup_type(def_id) or else target_type,
         _ then target_type,
     };
     let mutable concrete_target_type = resolve_parameterized_type(
@@ -1474,12 +1279,7 @@ let enqueue_extension_method_for_static_call(
     expected_return_type: Type,
 ): Option[Symbol] = {
     let type_key = when base_type in {
-        .StructureType(def_id) then {
-            let key = mono.storage.context.get_layout_key(base_type);
-            if key.is_empty() then mono.storage.context.get_name(def_id) or else key
-            else key
-        },
-        .EnumType(def_id) then {
+        .StructureType(def_id) or .EnumType(def_id) then {
             let key = mono.storage.context.get_layout_key(base_type);
             if key.is_empty() then mono.storage.context.get_name(def_id) or else key
             else key
@@ -1500,12 +1300,7 @@ let enqueue_extension_method_for_static_call(
             // Determine type_args from the base type.
             let mutable type_args = List[Type].new();
             when base_type in {
-                .GenericStruct(_, args) then {
-                    for a in args then {
-                        type_args.push(a);
-                    };
-                },
-                .GenericEnum(_, args) then {
+                .GenericStruct(_, args) or .GenericEnum(_, args) then {
                     for a in args then {
                         type_args.push(a);
                     };
@@ -1519,10 +1314,7 @@ let enqueue_extension_method_for_static_call(
                         },
                         .None() then {
                             when mono.storage.layout_to_template_info.get(
-                                when mono.storage.context.get_name(def_id) in {
-                                    .Some(n) then n,
-                                    .None() then "",
-                                },
+                                mono.storage.context.get_name(def_id) or else "",
                             ) in {
                                 .Some(info) then {
                                     for a in info.args then {
@@ -1532,12 +1324,7 @@ let enqueue_extension_method_for_static_call(
                                 .None() then {
                                     when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then when mapped_type in {
-                                            .GenericStruct(_, mapped_args) then {
-                                                for a in mapped_args then {
-                                                    type_args.push(a);
-                                                };
-                                            },
-                                            .GenericEnum(_, mapped_args) then {
+                                            .GenericStruct(_, mapped_args) or .GenericEnum(_, mapped_args) then {
                                                 for a in mapped_args then {
                                                     type_args.push(a);
                                                 };
@@ -1560,10 +1347,7 @@ let enqueue_extension_method_for_static_call(
                         },
                         .None() then {
                             when mono.storage.layout_to_template_info.get(
-                                when mono.storage.context.get_name(def_id) in {
-                                    .Some(n) then n,
-                                    .None() then "",
-                                },
+                                mono.storage.context.get_name(def_id) or else "",
                             ) in {
                                 .Some(info) then {
                                     for a in info.args then {
@@ -1573,12 +1357,7 @@ let enqueue_extension_method_for_static_call(
                                 .None() then {
                                     when mono.storage.context.lookup_type(def_id) in {
                                         .Some(mapped_type) then when mapped_type in {
-                                            .GenericEnum(_, mapped_args) then {
-                                                for a in mapped_args then {
-                                                    type_args.push(a);
-                                                };
-                                            },
-                                            .GenericStruct(_, mapped_args) then {
+                                            .GenericEnum(_, mapped_args) or .GenericStruct(_, mapped_args) then {
                                                 for a in mapped_args then {
                                                     type_args.push(a);
                                                 };
@@ -1597,8 +1376,7 @@ let enqueue_extension_method_for_static_call(
 
             // Find a template whose method-level generic args can be fully inferred
             // from this static call site, preferring checked templates first.
-            let mutable pass = UInt(0);
-            while pass < UInt(2) then {
+            for pass in UInt(0)..<UInt(2) then {
                 for ext in ext_templates then {
                     if ext.method.name != method_name then {
                         continue;
@@ -1703,10 +1481,7 @@ let enqueue_extension_method_for_static_call(
                                 if mono.storage.extension_body_resolution_depth == 0 then {
                                     let mutable lookup_method_type_args = List[Type].new(
                                     );
-                                    let conformance_trait_def_id = when ext.conformance_trait_def_id in {
-                                        .Some(id) then id,
-                                        .None() then def_id_invalid(),
-                                    };
+                                    let conformance_trait_def_id = ext.conformance_trait_def_id or else def_id_invalid();
                                     for method_type_arg in method_type_args then {
                                         lookup_method_type_args.push(method_type_arg);
                                     };
@@ -1769,7 +1544,6 @@ let enqueue_extension_method_for_static_call(
                         .None() then {},
                     };
                 };
-                pass += UInt(1);
             };
         },
         .None() then {},

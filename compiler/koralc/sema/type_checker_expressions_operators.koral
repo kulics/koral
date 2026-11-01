@@ -79,8 +79,7 @@ given TypeChecker {
 
     is_numeric_literal_expr(self, expr: TypedExpr): Bool = {
         return when expr.expr_kind in {
-            .IntegerLiteral(_) then true,
-            .FloatLiteral(_) then true,
+            .IntegerLiteral(_) or .FloatLiteral(_) then true,
             _ then false,
         };
     };
@@ -138,14 +137,10 @@ given TypeChecker {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
+                    .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
+                    or .MutableBorrowedReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+                    or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                    or .MutablePointerType(inner_ref) or .PointerType(inner_ref) then inner_ref,
                     _ then Type.Unknown(),
                 };
                 make_typed_expr(TypedExprKind.DerefExpr(typed_inner), inner_t)
@@ -153,14 +148,10 @@ given TypeChecker {
             .UnsafeDerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
                 let inner_t = when typed_inner.expr_type in {
-                    .MutableReferenceType(inner_ref) then inner_ref,
-                    .ReferenceType(inner_ref) then inner_ref,
-                    .MutableBorrowedReferenceType(inner_ref) then inner_ref,
-                    .BorrowedReferenceType(inner_ref) then inner_ref,
-                    .WeakReferenceType(inner_ref) then inner_ref,
-                    .MutableWeakReferenceType(inner_ref) then inner_ref,
-                    .MutablePointerType(inner_ref) then inner_ref,
-                    .PointerType(inner_ref) then inner_ref,
+                    .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
+                    or .MutableBorrowedReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
+                    or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
+                    or .MutablePointerType(inner_ref) or .PointerType(inner_ref) then inner_ref,
                     _ then Type.Unknown(),
                 };
                 make_typed_expr(TypedExprKind.UnsafeDerefExpr(typed_inner), inner_t)
@@ -407,13 +398,11 @@ given TypeChecker {
         };
         let mutable same_type = self.same_expr_type(left_t, right_t);
         let left_is_pointer = when left_t in {
-            .MutablePointerType(_) then true,
-            .PointerType(_) then true,
+            .MutablePointerType(_) or .PointerType(_) then true,
             _ then false,
         };
         let right_is_pointer = when right_t in {
-            .MutablePointerType(_) then true,
-            .PointerType(_) then true,
+            .MutablePointerType(_) or .PointerType(_) then true,
             _ then false,
         };
         // The Wrapping family has its own arithmetic surface: modular, no
@@ -441,8 +430,7 @@ given TypeChecker {
         let is_non_numeric_candidate = (not left_is_pointer and not self.is_numeric_type(
             left_t,
         ) and not self.is_float_type(left_t)) and left_t is not .VoidType() and is not .NeverType() and when left_t in {
-            .TypeVar(_) then false,
-            .Unknown() then false,
+            .TypeVar(_) or .Unknown() then false,
             _ then true,
         };
         if is_non_numeric_candidate then {
@@ -459,8 +447,7 @@ given TypeChecker {
                 // Unwrap reference types before checking for GenericParameter
                 // (Swift's enforceTraitConformance unwraps references via typeModifierInnerType)
                 let unwrapped_left = when left_t in {
-                    .ReferenceType(inner) then inner,
-                    .MutableReferenceType(inner) then inner,
+                    .ReferenceType(inner) or .MutableReferenceType(inner) then inner,
                     _ then left_t,
                 };
                 when unwrapped_left in {
@@ -561,32 +548,7 @@ given TypeChecker {
                 .Float64Type() then Type.Float64Type(),
                 _ then Type.Float32Type(),
             },
-            .TypeVar(_) then when right_t in {
-                .Float64Type() then Type.Float64Type(),
-                .Float32Type() then Type.Float32Type(),
-                .IntType() then Type.IntType(),
-                .Int8Type() then Type.Int8Type(),
-                .Int16Type() then Type.Int16Type(),
-                .Int32Type() then Type.Int32Type(),
-                .Int64Type() then Type.Int64Type(),
-                .UIntType() then Type.UIntType(),
-                .UInt8Type() then Type.UInt8Type(),
-                .UInt16Type() then Type.UInt16Type(),
-                .UInt32Type() then Type.UInt32Type(),
-                .UInt64Type() then Type.UInt64Type(),
-                .WrappingIntType() then Type.WrappingIntType(),
-                .WrappingInt8Type() then Type.WrappingInt8Type(),
-                .WrappingInt16Type() then Type.WrappingInt16Type(),
-                .WrappingInt32Type() then Type.WrappingInt32Type(),
-                .WrappingInt64Type() then Type.WrappingInt64Type(),
-                .WrappingUIntType() then Type.WrappingUIntType(),
-                .WrappingUInt8Type() then Type.WrappingUInt8Type(),
-                .WrappingUInt16Type() then Type.WrappingUInt16Type(),
-                .WrappingUInt32Type() then Type.WrappingUInt32Type(),
-                .WrappingUInt64Type() then Type.WrappingUInt64Type(),
-                _ then left_t,
-            },
-            .Unknown() then when right_t in {
+            .TypeVar(_) or .Unknown() then when right_t in {
                 .Float64Type() then Type.Float64Type(),
                 .Float32Type() then Type.Float32Type(),
                 .IntType() then Type.IntType(),
@@ -681,14 +643,12 @@ given TypeChecker {
             let method_name = self.arithmetic_method_name(op);
             let same_type = self.same_expr_type(left_t, right_t);
             let left_is_pointer = when left_t in {
-                .MutablePointerType(_) then true,
-                .PointerType(_) then true,
+                .MutablePointerType(_) or .PointerType(_) then true,
                 _ then false,
             };
             if left_is_pointer then {
                 let op_takes_offset = when op in {
-                    .Add() then true,
-                    .Subtract() then true,
+                    .Add() or .Subtract() then true,
                     _ then false,
                 };
                 if op_takes_offset then {
@@ -993,10 +953,13 @@ given TypeChecker {
         params: List[LambdaParam],
         typed_params: List[TypedParam],
     ): Void = {
-        let mutable i: UInt = 0;
-        while i < params.count() and i < typed_params.count() then {
-            let param = params[i];
-            let typed_param = typed_params[i];
+        for pair in params.lazy().zip[
+            TypedParam,
+            ListIterator[TypedParam],
+            List[TypedParam],
+        ](typed_params) then {
+            let param = pair.first;
+            let typed_param = pair.second;
             if param.type_annotation is .None() then {
                 if typed_param.param_type is .Unknown() then {
                     self.push_diagnostic(
@@ -1005,7 +968,6 @@ given TypeChecker {
                     );
                 };
             };
-            i += 1;
         };
     };
 
@@ -1118,12 +1080,7 @@ given TypeChecker {
                     names.insert(symbol_name);
                 };
             },
-            .EnumCase(_, _, elements) then {
-                for element in elements then {
-                    self.collect_pattern_binding_names(element.pattern, names);
-                };
-            },
-            .StructPattern(_, elements) then {
+            .EnumCase(_, _, elements) or .StructPattern(_, elements) then {
                 for element in elements then {
                     self.collect_pattern_binding_names(element.pattern, names);
                 };
@@ -1133,11 +1090,7 @@ given TypeChecker {
                     self.collect_pattern_binding_names(element, names);
                 };
             },
-            .AndPattern(left, right) then {
-                self.collect_pattern_binding_names(left, names);
-                self.collect_pattern_binding_names(right, names);
-            },
-            .OrPattern(left, right) then {
+            .AndPattern(left, right) or .OrPattern(left, right) then {
                 self.collect_pattern_binding_names(left, names);
                 self.collect_pattern_binding_names(right, names);
             },
@@ -1170,15 +1123,7 @@ given TypeChecker {
         reported_ids: Set[UInt],
     ): Void = {
         when stmt in {
-            .LetStmt(_, value_ref, _) then {
-                self.validate_lambda_captures_in_expr(
-                    value_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .TupleLetStmt(_, _, value_ref, _) then {
+            .LetStmt(_, value_ref, _) or .TupleLetStmt(_, _, value_ref, _) then {
                 self.validate_lambda_captures_in_expr(
                     value_ref,
                     local_names,
@@ -1451,27 +1396,8 @@ given TypeChecker {
                             reported_ids,
                         );
                     },
-                    .CopyMemory(dest_expr, source_expr, count_expr) then {
-                        self.validate_lambda_captures_in_expr(
-                            dest_expr,
-                            local_names,
-                            local_ids,
-                            reported_ids,
-                        );
-                        self.validate_lambda_captures_in_expr(
-                            source_expr,
-                            local_names,
-                            local_ids,
-                            reported_ids,
-                        );
-                        self.validate_lambda_captures_in_expr(
-                            count_expr,
-                            local_names,
-                            local_ids,
-                            reported_ids,
-                        );
-                    },
-                    .MoveMemory(dest_expr, source_expr, count_expr) then {
+                    .CopyMemory(dest_expr, source_expr, count_expr)
+                    or .MoveMemory(dest_expr, source_expr, count_expr) then {
                         self.validate_lambda_captures_in_expr(
                             dest_expr,
                             local_names,
@@ -1505,15 +1431,7 @@ given TypeChecker {
                             reported_ids,
                         );
                     },
-                    .DeinitMemory(pointer_expr) then {
-                        self.validate_lambda_captures_in_expr(
-                            pointer_expr,
-                            local_names,
-                            local_ids,
-                            reported_ids,
-                        );
-                    },
-                    .TakeMemory(pointer_expr, _) then {
+                    .DeinitMemory(pointer_expr) or .TakeMemory(pointer_expr, _) then {
                         self.validate_lambda_captures_in_expr(
                             pointer_expr,
                             local_names,
@@ -1532,7 +1450,9 @@ given TypeChecker {
                     reported_ids,
                 );
             },
-            .ArithmeticExpr(left_ref, _, right_ref) then {
+            .ArithmeticExpr(left_ref, _, right_ref) or .ComparisonExpr(left_ref, _, right_ref)
+            or .BitwiseExpr(left_ref, _, right_ref) or .AndExpr(left_ref, right_ref)
+            or .OrExpr(left_ref, right_ref) then {
                 self.validate_lambda_captures_in_expr(
                     left_ref,
                     local_names,
@@ -1546,103 +1466,8 @@ given TypeChecker {
                     reported_ids,
                 );
             },
-            .ComparisonExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    left_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-                self.validate_lambda_captures_in_expr(
-                    right_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .BitwiseExpr(left_ref, _, right_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    left_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-                self.validate_lambda_captures_in_expr(
-                    right_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .AndExpr(left_ref, right_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    left_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-                self.validate_lambda_captures_in_expr(
-                    right_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .OrExpr(left_ref, right_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    left_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-                self.validate_lambda_captures_in_expr(
-                    right_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .Unary(_, inner_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    inner_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .RefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    inner_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .PtrExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    inner_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .DerefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    inner_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .UnsafeDerefExpr(inner_ref) then {
-                self.validate_lambda_captures_in_expr(
-                    inner_ref,
-                    local_names,
-                    local_ids,
-                    reported_ids,
-                );
-            },
-            .CastExpr(_, inner_ref) then {
+            .Unary(_, inner_ref) or .RefExpr(inner_ref) or .PtrExpr(inner_ref) or .DerefExpr(inner_ref)
+            or .UnsafeDerefExpr(inner_ref) or .CastExpr(_, inner_ref) then {
                 self.validate_lambda_captures_in_expr(
                     inner_ref,
                     local_names,
@@ -1761,27 +1586,7 @@ given TypeChecker {
                     reported_ids,
                 );
             },
-            .GenericCall(_, _, args) then {
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(
-                        arg,
-                        local_names,
-                        local_ids,
-                        reported_ids,
-                    );
-                };
-            },
-            .TypeConstruction(_, _, args) then {
-                for arg in args then {
-                    self.validate_lambda_captures_in_expr(
-                        arg,
-                        local_names,
-                        local_ids,
-                        reported_ids,
-                    );
-                };
-            },
-            .EnumConstruction(_, _, args) then {
+            .GenericCall(_, _, args) or .TypeConstruction(_, _, args) or .EnumConstruction(_, _, args) then {
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(
                         arg,
@@ -1841,21 +1646,15 @@ given TypeChecker {
         };
 
         let left_value_type = when typed_left.expr_type in {
-            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .PointerType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref),
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) or .PointerType(inner_ref)
+            or .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref),
             _ then Option[Type].None(),
         };
         let right_value_type = when typed_right.expr_type in {
-            .ReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutableReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .WeakReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutableWeakReferenceType(inner_ref) then Option[Type].Some(inner_ref),
-            .PointerType(inner_ref) then Option[Type].Some(inner_ref),
-            .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref),
+            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
+            or .MutableWeakReferenceType(inner_ref) or .PointerType(inner_ref)
+            or .MutablePointerType(inner_ref) then Option[Type].Some(inner_ref),
             _ then Option[Type].None(),
         };
         when left_value_type in {
@@ -1976,15 +1775,11 @@ given TypeChecker {
             typed_right.expr_type,
         );
         let is_eq_op = when op in {
-            .Equal() then true,
-            .NotEqual() then true,
+            .Equal() or .NotEqual() then true,
             _ then false,
         };
         let is_ord_op = when op in {
-            .Greater() then true,
-            .GreaterEqual() then true,
-            .Less() then true,
-            .LessEqual() then true,
+            .Greater() or .GreaterEqual() or .Less() or .LessEqual() then true,
             _ then false,
         };
 
@@ -2066,14 +1861,11 @@ given TypeChecker {
                 }
             },
         };
-        let raw_right = when pre_typed_right in {
-            .Some(typed_right) then typed_right,
-            .None() then self.check_expr_scoped_ref(
+        let raw_right = pre_typed_right or else self.check_expr_scoped_ref(
                 right_source_ref,
                 right_expected,
                 scope,
-            ),
-        };
+            );
         let normalized = self.normalize_comparison_operands(
             left_expr,
             left_source,
@@ -2297,59 +2089,23 @@ given TypeChecker {
 
     is_builtin_equality_comparable(self, t: Type): Bool = {
         return when t in {
-            .IntType() then true,
-            .Int8Type() then true,
-            .Int16Type() then true,
-            .Int32Type() then true,
-            .Int64Type() then true,
-            .UIntType() then true,
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .WrappingIntType() then true,
-            .WrappingInt8Type() then true,
-            .WrappingInt16Type() then true,
-            .WrappingInt32Type() then true,
-            .WrappingInt64Type() then true,
-            .WrappingUIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
-            .Float32Type() then true,
-            .Float64Type() then true,
-            .BoolType() then true,
-            .MutablePointerType(_) then true,
-            .PointerType(_) then true,
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType()
+            or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType()
+            or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+            or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType()
+            or .MutablePointerType(_) or .PointerType(_) then true,
             _ then false,
         };
     };
 
     is_builtin_ordering_comparable(self, t: Type): Bool = {
         return when t in {
-            .IntType() then true,
-            .Int8Type() then true,
-            .Int16Type() then true,
-            .Int32Type() then true,
-            .Int64Type() then true,
-            .UIntType() then true,
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .WrappingIntType() then true,
-            .WrappingInt8Type() then true,
-            .WrappingInt16Type() then true,
-            .WrappingInt32Type() then true,
-            .WrappingInt64Type() then true,
-            .WrappingUIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
-            .Float32Type() then true,
-            .Float64Type() then true,
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .UIntType()
+            or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .WrappingIntType()
+            or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
+            or .WrappingUInt64Type() or .Float32Type() or .Float64Type() then true,
             _ then false,
         };
     };

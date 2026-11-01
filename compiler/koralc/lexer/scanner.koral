@@ -1716,16 +1716,11 @@ given Lexer {
             };
 
             if Lexer.is_digit(ch) then {
-                when self.read_number(start_line, start_col, ch) in {
-                    .Ok(_) then {},
-                    // Propagate. The failure already has its own span and
-                    // message; re-siting it through `fail(..., e.message())`
-                    // nested the whole rendered CLI line inside a fresh message,
-                    // so the location printed twice.
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                // Propagate. The failure already has its own span and
+                // message; re-siting it through `fail(..., e.message())`
+                // nested the whole rendered CLI line inside a fresh message,
+                // so the location printed twice.
+                self.read_number(start_line, start_col, ch) or return;
                 continue;
             };
 
@@ -1736,15 +1731,10 @@ given Lexer {
                             when self.peek_next() in {
                                 .Some(b) then {
                                     if b == '"' then {
-                                        when self.read_multiline_string(
+                                        self.read_multiline_string(
                                             start_line,
                                             start_col,
-                                        ) in {
-                                            .Ok(_) then {},
-                                            .Error(e) then {
-                                                return .Error(e);
-                                            },
-                                        };
+                                        ) or return;
                                         continue;
                                     };
                                 },
@@ -1755,12 +1745,7 @@ given Lexer {
                     .None() then {},
                 };
 
-                when self.read_string(start_line, start_col) in {
-                    .Ok(_) then {},
-                    .Error(e) then {
-                        return .Error(e);
-                    },
-                };
+                self.read_string(start_line, start_col) or return;
                 continue;
             };
 
@@ -1786,12 +1771,7 @@ given Lexer {
                     if self.peek() is .Some('\'') then {
                         // Rune literal: 'a' — restore position and call read_rune
                         self.index = saved_index;
-                        when self.read_rune(start_line, start_col) in {
-                            .Ok(_) then {},
-                            .Error(e) then {
-                                return .Error(e);
-                            },
-                        };
+                        self.read_rune(start_line, start_col) or return;
                     } else {
                         // Lifetime identifier: 'a
                         self.add(
@@ -1802,12 +1782,7 @@ given Lexer {
                     };
                 } else {
                     // Not identifier start — rune literal
-                    when self.read_rune(start_line, start_col) in {
-                        .Ok(_) then {},
-                        .Error(e) then {
-                            return .Error(e);
-                        },
-                    };
+                    self.read_rune(start_line, start_col) or return;
                 };
                 continue;
             };
@@ -1826,17 +1801,11 @@ given Lexer {
 
                 if next == '*' then {
                     self.advance();
-                    when self.skip_block_comment() in {
-                        .Ok(comment_had_newline) then {
-                            if comment_had_newline then {
-                                self.has_newline_before = true;
-                            };
-                            continue;
-                        },
-                        .Error(e) then {
-                            return .Error(e);
-                        },
+                    let comment_had_newline = self.skip_block_comment() or return;
+                    if comment_had_newline then {
+                        self.has_newline_before = true;
                     };
+                    continue;
                 };
             };
 

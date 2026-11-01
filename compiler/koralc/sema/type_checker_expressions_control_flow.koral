@@ -1,9 +1,7 @@
 given TypeChecker {
     should_defer_explicit_trait_check(self, t: Type): Bool = {
         return when t in {
-            .Unknown() then true,
-            .TypeVar(_) then true,
-            .GenericParameter(_) then true,
+            .Unknown() or .TypeVar(_) or .GenericParameter(_) then true,
             _ then false,
         };
     };
@@ -15,11 +13,8 @@ given TypeChecker {
         scope: Scope,
     ): TypedExpr = {
         let skip_call_family_expr = if self.skip_call_family_debug_enabled() then when expr in {
-            .Call(_, _, _) then true,
-            .GenericMethodCall(_, _, _, _, _) then true,
-            .QualifiedMethodCall(_, _, _, _, _) then true,
-            .QualifiedGenericMethodCall(_, _, _, _, _, _) then true,
-            .StaticMethodCall(_, _, _, _, _) then true,
+            .Call(_, _, _) or .GenericMethodCall(_, _, _, _, _) or .QualifiedMethodCall(_, _, _, _, _)
+            or .QualifiedGenericMethodCall(_, _, _, _, _, _) or .StaticMethodCall(_, _, _, _, _) then true,
             _ then false,
         } else false;
         if skip_call_family_expr then {
@@ -295,27 +290,12 @@ given TypeChecker {
         while not stack.is_empty() then {
             let node = stack.pop() or else pattern;
             when node in {
-                .Variable(name, _, _) then {
+                .Variable(name, _, _) or .TraitObjectTypeBinding(name, _, _, _) or .WeakBinding(name, _, _) then {
                     if not (name == "_") then {
                         names.insert(name);
                     };
                 },
-                .TraitObjectTypeBinding(name, _, _, _) then {
-                    if not (name == "_") then {
-                        names.insert(name);
-                    };
-                },
-                .WeakBinding(name, _, _) then {
-                    if not (name == "_") then {
-                        names.insert(name);
-                    };
-                },
-                .EnumCase(_, elements, _) then {
-                    for element in elements then {
-                        stack.push(element.pattern);
-                    };
-                },
-                .StructPattern(_, elements, _) then {
+                .EnumCase(_, elements, _) or .StructPattern(_, elements, _) then {
                     for element in elements then {
                         stack.push(element.pattern);
                     };
@@ -325,11 +305,7 @@ given TypeChecker {
                         stack.push(element);
                     };
                 },
-                .AndPattern(left, right, _) then {
-                    stack.push(left);
-                    stack.push(right);
-                },
-                .OrPattern(left, right, _) then {
+                .AndPattern(left, right, _) or .OrPattern(left, right, _) then {
                     stack.push(left);
                     stack.push(right);
                 },
@@ -342,10 +318,7 @@ given TypeChecker {
     condition_contains_is_with_bindings(self, expr: Expr): Bool = {
         return when expr in {
             .IsExpr(_, pattern, _) then self.pattern_contains_bindings(pattern),
-            .AndExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(
-                right,
-            ),
-            .OrExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(
+            .AndExpr(left, right, _) or .OrExpr(left, right, _) then self.condition_contains_is_with_bindings(left) or self.condition_contains_is_with_bindings(
                 right,
             ),
             .Unary(op, inner, _) then when op in {
@@ -359,10 +332,7 @@ given TypeChecker {
     condition_contains_is_expression(self, expr: Expr): Bool = {
         return when expr in {
             .IsExpr(...) then true,
-            .AndExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(
-                right,
-            ),
-            .OrExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(
+            .AndExpr(left, right, _) or .OrExpr(left, right, _) then self.condition_contains_is_expression(left) or self.condition_contains_is_expression(
                 right,
             ),
             .Unary(op, inner, _) then when op in {
@@ -379,9 +349,7 @@ given TypeChecker {
             .AndExpr(left, right, _) then self.condition_requires_pattern_lowering(left) or self.condition_requires_pattern_lowering(
                 right,
             ),
-            .OrExpr(_, _, _) then false,
-            .IsNotExpr(_, _, _) then false,
-            .Unary(_, _, _) then false,
+            .OrExpr(_, _, _) or .IsNotExpr(_, _, _) or .Unary(_, _, _) then false,
             _ then false,
         };
     };
@@ -395,11 +363,7 @@ given TypeChecker {
             .IsExpr(_, pattern, _) then if self.pattern_contains_bindings(pattern) then Option[Expr].Some(
                 expr,
             ) else Option[Expr].None(),
-            .AndExpr(left, right, _) then when self.first_is_with_bindings(left) in {
-                .Some(found) then Option[Expr].Some(found),
-                .None() then self.first_is_with_bindings(right),
-            },
-            .OrExpr(left, right, _) then when self.first_is_with_bindings(left) in {
+            .AndExpr(left, right, _) or .OrExpr(left, right, _) then when self.first_is_with_bindings(left) in {
                 .Some(found) then Option[Expr].Some(found),
                 .None() then self.first_is_with_bindings(right),
             },
@@ -421,7 +385,7 @@ given TypeChecker {
     /// leaves the names defined.
     bind_rejected_is_patterns(self, expr: Expr, scope: Scope): Void = {
         when expr in {
-            .IsExpr(subject, pattern, _) then {
+            .IsExpr(subject, pattern, _) or .IsNotExpr(subject, pattern, _) then {
                 let typed_subj = self.check_expr_scoped_ref(
                     subject,
                     Option[Type].None(),
@@ -429,19 +393,7 @@ given TypeChecker {
                 );
                 let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
             },
-            .IsNotExpr(subject, pattern, _) then {
-                let typed_subj = self.check_expr_scoped_ref(
-                    subject,
-                    Option[Type].None(),
-                    scope,
-                );
-                let _ = self.bind_pattern_vars(pattern, typed_subj.expr_type, scope);
-            },
-            .AndExpr(left, right, _) then {
-                self.bind_rejected_is_patterns(left, scope);
-                self.bind_rejected_is_patterns(right, scope);
-            },
-            .OrExpr(left, right, _) then {
+            .AndExpr(left, right, _) or .OrExpr(left, right, _) then {
                 self.bind_rejected_is_patterns(left, scope);
                 self.bind_rejected_is_patterns(right, scope);
             },
@@ -501,8 +453,7 @@ given TypeChecker {
 
     expr_condition_span(self, expr: Expr): SourceSpan = {
         return when expr in {
-            .IsExpr(_, _, span) then span,
-            .IsNotExpr(_, _, span) then span,
+            .IsExpr(_, _, span) or .IsNotExpr(_, _, span) then span,
             _ then unknown_span(),
         };
     };
@@ -521,14 +472,11 @@ given TypeChecker {
                 arms.push(
                     WhenArm(pattern, Option[Expr].None(), then_expr, false, false),
                 );
-                let else_body = when else_expr in {
-                    .Some(else_ref) then else_ref,
-                    .None() then Expr.Block(
+                let else_body = else_expr or else Expr.Block(
                         List[Statement].new(),
                         Option[Expr].None(),
                         actual_span,
-                    ),
-                };
+                    );
                 // An `if ... is` with no `else` has ONE branch. The wildcard is
                 // invented so the `when` is exhaustive, and it must not take
                 // part in the branch-type merge: its Void type is not the
@@ -635,13 +583,10 @@ given TypeChecker {
                 .None() then Option[TypedExpr].Some(step),
             };
         };
-        return when folded in {
-            .Some(result) then result,
-            .None() then make_typed_expr(
+        return folded or else make_typed_expr(
                 TypedExprKind.BoolLiteral(false),
                 Type.BoolType(),
-            ),
-        };
+            );
     };
 
     /// One conjunct of a guard's and-spine. `is` / `is not` become typed
@@ -682,8 +627,7 @@ given TypeChecker {
                 raw_typed_subj.expr_type,
             ) then {
                 let inner_type = when raw_typed_subj.expr_type in {
-                    .WeakReferenceType(inner) then inner,
-                    .MutableWeakReferenceType(inner) then inner,
+                    .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then inner,
                     _ then raw_typed_subj.expr_type,
                 };
                 let mutable opt_args = List[Type].new();
@@ -997,8 +941,7 @@ given TypeChecker {
         ) then {
             // Prefer coercing literals to the concrete type (like Swift's coerceLiteral)
             let left_is_literal = when typed_left_ref.expr_kind in {
-                .IntegerLiteral(_) then true,
-                .FloatLiteral(_) then true,
+                .IntegerLiteral(_) or .FloatLiteral(_) then true,
                 _ then false,
             };
             if left_is_literal then {
@@ -1038,15 +981,12 @@ given TypeChecker {
             },
             .None() then when typed_right in {
                 .Some(typed_right_ref) then typed_right_ref.expr_type,
-                .None() then when expected_element_type in {
-                    .Some(et) then et,
-                    .None() then {
-                        self.push_diagnostic(
-                            "Full range '...' requires type annotation or context type",
-                            report_span,
-                        );
-                        Type.Unknown()
-                    },
+                .None() then expected_element_type or else {
+                    self.push_diagnostic(
+                        "Full range '...' requires type annotation or context type",
+                        report_span,
+                    );
+                    Type.Unknown()
                 },
             },
         };

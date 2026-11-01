@@ -141,19 +141,14 @@ public let retype_typed_expr(expr: TypedExpr, t: Type): TypedExpr =
 
 public let typed_intrinsic_type(node: TypedIntrinsic): Type = {
     return when node in {
-        .DowngradeRef(_, result_type) then result_type,
-        .UpgradeRef(_, result_type) then result_type,
+        .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
         .SpawnThread(_, _, _, _) then Type.Int32Type(),
         .AllocMemory(_, result_type) then result_type,
-        .DeallocMemory(_) then Type.VoidType(),
-        .CopyMemory(_, _, _) then Type.VoidType(),
-        .MoveMemory(_, _, _) then Type.VoidType(),
-        .InitMemory(_, _) then Type.VoidType(),
-        .DeinitMemory(_) then Type.VoidType(),
+        .DeallocMemory(_) or .CopyMemory(_, _, _) or .MoveMemory(_, _, _) or .InitMemory(_, _)
+        or .DeinitMemory(_) then Type.VoidType(),
         .TakeMemory(pointer_expr, _) then {
             when typed_expr_type(pointer_expr) in {
-                .PointerType(inner) then inner,
-                .MutablePointerType(inner) then inner,
+                .PointerType(inner) or .MutablePointerType(inner) then inner,
                 _ then Type.Unknown(),
             }
         },
@@ -185,21 +180,16 @@ public let typed_expr_type(expr: TypedExpr): Type = {
         },
         .DerefExpr(inner) then {
             when typed_expr_type(inner) in {
-                .ReferenceType(inner_type) then inner_type,
-                .MutableReferenceType(inner_type) then inner_type,
-                .BorrowedReferenceType(inner_type) then inner_type,
-                .MutableBorrowedReferenceType(inner_type) then inner_type,
-                .WeakReferenceType(inner_type) then inner_type,
-                .MutableWeakReferenceType(inner_type) then inner_type,
-                .PointerType(inner_type) then inner_type,
-                .MutablePointerType(inner_type) then inner_type,
+                .ReferenceType(inner_type) or .MutableReferenceType(inner_type)
+                or .BorrowedReferenceType(inner_type) or .MutableBorrowedReferenceType(inner_type)
+                or .WeakReferenceType(inner_type) or .MutableWeakReferenceType(inner_type)
+                or .PointerType(inner_type) or .MutablePointerType(inner_type) then inner_type,
                 _ then expr.expr_type,
             }
         },
         .UnsafeDerefExpr(inner) then {
             when typed_expr_type(inner) in {
-                .PointerType(inner_type) then inner_type,
-                .MutablePointerType(inner_type) then inner_type,
+                .PointerType(inner_type) or .MutablePointerType(inner_type) then inner_type,
                 _ then expr.expr_type,
             }
         },
@@ -328,14 +318,8 @@ private let typed_value_category_preserves_identity_cast(
         return true;
     };
     return when source_type in {
-        .ReferenceType(_) then when target_type in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
-            _ then false,
-        },
-        .MutableReferenceType(_) then when target_type in {
-            .ReferenceType(_) then true,
-            .MutableReferenceType(_) then true,
+        .ReferenceType(_) or .MutableReferenceType(_) then when target_type in {
+            .ReferenceType(_) or .MutableReferenceType(_) then true,
             _ then false,
         },
         _ then false,
@@ -346,8 +330,7 @@ public let typed_expr_value_category(expr: TypedExpr): ValueCategory = {
     return when expr.expr_kind in {
         .Variable(_) then ValueCategory.LValue(),
         .MemberPath(source, _) then typed_expr_value_category(source),
-        .DerefExpr(_) then ValueCategory.LValue(),
-        .UnsafeDerefExpr(_) then ValueCategory.LValue(),
+        .DerefExpr(_) or .UnsafeDerefExpr(_) then ValueCategory.LValue(),
         .CastExpr(target_type, inner) then {
             if typed_value_category_preserves_identity_cast(inner.expr_type, target_type) then typed_expr_value_category(
                 inner,
@@ -367,17 +350,10 @@ public let typed_expr_span_at(expr: TypedExpr, context: CompilerContext): Source
         return when expr.expr_kind in {
             .Variable(symbol) then context.get_span(symbol.def_id) or else unknown_span(
             ),
-            .CastExpr(_, inner) then typed_expr_span_at(inner, context),
-            .Unary(_, inner) then typed_expr_span_at(inner, context),
-            .RefExpr(inner) then typed_expr_span_at(inner, context),
-            .PtrExpr(inner) then typed_expr_span_at(inner, context),
-            .DerefExpr(inner) then typed_expr_span_at(inner, context),
-            .UnsafeDerefExpr(inner) then typed_expr_span_at(inner, context),
-            .ArithmeticExpr(left, _, _) then typed_expr_span_at(left, context),
-            .ComparisonExpr(left, _, _) then typed_expr_span_at(left, context),
-            .BitwiseExpr(left, _, _) then typed_expr_span_at(left, context),
-            .AndExpr(left, _) then typed_expr_span_at(left, context),
-            .OrExpr(left, _) then typed_expr_span_at(left, context),
+            .CastExpr(_, inner) or .Unary(_, inner) or .RefExpr(inner) or .PtrExpr(inner) or .DerefExpr(inner)
+            or .UnsafeDerefExpr(inner) then typed_expr_span_at(inner, context),
+            .ArithmeticExpr(left, _, _) or .ComparisonExpr(left, _, _) or .BitwiseExpr(left, _, _)
+            or .AndExpr(left, _) or .OrExpr(left, _) then typed_expr_span_at(left, context),
             .IsExpr(subject, _, _) then {
                 let subject_span = typed_expr_span_at(subject, context);
                 if is_known_span(subject_span) then subject_span else unknown_span()
@@ -405,17 +381,10 @@ public let typed_expr_span_at(expr: TypedExpr, context: CompilerContext): Source
                     .None() then unknown_span(),
                 }
             } else when statements[UInt(0)] in {
-                .LetStmt(_, _, span) then span,
-                .TupleLetStmt(_, _, _, span) then span,
-                .AssignmentStmt(_, _, span) then span,
-                .ExprStmt(_, span) then span,
-                .IfStmt(_, _, _, span) then span,
-                .WhileStmt(_, _, span) then span,
-                .WhenStmt(_, _, span) then span,
-                .ReturnStmt(_, span) then span,
-                .BreakStmt(span) then span,
-                .ContinueStmt(span) then span,
-                .DeferStmt(_, span) then span,
+                .LetStmt(_, _, span) or .TupleLetStmt(_, _, _, span) or .AssignmentStmt(_, _, span)
+                or .ExprStmt(_, span) or .IfStmt(_, _, _, span) or .WhileStmt(_, _, span)
+                or .WhenStmt(_, _, span) or .ReturnStmt(_, span) or .BreakStmt(span) or .ContinueStmt(span)
+                or .DeferStmt(_, span) then span,
             },
             .IfExpr(condition, _, _) then typed_expr_span_at(condition, context),
             .WhenExpr(subject, _) then typed_expr_span_at(subject, context),
@@ -453,11 +422,7 @@ public let typed_expr_span_at(expr: TypedExpr, context: CompilerContext): Source
             .TraitObjectConversion(inner, _, _) then typed_expr_span_at(inner, context),
             .TraitMethodCall(receiver, _, _, _, _) then typed_expr_span_at(receiver, context),
             .GenericInstantiation(base_type, _) then when base_type in {
-                .StructureType(def_id) then context.get_span(def_id) or else unknown_span(
-                ),
-                .EnumType(def_id) then context.get_span(def_id) or else unknown_span(
-                ),
-                .OpaqueType(def_id) then context.get_span(def_id) or else unknown_span(
+                .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then context.get_span(def_id) or else unknown_span(
                 ),
                 _ then unknown_span(),
             },

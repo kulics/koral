@@ -322,10 +322,7 @@ given TypeChecker {
     /// agree. Minting a fresh DefId per call is how the two drifted apart.
     declared_method_def_id(self, receiver_type: Type, method_name: String): DefId = {
         let map_key = "\(self.context().method_owner_of(receiver_type).display())#\(method_name)";
-        return when self.storage.given_member_def_ids.get(map_key) in {
-            .Some(existing) then existing,
-            .None() then def_id_invalid(),
-        };
+        return self.storage.given_member_def_ids.get(map_key) or else def_id_invalid();
     };
 
     make_method_symbol(self, method_name: String, return_type: Type): Symbol = {
@@ -419,8 +416,9 @@ given TypeChecker {
                         return Option[ReusedGivenMemberSignature].None();
                     };
                     let mutable params = List[TypedParam].new();
-                    let mutable idx: UInt = 0;
-                    for entry in param_entries then {
+                    for pair in param_entries.lazy().enumerate() then {
+                        let idx = pair.first;
+                        let entry = pair.second;
                         let spec = param_specs[idx];
                         params.push(
                             TypedParam(
@@ -431,7 +429,6 @@ given TypeChecker {
                                 spec.default_value,
                             ),
                         );
-                        idx += UInt(1);
                     };
                     Option[ReusedGivenMemberSignature].Some(
                         ReusedGivenMemberSignature(
@@ -514,19 +511,21 @@ given TypeChecker {
         resolved_types: List[Type],
     ): List[TypedParam] = {
         let mutable out = List[TypedParam].new();
-        let mutable idx: UInt = 0;
-        while idx < params.count() and idx < resolved_types.count() then {
-            let p = params[idx];
+        for pair in params.lazy().zip[
+            Type,
+            ListIterator[Type],
+            List[Type],
+        ](resolved_types) then {
+            let p = pair.first;
             out.push(
                 TypedParam(
                     p.name,
                     p.is_mutable,
-                    resolved_types[idx],
+                    (pair.second),
                     p.named,
                     p.default_value,
                 ),
             );
-            idx += 1;
         };
         return out;
     };
@@ -669,18 +668,15 @@ given TypeChecker {
         bindings: Dict[String, Type],
     ): Type = {
         return when node in {
-            .Identifier(name, span) then when bindings.get(name) in {
-                .Some(bound) then bound,
-                .None() then {
-                    if name == "Self" then {
-                        return self_type;
-                    };
-                    // Check current_scope before falling back (Swift: currentScope.resolveType)
-                    if self.resolve_type_name_binding(name) is .Some(t) then {
-                        return self.surface_named_type(self.canonicalize_alias_type(t));
-                    };
-                    self.surface_named_type(self.resolve_named_type(name, span))
-                },
+            .Identifier(name, span) then bindings.get(name) or else {
+                if name == "Self" then {
+                    return self_type;
+                };
+                // Check current_scope before falling back (Swift: currentScope.resolveType)
+                if self.resolve_type_name_binding(name) is .Some(t) then {
+                    return self.surface_named_type(self.canonicalize_alias_type(t));
+                };
+                self.surface_named_type(self.resolve_named_type(name, span))
             },
             .Reference(inner, is_mutable, span) then {
                 let trait_ref_override = when inner in {
@@ -723,18 +719,15 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_type_with_self_and_bindings(
-                            inner,
-                            self_type,
-                            bindings,
-                        );
-                        if is_mutable then self.resolve_mutable_reference_type(
-                            resolved_inner,
-                        ) else self.resolve_reference_type(resolved_inner)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_type_with_self_and_bindings(
+                        inner,
+                        self_type,
+                        bindings,
+                    );
+                    if is_mutable then self.resolve_mutable_reference_type(
+                        resolved_inner,
+                    ) else self.resolve_reference_type(resolved_inner)
                 }
             },
             .BorrowedReference(inner, is_mutable, _) then {
@@ -804,19 +797,16 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_type_with_self_and_bindings(
-                            inner,
-                            self_type,
-                            bindings,
-                        );
-                        if is_mutable then self.resolve_mutable_weak_reference_type(
-                            resolved_inner,
-                            span,
-                        ) else self.resolve_weak_reference_type(resolved_inner, span)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_type_with_self_and_bindings(
+                        inner,
+                        self_type,
+                        bindings,
+                    );
+                    if is_mutable then self.resolve_mutable_weak_reference_type(
+                        resolved_inner,
+                        span,
+                    ) else self.resolve_weak_reference_type(resolved_inner, span)
                 }
             },
             .Generic(base, args, span) then {
@@ -1069,16 +1059,13 @@ given TypeChecker {
     /// re-mint and the lookup missed.
     trait_member_def_id(self, trait_def_id: DefId, member_name: String): DefId = {
         let map_key = "trait#\(trait_def_id.id)#\(member_name)";
-        return when self.storage.given_member_def_ids.get(map_key) in {
-            .Some(existing) then existing,
-            .None() then {
-                let allocated = self.allocate_unindexed_def_id(
-                    member_name,
-                    DefKind.Function(),
-                );
-                self.storage.given_member_def_ids.insert(map_key, allocated);
-                allocated
-            },
+        return self.storage.given_member_def_ids.get(map_key) or else {
+            let allocated = self.allocate_unindexed_def_id(
+                member_name,
+                DefKind.Function(),
+            );
+            self.storage.given_member_def_ids.insert(map_key, allocated);
+            allocated
         };
     };
 
@@ -1174,10 +1161,8 @@ given TypeChecker {
         let mutable out = List[TypedGivenMember].with_capacity(members.count());
         let is_trait_tool_target = when target_type in {
             .TraitObject(...) then true,
-            .ReferenceType(inner) then inner is .TraitObject(...),
-            .MutableReferenceType(inner) then inner is .TraitObject(...),
-            .BorrowedReferenceType(inner) then inner is .TraitObject(...),
-            .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then inner is .TraitObject(...),
             _ then false,
         };
         let is_trait_tool_declaration = type_params.is_empty() and is_trait_tool_target and conformance_trait_name is .None();
@@ -1304,10 +1289,8 @@ given TypeChecker {
                 Type.GenericParameter("Self")
             } else {
                 when target_type in {
-                    .ReferenceType(inner) then inner,
-                    .MutableReferenceType(inner) then inner,
-                    .BorrowedReferenceType(inner) then inner,
-                    .MutableBorrowedReferenceType(inner) then inner,
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                    or .MutableBorrowedReferenceType(inner) then inner,
                     _ then target_type,
                 }
             };
@@ -1653,14 +1636,16 @@ given TypeChecker {
         if left.type_args.count() != right.type_args.count() then {
             return false;
         };
-        let mutable index: UInt = 0;
-        while index < left.type_args.count() then {
-            if self.context().type_display_name(left.type_args[index]) != self.context().type_display_name(
-                right.type_args[index],
+        for pair in left.type_args.lazy().zip[
+            Type,
+            ListIterator[Type],
+            List[Type],
+        ](right.type_args) then {
+            if self.context().type_display_name((pair.first)) != self.context().type_display_name(
+                (pair.second),
             ) then {
                 return false;
             };
-            index += 1;
         };
         return true;
     };
@@ -1729,9 +1714,9 @@ given TypeChecker {
         ) in {
             .Some(trait_info) then {
                 for tool_param in tool_type_params then {
-                    let mutable search: UInt = 0;
-                    while search < trait_info.type_params.count() then {
-                        if trait_info.type_params[search] == tool_param.name and search < resolved_trait_args.count(
+                    for pair in trait_info.type_params.lazy().enumerate() then {
+                        let search = pair.first;
+                        if pair.second == tool_param.name and search < resolved_trait_args.count(
                         ) then {
                             when resolved_trait_args[search] in {
                                 .GenericParameter(mapped_name) then {
@@ -1768,7 +1753,6 @@ given TypeChecker {
                                 _ then {},
                             };
                         };
-                        search += 1;
                     };
                 };
             },
@@ -2114,11 +2098,12 @@ given TypeChecker {
             self.storage.module_path,
         ) in {
             .Some(info) then {
-                let mutable index: UInt = 0;
-                while index < info.type_params.count() and index < resolved_trait_args.count(
-                ) then {
-                    bindings.insert(info.type_params[index], resolved_trait_args[index]);
-                    index += 1;
+                for pair in info.type_params.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](resolved_trait_args) then {
+                    bindings.insert((pair.first), (pair.second));
                 };
             },
             .None() then {},

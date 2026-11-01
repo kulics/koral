@@ -33,10 +33,8 @@ given RecursionCycle {
     public path_string(self, context: CompilerContext): String = {
         let _ = context;
         let mutable parts = List[String].new();
-        let mutable i = self.start_index;
-        while i < self.path.count() then {
-            parts.push(self.path[i].type_name);
-            i += 1;
+        for node in self.path.lazy().skip(self.start_index) then {
+            parts.push(node.type_name);
         };
         let mutable result = StringBuilder.new();
         let mutable first = true;
@@ -91,15 +89,7 @@ given RecursiveTypeChecker {
             .EnumType(def_id) then {
                 result.push(def_id);
             },
-            .GenericStruct(_, args) then {
-                for arg in args then {
-                    let sub = self.extract_value_type_def_ids(arg);
-                    for d in sub then {
-                        result.push(d);
-                    };
-                };
-            },
-            .GenericEnum(_, args) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) then {
                 for arg in args then {
                     let sub = self.extract_value_type_def_ids(arg);
                     for d in sub then {
@@ -214,10 +204,7 @@ given RecursiveTypeChecker {
 
         // 对每个未访问的类型执行 DFS
         for def_id in self.all_type_def_ids then {
-            let state = when visit_state.get(def_id.id) in {
-                .Some(s) then s,
-                .None() then 0,
-            };
+            let state = visit_state.get(def_id.id) or else 0;
             if state == 0 then {
                 let mutable path = List[CycleNode].new();
                 self.dfs(def_id, visit_state, path, cycles);
@@ -237,20 +224,14 @@ given RecursiveTypeChecker {
         // 标记为 Gray（正在访问）
         visit_state.insert(def_id.id, 1);
 
-        let type_name = when self.context.get_name(def_id) in {
-            .Some(n) then n,
-            .None() then "<unknown>",
-        };
+        let type_name = self.context.get_name(def_id) or else "<unknown>";
         path.push(CycleNode(def_id, type_name, ""));
 
         // 遍历所有依赖
         when self.dependency_graph.get(def_id.id) in {
             .Some(deps) then {
                 for dep in deps then {
-                    let target_state = when visit_state.get(dep.target_def_id.id) in {
-                        .Some(s) then s,
-                        .None() then 0,
-                    };
+                    let target_state = visit_state.get(dep.target_def_id.id) or else 0;
 
                     if target_state == 0 then {
                         // White: 未访问，继续 DFS
@@ -259,27 +240,18 @@ given RecursiveTypeChecker {
                         // Gray: 发现循环！
                         let mutable start_index: UInt = 0;
                         let mutable found = false;
-                        let mutable si: UInt = 0;
-                        while si < path.count() then {
-                            if path[si].def_id.id == dep.target_def_id.id then {
-                                start_index = si;
-                                found = true;
-                                break;
-                            };
-                            si += 1;
+                        let found_idx = path.lazy().position(
+                            (x) => x.def_id.id == dep.target_def_id.id,
+                        );
+                        if found_idx is .Some(si) then {
+                            start_index = si;
+                            found = true;
                         };
                         if found then {
-                            let target_name = when self.context.get_name(
-                                dep.target_def_id,
-                            ) in {
-                                .Some(n) then n,
-                                .None() then "<unknown>",
-                            };
+                            let target_name = self.context.get_name(dep.target_def_id) or else "<unknown>";
                             let mutable cycle_path = List[CycleNode].new();
-                            let mutable ci: UInt = 0;
-                            while ci < path.count() then {
-                                cycle_path.push(path[ci]);
-                                ci += 1;
+                            for node in path then {
+                                cycle_path.push(node);
                             };
                             cycle_path.push(
                                 CycleNode(dep.target_def_id, target_name, dep.field_name),

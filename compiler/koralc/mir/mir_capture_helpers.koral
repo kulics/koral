@@ -78,14 +78,9 @@ given MIRFunctionBuilder {
                     .None() then false,
                 };
                 if not param_names.contains(name) and is_local_capture then {
-                    let mutable seen = false;
-                    let mutable capture_index: UInt = 0;
-                    while capture_index < out.count() then {
-                        if out[capture_index].def_id.id == symbol.def_id.id then {
-                            seen = true;
-                        };
-                        capture_index += 1;
-                    };
+                    let seen = out.lazy().any(
+                        (capture) => capture.def_id.id == symbol.def_id.id,
+                    );
                     if not seen then {
                         out.push(symbol);
                     };
@@ -120,10 +115,7 @@ given MIRFunctionBuilder {
                     self.collect_captures_expr(arg, param_names, out);
                 };
             },
-            .GenericCall(_, _, args) then for arg in args then {
-                self.collect_captures_expr(arg, param_names, out);
-            },
-            .StaticMethodCall(_, _, _, _, _, args) then for arg in args then {
+            .GenericCall(_, _, args) or .StaticMethodCall(_, _, _, _, _, args) then for arg in args then {
                 self.collect_captures_expr(arg, param_names, out);
             },
             .TraitMethodCall(receiver, _, _, _, args) then {
@@ -137,48 +129,21 @@ given MIRFunctionBuilder {
                 param_names,
                 out,
             ),
-            .MethodReference(base, _, _, _, _, _) then self.collect_captures_expr(
+            .MethodReference(base, _, _, _, _, _) or .TraitMethodPlaceholder(base, _, _, _, _, _) then self.collect_captures_expr(
                 base,
                 param_names,
                 out,
             ),
-            .TraitMethodPlaceholder(base, _, _, _, _, _) then self.collect_captures_expr(
-                base,
-                param_names,
-                out,
-            ),
-            .RefExpr(inner) then self.collect_captures_expr(inner, param_names, out),
-            .PtrExpr(inner) then self.collect_captures_expr(inner, param_names, out),
-            .DerefExpr(inner) then self.collect_captures_expr(inner, param_names, out),
+            .RefExpr(inner) or .PtrExpr(inner) or .DerefExpr(inner) then self.collect_captures_expr(inner, param_names, out),
             .UnsafeDerefExpr(inner) then self.collect_captures_expr(
                 inner,
                 param_names,
                 out,
             ),
-            .CastExpr(_, inner) then self.collect_captures_expr(inner, param_names, out),
-            .Unary(_, inner) then self.collect_captures_expr(inner, param_names, out),
+            .CastExpr(_, inner) or .Unary(_, inner) then self.collect_captures_expr(inner, param_names, out),
             .MemberPath(base, _) then self.collect_captures_expr(base, param_names, out),
-            .ArithmeticExpr(l, _, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .WrappingArithmeticExpr(l, _, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .ComparisonExpr(l, _, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .BitwiseExpr(l, _, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .AndExpr(l, r) then {
-                self.collect_captures_expr(l, param_names, out);
-                self.collect_captures_expr(r, param_names, out);
-            },
-            .OrExpr(l, r) then {
+            .ArithmeticExpr(l, _, r) or .WrappingArithmeticExpr(l, _, r) or .ComparisonExpr(l, _, r)
+            or .BitwiseExpr(l, _, r) or .AndExpr(l, r) or .OrExpr(l, r) then {
                 self.collect_captures_expr(l, param_names, out);
                 self.collect_captures_expr(r, param_names, out);
             },
@@ -196,10 +161,7 @@ given MIRFunctionBuilder {
             },
             // Only type arguments, no expressions.
             .GenericInstantiation(_, _) then {},
-            .IntegerLiteral(_) then {},
-            .FloatLiteral(_) then {},
-            .StringLiteral(_) then {},
-            .BoolLiteral(_) then {},
+            .IntegerLiteral(_) or .FloatLiteral(_) or .StringLiteral(_) or .BoolLiteral(_) then {},
             .IsExpr(subject, _, _) then self.collect_captures_expr(
                 subject,
                 param_names,
@@ -247,12 +209,7 @@ given MIRFunctionBuilder {
                 out,
             ),
             .DeallocMemory(p) then self.collect_captures_expr(p, param_names, out),
-            .CopyMemory(a, b, c) then {
-                self.collect_captures_expr(a, param_names, out);
-                self.collect_captures_expr(b, param_names, out);
-                self.collect_captures_expr(c, param_names, out);
-            },
-            .MoveMemory(a, b, c) then {
+            .CopyMemory(a, b, c) or .MoveMemory(a, b, c) then {
                 self.collect_captures_expr(a, param_names, out);
                 self.collect_captures_expr(b, param_names, out);
                 self.collect_captures_expr(c, param_names, out);
@@ -261,8 +218,7 @@ given MIRFunctionBuilder {
                 self.collect_captures_expr(a, param_names, out);
                 self.collect_captures_expr(b, param_names, out);
             },
-            .DeinitMemory(p) then self.collect_captures_expr(p, param_names, out),
-            .TakeMemory(p, _) then self.collect_captures_expr(p, param_names, out),
+            .DeinitMemory(p) or .TakeMemory(p, _) then self.collect_captures_expr(p, param_names, out),
             .NullPtr(_) then {},
         };
     };
@@ -333,10 +289,8 @@ given MIRFunctionBuilder {
     ): Bool = {
         let _ = self;
         return when source_type in {
-            .ReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
-            .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
-            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
-            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            .ReferenceType(_) or .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
             _ then source_type == target_type,
         };
     };
@@ -356,9 +310,8 @@ given MIRFunctionBuilder {
             return identifier_type;
         };
 
-        let type_name = when self.context.get_template_name(identifier.def_id) in {
-            .Some(name) then name,
-            .None() then self.context.get_name(identifier.def_id) or else "",
+        let type_name = self.context.get_template_name(identifier.def_id) or else {
+            self.context.get_name(identifier.def_id) or else ""
         };
         if args.count() == UInt(2) and is_std_pair_def_id(
             self.context,
@@ -402,14 +355,9 @@ given MIRFunctionBuilder {
 
     deref_pointee_type(self, container: Type, fallback: Type): Type = {
         return when container in {
-            .ReferenceType(inner) then inner,
-            .MutableReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
-            .PointerType(inner) then inner,
-            .MutablePointerType(inner) then inner,
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then inner,
             _ then fallback,
         };
     };
@@ -427,9 +375,7 @@ given MIRFunctionBuilder {
                 },
                 .None() then Type.Unknown(),
             },
-            .ReferenceType(inner) then self.lookup_field_type(inner, field_name),
-            .MutableReferenceType(inner) then self.lookup_field_type(inner, field_name),
-            .BorrowedReferenceType(inner) then self.lookup_field_type(inner, field_name),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.lookup_field_type(inner, field_name),
             .MutableBorrowedReferenceType(inner) then self.lookup_field_type(
                 inner,
                 field_name,
@@ -439,8 +385,7 @@ given MIRFunctionBuilder {
                 inner,
                 field_name,
             ),
-            .PointerType(inner) then self.lookup_field_type(inner, field_name),
-            .MutablePointerType(inner) then self.lookup_field_type(inner, field_name),
+            .PointerType(inner) or .MutablePointerType(inner) then self.lookup_field_type(inner, field_name),
             _ then Type.Unknown(),
         };
     };

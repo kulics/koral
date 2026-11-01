@@ -123,10 +123,7 @@ private let mir_nearest_active_common_scope(
 ): Option[MIRScopeID] = {
     let mutable scope_opt = Option[MIRScopeID].Some(existing_scope);
     while scope_opt is .Some(_) then {
-        let scope = when scope_opt in {
-            .Some(existing) then existing,
-            .None() then MIRScopeID(UInt(0)),
-        };
+        let scope = scope_opt or else MIRScopeID(UInt(0));
         if mir_active_scope_contains(active_scopes, scope) then {
             return Option[MIRScopeID].Some(scope);
         };
@@ -235,7 +232,7 @@ private let mir_walk_place_uses(
             active_scopes,
         ),
         .Global(_) then {},
-        .Field(base, _) then mir_walk_place_uses(
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -245,27 +242,7 @@ private let mir_walk_place_uses(
             block,
             active_scopes,
         ),
-        .EnumPayload(base, _, _, _, _) then mir_walk_place_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            base,
-            block,
-            active_scopes,
-        ),
-        .Deref(base, _) then mir_walk_value_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            base,
-            block,
-            active_scopes,
-        ),
-        .PointerElement(base, _) then mir_walk_value_uses(
+        .Deref(base, _) or .PointerElement(base, _) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -309,7 +286,7 @@ private let mir_walk_intrinsic_uses(
             block,
             active_scopes,
         ),
-        .CopyMemory(dest, source, count) then {
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
             mir_walk_value_uses(
                 shared_use_scope_by_local,
                 first_use_block_by_local,
@@ -341,69 +318,8 @@ private let mir_walk_intrinsic_uses(
                 active_scopes,
             );
         },
-        .MoveMemory(dest, source, count) then {
-            mir_walk_value_uses(
-                shared_use_scope_by_local,
-                first_use_block_by_local,
-                multiple_use_blocks_by_local,
-                tracked_drop_local_ids,
-                parent_scope_by_scope,
-                dest,
-                block,
-                active_scopes,
-            );
-            mir_walk_value_uses(
-                shared_use_scope_by_local,
-                first_use_block_by_local,
-                multiple_use_blocks_by_local,
-                tracked_drop_local_ids,
-                parent_scope_by_scope,
-                source,
-                block,
-                active_scopes,
-            );
-            mir_walk_value_uses(
-                shared_use_scope_by_local,
-                first_use_block_by_local,
-                multiple_use_blocks_by_local,
-                tracked_drop_local_ids,
-                parent_scope_by_scope,
-                count,
-                block,
-                active_scopes,
-            );
-        },
-        .DowngradeRef(value, _) then mir_walk_value_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            value,
-            block,
-            active_scopes,
-        ),
-        .UpgradeRef(value, _) then mir_walk_value_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            value,
-            block,
-            active_scopes,
-        ),
-        .TraitObjectMatches(value, _, _, _, _) then mir_walk_value_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            value,
-            block,
-            active_scopes,
-        ),
-        .TraitObjectDowncast(value, _) then mir_walk_value_uses(
+        .DowngradeRef(value, _) or .UpgradeRef(value, _) or .TraitObjectMatches(value, _, _, _, _)
+        or .TraitObjectDowncast(value, _) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -435,17 +351,7 @@ private let mir_walk_intrinsic_uses(
                 active_scopes,
             );
         },
-        .DeinitMemory(pointer) then mir_walk_value_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            pointer,
-            block,
-            active_scopes,
-        ),
-        .TakeMemory(pointer, _) then mir_walk_value_uses(
+        .DeinitMemory(pointer) or .TakeMemory(pointer, _) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -660,17 +566,7 @@ private let mir_walk_value_uses(
                 );
             };
         },
-        .Ref(place, _, _) then mir_walk_place_uses(
-            shared_use_scope_by_local,
-            first_use_block_by_local,
-            multiple_use_blocks_by_local,
-            tracked_drop_local_ids,
-            parent_scope_by_scope,
-            place,
-            block,
-            active_scopes,
-        ),
-        .Pointer(place) then mir_walk_place_uses(
+        .Ref(place, _, _) or .Pointer(place) then mir_walk_place_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -743,11 +639,7 @@ private let build_mir_function_emit_plan(
 
     for local in function.locals then {
         let name = when local.storage in {
-            .Parameter() then when local.symbol in {
-                .Some(symbol) then codegen.c_identifier_for_symbol(symbol),
-                .None() then codegen.sanitize_codegen_identifier(local.name),
-            },
-            .Capture() then when local.symbol in {
+            .Parameter() or .Capture() then when local.symbol in {
                 .Some(symbol) then codegen.c_identifier_for_symbol(symbol),
                 .None() then codegen.sanitize_codegen_identifier(local.name),
             },
@@ -1147,11 +1039,8 @@ given MIRFunctionCodeEmitter {
     is_deref_place(self, place: MIRPlace): Bool = {
         return when place in {
             .Deref(_, _) then true,
-            .Field(base, _) then self.is_deref_place(base),
-            .EnumPayload(base, _, _, _, _) then self.is_deref_place(base),
-            .Local(_) then false,
-            .Global(_) then false,
-            .PointerElement(_, _) then false,
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then self.is_deref_place(base),
+            .Local(_) or .Global(_) or .PointerElement(_, _) then false,
         };
     };
 
@@ -1235,19 +1124,7 @@ given MIRFunctionCodeEmitter {
         let emission = self.emit_value_source(value);
         let mutable value_type = self.type_of_value(value);
         when value_type in {
-            .ReferenceType(_) then {
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("__koral_retain_value((");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").ptr);\n");
-            },
-            .MutableReferenceType(_) then {
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("__koral_retain_value((");
-                self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").ptr);\n");
-            },
-            .TraitObject(...) then {
+            .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(...) then {
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("__koral_retain_value((");
                 self.codegen.buffer.push_string(emission.expression);
@@ -1636,13 +1513,13 @@ given MIRFunctionCodeEmitter {
                 if params.count() != arguments.count() then {
                     return false;
                 };
-                let mutable i: UInt = 0;
-                while i < arguments.count() then {
+                for pair in arguments.lazy().enumerate() then {
+                    let i = pair.first;
                     let mutable expected_param_type = self.codegen.function_type_param_type(
                         function_type,
                         i,
                     ) or else Type.Unknown();
-                    let mutable actual_param_type = self.type_of_value(arguments[i]);
+                    let mutable actual_param_type = self.type_of_value(pair.second);
                     let expected_key = self.codegen.concrete_layout_key_for_type(
                         self.codegen.concretize_codegen_type(expected_param_type),
                     );
@@ -1652,7 +1529,6 @@ given MIRFunctionCodeEmitter {
                     if expected_key != actual_key then {
                         return false;
                     };
-                    i += 1;
                 };
                 true
             },
@@ -1842,9 +1718,9 @@ given MIRFunctionCodeEmitter {
         let mutable arg_values = List[String].new();
         let mutable emissions = List[MIRValueEmission].new();
         let mutable ownerships = List[MIROwnershipUse].new();
-        let mutable arg_i: UInt = 0;
-        while arg_i < call.arguments.count() then {
-            let arg = call.arguments[arg_i];
+        for pair in call.arguments.lazy().enumerate() then {
+            let arg_i = pair.first;
+            let arg = pair.second;
             let ownership = if has_ownerships then call.argument_ownerships[arg_i]
             else MIROwnershipUse.Move();
             ownerships.push(ownership);
@@ -1872,7 +1748,6 @@ given MIRFunctionCodeEmitter {
                 emissions.push(final_emission);
                 arg_values.push(final_emission.expression);
             };
-            arg_i += 1;
         };
         let expression = when call.callee in {
             .Function(symbol) then {
@@ -1886,21 +1761,21 @@ given MIRFunctionCodeEmitter {
                 call.result_type,
             ),
         };
-        let mutable consume_i: UInt = 0;
-        while consume_i < call.arguments.count() then {
-            let ownership = ownerships[consume_i];
+        for pair in ownerships.lazy().zip[
+            MIRValue,
+            ListIterator[MIRValue],
+            List[MIRValue],
+        ](call.arguments) then {
+            let ownership = pair.first;
             if ownership is .Move() or is .Take() then {
-                self.consume_moved_source(call.arguments[consume_i]);
+                self.consume_moved_source(pair.second);
             };
-            consume_i += 1;
         };
-        let mutable cleanup_i: UInt = 0;
-        while cleanup_i < emissions.count() then {
+        for pair in emissions.lazy().enumerate() then {
             self.emit_residual_cleanups(
-                emissions[cleanup_i],
-                self.call_arg_consumed(ownerships[cleanup_i], call.arguments[cleanup_i]),
+                pair.second,
+                self.call_arg_consumed(ownerships[pair.first], call.arguments[pair.first]),
             );
-            cleanup_i += 1;
         };
         return MIRValueEmission(
             expression,
@@ -2312,10 +2187,13 @@ given MIRFunctionCodeEmitter {
                         "__koral_control_of(\(expression).ptr)->weak_count = 1;\n",
                     );
                     let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
-                    let mutable index: UInt = 0;
-                    while index < aggregate.fields.count() and index < fields.count() then {
-                        let value = aggregate.fields[index];
-                        let member = fields[index];
+                    for pair in aggregate.fields.lazy().zip[
+                        StructField,
+                        ListIterator[StructField],
+                        List[StructField],
+                    ](fields) then {
+                        let value = pair.first;
+                        let member = pair.second;
                         let emission = self.emit_value(value);
                         let field_name = self.codegen.sanitize_codegen_identifier(
                             member.name,
@@ -2335,7 +2213,6 @@ given MIRFunctionCodeEmitter {
                         );
                         self.consume_moved_source(value);
                         self.emit_residual_cleanups(emission, true);
-                        index += 1;
                     };
                     return MIRValueEmission(
                         expression,
@@ -2517,22 +2394,9 @@ given MIRFunctionCodeEmitter {
             member_op = "->";
         } else {
             when self.type_of_value(tag.subject) in {
-                .ReferenceType(inner) then {
-                    base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
-                },
-                .MutableReferenceType(inner) then {
-                    base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
-                },
-                .BorrowedReferenceType(inner) then {
-                    base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
-                },
-                .MutableBorrowedReferenceType(inner) then {
-                    base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
-                },
-                .WeakReferenceType(inner) then {
-                    base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
-                },
-                .MutableWeakReferenceType(inner) then {
+                .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                or .MutableWeakReferenceType(inner) then {
                     base_expr = "(*(\(self.codegen.c_type_name(inner))*)\(subject.expression).ptr)";
                 },
                 _ then {},
@@ -2615,9 +2479,7 @@ given MIRFunctionCodeEmitter {
             .TraitObject(trait_def_id, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
             ),
-            .ReferenceType(inner) then self.trait_object_target_name(inner),
-            .MutableReferenceType(inner) then self.trait_object_target_name(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_target_name(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_name(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_name(
                 inner,
             ),
@@ -2628,9 +2490,7 @@ given MIRFunctionCodeEmitter {
     trait_object_target_def_id(self, t: Type): Option[DefId] = {
         return when t in {
             .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
-            .ReferenceType(inner) then self.trait_object_target_def_id(inner),
-            .MutableReferenceType(inner) then self.trait_object_target_def_id(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_target_def_id(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_def_id(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_def_id(
                 inner,
             ),
@@ -2641,9 +2501,7 @@ given MIRFunctionCodeEmitter {
     trait_object_target_type_args(self, t: Type): List[Type] = {
         return when t in {
             .TraitObject(_, args) then args,
-            .ReferenceType(inner) then self.trait_object_target_type_args(inner),
-            .MutableReferenceType(inner) then self.trait_object_target_type_args(inner),
-            .BorrowedReferenceType(inner) then self.trait_object_target_type_args(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_type_args(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_type_args(
                 inner,
             ),
@@ -2654,20 +2512,13 @@ given MIRFunctionCodeEmitter {
     trait_object_source_concrete_type(self, t: Type): Option[Type] = {
         let _ = self;
         return when t in {
-            .ReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .MutableReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
-            ) else Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then if inner is .TraitObject(...) then Option[Type].None(
             ) else Option[Type].Some(inner),
             // In the simplified type system, concrete types can be directly
             // assigned to trait object fields without going through references.
             .StructureType(_) then Option[Type].Some(t),
-            .EnumType(_) then Option[Type].Some(t),
-            .GenericStruct(...) then Option[Type].Some(t),
-            .GenericEnum(...) then Option[Type].Some(t),
+            .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then Option[Type].Some(t),
             _ then Option[Type].None(),
         };
     };
@@ -2751,19 +2602,18 @@ given MIRFunctionCodeEmitter {
         let receiver = self.emit_value_source(call.receiver);
         let mutable arg_values = List[String].new();
         let mutable arg_types = List[Type].new();
-        let mutable idx: UInt = 0;
-        while idx < call.arguments.count() then {
-            let emission = self.emit_value_source(call.arguments[idx]);
+        for pair in call.arguments.lazy().enumerate() then {
+            let idx = pair.first;
+            let emission = self.emit_value_source(pair.second);
             arg_values.push(emission.expression);
-            arg_types.push(self.type_of_value(call.arguments[idx]));
+            arg_types.push(self.type_of_value(pair.second));
             if call.argument_ownerships[idx] is .Move() then {
-                self.consume_moved_source(call.arguments[idx]);
+                self.consume_moved_source(pair.second);
             };
             self.emit_residual_cleanups(
                 emission,
                 call.argument_ownerships[idx] is .Move(),
             );
-            idx += 1;
         };
         let expression = self.emit_trait_method_call_abi(
             receiver.expression,
@@ -2835,13 +2685,12 @@ given MIRFunctionCodeEmitter {
         };
         let mutable method_param_types = List[String].new();
         method_param_types.push("struct __koral_Ref");
-        let mutable arg_index: UInt = 0;
-        while arg_index < arg_values.count() then {
+        for pair in arg_values.lazy().enumerate() then {
+            let arg_index = pair.first;
             let mutable expected_type = if arg_index + 1 < signature_param_types.count() then signature_param_types[
                 arg_index + 1
             ] else arg_types[arg_index];
             method_param_types.push(self.codegen.c_type_name(expected_type));
-            arg_index += 1;
         };
         let ref_var = self.codegen.next_temp_with_init(
             "struct __koral_Ref",
@@ -2932,8 +2781,7 @@ given MIRFunctionCodeEmitter {
 
         let mutable expected_c_type = self.codegen.c_type_name(expected_type);
         let expression = when expected_type in {
-            .StructureType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
-            .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
+            .StructureType(def_id) or .EnumType(def_id) then "__koral_\(self.codegen.c_name_for_def_id(def_id))_copy((\(expected_c_type)*)\(emission.expression).ptr)",
             _ then "*(\(expected_c_type)*)\(emission.expression).ptr",
         };
         return MIRValueEmission(expression, emission.cleanup);
@@ -2973,8 +2821,7 @@ given MIRFunctionCodeEmitter {
     ): MIRValueEmission = {
         let mutable result_type = self.type_of_ref(place, kind);
         return when allocation in {
-            .HeapOwned() then self.emit_heap_reference(place, result_type, allocation),
-            .HeapOwnedMove() then self.emit_heap_reference(place, result_type, allocation),
+            .HeapOwned() or .HeapOwnedMove() then self.emit_heap_reference(place, result_type, allocation),
             .StackBorrow() then self.emit_borrowed_reference(place, result_type),
         };
     };
@@ -3055,8 +2902,7 @@ given MIRFunctionCodeEmitter {
     is_float_cast_source_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
-            .Float32Type() then true,
-            .Float64Type() then true,
+            .Float32Type() or .Float64Type() then true,
             _ then false,
         };
     };
@@ -3143,16 +2989,8 @@ given MIRFunctionCodeEmitter {
     is_signed_int_cast_target_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
-            .Int8Type() then true,
-            .Int16Type() then true,
-            .Int32Type() then true,
-            .Int64Type() then true,
-            .IntType() then true,
-            .WrappingInt8Type() then true,
-            .WrappingInt16Type() then true,
-            .WrappingInt32Type() then true,
-            .WrappingInt64Type() then true,
-            .WrappingIntType() then true,
+            .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type() or .IntType() or .WrappingInt8Type()
+            or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type() or .WrappingIntType() then true,
             _ then false,
         };
     };
@@ -3160,16 +2998,9 @@ given MIRFunctionCodeEmitter {
     is_unsigned_int_cast_target_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
-            .UInt8Type() then true,
-            .UInt16Type() then true,
-            .UInt32Type() then true,
-            .UInt64Type() then true,
-            .UIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
-            .WrappingUIntType() then true,
+            .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type() or .UIntType()
+            or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type() or .WrappingUInt64Type()
+            or .WrappingUIntType() then true,
             _ then false,
         };
     };
@@ -3177,64 +3008,34 @@ given MIRFunctionCodeEmitter {
     float_cast_target_bounds(self, t: Type): Option[Pair[String, String]] = {
         let _ = self;
         return when t in {
-            .Int8Type() then Option[Pair[String, String]].Some(
+            .Int8Type() or .WrappingInt8Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT8_MIN", "INT8_MAX"),
             ),
-            .WrappingInt8Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("INT8_MIN", "INT8_MAX"),
-            ),
-            .Int16Type() then Option[Pair[String, String]].Some(
+            .Int16Type() or .WrappingInt16Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT16_MIN", "INT16_MAX"),
             ),
-            .WrappingInt16Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("INT16_MIN", "INT16_MAX"),
-            ),
-            .Int32Type() then Option[Pair[String, String]].Some(
+            .Int32Type() or .WrappingInt32Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT32_MIN", "INT32_MAX"),
             ),
-            .WrappingInt32Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("INT32_MIN", "INT32_MAX"),
-            ),
-            .Int64Type() then Option[Pair[String, String]].Some(
+            .Int64Type() or .WrappingInt64Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INT64_MIN", "INT64_MAX"),
             ),
-            .WrappingInt64Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("INT64_MIN", "INT64_MAX"),
-            ),
-            .IntType() then Option[Pair[String, String]].Some(
+            .IntType() or .WrappingIntType() then Option[Pair[String, String]].Some(
                 Pair[String, String]("INTPTR_MIN", "INTPTR_MAX"),
             ),
-            .WrappingIntType() then Option[Pair[String, String]].Some(
-                Pair[String, String]("INTPTR_MIN", "INTPTR_MAX"),
-            ),
-            .UInt8Type() then Option[Pair[String, String]].Some(
+            .UInt8Type() or .WrappingUInt8Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT8_MAX"),
             ),
-            .WrappingUInt8Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("0", "UINT8_MAX"),
-            ),
-            .UInt16Type() then Option[Pair[String, String]].Some(
+            .UInt16Type() or .WrappingUInt16Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT16_MAX"),
             ),
-            .WrappingUInt16Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("0", "UINT16_MAX"),
-            ),
-            .UInt32Type() then Option[Pair[String, String]].Some(
+            .UInt32Type() or .WrappingUInt32Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT32_MAX"),
             ),
-            .WrappingUInt32Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("0", "UINT32_MAX"),
-            ),
-            .UInt64Type() then Option[Pair[String, String]].Some(
+            .UInt64Type() or .WrappingUInt64Type() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINT64_MAX"),
             ),
-            .WrappingUInt64Type() then Option[Pair[String, String]].Some(
-                Pair[String, String]("0", "UINT64_MAX"),
-            ),
-            .UIntType() then Option[Pair[String, String]].Some(
-                Pair[String, String]("0", "UINTPTR_MAX"),
-            ),
-            .WrappingUIntType() then Option[Pair[String, String]].Some(
+            .UIntType() or .WrappingUIntType() then Option[Pair[String, String]].Some(
                 Pair[String, String]("0", "UINTPTR_MAX"),
             ),
             _ then Option[Pair[String, String]].None(),
@@ -3245,16 +3046,9 @@ given MIRFunctionCodeEmitter {
     is_wrapping_int_cast_target_type(self, t: Type): Bool = {
         let _ = self;
         return when t in {
-            .WrappingIntType() then true,
-            .WrappingInt8Type() then true,
-            .WrappingInt16Type() then true,
-            .WrappingInt32Type() then true,
-            .WrappingInt64Type() then true,
-            .WrappingUIntType() then true,
-            .WrappingUInt8Type() then true,
-            .WrappingUInt16Type() then true,
-            .WrappingUInt32Type() then true,
-            .WrappingUInt64Type() then true,
+            .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type()
+            or .WrappingInt64Type() or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type()
+            or .WrappingUInt32Type() or .WrappingUInt64Type() then true,
             _ then false,
         };
     };
@@ -3520,10 +3314,9 @@ given MIRFunctionCodeEmitter {
         // Resolve capture sources to C expression paths
         let mutable capture_source_overrides = Dict[UInt, String].new();
         let mutable capture_source_cleanups = List[MIRValueCleanup].new();
-        let mutable ci: UInt = 0;
-        while ci < lambda.captures.count() then {
-            let capture = lambda.captures[ci];
-            let source = lambda.capture_sources[ci];
+        for pair in lambda.captures.lazy().enumerate() then {
+            let capture = pair.second;
+            let source = lambda.capture_sources[pair.first];
             let capture_emission = when capture.symbol_type in {
                 .ReferenceType(inner_ref) then if self.type_of_place(source) == inner_ref then self.emit_heap_reference(
                     source,
@@ -3555,7 +3348,6 @@ given MIRFunctionCodeEmitter {
                 .Some(cleanup) then capture_source_cleanups.push(cleanup),
                 .None() then {},
             };
-            ci += 1;
         };
         let closure = self.generate_lambda_expression(lambda, capture_source_overrides);
         // Clean up capture source cleanups
@@ -3619,25 +3411,12 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string("->__refcount = 1;\n");
 
         let mutable ci: UInt = 0;
-        while ci < lambda.captures.count() then {
-            let capture = lambda.captures[ci];
+        for capture in lambda.captures then {
             let field_name = self.capture_field_name(capture);
             let source = capture_source_overrides.get(capture.def_id.id) or else "";
             let dest = "\(env_var)->\(field_name)";
             when capture.symbol_type in {
-                .ReferenceType(inner_ref) then {
-                    let _ = inner_ref;
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(" = ");
-                    self.codegen.buffer.push_string(source);
-                    self.codegen.buffer.push_string(";\n");
-                    self.codegen.add_indent();
-                    self.codegen.buffer.push_string("__koral_retain_value((");
-                    self.codegen.buffer.push_string(dest);
-                    self.codegen.buffer.push_string(").ptr);\n");
-                },
-                .MutableReferenceType(inner_ref) then {
+                .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then {
                     let _ = inner_ref;
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string(dest);
@@ -3656,7 +3435,6 @@ given MIRFunctionCodeEmitter {
                     true,
                 ),
             };
-            ci += 1;
         };
 
         return self.codegen.next_temp_with_init(
@@ -3689,9 +3467,9 @@ given MIRFunctionCodeEmitter {
         };
         // Build parameter list
         let mutable param_parts = List[String].new();
-        let mutable pi: UInt = 0;
-        while pi < params.count() then {
-            let param = params[pi];
+        for pair in params.lazy().enumerate() then {
+            let pi = pair.first;
+            let param = pair.second;
             let mutable c_type = if pi < function_params.count() then self.codegen.c_type_name(
                 function_params[pi].param_type,
             ) else self.codegen.c_type_name(param.symbol_type);
@@ -3699,7 +3477,6 @@ given MIRFunctionCodeEmitter {
                 pi
             ] else self.codegen.c_identifier_for_symbol(param);
             param_parts.push("\(c_type) \(param_name)");
-            pi += 1;
         };
         let param_str = if param_parts.is_empty() then "void"
         else join_strings(param_parts, ", ");
@@ -3757,9 +3534,9 @@ given MIRFunctionCodeEmitter {
         // Build parameter list with void* __env first
         let mutable param_parts = List[String].new();
         param_parts.push("void* __env");
-        let mutable pi: UInt = 0;
-        while pi < params.count() then {
-            let param = params[pi];
+        for pair in params.lazy().enumerate() then {
+            let pi = pair.first;
+            let param = pair.second;
             let mutable c_type = if pi < function_params.count() then self.codegen.c_type_name(
                 function_params[pi].param_type,
             ) else self.codegen.c_type_name(param.symbol_type);
@@ -3767,7 +3544,6 @@ given MIRFunctionCodeEmitter {
                 pi
             ] else self.codegen.c_identifier_for_symbol(param);
             param_parts.push("\(c_type) \(param_name)");
-            pi += 1;
         };
         let param_str = join_strings(param_parts, ", ");
         let mutable return_c_type = self.codegen.c_type_name(return_type);
@@ -3884,35 +3660,12 @@ given MIRFunctionCodeEmitter {
                     let payload_type = self.codegen.managed_payload_type_name(base_type);
                     path = "((struct \(payload_type)*)\(base_access.path).ptr)->\(field_name)";
                 } else when base_type in {
-                    .ReferenceType(inner) then {
+                    .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                    or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                    or .MutableWeakReferenceType(inner) then {
                         path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
                     },
-                    .MutableReferenceType(inner) then {
-                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
-                    },
-                    .BorrowedReferenceType(inner) then {
-                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
-                    },
-                    .MutableBorrowedReferenceType(inner) then {
-                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
-                    },
-                    .WeakReferenceType(inner) then {
-                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
-                    },
-                    .MutableWeakReferenceType(inner) then {
-                        path = "(*(\(self.codegen.c_type_name(inner))*)\(base_access.path).ptr).\(field_name)";
-                    },
-                    .PointerType(pointee) then {
-                        if self.codegen.uses_managed_nominal_representation(pointee) then {
-                            let payload_type = self.codegen.managed_payload_type_name(
-                                pointee,
-                            );
-                            path = "((struct \(payload_type)*)\(base_access.path)->ptr)->\(field_name)";
-                        } else {
-                            path = "\(base_access.path)->\(field_name)";
-                        };
-                    },
-                    .MutablePointerType(pointee) then {
+                    .PointerType(pointee) or .MutablePointerType(pointee) then {
                         if self.codegen.uses_managed_nominal_representation(pointee) then {
                             let payload_type = self.codegen.managed_payload_type_name(
                                 pointee,
@@ -4027,9 +3780,7 @@ given MIRFunctionCodeEmitter {
             },
             .Function(symbol) then symbol.symbol_type,
             .Constant(constant) then when constant in {
-                .Integer(_, t) then t,
-                .Float(_, t) then t,
-                .StringLiteral(_, t) then t,
+                .Integer(_, t) or .Float(_, t) or .StringLiteral(_, t) then t,
                 .Boolean(_) then Type.BoolType(),
                 .Void() then Type.VoidType(),
             },
@@ -4051,13 +3802,9 @@ given MIRFunctionCodeEmitter {
 
     type_of_intrinsic(self, node: MIRIntrinsic): Type = {
         return when node in {
-            .AllocMemory(_, result_type) then result_type,
-            .DowngradeRef(_, result_type) then result_type,
-            .UpgradeRef(_, result_type) then result_type,
+            .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
             .TraitObjectMatches(_, _, _, _, _) then Type.BoolType(),
-            .TraitObjectDowncast(_, result_type) then result_type,
-            .TakeMemory(_, result_type) then result_type,
-            .NullPtr(result_type) then result_type,
+            .TraitObjectDowncast(_, result_type) or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
             _ then Type.VoidType(),
         };
@@ -4074,11 +3821,7 @@ given MIRFunctionCodeEmitter {
 
     computed_local_name(self, local: MIRLocal): String = {
         return when local.storage in {
-            .Parameter() then when local.symbol in {
-                .Some(symbol) then self.codegen.c_identifier_for_symbol(symbol),
-                .None() then self.codegen.sanitize_codegen_identifier(local.name),
-            },
-            .Capture() then when local.symbol in {
+            .Parameter() or .Capture() then when local.symbol in {
                 .Some(symbol) then self.codegen.c_identifier_for_symbol(symbol),
                 .None() then self.codegen.sanitize_codegen_identifier(local.name),
             },
@@ -4112,8 +3855,7 @@ given MIRFunctionCodeEmitter {
     root_local_of_place(self, place: MIRPlace): Option[MIRLocalID] = {
         return when place in {
             .Local(local) then Option[MIRLocalID].Some(local),
-            .Field(base, _) then self.root_local_of_place(base),
-            .EnumPayload(base, _, _, _, _) then self.root_local_of_place(base),
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then self.root_local_of_place(base),
             _ then Option[MIRLocalID].None(),
         };
     };
@@ -4160,10 +3902,8 @@ given MIRFunctionCodeEmitter {
 
     is_ownership_preserving_cast(self, source_type: Type, target_type: Type): Bool = {
         return when source_type in {
-            .ReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
-            .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
-            .WeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
-            .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
+            .ReferenceType(_) or .MutableReferenceType(_) then target_type is .ReferenceType(_) or is .MutableReferenceType(_),
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then target_type is .WeakReferenceType(_) or is .MutableWeakReferenceType(_),
             .MutablePointerType(_) then target_type is .PointerType(_) or is .MutablePointerType(_),
             _ then source_type == target_type,
         };
@@ -4284,8 +4024,7 @@ given MIRFunctionCodeEmitter {
     };
 
     pointer_element_type(self, pointer_type: Type): Type = when pointer_type in {
-        .PointerType(inner) then inner,
-        .MutablePointerType(inner) then inner,
+        .PointerType(inner) or .MutablePointerType(inner) then inner,
         _ then Type.VoidType(),
     };
 
@@ -4422,8 +4161,7 @@ given MIRFunctionCodeEmitter {
         let success = self.codegen.next_temp_with_decl("int");
         let value_type = self.type_of_value(value);
         let is_trait_weak = when value_type in {
-            .WeakReferenceType(inner) then inner is .TraitObject(...),
-            .MutableWeakReferenceType(inner) then inner is .TraitObject(...),
+            .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then inner is .TraitObject(...),
             _ then false,
         };
         if is_trait_weak then {
@@ -4729,27 +4467,7 @@ private let build_mir_lifetime_plan(
                     block.id,
                     active_scopes,
                 ),
-                .Retain(value) then mir_walk_value_uses(
-                    shared_use_scope_by_local,
-                    first_use_block_by_local,
-                    multiple_use_blocks_by_local,
-                    tracked_drop_local_ids,
-                    parent_scope_by_scope,
-                    value,
-                    block.id,
-                    active_scopes,
-                ),
-                .Release(value) then mir_walk_value_uses(
-                    shared_use_scope_by_local,
-                    first_use_block_by_local,
-                    multiple_use_blocks_by_local,
-                    tracked_drop_local_ids,
-                    parent_scope_by_scope,
-                    value,
-                    block.id,
-                    active_scopes,
-                ),
-                .Evaluate(value) then mir_walk_value_uses(
+                .Retain(value) or .Release(value) or .Evaluate(value) then mir_walk_value_uses(
                     shared_use_scope_by_local,
                     first_use_block_by_local,
                     multiple_use_blocks_by_local,
@@ -4810,10 +4528,7 @@ private let build_mir_lifetime_plan(
                     local.id.raw_value,
                 );
                 while scope is .Some(_) then {
-                    let scope_id = when scope in {
-                        .Some(existing) then existing,
-                        .None() then MIRScopeID(UInt(0)),
-                    };
+                    let scope_id = scope or else MIRScopeID(UInt(0));
                     let retained_scope = when shared_use_scope_opt in {
                         .Some(shared_use_scope) then shared_use_scope.raw_value == scope_id.raw_value,
                         .None() then false,
@@ -4895,12 +4610,9 @@ given CodeGen {
             return Option[Type].None();
         };
         return when first_param.param_type in {
-            .ReferenceType(inner) then Option[Type].Some(inner),
-            .MutableReferenceType(inner) then Option[Type].Some(inner),
-            .BorrowedReferenceType(inner) then Option[Type].Some(inner),
-            .MutableBorrowedReferenceType(inner) then Option[Type].Some(inner),
-            .WeakReferenceType(inner) then Option[Type].Some(inner),
-            .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then Option[Type].Some(inner),
             _ then Option[Type].Some(first_param.param_type),
         };
     };

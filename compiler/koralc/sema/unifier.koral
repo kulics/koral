@@ -68,15 +68,10 @@ private let unification_base_summary(inner: Type, depth: UInt): String = {
     if depth >= UInt(8) then {
         return when inner in {
             .FunctionType(...) then "(...) -> ...",
-            .GenericStruct(template_def_id, _) then {
+            .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then {
                 def_id_spelling(template_def_id) + "[...]"
             },
-            .GenericEnum(template_def_id, _) then {
-                def_id_spelling(template_def_id) + "[...]"
-            },
-            .StructureType(def_id) then def_id_spelling(def_id),
-            .EnumType(def_id) then def_id_spelling(def_id),
-            .OpaqueType(def_id) then def_id_spelling(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then def_id_spelling(def_id),
             .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
             .TypeVar(tv_ref) then tv_ref.display(),
             .Unknown() then "?",
@@ -131,28 +126,9 @@ private let unification_base_summary(inner: Type, depth: UInt): String = {
             out.push_string(unification_type_summary_with_depth(ret, depth + UInt(1)));
             out.to_string()
         },
-        .StructureType(def_id) then def_id_spelling(def_id),
-        .EnumType(def_id) then def_id_spelling(def_id),
-        .OpaqueType(def_id) then def_id_spelling(def_id),
+        .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then def_id_spelling(def_id),
         .GenericParameter(name) then name,
-        .GenericStruct(tplDefId, args) then {
-            let mutable out = StringBuilder.new();
-            out.push_string(def_id_spelling(tplDefId));
-            out.push_byte('[');
-            let mutable first = true;
-            for arg in args then {
-                if not first then {
-                    out.push_string(", ");
-                };
-                out.push_string(
-                    unification_type_summary_with_depth(arg, depth + UInt(1)),
-                );
-                first = false;
-            };
-            out.push_byte(']');
-            out.to_string()
-        },
-        .GenericEnum(tplDefId, args) then {
+        .GenericStruct(tplDefId, args) or .GenericEnum(tplDefId, args) then {
             let mutable out = StringBuilder.new();
             out.push_string(def_id_spelling(tplDefId));
             out.push_byte('[');
@@ -232,12 +208,14 @@ given Unifier {
                         UnificationError.ArityMismatch(lhs_r, rhs_r, span),
                     );
                 };
-                let mutable i = UInt(0);
-                while i < lhs_params.count() then {
-                    let lp = (lhs_params[i]).param_type;
-                    let rp = (rhs_params[i]).param_type;
+                for pair in lhs_params.lazy().zip[
+                    FunctionParamEntry,
+                    ListIterator[FunctionParamEntry],
+                    List[FunctionParamEntry],
+                ](rhs_params) then {
+                    let lp = (pair.first).param_type;
+                    let rp = (pair.second).param_type;
                     let _ = self.unify(lp, rp, span) or return;
-                    i += UInt(1);
                 };
                 return self.unify(lhs_ret, rhs_ret, span);
             } else {
@@ -265,12 +243,14 @@ given Unifier {
                         UnificationError.ArityMismatch(lhs_r, rhs_r, span),
                     );
                 };
-                let mutable i = UInt(0);
-                while i < lhs_args.count() then {
-                    let la = (lhs_args[i]);
-                    let ra = (rhs_args[i]);
+                for pair in lhs_args.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](rhs_args) then {
+                    let la = (pair.first);
+                    let ra = (pair.second);
                     let _ = self.unify(la, ra, span) or return;
-                    i += UInt(1);
                 };
                 return Result[Void].Ok({});
             } else {
@@ -297,12 +277,14 @@ given Unifier {
                         UnificationError.ArityMismatch(lhs_r, rhs_r, span),
                     );
                 };
-                let mutable i = UInt(0);
-                while i < lhs_args.count() then {
-                    let la = (lhs_args[i]);
-                    let ra = (rhs_args[i]);
+                for pair in lhs_args.lazy().zip[
+                    Type,
+                    ListIterator[Type],
+                    List[Type],
+                ](rhs_args) then {
+                    let la = (pair.first);
+                    let ra = (pair.second);
                     let _ = self.unify(la, ra, span) or return;
-                    i += UInt(1);
                 };
                 return Result[Void].Ok({});
             } else {
@@ -600,72 +582,37 @@ given Unifier {
                 return tv_ref.id == tv_id;
             },
             .FunctionType(params, ret) then {
-                let mutable i = UInt(0);
-                while i < params.count() then {
-                    if self.occurs_check_internal(tv_id, params[i].param_type, visited) then {
+                for param in params then {
+                    if self.occurs_check_internal(tv_id, param.param_type, visited) then {
                         return true;
                     };
-                    i += UInt(1);
                 };
                 return self.occurs_check_internal(tv_id, ret, visited);
             },
-            .ReferenceType(inner) then {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner)
+            or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
                 return self.occurs_check_internal(tv_id, inner, visited);
             },
-            .MutableReferenceType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .BorrowedReferenceType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .MutableBorrowedReferenceType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .PointerType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .MutablePointerType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .WeakReferenceType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .MutableWeakReferenceType(inner) then {
-                return self.occurs_check_internal(tv_id, inner, visited);
-            },
-            .GenericStruct(_, args) then {
-                let mutable i = UInt(0);
-                while i < args.count() then {
-                    if self.occurs_check_internal(tv_id, args[i], visited) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) then {
+                for arg in args then {
+                    if self.occurs_check_internal(tv_id, arg, visited) then {
                         return true;
                     };
-                    i += UInt(1);
-                };
-                return false;
-            },
-            .GenericEnum(_, args) then {
-                let mutable i = UInt(0);
-                while i < args.count() then {
-                    if self.occurs_check_internal(tv_id, args[i], visited) then {
-                        return true;
-                    };
-                    i += UInt(1);
                 };
                 return false;
             },
             .StructureType(def_id) then {
                 return when self.context.get_struct_fields(def_id) in {
                     .Some(fields) then {
-                        let mutable i = UInt(0);
-                        while i < fields.count() then {
+                        for field in fields then {
                             if self.occurs_check_internal(
                                 tv_id,
-                                fields[i].field_type,
+                                field.field_type,
                                 visited,
                             ) then {
                                 return true;
                             };
-                            i += UInt(1);
                         };
                         false
                     },
@@ -675,21 +622,17 @@ given Unifier {
             .EnumType(def_id) then {
                 return when self.context.get_enum_cases(def_id) in {
                     .Some(cases) then {
-                        let mutable case_index = UInt(0);
-                        while case_index < cases.count() then {
-                            let params = cases[case_index].params;
-                            let mutable param_index = UInt(0);
-                            while param_index < params.count() then {
+                        for case in cases then {
+                            let params = case.params;
+                            for param in params then {
                                 if self.occurs_check_internal(
                                     tv_id,
-                                    params[param_index].param_type,
+                                    param.param_type,
                                     visited,
                                 ) then {
                                     return true;
                                 };
-                                param_index += UInt(1);
                             };
-                            case_index += UInt(1);
                         };
                         false
                     },
@@ -697,12 +640,10 @@ given Unifier {
                 };
             },
             .TraitObject(_, args) then {
-                let mutable i = UInt(0);
-                while i < args.count() then {
-                    if self.occurs_check_internal(tv_id, args[i], visited) then {
+                for arg in args then {
+                    if self.occurs_check_internal(tv_id, arg, visited) then {
                         return true;
                     };
-                    i += UInt(1);
                 };
                 return false;
             },
@@ -716,9 +657,7 @@ given Unifier {
 /// spelling.
 private let generic_template_id(t: Type): DefId = {
     return when t in {
-        .GenericStruct(d, _) then d,
-        .GenericEnum(d, _) then d,
-        .TraitObject(d, _) then d,
+        .GenericStruct(d, _) or .GenericEnum(d, _) or .TraitObject(d, _) then d,
         _ then def_id_invalid(),
     };
 };

@@ -32,12 +32,8 @@ given ModuleError {
     /// Where the failure is written, when it points at a token. A failure that
     /// names files rather than source (a missing file, a merge ring) has none.
     public span(self): Option[SourceSpan] = when self in {
-        .DuplicateUsing(_, span) then Option[SourceSpan].Some(span),
-        .UnknownPackageName(_, _, span) then Option[SourceSpan].Some(span),
-        .UnknownModule(_, _, _, span) then Option[SourceSpan].Some(span),
-        .NoMainModule(_, _, span) then Option[SourceSpan].Some(span),
-        .InvalidModuleSpecifier(_, span) then Option[SourceSpan].Some(span),
-        .CrossPackageMerge(_, span) then Option[SourceSpan].Some(span),
+        .DuplicateUsing(_, span) or .UnknownPackageName(_, _, span) or .UnknownModule(_, _, _, span)
+        or .NoMainModule(_, _, span) or .InvalidModuleSpecifier(_, span) or .CrossPackageMerge(_, span) then Option[SourceSpan].Some(span),
         _ then Option[SourceSpan].None(),
     };
 
@@ -194,12 +190,7 @@ given ModuleResolver {
 
         let outcome = self.resolve_file(spec.entry_file, module, unit);
         self.storage.module_stack.pop();
-        when outcome in {
-            .Ok(_) then {},
-            .Error(e) then {
-                return Result[ModuleInfo].Error(e);
-            },
-        };
+        outcome or return;
         return Result[ModuleInfo].Ok(module);
     };
 
@@ -331,15 +322,11 @@ given ModuleResolver {
         module_debug("[module] read: done");
         module_debug("[module] lex: begin");
 
-        let tokens = lex_in_file(source, normalized_file) or else as e in {
-            return Result[List[PendingUsing]].Error(e);
-        };
+        let tokens = lex_in_file(source, normalized_file) or return;
         module_debug("[module] lex: done");
         module_debug("[module] parse: begin");
 
-        let program = parse_in_file(tokens, normalized_file) or else as e in {
-            return Result[List[PendingUsing]].Error(e);
-        };
+        let program = parse_in_file(tokens, normalized_file) or return;
         module_debug("[module] parse: done");
 
         module_debug("[module] decl-loop: begin");
@@ -934,13 +921,10 @@ given ModuleResolver {
             );
         };
 
-        let mutable root_path = when root_module_path in {
-            .Some(path) then path,
-            .None() then {
-                let mutable default_path = List[String].new();
-                default_path.push(module_file_name_to_identifier(filename));
-                default_path
-            },
+        let mutable root_path = root_module_path or else {
+            let mutable default_path = List[String].new();
+            default_path.push(module_file_name_to_identifier(filename));
+            default_path
         };
         // A bare entry has no package behind it; its identity source is the
         // fixed `single:` tag and its position is the entry's own name (§5.3.1
@@ -1130,8 +1114,7 @@ private let join_sorted(values: List[String]): String = {
 /// The keys a package's manifest declares, for "module not found" messages.
 public let declared_module_keys(manifest: PackageManifest): List[String] = {
     let mutable keys = List[String].new();
-    let mutable iter = manifest.modules.iterator();
-    while iter.next() is .Some(entry) then {
+    for entry in manifest.modules then {
         keys.push(entry.first);
     };
     keys.sort();

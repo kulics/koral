@@ -302,20 +302,14 @@ given TypeChecker {
         bindings: Dict[String, Type],
     ): Type = {
         return when node in {
-            .Identifier(name, span) then when bindings.get(name) in {
-                .Some(bound) then bound,
-                .None() then {
-                    // Check current_scope before falling back (Swift: currentScope.resolveType)
-                    if self.resolve_type_name_binding(name) is .Some(t) then {
-                        return self.canonicalize_alias_type(t);
-                    };
-                    self.resolve_type(node)
-                },
+            .Identifier(name, span) then bindings.get(name) or else {
+                // Check current_scope before falling back (Swift: currentScope.resolveType)
+                if self.resolve_type_name_binding(name) is .Some(t) then {
+                    return self.canonicalize_alias_type(t);
+                };
+                self.resolve_type(node)
             },
-            .InferredSelf(span) then when bindings.get("Self") in {
-                .Some(bound) then bound,
-                .None() then Type.Unknown(),
-            },
+            .InferredSelf(span) then bindings.get("Self") or else Type.Unknown(),
             .Reference(inner, is_mutable, span) then {
                 let trait_ref_override = when inner in {
                     .Identifier(name, span) where bindings.get(name) is .None() and self.storage.trait_registry.get_in_module(
@@ -356,17 +350,14 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_template_type_node_with_bindings(
-                            inner,
-                            bindings,
-                        );
-                        if is_mutable then self.resolve_mutable_reference_type(
-                            resolved_inner,
-                        ) else self.resolve_reference_type(resolved_inner)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_template_type_node_with_bindings(
+                        inner,
+                        bindings,
+                    );
+                    if is_mutable then self.resolve_mutable_reference_type(
+                        resolved_inner,
+                    ) else self.resolve_reference_type(resolved_inner)
                 }
             },
             .BorrowedReference(inner, is_mutable, span) then {
@@ -433,18 +424,15 @@ given TypeChecker {
                     },
                     _ then Option[Type].None(),
                 };
-                when trait_ref_override in {
-                    .Some(resolved_trait_ref) then resolved_trait_ref,
-                    .None() then {
-                        let resolved_inner = self.resolve_template_type_node_with_bindings(
-                            inner,
-                            bindings,
-                        );
-                        if is_mutable then self.resolve_mutable_weak_reference_type(
-                            resolved_inner,
-                            span,
-                        ) else self.resolve_weak_reference_type(resolved_inner, span)
-                    },
+                trait_ref_override or else {
+                    let resolved_inner = self.resolve_template_type_node_with_bindings(
+                        inner,
+                        bindings,
+                    );
+                    if is_mutable then self.resolve_mutable_weak_reference_type(
+                        resolved_inner,
+                        span,
+                    ) else self.resolve_weak_reference_type(resolved_inner, span)
                 }
             },
             .Generic(base, args, span) then {
@@ -503,13 +491,12 @@ given TypeChecker {
         when self.storage.generic_templates.extension_methods.get(key) in {
             .Some(existing) then {
                 let mutable updated = existing;
-                let mutable index = UInt(0);
                 let mutable replaced = false;
-                while index < updated.count() then {
-                    let current_ref = updated[index];
+                for pair in updated.lazy().enumerate() then {
+                    let index = pair.first;
+                    let current_ref = pair.second;
                     if self.same_extension_template_slot(current_ref, template) then {
-                        let should_replace = if template.checked_body is .Some(_) then true
-                        else current_ref.checked_body is .None();
+                        let should_replace = template.checked_body is .Some(_) or current_ref.checked_body is .None();
                         if should_replace then {
                             // Preserve the DECLARATION identity: the first
                             // registration is what call-site symbols are built
@@ -548,7 +535,6 @@ given TypeChecker {
                         replaced = true;
                         break;
                     };
-                    index += UInt(1);
                 };
                 if not replaced then {
                     updated.push(template);
@@ -593,19 +579,8 @@ given TypeChecker {
     /// extension and must stay keyed by the modifier.
     trait_extension_template_key(self, target_type: Type): MethodOwner = {
         let effective = when target_type in {
-            .ReferenceType(inner) then when inner in {
-                .TraitObject(...) then inner,
-                _ then target_type,
-            },
-            .MutableReferenceType(inner) then when inner in {
-                .TraitObject(...) then inner,
-                _ then target_type,
-            },
-            .BorrowedReferenceType(inner) then when inner in {
-                .TraitObject(...) then inner,
-                _ then target_type,
-            },
-            .MutableBorrowedReferenceType(inner) then when inner in {
+            .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) then when inner in {
                 .TraitObject(...) then inner,
                 _ then target_type,
             },
@@ -715,9 +690,9 @@ given TypeChecker {
         when self.storage.generic_templates.extension_methods.get(type_key) in {
             .Some(existing) then {
                 let mutable updated = existing;
-                let mutable index = UInt(0);
-                while index < updated.count() then {
-                    let current_ref = updated[index];
+                for pair in updated.lazy().enumerate() then {
+                    let index = pair.first;
+                    let current_ref = pair.second;
                     // Identity: the conformance's trait DECLARATION. Two same-named traits
                     // from different modules are different traits, so a name cannot select it.
                     if current_ref.method.name == method_name and current_ref.type_params.count(
@@ -750,7 +725,6 @@ given TypeChecker {
                         );
                         return;
                     };
-                    index += UInt(1);
                 };
                 return;
             },
@@ -949,12 +923,7 @@ given TypeChecker {
             },
         };
 
-        let inner_type = when inner_type_opt in {
-            .Some(t) then t,
-            .None() then {
-                return Option[Symbol].None();
-            },
-        };
+        let inner_type = inner_type_opt or return;
 
         for owner_key in keys then {
             when self.storage.generic_templates.lookup_extension_method(
@@ -1041,12 +1010,7 @@ given TypeChecker {
                 return Option[Symbol].None();
             },
         };
-        let inner_type = when inner_type_opt in {
-            .Some(t) then t,
-            .None() then {
-                return Option[Symbol].None();
-            },
-        };
+        let inner_type = inner_type_opt or return;
         for owner_key in keys then {
             when self.storage.generic_templates.lookup_extension_method(
                 owner_key,
@@ -1115,19 +1079,13 @@ given TypeChecker {
         let mutable template_name_opt = Option[String].None();
         let mutable extension_type_args = List[Type].new();
         when normalized_base in {
-            .GenericStruct(tplDefId, args) then {
+            .GenericStruct(tplDefId, args) or .GenericEnum(tplDefId, args) then {
                 template_name_opt = Option[String].Some(def_id_spelling(tplDefId));
                 for arg in args then {
                     extension_type_args.push(arg);
                 };
             },
-            .GenericEnum(tplDefId, args) then {
-                template_name_opt = Option[String].Some(def_id_spelling(tplDefId));
-                for arg in args then {
-                    extension_type_args.push(arg);
-                };
-            },
-            .StructureType(def_id) then {
+            .StructureType(def_id) or .EnumType(def_id) then {
                 when self.context().get_template_name(def_id) in {
                     .Some(template_name) then {
                         template_name_opt = Option[String].Some(template_name);
@@ -1140,49 +1098,7 @@ given TypeChecker {
                             .None() then {
                                 when self.context().lookup_type(def_id) in {
                                     .Some(mapped_type) then when mapped_type in {
-                                        .GenericStruct(_, mapped_args) then {
-                                            for arg in mapped_args then {
-                                                extension_type_args.push(arg);
-                                            };
-                                        },
-                                        .GenericEnum(_, mapped_args) then {
-                                            for arg in mapped_args then {
-                                                extension_type_args.push(arg);
-                                            };
-                                        },
-                                        _ then {},
-                                    },
-                                    .None() then {},
-                                };
-                            },
-                        };
-                    },
-                    .None() then {
-                        if self.context().get_name(def_id) is .Some(name) then {
-                            template_name_opt = Option[String].Some(name);
-                        };
-                    },
-                };
-            },
-            .EnumType(def_id) then {
-                when self.context().get_template_name(def_id) in {
-                    .Some(template_name) then {
-                        template_name_opt = Option[String].Some(template_name);
-                        when self.context().get_type_arguments(def_id) in {
-                            .Some(actual_args) then {
-                                for arg in actual_args then {
-                                    extension_type_args.push(arg);
-                                };
-                            },
-                            .None() then {
-                                when self.context().lookup_type(def_id) in {
-                                    .Some(mapped_type) then when mapped_type in {
-                                        .GenericStruct(_, mapped_args) then {
-                                            for arg in mapped_args then {
-                                                extension_type_args.push(arg);
-                                            };
-                                        },
-                                        .GenericEnum(_, mapped_args) then {
+                                        .GenericStruct(_, mapped_args) or .GenericEnum(_, mapped_args) then {
                                             for arg in mapped_args then {
                                                 extension_type_args.push(arg);
                                             };
@@ -1224,16 +1140,12 @@ given TypeChecker {
             _ then {},
         };
 
-        let template_name = when template_name_opt in {
-            .Some(name) then name,
-            .None() then {
-                return;
-            },
+        let template_name = template_name_opt or else {
+            return;
         };
         let method_type_args_ref = self.to_type_ref_list(method_type_args);
         let receiver_is_generic_instance = when normalized_base in {
-            .GenericStruct(...) then true,
-            .GenericEnum(...) then true,
+            .GenericStruct(...) or .GenericEnum(...) then true,
             _ then false,
         };
         let mutable recorded = false;
@@ -1358,12 +1270,9 @@ given TypeChecker {
         method_type_args: List[Type],
     ): Void = {
         let normalized_base = when base_type in {
-            .MutableReferenceType(inner) then inner,
-            .ReferenceType(inner) then inner,
-            .BorrowedReferenceType(inner) then inner,
-            .MutableBorrowedReferenceType(inner) then inner,
-            .WeakReferenceType(inner) then inner,
-            .MutableWeakReferenceType(inner) then inner,
+            .MutableReferenceType(inner) or .ReferenceType(inner) or .BorrowedReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+            or .MutableWeakReferenceType(inner) then inner,
             _ then base_type,
         };
         if self.contains_generic_parameter(normalized_base) then {
