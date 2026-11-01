@@ -1443,7 +1443,7 @@ public class CodeGen {
       addIndent()
       buffer += "__koral_control_of(\(resultVar).ptr)->strong_count = 1;\n"
       addIndent()
-      buffer += "__koral_control_of(\(resultVar).ptr)->weak_count = 0;\n"
+      buffer += "__koral_control_of(\(resultVar).ptr)->weak_count = 1;\n"
       addIndent()
       buffer += "((struct \(payloadType)*)\(resultVar).ptr)->data = \(dataVar);\n"
       addIndent()

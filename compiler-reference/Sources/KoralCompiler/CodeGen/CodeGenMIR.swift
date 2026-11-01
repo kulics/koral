@@ -1718,7 +1718,7 @@ final class MIRFunctionCodeEmitter {
       codeGen.addIndent()
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->strong_count = 1;\n")
       codeGen.addIndent()
-      codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->weak_count = 0;\n")
+      codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->weak_count = 1;\n")
       let payloadExpr = "((struct \(payloadType)*)\(expression).ptr)"
       for ((value, emission), member) in zip(zip(aggregate.fields, fieldEmissions), members) {
         let fieldName = sanitizeCIdentifier(member.name)
@@ -1771,7 +1771,7 @@ final class MIRFunctionCodeEmitter {
       codeGen.addIndent()
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->strong_count = 1;\n")
       codeGen.addIndent()
-      codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->weak_count = 0;\n")
+      codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->weak_count = 1;\n")
       let payloadExpr = "((struct \(payloadType)*)\(expression).ptr)"
       if let niche = codeGen.enumNicheLayout(for: construction.type) {
         if caseInfo.parameters.isEmpty {
@@ -1981,7 +1981,7 @@ final class MIRFunctionCodeEmitter {
     codeGen.addIndent()
     codeGen.appendToBuffer("__koral_control_of(\(result).ptr)->strong_count = 1;\n")
     codeGen.addIndent()
-    codeGen.appendToBuffer("__koral_control_of(\(result).ptr)->weak_count = 0;\n")
+    codeGen.appendToBuffer("__koral_control_of(\(result).ptr)->weak_count = 1;\n")
     codeGen.addIndent()
     let shouldTransferOwnership = allocation == .heapOwnedMove
     codeGen.emitCopyOrMove(

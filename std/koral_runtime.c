@@ -46,21 +46,23 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     if (dtor) {
         // 析构期间对象处于「不可复活」状态：`drop(self)` 里的 `self` 是同一个
         // payload 的句柄，方法调用按值传接收者就会 retain 一次、在方法结束时
-        // release 一次。若不置 immortal，retain 会把 0 抬回 1，随后的 release
+        // release 一次。若不早退，retain 会把 0 抬回 1，随后的 release
         // 又会以 prev == 1 重新进入本函数——析构递归。
-        // `strong_count = -1` 正是运行时既有的 immortal 哨兵：retain/release
-        // 读到负数直接返回，weak 的 upgrade 也要求 > 0，所以析构期间既不能
-        // 复活也不能重入。析构结束后恢复 0，让 weak 释放仍能走下面的 free。
-        atomic_store(&control->strong_count, -1);
+        // `strong_count = -2`（destroying）：retain/release 读到负数直接返回，
+        // weak 的 upgrade 也要求 > 0，所以析构期间既不能复活也不能重入。
+        // 析构结束后恢复 0。注意 immortal 哨兵是 -1，两个哨兵不共享：
+        // weak 操作只对 -1 早退，析构期间 weak 递减必须照常进行。
+        atomic_store(&control->strong_count, KORAL_DESTROYING_REFCOUNT);
         dtor(__koral_payload_of(control));
         atomic_store(&control->strong_count, 0);
     }
     // Merged layout: control block and payload are in the same allocation.
-    // The payload is freed together with the control block when the last weak
-    // reference is released. If no explicit weak references exist
-    // (weak_count == 0), free now. Otherwise, __koral_weak_release will free
-    // when the last weak ref dies.
-    if (atomic_load(&control->weak_count) == 0) {
+    // 「payload 还活着」持有的隐式 weak 在这里释放，且**必须**在 dtor 跑完
+    // 之后——析构期间块不得被 free。free 的唯一判定点是 weak_count 到 0 的
+    // 那次 fetch_sub（RcBox 协议）：强路径与弱路径都走同一判定，胜者恰好
+    // 一个。早先「强看 weak、weak 看 strong」的互查是两个释放者，两线程并发
+    // 各释放一个引用计数时双双看到 0，double free。
+    if (atomic_fetch_sub(&control->weak_count, 1) == 1) {
         free(control);
     }
 }
@@ -68,18 +70,18 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
 void __koral_weak_retain(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) == KORAL_IMMORTAL_REFCOUNT) return;
     atomic_fetch_add(&control->weak_count, 1);
 }
 
 void __koral_weak_release(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
-    int prev = atomic_fetch_sub(&control->weak_count, 1);
-    if (prev == 1) {
-        // Last weak reference released. Free only if strong refs are also gone.
-        if (atomic_load(&control->strong_count) == 0) {
-            free(control);
-        }
+    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) == KORAL_IMMORTAL_REFCOUNT) return;
+    // 唯一的 free 判定点：weak 计数（含隐式 +1）递减到 0 的这一方释放整块。
+    // 不看 strong_count —— 互查会给出两个释放者（见 __koral_release_slow）。
+    if (atomic_fetch_sub(&control->weak_count, 1) == 1) {
+        free(control);
     }
 }
 

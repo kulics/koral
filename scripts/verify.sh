@@ -138,6 +138,31 @@ say "6. differential oracle"
   --timeout 60 -j 8 \
   --report-file "$WORK/6-differential.log"
 
+# ── runtime stress ────────────────────────────────────────────────────────────
+# The differential cannot see runtime bugs: both compilers link the same
+# std/koral_runtime.c. This stage pins the strong/weak lifetime protocol
+# directly -- exactly-one-free under concurrent strong/weak release, the
+# destructor window, immortal blocks -- via a tracked free that aborts on any
+# double free, and pins the codegen/runtime init contract (a fresh block
+# starts at strong = 1, weak = 1: the implicit weak) by grepping emitted C.
+say "runtime stress"
+if [ "$WINDOWS" = "1" ]; then RT_LIBS="$WIN_LIBS"; else RT_LIBS="-lm -lpthread"; fi
+clang -c -Dfree=koral_test_free -I std std/koral_runtime.c \
+  -o "$WORK/rt_track.o" -Wno-everything -O1
+clang -I std tests/runtime-cases/refcount_release_race.c "$WORK/rt_track.o" \
+  -o "$WORK/refcount_release_race$EXE" -Wno-everything -O1 $RT_LIBS
+"$WORK/refcount_release_race$EXE"
+echo "refcount protocol OK"
+
+"$BOOTSTRAP" emit-c tests/runtime-cases/weak_init_probe.koral -o "$WORK/weak_init_probe"
+probe_c="$WORK/weak_init_probe/weak_init_probe.c"
+grep -q 'weak_count = 1' "$probe_c"
+if grep -q 'weak_count = 0' "$probe_c"; then
+  echo "error: emitted control blocks are missing the implicit weak" >&2
+  exit 1
+fi
+echo "weak init contract OK"
+
 # ── samples ───────────────────────────────────────────────────────────────────
 say "samples"
 mkdir -p bin/samples

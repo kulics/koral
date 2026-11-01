@@ -599,6 +599,31 @@ Add branches for the new type in:
 - `getDebugName(_ type: Type)`
 - `containsGenericParameter(_ type: Type)`
 
+### 6) Cross-Phase Touchpoint Checklist
+
+A new type family is not done when the seed compiles: the self-hosting compiler
+carries the same classification again in every phase, and the two sides must
+agree. Walk this list for each side (koralc file · seed file):
+
+| Layer | koralc (`compiler/koralc/…`) | seed (`compiler-reference/Sources/KoralCompiler/…`) |
+| --- | --- | --- |
+| Type identity / layout | `sema/compiler_context.koral` (`get_layout_key`, `get_debug_name`, `contains_generic_parameter`) | `CompilerContext` (step 5) |
+| Typed AST shape | `typed/typed_ast.koral` + its printer | `Sema/TypedAST.swift`, `Sema/TypedASTPrinter.swift` |
+| Sema: operators, dispatch, methods | `sema/type_checker_expressions_operators.koral`, `_dispatch.koral`, `_methods.koral`, `type_checker_patterns.koral` | `Sema/TypeCheckerExpressions.swift`, `TypeCheckerMethods.swift`, `TypeCheckerStatements.swift` |
+| Monomorphization | `mono/mono_type_resolution.koral` (`substitute_type` and the resolution walks), `mono_expr_substitution.koral`, `mono_functions.koral`, `mono_types.koral` | `Monomorphization/MonomorphizerTypeResolution.swift`, `MonomorphizerExpressionSubstitution.swift` |
+| MIR | `mir/mir.koral`, `mir/mir_function_builder.koral`, `mir/mir_verifier.koral` | `MIR/MIR.swift`, `MIRLowerer.swift`, `MIRTypeResolver.swift`, `MIRVerifier.swift` |
+| Codegen | `codegen/codegen.koral`, `codegen/codegen_mir.koral` (type names, copy/drop glue, managed payload, control-block init) | `CodeGen/CodeGen.swift`, `CodeGenMIR.swift` + the `TypeHandler` cluster (steps 2–4) |
+| Runtime | `std/koral_runtime.c` / `std/koral_runtime.h` (representation helpers, refcount protocol) | same files (shared) |
+
+The cost is real: type classification is currently re-derived per phase by
+large `when` switches (`mono/mono_type_resolution.koral` and
+`mir/mir_function_builder.koral` alone are ~13k and ~7k lines), so one new
+family means one edit per row above. Until that duplication is collapsed,
+treat this table as the definition of done; when touching a row, prefer
+routing the decision through the single-point queries (`get_layout_key`, the
+`TypeHandler` registry) over adding another type switch that later phases
+will have to copy.
+
 ## Adding a New Semantic Analysis Pass
 
 ### 1) Define Pass Output

@@ -1,0 +1,57 @@
+// EXPECT: ok
+// Two threads race a managed object's last strong release against its last
+// weak release, round after round. Each spawned closure owns exactly one
+// handle -- one captures the object, the other captures only its weak handle
+// -- and a LatchGate makes both closures return at the same instant, so the
+// two release paths (drop of the captured strong vs drop of the captured
+// weak) run concurrently. If the runtime's free decision is not a single one
+// (the weak count's zero crossing), rounds double-free and the process dies.
+// The protocol itself is pinned in tests/runtime-cases/refcount_release_race.c;
+// this case pins the same behavior through both compilers' real codegen.
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+type mutable Node(mutable value: Int);
+
+type Handles(first: Thread, second: Thread);
+
+let spawn_round(): Handles = {
+    let gate = LatchGate.new(2);
+    let obj = Node(42);
+    let w = obj as ?Node;
+    let a = run_task(() => {
+        if obj.value == 42 then {} else {
+            assert(false, "node payload");
+        };
+        gate.unlatch_and_wait();
+    });
+    let b = run_task(() => {
+        if ?w is .Some(v) then {
+            if v.value == 42 then {} else {
+                assert(false, "upgraded payload");
+            };
+        } else {
+            assert(false, "weak must upgrade while the strong handle lives");
+        };
+        gate.unlatch_and_wait();
+    });
+    return Handles(a, b);
+};
+
+let main(): Void = {
+    let mutable round = 0;
+    while round < 1500 then {
+        let handles = spawn_round();
+        when handles.first.wait() in {
+            .Ok(_) then {},
+            .Error(_) then assert(false, "first thread wait"),
+        };
+        when handles.second.wait() in {
+            .Ok(_) then {},
+            .Error(_) then assert(false, "second thread wait"),
+        };
+        round = round + 1;
+    };
+    println("ok");
+};

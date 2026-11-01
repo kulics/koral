@@ -63,6 +63,13 @@ struct __koral_VTableHeader {
 // 调用点单态化，由调用方作为 `__koral_Dtor` 传进来；类型擦除的场景（trait
 // object）改走 vtable 的 base.destroy。这与 Rust `RcBox { strong, weak, value }`
 // 同构：头里没有 dtor，drop glue 在 `Rc::drop::<T>` 处单态化。
+//
+// 强弱生命周期协议（RcBox 形状）：weak_count 含一个**隐式 +1** ——「payload
+// 还活着」本身持有一个 weak，显式弱句柄各自再 +1（因此新分配的块 weak_count
+// 从 1 起，由 codegen 发射）。free 只有一个判定点：weak_count 递减到 0 的那次
+// fetch_sub 的胜者释放整块；强路径在析构完成后释放隐式 weak，从不直接 free。
+// 两个计数器互查（强看 weak、weak 看 strong）会给出两个释放者，并发下 double
+// free —— 判定必须收敛到单一计数器的零穿越。
 struct __koral_Control {
     _Atomic int strong_count;
     _Atomic int weak_count;
@@ -102,9 +109,18 @@ uint32_t __koral_hardware_concurrency(void);
 //
 // Immortal（静态字面量）：control 块的 strong_count 为 -1，永不释放。
 // 与 Swift 的 immortal object 同一做法，用来取代「control == NULL」哨兵。
+// immortal 的 weak_count 同为哨兵值 -1；weak 操作读到 strong == -1 早退，
+// 所以一次 downgrade/release 不会把静态块送进 free 路径。
 #define KORAL_IMMORTAL_REFCOUNT (-1)
 
-// 慢路径：强引用归零后调 dtor 销毁 payload，再视 weak 计数决定何时 free 整块。
+// 析构窗口哨兵（destroying）：强引用归零进入析构时把 strong_count 置 -2，
+// 析构结束后恢复 0。retain/release 读到**任何**负数都早退（析构期间
+// `drop(self)` 的 retain/release 是空操作，防析构递归），但 weak 操作只对
+// immortal（-1）早退 —— 析构期间隐式 weak 仍在，weak 计数照常递减。
+#define KORAL_DESTROYING_REFCOUNT (-2)
+
+// 慢路径：强引用归零后调 dtor 销毁 payload，再释放「payload 存活」持有的
+// 隐式 weak。free 由 weak_count 到 0 的唯一判定点决定（见 __koral_weak_release）。
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor);
 
 // ---- control 层原语 ----
