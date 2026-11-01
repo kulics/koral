@@ -98,6 +98,11 @@ public type mutable CodeGen(
     // thunk 定义要出现在使用它之前，所以先占位、最后 splice。
     mutable drop_thunk_defs: List[String],
     mutable drop_thunk_names: Dict[String, String],
+
+    // DefId 名字倒排索引：def_ids_named 原先每个查询全扫 1..<next_def_id
+    // （自举约 9.7 万个 DefId × Dict 查询 + 字符串比较），是 codegen/MIR 的
+    // 热点。预热一次、按名 O(1)，返回顺序与原升序扫描一致。
+    mutable def_ids_by_name: Dict[String, List[UInt]],
 );
 
 given CodeGen {
@@ -149,6 +154,8 @@ given CodeGen {
             List[String].new(),
             // drop_thunk_names
             Dict[String, String].new(),
+            // def_ids_by_name
+            Dict[String, List[UInt]].new(),
         );
         cg.build_def_id_indices();
         return cg;
@@ -1087,12 +1094,23 @@ given CodeGen {
     };
 
     def_ids_named(self, name: String): List[DefId] = {
-        let mutable out = List[DefId].new();
-        for id in 1..<self.context.next_def_id() then {
-            let def_id = DefId(id);
-            if self.context.get_name(def_id) is .Some(found_name) and found_name == name then {
-                out.push(def_id);
+        if self.def_ids_by_name.is_empty() then {
+            for id in 1..<self.context.next_def_id() then {
+                let def_id = DefId(id);
+                when self.context.get_name(def_id) in {
+                    .Some(found_name) then {
+                        let mutable bucket = self.def_ids_by_name.get(found_name)
+                            or else List[UInt].new();
+                        bucket.push(id);
+                        self.def_ids_by_name.insert(found_name, bucket);
+                    },
+                    .None() then {},
+                };
             };
+        };
+        let mutable out = List[DefId].new();
+        for id in self.def_ids_by_name.get(name) or else List[UInt].new() then {
+            out.push(DefId(id));
         };
         return out;
     };

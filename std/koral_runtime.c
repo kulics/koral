@@ -62,7 +62,9 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     // 那次 fetch_sub（RcBox 协议）：强路径与弱路径都走同一判定，胜者恰好
     // 一个。早先「强看 weak、weak 看 strong」的互查是两个释放者，两线程并发
     // 各释放一个引用计数时双双看到 0，double free。
-    if (atomic_fetch_sub(&control->weak_count, 1) == 1) {
+    // release 减量：发布 dtor 的写。胜者是本线程时直接 free；胜者是别的
+    // weak_release 时，对方的 acquire fence 与这里同步（见 __koral_weak_release）。
+    if (atomic_fetch_sub_explicit(&control->weak_count, 1, memory_order_release) == 1) {
         free(control);
     }
 }
@@ -71,7 +73,7 @@ void __koral_weak_retain(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) == KORAL_IMMORTAL_REFCOUNT) return;
-    atomic_fetch_add(&control->weak_count, 1);
+    atomic_fetch_add_explicit(&control->weak_count, 1, memory_order_relaxed);
 }
 
 void __koral_weak_release(void* raw_control) {
@@ -80,7 +82,11 @@ void __koral_weak_release(void* raw_control) {
     if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) == KORAL_IMMORTAL_REFCOUNT) return;
     // 唯一的 free 判定点：weak 计数（含隐式 +1）递减到 0 的这一方释放整块。
     // 不看 strong_count —— 互查会给出两个释放者（见 __koral_release_slow）。
-    if (atomic_fetch_sub(&control->weak_count, 1) == 1) {
+    if (atomic_fetch_sub_explicit(&control->weak_count, 1, memory_order_release) == 1) {
+        // 与析构线程的隐式 weak 释放（release 减量）同步：free 之前必须看得见
+        // dtor 对 payload 的全部写。RMW 链构成 release sequence，这一道
+        // acquire fence 把析构线程的写并入本线程。
+        atomic_thread_fence(memory_order_acquire);
         free(control);
     }
 }
@@ -121,9 +127,15 @@ struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success) {
     if (!w.control) return r;
 
     struct __koral_Control* control = (struct __koral_Control*)w.control;
-    int old_count = atomic_load(&control->strong_count);
+    int old_count = atomic_load_explicit(&control->strong_count, memory_order_relaxed);
+    // immortal（-1）不是活计数：upgrade 一律失败（见
+    // tests/runtime-cases/refcount_release_race.c 钉住的契约）。
     while (old_count > 0) {
-        if (atomic_compare_exchange_weak(&control->strong_count, &old_count, old_count + 1)) {
+        // acquire：成功升级要与「把计数减到 old_count 的那次 release」同步，
+        // 保证 payload 的写对本线程可见。失败侧 relaxed 足够。
+        if (atomic_compare_exchange_weak_explicit(
+                &control->strong_count, &old_count, old_count + 1,
+                memory_order_acquire, memory_order_relaxed)) {
             r.ptr = __koral_payload_of(control);
             *success = 1;
             return r;
@@ -136,14 +148,16 @@ struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success) {
 void __koral_closure_retain(struct __koral_Closure closure) {
     if (!closure.env) return;
     _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
-    atomic_fetch_add(refcount, 1);
+    atomic_fetch_add_explicit(refcount, 1, memory_order_relaxed);
 }
 
 void __koral_closure_release(struct __koral_Closure closure) {
     if (!closure.env) return;
     _Atomic intptr_t* refcount = (_Atomic intptr_t*)closure.env;
-    intptr_t prev = atomic_fetch_sub(refcount, 1);
+    intptr_t prev = atomic_fetch_sub_explicit(refcount, 1, memory_order_release);
     if (prev == 1) {
+        // 与 control 层同协议：归零方补 acquire fence，再走析构/释放。
+        atomic_thread_fence(memory_order_acquire);
         if (closure.drop) {
             closure.drop(closure.env);
         } else {

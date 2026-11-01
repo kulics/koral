@@ -128,19 +128,25 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor);
 // 生成代码一律走下面的 `_value` 形式（瘦指针句柄保存的是 payload 地址）。
 // 弱引用为什么走 control 而不是 payload：weak 存的是 control 地址，
 // 因为 payload 可能已经销毁，weak 仍要能查 strong_count 判断能否 upgrade。
+//
+// 内存序（Swift/Rust 的 Arc 协议）：retain 是 relaxed 增量——它不发布任何
+// 数据，只抬计数；release 是 release 减量——它发布「此前对 payload 的写」；
+// 计数归零的一方在析构前补一道 acquire fence，与所有更早的 release 减量同步，
+// 从而安全地读到各线程留下的 payload 状态。seq_cst 对这两个操作是纯开销。
 static inline void __koral_retain(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
-    atomic_fetch_add(&control->strong_count, 1);
+    atomic_fetch_add_explicit(&control->strong_count, 1, memory_order_relaxed);
 }
 
 static inline void __koral_release(void* raw_control, __koral_Dtor dtor) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
-    int prev = atomic_fetch_sub(&control->strong_count, 1);
+    int prev = atomic_fetch_sub_explicit(&control->strong_count, 1, memory_order_release);
     if (prev == 1) {
+        atomic_thread_fence(memory_order_acquire);
         __koral_release_slow(control, dtor);
     }
 }

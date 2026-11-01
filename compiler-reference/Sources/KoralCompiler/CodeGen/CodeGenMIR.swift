@@ -1766,6 +1766,44 @@ final class MIRFunctionCodeEmitter {
     if codeGen.usesManagedNominalRepresentation(construction.type) {
       let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(construction.type))
       let payloadType = codeGen.managedPayloadTypeName(for: construction.type)
+      // A field-less case carries no observable state (enums can never be
+      // `type mutable`, so weak references cannot reach one; equality is
+      // structural): every construction of one can be the address of a shared
+      // static [Control | payload] box with strong/weak = -1 (immortal).
+      // Construction degenerates to an address-of and every retain/release
+      // early-returns. GATE: when the enum type has a user Drop method each
+      // value owes one destructor run, which a static would swallow -- keep
+      // mallocing there (pin: empty_case_with_drop_runs_destructor).
+      let isFieldless = caseInfo.parameters.allSatisfy { $0.type == .void }
+      if isFieldless {
+        let typeName: String
+        if case .enum(let gateDefId) = construction.type {
+          typeName = codeGen.cIdentifierByDefId[codeGen.defIdKey(gateDefId)]
+            ?? codeGen.context.getCIdentifier(gateDefId) ?? "U_\(gateDefId.id)"
+        } else {
+          typeName = codeGen.cTypeName(construction.type)
+        }
+        if codeGen.getUserDefinedDrop(for: typeName) == nil {
+          // Under niche layout the empty case's payload is the zero value
+          // (the null pattern is NULL), so OMIT the payload initializer and
+          // let aggregate zero-fill do it -- `{ 0 }` is invalid when the
+          // union's first member is an empty struct ("initializer for
+          // aggregate with no elements requires explicit braces"). Under tag
+          // layout store the case index (first member is the tag scalar).
+          let initText = codeGen.enumNicheLayout(for: construction.type) != nil
+            ? "{ { -1, -1 } }"
+            : "{ { -1, -1 }, { \(caseIndex) } }"
+          let storageVarName = "\(expression)_storage"
+          codeGen.addIndent()
+          codeGen.appendToBuffer("static const struct { struct __koral_Control ctrl; struct \(payloadType) payload; } \(storageVarName) = \(initText);\n")
+          codeGen.addIndent()
+          codeGen.appendToBuffer("\(expression).ptr = (void*)&\(storageVarName).payload;\n")
+          return MIRValueEmission(
+            expression: expression,
+            cleanups: cleanupForTemporaryResult(expression: expression, type: construction.type)
+          )
+        }
+      }
       codeGen.addIndent()
       codeGen.appendToBuffer("\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n")
       codeGen.addIndent()
@@ -2231,6 +2269,29 @@ final class MIRFunctionCodeEmitter {
       default:
         fatalError("init_memory expects pointer operand")
       }
+      // init_memory's value operand comes from emitValue(sourceMode:) -- the
+      // raw place expression with no ownership materialization -- so the store
+      // must follow ownership exactly:
+      //   move -- consumeMovedSource really takes ownership (.operand(.local),
+      //     .placeRead(_, .move), .ref(_, .heapOwnedMove)), or the emission is
+      //     an owned temporary (its cleanup names the expression itself, and
+      //     residualCleanups skips it = ownership rides with the temporary);
+      //   copy -- everything else (.borrow/.copy/.take place reads, casts,
+      //     ...): the source still holds its own reference and drops it at
+      //     scope end, so the store must retain.
+      // The old unconditional copy plus consumeMovedSource leaked one handle
+      // per call on consumed sources (every Dict/List insert); keying only on
+      // the place family instead moves sources that keep ownership -- double
+      // release.
+      // NOTE: consumed-shape operands (inline aggregates, direct take_memory
+      // results, ...) leave the store's retain unpaired once consumeMovedSource
+      // clears the source flag -- one leaked handle per insert. A variable read
+      // is a .copy place read, which pairs: bind such values to a local first
+      // and the local drops its own reference at scope end (the idiom in
+      // list.koral / deque.koral / set.koral). dict.koral still passes inline
+      // aggregates: pairing it means letting the construction temporary
+      // actually drop, which trips the still-unlocated consumed-source double
+      // release (ASan evidence on file) -- fix that first.
       codeGen.appendCopyAssignment(
         for: elementType,
         source: valueEmission.expression,

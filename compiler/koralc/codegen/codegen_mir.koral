@@ -2254,6 +2254,47 @@ given MIRFunctionCodeEmitter {
             let payload_type = self.codegen.managed_payload_type_name(
                 construction.enum_type,
             );
+            let case_info = self.enum_case_info(
+                construction.enum_type,
+                construction.case_name,
+            );
+            // 无字段 case 的值没有任何可观察状态（枚举不能是 type mutable，
+            // 弱引用够不着；判等是结构判等），可以给每个 (类型, case) 造一块
+            // 静态 [Control | payload]，strong/weak = -1（immortal）——构造退化
+            // 为取址，retain/release 全部早退，省掉每次构造的 malloc 与整条
+            // ARC 流量。**门禁**：类型带用户 Drop 时每个值欠一次析构副作用，
+            // 静态化会吞掉它，这种情况照旧 malloc（钉子：
+            // empty_case_with_drop_runs_destructor）。
+            if self.enum_case_is_fieldless(case_info.second)
+                and not self.codegen.user_defined_drop_for_type_name(
+                    self.codegen.user_defined_drop_type_key(construction.enum_type),
+                ).is_some()
+            then {
+                // niche 布局下空 case 的载荷就是零值（空位模式恒为 NULL），
+                // 因此初始化器**省略载荷**、靠聚合零填充 —— 不能写 { 0 }：
+                // union 首成员可能是空 struct，`{ 0 }` 会报
+                // “initializer for aggregate with no elements”。
+                // tag 布局写 case 序号（首成员是 tag 标量，{ N } 合法）。
+                let init_text = when self.codegen.enum_niche_layout_for_type(
+                    construction.enum_type,
+                ) in {
+                    .Some(_) then "{ { -1, -1 } }",
+                    .None() then "{ { -1, -1 }, { \(case_info.first.to_string()) } }",
+                };
+                let storage_var_name = "\(expression)_storage";
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(
+                    "static const struct { struct __koral_Control ctrl; struct \(payload_type) payload; } \(storage_var_name) = \(init_text);\n",
+                );
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(
+                    "\(expression).ptr = (void*)&\(storage_var_name).payload;\n",
+                );
+                return MIRValueEmission(
+                    expression,
+                    self.cleanup_for_temporary_result(expression, construction.enum_type),
+                );
+            };
             self.codegen.add_indent();
             self.codegen.buffer.push_string(
                 "\(expression).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payload_type))));\n",
@@ -2267,10 +2308,6 @@ given MIRFunctionCodeEmitter {
                 "__koral_control_of(\(expression).ptr)->weak_count = 1;\n",
             );
             let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
-            let case_info = self.enum_case_info(
-                construction.enum_type,
-                construction.case_name,
-            );
             when self.codegen.enum_niche_layout_for_type(construction.enum_type) in {
                 .Some(layout) then {
                     if case_info.second.is_empty() then {
@@ -3259,6 +3296,25 @@ given MIRFunctionCodeEmitter {
                 let mutable element_type = self.pointer_element_type(
                     self.type_of_value(pointer),
                 );
+                // init_memory 的 value 源自 emit_value_source（place 的原位
+                // 表达式，不做所有权物化），store 的 copy/move 必须与所有权
+                // 去向严格一致：
+                //   move —— consume_moved_source 真会接管所有权（.Operand(.Local)、
+                //     .Move() place 读、HeapOwnedMove 引用），或发射物是自有
+                //     临时（cleanup 指向表达式本身，残余清理跳过它 = 所有权随
+                //     临时物转移）；
+                //   copy —— 其余（Borrow/Copy/Take place 读、cast 等）：源仍
+                //     持有自己的引用并在作用域末尾 drop，store 必须 retain。
+                // 旧代码固定 copy + consume：消费型源多 retain 一次永不释放
+                //（每次 Dict/List 插入漏一个句柄）；反过来按 place 家族一刀切
+                // 又会把「源仍持有」的形态搬成 move —— 双重释放。
+                // 注：消费型实参（行内聚合体、take_memory 直参等）的源引用
+                // 会随 consume 清标志 / 残余清理跳过一起消失，copy 进槽的
+                // 那份 retain 无人释放 —— 每次插入漏一个句柄。变量读是
+                // Copy place 读，先 let 绑定再传则局部保留自己的引用、作用域
+                // 末尾正常 drop（list.koral / deque.koral / set.koral 的写法）。
+                // dict.koral 暂留行内聚合形态：配平它要让构造临时真正 drop，
+                // 会触发尚未定位的消费路径双释放（ASan 在案）——先修双释放。
                 self.codegen.append_copy_assignment(
                     element_type,
                     v.expression,
@@ -3898,6 +3954,17 @@ given MIRFunctionCodeEmitter {
             .PlaceRead(_, ownership) then ownership is .Borrow(),
             _ then false,
         };
+    };
+
+    /// A case is field-less when none of its parameters occupy storage
+    /// (Void parameters are erased from the payload union).
+    enum_case_is_fieldless(self, params: List[EnumCaseParam]): Bool = {
+        for field in params then {
+            if not self.codegen.type_is_void(field.param_type) then {
+                return false;
+            };
+        };
+        return true;
     };
 
     is_ownership_preserving_cast(self, source_type: Type, target_type: Type): Bool = {
