@@ -32,7 +32,8 @@ struct MIRScopeID: Hashable, CustomStringConvertible {
 
 struct MIRProgram {
   let globals: [MIRGlobal]
-  let functions: [MIRFunction]
+  /// Pruned to the reachable set at codegen time (see CodeGenReachability.swift).
+  var functions: [MIRFunction]
   let context: CompilerContext
   let staticMethodLookup: [MethodInstanceKey: DefId]
   let traits: [String: TraitDeclInfo]

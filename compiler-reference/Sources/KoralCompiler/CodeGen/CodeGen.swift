@@ -16,7 +16,7 @@ public class CodeGen {
   private var callableNameByDefId: [UInt64: String] = [:]
   private var callParametersByDefId: [UInt64: [Parameter]] = [:]
   private var callParametersByQualifiedName: [String: [Parameter]] = [:]
-  let mirProgram: MIRProgram
+  var mirProgram: MIRProgram
   private var foreignFunctionDefIds: Set<UInt64> = []
   private var foreignGlobalVarDefIds: Set<UInt64> = []
   private var mirFunctionPlanDurationNs: UInt64 = 0
@@ -904,6 +904,9 @@ public class CodeGen {
 
   private func generateProgram() {
     let totalStart = DispatchTime.now()
+    // Dead functions carry their declarations too; prune before anything reads
+    // mirProgram.functions (see CodeGenReachability.swift).
+    pruneUnreachableFunctions()
     let globals = mirProgram.globals
     let typeDeclStart = DispatchTime.now()
     let declarations = sortTypeDeclarations(collectTypeDeclarations(globals))

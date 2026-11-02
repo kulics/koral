@@ -18,7 +18,7 @@ struct CodeGenTraitCallArgument {
 
 extension CodeGen {
 
-  private func emittedMethodSymbol(defId: DefId) -> Symbol? {
+  func emittedMethodSymbol(defId: DefId) -> Symbol? {
     for global in mirProgram.globals {
       switch global {
       case .given(_, _, let methods):
@@ -36,7 +36,7 @@ extension CodeGen {
     return nil
   }
 
-  private func resolveMethodDefIdFromWitness(
+  func resolveMethodDefIdFromWitness(
     concreteType: Type,
     traitName: String,
     traitDefId: DefId,
