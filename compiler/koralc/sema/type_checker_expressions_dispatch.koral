@@ -3253,7 +3253,7 @@ given TypeChecker {
                 let target = self.resolve_type_in_scope(type_node, scope);
                 self.lower_as_cast_target(target, inner, cast_span, scope, false)
             },
-            .Unary(op, inner, _) then {
+            .Unary(op, inner, unary_span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, expected, scope);
                 when op in {
                     .Negate() then when typed_inner.expr_kind in {
@@ -3314,6 +3314,73 @@ given TypeChecker {
                             "neg",
                             typed_inner.expr_type,
                         ),
+                    },
+                    .BitwiseNot() then {
+                        // `~` is the `Neg` shape one arm over: a builtin
+                        // integer scalar -- either family -- is the built-in
+                        // bitwise NOT, a user type dispatches through `BitNot`,
+                        // and any other builtin keeps the integer complaint.
+                        if self.is_integer_type(typed_inner.expr_type) then make_typed_expr(
+                            TypedExprKind.Unary(op, typed_inner),
+                            typed_inner.expr_type,
+                        )
+                        else if not self.bitwise_overload_candidate(
+                            typed_inner.expr_type,
+                        ) then {
+                            self.push_diagnostic(
+                                "Type mismatch: expected Integer Type, got \(self.display_type_name(typed_inner.expr_type))",
+                                unary_span,
+                            );
+                            make_typed_expr(
+                                TypedExprKind.Unary(op, typed_inner),
+                                Type.Unknown(),
+                            )
+                        }
+                        else if not self.enforce_explicit_trait_requirement_with_context(
+                            typed_inner.expr_type,
+                            self.lang_trait_def_id("BitNot"),
+                            "BitNot",
+                            "",
+                            "operator 'bit_not'",
+                            unary_span,
+                        ) then {
+                            // The record-and-continue shape the operator
+                            // family uses: the receiver's own `bit_not` gets
+                            // its chance, or the missing method is named. A
+                            // generic parameter has no methods to try -- the
+                            // bound complaint above is the whole story.
+                            let unwrapped = when typed_inner.expr_type in {
+                                .ReferenceType(inner)
+                                or .MutableReferenceType(inner) then inner,
+                                _ then typed_inner.expr_type,
+                            };
+                            if unwrapped is .GenericParameter(_) then make_typed_expr(
+                                TypedExprKind.Unary(op, typed_inner),
+                                Type.Unknown(),
+                            )
+                            else if self.resolve_method_signature(
+                                typed_inner.expr_type,
+                                "bit_not",
+                            ) is .Some(_) then self.build_unary_method_call(
+                                typed_inner,
+                                "bit_not",
+                                typed_inner.expr_type,
+                            ) else {
+                                self.push_diagnostic(
+                                    "Member 'bit_not' not found in type '\(self.display_type_name(typed_inner.expr_type))'",
+                                    unary_span,
+                                );
+                                make_typed_expr(
+                                    TypedExprKind.Unary(op, typed_inner),
+                                    Type.Unknown(),
+                                )
+                            }
+                        }
+                        else self.build_unary_method_call(
+                            typed_inner,
+                            "bit_not",
+                            typed_inner.expr_type,
+                        )
                     },
                     _ then make_typed_expr(
                         TypedExprKind.Unary(op, typed_inner),

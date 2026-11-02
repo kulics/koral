@@ -139,6 +139,42 @@ public trait Rem[R: Any] {
     rem(self, other: R): Self;
 };
 
+/// Types that support bitwise AND with an `R` right-hand operand.
+public trait BitAnd[R: Any] {
+    /// Returns the bitwise AND of `self` and `other`.
+    bit_and(self, other: R): Self;
+};
+
+/// Types that support bitwise OR with an `R` right-hand operand.
+public trait BitOr[R: Any] {
+    /// Returns the bitwise OR of `self` and `other`.
+    bit_or(self, other: R): Self;
+};
+
+/// Types that support bitwise XOR with an `R` right-hand operand.
+public trait BitXor[R: Any] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    bit_xor(self, other: R): Self;
+};
+
+/// Types that support bitwise NOT.
+public trait BitNot {
+    /// Returns the bitwise NOT of `self`.
+    bit_not(self): Self;
+};
+
+/// Types that support left-shifting by an `R` right-hand operand.
+public trait ShiftLeft[R: Any] {
+    /// Returns `self` shifted left by `other` bits.
+    shift_left(self, other: R): Self;
+};
+
+/// Types that support right-shifting by an `R` right-hand operand.
+public trait ShiftRight[R: Any] {
+    /// Returns `self` shifted right by `other` bits.
+    shift_right(self, other: R): Self;
+};
+
 /// Types whose values can be compared for equality.
 public trait Eq {
     /// Returns whether `self` equals `other`.
@@ -1327,6 +1363,726 @@ given WrappingUInt: Div[WrappingUInt] {
 given WrappingUInt: Rem[WrappingUInt] {
     /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `BitAnd` for `Int`: bitwise AND.
+given Int: BitAnd[Int] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: Int): Int;
+};
+
+/// `BitOr` for `Int`: bitwise OR.
+given Int: BitOr[Int] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: Int): Int;
+};
+
+/// `BitXor` for `Int`: bitwise XOR.
+given Int: BitXor[Int] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: Int): Int;
+};
+
+/// `BitNot` for `Int`: bitwise NOT.
+given Int: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): Int;
+};
+
+/// `ShiftLeft` for `Int`: shifts `self` left by `other` bits.
+given Int: ShiftLeft[Int] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: Int): Int;
+};
+
+/// `ShiftRight` for `Int`: shifts `self` right by `other` bits.
+given Int: ShiftRight[Int] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: Int): Int;
+};
+
+/// `BitAnd` for `Int8`: bitwise AND.
+given Int8: BitAnd[Int8] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: Int8): Int8;
+};
+
+/// `BitOr` for `Int8`: bitwise OR.
+given Int8: BitOr[Int8] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: Int8): Int8;
+};
+
+/// `BitXor` for `Int8`: bitwise XOR.
+given Int8: BitXor[Int8] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: Int8): Int8;
+};
+
+/// `BitNot` for `Int8`: bitwise NOT.
+given Int8: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): Int8;
+};
+
+/// `ShiftLeft` for `Int8`: shifts `self` left by `other` bits.
+given Int8: ShiftLeft[Int8] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: Int8): Int8;
+};
+
+/// `ShiftRight` for `Int8`: shifts `self` right by `other` bits.
+given Int8: ShiftRight[Int8] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: Int8): Int8;
+};
+
+/// `BitAnd` for `Int16`: bitwise AND.
+given Int16: BitAnd[Int16] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: Int16): Int16;
+};
+
+/// `BitOr` for `Int16`: bitwise OR.
+given Int16: BitOr[Int16] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: Int16): Int16;
+};
+
+/// `BitXor` for `Int16`: bitwise XOR.
+given Int16: BitXor[Int16] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: Int16): Int16;
+};
+
+/// `BitNot` for `Int16`: bitwise NOT.
+given Int16: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): Int16;
+};
+
+/// `ShiftLeft` for `Int16`: shifts `self` left by `other` bits.
+given Int16: ShiftLeft[Int16] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: Int16): Int16;
+};
+
+/// `ShiftRight` for `Int16`: shifts `self` right by `other` bits.
+given Int16: ShiftRight[Int16] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: Int16): Int16;
+};
+
+/// `BitAnd` for `Int32`: bitwise AND.
+given Int32: BitAnd[Int32] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: Int32): Int32;
+};
+
+/// `BitOr` for `Int32`: bitwise OR.
+given Int32: BitOr[Int32] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: Int32): Int32;
+};
+
+/// `BitXor` for `Int32`: bitwise XOR.
+given Int32: BitXor[Int32] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: Int32): Int32;
+};
+
+/// `BitNot` for `Int32`: bitwise NOT.
+given Int32: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): Int32;
+};
+
+/// `ShiftLeft` for `Int32`: shifts `self` left by `other` bits.
+given Int32: ShiftLeft[Int32] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: Int32): Int32;
+};
+
+/// `ShiftRight` for `Int32`: shifts `self` right by `other` bits.
+given Int32: ShiftRight[Int32] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: Int32): Int32;
+};
+
+/// `BitAnd` for `Int64`: bitwise AND.
+given Int64: BitAnd[Int64] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: Int64): Int64;
+};
+
+/// `BitOr` for `Int64`: bitwise OR.
+given Int64: BitOr[Int64] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: Int64): Int64;
+};
+
+/// `BitXor` for `Int64`: bitwise XOR.
+given Int64: BitXor[Int64] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: Int64): Int64;
+};
+
+/// `BitNot` for `Int64`: bitwise NOT.
+given Int64: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): Int64;
+};
+
+/// `ShiftLeft` for `Int64`: shifts `self` left by `other` bits.
+given Int64: ShiftLeft[Int64] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: Int64): Int64;
+};
+
+/// `ShiftRight` for `Int64`: shifts `self` right by `other` bits.
+given Int64: ShiftRight[Int64] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: Int64): Int64;
+};
+
+/// `BitAnd` for `UInt`: bitwise AND.
+given UInt: BitAnd[UInt] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: UInt): UInt;
+};
+
+/// `BitOr` for `UInt`: bitwise OR.
+given UInt: BitOr[UInt] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: UInt): UInt;
+};
+
+/// `BitXor` for `UInt`: bitwise XOR.
+given UInt: BitXor[UInt] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: UInt): UInt;
+};
+
+/// `BitNot` for `UInt`: bitwise NOT.
+given UInt: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): UInt;
+};
+
+/// `ShiftLeft` for `UInt`: shifts `self` left by `other` bits.
+given UInt: ShiftLeft[UInt] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: UInt): UInt;
+};
+
+/// `ShiftRight` for `UInt`: shifts `self` right by `other` bits.
+given UInt: ShiftRight[UInt] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: UInt): UInt;
+};
+
+/// `BitAnd` for `UInt8`: bitwise AND.
+given UInt8: BitAnd[UInt8] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: UInt8): UInt8;
+};
+
+/// `BitOr` for `UInt8`: bitwise OR.
+given UInt8: BitOr[UInt8] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: UInt8): UInt8;
+};
+
+/// `BitXor` for `UInt8`: bitwise XOR.
+given UInt8: BitXor[UInt8] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: UInt8): UInt8;
+};
+
+/// `BitNot` for `UInt8`: bitwise NOT.
+given UInt8: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): UInt8;
+};
+
+/// `ShiftLeft` for `UInt8`: shifts `self` left by `other` bits.
+given UInt8: ShiftLeft[UInt8] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: UInt8): UInt8;
+};
+
+/// `ShiftRight` for `UInt8`: shifts `self` right by `other` bits.
+given UInt8: ShiftRight[UInt8] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: UInt8): UInt8;
+};
+
+/// `BitAnd` for `UInt16`: bitwise AND.
+given UInt16: BitAnd[UInt16] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: UInt16): UInt16;
+};
+
+/// `BitOr` for `UInt16`: bitwise OR.
+given UInt16: BitOr[UInt16] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: UInt16): UInt16;
+};
+
+/// `BitXor` for `UInt16`: bitwise XOR.
+given UInt16: BitXor[UInt16] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: UInt16): UInt16;
+};
+
+/// `BitNot` for `UInt16`: bitwise NOT.
+given UInt16: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): UInt16;
+};
+
+/// `ShiftLeft` for `UInt16`: shifts `self` left by `other` bits.
+given UInt16: ShiftLeft[UInt16] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: UInt16): UInt16;
+};
+
+/// `ShiftRight` for `UInt16`: shifts `self` right by `other` bits.
+given UInt16: ShiftRight[UInt16] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: UInt16): UInt16;
+};
+
+/// `BitAnd` for `UInt32`: bitwise AND.
+given UInt32: BitAnd[UInt32] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: UInt32): UInt32;
+};
+
+/// `BitOr` for `UInt32`: bitwise OR.
+given UInt32: BitOr[UInt32] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: UInt32): UInt32;
+};
+
+/// `BitXor` for `UInt32`: bitwise XOR.
+given UInt32: BitXor[UInt32] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: UInt32): UInt32;
+};
+
+/// `BitNot` for `UInt32`: bitwise NOT.
+given UInt32: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): UInt32;
+};
+
+/// `ShiftLeft` for `UInt32`: shifts `self` left by `other` bits.
+given UInt32: ShiftLeft[UInt32] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: UInt32): UInt32;
+};
+
+/// `ShiftRight` for `UInt32`: shifts `self` right by `other` bits.
+given UInt32: ShiftRight[UInt32] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: UInt32): UInt32;
+};
+
+/// `BitAnd` for `UInt64`: bitwise AND.
+given UInt64: BitAnd[UInt64] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: UInt64): UInt64;
+};
+
+/// `BitOr` for `UInt64`: bitwise OR.
+given UInt64: BitOr[UInt64] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: UInt64): UInt64;
+};
+
+/// `BitXor` for `UInt64`: bitwise XOR.
+given UInt64: BitXor[UInt64] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: UInt64): UInt64;
+};
+
+/// `BitNot` for `UInt64`: bitwise NOT.
+given UInt64: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): UInt64;
+};
+
+/// `ShiftLeft` for `UInt64`: shifts `self` left by `other` bits.
+given UInt64: ShiftLeft[UInt64] {
+    /// Returns `self` shifted left by `other` bits, panicking when `other` is at least the width in bits.
+    public shift_left(self, other: UInt64): UInt64;
+};
+
+/// `ShiftRight` for `UInt64`: shifts `self` right by `other` bits.
+given UInt64: ShiftRight[UInt64] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and panicking when `other` is at least the width in bits.
+    public shift_right(self, other: UInt64): UInt64;
+};
+
+/// `BitAnd` for `WrappingInt`: bitwise AND.
+given WrappingInt: BitAnd[WrappingInt] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingInt): WrappingInt;
+};
+
+/// `BitOr` for `WrappingInt`: bitwise OR.
+given WrappingInt: BitOr[WrappingInt] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingInt): WrappingInt;
+};
+
+/// `BitXor` for `WrappingInt`: bitwise XOR.
+given WrappingInt: BitXor[WrappingInt] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingInt): WrappingInt;
+};
+
+/// `BitNot` for `WrappingInt`: bitwise NOT.
+given WrappingInt: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingInt;
+};
+
+/// `ShiftLeft` for `WrappingInt`: shifts `self` left by `other` bits.
+given WrappingInt: ShiftLeft[WrappingInt] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingInt): WrappingInt;
+};
+
+/// `ShiftRight` for `WrappingInt`: shifts `self` right by `other` bits.
+given WrappingInt: ShiftRight[WrappingInt] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingInt): WrappingInt;
+};
+
+/// `BitAnd` for `WrappingInt8`: bitwise AND.
+given WrappingInt8: BitAnd[WrappingInt8] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingInt8): WrappingInt8;
+};
+
+/// `BitOr` for `WrappingInt8`: bitwise OR.
+given WrappingInt8: BitOr[WrappingInt8] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingInt8): WrappingInt8;
+};
+
+/// `BitXor` for `WrappingInt8`: bitwise XOR.
+given WrappingInt8: BitXor[WrappingInt8] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingInt8): WrappingInt8;
+};
+
+/// `BitNot` for `WrappingInt8`: bitwise NOT.
+given WrappingInt8: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingInt8;
+};
+
+/// `ShiftLeft` for `WrappingInt8`: shifts `self` left by `other` bits.
+given WrappingInt8: ShiftLeft[WrappingInt8] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingInt8): WrappingInt8;
+};
+
+/// `ShiftRight` for `WrappingInt8`: shifts `self` right by `other` bits.
+given WrappingInt8: ShiftRight[WrappingInt8] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingInt8): WrappingInt8;
+};
+
+/// `BitAnd` for `WrappingInt16`: bitwise AND.
+given WrappingInt16: BitAnd[WrappingInt16] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingInt16): WrappingInt16;
+};
+
+/// `BitOr` for `WrappingInt16`: bitwise OR.
+given WrappingInt16: BitOr[WrappingInt16] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingInt16): WrappingInt16;
+};
+
+/// `BitXor` for `WrappingInt16`: bitwise XOR.
+given WrappingInt16: BitXor[WrappingInt16] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingInt16): WrappingInt16;
+};
+
+/// `BitNot` for `WrappingInt16`: bitwise NOT.
+given WrappingInt16: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingInt16;
+};
+
+/// `ShiftLeft` for `WrappingInt16`: shifts `self` left by `other` bits.
+given WrappingInt16: ShiftLeft[WrappingInt16] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingInt16): WrappingInt16;
+};
+
+/// `ShiftRight` for `WrappingInt16`: shifts `self` right by `other` bits.
+given WrappingInt16: ShiftRight[WrappingInt16] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingInt16): WrappingInt16;
+};
+
+/// `BitAnd` for `WrappingInt32`: bitwise AND.
+given WrappingInt32: BitAnd[WrappingInt32] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingInt32): WrappingInt32;
+};
+
+/// `BitOr` for `WrappingInt32`: bitwise OR.
+given WrappingInt32: BitOr[WrappingInt32] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingInt32): WrappingInt32;
+};
+
+/// `BitXor` for `WrappingInt32`: bitwise XOR.
+given WrappingInt32: BitXor[WrappingInt32] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingInt32): WrappingInt32;
+};
+
+/// `BitNot` for `WrappingInt32`: bitwise NOT.
+given WrappingInt32: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingInt32;
+};
+
+/// `ShiftLeft` for `WrappingInt32`: shifts `self` left by `other` bits.
+given WrappingInt32: ShiftLeft[WrappingInt32] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingInt32): WrappingInt32;
+};
+
+/// `ShiftRight` for `WrappingInt32`: shifts `self` right by `other` bits.
+given WrappingInt32: ShiftRight[WrappingInt32] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingInt32): WrappingInt32;
+};
+
+/// `BitAnd` for `WrappingInt64`: bitwise AND.
+given WrappingInt64: BitAnd[WrappingInt64] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingInt64): WrappingInt64;
+};
+
+/// `BitOr` for `WrappingInt64`: bitwise OR.
+given WrappingInt64: BitOr[WrappingInt64] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingInt64): WrappingInt64;
+};
+
+/// `BitXor` for `WrappingInt64`: bitwise XOR.
+given WrappingInt64: BitXor[WrappingInt64] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingInt64): WrappingInt64;
+};
+
+/// `BitNot` for `WrappingInt64`: bitwise NOT.
+given WrappingInt64: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingInt64;
+};
+
+/// `ShiftLeft` for `WrappingInt64`: shifts `self` left by `other` bits.
+given WrappingInt64: ShiftLeft[WrappingInt64] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingInt64): WrappingInt64;
+};
+
+/// `ShiftRight` for `WrappingInt64`: shifts `self` right by `other` bits.
+given WrappingInt64: ShiftRight[WrappingInt64] {
+    /// Returns `self` shifted right by `other` bits, sign-extending and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingInt64): WrappingInt64;
+};
+
+/// `BitAnd` for `WrappingUInt`: bitwise AND.
+given WrappingUInt: BitAnd[WrappingUInt] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `BitOr` for `WrappingUInt`: bitwise OR.
+given WrappingUInt: BitOr[WrappingUInt] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `BitXor` for `WrappingUInt`: bitwise XOR.
+given WrappingUInt: BitXor[WrappingUInt] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `BitNot` for `WrappingUInt`: bitwise NOT.
+given WrappingUInt: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingUInt;
+};
+
+/// `ShiftLeft` for `WrappingUInt`: shifts `self` left by `other` bits.
+given WrappingUInt: ShiftLeft[WrappingUInt] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `ShiftRight` for `WrappingUInt`: shifts `self` right by `other` bits.
+given WrappingUInt: ShiftRight[WrappingUInt] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingUInt): WrappingUInt;
+};
+
+/// `BitAnd` for `WrappingUInt8`: bitwise AND.
+given WrappingUInt8: BitAnd[WrappingUInt8] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingUInt8): WrappingUInt8;
+};
+
+/// `BitOr` for `WrappingUInt8`: bitwise OR.
+given WrappingUInt8: BitOr[WrappingUInt8] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingUInt8): WrappingUInt8;
+};
+
+/// `BitXor` for `WrappingUInt8`: bitwise XOR.
+given WrappingUInt8: BitXor[WrappingUInt8] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingUInt8): WrappingUInt8;
+};
+
+/// `BitNot` for `WrappingUInt8`: bitwise NOT.
+given WrappingUInt8: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingUInt8;
+};
+
+/// `ShiftLeft` for `WrappingUInt8`: shifts `self` left by `other` bits.
+given WrappingUInt8: ShiftLeft[WrappingUInt8] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingUInt8): WrappingUInt8;
+};
+
+/// `ShiftRight` for `WrappingUInt8`: shifts `self` right by `other` bits.
+given WrappingUInt8: ShiftRight[WrappingUInt8] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingUInt8): WrappingUInt8;
+};
+
+/// `BitAnd` for `WrappingUInt16`: bitwise AND.
+given WrappingUInt16: BitAnd[WrappingUInt16] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingUInt16): WrappingUInt16;
+};
+
+/// `BitOr` for `WrappingUInt16`: bitwise OR.
+given WrappingUInt16: BitOr[WrappingUInt16] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingUInt16): WrappingUInt16;
+};
+
+/// `BitXor` for `WrappingUInt16`: bitwise XOR.
+given WrappingUInt16: BitXor[WrappingUInt16] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingUInt16): WrappingUInt16;
+};
+
+/// `BitNot` for `WrappingUInt16`: bitwise NOT.
+given WrappingUInt16: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingUInt16;
+};
+
+/// `ShiftLeft` for `WrappingUInt16`: shifts `self` left by `other` bits.
+given WrappingUInt16: ShiftLeft[WrappingUInt16] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingUInt16): WrappingUInt16;
+};
+
+/// `ShiftRight` for `WrappingUInt16`: shifts `self` right by `other` bits.
+given WrappingUInt16: ShiftRight[WrappingUInt16] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingUInt16): WrappingUInt16;
+};
+
+/// `BitAnd` for `WrappingUInt32`: bitwise AND.
+given WrappingUInt32: BitAnd[WrappingUInt32] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingUInt32): WrappingUInt32;
+};
+
+/// `BitOr` for `WrappingUInt32`: bitwise OR.
+given WrappingUInt32: BitOr[WrappingUInt32] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingUInt32): WrappingUInt32;
+};
+
+/// `BitXor` for `WrappingUInt32`: bitwise XOR.
+given WrappingUInt32: BitXor[WrappingUInt32] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingUInt32): WrappingUInt32;
+};
+
+/// `BitNot` for `WrappingUInt32`: bitwise NOT.
+given WrappingUInt32: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingUInt32;
+};
+
+/// `ShiftLeft` for `WrappingUInt32`: shifts `self` left by `other` bits.
+given WrappingUInt32: ShiftLeft[WrappingUInt32] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingUInt32): WrappingUInt32;
+};
+
+/// `ShiftRight` for `WrappingUInt32`: shifts `self` right by `other` bits.
+given WrappingUInt32: ShiftRight[WrappingUInt32] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingUInt32): WrappingUInt32;
+};
+
+/// `BitAnd` for `WrappingUInt64`: bitwise AND.
+given WrappingUInt64: BitAnd[WrappingUInt64] {
+    /// Returns the bitwise AND of `self` and `other`.
+    public bit_and(self, other: WrappingUInt64): WrappingUInt64;
+};
+
+/// `BitOr` for `WrappingUInt64`: bitwise OR.
+given WrappingUInt64: BitOr[WrappingUInt64] {
+    /// Returns the bitwise OR of `self` and `other`.
+    public bit_or(self, other: WrappingUInt64): WrappingUInt64;
+};
+
+/// `BitXor` for `WrappingUInt64`: bitwise XOR.
+given WrappingUInt64: BitXor[WrappingUInt64] {
+    /// Returns the bitwise XOR of `self` and `other`.
+    public bit_xor(self, other: WrappingUInt64): WrappingUInt64;
+};
+
+/// `BitNot` for `WrappingUInt64`: bitwise NOT.
+given WrappingUInt64: BitNot {
+    /// Returns the bitwise NOT of `self`.
+    public bit_not(self): WrappingUInt64;
+};
+
+/// `ShiftLeft` for `WrappingUInt64`: shifts `self` left by `other` bits.
+given WrappingUInt64: ShiftLeft[WrappingUInt64] {
+    /// Returns `self` shifted left by `other` bits, masking `other` modulo the width in bits.
+    public shift_left(self, other: WrappingUInt64): WrappingUInt64;
+};
+
+/// `ShiftRight` for `WrappingUInt64`: shifts `self` right by `other` bits.
+given WrappingUInt64: ShiftRight[WrappingUInt64] {
+    /// Returns `self` shifted right by `other` bits, zero-filling and masking `other` modulo the width in bits.
+    public shift_right(self, other: WrappingUInt64): WrappingUInt64;
 };
 
 /// `Eq` for `Bool`: compares by value.

@@ -2528,7 +2528,7 @@ trait object 上的实现类型精确测试见[精确类型模式](#精确类型
 
 ### 运算符重载
 
-Koral 支持基于 trait 的算术与比较运算符重载。下标是内建的，不可由用户重载。
+Koral 支持基于 trait 的算术、位与比较运算符重载。下标是内建的，不可由用户重载。
 
 内建运算符映射为：
 
@@ -2538,12 +2538,20 @@ Koral 支持基于 trait 的算术与比较运算符重载。下标是内建的�
 - `*` -> `Mul[R]`，经由 `mul(self, other: R): Self`
 - `/` -> `Div[R]`，经由 `div(self, other: R): Self`
 - `%` -> `Rem[R]`，经由 `rem(self, other: R): Self`
+- `&` -> `BitAnd[R]`，经由 `bit_and(self, other: R): Self`
+- `|` -> `BitOr[R]`，经由 `bit_or(self, other: R): Self`
+- `^` -> `BitXor[R]`，经由 `bit_xor(self, other: R): Self`
+- `~`（一元）-> `BitNot`，经由 `bit_not(self): Self`
+- `<<` -> `ShiftLeft[R]`，经由 `shift_left(self, other: R): Self`
+- `>>` -> `ShiftRight[R]`，经由 `shift_right(self, other: R): Self`
 - `==` / `!=` -> `Eq`，经由 `equals(self, other: Self): Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord`，经由 `compare(self, other: Self): Int`
 
 同方向链式序比较（如 `a < b < c`）是这些既有比较运算符的语法糖。编译器把它们降级为两两比较，具备单次求值和短路语义；不会引入独立的 trait 或分发机制。
 
-位运算符（`&`、`|`、`^`、`~`、`<<`、`>>`）目前是内建的，不通过公开运算符 trait 定制。
+同宽整数对（含 `Wrapping` 家族）走算术与位运算符的内建路径——常规家族为 checked 算术与移位，`Wrapping` 为模算术与掩码移位量——其余一律经上述 trait 分发。
+
+位运算符（`&`、`|`、`^`、`~`、`<<`、`>>`）经 `BitAnd`/`BitOr`/`BitXor`/`BitNot`/`ShiftLeft`/`ShiftRight` 分发，规则与算术一致。
 
 ```koral
 type Vec2(x: Int, y: Int);
@@ -2570,6 +2578,32 @@ let flipped = -sum;
 let same = sum == Vec2(4, 6);
 let ordered = Vec2(1, 0) < Vec2(2, 0);
 ```
+
+位运算符的重载方式相同：
+
+```koral
+type Bits(mask: UInt32);
+
+given Bits: BitAnd[Bits] {
+    bit_and(self, other: Bits): Bits = Bits(self.mask & other.mask);
+};
+
+given Bits: BitNot {
+    bit_not(self): Bits = Bits(~self.mask);
+};
+
+// 右操作数的类型是 trait 的 `R`：移位计数写成 `Int` 最自然。
+given Bits: ShiftLeft[Int] {
+    shift_left(self, other: Int): Bits = Bits(self.mask << UInt32(other));
+};
+
+let both = Bits(0xF0) & Bits(0x33);
+let complement = ~both;
+let wide = Bits(1) << 8;
+```
+
+复合赋值（`&=`、`|=`、`^=`、`<<=`、`>>=`）与 `+=` 规则相同：值必须已经具有目标类型，
+因此按普通计数移位用二元形式（`wide = wide << 1`）。
 
 #### 内建下标规则
 
@@ -2617,6 +2651,7 @@ let p = Point.origin();
 最常用的核心 trait 有：
 
 - `Add[R]` / `Sub[R]` / `Neg` / `Mul[R]` / `Div[R]` / `Rem[R]`：算术运算符 trait。
+- `BitAnd[R]` / `BitOr[R]` / `BitXor[R]` / `BitNot` / `ShiftLeft[R]` / `ShiftRight[R]`：位运算符 trait。
 - `Eq` / `Ord`：相等与排序。
 - `Hash`：dict/set 键的哈希支持。
 - `ToString`：转换为字符串。
@@ -2626,7 +2661,7 @@ let p = Point.origin();
 - `Error`：错误消息接口（`message(self): String`）。
 - `Drop`：析构钩子（`drop(self): Void`）。
 
-算术与比较运算符在内部会降级为 trait 方法（例如 `+` 对应 `Add`）。下标由内建编译器规则解析，不走公开 trait。
+算术、位与比较运算符在内部会降级为 trait 方法（例如 `+` 对应 `Add`、`&` 对应 `BitAnd`）。下标由内建编译器规则解析，不走公开 trait。
 
 ### 模块与可见性
 

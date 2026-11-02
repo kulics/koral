@@ -242,8 +242,8 @@ public trait Integer: Numeric and Div[Self] and Rem[Self] {
 };
 
 /// Fixed-width binary integers with a total bit toolbox: bit operations cannot overflow and behave the same in every family.
-/// The bitwise operators (`& | ^ ~`, `<< >>`) are built in and not part of this trait.
-public trait BinaryInteger: Integer {
+/// Refines the bitwise operator traits, so `& | ^ ~ << >>` work on any `BinaryInteger` bound.
+public trait BinaryInteger: Integer and BitAnd[Self] and BitOr[Self] and BitXor[Self] and BitNot and ShiftLeft[Self] and ShiftRight[Self] {
     /// Return the number of one bits in the pattern.
     count_ones(self): UInt;
     /// Return the number of zero bits in the pattern.
