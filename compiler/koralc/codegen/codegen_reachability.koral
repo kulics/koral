@@ -1,0 +1,411 @@
+// codegen_reachability.koral - 函数可达性剪枝
+//
+// 发射前把 program.functions 收缩成可达集，不可达的实现连同声明一并不发：
+// hello world 的 C 有三万多行，其中 96% 以上是从未被调用的 std 单态化产物。
+//
+// 根 = 用户 main、全局初始化器、Drop 方法与 _drop 派生 glue、vtable 请求
+// 解析出的全部见证实现（连同父 trait）。边 = 保留函数体里出现的一切函数
+// 符号：直接调用、函数值、capture 源、drop 函数指针…… lambda 体是宿主的
+// 嵌套定义、随宿主发射，宿主被剪则它们一并消失。
+//
+// 身份键是 **C 符号名**，不是 DefId：调用点经方法解析拿到的是实例身份，
+// 定义带的是声明身份，两者 DefId 不同而 C 名相同（compose_method_c_name
+// 按 owner+方法名合成）。按 DefId 对账会把被调用的定义误剪成链接期缺符号。
+//
+// 漏根会表现为「声明无定义」：自举链路的 dangling 扫描只认裸 `name();`
+// 抓不到带签名的悬空声明，第一道网是 clang 链接，第二道是差分预言机。
+
+/// 判定名是否是 codegen 会按名查找的 drop 方法/派生 glue。名字形态有
+/// `drop`（方法名）、`Type_drop`（派生 glue）、`Type_drop_dNN`（单态化后
+/// 带 DefId 后缀）三种，一律收根。
+private let is_drop_glue_name(name: String): Bool =
+    name == "drop" or name.contains("_drop");
+
+private let collect_operand_refs(
+    cg: CodeGen,
+    operand: MIROperand,
+    out: List[String],
+): Void = {
+    when operand in {
+        .Function(symbol) then out.push(cg.callable_c_name(symbol)),
+        .Local(_) or .Constant(_) then {},
+    };
+};
+
+private let collect_place_refs(cg: CodeGen, place: MIRPlace, out: List[String]): Void = {
+    when place in {
+        .Local(_) or .Global(_) then {},
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then collect_place_refs(
+            cg,
+            base,
+            out,
+        ),
+        .Deref(base, _) or .PointerElement(base, _) then collect_value_refs(cg, base, out),
+    };
+};
+
+private let collect_value_list_refs(
+    cg: CodeGen,
+    values: List[MIRValue],
+    out: List[String],
+): Void = {
+    for value in values then {
+        collect_value_refs(cg, value, out);
+    };
+};
+
+private let collect_value_refs(cg: CodeGen, value: MIRValue, out: List[String]): Void = {
+    when value in {
+        .Operand(operand) then collect_operand_refs(cg, operand, out),
+        .PlaceRead(place, _) then collect_place_refs(cg, place, out),
+        .Binary(operation) then {
+            collect_operand_refs(cg, operation.left, out);
+            collect_operand_refs(cg, operation.right, out);
+        },
+        .Unary(operation) then collect_operand_refs(cg, operation.operand, out),
+        .Call(call) then {
+            collect_operand_refs(cg, call.callee, out);
+            collect_value_list_refs(cg, call.arguments, out);
+        },
+        .Aggregate(aggregate) then collect_value_list_refs(cg, aggregate.fields, out),
+        .EnumCase(construction) then collect_value_list_refs(cg, construction.arguments, out),
+        .EnumTag(tag) then collect_value_refs(cg, tag.subject, out),
+        .TraitObjectConversion(conversion) then collect_value_refs(cg, conversion.inner, out),
+        .TraitMethodCall(call) then {
+            collect_value_refs(cg, call.receiver, out);
+            collect_value_list_refs(cg, call.arguments, out);
+        },
+        .Ref(place, _, _) then collect_place_refs(cg, place, out),
+        .Pointer(place) then collect_place_refs(cg, place, out),
+        .Cast(operand, _, _) then collect_operand_refs(cg, operand, out),
+        .Intrinsic(node) then collect_intrinsic_refs(cg, node, out),
+        .Lambda(lambda) then {
+            // 嵌套定义随宿主发射；若它同时是顶层条目（不应发生），也一并
+            // 保住，输出与剪枝前一致。
+            out.push(cg.callable_c_name(lambda.function.identifier));
+            collect_function_body_refs(cg, lambda.function, out);
+        },
+    };
+};
+
+private let collect_intrinsic_refs(
+    cg: CodeGen,
+    node: MIRIntrinsic,
+    out: List[String],
+): Void = {
+    when node in {
+        .AllocMemory(count, _) then collect_value_refs(cg, count, out),
+        .DeallocMemory(pointer) then collect_value_refs(cg, pointer, out),
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
+            collect_value_refs(cg, dest, out);
+            collect_value_refs(cg, source, out);
+            collect_value_refs(cg, count, out);
+        },
+        .DowngradeRef(value, _) or .UpgradeRef(value, _) then collect_value_refs(cg, value, out),
+        .TraitObjectMatches(value, _, _, _, _) or .TraitObjectDowncast(value, _) then collect_value_refs(
+            cg,
+            value,
+            out,
+        ),
+        .InitMemory(pointer, value) then {
+            collect_value_refs(cg, pointer, out);
+            collect_value_refs(cg, value, out);
+        },
+        .DeinitMemory(pointer) or .TakeMemory(pointer, _) then collect_value_refs(
+            cg,
+            pointer,
+            out,
+        ),
+        .NullPtr(_) then {},
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            collect_value_refs(cg, out_handle, out);
+            collect_value_refs(cg, out_tid, out);
+            collect_value_refs(cg, closure, out);
+            collect_value_refs(cg, stack_size, out);
+        },
+    };
+};
+
+private let collect_statement_refs(cg: CodeGen, statement: MIRStatement, out: List[String]): Void = {
+    when statement in {
+        .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
+        .Assign(place, value) then {
+            collect_place_refs(cg, place, out);
+            collect_value_refs(cg, value, out);
+        },
+        .CompoundAssign(assignment) then {
+            collect_place_refs(cg, assignment.target, out);
+            collect_value_refs(cg, assignment.value, out);
+        },
+        .Drop(place) then collect_place_refs(cg, place, out),
+        .Retain(value) or .Release(value) or .Evaluate(value) then collect_value_refs(
+            cg,
+            value,
+            out,
+        ),
+    };
+};
+
+private let collect_terminator_refs(
+    cg: CodeGen,
+    terminator: MIRTerminator,
+    out: List[String],
+): Void = {
+    when terminator in {
+        .Goto(_) or .Unreachable() then {},
+        .Branch(condition, _, _) then collect_operand_refs(cg, condition, out),
+        .SwitchValue(operand, _, _) then collect_operand_refs(cg, operand, out),
+        .ReturnValue(operand) then {
+            when operand in {
+                .Some(op) then collect_operand_refs(cg, op, out),
+                .None() then {},
+            };
+        },
+    };
+};
+
+/// 遍历函数体（含嵌套 lambda 体），把引用到的函数符号 C 名追加进 out。
+private let collect_function_body_refs(
+    cg: CodeGen,
+    function: MIRFunction,
+    out: List[String],
+): Void = {
+    for block in function.blocks then {
+        for statement in block.statements then {
+            collect_statement_refs(cg, statement, out);
+        };
+        collect_terminator_refs(cg, block.terminator, out);
+    };
+};
+
+given CodeGen {
+    /// 把 program.functions 收缩为可达集，原列表序保持不变。
+    public prune_unreachable_functions(self): Void = {
+        let mutable by_name = Dict[String, List[MIRFunction]].new();
+        for function in self.program.functions then {
+            let c_name = self.callable_c_name(function.identifier);
+            let mutable bucket = by_name.get(c_name) or else List[MIRFunction].new();
+            bucket.push(function);
+            by_name.insert(c_name, bucket);
+        };
+
+        let mutable keep = Set[String].new();
+        let mutable worklist = List[String].new();
+        let drop_trait = self.context.std_drop_trait_def_id();
+        for function in self.program.functions then {
+            let name = self.context.symbol_name(function.identifier);
+            let is_root = when function.kind in {
+                .Given(_, _, _, trait_def_id) then {
+                    // Drop 实现与派生 drop glue 都必须保留：释放路径传的是
+                    // 函数指针。判定 = trait 声明身份（impl Drop）∪ 方法种类
+                    // 标记（派生/inherent drop 都打 Drop 标）∪ 按名 belt。
+                    let mutable is_drop_impl = false;
+                    when self.context.get_name(function.identifier.def_id) in {
+                        .Some(decl_name) then {
+                            if decl_name == "drop" then {
+                                is_drop_impl = true;
+                            };
+                        },
+                        .None() then {},
+                    };
+                    when self.context.get_symbol_method_kind(function.identifier.def_id) in {
+                        .Some(method_kind) then {
+                            if method_kind is .Drop() then {
+                                is_drop_impl = true;
+                            };
+                        },
+                        .None() then {},
+                    };
+                    when trait_def_id in {
+                        .Some(id) then {
+                            when drop_trait in {
+                                .Some(drop_id) then {
+                                    if id == drop_id then {
+                                        is_drop_impl = true;
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        },
+                        .None() then {},
+                    };
+                    is_drop_impl or is_drop_glue_name(name)
+                },
+                .Global() then {
+                    let mutable is_drop_fn = is_drop_glue_name(name);
+                    when self.context.get_name(function.identifier.def_id) in {
+                        .Some(decl_name) then {
+                            if decl_name == "drop" then {
+                                is_drop_fn = true;
+                            };
+                        },
+                        .None() then {},
+                    };
+                    when self.context.get_symbol_method_kind(function.identifier.def_id) in {
+                        .Some(method_kind) then {
+                            if method_kind is .Drop() then {
+                                is_drop_fn = true;
+                            };
+                        },
+                        .None() then {},
+                    };
+                    name == "main" or is_drop_fn
+                },
+            };
+            if is_root then {
+                self.note_function(function.identifier, keep, worklist);
+            };
+        };
+        for global in self.program.globals then {
+            when global in {
+                .GlobalVariable(_, initializer_function, _, _) then {
+                    self.note_function(initializer_function, keep, worklist);
+                },
+                _ then {},
+            };
+        };
+        self.expand_call_edges(keep, worklist, by_name);
+
+        // 见证根：codegen 按 vtable 请求解析出的实现必须全部保留，否则见证
+        // 调用是链接期悬空。请求 = 全局 .TraitVTable 条目 + 保留函数体里的
+        // 显式/隐式 trait-object 转换——收集逻辑直接用 codegen 自己的
+        // collect_mir_vtable_codegen_requests（函数表先缩到已保留集，与
+        // 发射期看到的完全一致），见证解析连同父 trait 一并收根。
+        let mutable seen_witness_keys = Set[String].new();
+        let mutable grew = true;
+        while grew then {
+            grew = false;
+            let saved_functions = self.program.functions;
+            let mutable kept_functions = List[MIRFunction].new();
+            for function in saved_functions then {
+                if keep.contains(self.callable_c_name(function.identifier)) then {
+                    kept_functions.push(function);
+                };
+            };
+            self.program.functions = kept_functions;
+            let requests = self.collect_mir_vtable_codegen_requests();
+            self.program.functions = saved_functions;
+
+            let keep_size_before = keep.count();
+            for request in requests then {
+                self.note_witness_roots(
+                    request.concrete_type,
+                    request.trait_name,
+                    request.trait_def_id,
+                    request.trait_type_args,
+                    keep,
+                    worklist,
+                    seen_witness_keys,
+                );
+            };
+            self.expand_call_edges(keep, worklist, by_name);
+            if keep.count() != keep_size_before then {
+                grew = true;
+            };
+        };
+
+        let mutable kept_functions = List[MIRFunction].new();
+        for function in self.program.functions then {
+            if keep.contains(self.callable_c_name(function.identifier)) then {
+                kept_functions.push(function);
+            };
+        };
+        self.program.functions = kept_functions;
+    };
+
+    private note_function(
+        self,
+        identifier: Symbol,
+        keep: Set[String],
+        worklist: List[String],
+    ): Void = {
+        let c_name = self.callable_c_name(identifier);
+        if not keep.contains(c_name) then {
+            keep.insert(c_name);
+            worklist.push(c_name);
+        };
+    };
+
+    private expand_call_edges(
+        self,
+        keep: Set[String],
+        worklist: List[String],
+        by_name: Dict[String, List[MIRFunction]],
+    ): Void = {
+        while not worklist.is_empty() then {
+            let current = worklist.pop().unwrap();
+            when by_name.get(current) in {
+                .Some(functions) then {
+                    for function in functions then {
+                        let mutable refs = List[String].new();
+                        collect_function_body_refs(self, function, refs);
+                        for ref_name in refs then {
+                            if not keep.contains(ref_name) then {
+                                keep.insert(ref_name);
+                                worklist.push(ref_name);
+                            };
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+
+    /// (concrete type, trait) 的见证实现与父 trait 见证实现全部入根。
+    private note_witness_roots(
+        self,
+        concrete_type: Type,
+        trait_name: String,
+        trait_def_id: DefId,
+        trait_type_args: List[Type],
+        keep: Set[String],
+        worklist: List[String],
+        seen: Set[String],
+    ): Void = {
+        let trait_ref = CanonicalTraitRef(trait_name, trait_def_id, trait_type_args);
+        let key = trait_ref.key(concrete_type);
+        if seen.contains(key) then {
+            return;
+        };
+        seen.insert(key);
+        when self.program.conformance_witnesses.get(key) in {
+            .Some(witness) then {
+                for entry in witness.local_implementation_def_ids_by_method_name then {
+                    self.note_witness_def_id(entry.second, keep, worklist);
+                };
+                for entry in witness.local_implementation_def_ids_by_trait_method_def_id then {
+                    self.note_witness_def_id(entry.second, keep, worklist);
+                };
+                for parent in witness.direct_parent_trait_refs then {
+                    self.note_witness_roots(
+                        concrete_type,
+                        parent.trait_name,
+                        parent.trait_def_id,
+                        parent.trait_type_args,
+                        keep,
+                        worklist,
+                        seen,
+                    );
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    /// 见证实现的 DefId 与定义侧可能不同名同 C 名：经 concrete_callable_symbol
+    /// 拿到符号再按 C 名入根，与发射期的解析路径一致（C 名只依赖 DefId）。
+    private note_witness_def_id(
+        self,
+        impl_def_id: DefId,
+        keep: Set[String],
+        worklist: List[String],
+    ): Void = {
+        when self.concrete_callable_symbol(impl_def_id, Type.VoidType()) in {
+            .Some(symbol) then {
+                self.note_function(symbol, keep, worklist);
+            },
+            .None() then {},
+        };
+    };
+};

@@ -382,6 +382,10 @@ public type mutable MonomorphizedProgram(
     mutable extension_methods: Dict[MethodLookupKey, ConcreteMethodEntry],
     mutable extension_method_def_ids_by_identity: Dict[MethodInstanceKey, DefId],
     mutable remapped_function_def_ids: Dict[UInt, List[Pair[DefId, Type]]],
+    // 按 logical_name 倒排的 concrete callable 索引（见 MIRProgram 同名字段：
+    // MIR 降级读的是本表，codegen 读的是 MIRProgram 表，两边各自缓存）。
+    mutable callables_by_name: Dict[String, List[Pair[DefId, ConcreteCallableInfo]]],
+    mutable callables_by_name_count: UInt,
 );
 
 given MonomorphizedProgram {
@@ -389,6 +393,28 @@ given MonomorphizedProgram {
     /// consulted. Delegates to the registry's DefId index.
     public trait_by_def_id(self, def_id: DefId): Option[TraitDeclInfo] = {
         return self.generic_templates.lookup_trait_by_def_id(def_id);
+    };
+
+    /// `logical_name` 为名的 concrete callable，顺序与全表扫描一致。
+    public callables_named(
+        self,
+        name: String,
+    ): List[Pair[DefId, ConcreteCallableInfo]] = {
+        if self.callables_by_name_count != self.concrete_callables_by_def_id.count() then {
+            let mutable rebuilt = Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(
+            );
+            for entry in self.concrete_callables_by_def_id.iterator() then {
+                let mutable bucket = rebuilt.get(entry.second.logical_name) or else List[
+                    Pair[DefId, ConcreteCallableInfo],
+                ].new();
+                bucket.push(entry);
+                rebuilt.insert(entry.second.logical_name, bucket);
+            };
+            self.callables_by_name = rebuilt;
+            self.callables_by_name_count = self.concrete_callables_by_def_id.count();
+        };
+        return self.callables_by_name.get(name) or else List[Pair[DefId, ConcreteCallableInfo]].new(
+        );
     };
 
     public merge_generated_node(self, node: TypedDecl): Void = {
@@ -1664,6 +1690,8 @@ given Monomorphizer {
             self.storage.extension_methods,
             self.storage.extension_method_def_ids_by_identity,
             self.storage.remapped_function_def_ids,
+            Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
+            UInt(0),
         );
     };
 

@@ -32,6 +32,11 @@ public type mutable MIRProgram(
     receiver_method_dispatch: Dict[DefId, ReceiverMethodDispatchInfo],
     concrete_callables_by_def_id: Dict[DefId, ConcreteCallableInfo],
     conformance_witnesses: Dict[String, ConformanceWitness],
+    // 按 logical_name 倒排的 concrete callable 索引：方法解析/见证查找原先
+    // 每个查询全表扫（自举约 9 万条），是 profile 里 DictIterator 大头之一。
+    // 主表只增不减（替换不改名字），计数变化即重建，迭代序与全表扫描一致。
+    mutable callables_by_name: Dict[String, List[Pair[DefId, ConcreteCallableInfo]]],
+    mutable callables_by_name_count: UInt,
 );
 
 /// The DefId index over `traits`. Built alongside the spelling table so the two
@@ -51,6 +56,28 @@ given MIRProgram {
     /// consulted. Mirrors `GenericTemplateRegistry.lookup_trait_by_def_id`.
     public trait_by_def_id(self, def_id: DefId): Option[TraitDeclInfo] = {
         return self.traits_by_def_id.get(def_id.id);
+    };
+
+    /// `logical_name` 为名的 concrete callable，顺序与全表扫描一致。
+    public callables_named(
+        self,
+        name: String,
+    ): List[Pair[DefId, ConcreteCallableInfo]] = {
+        if self.callables_by_name_count != self.concrete_callables_by_def_id.count() then {
+            let mutable rebuilt = Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(
+            );
+            for entry in self.concrete_callables_by_def_id.iterator() then {
+                let mutable bucket = rebuilt.get(entry.second.logical_name) or else List[
+                    Pair[DefId, ConcreteCallableInfo],
+                ].new();
+                bucket.push(entry);
+                rebuilt.insert(entry.second.logical_name, bucket);
+            };
+            self.callables_by_name = rebuilt;
+            self.callables_by_name_count = self.concrete_callables_by_def_id.count();
+        };
+        return self.callables_by_name.get(name) or else List[Pair[DefId, ConcreteCallableInfo]].new(
+        );
     };
 };
 

@@ -23,6 +23,18 @@ public type mutable CompilerContext(
     mutable concrete_given_member_bodies: Dict[UInt, TypedExpr],
     mutable concrete_given_member_sources: Dict[UInt, ConcreteExprSource],
     mutable method_param_specs: Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]],
+
+    // 布局键缓存：MIR 降级/单态化按接收者与签名反复比较布局键（profile 里
+    // layout_key 链占自举 emit 的一到两成），同一类型的答案是稳定字符串。
+    // 与 c_type_name_cache 同款，按 Type 结构键缓存，递归子键也走缓存。
+    mutable layout_key_cache: Dict[Type, String],
+
+    // 名义值依赖 / 环判定备忘录：类型声明拓扑排序对每个定义重算一遍
+    // 字段依赖并做无备忘 DFS（profile 尾段 contains_nominal_value_cycle
+    // 占一成以上）。依赖只读 def_id_map 的声明元数据，编译期稳定。
+    mutable nominal_deps_memo: Dict[UInt, List[DefId]],
+    mutable nominal_deps_in_type_memo: Dict[Type, List[DefId]],
+    mutable nominal_reach_memo: Dict[UInt, Set[UInt]],
 );
 
 public type ConcreteExprSource(
@@ -42,6 +54,10 @@ given CompilerContext {
             Dict[UInt, TypedExpr].new(),
             Dict[UInt, ConcreteExprSource].new(),
             Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]].new(),
+            Dict[Type, String].new(),
+            Dict[UInt, List[DefId]].new(),
+            Dict[Type, List[DefId]].new(),
+            Dict[UInt, Set[UInt]].new(),
         );
     };
 
@@ -54,6 +70,10 @@ given CompilerContext {
             Dict[UInt, TypedExpr].new(),
             Dict[UInt, ConcreteExprSource].new(),
             Dict[MethodOwner, Dict[String, List[FunctionParamSpec]]].new(),
+            Dict[Type, String].new(),
+            Dict[UInt, List[DefId]].new(),
+            Dict[Type, List[DefId]].new(),
+            Dict[UInt, Set[UInt]].new(),
         );
     };
 
@@ -702,35 +722,60 @@ given CompilerContext {
         return cycle;
     };
 
+    /// `target` 是否能经名义值依赖从 `current` 走到（至少一条边）。
+    /// 原实现是无备忘的 trail DFS，每个定义的拓扑序查询都把整张依赖图
+    /// 重走一遍；现在按定义备忘可达闭包（闭包与来路无关，trail 剪枝下
+    /// 的成对答案不能直接复用——那会把「经来路节点」的路径误判成不可达）。
     private contains_nominal_value_cycle(
         self,
         current: DefId,
         target: DefId,
         mutable path: Set[UInt],
     ): Bool = {
-        let dependencies = self.direct_nominal_value_dependencies_of_def(current);
-        for dependency in dependencies then {
-            if dependency.id == target.id then {
-                return true;
-            };
-            if path.contains(dependency.id) then {
+        return self.nominal_value_dependency_closure(current).contains(target.id);
+    };
+
+    /// 从 `def_id` 出发经依赖边（至少一条）可达的全部定义。按定义备忘；
+    /// 环用工作表自然处理（已到达即不再展开）。
+    private nominal_value_dependency_closure(self, def_id: DefId): Set[UInt] = {
+        when self.nominal_reach_memo.get(def_id.id) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
+        let mutable reached = Set[UInt].new();
+        let mutable worklist = List[DefId].new();
+        for dep in self.direct_nominal_value_dependencies_of_def(def_id) then {
+            worklist.push(dep);
+        };
+        while not worklist.is_empty() then {
+            let next = worklist.pop().unwrap();
+            if reached.contains(next.id) then {
                 continue;
             };
-            path.insert(dependency.id);
-            if self.contains_nominal_value_cycle(dependency, target, path) then {
-                return true;
+            reached.insert(next.id);
+            for dep in self.direct_nominal_value_dependencies_of_def(next) then {
+                worklist.push(dep);
             };
-            path.remove(dependency.id);
         };
-        return false;
+        self.nominal_reach_memo.insert(def_id.id, reached);
+        return reached;
     };
 
     private direct_nominal_value_dependencies_of_def(self, def_id: DefId): List[DefId] = {
+        when self.nominal_deps_memo.get(def_id.id) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
+        let mutable result = List[DefId].new();
         if self.is_struct_mutable(def_id) or self.has_explicit_drop(def_id) then {
-            return List[DefId].new();
+            self.nominal_deps_memo.insert(def_id.id, result);
+            return result;
         };
 
-        let mutable result = List[DefId].new();
         if self.def_id_map.get_struct_fields(def_id) is .Some(fields) then {
             for field in fields then {
                 let dependencies = self.direct_nominal_value_dependencies_in_type(
@@ -740,6 +785,7 @@ given CompilerContext {
                     result.push(dependency);
                 };
             };
+            self.nominal_deps_memo.insert(def_id.id, result);
             return result;
         };
 
@@ -755,6 +801,7 @@ given CompilerContext {
                 };
             };
         };
+        self.nominal_deps_memo.insert(def_id.id, result);
         return result;
     };
 
@@ -805,7 +852,22 @@ given CompilerContext {
         };
     };
 
+    /// 按类型结构备忘：同一字段类型（String、List[X]……）在几百个定义里
+    /// 反复出现，每次都要重走 lookup_generic_layout_def_id（布局键 + 名字
+    /// 查找）。只读声明元数据，编译期稳定。
     private direct_nominal_value_dependencies_in_type(self, t: Type): List[DefId] = {
+        when self.nominal_deps_in_type_memo.get(t) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
+        let dependencies = self.compute_nominal_value_dependencies_in_type(t);
+        self.nominal_deps_in_type_memo.insert(t, dependencies);
+        return dependencies;
+    };
+
+    private compute_nominal_value_dependencies_in_type(self, t: Type): List[DefId] = {
         let mutable result = List[DefId].new();
         when t in {
             .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
@@ -1398,7 +1460,23 @@ given CompilerContext {
     // ── Layout Key 生成 ───────────────────────────────────────────────────
 
     /// 生成类型的布局键（用于 C 标识符生成）
+    ///
+    /// 结果按 Type 结构键缓存：接收者匹配与签名比较在一次编译里对同一
+    /// 类型问成千上万次，而键是纯函数式的稳定字符串（与 c_type_name_cache
+    /// 同款做法）。
     public get_layout_key(self, t: Type): String = {
+        when self.layout_key_cache.get(t) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
+        let key = self.compute_layout_key(t);
+        self.layout_key_cache.insert(t, key);
+        return key;
+    };
+
+    private compute_layout_key(self, t: Type): String = {
         return when t in {
             .IntType() then "I",
             .Int8Type() then "I8",

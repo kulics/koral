@@ -14,6 +14,7 @@ using "./codegen_memory.koral";
 using "./codegen_types.koral";
 using "./codegen_vtable.koral";
 using "./codegen_mir.koral";
+using "./codegen_reachability.koral";
 using "./codegen_generate.koral";
 
 // ── TypeDeclaration ───────────────────────────────────────────────────────────
@@ -721,12 +722,9 @@ given CodeGen {
     ): Option[DefId] = {
         let mutable concrete_receiver_type = self.concretize_codegen_type(concrete_type);
         let receiver_key = self.receiver_owner(concrete_receiver_type);
-        for entry in self.program.concrete_callables_by_def_id.iterator() then {
+        for entry in self.program.callables_named(method_name) then {
             let def_id = entry.first;
             let info = entry.second;
-            if info.logical_name != method_name then {
-                continue;
-            };
             let owner_type = info.owner_type or else {
                 continue;
             };
@@ -2932,16 +2930,18 @@ given CodeGen {
     };
 
     push_indent_level(self): Void = {
-        self.indent.push_string("    ");
+        self.indent.push_string(" ");
     };
 
     pop_indent_level(self): Void = {
+        // 与 push_indent_level 的单位（1 空格）一致：早先两边都按 4 空格，
+        // 缩进改 1 后这里必须跟着改，否则每层 pop 多吞 3 字符、嵌套塌到 0 列。
         let len = self.indent.count();
-        if len < UInt(4) then {
+        if len < UInt(1) then {
             self.indent = StringBuilder.new();
             return;
         };
-        let trimmed = self.indent.to_string().substring(0..<(len - UInt(4)));
+        let trimmed = self.indent.to_string().substring(0..<(len - UInt(1)));
         let mutable next_indent = StringBuilder.new();
         next_indent.push_string(trimmed);
         self.indent = next_indent;
