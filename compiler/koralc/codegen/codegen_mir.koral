@@ -1157,7 +1157,9 @@ given MIRFunctionCodeEmitter {
             self.type_of_value(value),
             emission.expression,
         );
-        self.emit_cleanup(emission.cleanup);
+        // 自持临时的 drop 就是上面那句（释放发射物的引用），残余清理必须
+        // 跳过自命名 cleanup，否则同一份引用被放两次。
+        self.emit_residual_cleanups(emission, true);
     };
 
     emit_evaluate(self, value: MIRValue): Void = {
@@ -1413,13 +1415,24 @@ given MIRFunctionCodeEmitter {
     ): MIRValueEmission = {
         let access = self.emit_place_access(place);
         let mutable place_type = self.type_of_place(place);
+        let mutable must_copy = false;
         if ownership is .Move() then {
-            self.consume_moved_place(place);
+            if self.place_is_consumable(place) then {
+                self.consume_moved_place(place);
+            } else {
+                // 根不可消费的 move 读（指针元素/全局/解引用 place、捕获/
+                // 非持有局部）只是别名：源仍持有引用并在之后 drop。必须物
+                // 化 copy（retain）让发射物自持引用，否则任何存放点拿到的
+                // 都是无主引用，源的 drop 会把它一起放掉（双释放）。
+                must_copy = true;
+            };
         };
-        if source_mode or ownership is not .Copy() or not self.codegen.needs_drop(
-            place_type,
-        ) then {
-            return MIRValueEmission(access.path, access.cleanup);
+        if not must_copy then {
+            if source_mode or ownership is not .Copy() or not self.codegen.needs_drop(
+                place_type,
+            ) then {
+                return MIRValueEmission(access.path, access.cleanup);
+            };
         };
         let temp = self.codegen.next_temp_with_decl(
             self.codegen.c_type_name(place_type),
@@ -1430,6 +1443,15 @@ given MIRFunctionCodeEmitter {
             temp,
             self.cleanup_for_temporary_result(temp, place_type),
         );
+    };
+
+    /// consume_moved_place 真能压掉一次 drop 的 place：根是持有 init flag
+    /// 的局部（Capture/非持有局部没有 flag，清 flag 是空操作）。
+    place_is_consumable(self, place: MIRPlace): Bool = {
+        return when self.root_local_of_place(place) in {
+            .Some(local) then self.init_flag(local) is .Some(_),
+            .None() then false,
+        };
     };
 
     emit_binary(self, operation: MIRBinaryOperation): MIRValueEmission = {
@@ -3308,18 +3330,28 @@ given MIRFunctionCodeEmitter {
                 // 旧代码固定 copy + consume：消费型源多 retain 一次永不释放
                 //（每次 Dict/List 插入漏一个句柄）；反过来按 place 家族一刀切
                 // 又会把「源仍持有」的形态搬成 move —— 双重释放。
-                // 注：消费型实参（行内聚合体、take_memory 直参等）的源引用
-                // 会随 consume 清标志 / 残余清理跳过一起消失，copy 进槽的
-                // 那份 retain 无人释放 —— 每次插入漏一个句柄。变量读是
-                // Copy place 读，先 let 绑定再传则局部保留自己的引用、作用域
-                // 末尾正常 drop（list.koral / deque.koral / set.koral 的写法）。
-                // dict.koral 暂留行内聚合形态：配平它要让构造临时真正 drop，
-                // 会触发尚未定位的消费路径双释放（ASan 在案）——先修双释放。
-                self.codegen.append_copy_assignment(
-                    element_type,
-                    v.expression,
-                    "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)",
-                );
+                // 自有临时（cleanup 指向表达式本身）两种去向都不 drop 它：
+                // move 时所有权随 store 转移进槽，copy 时它只是别名载体。
+                let is_owned_temp = when v.cleanup in {
+                    .Some(cleanup) then cleanup.name == v.expression,
+                    .None() then false,
+                };
+                let transferred = self.source_is_consumed(value) or is_owned_temp;
+                let dest = "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)";
+                if transferred then {
+                    self.codegen.append_copy_or_move_assignment(
+                        element_type,
+                        v.expression,
+                        dest,
+                        false,
+                    );
+                } else {
+                    self.codegen.append_copy_assignment(
+                        element_type,
+                        v.expression,
+                        dest,
+                    );
+                };
                 self.consume_moved_source(value);
                 self.emit_cleanup(p.cleanup);
                 self.emit_residual_cleanups(v, true);
@@ -3947,6 +3979,34 @@ given MIRFunctionCodeEmitter {
             },
             _ then {},
         };
+    };
+
+    /// init_memory 的 store 应该转移还是保留所有权，判据与
+    /// consume_moved_source 同构：consume 真会压掉一次 drop 的形态 → 转移
+    ///（move store，不 retain）；其余形态源仍持有自己的引用 → 保留
+    ///（copy store，retain 一份）。判据是「consume 真能接管」：目标局部
+    /// 持有 init flag（Capture/非持有局部清 flag 是空操作，只是别名）。
+    source_is_consumed(self, value: MIRValue): Bool = {
+        return when value in {
+            .Operand(.Local(local)) then self.init_flag(local) is .Some(_),
+            .PlaceRead(place, ownership) then ownership is .Move()
+                and self.place_is_consumable(place),
+            .Cast(operand, target_type, _) then self.cast_source_is_consumed(
+                operand,
+                target_type,
+            ),
+            .Ref(place, _, allocation) then allocation is .HeapOwnedMove()
+                and self.place_is_consumable(place),
+            _ then false,
+        };
+    };
+
+    cast_source_is_consumed(self, operand: MIROperand, target_type: Type): Bool = {
+        let source_type = self.type_of_value(MIRValue.Operand(operand));
+        if not self.is_ownership_preserving_cast(source_type, target_type) then {
+            return false;
+        };
+        return self.source_is_consumed(MIRValue.Operand(operand));
     };
 
     should_copy_borrowed_aggregate_field(self, value: MIRValue): Bool = {

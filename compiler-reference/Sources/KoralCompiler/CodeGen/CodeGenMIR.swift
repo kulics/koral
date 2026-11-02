@@ -946,7 +946,9 @@ final class MIRFunctionCodeEmitter {
   private func emitRelease(_ value: MIRValue) {
     let emission = emitValue(value, sourceMode: true)
     codeGen.appendDropStatement(for: resolver.type(of: value) ?? .void, value: emission.expression, indent: codeGen.indent)
-    emitCleanups(emission.cleanups)
+    // The drop above IS the owned temporary's own release; residual cleanups
+    // must skip its self-named cleanup or the reference is released twice.
+    emitCleanups(residualCleanups(for: emission, consumedExpression: true))
   }
 
   private func emitEvaluate(_ value: MIRValue) {
@@ -1435,17 +1437,36 @@ final class MIRFunctionCodeEmitter {
     let access = emitPlaceAccess(place)
     let type = resolver.type(of: place) ?? .void
 
+    var mustCopy = false
     if ownership == .move {
-      consumeMovedPlace(place)
+      if placeIsConsumable(place) {
+        consumeMovedPlace(place)
+      } else {
+        // A move read with an unconsumable root (pointer-element / global /
+        // deref places, capture / non-owning locals) is a mere alias: the
+        // source keeps its reference and drops it later. Materialize a copy
+        // (retain) so the emission owns its own reference -- otherwise any
+        // stash site holds an ownerless reference that the source's drop
+        // frees along with its own (double release).
+        mustCopy = true
+      }
     }
 
-    if sourceMode || ownership != .copy || !codeGen.needsDrop(type) {
+    if !mustCopy && (sourceMode || ownership != .copy || !codeGen.needsDrop(type)) {
       return MIRValueEmission(expression: access.path, cleanups: access.cleanups)
     }
 
     let temp = codeGen.emitTempCopyOrMove(type: type, source: access.path, isLvalue: true)
     emitCleanups(access.cleanups)
     return MIRValueEmission(expression: temp, cleanups: cleanupForTemporaryResult(expression: temp, type: type))
+  }
+
+  /// Places whose consume really suppresses a drop: the root is a local with
+  /// an init flag (captures / non-owning locals have none -- clearing their
+  /// flag would be a no-op).
+  private func placeIsConsumable(_ place: MIRPlace) -> Bool {
+    guard let local = rootLocal(of: place) else { return false }
+    return initFlagByLocalID[local] != nil
   }
 
   private func emitBinary(_ operation: MIRBinaryOperation) -> MIRValueEmission {
@@ -2283,21 +2304,17 @@ final class MIRFunctionCodeEmitter {
       // per call on consumed sources (every Dict/List insert); keying only on
       // the place family instead moves sources that keep ownership -- double
       // release.
-      // NOTE: consumed-shape operands (inline aggregates, direct take_memory
-      // results, ...) leave the store's retain unpaired once consumeMovedSource
-      // clears the source flag -- one leaked handle per insert. A variable read
-      // is a .copy place read, which pairs: bind such values to a local first
-      // and the local drops its own reference at scope end (the idiom in
-      // list.koral / deque.koral / set.koral). dict.koral still passes inline
-      // aggregates: pairing it means letting the construction temporary
-      // actually drop, which trips the still-unlocated consumed-source double
-      // release (ASan evidence on file) -- fix that first.
-      codeGen.appendCopyAssignment(
-        for: elementType,
-        source: valueEmission.expression,
-        dest: "*(\(codeGen.cTypeName(elementType))*)\(ptrEmission.expression)",
-        indent: codeGen.indent
-      )
+      // A self-named cleanup (the emission names its own temporary) is never
+      // dropped in either direction: on a move the ownership rides into the
+      // slot, on a copy it is only an alias carrier.
+      let isOwnedTemp = valueEmission.cleanups.contains { $0.name == valueEmission.expression }
+      let transferred = sourceIsConsumed(value) || isOwnedTemp
+      let dest = "*(\(codeGen.cTypeName(elementType))*)\(ptrEmission.expression)"
+      if transferred {
+        codeGen.emitCopyOrMove(type: elementType, source: valueEmission.expression, dest: dest, isLvalue: false)
+      } else {
+        codeGen.appendCopyAssignment(for: elementType, source: valueEmission.expression, dest: dest, indent: codeGen.indent)
+      }
       consumeMovedSource(value)
       emitCleanups(ptrEmission.cleanups)
       emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
@@ -2810,6 +2827,35 @@ final class MIRFunctionCodeEmitter {
       }
     default:
       break
+    }
+  }
+
+  /// Whether init_memory's store must transfer or keep ownership, isomorphic
+  /// with consumeMovedSource: shapes consume really takes over -> transfer
+  /// (move store, no retain); everything else keeps the source's own
+  /// reference -> keep (copy store, retain).
+  /// A .move place read only counts as transferred when its root is
+  /// consumable (a local whose init flag consume can clear to suppress the
+  /// source's drop); a move read with an unconsumable root (pointer-element /
+  /// global / deref places) is a mere alias -- the source keeps its reference
+  /// and drops it later, so the store must retain or the source's drop frees
+  /// the reference the store is holding (double release).
+  private func sourceIsConsumed(_ value: MIRValue) -> Bool {
+    switch value {
+    case .operand(.local(let local)):
+      return initFlagByLocalID[local] != nil
+    case .placeRead(let place, let ownership):
+      return ownership == .move && placeIsConsumable(place)
+    case .cast(let operand, let targetType, _):
+      let sourceType = resolver.type(of: operand) ?? targetType
+      guard isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) else {
+        return false
+      }
+      return sourceIsConsumed(.operand(operand))
+    case .ref(let place, _, let allocation):
+      return allocation == .heapOwnedMove && placeIsConsumable(place)
+    default:
+      return false
     }
   }
 
