@@ -618,6 +618,224 @@ given TypeChecker {
         return self.combine_arithmetic_operands(typed_target, op, typed_value, blame_span);
     };
 
+    /// Compound assignment (`x op= v`) for the bitwise family: the value must
+    /// already have the target's type, exactly like `combine_compound_arithmetic_operands`,
+    /// then the combination dispatches the same way the binary operator does.
+    combine_compound_bitwise_operands(
+        self,
+        typed_target: TypedExpr,
+        op: BitwiseOperator,
+        typed_value: TypedExpr,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
+        let target_t = typed_target.expr_type;
+        let value_t = typed_value.expr_type;
+        if not self.same_expr_type(target_t, value_t) and not self.is_unresolved_expr_type(
+            self.concretize_default_literal_type(target_t),
+        ) and not self.is_unresolved_expr_type(
+            self.concretize_default_literal_type(value_t),
+        ) and target_t is not .NeverType() and value_t is not .NeverType() then {
+            self.push_diagnostic(
+                "Type mismatch: expected \(self.display_type_name(target_t)), got \(self.display_type_name(value_t))",
+                blame_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_target, op, typed_value),
+                Type.Unknown(),
+            );
+        };
+        return self.combine_bitwise_operands(typed_target, op, typed_value, blame_span);
+    };
+
+    /// Whether `t` can carry an overloaded bitwise operator: a nominal type a
+    /// `given` can extend, or a generic parameter that must satisfy the bound.
+    /// Builtin scalars and pointer-like shapes are the built-in rules' turf.
+    bitwise_overload_candidate(self, t: Type): Bool = {
+        let _ = self;
+        return when t in {
+            .StructureType(_) or .EnumType(_) or .GenericStruct(_, _) or .GenericEnum(_, _)
+            or .OpaqueType(_) or .GenericParameter(_) or .TraitObject(_, _) then true,
+            _ then false,
+        };
+    };
+
+    /// Combine two already-typed operands with a bitwise `op`. A same-width
+    /// integer pair -- either family -- stays a plain bitwise node: checked
+    /// shifts for the regular family, masking for Wrapping. Anything else
+    /// dispatches through the `BitAnd`/`BitOr`/... trait so user types work,
+    /// the way `combine_arithmetic_operands` serves the algebraic family. Two
+    /// builtin scalars the built-in rule refuses keep its complaint -- `1 &
+    /// true` teaches integers, not traits.
+    combine_bitwise_operands(
+        self,
+        typed_left: TypedExpr,
+        op: BitwiseOperator,
+        typed_right: TypedExpr,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
+        let left_raw_t = typed_left.expr_type;
+        let right_raw_t = typed_right.expr_type;
+        let left_t = self.concretize_default_literal_type(left_raw_t);
+        let right_t = self.concretize_default_literal_type(right_raw_t);
+        if left_t is .NeverType() or right_t is .NeverType() then {
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                Type.NeverType(),
+            );
+        };
+        // An unresolved operand has already complained; the combination has
+        // no further disagreement to report (no trait note, no mismatch).
+        if self.is_unresolved_expr_type(left_t) or self.is_unresolved_expr_type(right_t) then {
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                Type.Unknown(),
+            );
+        };
+        if self.is_integer_type(left_t) and self.same_expr_type(left_t, right_t) then {
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                left_t,
+            );
+        };
+        if not self.bitwise_overload_candidate(left_t) and not self.bitwise_overload_candidate(
+            right_t,
+        ) then {
+            self.push_diagnostic(
+                "Type mismatch: expected Matching Integer Types, got \(self.display_type_name(left_t)) \(self.bitwise_operator_name(op)) \(self.display_type_name(right_t))",
+                blame_span,
+            );
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                left_t,
+            );
+        };
+        let trait_name = self.bitwise_trait_name(op);
+        let method_name = self.bitwise_method_name(op);
+        let trait_def_id = self.lang_trait_def_id(trait_name);
+        let mutable trait_args = List[Type].new();
+        if self.same_expr_type(left_t, right_t) then {
+            trait_args.push(left_t);
+        } else {
+            trait_args.push(right_t);
+        };
+        // Unwrap reference types before checking for GenericParameter, the
+        // same shape `combine_arithmetic_operands` uses.
+        let unwrapped_left = when left_t in {
+            .ReferenceType(inner) or .MutableReferenceType(inner) then inner,
+            _ then left_t,
+        };
+        when unwrapped_left in {
+            .GenericParameter(_) then {
+                if not self.generic_parameter_satisfies_trait_constraint(
+                    unwrapped_left,
+                    trait_def_id,
+                    trait_name,
+                    trait_args,
+                ) then {
+                    // The same blame shape the arithmetic family uses: the
+                    // complaint is about the missing bound on T, not the pair.
+                    let type_name = self.context().type_display_name(left_t);
+                    self.push_diagnostic(
+                        "Invalid operation \(self.bitwise_operator_name(op)) between types \(type_name) and \(type_name)",
+                        blame_span,
+                    );
+                    return make_typed_expr(
+                        TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                        Type.Unknown(),
+                    );
+                };
+                return self.build_arithmetic_method_call(
+                    typed_left,
+                    typed_right,
+                    method_name,
+                    unwrapped_left,
+                );
+            },
+            _ then {},
+        };
+        if not self.enforce_explicit_generic_trait_conformance_with_note(
+            left_t,
+            trait_def_id,
+            trait_name,
+            trait_args,
+            "operator '\(method_name)'",
+            blame_span,
+        ) then {
+            // The record-and-continue shape the algebraic family uses: a
+            // NOMINAL's missing conformance is recorded, then the receiver's
+            // own operator method is given its chance.
+            let records_and_continues = self.generic_trait_conformance_status(
+                left_t,
+                trait_def_id,
+                trait_name,
+                trait_args,
+            ) is .MissingConformance() and self.type_modifier_inner_type(left_t) is .None();
+            if records_and_continues then {
+                return self.bitwise_operator_method_followon(
+                    typed_left,
+                    left_t,
+                    op,
+                    typed_right,
+                    right_t,
+                    blame_span,
+                );
+            };
+            return make_typed_expr(
+                TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+                Type.Unknown(),
+            );
+        };
+        return self.build_arithmetic_method_call(
+            typed_left,
+            typed_right,
+            method_name,
+            left_t,
+        );
+    };
+
+    /// The bitwise twin of `arithmetic_operator_method_followon`: once the
+    /// missing conformance is on the record, try the operator method the
+    /// receiver does have and check the neighbour against that method's
+    /// operand -- or report the method as missing. Both complaint lines land
+    /// on the same span the conformance line used.
+    bitwise_operator_method_followon(
+        self,
+        typed_left: TypedExpr,
+        left_t: Type,
+        op: BitwiseOperator,
+        typed_right: TypedExpr,
+        right_t: Type,
+        blame_span: SourceSpan,
+    ): TypedExpr = {
+        let method_name = self.bitwise_method_name(op);
+        let error_node = make_typed_expr(
+            TypedExprKind.BitwiseExpr(typed_left, op, typed_right),
+            Type.Unknown(),
+        );
+        if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
+            let params = self.resolve_method_param_types(left_t, method_name);
+            let expected_t = if params.is_empty() then left_t else params[UInt(0)];
+            if not self.same_expr_type(expected_t, right_t) then {
+                self.push_diagnostic(
+                    "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(right_t))",
+                    blame_span,
+                );
+                return error_node;
+            };
+            return self.build_arithmetic_method_call(
+                typed_left,
+                typed_right,
+                method_name,
+                left_t,
+            );
+        };
+        self.push_diagnostic(
+            "Member '\(method_name)' not found in type '\(self.context().type_display_name(left_t))'",
+            blame_span,
+        );
+        return error_node;
+    };
+
     /// The pairs the seed refuses before it builds the node. Legal here:
     /// numeric x numeric of one type (the join already ran), and
     /// `pointer +/- offset` where the offset is an UInt or an integer literal
@@ -885,21 +1103,11 @@ given TypeChecker {
                 return self.empty_typed_block(Type.Unknown());
             };
             let op_i = ops[i - UInt(1)];
-            // A bitwise operation is defined on one integer width at a time:
-            // both sides must be the same integer scalar type -- either family.
-            // `1 & true` is not a narrower rule about `true`, it is not a
-            // bitwise operation.
-            if not self.is_integer_type(current.expr_type) or not self.is_integer_type(
-                typed_right.expr_type,
-            ) or not self.same_expr_type(current.expr_type, typed_right.expr_type) then {
-                self.push_diagnostic(
-                    "Type mismatch: expected Matching Integer Types, got \(self.display_type_name(current.expr_type)) \(self.bitwise_operator_name(op_i)) \(self.display_type_name(typed_right.expr_type))",
-                    expr_span(first_operand),
-                );
-            };
-            current = make_typed_expr(
-                TypedExprKind.BitwiseExpr(current, op_i, typed_right),
-                current.expr_type,
+            current = self.combine_bitwise_operands(
+                current,
+                op_i,
+                typed_right,
+                expr_span(first_operand),
             );
             i += 1;
         };
@@ -2313,6 +2521,29 @@ given TypeChecker {
             .Multiply() then "multiply",
             .Divide() then "divide",
             .Remainder() then "remainder",
+        };
+    };
+
+    /// The bitwise family's trait names, the `Add`/`Sub`/... table's twin.
+    bitwise_trait_name(self, op: BitwiseOperator): String = {
+        return when op in {
+            .BitAnd() then "BitAnd",
+            .BitOr() then "BitOr",
+            .BitXor() then "BitXor",
+            .LeftShift() then "ShiftLeft",
+            .RightShift() then "ShiftRight",
+        };
+    };
+
+    /// The method each bitwise operator spells as a declaration, mirroring
+    /// `arithmetic_method_name`.
+    bitwise_method_name(self, op: BitwiseOperator): String = {
+        return when op in {
+            .BitAnd() then "bit_and",
+            .BitOr() then "bit_or",
+            .BitXor() then "bit_xor",
+            .LeftShift() then "shift_left",
+            .RightShift() then "shift_right",
         };
     };
 

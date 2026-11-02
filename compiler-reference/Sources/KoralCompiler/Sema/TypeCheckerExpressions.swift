@@ -2430,18 +2430,38 @@ extension TypeChecker {
         }
       }
 
-      if typedLeft.type != .error && typedRight.type != .error && (!typedLeft.type.isIntegerType || typedLeft.type != typedRight.type) {
-        throw SemanticError.typeMismatch(
-          expected: "Matching Integer Types", got: "\(typedLeft.type) \(op) \(typedRight.type)")
-      }
-      return .bitwiseExpression(left: typedLeft, op: op, right: typedRight, type: typedLeft.type, span: left.span)
+      return try buildBitwiseExpression(op: op, lhs: typedLeft, rhs: typedRight, span: left.span)
 
-    case .bitwiseNotExpression(let expr, _):
+    case .bitwiseNotExpression(let expr, let unarySpan):
       let typedExpr = try inferTypedExpression(expr)
-      if typedExpr.type != .error && !isIntegerScalarType(typedExpr.type) {
+      if typedExpr.type == .error {
+        return .bitwiseNotExpression(expression: typedExpr, type: typedExpr.type)
+      }
+      if isIntegerScalarType(typedExpr.type) {
+        return .bitwiseNotExpression(expression: typedExpr, type: typedExpr.type)
+      }
+      if !isBitwiseOverloadCandidate(typedExpr.type) {
         throw SemanticError.typeMismatch(expected: "Integer Type", got: typedExpr.type.description)
       }
-      return .bitwiseNotExpression(expression: typedExpr, type: typedExpr.type)
+      // A generic parameter without the bound names the bound, the same shape
+      // the binary family's missing-bound complaint takes.
+      if case .genericParameter(let paramName) = typedExpr.type,
+        resolvedTraitBound(paramName, traitName: "BitNot") == nil {
+        throw SemanticError(
+          .generic("Type \(typedExpr.type) does not explicitly implement trait BitNot (operator 'bit_not')"),
+          span: unarySpan)
+      }
+      if let call = try buildOperatorMethodCall(
+        base: typedExpr,
+        methodName: "bit_not",
+        traitName: "BitNot",
+        requiredTraitArgs: nil,
+        arguments: [],
+        span: unarySpan
+      ) {
+        return call
+      }
+      throw SemanticError.undefinedMember("bit_not", typedExpr.type.description)
 
     case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
@@ -8319,6 +8339,82 @@ extension TypeChecker {
     throw SemanticError.undefinedMember(methodName, lhs.type.description)
   }
 
+  /// Whether `t` can carry an overloaded bitwise operator: a nominal type a
+  /// `given` can extend, or a generic parameter that must satisfy the bound.
+  /// Builtin scalars and pointer-like shapes are the built-in rules' turf.
+  private func isBitwiseOverloadCandidate(_ t: Type) -> Bool {
+    switch t {
+    case .structure, .enum, .genericStruct, .genericEnum, .opaque, .genericParameter,
+      .traitObject:
+      return true
+    default:
+      return false
+    }
+  }
+
+  /// The bitwise family's binary surface: `& | ^ << >>`. A same-width integer
+  /// pair -- either family -- stays the built-in node (checked shifts for the
+  /// regular family, masking for Wrapping); anything else dispatches through
+  /// the `BitAnd`/`BitOr`/... trait so user types work, the way
+  /// `buildArithmeticExpression` serves the algebraic family. Two builtin
+  /// scalars the built-in rule refuses keep its complaint -- `1 & true`
+  /// teaches integers, not traits.
+  func buildBitwiseExpression(
+    op: BitwiseOperator,
+    lhs: TypedExpressionNode,
+    rhs: TypedExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    if lhs.type == .error || rhs.type == .error {
+      return failedExpression()
+    }
+    let left = lhs
+    let right = rhs
+
+    if left.type.isIntegerType && left.type == right.type {
+      return .bitwiseExpression(left: left, op: op, right: right, type: left.type, span: span)
+    }
+
+    if !isBitwiseOverloadCandidate(left.type) && !isBitwiseOverloadCandidate(right.type) {
+      throw SemanticError.typeMismatch(
+        expected: "Matching Integer Types", got: "\(left.type) \(op) \(right.type)")
+    }
+
+    return try buildNonNumericBitwiseExpression(op: op, lhs: left, rhs: right, span: span)
+  }
+
+  private func buildNonNumericBitwiseExpression(
+    op: BitwiseOperator,
+    lhs: TypedExpressionNode,
+    rhs: TypedExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    let sameType = lhs.type == rhs.type
+    let traitArgs: [Type] = sameType ? [lhs.type] : [rhs.type]
+
+    let traitName: String
+    let methodName: String
+    switch op {
+    case .and:        traitName = "BitAnd";     methodName = "bit_and"
+    case .or:         traitName = "BitOr";      methodName = "bit_or"
+    case .xor:        traitName = "BitXor";     methodName = "bit_xor"
+    case .shiftLeft:  traitName = "ShiftLeft";  methodName = "shift_left"
+    case .shiftRight: traitName = "ShiftRight"; methodName = "shift_right"
+    }
+
+    if let call = try buildOperatorMethodCall(
+      base: lhs,
+      methodName: methodName,
+      traitName: traitName,
+      requiredTraitArgs: traitArgs,
+      arguments: [rhs],
+      span: span
+    ) {
+      return call
+    }
+    throw SemanticError.undefinedMember(methodName, lhs.type.description)
+  }
+
   /// `span` names the construct that needs the trait -- the operator, the
   /// interpolated value. Left unset the diagnostic falls back to `currentSpan`,
   /// which is the enclosing expression and is usually the wrong one.
@@ -8426,6 +8522,11 @@ extension TypeChecker {
       case "mul": opName = "multiply"
       case "div": opName = "divide"
       case "rem": opName = "remainder"
+      case "bit_and": opName = "and"
+      case "bit_or": opName = "or"
+      case "bit_xor": opName = "xor"
+      case "shift_left": opName = "shiftLeft"
+      case "shift_right": opName = "shiftRight"
       default: opName = "operation"
       }
       throw SemanticError(

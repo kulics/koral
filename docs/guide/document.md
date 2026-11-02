@@ -2621,12 +2621,18 @@ The built-in operator mappings are:
 - `*` -> `Mul[R]` via `mul(self, other: R): Self`
 - `/` -> `Div[R]` via `div(self, other: R): Self`
 - `%` -> `Rem[R]` via `rem(self, other: R): Self`
+- `&` -> `BitAnd[R]` via `bit_and(self, other: R): Self`
+- `|` -> `BitOr[R]` via `bit_or(self, other: R): Self`
+- `^` -> `BitXor[R]` via `bit_xor(self, other: R): Self`
+- `~` (unary) -> `BitNot` via `bit_not(self): Self`
+- `<<` -> `ShiftLeft[R]` via `shift_left(self, other: R): Self`
+- `>>` -> `ShiftRight[R]` via `shift_right(self, other: R): Self`
 - `==` / `!=` -> `Eq` via `equals(self, other: Self): Bool`
 - `<` / `>` / `<=` / `>=` -> `Ord` via `compare(self, other: Self): Int`
 
 Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
 
-Bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) are currently built-in and are not customized through public operator traits.
+A pair of same-width integer operands (the `Wrapping` family included) takes the built-in path for the arithmetic and bitwise operators -- checked arithmetic and shifts for the regular family, modular arithmetic and masked shift amounts for `Wrapping` -- and everything else dispatches through the traits above.
 
 ```koral
 type Vec2(x: Int, y: Int);
@@ -2653,6 +2659,33 @@ let flipped = -sum;
 let same = sum == Vec2(4, 6);
 let ordered = Vec2(1, 0) < Vec2(2, 0);
 ```
+
+Bitwise operators overload the same way:
+
+```koral
+type Bits(mask: UInt32);
+
+given Bits: BitAnd[Bits] {
+    bit_and(self, other: Bits): Bits = Bits(self.mask & other.mask);
+};
+
+given Bits: BitNot {
+    bit_not(self): Bits = Bits(~self.mask);
+};
+
+// The rhs type is the trait's `R`: a shift count reads naturally as `Int`.
+given Bits: ShiftLeft[Int] {
+    shift_left(self, other: Int): Bits = Bits(self.mask << UInt32(other));
+};
+
+let both = Bits(0xF0) & Bits(0x33);
+let complement = ~both;
+let wide = Bits(1) << 8;
+```
+
+Compound assignment (`&=`, `|=`, `^=`, `<<=`, `>>=`) follows the same rule as
+`+=`: the value must already have the target's type, so a shift by a plain
+count takes the binary form (`wide = wide << 1`).
 
 #### Builtin Subscript Rules
 
@@ -2700,6 +2733,7 @@ let p = Point.origin();
 The most commonly used core traits are:
 
 - `Add[R]` / `Sub[R]` / `Neg` / `Mul[R]` / `Div[R]` / `Rem[R]`: arithmetic operator traits.
+- `BitAnd[R]` / `BitOr[R]` / `BitXor[R]` / `BitNot` / `ShiftLeft[R]` / `ShiftRight[R]`: bitwise operator traits.
 - `Eq` / `Ord`: equality and ordering.
 - `Hash`: hash support for dict/set keys.
 - `ToString`: conversion to string.
@@ -2709,7 +2743,7 @@ The most commonly used core traits are:
 - `Error`: error message interface (`message(self): String`).
 - `Drop`: destructor hook (`drop(self): Void`).
 
-Arithmetic and comparison operators are lowered to trait methods internally (for example `+` to `Add`). Subscripts are resolved by builtin compiler rules instead of public traits.
+Arithmetic, bitwise, and comparison operators are lowered to trait methods internally (for example `+` to `Add`, `&` to `BitAnd`). Subscripts are resolved by builtin compiler rules instead of public traits.
 
 ### Modules and Visibility
 
