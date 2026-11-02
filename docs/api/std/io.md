@@ -2,162 +2,266 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Io API
+# std/io API
 
 ## Overview
-This page lists the public API of module `Std.Io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/io` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/io" { ... };`.
 
 ## Free Functions
 ```koral
+/// The process standard input stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
 public let stdin(): Stdin;
 
+/// The process standard output stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
 public let stdout(): Stdout;
 
+/// The process standard error stream. Each call returns a fresh handle over
+/// the same stream; the private field makes this the only construction path.
 public let stderr(): Stderr;
 ```
 
 ## Traits
 ```koral
+/// A byte source that fills caller-provided buffers.
 public trait Reader {
+    /// Fill `into[span]` with bytes and return the count read; `Ok(0)` marks end of input.
+    /// `span` defaults to the whole buffer, which is what every caller wants
+    /// unless it is resuming a partial transfer.
     read(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
 };
 
+/// A byte sink that consumes caller-provided buffers.
 public trait Writer {
+    /// Write bytes from `from[span]` and return the count written.
     write(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    /// Write any buffered bytes to the underlying sink.
     flush(self): Result[Void];
 };
 
+/// A stream whose cursor can be repositioned.
 public trait Seeker {
+    /// Move the cursor to `pos` and return its new absolute position.
     seek(self, pos: SeekOrigin): Result[UInt64];
 };
 ```
 
 ## Types
 ```koral
+/// Buffered reader that wraps any `Reader`, serving reads from an internal buffer.
 public type mutable BufReader[R: Reader];
 
+/// Buffered writer that wraps any `Writer`, flushing its internal buffer when full.
 public type mutable BufWriter[W: Writer];
 
+/// In-memory byte stream with a single cursor, supporting `Reader`, `Writer`, and `Seeker`.
 public type mutable ByteBuffer;
 
+/// IO failure: `InvalidUtf8` for bad UTF-8, `WriteZero` for an empty write, or `Other` with a detail message.
 public type IoError {
     InvalidUtf8(),
     WriteZero(),
     Other(detail: String),
 };
 
+/// The reference point and offset for a seek: from the start, the current position, or the end, where `Current` and `End` offsets may be negative.
 public type SeekOrigin {
     Start(offset: UInt64),
     End(offset: Int64),
     Current(offset: Int64),
 };
 
+/// Process standard input (fd 0) as a byte stream.
+/// Unbuffered: every `read` is one OS read; wrap in `BufReader` for
+/// line-oriented or chunked consumption. Acquire via `stdin()` -- the private
+/// handle makes the literal unusable outside this file.
 public type mutable Stdin;
 
+/// Process standard output (fd 1) as a byte stream.
+/// Write-through and unbuffered, so mixing with `print`/`println` stays
+/// ordered; batch with `BufWriter` for throughput. Acquire via `stdout()` --
+/// the private handle makes the literal unusable outside this file.
 public type mutable Stdout;
 
+/// Process standard error (fd 2) as a byte stream.
+/// Write-through and unbuffered like `Stdout` -- stderr is the immediate
+/// stream by universal convention. Acquire via `stderr()` -- the private
+/// handle makes the literal unusable outside this file.
 public type mutable Stderr;
 ```
 
 ## Given Implementations
 ```koral
+/// Creates `BufReader` values and provides byte, rune, delimiter, and line reads.
 given[R: Reader] BufReader[R] {
+    /// Wrap `r` in a reader with a 4096-byte buffer.
     public new(r: R): BufReader[R];
+    /// Wrap `r` in a reader with a `cap`-byte buffer, panicking when `cap` is zero.
     public with_capacity(cap: UInt, r: R): BufReader[R];
+    /// Read one byte through the buffer, returning `None` at end of input.
     public read_byte(self): Result[Option[UInt8]];
+    /// Read one UTF-8 rune through the buffer, returning `None` at end of input and failing on invalid UTF-8.
     public read_rune(self): Result[Option[Rune]];
+    /// Read bytes through `delim` into `into[span]` and return the count copied, delimiter included.
+    /// `span` bounds where the delimiter is looked for and where bytes land,
+    /// defaulting to the whole buffer like `Reader.read`.
     public read_until(self, delim: UInt8, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    /// Read one line through its newline as a `String`, returning `None` at end of input and failing on invalid UTF-8.
     public read_line(self): Result[Option[String]];
+    /// Skip the next `n` bytes, returning the count actually skipped when input ends early.
     public skip(self, n: UInt): Result[UInt];
 };
 
+/// Implements `Reader` through the internal buffer.
 given[R: Reader] BufReader[R]: Reader {
+    /// Fill `into[span]` from buffered bytes, refilling from the inner reader as needed, and return the count read.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Implements `Seeker`, adjusting `Current` offsets for unread buffered bytes and then discarding them.
 given[R: Reader and Seeker] BufReader[R]: Seeker {
+    /// Move the inner reader to `pos`, discarding buffered bytes after compensating `Current` for the unread ones.
     public seek(self, pos: SeekOrigin): Result[UInt64];
 };
 
+/// Creates `BufWriter` values and provides byte, string, line, and rune writes.
 given[W: Writer] BufWriter[W] {
+    /// Wrap `w` in a writer with a 4096-byte buffer.
     public new(w: W): BufWriter[W];
+    /// Wrap `w` in a writer with a `cap`-byte buffer, panicking when `cap` is zero.
     public with_capacity(cap: UInt, w: W): BufWriter[W];
+    /// Buffer one byte, flushing to the inner writer first when the buffer is full.
     public write_byte(self, b: UInt8): Result[Void];
+    /// Buffer the UTF-8 bytes of `s`.
     public write_string(self, s: String): Result[Void];
+    /// Buffer the UTF-8 bytes of `s` followed by a newline.
     public write_line(self, s: String): Result[Void];
+    /// Buffer `r` as its UTF-8 encoding.
     public write_rune(self, r: Rune): Result[Void];
 };
 
+/// Implements `Writer` through the internal buffer.
 given[W: Writer] BufWriter[W]: Writer {
+    /// Writes data from `from[span]` into the internal buffer, auto-flushing when full, and returns the count written.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
     public flush(self): Result[Void];
 };
 
+/// Implements `Seeker`, flushing before moving the inner writer's cursor.
 given[W: Writer and Seeker] BufWriter[W]: Seeker {
+    /// Flush the internal buffer, then move the inner writer to `pos`.
     public seek(self, pos: SeekOrigin): Result[UInt64];
 };
 
+/// Implements `Drop`, freeing the buffer's heap allocation.
 given ByteBuffer: Drop {};
 
+/// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
+    /// Create an empty byte buffer.
     public new(): ByteBuffer;
+    /// Create an empty byte buffer with room for at least `cap` bytes.
     public with_capacity(cap: UInt): ByteBuffer;
+    /// Create a byte buffer holding the UTF-8 bytes of `s`.
     public from_string(s: String): ByteBuffer;
+    /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer;
 };
 
+/// Implements `Reader`, reading from the buffer's cursor.
 given ByteBuffer: Reader {
+    /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Implements `Writer`, writing at the buffer's cursor and growing the buffer as needed.
 given ByteBuffer: Writer {
+    /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// Flush is a no-op here, since writes already land in the buffer.
     public flush(self): Result[Void];
 };
 
+/// Implements `Seeker`, moving the cursor within the buffer.
 given ByteBuffer: Seeker {
+    /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
     public seek(self, pos: SeekOrigin): Result[UInt64];
 };
 
+/// Implements `Error`, giving each case a human-readable message.
 given IoError: Error {
+    /// Return the human-readable description of this failure.
     public message(self): String;
 };
 
+/// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stdin {
+    /// Returns the underlying OS file descriptor (0).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
     public fd(self): Int;
+    /// Whether the stream is attached to a console/terminal.
     public is_terminal(self): Bool;
 };
 
+/// Implements `Reader` with unbuffered OS reads.
 given Stdin: Reader {
+    /// Unbuffered: directly calls the OS read, errors returned immediately.
+    /// Returns the number of bytes transferred; `Ok(0)` means EOF.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stdout {
+    /// Returns the underlying OS file descriptor (1).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
     public fd(self): Int;
+    /// Whether the stream is attached to a console/terminal.
     public is_terminal(self): Bool;
 };
 
+/// Implements `Writer` with unbuffered OS writes.
 given Stdout: Writer {
+    /// Unbuffered: directly calls the OS write, errors returned immediately.
+    /// Returns the number of bytes transferred; short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
 
+/// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stderr {
+    /// Returns the underlying OS file descriptor (2).
+    /// This is a low-level operation for interop with OS APIs, contract of `File.fd`.
     public fd(self): Int;
+    /// Whether the stream is attached to a console/terminal.
     public is_terminal(self): Bool;
 };
 
+/// Implements `Writer` with unbuffered OS writes.
 given Stderr: Writer {
+    /// Unbuffered: directly calls the OS write, errors returned immediately.
+    /// Returns the number of bytes transferred; short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
 
+/// Adds whole-stream reads to every `Reader`.
 given Reader {
+    /// Read all bytes from self until EOF. Returns all bytes as a list.
     public read_all(self): Result[List[UInt8]];
+    /// Copy all bytes from self to dst. Returns total bytes copied.
     public copy_all_to[W: Writer](self, dst: W): Result[UInt];
 };
 
+/// Adds whole-buffer writes to every `Writer`.
 given Writer {
+    /// Write all bytes in `from[span]` to self, looping on short writes. `span`
+    /// defaults to the whole buffer, like `Writer.write`.
     public write_all(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[Void];
 };
 ```

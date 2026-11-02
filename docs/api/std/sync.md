@@ -2,13 +2,17 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Sync API
+# std/sync API
 
 ## Overview
-This page lists the public API of module `Std.Sync` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/sync` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/sync" { ... };`.
 
 ## Free Functions
 ```koral
+/// 类型安全的消息传递通道工厂。
+/// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
 public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChannel[T]];
 ```
 
@@ -17,144 +21,241 @@ public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChanne
 
 ## Types
 ```koral
+/// 原子布尔，用于标志位和开关
+/// 所有操作使用顺序一致性内存序
 public type mutable AtomicBool;
 
+/// 原子有符号整数（Int，平台相关宽度），支持无锁的原子读写和 CAS 操作
+/// 所有操作使用顺序一致性内存序
 public type mutable AtomicInt;
 
+/// 原子无符号整数（UInt，平台相关宽度），支持无锁的原子读写和 CAS 操作
+/// 所有操作使用顺序一致性内存序
 public type mutable AtomicUInt;
 
+/// The sending half of a bounded channel; dropping it closes the channel for receivers.
 public type mutable SendChannel[T: Any];
 
+/// The receiving half of a bounded channel; dropping it closes the channel for senders.
 public type mutable RecvChannel[T: Any];
 
+/// Countdown gate that opens once every latch has been removed.
 public type mutable LatchGate;
 
+/// Thread-safe lazy value whose initializer runs at most once.
 public type mutable Lazy[T: Any];
 
+/// A bare mutex lock that protects whatever shared data the caller guards between `lock` and `unlock`.
 public type mutable Mutex;
 
+/// Condition variable bound to a `Mutex` for waiting on shared-state changes.
 public type mutable MutexCondvar;
 
+/// Counting semaphore that caps how many threads hold a permit at once.
 public type mutable Semaphore;
 
+/// Reader-writer lock with exclusive `lock` and shared `lock_shared` modes, preferring writers.
 public type mutable SharedMutex;
 
+/// Condition variable bound to a `SharedMutex`'s exclusive mode.
 public type mutable SharedMutexCondvar;
 ```
 
 ## Given Implementations
 ```koral
+/// Creates the flag and provides lock-free atomic updates.
 given AtomicBool {
+    /// Create an atomic flag holding `value`.
     public new(value: Bool): AtomicBool;
+    /// Atomically read the current value.
     public load(self): Bool;
+    /// Atomically set the stored value.
     public store(self, value: Bool): Void;
+    /// Atomically replace the value and return the previous one.
     public swap(self, value: Bool): Bool;
+    /// Atomically store `desired` when the value equals `expected`, returning whether the swap happened.
     public compare_exchange(self, expected: Bool =, desired: Bool =): Bool;
 };
 
+/// Implements `ToString`, rendering the flag as `true` or `false`.
 given AtomicBool: ToString {
+    /// Return the current flag as `true` or `false`.
     public to_string(self): String;
 };
 
+/// Creates the counter and provides lock-free atomic updates and arithmetic.
 given AtomicInt {
+    /// Create an atomic integer holding `value`.
     public new(value: Int): AtomicInt;
+    /// Atomically read the current value.
     public load(self): Int;
+    /// Atomically set the stored value.
     public store(self, value: Int): Void;
+    /// Atomically replace the value and return the previous one.
     public swap(self, value: Int): Int;
+    /// Atomically store `desired` when the value equals `expected`, returning whether the swap happened.
     public compare_exchange(self, expected: Int =, desired: Int =): Bool;
+    /// Atomically add `delta` and return the previous value.
     public fetch_add(self, delta: Int): Int;
+    /// Atomically subtract `delta` and return the previous value.
     public fetch_sub(self, delta: Int): Int;
 };
 
+/// Implements `ToString`, rendering the current value in decimal.
 given AtomicInt: ToString {
+    /// Return the current value as a decimal string.
     public to_string(self): String;
 };
 
+/// Creates the counter and provides lock-free atomic updates and arithmetic.
 given AtomicUInt {
+    /// Create an atomic integer holding `value`.
     public new(value: UInt): AtomicUInt;
+    /// Atomically read the current value.
     public load(self): UInt;
+    /// Atomically set the stored value.
     public store(self, value: UInt): Void;
+    /// Atomically replace the value and return the previous one.
     public swap(self, value: UInt): UInt;
+    /// Atomically store `desired` when the value equals `expected`, returning whether the swap happened.
     public compare_exchange(self, expected: UInt =, desired: UInt =): Bool;
+    /// Atomically add `delta` and return the previous value.
     public fetch_add(self, delta: UInt): UInt;
+    /// Atomically subtract `delta` and return the previous value.
     public fetch_sub(self, delta: UInt): UInt;
 };
 
+/// Implements `ToString`, rendering the current value in decimal.
 given AtomicUInt: ToString {
+    /// Return the current value as a decimal string.
     public to_string(self): String;
 };
 
+/// Implements `Drop`, closing the send side and waking waiting receivers.
 given[T: Any] SendChannel[T]: Drop {};
 
+/// Implements `Drop`, closing the receive side and waking waiting senders.
 given[T: Any] RecvChannel[T]: Drop {};
 
+/// Sends values, blocking for space or returning without blocking.
 given[T: Any] SendChannel[T] {
+    /// 发送消息（阻塞，直到有空间或通道关闭）
     public send(self, value: T): Result[Void];
+    /// 非阻塞发送
     public try_send(self, value: T): Result[Bool];
 };
 
+/// Receives values, blocking for a message or returning without blocking.
 given[T: Any] RecvChannel[T] {
+    /// 接收消息（阻塞，直到有消息或通道关闭）
     public recv(self): Result[T];
+    /// 非阻塞接收
     public try_recv(self): Result[Option[T]];
 };
 
+/// Creates the gate and adds, removes, and awaits latches.
 given LatchGate {
+    /// Create a gate held closed by `count` latches.
     public new(count: UInt): LatchGate;
+    /// Add `count` more latches to the gate.
     public latch(self, count: UInt): Void;
+    /// Remove one latch, waking all waiters when the last is removed and panicking when none remain.
     public unlatch(self): Void;
+    /// Remove one latch, then block until the gate opens; panics when no latch remains.
     public unlatch_and_wait(self): Void;
+    /// Block until every latch has been removed.
     public wait(self): Void;
 };
 
+/// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
+    /// Wrap `f` so it runs at most once, on the first `get`.
     public new(f: () -> T): Lazy[T];
+    /// Return the value, running and caching the initializer on first use.
     public get(self): T;
+    /// Check whether the initializer has already run.
     public is_initialized(self): Bool;
 };
 
+/// Implements `Drop`, destroying the underlying lock.
 given Mutex: Drop {};
 
+/// Locks and unlocks the mutex and creates its condition variables.
 given Mutex {
+    /// 创建互斥锁
     public new(): Mutex;
+    /// 获取锁（阻塞直到成功）
     public lock(self): Void;
+    /// 尝试获取锁（非阻塞），成功返回 true，锁被占用返回 false
     public try_lock(self): Bool;
+    /// 释放锁
     public unlock(self): Void;
+    /// 创建绑定到此互斥锁的条件变量
     public condvar(self): MutexCondvar;
 };
 
+/// Implements `Drop`, destroying the underlying condition variable.
 given MutexCondvar: Drop {};
 
+/// Waits for and sends notifications while holding the bound mutex.
 given MutexCondvar {
+    /// 释放绑定的 Mutex 并等待通知，被唤醒后重新获取 Mutex
+    /// 调用前必须持有绑定的 Mutex，否则行为未定义
+    /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
     public wait(self): Void;
+    /// 唤醒一个等待中的线程
     public notify(self): Void;
+    /// 唤醒所有等待中的线程
     public notify_all(self): Void;
 };
 
+/// Creates the semaphore and takes and returns permits.
 given Semaphore {
+    /// Create a semaphore with `permits` permits available.
     public new(permits: UInt): Semaphore;
+    /// Take a permit, blocking until one is available.
     public acquire(self): Void;
+    /// Take a permit only if one is immediately available.
     public try_acquire(self): Bool;
+    /// Return a permit and wake one waiting thread.
     public release(self): Void;
 };
 
+/// Implements `Drop`, destroying the underlying lock.
 given SharedMutex: Drop {};
 
+/// Acquires and releases exclusive and shared locks and creates condition variables.
 given SharedMutex {
+    /// 创建共享互斥锁
     public new(): SharedMutex;
+    /// 获取独占锁（阻塞直到所有共享锁和独占锁都释放）
     public lock(self): Void;
+    /// 释放独占锁
     public unlock(self): Void;
+    /// 尝试获取独占锁（非阻塞），成功返回 true
     public try_lock(self): Bool;
+    /// 获取共享锁（阻塞直到成功，多个线程可并发持有共享锁）
     public lock_shared(self): Void;
+    /// 释放共享锁
     public unlock_shared(self): Void;
+    /// 尝试获取共享锁（非阻塞），成功返回 true
     public try_lock_shared(self): Bool;
+    /// 创建绑定到此共享互斥锁独占模式的条件变量
     public condvar(self): SharedMutexCondvar;
 };
 
+/// Implements `Drop`, destroying the underlying condition variable.
 given SharedMutexCondvar: Drop {};
 
+/// Waits for and sends notifications while holding the bound exclusive lock.
 given SharedMutexCondvar {
+    /// 释放绑定的独占锁并等待通知，被唤醒后重新获取独占锁
+    /// 调用前必须持有绑定的独占锁，否则行为未定义
+    /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
     public wait(self): Void;
+    /// 唤醒一个等待中的线程
     public notify(self): Void;
+    /// 唤醒所有等待中的线程
     public notify_all(self): Void;
 };
 ```

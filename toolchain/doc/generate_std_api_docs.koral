@@ -2,7 +2,8 @@
 // Standard Library API Doc Generator
 // ============================================================================
 // Walks the Koral sources of `std/` and writes one markdown page per module,
-// listing its public API in declaration-only syntax.
+// listing its public API in declaration-only syntax, every entry carrying the
+// `///` doc comment that documents it.
 //
 // Extraction goes through `koral_syntax`, the same tokenizer, parser and
 // printer the formatter uses. An earlier version of this tool scanned raw lines
@@ -12,6 +13,15 @@
 // CST node, and the text on the page is printed by the one printer that knows
 // how Koral is spelled -- so a signature in these docs is the syntax the
 // formatter would write for it.
+//
+// What reaches a page is decided here: a top-level declaration is shown when it
+// is `public`; a `given` carries no access modifier, so it is shown when the
+// thing it extends is `public` -- a type or a trait (the trait-tool block). A
+// `given` for a module-internal type is implementation detail and its
+// documentation would leak that type's name.
+// An entry that reaches a page must carry a `///` doc comment; a page with an
+// undocumented entry is an error, so "every API has its documentation" is a
+// property of the output and not a promise to be kept by hand.
 // ============================================================================
 
 using "koral_syntax" { ... };
@@ -22,10 +32,11 @@ using "std/os" { ... };
 // What gets collected
 // ============================================================================
 
-/// One rendered declaration, already in its final spelling. Multi-line by
-/// construction -- a type with a body, say -- so it is kept as text rather than
-/// re-split into lines.
-type Decl(text: String);
+/// One rendered declaration with its documentation, already in its final
+/// spelling. Multi-line by construction -- a type with a body, say -- so the
+/// signature is kept as text rather than re-split into lines. `docs` are the
+/// `///` lines of the comment run above the declaration, verbatim.
+type Decl(docs: List[String], text: String);
 
 type mutable ParsedApi(
     mutable free_functions: List[Decl],
@@ -56,10 +67,16 @@ let merge_parsed(target: ParsedApi, parsed: ParsedApi): Void = {
 // Extraction: a walk over the CST
 // ============================================================================
 
-/// Everything a consumer of the file can see, in source order. The filtering
-/// rule lives in `Printer.print_signature` -- one place decides what "the public
-/// API" of a declaration is, and this tool only sorts the results into pages.
-let parse_public_api(file_path: Path): ParsedApi = {
+/// Everything a consumer of the file can see, in source order, each entry
+/// carrying the `///` run that documents it. What reaches a page is decided in
+/// `decl_is_shown`; what is shown of each declaration is decided by
+/// `Printer.print_signature`. Anything shown without a doc comment is recorded
+/// in `missing`.
+let parse_public_api(
+    file_path: Path,
+    public_types: List[String],
+    missing: List[String],
+): ParsedApi = {
     let api = empty_parsed_api();
 
     let text = read_text_file(file_path) or else as e in {
@@ -72,16 +89,26 @@ let parse_public_api(file_path: Path): ParsedApi = {
         return api;
     };
 
-    for item in file.items then {
-        when item in {
-            .Decl(d) then {
-                collect_decl(api, d);
+    collect_file_api(api, file, public_types, missing);
+    return api;
+};
+
+/// The walk shared by page rendering and the self-test: every shown
+/// declaration of `file`, with its docs, in source order.
+let collect_file_api(
+    api: ParsedApi,
+    file: CstFile,
+    public_types: List[String],
+    missing: List[String],
+): Void = {
+    for pair in file.items.lazy().enumerate() then {
+        when pair.second in {
+            .Decl(d) or .DeclPreSemi(_, d) then {
+                collect_decl(api, file.items, pair.first, d, public_types, missing);
             },
             _ then {},
         };
     };
-
-    return api;
 };
 
 let parse_source(text: String): Result[CstFile] = {
@@ -91,43 +118,177 @@ let parse_source(text: String): Result[CstFile] = {
     return parser.parse();
 };
 
+/// Whether `d` reaches a module page. A top-level declaration must say
+/// `public`. A `given` never can (grammar.bnf <given-decl>), so it is part of
+/// the story only when the thing it extends is one a consumer can name -- a
+/// `public` type (`given BufReader[R]`, `given Int: Add[Int]`) or trait (the
+/// trait-tool block `given Ord { ... }`), or a language-level shape like
+/// `*T` / `?T` that every consumer spells for themselves. A `given` for a
+/// module-internal type is implementation detail, and printing it would leak
+/// that type's name into the public docs.
+let decl_is_shown(d: CstDecl, public_types: List[String]): Bool = when d in {
+    .Given(_, _, _, _, target, _, _, _, _, _) then {
+        when target_type_name(target) in {
+            .Some(name) then public_types.contains(name),
+            .None() then true,
+        }
+    },
+    _ then Printer.is_public(Printer.decl_visibility(d)),
+};
+
+/// The nominal name at the head of a `given` target: `Box` for `Box[R]`, seen
+/// through `mutable` / parenthesized wrappers. `None` when the target names
+/// no nominal type -- a pointer (`*T`), a weak reference (`?T`), a function
+/// type, `Self` -- where the shape itself is language-level and no module
+/// declaration stands behind the name.
+let target_type_name(t: CstType): Option[String] = when t in {
+    .Named(name) then Option[String].Some(name.to_string()),
+    .Generic(_, _, _, base) then .Some(base.to_string()),
+    .Mutable(inner, _) or .Paren(_, inner, _) then target_type_name(inner),
+    .Ptr(_, _) or .Weakref(_, _) or .SelfType(_) or .ConstraintKeyword(_) or .Function(_, _, _, _) then Option[
+        String
+    ].None(),
+};
+
+/// Every `public` type and trait name declared in `file` -- the names a
+/// `given` may extend and still be part of the story. A trait name matters
+/// because a trait-tool block (`given Ord { ... }`) targets its trait.
+let public_type_names(file: CstFile): List[String] = {
+    let mutable names = List[String].new();
+    for item in file.items then {
+        when item in {
+            .Decl(d) or .DeclPreSemi(_, d) then {
+                when d in {
+                    .Type(vis, _, _, _, _, name, _) or .Trait(vis, _, _, name, _, _, _, _) then {
+                        if Printer.is_public(vis) then {
+                            names.push(name.to_string());
+                        };
+                    },
+                    _ then {},
+                };
+            },
+            _ then {},
+        };
+    };
+    return names;
+};
+
+/// Appends every `public` type name declared in the file. A read or parse
+/// failure warns and contributes nothing -- the same policy as the page walk.
+let collect_public_type_names_from_file(file_path: Path, into: List[String]): Void = {
+    let text = read_text_file(file_path) or else as e in {
+        eprintln("Warning: failed to read \(file_path.to_string()): \(e.message())");
+        return;
+    };
+    let file = parse_source(text) or else as e in {
+        eprintln("Warning: failed to parse \(file_path.to_string()): \(e.message())");
+        return;
+    };
+    for name in public_type_names(file) then {
+        into.push(name);
+    };
+};
+
 /// Renders a declaration without its body and without the members a consumer
 /// cannot reach, then terminates it. The `;` is added here rather than by the
 /// printer because this is documentation: the page shows a signature, and a
 /// signature ends in a semicolon.
-let render_signature(d: CstDecl): Decl = {
+let render_signature(d: CstDecl): String = {
     let mutable printer = Printer.new();
     printer.print_signature(d);
     printer.write_terminator();
-    return Decl(printer.result());
+    return printer.result();
 };
 
-let collect_decl(api: ParsedApi, d: CstDecl): Void = {
-    if not Printer.is_public(Printer.decl_visibility(d)) then {
-        // A `given` block carries no access modifier and is always part of the
-        // story -- it is where a type meets its traits.
-        when d in {
-            .Given(_, _, _, _, _, _, _, _, _, _) then {
-                api.givens.push(render_signature(d));
+/// The name a missing-doc report hangs `d` on: its own name, or the trait /
+/// type a `given` is about.
+let decl_report_name(d: CstDecl): String = when d in {
+    .Func(_, _, _, _, _, name, _, _, _, _, _, _) or .ForeignDecl(_, _, _, _, _, name, _, _, _, _) then {
+        when name in {
+            .Some(t) then t.to_string(),
+            .None() then "let",
+        }
+    },
+    .Type(_, _, _, _, _, name, _) or .Trait(_, _, _, name, _, _, _, _) or .Var(_, _, _, name, _)
+    or .TraitMethod(_, _, name, _, _, _, _) then name.to_string(),
+    .Given(_, _, _, _, target, _, trait_type, _, _, _) then {
+        when trait_type in {
+            .Some(tt) then "given " + type_to_string(target) + ": " + type_to_string(tt),
+            .None() then "given " + type_to_string(target),
+        }
+    },
+    .Using(_) then "using",
+};
+
+/// The name a missing-doc report hangs `d`'s members on: the trait name, or
+/// the type a `given` extends.
+let member_owner_name(d: CstDecl): String = when d in {
+    .Trait(_, _, _, name, _, _, _, _) then name.to_string(),
+    .Given(_, _, _, _, target, _, _, _, _, _) then {
+        when target_type_name(target) in {
+            .Some(name) then name,
+            .None() then type_to_string(target),
+        }
+    },
+    _ then decl_report_name(d),
+};
+
+/// Records every shown member of a trait or `given` that carries no `///` doc
+/// comment. `public_only` mirrors the rendering rule: a `given` shows only its
+/// `public` members, a trait shows all of them.
+let check_member_docs(
+    missing: List[String],
+    owner: String,
+    members: List[CstItem],
+    public_only: Bool,
+): Void = {
+    for pair in members.lazy().enumerate() then {
+        when pair.second in {
+            .Decl(d) or .DeclPreSemi(_, d) then {
+                if public_only and not Printer.is_public(Printer.decl_visibility(d)) then {
+                    continue;
+                };
+                if doc_comments_above(members, pair.first).is_empty() then {
+                    missing.push(owner + "." + decl_report_name(d));
+                };
             },
             _ then {},
         };
+    };
+};
+
+let collect_decl(
+    api: ParsedApi,
+    items: List[CstItem],
+    index: UInt,
+    d: CstDecl,
+    public_types: List[String],
+    missing: List[String],
+): Void = {
+    if not decl_is_shown(d, public_types) then {
         return;
+    };
+
+    let docs = doc_comments_above(items, index);
+    if docs.is_empty() then {
+        missing.push(decl_report_name(d));
     };
 
     when d in {
         .Func(_, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _)
         or .Var(_, _, _, _, _) then {
-            api.free_functions.push(render_signature(d));
+            api.free_functions.push(Decl(docs, render_signature(d)));
         },
         .Type(_, _, _, _, _, _, _) then {
-            api.types.push(render_signature(d));
+            api.types.push(Decl(docs, render_signature(d)));
         },
-        .Trait(_, _, _, _, _, _, _, _) then {
-            api.traits.push(render_signature(d));
+        .Trait(_, _, _, _, _, _, members, _) then {
+            check_member_docs(missing, member_owner_name(d), members, false);
+            api.traits.push(Decl(docs, render_signature(d)));
         },
-        .Given(_, _, _, _, _, _, _, _, _, _) then {
-            api.givens.push(render_signature(d));
+        .Given(_, _, _, _, _, _, _, _, members, _) then {
+            check_member_docs(missing, member_owner_name(d), members, true);
+            api.givens.push(Decl(docs, render_signature(d)));
         },
         _ then {},
     };
@@ -139,6 +300,9 @@ let collect_decl(api: ParsedApi, d: CstDecl): Void = {
 
 let append_declarations(lines: List[String], declarations: List[Decl]): Void = {
     for idx in 0..<declarations.count() then {
+        for doc in declarations[idx].docs then {
+            lines.push(doc);
+        };
         lines.push(declarations[idx].text);
         if idx + 1 < declarations.count() then {
             lines.push("");
@@ -146,14 +310,21 @@ let append_declarations(lines: List[String], declarations: List[Decl]): Void = {
     };
 };
 
-/// The whole markdown page for one module, as text.
-let render_module_doc(module_key: String, source_files: List[String]): Result[String] = {
-    let module_name = module_name_from_key(module_key);
+/// The whole markdown page for one module, as text. Fails when the module
+/// offers an API entry with no `///` doc comment: a page that documents every
+/// API is the point of the tool, so an undocumented entry stops the build
+/// instead of reaching the page.
+let render_module_doc(
+    module_key: String,
+    source_files: List[String],
+    public_types: List[String],
+): Result[String] = {
+    let module_name = module_key;
     let module_stem = last_segment(module_key);
     let mutable stem_first = List[String].new();
     let mutable rest = List[String].new();
     for source_str in source_files then {
-        if to_pascal_case(file_stem(source_str.into_path())) == module_stem then {
+        if file_stem(source_str.into_path()) == module_stem then {
             stem_first.push(source_str);
         } else {
             rest.push(source_str);
@@ -165,9 +336,19 @@ let render_module_doc(module_key: String, source_files: List[String]): Result[St
     let mutable ordered_sources = stem_first;
     ordered_sources.push_list(rest);
 
+    let mutable missing = List[String].new();
     let mutable parsed_all = empty_parsed_api();
     for source_str in ordered_sources then {
-        merge_parsed(parsed_all, parse_public_api(source_str.into_path()));
+        merge_parsed(
+            parsed_all,
+            parse_public_api(source_str.into_path(), public_types, missing),
+        );
+    };
+
+    if not missing.is_empty() then {
+        return Result[String].Error(
+            "undocumented public API in module " + module_name + ": " + missing.join_to_string(", "),
+        );
     };
 
     let mutable lines = List[String].new();
@@ -183,6 +364,8 @@ let render_module_doc(module_key: String, source_files: List[String]): Result[St
     lines.push(
         "This page lists the public API of module `" + module_name + "` (declaration-only syntax), organized by free functions, traits, types, and given implementations.",
     );
+    lines.push("");
+    lines.push("Import the module with `using \"" + module_name + "\" { ... };`.");
     lines.push("");
 
     lines.push("## Free Functions");
@@ -265,28 +448,38 @@ given SelfTest {
     };
 };
 
+/// The rendered declarations of one self-contained source string: the same
+/// selection and doc rules as a module page, in declaration order.
 let render_all(source: String): Result[String] = {
     let file = parse_source(source) or return;
+    let public_types = public_type_names(file);
+    let mutable missing = List[String].new();
+    let mutable api = empty_parsed_api();
+    collect_file_api(api, file, public_types, missing);
+
     let mutable out = StringBuilder.new();
-    for item in file.items then {
-        when item in {
-            .Decl(d) then {
-                if not Printer.is_public(Printer.decl_visibility(d)) then {
-                    when d in {
-                        .Given(_, _, _, _, _, _, _, _, _, _) then {},
-                        _ then {
-                            continue;
-                        },
-                    };
-                };
-                let rendered = render_signature(d);
-                out.push_string(rendered.text);
+    for group in [api.free_functions, api.traits, api.types, api.givens] then {
+        for decl in group then {
+            for doc in decl.docs then {
+                out.push_string(doc);
                 out.push_string("\n");
-            },
-            _ then {},
+            };
+            out.push_string(decl.text);
+            out.push_string("\n");
         };
     };
     return .Ok(out.to_string());
+};
+
+/// The missing-doc report of one self-contained source string -- what the
+/// module-page gate would refuse to publish.
+let undocumented_in(source: String): Result[List[String]] = {
+    let file = parse_source(source) or return;
+    let public_types = public_type_names(file);
+    let mutable missing = List[String].new();
+    let mutable api = empty_parsed_api();
+    collect_file_api(api, file, public_types, missing);
+    return .Ok(missing);
 };
 
 let run_self_test(): Void = {
@@ -309,7 +502,7 @@ let run_self_test(): Void = {
     // A `given` shows only its public methods; a trait shows all of them,
     // because a trait's whole body is its interface.
     let given_text = render_all(
-        "type mutable Box[R: Any](value: R);\n" + "given[R: Any] Box[R] {\n" + "    public new(value: R): Box[R] = Box[R](value);\n" + "    private peek(self): R = self.value;\n" + "    get(self): R = self.value;\n" + "};\n",
+        "public type mutable Box[R: Any](value: R);\n" + "given[R: Any] Box[R] {\n" + "    public new(value: R): Box[R] = Box[R](value);\n" + "    private peek(self): R = self.value;\n" + "    get(self): R = self.value;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render given: \(e.message())");
         exit(1);
@@ -337,10 +530,12 @@ let run_self_test(): Void = {
     t.contains("function signature", function_text, "public let add(a: Int, b: Int): Int;");
     t.not_contains("function body is not shown", function_text, "return");
 
-    // A declaration that is not `public` is not part of the public API -- and
-    // `given` is the exception, since it carries no access modifier at all.
+    // A declaration that is not `public` is not part of the public API. A
+    // `given` has no access modifier, but it is shown only for a type a
+    // consumer can name: `Secret` is module-internal here, so its `given`
+    // stays off the page with it.
     let private_text = render_all(
-        "let hidden(): Int = 1;\n" + "type Secret(value: Int);\n" + "trait Quiet { q(self): Int; };\n",
+        "let hidden(): Int = 1;\n" + "type Secret(value: Int);\n" + "trait Quiet { q(self): Int; };\n" + "given Secret {\n" + "    public reveal(self): Int = self.value;\n" + "};\n",
     ) or else as e in {
         eprintln("SELF-TEST FAIL: could not render private decls: \(e.message())");
         exit(1);
@@ -348,6 +543,82 @@ let run_self_test(): Void = {
     t.not_contains("non-public function is skipped", private_text, "hidden");
     t.not_contains("non-public type is skipped", private_text, "Secret");
     t.not_contains("non-public trait is skipped", private_text, "Quiet");
+    t.not_contains("given of non-public type is skipped", private_text, "reveal");
+
+    // A `given` for a public type is part of the story even though the block
+    // itself carries no access modifier -- and so is a `given` for a built-in
+    // type, whose `public type intrinsic` declaration names it.
+    let given_public = render_all(
+        "public type intrinsic Int;\n" + "public trait Zero {\n" + "    zero(): Self;\n" + "};\n" + "given Int: Zero {\n" + "    public zero(): Int = 0;\n" + "};\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render public-type given: \(e.message())");
+        exit(1);
+    };
+    t.contains("given of public type is shown", given_public, "given Int: Zero");
+    t.contains("given of built-in type is shown", given_public, "public zero(): Int");
+
+    // A trait-tool block -- `given Trait { ... }` -- targets its trait, which
+    // is just as nameable, so it is shown with its public methods.
+    let tool_text = render_all(
+        "public trait Ord {\n" + "    compare(self, other: Self): Int;\n" + "};\n" + "given Ord {\n" + "    public clamp(self, min: Self =, max: Self =): Self;\n" + "};\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render trait-tool block: \(e.message())");
+        exit(1);
+    };
+    t.contains("trait-tool block is shown", tool_text, "given Ord");
+    t.contains("trait-tool methods are shown", tool_text, "clamp");
+
+    // A `given` on a language-level shape (`*T`) names no module type: every
+    // consumer spells the target for themselves, so it is always part of the
+    // story.
+    let ptr_text = render_all(
+        "given[T: Any] *T: Eq {\n" + "    public equals(self, other: *T): Bool = true;\n" + "};\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render pointer given: \(e.message())");
+        exit(1);
+    };
+    t.contains("pointer given is shown", ptr_text, "given[T: Any] *T: Eq");
+
+    // Doc comments ride above the entry they document -- the declaration
+    // itself and the members a trait or `given` shows. An ordinary `//` note
+    // is not documentation and stays off the page.
+    let doc_text = render_all(
+        "/// Adds two numbers.\n" + "public let add(a: Int, b: Int): Int = a + b;\n" + "\n" + "// just a note\n" + "/// A stack.\n" + "public type Stack;\n" + "\n" + "/// Reader surface.\n" + "public trait Reader {\n" + "    /// Reads one byte.\n" + "    read(self): Option[UInt8];\n" + "};\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not render doc comments: \(e.message())");
+        exit(1);
+    };
+    t.contains("doc comment renders above a function", doc_text, "/// Adds two numbers.");
+    t.contains("doc comment renders above a type", doc_text, "/// A stack.");
+    t.contains("doc comment renders above a trait", doc_text, "/// Reader surface.");
+    t.contains("doc comment renders above a member", doc_text, "/// Reads one byte.");
+    t.not_contains("ordinary comment is not documentation", doc_text, "just a note");
+
+    // Every entry a page shows must carry its documentation; the gate names
+    // what is missing so it can be fixed in the source.
+    let undocumented = undocumented_in(
+        "/// Documented.\n" + "public let documented(): Int = 1;\n" + "public let bare(): Int = 2;\n" + "public trait T {\n" + "    /// Documented.\n" + "    a(self): Int;\n" + "    b(self): Int;\n" + "};\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not report missing docs: \(e.message())");
+        exit(1);
+    };
+    let report = undocumented.join_to_string(", ");
+    t.contains("undocumented function is reported", report, "bare");
+    t.contains("undocumented member is reported", report, "T.b");
+    t.not_contains("documented function is not reported", report, "documented");
+    t.not_contains("documented member is not reported", report, "T.a");
+
+    let documented_only = undocumented_in(
+        "/// Documented.\n" + "public let documented(): Int = 1;\n",
+    ) or else as e in {
+        eprintln("SELF-TEST FAIL: could not report missing docs: \(e.message())");
+        exit(1);
+    };
+    if not documented_only.is_empty() then {
+        t.failed = true;
+        eprintln("SELF-TEST FAIL: fully documented source reports nothing");
+        eprintln("  got: \(documented_only.join_to_string(", "))");
+    };
 
     // Comments and multiline strings live inside tokens; a line scanner
     // mis-reads them, the parser does not.
@@ -380,6 +651,24 @@ let run_self_test(): Void = {
     t.contains("integer default", default_text, "length: UInt = 0");
     t.contains("string default", default_text, "label: String = \"x\"");
 
+    // A module is named the way `using` names it: `std/io`, never `Std.Io`.
+    if module_key_for_source(
+        "std/io/io.koral".into_path(),
+        "std".into_path(),
+    ) != "std/io" then {
+        t.failed = true;
+        eprintln("SELF-TEST FAIL: nested module key");
+        eprintln("  expected: std/io");
+    };
+    if module_key_for_source(
+        "std/std.koral".into_path(),
+        "std".into_path(),
+    ) != "std" then {
+        t.failed = true;
+        eprintln("SELF-TEST FAIL: root module key");
+        eprintln("  expected: std");
+    };
+
     if t.failed then {
         eprintln("SELF-TEST FAILED");
         exit(1);
@@ -391,32 +680,12 @@ let run_self_test(): Void = {
 // Module naming
 // ============================================================================
 
-/// `io` -> `Io`, `json_value` -> `JsonValue`. File and module names are ASCII
-/// identifiers, so the uppercase is a byte shift and nothing more.
-let to_pascal_case(s: String): String = {
-    let mutable out = StringBuilder.new();
-    let mutable upper_next = true;
-    for i in 0..<s.count() then {
-        let ch = s[i];
-        if ch == '_' then {
-            upper_next = true;
-            continue;
-        };
-        if upper_next and ch >= 'a' and ch <= 'z' then {
-            out.push_byte(ch - 'a' + 'A');
-        } else {
-            out.push_byte(ch);
-        };
-        upper_next = false;
-    };
-    return out.to_string();
-};
-
-/// `std/io/io.koral` -> `Std.Io`, `std/std.koral` -> `Std`. The key is the
-/// directory path under the library root; a file name is not part of it, since
-/// a module may span several files.
+/// `std/io/io.koral` -> `std/io`, `std/std.koral` -> `std`. The key is the
+/// directory path under the library root: the module's real name, the same
+/// string a `using` specifier writes. A file name is not part of it, since a
+/// module may span several files.
 let module_key_for_source(source: Path, std_root: Path): String = {
-    let root_name = to_pascal_case(std_root.base_name());
+    let root_name = std_root.base_name();
     let rel = source.to_string().trim_prefix(std_root.to_string()).trim_prefix("/");
 
     let mutable parts = List[String].new();
@@ -429,15 +698,8 @@ let module_key_for_source(source: Path, std_root: Path): String = {
     if parts.is_empty() then {
         return root_name;
     };
-
-    let mutable names = List[String].new();
-    for part in parts then {
-        names.push(to_pascal_case(part));
-    };
-    return root_name + "." + names.join_to_string(".");
+    return root_name + "/" + parts.join_to_string("/");
 };
-
-let module_name_from_key(key: String): String = key;
 
 let file_stem(path: Path): String = {
     let base = path.base_name();
@@ -448,7 +710,7 @@ let file_stem(path: Path): String = {
     return base.substring(0..<(base.count() - ext.count()));
 };
 
-let last_segment(key: String): String = when key.find_last(".") in {
+let last_segment(key: String): String = when key.find_last("/") in {
     .Some(idx) then key.substring((idx + 1)...),
     .None() then key,
 };
@@ -552,6 +814,13 @@ let main(): Void = {
 
     source_files.sort();
 
+    // One name table for all of `std/`: a `given` is public story only when the
+    // type it extends is `public`, wherever that type is declared.
+    let mutable public_types = List[String].new();
+    for source_str in source_files then {
+        collect_public_type_names_from_file(source_str.into_path(), public_types);
+    };
+
     let grouped = source_files.group_by(
         (source_str) => module_key_for_source(source_str.into_path(), std_root),
     );
@@ -567,20 +836,43 @@ let main(): Void = {
     // not followed by a regeneration is a stale page, and this is what says so.
     let mutable stale: UInt = 0;
 
+    // Every page is rendered before any page is written or checked: a module
+    // with undocumented API stops the whole run -- every gap is reported, not
+    // just the first -- and a half-written docs tree is worse than none.
+    let mutable pending_paths = List[Path].new();
+    let mutable pending_pages = List[String].new();
+    let mutable failures = List[String].new();
+
+    for module_key in module_keys then {
+        let files = grouped.get(module_key).unwrap();
+        let output = docs_root.join(
+            last_segment(module_key).to_ascii_lowercase() + ".md",
+        );
+        let page = render_module_doc(module_key, files, public_types) or else as e in {
+            failures.push(e.message());
+            continue;
+        };
+        pending_paths.push(output);
+        pending_pages.push(page);
+    };
+
+    if not failures.is_empty() then {
+        for message in failures then {
+            eprintln(message);
+        };
+        eprintln(
+            "\(failures.count()) module page(s) cannot be published until their undocumented API is described",
+        );
+        exit(1);
+    };
+
     if not check_only then {
         clear_generated_docs(docs_root);
     };
 
-    for module_key in module_keys then {
-        let files = grouped.get(module_key).unwrap();
-        let page = render_module_doc(module_key, files) or else as e in {
-            eprintln("Error rendering doc for \(module_key): \(e.message())");
-            exit(1);
-        };
-
-        let output = docs_root.join(
-            last_segment(module_key).to_ascii_lowercase() + ".md",
-        );
+    for idx in 0..<pending_paths.count() then {
+        let output = pending_paths[idx];
+        let page = pending_pages[idx];
         if check_only then {
             let existing = read_text_file(output) or else as e in {
                 stale += 1;

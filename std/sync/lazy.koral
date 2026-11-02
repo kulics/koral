@@ -12,6 +12,7 @@ using "std" { ... };
 // the cached value.
 // ============================================================================
 
+/// Thread-safe lazy value whose initializer runs at most once.
 public type mutable Lazy[T: Any](
     private state: AtomicInt,
     private mutex: Mutex,
@@ -19,10 +20,13 @@ public type mutable Lazy[T: Any](
     private mutable value: Option[T],
 );
 
+/// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
+    /// Wrap `f` so it runs at most once, on the first `get`.
     public new(f: () -> T): Lazy[T] =
         Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None());
 
+    /// Return the value, running and caching the initializer on first use.
     public get(self): T = {
         if self.state.load() == 1 then {
             return self.value.unwrap();
@@ -37,5 +41,6 @@ given[T: Any] Lazy[T] {
         return self.value.unwrap();
     };
 
+    /// Check whether the initializer has already run.
     public is_initialized(self): Bool = self.state.load() == 1;
 };

@@ -8,22 +8,28 @@
 // Generic Utility Functions
 // ============================================================================
 
-// Pair - generic tuple-like utility type
+/// A generic tuple-like pair holding a `first` and a `second` value.
 public type Pair[T: Any, U: Any](public first: T, public second: U);
 
+/// `Eq` for `Pair`: equal when both components are equal.
 given[T: Eq, U: Eq] Pair[T, U]: Eq {
 
+    /// Whether both components of the two pairs are equal.
     public equals(self, other: Pair[T, U]): Bool =
         self.first == other.first and self.second == other.second;
 };
 
+/// `Hash` for `Pair`: combines the hashes of both components.
 given[T: Hash, U: Hash] Pair[T, U]: Hash {
 
+    /// Hash both components and combine the results.
     public hash(self): UInt = self.first.hash().combine_hash(self.second.hash());
 };
 
+/// `Ord` for `Pair`: lexicographic, comparing `first` and then `second`.
 given[T: Ord, U: Ord] Pair[T, U]: Ord {
 
+    /// Compare `first`, then `second`, returning the first nonzero result.
     public compare(self, other: Pair[T, U]): Int = {
         let c = self.first.compare(other.first);
         if c != 0 then {
@@ -33,26 +39,32 @@ given[T: Ord, U: Ord] Pair[T, U]: Ord {
     };
 };
 
+/// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T = if a > b then a else b;
+/// Return the smaller of `a` and `b`.
 public let min[T: Ord](a: T, b: T): T = if a < b then a else b;
 
 // ============================================================================
 // Cell - shared mutable state
 // ============================================================================
-// Closure capture is copy-only, so a `let mutable` local cannot be captured.
-// To carry mutable state into a closure, hold it in a `Cell` (a shared
-// `type mutable` object) and capture the cell.
+/// Closure capture is copy-only, so a `let mutable` local cannot be captured.
+/// To carry mutable state into a closure, hold it in a `Cell` (a shared
+/// `type mutable` object) and capture the cell.
 public type mutable Cell[T: Any](public mutable value: T);
 
+/// Reading and writing the value held by a `Cell`.
 given[T: Any] Cell[T] {
 
+    /// Return the current value.
     public get(self): T = self.value;
 
+    /// Replace the held value.
     public set(self, value: T): Void = {
         self.value = value;
     };
 };
 
+/// Orderable values: the tool methods every `Ord` implementation inherits.
 given Ord {
 
     /// Clamps self into the inclusive range [min, max].
@@ -73,7 +85,9 @@ let foreign __koral_stdin(): *CFile;
 let foreign __koral_stdout(): *CFile;
 let foreign __koral_stderr(): *CFile;
 
+/// Terminate the process with the given exit code.
 public let foreign exit(code: Int): Never;
+/// Terminate the process immediately.
 public let foreign abort(): Never;
 
 private let foreign __koral_set_args(argc: Int32, argv: **UInt8): Void;
@@ -90,6 +104,7 @@ public let last_error_message(): String = {
     return String.from_cstring_unchecked(msg);
 };
 
+/// Return the command-line arguments, starting with the program name.
 public let args(): List[String] = {
     let mutable result: List[String] = [];
     let count = UInt(__koral_argc());
@@ -104,7 +119,7 @@ public let args(): List[String] = {
 // Panic and Assertion
 // ============================================================================
 
-// High-level panic function (uses String)
+/// Print `Panic: ` and the message to standard error, then abort the process.
 public let panic(message: String): Never = {
     let prefix = "Panic: ";
     fwrite(prefix.data, 1, prefix.len, __koral_stderr());
@@ -115,6 +130,7 @@ public let panic(message: String): Never = {
     abort();
 };
 
+/// Panic with `message` when `condition` is false.
 public let assert(condition: Bool, message: String): Void = {
     if not condition then {
         panic(message);
@@ -125,12 +141,14 @@ public let assert(condition: Bool, message: String): Void = {
 // Standard IO Functions
 // ============================================================================
 
+/// Write `value`'s text to standard output without a newline, then flush.
 public let print[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stdout());
     fflush(__koral_stdout());
 };
 
+/// Write `value`'s text and a newline to standard output, then flush.
 public let println[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stdout());
@@ -139,12 +157,14 @@ public let println[T: ToString](value: T): Void = {
     fflush(__koral_stdout());
 };
 
+/// Write `value`'s text to standard error without a newline, then flush.
 public let eprint[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stderr());
     fflush(__koral_stderr());
 };
 
+/// Write `value`'s text and a newline to standard error, then flush.
 public let eprintln[T: ToString](value: T): Void = {
     let s = value.to_string();
     fwrite(s.data, 1, s.len, __koral_stderr());
@@ -153,6 +173,8 @@ public let eprintln[T: ToString](value: T): Void = {
     fflush(__koral_stderr());
 };
 
+/// Read one line from standard input without its line ending, returning `None`
+/// at end of input; an empty line yields an empty string.
 public let scanln(): Option[String] = {
     let mutable result = StringBuilder.new();
 

@@ -2,29 +2,48 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Proc API
+# std/proc API
 
 ## Overview
-This page lists the public API of module `Std.Proc` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/proc` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/proc" { ... };`.
 
 ## Free Functions
 ```koral
+/// Get the current process PID.
 public let current_pid(): UInt32;
 
+/// Send a signal to the process with the given PID (Unix).
+/// On Windows, SIGTERM/SIGKILL calls TerminateProcess; other signals return an error.
 public let send_process_signal(signal: Int, to: UInt32 =): Result[Void];
 
+/// Force-kill the process with the given PID (equivalent to send_process_signal(9, to = pid)).
 public let kill_process(pid: UInt32): Result[Void];
 
+/// Force-kill the process group rooted at the given PID.
+/// Koral-spawned subprocesses run in their own process group on POSIX,
+/// so this terminates the root process and any compiler children it spawned.
 public let kill_process_tree(pid: UInt32): Result[Void];
 
+/// Check whether the process with the given PID is still alive.
 public let is_process_alive(pid: UInt32): Bool;
 
+/// Get the working set size (resident memory) of a process in bytes.
+/// Returns 0 if the process is not found or an error occurs.
 public let process_working_set_bytes(pid: UInt32): UInt64;
 
+/// Get the total working set size of a process and all its child processes.
+/// This tracks the entire process tree, not just the root process.
+/// Returns 0 if the process is not found or an error occurs.
 public let process_tree_working_set_bytes(pid: UInt32): UInt64;
 
+/// Convenience: synchronously execute a command and return only the exit status.
+/// Internally uses Command.new(program).args(args).run().
 public let run_command(program: String, args: List[String]): Result[ExitStatus];
 
+/// Convenience: synchronously execute a command and capture stdout/stderr.
+/// Internally uses Command.new(program).args(args).run_output().
 public let run_command_output(program: String, args: List[String]): Result[CommandOutput];
 ```
 
@@ -33,20 +52,40 @@ public let run_command_output(program: String, args: List[String]): Result[Comma
 
 ## Types
 ```koral
+/// Command builder for configuring and launching child processes.
+/// Provides a fluent API for setting program, arguments, environment variables,
+/// working directory, and I/O redirection before spawning.
 public type mutable Command;
 
+/// Synchronous command execution result containing exit status and captured output.
 public type CommandOutput(public status: ExitStatus, public stdout: String, public stderr: String);
 
+/// Child process exit status.
+/// raw_status encoding: normal exit = exit code (0-255), signal termination = -(signal_number)
 public type ExitStatus;
 
+/// Child process stdin pipe (implements Writer trait).
+/// Closing the pipe via drop sends EOF to the child process.
 public type mutable StdinPipe;
 
+/// Child process stdout pipe (implements Reader trait).
 public type mutable StdoutPipe;
 
+/// Child process stderr pipe (implements Reader trait).
 public type mutable StderrPipe;
 
+/// Child process handle providing wait, pipe access, and lifecycle management.
 public type mutable Process;
 
+/// I/O redirection configuration for child process stdin/stdout/stderr.
+///
+/// Variants:
+///   Inherit   — Inherit the parent process's corresponding file descriptor (default).
+///   Piped     — Create a pipe connecting parent and child processes.
+///   Null      — Redirect to /dev/null (Unix) or NUL (Windows).
+///   File      — Redirect to/from an already-opened File (owns the File; closed on drop).
+///   StdoutPipe — Use another child process's stdout pipe as input (for process chaining).
+///   StderrPipe — Use another child process's stderr pipe as input (for process chaining).
 public type IoRedirect {
     /// Inherit the parent process's corresponding file descriptor (default behavior).
     Inherit(),
@@ -65,82 +104,135 @@ public type IoRedirect {
 
 ## Given Implementations
 ```koral
+/// Configure arguments, environment, working directory, and I/O redirection, then spawn or run the child.
 given Command {
+    /// Create a new command builder for the specified program.
     public new(program: String): Command;
+    /// Add a single argument (chainable).
     public arg(self, value: String): Command;
+    /// Add multiple arguments at once (chainable).
     public args(self, values: List[String]): Command;
+    /// Set an environment variable (chainable).
     public set_env(self, name: String, value: String): Command;
+    /// Clear all inherited environment variables (chainable).
     public clear_env(self): Command;
+    /// Remove a specific environment variable (chainable).
     public remove_env(self, name: String): Command;
+    /// Set the child process working directory (chainable).
     public set_current_dir[T: IntoPath](self, path: T): Command;
+    /// Configure stdin redirection (chainable).
     public set_stdin(self, cfg: IoRedirect): Command;
+    /// Configure stdout redirection (chainable).
     public set_stdout(self, cfg: IoRedirect): Command;
+    /// Configure stderr redirection (chainable).
     public set_stderr(self, cfg: IoRedirect): Command;
+    /// Asynchronously spawn a child process, returning a Process handle.
     public spawn(self): Result[Process];
+    /// Synchronously execute the command and wait for completion.
+    /// Returns only the exit status (does not capture output).
     public run(self): Result[ExitStatus];
+    /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
+    /// Forces stdout/stderr to Piped mode to capture output.
     public run_output(self): Result[CommandOutput];
 };
 
+/// Convenience queries over the exit status and captured output.
 given CommandOutput {
+    /// Whether the command succeeded (exit code is 0).
     public is_success(self): Bool;
+    /// Get exit code (convenience method delegating to status).
     public code(self): Option[Int];
 };
 
+/// String conformance: renders the exit status together with the captured stdout and stderr.
 given CommandOutput: ToString {
+    /// Convert to diagnostic text of the form CommandOutput(status, stdout="...", stderr="...").
     public to_string(self): String;
 };
 
+/// Query the exit code or termination signal recorded in the status.
 given ExitStatus {
+    /// Get exit code (Some for normal exit, None for signal termination).
     public code(self): Option[Int];
+    /// Whether the process exited successfully (exit code is 0).
     public is_success(self): Bool;
+    /// Get termination signal number (Some on Unix when killed by signal, None otherwise).
     public signal(self): Option[Int];
 };
 
+/// String conformance: reports the exit code or the termination signal.
 given ExitStatus: ToString {
+    /// Convert to ExitStatus(code=n) for a normal exit or ExitStatus(signal=n) for signal termination.
     public to_string(self): String;
 };
 
-given PipeStorage: Drop {};
-
+/// Access the pipe's underlying file descriptor.
 given StdinPipe {
+    /// Returns the underlying OS file descriptor.
     public fd(self): Int;
 };
 
+/// Writer conformance: sends bytes to the child process's stdin.
 given StdinPipe: Writer {
+    /// Write data to the child process stdin.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// Flush is a no-op for pipes (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
 
+/// Access the pipe's underlying file descriptor.
 given StdoutPipe {
+    /// Returns the underlying OS file descriptor.
     public fd(self): Int;
 };
 
+/// Reader conformance: reads bytes from the child process's stdout.
 given StdoutPipe: Reader {
+    /// Read data from the child process stdout.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Access the pipe's underlying file descriptor.
 given StderrPipe {
+    /// Returns the underlying OS file descriptor.
     public fd(self): Int;
 };
 
+/// Reader conformance: reads bytes from the child process's stderr.
 given StderrPipe: Reader {
+    /// Read data from the child process stderr.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
-given ProcessStorage: Drop {};
-
+/// Wait for the child to exit, capture its output, and take ownership of its pipes.
 given Process {
+    /// Get the child process PID.
     public pid(self): UInt32;
+    /// Peak resident set size (RSS) of the child process in bytes, as reported
+    /// by the kernel after the process was reaped. 0 means not captured.
     public peak_rss_bytes(self): UInt64;
+    /// Block until the child process exits, returning its exit status.
     public wait(self): Result[ExitStatus];
+    /// Wait for the child process to exit and capture all stdout/stderr output.
+    /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
     public wait_output(self): Result[CommandOutput];
+    /// Non-blocking check if the child process has exited.
+    /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
     public try_wait(self): Result[Option[ExitStatus]];
+    /// Take ownership of the stdin pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
     public take_stdin_pipe(self): Option[StdinPipe];
+    /// Take ownership of the stdout pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
     public take_stdout_pipe(self): Option[StdoutPipe];
+    /// Take ownership of the stderr pipe (only Some when configured as Piped).
+    /// Subsequent calls return None (ownership already transferred).
     public take_stderr_pipe(self): Option[StderrPipe];
 };
 
+/// String conformance: names the redirection mode, including the target file descriptor when there is one.
 given IoRedirect: ToString {
+    /// Convert to "inherit", "piped", "null", or a descriptor form such as "file:fd=3".
     public to_string(self): String;
 };
 ```

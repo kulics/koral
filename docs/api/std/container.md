@@ -2,10 +2,12 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Container API
+# std/container API
 
 ## Overview
-This page lists the public API of module `Std.Container` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/container` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/container" { ... };`.
 
 ## Free Functions
 (none)
@@ -15,83 +17,133 @@ This page lists the public API of module `Std.Container` (declaration-only synta
 
 ## Types
 ```koral
+/// A max-heap priority queue: the greatest value is always at the top.
+/// Iteration visits values in internal heap order, not sorted order.
 public type mutable PriorityQueue[T: Ord];
 
+/// Iterator over a priority queue's values in internal heap order.
 public type mutable PriorityQueueIterator[T: Ord];
 
+/// A first-in-first-out (FIFO) queue of values; all operations mutate it in place.
 public type mutable Queue[T: Any];
 
+/// Iterator over a queue's values in first-in-first-out order.
 public type mutable QueueIterator[T: Any];
 
+/// A last-in-first-out (LIFO) stack of values; all operations mutate it in place.
 public type mutable Stack[T: Any];
 
+/// Iterator over a stack's values, from the top down to the bottom.
 public type mutable StackIterator[T: Any];
 ```
 
 ## Given Implementations
 ```koral
+/// Constructors and core heap operations for `PriorityQueue`.
 given[T: Ord] PriorityQueue[T] {
+    /// Create an empty priority queue.
     public new(): Self;
+    /// Create an empty priority queue with room for `capacity` values before resizing.
     public with_capacity(capacity: UInt): Self;
+    /// Return the number of values in the queue.
     public count(self): UInt;
+    /// Return `true` if the queue holds no values.
     public is_empty(self): Bool;
+    /// Remove all values from the queue.
     public clear(self): Void;
+    /// Insert a value, restoring the max-heap order.
     public push(self, value: T): Void;
+    /// Remove and return the greatest value, or `None` if the queue is empty.
     public pop(self): Option[T];
+    /// Return the greatest value without removing it, or `None` if the queue is empty.
     public peek(self): Option[T];
 };
 
+/// Iterable conformance: visit values in internal heap order.
 given[T: Ord] PriorityQueue[T]: Iterable[T, PriorityQueueIterator[T]] {
+    /// Create an iterator over the queue's values in heap order.
     public iterator(self): PriorityQueueIterator[T];
 };
 
+/// Iterator conformance for `PriorityQueueIterator`, yielding heap-ordered values.
 given[T: Ord] PriorityQueueIterator[T]: Iterator[T] {
+    /// Return the next value in heap order, or `None` when exhausted.
     public next(self): Option[T];
 };
 
+/// Constructors and core operations for `Queue`.
 given[T: Any] Queue[T] {
+    /// Create an empty queue.
     public new(): Self;
+    /// Create an empty queue with room for `capacity` values before resizing.
     public with_capacity(capacity: UInt): Self;
+    /// Return the number of values in the queue.
     public count(self): UInt;
+    /// Return `true` if the queue holds no values.
     public is_empty(self): Bool;
+    /// Remove all values from the queue.
     public clear(self): Void;
+    /// Add a value to the back of the queue.
     public push(self, value: T): Void;
+    /// Remove and return the front value, or `None` if the queue is empty.
     public pop(self): Option[T];
+    /// Return the front value without removing it, or `None` if the queue is empty.
     public peek(self): Option[T];
 };
 
+/// Default conformance: a new empty queue.
 given[T: Any] Queue[T]: Default {
+    /// Create an empty queue.
     public default(): Self;
 };
 
+/// Iterable conformance: visit values in first-in-first-out order.
 given[T: Any] Queue[T]: Iterable[T, QueueIterator[T]] {
+    /// Create an iterator over the queue's values, front first.
     public iterator(self): QueueIterator[T];
 };
 
+/// Iterator conformance for `QueueIterator`, yielding values front to back.
 given[T: Any] QueueIterator[T]: Iterator[T] {
+    /// Return the next value front to back, or `None` when exhausted.
     public next(self): Option[T];
 };
 
+/// Constructors and core operations for `Stack`.
 given[T: Any] Stack[T] {
+    /// Create an empty stack.
     public new(): Self;
+    /// Create an empty stack with room for `capacity` values before resizing.
     public with_capacity(capacity: UInt): Self;
+    /// Return the number of values on the stack.
     public count(self): UInt;
+    /// Return `true` if the stack holds no values.
     public is_empty(self): Bool;
+    /// Remove all values from the stack.
     public clear(self): Void;
+    /// Push a value onto the top of the stack.
     public push(self, value: T): Void;
+    /// Remove and return the top value, or `None` if the stack is empty.
     public pop(self): Option[T];
+    /// Return the top value without removing it, or `None` if the stack is empty.
     public peek(self): Option[T];
 };
 
+/// Default conformance: a new empty stack.
 given[T: Any] Stack[T]: Default {
+    /// Create an empty stack.
     public default(): Self;
 };
 
+/// Iterable conformance: visit values from the top of the stack to the bottom.
 given[T: Any] Stack[T]: Iterable[T, StackIterator[T]] {
+    /// Create an iterator over the stack's values, top first.
     public iterator(self): StackIterator[T];
 };
 
+/// Iterator conformance for `StackIterator`, yielding values top to bottom.
 given[T: Any] StackIterator[T]: Iterator[T] {
+    /// Return the next value from the top downwards, or `None` when exhausted.
     public next(self): Option[T];
 };
 ```

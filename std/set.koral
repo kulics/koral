@@ -13,12 +13,14 @@ type SetBucket[T: Hash] {
     Deleted(),
 };
 
+/// A hash set of `Hash` values; iteration order is unspecified.
 public type mutable Set[T: Hash](
     mutable buckets: *mutable SetBucket[T],
     mutable size: UInt,
     mutable capacity: UInt,
 );
 
+/// `Drop` for `Set[T]`: releases the bucket array.
 given[T: Hash] Set[T]: Drop {
 
     drop(self): Void = {
@@ -29,11 +31,13 @@ given[T: Hash] Set[T]: Drop {
     };
 };
 
+/// Iterator over a `Set`'s elements, in unspecified order.
 public type mutable SetIterator[T: Hash](source: Set[T], mutable index: UInt);
 
 // ============================================================================
 // Set Methods
 // ============================================================================
+/// Building, querying, and mutating a set.
 given[T: Hash] Set[T] {
 
     /// 空集合不分配桶数组，首次 insert（走 rehash）时再分配。
@@ -41,6 +45,8 @@ given[T: Hash] Set[T] {
         return Set[T](null, 0, 0);
     };
 
+    /// Create an empty set with its buckets allocated up front, sized for about
+    /// `capacity` elements.
     public with_capacity(capacity: UInt): Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
@@ -57,6 +63,7 @@ given[T: Hash] Set[T] {
         return Set[T](buckets, 0, cap);
     };
 
+    /// Return the number of elements in the set.
     public count(self): UInt = self.size;
 
     // Using when for bucket handling
@@ -129,10 +136,12 @@ given[T: Hash] Set[T] {
         dealloc_memory(old_buckets);
     };
 
+    /// Add `value` to the set if it is not already present.
     public insert(self, value: T): Void = {
         let _ = self.try_insert(value);
     };
 
+    /// Add `value` only if it is absent; return whether it was added.
     public try_insert(self, value: T): Bool = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
@@ -157,12 +166,14 @@ given[T: Hash] Set[T] {
         };
     };
 
+    /// Add every element of `other` to the set.
     public insert_set(self, other: Set[T]): Void = {
         for v in other then {
             self.insert(v);
         };
     };
 
+    /// Return whether `value` is in the set.
     public contains(self, value: T): Bool = {
         when self.find_slot(value) in {
             .None() then {
@@ -178,10 +189,12 @@ given[T: Hash] Set[T] {
         };
     };
 
+    /// Remove `value` from the set if present, ignoring whether it was there.
     public remove(self, value: T): Void = {
         let _ = self.try_remove(value);
     };
 
+    /// Remove `value` if present; return whether it was removed.
     public try_remove(self, value: T): Bool = {
         when self.find_slot(value) in {
             .None() then {
@@ -201,8 +214,10 @@ given[T: Hash] Set[T] {
         };
     };
 
+    /// Return whether the set has no elements.
     public is_empty(self): Bool = self.size == 0;
 
+    /// Return whether every element of `self` is also in `other`.
     public is_subset_of(self, other: Set[T]): Bool = {
         for v in self then {
             if not other.contains(v) then {
@@ -212,8 +227,10 @@ given[T: Hash] Set[T] {
         return true;
     };
 
+    /// Return whether `self` contains every element of `other`.
     public is_superset_of(self, other: Set[T]): Bool = other.is_subset_of(self);
 
+    /// Remove every element from the set.
     public clear(self): Void = {
         for i in 0..<self.capacity then {
             self.buckets[i] = SetBucket[T].Empty();
@@ -221,7 +238,7 @@ given[T: Hash] Set[T] {
         self.size = 0;
     };
 
-    // Retains only elements satisfying the predicate. O(n).
+    /// Keep only the elements that satisfy `predicate`; O(n) time.
     public retain(self, predicate: (T) -> Bool): Void = {
         for i in 0..<self.capacity then {
             let bucket = self.buckets[i];
@@ -238,6 +255,7 @@ given[T: Hash] Set[T] {
     };
 
     // Using while is pattern matching for iterator loops
+    /// Return a new set holding the elements of `self` or `other`.
     public union(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
@@ -249,6 +267,7 @@ given[T: Hash] Set[T] {
         return result;
     };
 
+    /// Return a new set holding the elements present in both `self` and `other`.
     public intersection(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
@@ -259,6 +278,7 @@ given[T: Hash] Set[T] {
         return result;
     };
 
+    /// Return a new set holding the elements of `self` that are not in `other`.
     public difference(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
@@ -269,6 +289,7 @@ given[T: Hash] Set[T] {
         return result;
     };
 
+    /// Return a new set holding the elements in exactly one of `self` and `other`.
     public symmetric_difference(self, other: Set[T]): Set[T] = {
         let mutable result = Set[T].new();
         for v in self then {
@@ -286,9 +307,10 @@ given[T: Hash] Set[T] {
     };
 };
 
+/// `Clone` for `Set[T]`: an independent shallow copy.
 given[T: Hash] Set[T]: Clone {
 
-    // Independent shallow copy: new set identity, elements copied one level.
+    /// Copy the set into a fresh identity, copying elements one level.
     public clone(self): Self = {
         let mutable result = Set[T].with_capacity(self.size);
         for i in 0..<self.capacity then {
@@ -304,21 +326,27 @@ given[T: Hash] Set[T]: Clone {
     };
 };
 
+/// `Default` for `Set[T]`: an empty set.
 given[T: Hash] Set[T]: Default {
 
+    /// Return an empty set.
     public default(): Self = Set[T].new();
 };
 
+/// `Iterable` for `Set[T]`: iterates elements in unspecified order.
 given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
 
+    /// Return an iterator over the set's elements.
     public iterator(self): SetIterator[T] = SetIterator[T](self, 0);
 };
 
 // ============================================================================
 // Set Iterator
 // ============================================================================
+/// `Iterator` for `SetIterator[T]`: yields elements in unspecified order.
 given[T: Hash] SetIterator[T]: Iterator[T] {
 
+    /// Yield the next element, or `None` after the last one.
     public next(self): Option[T] = {
         while self.index < self.source.capacity then {
             let bucket = self.source.buckets[self.index];

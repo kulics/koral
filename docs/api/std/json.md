@@ -2,10 +2,12 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Json API
+# std/json API
 
 ## Overview
-This page lists the public API of module `Std.Json` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/json` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/json" { ... };`.
 
 ## Free Functions
 (none)
@@ -15,8 +17,11 @@ This page lists the public API of module `Std.Json` (declaration-only syntax), o
 
 ## Types
 ```koral
+/// JSON parse failure with `msg` and the `position` in the input where parsing stopped.
 public type JsonError(public msg: String, public position: UInt);
 
+/// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
+/// `Number` holds a `Float64`, `Array` a list of values, and `Object` a string-keyed map.
 public type JsonValue {
     Null(),
     Bool(value: Bool),
@@ -29,42 +34,65 @@ public type JsonValue {
 
 ## Given Implementations
 ```koral
+/// Implements `Error`, reporting the message and its input position.
 given JsonError: Error {
+    /// Return the failure text, including the input position.
     public message(self): String;
 };
 
+/// Implements `ToString`, matching `message`.
 given JsonError: ToString {
+    /// Return the same text as `message`.
     public to_string(self): String;
 };
 
+/// Provides case tests, payload extraction, and indexed access for `JsonValue`.
 given JsonValue {
+    /// Check whether this is `Null`.
     public is_null(self): Bool;
+    /// Check whether this is a `Bool`.
     public is_bool(self): Bool;
+    /// Check whether this is a `Number`.
     public is_number(self): Bool;
+    /// Check whether this is a `String`.
     public is_string(self): Bool;
+    /// Check whether this is an `Array`.
     public is_array(self): Bool;
+    /// Check whether this is an `Object`.
     public is_object(self): Bool;
+    /// Return the `Bool` payload, or `None` when this is not a `Bool`.
     public as_bool(self): Option[Bool];
+    /// Return the `Number` payload, or `None` when this is not a `Number`.
     public as_number(self): Option[Float64];
+    /// Return the `String` payload, or `None` when this is not a `String`.
     public as_string(self): Option[String];
+    /// Return the `Array` elements, or `None` when this is not an `Array`.
     public as_array(self): Option[List[JsonValue]];
+    /// Return the `Object` entries, or `None` when this is not an `Object`.
     public as_object(self): Option[Dict[String, JsonValue]];
+    /// Return the value stored under `key`, or `None` when this is not an `Object` or has no such key.
     public get_field(self, key: String): Option[JsonValue];
+    /// Return the element at `index`, or `None` when this is not an `Array` or the index is out of range.
     public get_element(self, index: UInt): Option[JsonValue];
+    /// Format as JSON indented two spaces per level, with each array element and object entry on its own line.
     public to_string_pretty(self): String;
 };
 
+/// Implements `Eq`, comparing values structurally.
 given JsonValue: Eq {
+    /// Return whether both values hold the same case and equal payloads, comparing arrays and objects element by element.
     public equals(self, other: JsonValue): Bool;
 };
 
-given JsonParser {};
-
+/// Implements `Parseable`, parsing one JSON value from a string.
 given JsonValue: Parseable {
+    /// Parse `s` as one JSON value, failing with a `JsonError` giving the message and position of the first problem.
     public parse(s: String): Result[Self];
 };
 
+/// Implements `ToString`, formatting compact JSON.
 given JsonValue: ToString {
+    /// Format as compact JSON with no whitespace.
     public to_string(self): String;
 };
 ```

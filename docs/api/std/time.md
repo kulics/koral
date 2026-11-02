@@ -2,10 +2,12 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Time API
+# std/time API
 
 ## Overview
-This page lists the public API of module `Std.Time` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/time` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/time" { ... };`.
 
 ## Free Functions
 (none)
@@ -15,196 +17,334 @@ This page lists the public API of module `Std.Time` (declaration-only syntax), o
 
 ## Types
 ```koral
+/// ClockTime represents a time of day with nanosecond precision.
+/// Internal storage is nanoseconds since midnight.
+/// Arithmetic wraps around: 23:00 + 7200s = 01:00.
 public type ClockTime;
 
+/// Date represents a calendar date (year, month, day) with no timezone.
+/// Internal storage is days since Unix epoch (1970-01-01).
 public type Date;
 
+/// DateTime represents a calendar date and time with timezone information.
+/// Internal storage is UTC unix seconds + nanoseconds + timezone.
 public type DateTime;
 
+/// MonoTime represents a point in time from a monotonic clock.
+/// It is only useful for measuring elapsed time and is not affected
+/// by system clock adjustments (e.g. NTP).
 public type MonoTime;
 
+/// TimeZone represents a timezone for converting between UTC and local time.
 public type TimeZone;
 ```
 
 ## Given Implementations
 ```koral
+/// Constructors from hour, minute, second, and nanosecond fields.
 given ClockTime {
+    /// Creates a ClockTime from hour, minute, second.
+    /// Returns Error if any field is out of range.
     public new(hour: Int =, minute: Int =, second: Int =): Result[ClockTime];
+    /// Creates a ClockTime from hour, minute, second, nanoseconds.
+    /// Returns Error if any field is out of range.
     public new_full(hour: Int =, minute: Int =, second: Int =, nanosecond: Int =): Result[ClockTime];
+    /// Returns midnight (00:00:00).
     public midnight(): ClockTime;
 };
 
+/// Field accessors for hour, minute, second, and nanosecond.
 given ClockTime {
+    /// Returns the hour (0-23).
     public hour(self): Int;
+    /// Returns the minute (0-59).
     public minute(self): Int;
+    /// Returns the second (0-59).
     public second(self): Int;
+    /// Returns the nanosecond (0-999_999_999).
     public nanosecond(self): Int;
 };
 
+/// Add conformance: adding a Duration wraps around at midnight.
 given ClockTime: Add[Duration] {
+    /// [Duration]Add: add — ClockTime + Duration. Wraps around at midnight.
     public add(self, v: Duration): ClockTime;
 };
 
+/// Sub conformance: subtracting a Duration wraps around at midnight.
 given ClockTime: Sub[Duration] {
+    /// [Duration]Sub: sub — ClockTime - Duration. Wraps around at midnight.
     public sub(self, v: Duration): ClockTime;
 };
 
+/// Forward duration measurement between two times of day.
 given ClockTime {
+    /// Computes the Duration from self to other (returns other - self, wraps forward).
     public duration_to(self, other: ClockTime): Duration;
 };
 
+/// Eq conformance over the nanoseconds since midnight.
 given ClockTime: Eq {
+    /// Report whether two times of day are identical.
     public equals(self, other: ClockTime): Bool;
 };
 
+/// Ord conformance ordering times of day within the day.
 given ClockTime: Ord {
+    /// Compare two times of day within the day.
     public compare(self, other: ClockTime): Int;
 };
 
+/// ToString conformance formatting as ISO 8601 time.
 given ClockTime: ToString {
+    /// Formats as ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
     public to_string(self): String;
 };
 
+/// Parseable conformance accepting ISO 8601 time strings.
 given ClockTime: Parseable {
+    /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
     public parse(s: String): Result[ClockTime];
 };
 
+/// Constructors from year, month, and day components.
 given Date {
+    /// Creates a Date from year, month, day components.
+    /// Returns Error if any field is out of range.
     public new(year: Int =, month: Int =, day: Int =): Result[Date];
+    /// Returns the Unix epoch date (1970-01-01).
     public epoch(): Date;
 };
 
+/// Field accessors for year, month, day, weekday, and day of year.
 given Date {
+    /// Returns the year.
     public year(self): Int;
+    /// Returns the month (1-12).
     public month(self): Int;
+    /// Returns the day of month (1-31).
     public day(self): Int;
+    /// Returns the ISO 8601 weekday number (1=Monday .. 7=Sunday).
     public weekday(self): Int;
+    /// Returns the day of year (1-366).
     public day_of_year(self): Int;
+    /// Returns true if the year is a leap year.
     public is_leap_year(self): Bool;
+    /// Returns the number of days in the current month.
     public days_in_month(self): Int;
 };
 
+/// Day, month, and year arithmetic, clamping overflow to the target month's length.
 given Date {
+    /// Adds the given number of days (negative to subtract).
     public add_days(self, n: Int): Date;
+    /// Returns the number of days from self to other (positive if other is later).
     public days_to(self, other: Date): Int;
+    /// Adds the given number of months (negative to subtract).
+    /// If the resulting day exceeds the month's length, it is clamped to the last day.
     public add_months(self, months: Int): Date;
+    /// Adds the given number of years (negative to subtract).
+    /// Feb 29 in a leap year is clamped to Feb 28 in non-leap years.
     public add_years(self, years: Int): Date;
 };
 
+/// Eq conformance over the day count since the Unix epoch.
 given Date: Eq {
+    /// Report whether two dates fall on the same day.
     public equals(self, other: Date): Bool;
 };
 
+/// Ord conformance ordering dates chronologically.
 given Date: Ord {
+    /// Compare two dates chronologically.
     public compare(self, other: Date): Int;
 };
 
+/// ToString conformance formatting as ISO 8601 "YYYY-MM-DD".
 given Date: ToString {
+    /// Formats as ISO 8601 date string: "YYYY-MM-DD".
     public to_string(self): String;
 };
 
+/// Parseable conformance accepting ISO 8601 "YYYY-MM-DD" strings.
 given Date: Parseable {
+    /// Parses an ISO 8601 date string: "YYYY-MM-DD".
     public parse(s: String): Result[Date];
 };
 
+/// Display name and UTC offset queries for a timezone.
 given TimeZone {
+    /// Returns the timezone name.
     public name(self): String;
+    /// Returns the UTC offset at the given DateTime as a Duration.
     public offset_at(self, datetime: DateTime): Duration;
 };
 
+/// Constructors from wall-clock readings, Unix timestamps, and date/time parts.
 given DateTime {
+    /// Returns the current local time.
     public now(): DateTime;
+    /// Returns the current UTC time.
     public now_utc(): DateTime;
+    /// Returns the Unix epoch (1970-01-01T00:00:00Z).
     public epoch(): DateTime;
+    /// Creates a UTC DateTime from a Duration since the Unix epoch.
     public from_unix_timestamp(timestamp: Duration): DateTime;
+    /// Creates a UTC DateTime from seconds since the Unix epoch.
     public from_unix_seconds(seconds: Int64): DateTime;
+    /// Creates a DateTime from a Date and ClockTime in the given timezone.
     public from_parts(date: Date, time: ClockTime, timezone: TimeZone): DateTime;
+    /// Creates a DateTime from a Date at midnight in the given timezone.
     public from_date_at_midnight(date: Date, timezone: TimeZone): DateTime;
 };
 
+/// Field accessors evaluated in the associated timezone.
 given DateTime {
+    /// Returns the year.
     public year(self): Int;
+    /// Returns the month (1-12).
     public month(self): Int;
+    /// Returns the day of month (1-31).
     public day(self): Int;
+    /// Returns the hour (0-23).
     public hour(self): Int;
+    /// Returns the minute (0-59).
     public minute(self): Int;
+    /// Returns the second (0-59).
     public second(self): Int;
+    /// Returns the associated timezone.
     public timezone(self): TimeZone;
+    /// Returns the date part as a Date value.
     public date(self): Date;
+    /// Returns the time-of-day part as a ClockTime value.
     public time(self): ClockTime;
+    /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
     public weekday(self): Int;
 };
 
+/// Unix timestamp extraction, timezone conversion, and wall-clock elapsed time.
 given DateTime {
+    /// Returns the Duration since the Unix epoch.
     public to_unix_timestamp(self): Duration;
+    /// Returns the seconds since the Unix epoch.
     public to_unix_seconds(self): Int64;
+    /// Converts to the given timezone (same instant, different display).
     public in_timezone(self, timezone: TimeZone): DateTime;
+    /// Converts to UTC.
     public in_utc(self): DateTime;
+    /// Converts to local timezone.
     public in_local(self): DateTime;
+    /// Return the Duration elapsed since this DateTime instant.
+    /// If current wall clock is earlier than self, returns Duration.zero().
     public elapsed(self): Duration;
 };
 
+/// Add conformance shifting the instant forward by a Duration.
 given DateTime: Add[Duration] {
+    /// [Duration]Add: add — DateTime + Duration
     public add(self, v: Duration): DateTime;
 };
 
+/// Sub conformance shifting the instant back by a Duration.
 given DateTime: Sub[Duration] {
+    /// [Duration]Sub: sub — DateTime - Duration
     public sub(self, v: Duration): DateTime;
 };
 
+/// Duration measurement between two instants.
 given DateTime {
+    /// Computes the Duration from self to other (returns other - self).
     public duration_to(self, other: DateTime): Duration;
 };
 
+/// Eq conformance over the UTC instant, independent of timezone.
 given DateTime: Eq {
+    /// Eq: equals — based on unix_secs + nanos (timezone-independent)
     public equals(self, other: DateTime): Bool;
 };
 
+/// Ord conformance ordering by the UTC instant, independent of timezone.
 given DateTime: Ord {
+    /// Ord: compare — based on unix_secs + nanos (timezone-independent)
     public compare(self, other: DateTime): Int;
 };
 
+/// ToString conformance formatting as ISO 8601 with a timezone suffix.
 given DateTime: ToString {
+    /// Formats as ISO 8601 string.
+    /// UTC: "2024-01-15T10:30:00Z"
+    /// Fixed offset: "2024-01-15T10:30:00+08:00"
+    /// With nanos: "2024-01-15T10:30:00.123456789Z"
     public to_string(self): String;
 };
 
+/// Parseable conformance accepting ISO 8601 strings with 'Z' or a UTC offset.
 given DateTime: Parseable {
+    /// Parses an ISO 8601 string into a DateTime.
+    /// Supports: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00",
+    ///           "2024-01-15T10:30:00.123456789Z"
+    /// Returns Error with a description if the string does not match.
     public parse(s: String): Result[DateTime];
 };
 
+/// Constructors and elapsed-time measurement from the monotonic clock.
 given MonoTime {
+    /// Get the current monotonic time.
     public now(): MonoTime;
+    /// Return the Duration elapsed since this MonoTime was captured.
+    /// If the clock appears to have gone backwards (should not happen
+    /// with a monotonic clock), returns Duration.zero().
     public elapsed(self): Duration;
 };
 
+/// Add conformance shifting the monotonic instant forward.
 given MonoTime: Add[Duration] {
+    /// [Duration]Add: add — MonoTime + Duration
     public add(self, v: Duration): MonoTime;
 };
 
+/// Sub conformance shifting the monotonic instant back.
 given MonoTime: Sub[Duration] {
+    /// [Duration]Sub: sub — MonoTime - Duration
     public sub(self, v: Duration): MonoTime;
 };
 
+/// Duration measurement to another monotonic instant.
 given MonoTime {
+    /// Computes the Duration from self to other (returns other - self).
+    /// If the result would be negative, returns Duration.zero().
     public duration_to(self, other: MonoTime): Duration;
 };
 
+/// Eq conformance over the monotonic clock reading.
 given MonoTime: Eq {
+    /// Eq: equals
     public equals(self, other: MonoTime): Bool;
 };
 
+/// Ord conformance ordering monotonic instants.
 given MonoTime: Ord {
+    /// Ord: compare — returns -1, 0, or 1
     public compare(self, other: MonoTime): Int;
 };
 
+/// Constructors for UTC, local, fixed-offset, and named timezones.
 given TimeZone {
+    /// Returns the UTC timezone (offset zero).
     public utc(): TimeZone;
+    /// Returns the local system timezone.
     public local(): TimeZone;
+    /// Creates a fixed-offset timezone from a Duration.
+    /// Returns Error if the absolute offset is >= 86400 seconds.
     public from_offset(offset: Duration): Result[TimeZone];
+    /// Creates a named timezone from an IANA timezone name.
+    /// Returns Error if the timezone name is not found.
     public from_name(name: String): Result[TimeZone];
 };
 
+/// Eq conformance over the timezone kind and its name or offset.
 given TimeZone: Eq {
+    /// Compare two timezones by kind and name or offset.
     public equals(self, other: TimeZone): Bool;
 };
 ```

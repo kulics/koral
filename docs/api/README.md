@@ -9,9 +9,9 @@
 api/
   README.md      本文件（手写，不要放进 std/）
   std/           生成页，一个模块一页
-    std.md       模块 Std
-    io.md        模块 Std.Io
-    async.md     模块 Std.Async
+    std.md       模块 std
+    io.md        模块 std/io
+    async.md     模块 std/async
     ...          共 14 个模块
 ```
 
@@ -47,6 +47,20 @@ bin/toolchain-doc-gen/koral_doc --check       # 过期闸门
 
 改 `std/` 的公开声明（签名、默认参数、可见性、新增/删除成员）后，重新生成并把 14 页一并提交。
 `--check` 会在变更 checklist 里被要求跑过。
+
+## 每条 API 都要有文档
+
+生成页里每条 API（顶层公开声明、`given` 块、trait/given 的成员）都带源码里的
+`///` 文档注释。缺 `///` 的条目会让生成器**整体拒绝出页**并列出名字，所以
+「每个 API 都有说明」是产物的性质，不靠人肉维持：
+
+```
+undocumented public API in module std/io: BufReader.read_byte, ...
+```
+
+规则：文档注释是紧贴声明上方的 `///` 行（普通 `//` 是给维护者的便签，不进文档）；
+`given` 块只在目标（类型或 trait）是 `public` 时才进文档——非 public 类型的 `given`
+属于实现细节，不渲染也不要求文档。
 
 生成页顶部有机器可读标记：
 

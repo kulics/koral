@@ -1298,15 +1298,16 @@ extension Parser {
   
   // MARK: - Call Expression
 
-  /// Parse a single call argument, which may be a named argument (label: expr) or positional (expr).
+  /// Parse a single call argument, which may be a named argument (label = expr) or positional (expr).
   private func parseCallArgument() throws -> CallArg {
     // A bounded two-token shape rule decides named vs positional: a lower-first
-    // `ident` immediately followed by `:`. Once that matches, the argument IS
-    // labeled -- `ident : …` can never be a positional argument (there is no
-    // `:` operator in expressions), so a failure inside it is reported as what
-    // it is. This used to restore and re-parse positionally, which always
-    // produced the wrong diagnostic: `f(a: (1, 2))` said "unexpected `:`" after
-    // re-parsing `a`, instead of the pair-literal error the labeled parse had.
+    // `ident` immediately followed by `=`. Once that matches, the argument IS
+    // labeled -- `ident = …` can never be a positional argument (`=` never
+    // joins two expressions; an assignment is a statement, not a value), so a
+    // failure inside it is reported as what it is. This used to restore and
+    // re-parse positionally, which always produced the wrong diagnostic:
+    // `f(a = (1, 2))` said "unexpected `=`" after re-parsing `a`, instead of
+    // the pair-literal error the labeled parse had.
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
       // Anchored at the label: an argument-shape diagnostic is about the
       // `label = value` pair as written, and the label is where it starts.

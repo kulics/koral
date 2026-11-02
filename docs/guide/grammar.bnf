@@ -575,7 +575,7 @@
 <postfix-suffix> ::= <call-suffix>
                    | <subscript-suffix>
                    | <member-suffix>
-                   | <static-call-suffix>
+                   | <generic-instance-suffix>
                    | <qualified-call-suffix>
 
 // `(` 是两个后缀共用的起始记号，`[` 是两个共用的。文法里它们各写各的产生式，
@@ -626,7 +626,7 @@
 //       Drawable(c) 是 trait upcast；f(1, 2) 是调用；f(*p) 是调用（`*p` 是解引用）。
 //
 //   `[` 的归类：
-//     括号内是 <type-list> -> 泛型实例化（由 <subscript-suffix> 承担，见下）
+//     括号内是 <type-list> -> 泛型实例化（由 <generic-instance-suffix> 承担，见下）
 //     其余                 -> <subscript-suffix>
 //   `[` 后若是空的 `[]`，或实参之间出现 `,`，都按错误报出，不猜测语义。
 //
@@ -645,7 +645,12 @@
 <subscript-suffix> ::= "[" <expression> "]"
 // Exactly ONE index. `[]` and `[a, b]` are errors, not empty or multi-index
 // subscripts: there is no collection in the language that indexes by a tuple.
-<member-suffix> ::= "." <identifier>
+<member-suffix> ::= "." <member-access>
+// 成员访问的名字，以及它后面能跟的尾巴。<flow-receiver-chain>（省略接收者的
+// `and then .f(...)` 链）复用这两个：链以第一个 <member-access> 起步，其余
+// 逐节 <postfix-continuation>。
+<member-access> ::= <identifier>
+<postfix-continuation> ::= <postfix-suffix>
 
 // 命名目标家族：`Target(expr)` / `Target[T](expr)` 是「命名目标调用」。文法上
 // 同形，语义按目标种类分流（类型检查器按 Target 的种类决定）：
@@ -682,8 +687,10 @@
 //      方法实参里不再写 receiver。仅用于实例方法。
 //      例: n(Tag).plus_ten()  /  n(Tag).kind()
 // 语法上 `(` 的归类见上文：括号内是单个类型且后面紧跟 `.method(` 才是限定调用。
-<qualified-call-suffix> ::= "(" <trait-ref> ")" "." <identifier> <qualified-method-tail>
-<qualified-method-tail> ::= ("[" <type-list> "]")? "(" <argument-list>? ")"
+<qualified-call-suffix> ::= "(" <trait-ref> ")" "." <identifier> <method-tail>
+// 方法尾巴：可选的方法级泛型实参 + 调用括号。<type-method-expression>、
+// <type-head-follower>、<qualified-call-suffix> 三处共用，形状一致。
+<method-tail>           ::= ("[" <type-list> "]")? "(" <argument-list>? ")"
 <trait-ref>             ::= <type-identifier> ("[" <type-list> "]")?
 
 <argument> ::= <identifier> "=" <expression>
@@ -709,6 +716,7 @@
                        | "self"
                        | "it"
                        | <type-application>
+                       | <type-method-expression>
                        | <type-head-expression>
                        | <implicit-member-expression>
                        | <collection-literal>
@@ -719,7 +727,7 @@
 // （`let p: (*Int)` ≡ `let p: *Int`）。类型头只有两个合法跟随（跟随门控）：
 <type-head-expression> ::= "(" <type> ")" <type-head-follower>
 <type-head-follower> ::= "(" <argument-list> ")"
-                       | "." <identifier> <call-suffix>
+                       | "." <identifier> <method-tail>
 //   (Point)(1, 2)      ≡ Point(1, 2)     命名目标家族（构造 / 数值转换 / trait upcast）
 //   (Point).origin()   ≡ Point.origin()  静态调用
 //   (*Foo).f()         在 `*Foo` 的方法面上找 `f`（没有就 `Member 'f' not found`）
@@ -742,23 +750,36 @@
 //
 //   <type-application>        Type(...)            命名目标家族（转换 / 构造 / trait upcast）
 //   <type-head-expression>    (Type)(...) / (Type).m(...)  同上的括号类型头写法
-//   <static-call-suffix>      Type.method(...)     静态方法调用
+//   <type-method-expression>  Type.method(...)     静态调用，类型前缀（见下）
 //   <generic-instance-suffix> Type[T]              泛型实例化
 //   <qualified-call-suffix>   Type(Trait).method(...)  类型限定调用
 //
-// 除 <type-head-expression> 这个 primary 外，其余都由 <postfix-expression>
-// 组合出来（见 <postfix-suffix>），而不是从 <primary-expression> 单独生成
-// `Type`：裸 `Point` 不是产生式，它是 <identifier> 与类型名同形之后由语义
-// 拒绝的那一种写法。
+// 除 <type-head-expression> / <type-method-expression> 这两个 primary 外，其余
+// 都由 <postfix-expression> 组合出来（见 <postfix-suffix>），而不是从
+// <primary-expression> 单独生成 `Type`：裸 `Point` 不是产生式，它是
+// <identifier> 与类型名同形之后由语义拒绝的那一种写法。
 
-<static-call-suffix> ::= "." <identifier> <call-suffix>
+// Type.method(...)：**类型前缀** + 方法调用。前缀是类型名，可带泛型实参；
+// 方法名后可带方法级泛型实参。静态方法、关联函数、enum case 构造同形
+// （`Int.max_value()`、`List[UInt8].new()`、`Result[UInt].Ok(n)`、
+// `IpAddr.V4(a)`），语义按方法种类分流。类型名与值名在文法上同形（上文的
+// 语义判据），所以这条与 `<identifier> <member-suffix> <call-suffix>` 的值读法
+// 重叠，由语义按前缀是不是类型名选择读法——与实现一致（koral-syntax
+// parser.koral 的 `expr_is_type_name`，compiler koralc 同名判据）。
+<type-method-expression> ::= <type-method-prefix> "." <identifier> <method-tail>
+<type-method-prefix> ::= <type-identifier> ("[" <type-list> "]")?
+
 <generic-instance-suffix> ::= "[" <type-list> "]"
 // 组合规则（与实现一一对应）：
-//   TypeName[T]  → <identifier> <generic-instance-suffix>
-//   TypeName[T].method(args)  → <identifier> <generic-instance-suffix> <member-suffix> <call-suffix>
-//   TypeName.method(args)  → <identifier> <static-call-suffix>
-//   make[T](1)  → <identifier> <generic-instance-suffix> <call-suffix>
-//   TypeName[T](args)  → <type-application>（命名目标家族）；TypeName(expr) → <type-application>（同上）
+//   TypeName.method(args)     → <type-method-expression>
+//   TypeName[T].method(args)  → <type-method-expression>
+//   TypeName.method[T](args)  → <type-method-expression>
+//   TypeName[T](args)         → <type-application>（命名目标家族）
+//   TypeName(expr)            → <type-application>（同上）
+//   TypeName[T]               → <identifier> <generic-instance-suffix>
+//   make[T](1)                → <identifier> <generic-instance-suffix> <call-suffix>
+//   value.m(args)             → <identifier> <member-suffix> <call-suffix>
+//   value.m[T](args)          → <identifier> <member-suffix> <generic-instance-suffix> <call-suffix>
 
 <collection-literal> ::= "[" "]"
                        | "[" <expression-list> ","? "]"

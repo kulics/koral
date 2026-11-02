@@ -8,7 +8,8 @@
 // Range Type Definition
 // ============================================================================
 
-// Range enum type representing different kinds of intervals
+/// An interval over an `Ord` type: bounded on both sides (`a..b`, `a..<b`,
+/// `a<..b`, `a<..<b`), open-ended (`a...`, `a<...`, `...b`, `...<b`), or full (`...`).
 public type Range[T: Ord] {
     // Bound ranges (4 kinds)
     Closed(start: T, end: T), // a..b   : start <= x <= end
@@ -17,33 +18,41 @@ public type Range[T: Ord] {
     Open(start: T, end: T), // a<..<b : start < x < end
 
     // From ranges (2 kinds)
-    From(start: T), // a..    : start <= x <= max
-    After(start: T), // a<..   : start < x <= max
+    From(start: T), // a...   : start <= x <= max
+    After(start: T), // a<...  : start < x <= max
 
     // To ranges (2 kinds)
-    To(end: T), // ..b    : min <= x <= end
-    Until(end: T), // ..<b   : min <= x < end
+    To(end: T), // ...b   : min <= x <= end
+    Until(end: T), // ...<b  : min <= x < end
 
     // Full range (1 kind)
-    Full(), // ..     : min <= x <= max
+    Full(), // ...    : min <= x <= max
 };
 
+/// A slice descriptor: where a slice starts and how many elements it covers.
 public type SliceSpec(private slice_offset: UInt, private slice_len: UInt);
 
+/// Construction and accessors for `SliceSpec`.
 given SliceSpec {
 
+    /// Create a spec for the `len` elements starting at `offset`.
     public new(offset: UInt =, len: UInt =): SliceSpec = SliceSpec(offset, len);
 
+    /// Return the slice's start offset.
     public start(self): UInt = self.slice_offset;
 
+    /// Return the offset just past the slice's last element.
     public end(self): UInt = self.slice_offset + self.slice_len;
 
+    /// Return the number of elements the slice covers.
     public len(self): UInt = self.slice_len;
 };
 
-// Range contains method - checks if a value is within the range
+/// Containment and emptiness checks for `Range` intervals.
 given[T: Ord] Range[T] {
 
+    /// Return whether `value` lies within the range, honoring each variant's
+    /// bound style.
     public contains(self, value: T): Bool = when self in {
         .Closed(start, end) then start <= value and value <= end,
         .ClosedOpen(start, end) then start <= value and value < end,
@@ -56,6 +65,8 @@ given[T: Ord] Range[T] {
         .Full() then true,
     };
 
+    /// Return whether the range contains no values; the open-ended and full
+    /// forms never do, while a bounded form is empty once its bounds cross.
     public is_empty(self): Bool = when self in {
         .Closed(start, end) then start > end,
         .ClosedOpen(start, end) then start >= end,
@@ -73,108 +84,130 @@ given[T: Ord] Range[T] {
 // Step Trait
 // ============================================================================
 
-// Step trait for types that can be stepped through sequentially
+/// Types whose values step one at a time, enabling range iteration.
 public trait Step: Bounded {
+    /// Return the next value after `self`, or `None` at the type's maximum.
     succ(self): Option[Self];
+    /// Return the value before `self`, or `None` at the type's minimum.
     pred(self): Option[Self];
 };
 
-// Step implementation for Int
+/// `Step` for `Int`: steps by one, yielding `None` at the type's bounds.
 given Int: Step {
 
+    /// Return `self + 1`, or `None` at `Int.max_value()`.
     public succ(self): Option[Self] = if self == Int.max_value() then Option[Self].None()
     else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `Int.min_value()`.
     public pred(self): Option[Self] = if self == Int.min_value() then Option[Self].None()
     else Option[Self].Some(self - 1);
 };
 
-// Step implementation for Int8
+/// `Step` for `Int8`: steps by one, yielding `None` at the type's bounds.
 given Int8: Step {
 
+    /// Return `self + 1`, or `None` at `Int8.max_value()`.
     public succ(self): Option[Self] = if self == Int8.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `Int8.min_value()`.
     public pred(self): Option[Self] = if self == Int8.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for Int16
+/// `Step` for `Int16`: steps by one, yielding `None` at the type's bounds.
 given Int16: Step {
 
+    /// Return `self + 1`, or `None` at `Int16.max_value()`.
     public succ(self): Option[Self] = if self == Int16.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `Int16.min_value()`.
     public pred(self): Option[Self] = if self == Int16.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for Int32
+/// `Step` for `Int32`: steps by one, yielding `None` at the type's bounds.
 given Int32: Step {
 
+    /// Return `self + 1`, or `None` at `Int32.max_value()`.
     public succ(self): Option[Self] = if self == Int32.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `Int32.min_value()`.
     public pred(self): Option[Self] = if self == Int32.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for Int64
+/// `Step` for `Int64`: steps by one, yielding `None` at the type's bounds.
 given Int64: Step {
 
+    /// Return `self + 1`, or `None` at `Int64.max_value()`.
     public succ(self): Option[Self] = if self == Int64.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `Int64.min_value()`.
     public pred(self): Option[Self] = if self == Int64.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for UInt
+/// `Step` for `UInt`: steps by one, yielding `None` at the type's bounds.
 given UInt: Step {
 
+    /// Return `self + 1`, or `None` at `UInt.max_value()`.
     public succ(self): Option[Self] = if self == UInt.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `UInt.min_value()`.
     public pred(self): Option[Self] = if self == UInt.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for UInt8
+/// `Step` for `UInt8`: steps by one, yielding `None` at the type's bounds.
 given UInt8: Step {
 
+    /// Return `self + 1`, or `None` at `UInt8.max_value()`.
     public succ(self): Option[Self] = if self == UInt8.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `UInt8.min_value()`.
     public pred(self): Option[Self] = if self == UInt8.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for UInt16
+/// `Step` for `UInt16`: steps by one, yielding `None` at the type's bounds.
 given UInt16: Step {
 
+    /// Return `self + 1`, or `None` at `UInt16.max_value()`.
     public succ(self): Option[Self] = if self == UInt16.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `UInt16.min_value()`.
     public pred(self): Option[Self] = if self == UInt16.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for UInt32
+/// `Step` for `UInt32`: steps by one, yielding `None` at the type's bounds.
 given UInt32: Step {
 
+    /// Return `self + 1`, or `None` at `UInt32.max_value()`.
     public succ(self): Option[Self] = if self == UInt32.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `UInt32.min_value()`.
     public pred(self): Option[Self] = if self == UInt32.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
 
-// Step implementation for UInt64
+/// `Step` for `UInt64`: steps by one, yielding `None` at the type's bounds.
 given UInt64: Step {
 
+    /// Return `self + 1`, or `None` at `UInt64.max_value()`.
     public succ(self): Option[Self] = if self == UInt64.max_value() then Option[Self].None(
     ) else Option[Self].Some(self + 1);
 
+    /// Return `self - 1`, or `None` at `UInt64.min_value()`.
     public pred(self): Option[Self] = if self == UInt64.min_value() then Option[Self].None(
     ) else Option[Self].Some(self - 1);
 };
@@ -183,16 +216,18 @@ given UInt64: Step {
 // Range Iterator
 // ============================================================================
 
-// RangeIterator type for iterating over ranges
+/// Iterator that steps a range's values one at a time, from its start bound to
+/// its end bound.
 public type mutable RangeIterator[T: Step](
     mutable current: Option[T],
     end: T,
     include_end: Bool,
 );
 
-// RangeIterator next method
+/// `Iterator` for `RangeIterator[T]`: yields values until the end bound is reached.
 given[T: Step] RangeIterator[T]: Iterator[T] {
 
+    /// Yield the next value in the range, or `None` once the end bound is reached.
     public next(self): Option[T] = when self.current in {
         .None() then Option[T].None(),
         .Some(c) then {
@@ -211,9 +246,11 @@ given[T: Step] RangeIterator[T]: Iterator[T] {
     };
 };
 
-// Range iterator method - only available when T is Step
+/// `Iterable` for `Range[T]`: iterates exactly the values `contains` accepts,
+/// available when `T` can step.
 given[T: Step] Range[T]: Iterable[T, RangeIterator[T]] {
 
+    /// Return a `RangeIterator` covering this range's values.
     public iterator(self): RangeIterator[T] = when self in {
         .Closed(start, end) then RangeIterator[T](Option[T].Some(start), end, true),
         .ClosedOpen(start, end) then RangeIterator[T](Option[T].Some(start), end, false),

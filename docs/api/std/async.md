@@ -2,19 +2,28 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Async API
+# std/async API
 
 ## Overview
-This page lists the public API of module `Std.Async` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/async` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/async" { ... };`.
 
 ## Free Functions
 ```koral
+/// 创建新线程执行闭包，返回线程句柄
+/// 等价于 Task.new(f).spawn()，覆盖最常见场景
+/// 失败时 panic
 public let run_task(f: () -> Void): Thread;
 
+/// 获取当前线程 ID
 public let current_thread_id(): UInt64;
 
+/// 立即让出当前线程时间片，提示调度器切换到其他线程
+/// 不保证一定会切换——调度器可能立即恢复当前线程
 public let yield_thread_now(): Void;
 
+/// 获取可用并行度（通常等于逻辑 CPU 核心数，但可能受 cgroup、affinity 等限制）
 public let available_parallelism(): UInt;
 ```
 
@@ -23,48 +32,82 @@ public let available_parallelism(): UInt;
 
 ## Types
 ```koral
+/// Thread builder, configures thread parameters then creates thread via spawn().
+/// Analogous to Command builder -> Process handle pattern.
 public type mutable Task;
 
+/// Handle to a spawned thread, obtained from Task.spawn().
+/// Release it with wait() or detach(); dropping it without either detaches the thread automatically.
 public type mutable Thread;
 
+/// One-shot countdown timer that blocks in wait() until its duration elapses.
 public type mutable Timer;
 
+/// Periodic timer whose wait() blocks for one interval at a time.
+/// Each interval is measured from the previous wait() return, so drift accumulates instead of staying on a fixed schedule.
 public type mutable Ticker;
 ```
 
 ## Given Implementations
 ```koral
+/// Build a task from a closure, configure its thread name and stack size, and spawn it.
 given Task {
+    /// Create a Task builder, binding the closure to execute.
     public new(f: () -> Void): Task;
+    /// Set the thread name (chainable).
     public set_name(self, name: String): Task;
+    /// Set the thread stack size (chainable).
     public set_stack_size(self, size: UInt): Task;
+    /// Create a thread and return a Thread handle.
+    /// Panics on failure.
     public spawn(self): Thread;
 };
 
+/// Drop conformance: detaches the thread when it was neither waited nor detached.
 given Thread: Drop {};
 
+/// Join or detach the thread, and query its id and name.
 given Thread {
+    /// Block until the thread finishes.
+    /// Returns Error if already waited or detached.
     public wait(self): Result[Void];
+    /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
     public detach(self): Void;
+    /// Get the thread ID.
     public id(self): UInt64;
+    /// Get the thread name.
     public name(self): Option[String];
 };
 
+/// Drop conformance: cancels a still-pending timer and destroys its timer context.
 given Timer: Drop {};
 
+/// Create a timer, block until it fires, or reset and cancel it.
 given Timer {
+    /// Create a timer with the given delay.
     public new(d: Duration): Timer;
+    /// Block for the timer's duration. Returns immediately if already fired or cancelled.
+    /// Marks the timer as fired on return.
     public wait(self): Void;
+    /// Reset the timer: clears fired state and sets a new duration.
+    /// The next wait() will block for the new duration.
     public reset(self, d: Duration): Void;
+    /// Cancel the timer. Any blocked wait() returns immediately.
     public cancel(self): Void;
 };
 
+/// Drop conformance: cancels a still-running ticker and destroys its timer context.
 given Ticker: Drop {};
 
+/// Create a ticker, block until each tick, change the interval, or cancel it.
 given Ticker {
+    /// Create a ticker that fires every `interval`.
     public new(interval: Duration): Ticker;
+    /// Block until the next tick. Returns immediately if cancelled.
     public wait(self): Void;
+    /// Change the interval. Takes effect on the next wait() call.
     public reset(self, interval: Duration): Void;
+    /// Cancel the ticker. Any blocked wait() returns immediately.
     public cancel(self): Void;
 };
 ```

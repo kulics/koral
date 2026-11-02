@@ -3,26 +3,27 @@ using "std" { ... };
 // std.text - Type Definitions
 // ============================================================================
 
-// 编译选项（位标志）
+/// Bit flags that control how a regex is compiled and matched.
 public type RegexFlag(value: UInt);
 
+/// Flag constructors and bitwise combinators for `RegexFlag`.
 given RegexFlag {
 
-    // 无特殊选项（默认）
+    /// The empty flag set: default, case-sensitive, whole-text matching.
     public none(): RegexFlag = RegexFlag(0);
 
-    // 大小写不敏感
+    /// Match letters case-insensitively.
     public ignore_case(): RegexFlag = RegexFlag(1);
 
-    // 多行模式（^/$ 匹配行首/行尾而非字符串首/尾）
+    /// Make `^` and `$` match line starts and ends, not just the text's ends.
     public multiline(): RegexFlag = RegexFlag(2);
 
-    // 组合标志：a | b
+    /// Combine two flag sets with bitwise OR.
     public combine(self, other: RegexFlag): RegexFlag = RegexFlag(
         self.value | other.value,
     );
 
-    // 测试是否包含某标志
+    /// Return `true` if every flag in `flag` is set on this value.
     public has(self, flag: RegexFlag): Bool = (self.value & flag.value) == flag.value;
 
     // 转换为 C 层 flags（内部使用）
@@ -39,9 +40,10 @@ given RegexFlag {
     };
 };
 
-// 编译后的正则表达式
+/// A compiled regular expression, ready to match text.
 public type Regex(handle: *UInt8, pat: String, groups: UInt);
 
+/// Drop conformance: free the compiled pattern's native resources.
 given Regex: Drop {
 
     drop(self): Void = {
@@ -49,50 +51,64 @@ given Regex: Drop {
     };
 };
 
+/// Accessors for the compiled pattern's source and capture-group count.
 given Regex {
 
+    /// Return the original pattern string.
     public pattern(self): String = self.pat;
 
+    /// Return the number of capturing groups in the pattern.
     public group_count(self): UInt = self.groups;
 };
 
-// 轻量匹配结果（仅位置，不含捕获组）
+/// A match result that records only the whole match's span, with no capture groups.
 public type Match(
     source: String, // 原始文本
     match_start: UInt, // 匹配起始位置（字节偏移）
     match_end: UInt, // 匹配结束位置（字节偏移，不含）
 );
 
+/// Accessors for the matched text and its byte offsets.
 given Match {
 
+    /// Return the substring matched by the pattern.
     public text(self): String = self.source.substring(self.match_start..<self.match_end);
 
+    /// Return the byte offset where the match starts.
     public start(self): UInt = self.match_start;
 
+    /// Return the byte offset just past the match's end.
     public end(self): UInt = self.match_end;
 };
 
-// 带捕获组的匹配结果
+/// A match result that also records the span of every capture group.
 public type Captures(
     source: String, // 原始文本
     starts: List[Int32], // 各捕获组起始位置（-1 = 未匹配）
     ends: List[Int32], // 各捕获组结束位置（-1 = 未匹配）
 );
 
+/// Accessors for the overall match and its capturing groups.
 given Captures {
 
+    /// Return the substring matched by the whole pattern.
     public text(self): String = {
         let s = UInt(self.starts[0]);
         let e = UInt(self.ends[0]);
         return self.source.substring(s..<e);
     };
 
+    /// Return the byte offset where the overall match starts.
     public start(self): UInt = UInt(self.starts[0]);
 
+    /// Return the byte offset just past the overall match's end.
     public end(self): UInt = UInt(self.ends[0]);
 
+    /// Return the number of capture slots, counting the whole match as group 0.
     public group_count(self): UInt = self.starts.count();
 
+    /// Return group `index`'s text, where group 0 is the whole match.
+    /// `None` when the index is out of range or the group did not take part in the match.
     public group(self, index: UInt): Option[String] = {
         if index >= self.starts.count() then {
             return Option[String].None();
@@ -105,6 +121,7 @@ given Captures {
         return Option[String].Some(self.source.substring(UInt(s)..<UInt(e)));
     };
 
+    /// Return the byte offset where group `index` starts, or `None` if unavailable.
     public group_start(self, index: UInt): Option[UInt] = {
         if index >= self.starts.count() then {
             return Option[UInt].None();
@@ -116,6 +133,7 @@ given Captures {
         return Option[UInt].Some(UInt(s));
     };
 
+    /// Return the byte offset just past group `index`'s end, or `None` if unavailable.
     public group_end(self, index: UInt): Option[UInt] = {
         if index >= self.ends.count() then {
             return Option[UInt].None();
@@ -128,13 +146,13 @@ given Captures {
     };
 };
 
-// 匹配结果迭代器
+/// Iterator over the successive non-overlapping matches of a regex.
 public type mutable MatchIterator(regex: Regex, text: String, mutable offset: UInt);
 
-// 捕获组结果迭代器
+/// Iterator over successive matches, each with its capture groups.
 public type mutable CapturesIterator(regex: Regex, text: String, mutable offset: UInt);
 
-// 分割结果迭代器
+/// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator(
     regex: Regex,
     text: String,
@@ -146,8 +164,10 @@ public type mutable RegexSplitIterator(
 // MatchIterator — Iterator implementation
 // ============================================================================
 
+/// Iterator conformance for `MatchIterator`, yielding matches one after another.
 given MatchIterator: Iterator[Match] {
 
+    /// Return the next match, resuming after the previous one, or `None` when exhausted.
     public next(self): Option[Match] = {
         if self.offset > self.text.count() then {
             return Option[Match].None();
@@ -173,8 +193,10 @@ given MatchIterator: Iterator[Match] {
 // CapturesIterator — Iterator implementation
 // ============================================================================
 
+/// Iterator conformance for `CapturesIterator`, yielding one capture set at a time.
 given CapturesIterator: Iterator[Captures] {
 
+    /// Return the next match's captures, resuming after the previous one, or `None`.
     public next(self): Option[Captures] = {
         if self.offset > self.text.count() then {
             return Option[Captures].None();
@@ -200,8 +222,10 @@ given CapturesIterator: Iterator[Captures] {
 // RegexSplitIterator — Iterator implementation
 // ============================================================================
 
+/// Iterator conformance for `RegexSplitIterator`, yielding the pieces in order.
 given RegexSplitIterator: Iterator[String] {
 
+    /// Return the next piece between matches, or `None` once the text is consumed.
     public next(self): Option[String] = {
         if self.done then {
             return Option[String].None();

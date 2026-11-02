@@ -10,26 +10,31 @@ using "std" { ... };
 // unlatch() removes one, and when all latches are removed the gate opens.
 // ============================================================================
 
+/// Countdown gate that opens once every latch has been removed.
 public type mutable LatchGate(
     private mutex: Mutex,
     private condvar: MutexCondvar,
     private mutable counter: UInt,
 );
 
+/// Creates the gate and adds, removes, and awaits latches.
 given LatchGate {
 
+    /// Create a gate held closed by `count` latches.
     public new(count: UInt): LatchGate = {
         let mu = Mutex.new();
         let cv = mu.condvar();
         return LatchGate(mu, cv, count);
     };
 
+    /// Add `count` more latches to the gate.
     public latch(self, count: UInt): Void = {
         self.mutex.lock();
         defer self.mutex.unlock();
         self.counter = self.counter + count;
     };
 
+    /// Remove one latch, waking all waiters when the last is removed and panicking when none remain.
     public unlatch(self): Void = {
         self.mutex.lock();
         if self.counter == 0 then {
@@ -43,6 +48,7 @@ given LatchGate {
         };
     };
 
+    /// Remove one latch, then block until the gate opens; panics when no latch remains.
     public unlatch_and_wait(self): Void = {
         self.mutex.lock();
         if self.counter == 0 then {
@@ -60,6 +66,7 @@ given LatchGate {
         };
     };
 
+    /// Block until every latch has been removed.
     public wait(self): Void = {
         self.mutex.lock();
         defer self.mutex.unlock();

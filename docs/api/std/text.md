@@ -2,257 +2,409 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Text API
+# std/text API
 
 ## Overview
-This page lists the public API of module `Std.Text` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/text` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/text" { ... };`.
 
 ## Free Functions
 (none)
 
 ## Traits
 ```koral
+/// Parseable trait — types that can be parsed from a decimal string.
+/// All numeric types implement this trait.
 public trait Parseable {
+    /// Parse a value from a decimal string.
+    /// Returns Result.Ok on success, Result.Error with a message on failure.
     parse(s: String): Result[Self];
 };
 
+/// RadixParseable trait — types that support multi-radix parsing.
+/// Only integer types implement this trait.
 public trait RadixParseable: Parseable {
+    /// Parse a value from a string in the given radix (2..36).
+    /// Returns Result.Error for invalid radix values.
     parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Formattable trait — types that can be formatted to a string.
+/// Uses Python-style format spec mini-language:
+///   [[fill]align][sign][#][0][width][grouping][.precision][type]
+/// Invalid spec or unsupported type character will panic.
 public trait Formattable: ToString {
+    /// Format the value using the given format spec string.
     format(self, spec: String): String;
 };
 ```
 
 ## Types
 ```koral
+/// Bit flags that control how a regex is compiled and matched.
 public type RegexFlag;
 
+/// A compiled regular expression, ready to match text.
 public type Regex;
 
+/// A match result that records only the whole match's span, with no capture groups.
 public type Match;
 
+/// A match result that also records the span of every capture group.
 public type Captures;
 
+/// Iterator over the successive non-overlapping matches of a regex.
 public type mutable MatchIterator;
 
+/// Iterator over successive matches, each with its capture groups.
 public type mutable CapturesIterator;
 
+/// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator;
 ```
 
 ## Given Implementations
 ```koral
+/// Formattable conformance: format `Int` values with a Python-style format spec.
 given Int: Formattable {
+    /// Format as text using a Python-style spec: `[[fill]align][sign][#][0][width][grouping]`.
+    /// Type chars `b`/`o`/`d`/`x`/`X` pick the radix and `#` adds its prefix; precision panics.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Int8` values with a Python-style format spec.
 given Int8: Formattable {
+    /// Format the value with the same integer spec semantics as `Int.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Int16` values with a Python-style format spec.
 given Int16: Formattable {
+    /// Format the value with the same integer spec semantics as `Int.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Int32` values with a Python-style format spec.
 given Int32: Formattable {
+    /// Format the value with the same integer spec semantics as `Int.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Int64` values with a Python-style format spec.
 given Int64: Formattable {
+    /// Format the value with the same integer spec semantics as `Int.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `UInt` values with a Python-style format spec.
 given UInt: Formattable {
+    /// Format as text using a Python-style spec: `[[fill]align][sign][#][0][width][grouping]`.
+    /// Type chars `b`/`o`/`d`/`x`/`X` pick the radix and `#` adds its prefix; precision panics.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `UInt8` values with a Python-style format spec.
 given UInt8: Formattable {
+    /// Format the value with the same integer spec semantics as `UInt.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `UInt16` values with a Python-style format spec.
 given UInt16: Formattable {
+    /// Format the value with the same integer spec semantics as `UInt.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `UInt32` values with a Python-style format spec.
 given UInt32: Formattable {
+    /// Format the value with the same integer spec semantics as `UInt.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `UInt64` values with a Python-style format spec.
 given UInt64: Formattable {
+    /// Format the value with the same integer spec semantics as `UInt.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Float64` values with a Python-style format spec.
 given Float64: Formattable {
+    /// Format as text using a Python-style spec: `f`/`F` fixed, `e`/`E` scientific, `g`/`G` auto, `%` percent.
+    /// Precision defaults to 6 digits and `nan`/`inf` render as such; panics on an unsupported spec.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `Float32` values with a Python-style format spec.
 given Float32: Formattable {
+    /// Format the value with the same float spec semantics as `Float64.format`.
     public format(self, spec: String): String;
 };
 
+/// Formattable conformance: format `String` values with padding and truncation.
 given String: Formattable {
+    /// Pad or truncate the string per `[fill]align` and `.precision` (a max length).
+    /// Defaults to left-aligned; panics on sign, `#`, zero padding, or grouping.
     public format(self, spec: String): String;
 };
 
+/// Parseable conformance: parse `Int` from decimal text.
 given Int: Parseable {
+    /// Parse a decimal integer from `s`, trimming surrounding whitespace.
+    /// Accepts `+`/`-` signs and `_` separators; errors on empty, malformed, or overflowing input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `Int` from text in radix 2..36.
 given Int: RadixParseable {
+    /// Parse `s` as an integer in `radix` (2..36); never panics, errors on bad input.
+    /// Accepts a sign, `_` separators, and `0x`/`0o`/`0b` prefixes for the matching radix.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `Int8` from decimal text.
 given Int8: Parseable {
+    /// Parse a decimal `Int8` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `Int8` from text in radix 2..36.
 given Int8: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `Int8`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `Int16` from decimal text.
 given Int16: Parseable {
+    /// Parse a decimal `Int16` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `Int16` from text in radix 2..36.
 given Int16: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `Int16`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `Int32` from decimal text.
 given Int32: Parseable {
+    /// Parse a decimal `Int32` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `Int32` from text in radix 2..36.
 given Int32: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `Int32`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `Int64` from decimal text.
 given Int64: Parseable {
+    /// Parse a decimal `Int64` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `Int64` from text in radix 2..36.
 given Int64: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `Int64`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `UInt` from decimal text.
 given UInt: Parseable {
+    /// Parse a decimal unsigned integer from `s`, trimming surrounding whitespace.
+    /// Rejects negative values; errors on empty, malformed, or overflowing input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `UInt` from text in radix 2..36.
 given UInt: RadixParseable {
+    /// Parse `s` as an unsigned integer in `radix` (2..36); never panics, errors on bad input.
+    /// Rejects a leading `-`; accepts `+`, `_` separators, and `0x`/`0o`/`0b` prefixes.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `UInt8` from decimal text.
 given UInt8: Parseable {
+    /// Parse a decimal `UInt8` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `UInt8` from text in radix 2..36.
 given UInt8: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `UInt8`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `UInt16` from decimal text.
 given UInt16: Parseable {
+    /// Parse a decimal `UInt16` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `UInt16` from text in radix 2..36.
 given UInt16: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `UInt16`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `UInt32` from decimal text.
 given UInt32: Parseable {
+    /// Parse a decimal `UInt32` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `UInt32` from text in radix 2..36.
 given UInt32: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `UInt32`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `UInt64` from decimal text.
 given UInt64: Parseable {
+    /// Parse a decimal `UInt64` from `s`, returning `Result.Error` on overflow or bad input.
     public parse(s: String): Result[Self];
 };
 
+/// RadixParseable conformance: parse `UInt64` from text in radix 2..36.
 given UInt64: RadixParseable {
+    /// Parse `s` in radix 2..36, returning `Result.Error` on overflow beyond `UInt64`'s range.
     public parse_radix(s: String, radix: UInt): Result[Self];
 };
 
+/// Parseable conformance: parse `Float64` from decimal text.
 given Float64: Parseable {
+    /// Parse a floating-point number from `s`, trimming surrounding whitespace.
+    /// Accepts `NaN`, `inf`, decimals, and exponents like `1e10`; errors on malformed input.
     public parse(s: String): Result[Self];
 };
 
+/// Parseable conformance: parse `Float32` by widening through `Float64`.
 given Float32: Parseable {
+    /// Parse a floating-point number via `Float64.parse` and narrow it to `Float32`.
     public parse(s: String): Result[Self];
 };
 
+/// Parseable conformance: parse a `Rune` from a single-character string.
 given Rune: Parseable {
+    /// Parse a string containing exactly one Unicode scalar value into a `Rune`.
+    /// Returns `Result.Error` if the string is empty or contains more than one code point.
     public parse(s: String): Result[Self];
 };
 
+/// Compile patterns into `Regex` values.
 given Regex {
+    /// Compile `pattern` with default flags into a `Regex`.
+    /// Returns `Result.Error` with the engine's message if the pattern is invalid.
     public compile(pattern: String): Result[Regex];
+    /// Compile `pattern` with `flags` applied, returning `Result.Error` on an invalid pattern.
     public compile_with_flags(pattern: String, flags: RegexFlag): Result[Regex];
 };
 
+/// Match testing and first-match search without capture detail.
 given Regex {
+    /// Test whether the pattern matches anywhere in `text`, capturing no groups.
     public matches(self, text: String): Bool;
+    /// Return the first match in `text`, recording only the whole match's span.
+    /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match];
 };
 
+/// Capture-group search plus match and capture iterators.
 given Regex {
+    /// Iterate over every non-overlapping match in `text`, without capture groups.
     public find_all(self, text: String): MatchIterator;
+    /// Return the first match in `text` with all of its capture groups.
+    /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures];
+    /// Iterate over every non-overlapping match in `text`, each with its capture groups.
     public captures_all(self, text: String): CapturesIterator;
 };
 
+/// Substitution of the first match or of every match.
 given Regex {
+    /// Replace the first match in `text` with `with`, returning `text` unchanged if there is none.
+    /// In `with`, `$0`..`$9` expand to capture groups and `$$` produces a literal `$`.
     public replace(self, text: String, with: String =): String;
+    /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
     public replace_all(self, text: String, with: String =): String;
 };
 
+/// Splitting text around matches.
 given Regex {
+    /// Split `text` around every match, yielding the pieces between matches and the trailing tail.
     public split(self, text: String): RegexSplitIterator;
 };
 
+/// Flag constructors and bitwise combinators for `RegexFlag`.
 given RegexFlag {
+    /// The empty flag set: default, case-sensitive, whole-text matching.
     public none(): RegexFlag;
+    /// Match letters case-insensitively.
     public ignore_case(): RegexFlag;
+    /// Make `^` and `$` match line starts and ends, not just the text's ends.
     public multiline(): RegexFlag;
+    /// Combine two flag sets with bitwise OR.
     public combine(self, other: RegexFlag): RegexFlag;
+    /// Return `true` if every flag in `flag` is set on this value.
     public has(self, flag: RegexFlag): Bool;
 };
 
+/// Drop conformance: free the compiled pattern's native resources.
 given Regex: Drop {};
 
+/// Accessors for the compiled pattern's source and capture-group count.
 given Regex {
+    /// Return the original pattern string.
     public pattern(self): String;
+    /// Return the number of capturing groups in the pattern.
     public group_count(self): UInt;
 };
 
+/// Accessors for the matched text and its byte offsets.
 given Match {
+    /// Return the substring matched by the pattern.
     public text(self): String;
+    /// Return the byte offset where the match starts.
     public start(self): UInt;
+    /// Return the byte offset just past the match's end.
     public end(self): UInt;
 };
 
+/// Accessors for the overall match and its capturing groups.
 given Captures {
+    /// Return the substring matched by the whole pattern.
     public text(self): String;
+    /// Return the byte offset where the overall match starts.
     public start(self): UInt;
+    /// Return the byte offset just past the overall match's end.
     public end(self): UInt;
+    /// Return the number of capture slots, counting the whole match as group 0.
     public group_count(self): UInt;
+    /// Return group `index`'s text, where group 0 is the whole match.
+    /// `None` when the index is out of range or the group did not take part in the match.
     public group(self, index: UInt): Option[String];
+    /// Return the byte offset where group `index` starts, or `None` if unavailable.
     public group_start(self, index: UInt): Option[UInt];
+    /// Return the byte offset just past group `index`'s end, or `None` if unavailable.
     public group_end(self, index: UInt): Option[UInt];
 };
 
+/// Iterator conformance for `MatchIterator`, yielding matches one after another.
 given MatchIterator: Iterator[Match] {
+    /// Return the next match, resuming after the previous one, or `None` when exhausted.
     public next(self): Option[Match];
 };
 
+/// Iterator conformance for `CapturesIterator`, yielding one capture set at a time.
 given CapturesIterator: Iterator[Captures] {
+    /// Return the next match's captures, resuming after the previous one, or `None`.
     public next(self): Option[Captures];
 };
 
+/// Iterator conformance for `RegexSplitIterator`, yielding the pieces in order.
 given RegexSplitIterator: Iterator[String] {
+    /// Return the next piece between matches, or `None` once the text is consumed.
     public next(self): Option[String];
 };
 ```

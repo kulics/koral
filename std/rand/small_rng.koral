@@ -21,7 +21,8 @@ type mutable SimpleRandomState(
     mutable s3: UInt64,
 );
 
-// DefaultRandomSource — xoshiro256**PRNG (shared handle to mutable state)
+/// A xoshiro256** pseudo-random generator with 256-bit state and period 2^256-1, not cryptographically secure.
+/// Copies share one underlying state, so generating through any copy advances them all.
 public type mutable DefaultRandomSource(private state: SimpleRandomState);
 
 // Helper: rotate left for UInt64
@@ -40,9 +41,10 @@ let read_u64_le(buf: *UInt8, offset: UInt): UInt64 = {
     return b0 | (b1 << 8) | (b2 << 16) | (b3 << 24) | (b4 << 32) | (b5 << 40) | (b6 << 48) | (b7 << 56);
 };
 
+/// Seeding constructors for DefaultRandomSource from explicit state words or system entropy.
 given DefaultRandomSource {
 
-    // Create from explicit seed values. Panics if all zeros.
+    /// Create from explicit seed values. Panics if all zeros.
     public from_seed(s0: UInt64, s1: UInt64, s2: UInt64, s3: UInt64): DefaultRandomSource = {
         if s0 == 0 and s1 == 0 and s2 == 0 and s3 == 0 then {
             panic("DefaultRandomSource: seed must not be all zeros");
@@ -50,7 +52,7 @@ given DefaultRandomSource {
         return DefaultRandomSource(SimpleRandomState(s0, s1, s2, s3));
     };
 
-    // Create with system entropy. Panics if entropy source fails.
+    /// Create with system entropy. Panics if entropy source fails.
     public new(): DefaultRandomSource = {
         let buf = alloc_memory[UInt8](32);
         defer dealloc_memory(buf);
@@ -69,10 +71,10 @@ given DefaultRandomSource {
     };
 };
 
+/// RandomSource conformance producing raw 64-bit output from the xoshiro256** algorithm.
 given DefaultRandomSource: RandomSource {
 
-    // xoshiro256** generate: produces the next UInt64 and advances state.
-    // Uses `self` — state mutation goes through the internal *.
+    /// Return the next pseudo-random UInt64, advancing the shared generator state.
     public generate(self): UInt64 = {
         let s = self.state;
         let result = UInt64(

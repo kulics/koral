@@ -2,199 +2,376 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Net API
+# std/net API
 
 ## Overview
-This page lists the public API of module `Std.Net` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/net` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/net" { ... };`.
 
 ## Free Functions
 (none)
 
 ## Traits
 ```koral
+/// Types that resolve to a SocketAddr, so socket APIs accept both parsed addresses and address strings.
 public trait IntoSocketAddr {
+    /// Resolve this value to a socket address, failing with an Error message when it is not a valid address.
     into_socket_addr(self): Result[SocketAddr];
 };
 ```
 
 ## Types
 ```koral
+/// IPv4 address type, stored as four octets.
 public type Ipv4Addr;
 
+/// IPv6 address type, stored as eight 16-bit segments.
 public type Ipv6Addr;
 
+/// Unified IP address enum, containing either an IPv4 or IPv6 address.
 public type IpAddr {
     V4(addr: Ipv4Addr),
     V6(addr: Ipv6Addr),
 };
 
+/// Shutdown mode for socket connections.
+/// Maps to system call values: SHUT_RD(0), SHUT_WR(1), SHUT_RDWR(2).
 public type Shutdown {
     Read(),
     Write(),
     Both(),
 };
 
+/// Socket address type, combining an IP address and a port number.
 public type SocketAddr;
 
+/// TCP listening socket that accepts incoming connections.
+/// Created by TcpListener.bind(); the socket is closed when the listener is dropped.
 public type mutable TcpListener;
 
+/// TCP socket type.
+/// Holds a socket file descriptor. Automatically closed on drop.
+/// Implements Reader and Writer traits for use with BufReader/BufWriter.
 public type mutable TcpSocket;
 
+/// UDP socket type.
+/// Holds a socket file descriptor. Automatically closed on drop.
+/// Supports both connectionless (send_to/recv_from) and connected (send/recv) modes.
 public type mutable UdpSocket;
 ```
 
 ## Given Implementations
 ```koral
+/// Build IPv4 addresses from octets or well-known constants, and classify them.
 given Ipv4Addr {
+    /// Create an IPv4 address from four octets.
     public new(a: UInt8, b: UInt8, c: UInt8, d: UInt8): Ipv4Addr;
+    /// Return the loopback address 127.0.0.1.
     public localhost(): Ipv4Addr;
+    /// Return the unspecified address 0.0.0.0.
     public unspecified(): Ipv4Addr;
+    /// Return the broadcast address 255.255.255.255.
     public broadcast(): Ipv4Addr;
+    /// Return the four octets as a list.
     public octets(self): List[UInt8];
+    /// Check if this is a loopback address (127.0.0.0/8).
     public is_loopback(self): Bool;
+    /// Check if this is the unspecified address (0.0.0.0).
     public is_unspecified(self): Bool;
+    /// Check if this is the broadcast address (255.255.255.255).
     public is_broadcast(self): Bool;
+    /// Check if this is a multicast address (224.0.0.0/4).
     public is_multicast(self): Bool;
+    /// Check if this is a private address (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16).
     public is_private(self): Bool;
 };
 
+/// Equality conformance: two addresses are equal when their four octets match.
 given Ipv4Addr: Eq {
+    /// Return true when the two addresses have the same four octets.
     public equals(self, other: Ipv4Addr): Bool;
 };
 
+/// String conformance: renders dotted-decimal text such as "127.0.0.1".
 given Ipv4Addr: ToString {
+    /// Convert to dotted-decimal string representation.
     public to_string(self): String;
 };
 
+/// Parsing conformance: reads dotted-decimal text such as "192.168.0.1".
 given Ipv4Addr: Parseable {
+    /// Parse an IPv4 address from a dotted-decimal string.
+    /// Strict parsing: no leading zeros, no out-of-range values, exactly 4 octets.
     public parse(s: String): Result[Self];
 };
 
+/// Build IPv6 addresses from segments or well-known constants, and classify them.
 given Ipv6Addr {
+    /// Create an IPv6 address from eight 16-bit segments.
     public new(a: UInt16, b: UInt16, c: UInt16, d: UInt16, e: UInt16, f: UInt16, g: UInt16, h: UInt16): Ipv6Addr;
+    /// Return the loopback address ::1.
     public localhost(): Ipv6Addr;
+    /// Return the unspecified address ::.
     public unspecified(): Ipv6Addr;
+    /// Return the eight 16-bit segments as a list.
     public segments(self): List[UInt16];
+    /// Check if this is the loopback address (::1).
     public is_loopback(self): Bool;
+    /// Check if this is the unspecified address (::).
     public is_unspecified(self): Bool;
+    /// Check if this is a multicast address (ff00::/8).
     public is_multicast(self): Bool;
 };
 
+/// Equality conformance: two addresses are equal when their eight segments match.
 given Ipv6Addr: Eq {
+    /// Return true when the two addresses have the same eight segments.
     public equals(self, other: Ipv6Addr): Bool;
 };
 
+/// String conformance: renders the RFC 5952 canonical form.
 given Ipv6Addr: ToString {
+    /// Convert to standard IPv6 string representation (RFC 5952).
+    /// Uses :: to compress the longest run of consecutive zero segments.
+    /// Uses lowercase hexadecimal.
     public to_string(self): String;
 };
 
+/// Parsing conformance: reads standard IPv6 text, accepting :: compression and ignoring any %zone suffix.
 given Ipv6Addr: Parseable {
+    /// Parse an IPv6 address from a standard string representation.
+    /// Supports :: zero compression. Each group is 1-4 hex digits.
+    /// :: may appear at most once.
     public parse(s: String): Result[Self];
 };
 
+/// Classification queries that delegate to the wrapped IPv4 or IPv6 address.
 given IpAddr {
+    /// Check if this is a loopback address (delegates to inner type).
     public is_loopback(self): Bool;
+    /// Check if this is the unspecified address (delegates to inner type).
     public is_unspecified(self): Bool;
+    /// Check if this is a multicast address (delegates to inner type).
     public is_multicast(self): Bool;
+    /// Check if this is an IPv4 address.
     public is_ipv4(self): Bool;
+    /// Check if this is an IPv6 address.
     public is_ipv6(self): Bool;
 };
 
+/// Equality conformance: both values must hold the same variant and address.
 given IpAddr: Eq {
+    /// Return true when both values hold the same variant and the same address.
     public equals(self, other: IpAddr): Bool;
 };
 
+/// String conformance: renders via the wrapped IPv4 or IPv6 address.
 given IpAddr: ToString {
+    /// Convert to string representation (delegates to inner type).
     public to_string(self): String;
 };
 
+/// Parsing conformance: tries IPv4 first, then falls back to IPv6.
 given IpAddr: Parseable {
+    /// Parse an IP address string, trying IPv4 first, then IPv6.
     public parse(s: String): Result[Self];
 };
 
+/// IntoSocketAddr conformance: parses the string as a socket address.
 given String: IntoSocketAddr {
+    /// Parse this string as "ip:port" (IPv4) or "[ip]:port" (IPv6).
     public into_socket_addr(self): Result[SocketAddr];
 };
 
+/// IntoSocketAddr conformance: a SocketAddr resolves to itself.
 given SocketAddr: IntoSocketAddr {
+    /// Return this address unchanged.
     public into_socket_addr(self): Result[SocketAddr];
 };
 
+/// Build socket addresses, read their parts, and convert to and from raw sockaddr bytes.
 given SocketAddr {
+    /// Create a socket address from an IP address and port.
     public new(ip: IpAddr, port: UInt16): SocketAddr;
+    /// Create a socket address from an IPv4 address and port.
     public from_ipv4(addr: Ipv4Addr, port: UInt16): SocketAddr;
+    /// Create a socket address from an IPv6 address and port.
     public from_ipv6(addr: Ipv6Addr, port: UInt16): SocketAddr;
+    /// Return the IP address.
     public ip(self): IpAddr;
+    /// Return the port number.
     public port(self): UInt16;
+    /// Check if this is an IPv4 socket address.
     public is_ipv4(self): Bool;
+    /// Check if this is an IPv6 socket address.
     public is_ipv6(self): Bool;
+    /// Convert a SocketAddr to a sockaddr_in (16 bytes) or sockaddr_in6 (28 bytes) byte array.
+    /// Used by the FFI layer for bind/connect/sendto operations.
+    ///
+    /// IPv4 sockaddr_in layout (16 bytes):
+    ///   [0..1]  = sin_family (AF_INET = 2, little-endian on most platforms)
+    ///   [2..3]  = sin_port (network byte order = big-endian)
+    ///   [4..7]  = sin_addr (4 bytes, network byte order)
+    ///   [8..15] = padding zeros
+    ///
+    /// IPv6 sockaddr_in6 layout (28 bytes):
+    ///   [0..1]  = sin6_family (AF_INET6 = 10 on Linux, 30 on macOS)
+    ///   [2..3]  = sin6_port (network byte order = big-endian)
+    ///   [4..7]  = sin6_flowinfo (zeros)
+    ///   [8..23] = sin6_addr (16 bytes, network byte order)
+    ///   [24..27] = sin6_scope_id (zeros)
     public to_sockaddr_bytes(self): List[UInt8];
+    /// Convert a sockaddr byte array (from accept/recvfrom/getsockname/getpeername)
+    /// back to a SocketAddr. Examines the family field to determine IPv4 or IPv6.
+    ///
+    /// Returns Error if the family is unrecognized or the buffer is too short.
     public from_sockaddr_bytes(buf: List[UInt8]): Result[SocketAddr];
 };
 
+/// String conformance: renders "ip:port" for IPv4 and "[ip]:port" for IPv6.
 given SocketAddr: ToString {
+    /// Convert to string representation.
+    /// IPv4: "ip:port", IPv6: "[ip]:port"
     public to_string(self): String;
 };
 
+/// Parsing conformance: reads "ip:port" and "[ip]:port" text.
 given SocketAddr: Parseable {
+    /// Parse a socket address from a string.
+    /// IPv4 format: "ip:port" (e.g., "192.168.1.1:8080")
+    /// IPv6 format: "[ip]:port" (e.g., "[::1]:8080")
     public parse(s: String): Result[Self];
 };
 
+/// Equality conformance: both the IP address and the port must match.
 given SocketAddr: Eq {
+    /// Return true when the IP address and the port are both equal.
     public equals(self, other: SocketAddr): Bool;
 };
 
+/// Drop conformance: closes the listening socket when the listener is dropped.
 given TcpListener: Drop {};
 
+/// Create a listener with bind(), accept connections, and query the bound address.
 given TcpListener {
+    /// Returns the underlying OS socket file descriptor.
     public fd(self): Int;
+    /// Bind to a socket address and start listening.
+    /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
+    /// On any failure, closes the fd and returns Error.
     public bind[T: IntoSocketAddr](addr: T): Result[TcpListener];
+    /// Accept a connection. Blocks until a client connects.
+    /// Returns a Pair of (TcpSocket, SocketAddr) on success.
     public accept(self): Result[Pair[TcpSocket, SocketAddr]];
+    /// Get the local address this listener is bound to.
     public local_addr(self): Result[SocketAddr];
 };
 
+/// Drop conformance: closes the socket when the connection is dropped.
 given TcpSocket: Drop {};
 
+/// Connect to a remote address, query the connection's addresses, and manage shutdown and socket options.
 given TcpSocket {
+    /// Returns the underlying OS socket file descriptor.
     public fd(self): Int;
+    /// Connect to a socket address.
+    /// Flow: create socket → connect
+    /// On any failure, closes the fd and returns Error.
     public connect[T: IntoSocketAddr](addr: T): Result[TcpSocket];
+    /// Get the local address of this socket.
     public local_addr(self): Result[SocketAddr];
+    /// Get the peer address of this socket.
     public peer_addr(self): Result[SocketAddr];
+    /// Shutdown the connection.
+    /// Shutdown.Read() = 0, Shutdown.Write() = 1, Shutdown.Both() = 2
     public shutdown(self, how: Shutdown): Result[Void];
+    /// Set TCP_NODELAY option (disable Nagle's algorithm).
+    /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
     public set_nodelay(self, nodelay: Bool): Result[Void];
+    /// Get TCP_NODELAY option.
+    /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
     public nodelay(self): Result[Bool];
+    /// Set read timeout. None clears the timeout.
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
+    /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void];
+    /// Set write timeout. None clears the timeout.
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void];
+    /// Get read timeout. Returns None if no timeout is set.
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
     public read_timeout(self): Result[Option[Duration]];
+    /// Get write timeout. Returns None if no timeout is set.
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
     public write_timeout(self): Result[Option[Duration]];
 };
 
+/// Reader conformance: reads incoming bytes, reporting Ok(0) once the peer closes the connection.
 given TcpSocket: Reader {
+    /// Reader trait: read bytes into into[range].
+    /// Returns Ok(0) on EOF (peer closed connection).
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Writer conformance: sends bytes to the connected peer.
 given TcpSocket: Writer {
+    /// Writer trait: write bytes from from[range] into the connection.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// Writer trait: flush. TCP has no user-space buffer, so this is a no-op.
     public flush(self): Result[Void];
 };
 
+/// Drop conformance: closes the socket when the handle is dropped.
 given UdpSocket: Drop {};
 
+/// Bind an address, exchange datagrams in connectionless or connected mode, and manage socket options.
 given UdpSocket {
+    /// Returns the underlying OS socket file descriptor.
     public fd(self): Int;
+    /// Bind to a socket address.
+    /// Flow: create socket (SOCK_DGRAM) → bind
+    /// On any failure, closes the fd and returns Error.
     public bind[T: IntoSocketAddr](addr: T): Result[UdpSocket];
+    /// Send a datagram to the specified address.
+    /// Returns the number of bytes sent.
     public send_to[T: IntoSocketAddr](self, addr: T, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    /// Receive a datagram and return the number of bytes read and the sender's address.
     public recv_from(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[Pair[UInt, SocketAddr]];
+    /// Associate this socket with a remote socket address (connected mode).
+    /// After calling connect, use send/recv instead of send_to/recv_from.
     public connect[T: IntoSocketAddr](self, addr: T): Result[Void];
+    /// Send data in connected mode.
+    /// Returns the number of bytes sent.
+    /// Returns Error if the socket is not connected.
     public send(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    /// Receive data in connected mode.
+    /// Returns the number of bytes received.
+    /// Returns Error if the socket is not connected.
     public recv(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    /// Get the local address this socket is bound to.
     public local_addr(self): Result[SocketAddr];
+    /// Get the peer address of this socket (connected mode only).
+    /// Returns Error if the socket is not connected.
     public peer_addr(self): Result[SocketAddr];
+    /// Set SO_BROADCAST option.
+    /// level=1 (SOL_SOCKET), optname=6 (SO_BROADCAST)
     public set_broadcast(self, broadcast: Bool): Result[Void];
+    /// Get SO_BROADCAST option.
+    /// level=1 (SOL_SOCKET), optname=6 (SO_BROADCAST)
     public broadcast(self): Result[Bool];
+    /// Set read timeout. None clears the timeout.
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
+    /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void];
+    /// Set write timeout. None clears the timeout.
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void];
+    /// Get read timeout. Returns None if no timeout is set.
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
     public read_timeout(self): Result[Option[Duration]];
+    /// Get write timeout. Returns None if no timeout is set.
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
     public write_timeout(self): Result[Option[Duration]];
 };
 ```
