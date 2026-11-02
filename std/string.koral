@@ -8,10 +8,11 @@
 // String Storage and Type Definition
 // ============================================================================
 
-// String is immutable value data with fixed storage length.
+/// String is immutable value data with fixed storage length.
+/// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
 public type String(protected data: *mutable UInt8, protected len: UInt);
 
-// Mutable builder for incremental string construction without relying on String alias mutation.
+/// Mutable builder for incremental string construction without relying on String alias mutation.
 public type mutable StringBuilder(
     mutable data: *mutable UInt8,
     mutable len: UInt,
@@ -19,39 +20,50 @@ public type mutable StringBuilder(
 );
 
 // String iterator types
+/// Iterator over the whitespace-separated words of a string.
 public type mutable StringSplitAsciiWhitespaceIterator(
     source: String,
     mutable index: UInt,
 );
 
+/// Iterator over the parts of a string separated by a fixed separator.
 public type mutable StringSplitIterator(
     source: String,
     sep: String,
     mutable index: UInt,
 );
 
+/// Iterator over the lines of a string, split at `\n`.
 public type mutable StringLinesIterator(source: String, mutable index: UInt);
 
+/// Iterator over the raw UTF-8 bytes of a string.
 public type mutable StringBytesIterator(source: String, mutable index: UInt);
 
+/// `Drop` for `String`: frees the string's UTF-8 buffer.
 given String: Drop {
 
+    /// Release the buffer owned by the string.
     public drop(self): Void = {
         dealloc_memory(self.data);
     };
 };
 
+/// `Drop` for `StringBuilder`: frees the builder's buffer.
 given StringBuilder: Drop {
 
+    /// Release the buffer owned by the builder.
     public drop(self): Void = {
         dealloc_memory(self.data);
     };
 };
 
+/// Construction and incremental building of strings.
 given StringBuilder {
 
+    /// Create an empty builder with a small initial capacity.
     public new(): StringBuilder = StringBuilder.with_capacity(16);
 
+    /// Create an empty builder with room for at least `capacity` bytes.
     public with_capacity(capacity: UInt): StringBuilder = {
         let cap = if capacity < 1 then 1 else capacity + 1;
         let data = alloc_memory[UInt8](cap);
@@ -59,8 +71,10 @@ given StringBuilder {
         return StringBuilder(data, 0, cap);
     };
 
+    /// The number of bytes pushed so far.
     public count(self): UInt = self.len;
 
+    /// Whether nothing has been pushed yet.
     public is_empty(self): Bool = self.len == 0;
 
     private ensure_capacity(self, min_cap: UInt): Void = {
@@ -78,6 +92,8 @@ given StringBuilder {
         self.cap = new_cap;
     };
 
+    /// Append one raw byte to the builder.
+    /// The caller must keep the accumulated bytes valid UTF-8.
     public push_byte(self, value: UInt8): Void = {
         self.ensure_capacity(self.len + 2);
         init_memory(self.data + self.len, value);
@@ -85,8 +101,8 @@ given StringBuilder {
         self.data[self.len] = 0;
     };
 
-    // `span` picks which slice of `other` to append, defaulting to all of it --
-    // the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
+    /// Append `other`, where `span` picks which slice to append, defaulting to
+    /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     public push_string(self, other: String, span: Range[UInt] = ...): Void = {
         let spec = other.slice_spec(span);
         let copy_len = spec.len();
@@ -99,6 +115,8 @@ given StringBuilder {
         self.data[self.len] = 0;
     };
 
+    /// Encode `rune` in UTF-8 and append it, substituting the replacement
+    /// character for an invalid rune.
     public push_rune(self, rune: Rune): Void = {
         let cp = rune.value;
 
@@ -133,21 +151,24 @@ given StringBuilder {
         self.push_byte(UInt8((cp & UInt32(63))) | UInt8(128));
     };
 
+    /// Empty the builder, keeping its allocated capacity.
     public clear(self): Void = {
         self.len = 0;
         self.data[0] = 0;
     };
 
-    // to_string returns a stable snapshot and does not alias future builder mutations.
+    /// Return a stable snapshot that does not alias future builder mutations.
     public to_string(self): String = String.from_utf8_ptr_unchecked(self.data, self.len);
 };
 
 // ============================================================================
 // String Methods
 // ============================================================================
+/// Construction, inspection, searching, and transformation of `String` values.
 given String {
 
-    // Unsafe constructor: does not validate UTF-8
+    /// Unsafe constructor: copy `len` bytes without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String = {
         let data = alloc_memory[UInt8](len + 1);
         copy_memory(data, bytes, len);
@@ -241,7 +262,8 @@ given String {
         return true;
     };
 
-    // Checked constructor: validates UTF-8
+    /// Checked constructor: copy `len` bytes, validating UTF-8.
+    /// Return an error when the bytes are not valid UTF-8.
     public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String] = {
         if not String.validate_utf8(bytes, len) then {
             return Result[String].Error("Invalid UTF-8");
@@ -249,13 +271,17 @@ given String {
         return Result[String].Ok(String.from_utf8_ptr_unchecked(bytes, len));
     };
 
+    /// Copy `bytes` into a string, returning an error when they are not valid UTF-8.
     public from_bytes(bytes: List[UInt8]): Result[String] =
         String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count());
 
+    /// Copy `bytes` into a string without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_bytes_unchecked(bytes: List[UInt8]): String =
         String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count());
 
-    // Checked constructor from C string (null-terminated, validates UTF-8)
+    /// Build a string from a null-terminated C string, returning an error when
+    /// it is not valid UTF-8.
     public from_cstring(cstr: *UInt8): Result[String] = {
         let mutable len: UInt = 0;
         while cstr[len] != UInt8(0) then {
@@ -264,6 +290,8 @@ given String {
         return String.from_utf8_ptr(cstr, len);
     };
 
+    /// Build a string from a null-terminated C string without validating UTF-8.
+    /// Behavior is undefined when the bytes are not valid UTF-8.
     public from_cstring_unchecked(cstr: *UInt8): String = {
         let mutable len: UInt = 0;
         while cstr[len] != UInt8(0) then {
@@ -272,6 +300,7 @@ given String {
         return String.from_utf8_ptr_unchecked(cstr, len);
     };
 
+    /// Create an empty string.
     public new(): String = {
         let data = alloc_memory[UInt8](1);
         init_memory(data, 0);
@@ -307,10 +336,14 @@ given String {
         };
     };
 
+    /// The length of the string in UTF-8 bytes, not runes.
     public count(self): UInt = self.len;
+    /// Whether the string is empty.
     public is_empty(self): Bool = self.len == 0;
+    /// Borrow the internal null-terminated bytes; valid while the string lives.
     public borrow_ptr(self): *UInt8 = self.data;
 
+    /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8] = {
         let len = self.len;
         let mutable bytes = make_bytes(len);
@@ -321,6 +354,8 @@ given String {
         return bytes;
     };
 
+    /// Return the byte at `index`, or `None` when it is past the end.
+    /// The index is a byte offset and need not be a rune boundary.
     public get(self, index: UInt): Option[UInt8] = {
         if index >= self.len then {
             return Option[UInt8].None();
@@ -335,6 +370,7 @@ given String {
         return self.data[key];
     };
 
+    /// Whether the string begins with `prefix`.
     public starts_with(self, prefix: String): Bool = {
         if prefix.len > self.len then {
             return false;
@@ -347,6 +383,7 @@ given String {
         return true;
     };
 
+    /// Whether the string ends with `suffix`.
     public ends_with(self, suffix: String): Bool = {
         if suffix.len > self.len then {
             return false;
@@ -360,8 +397,12 @@ given String {
         return true;
     };
 
+    /// Return the byte index of the first occurrence of `pat`, or `None` when
+    /// absent; an empty pattern never matches.
     public find(self, pat: String): Option[UInt] = self.find_from(0, pat);
 
+    /// Return the byte index of the last occurrence of `pat`, or `None` when
+    /// absent; an empty pattern never matches.
     public find_last(self, pat: String): Option[UInt] = {
         if pat.len == 0 then {
             return Option[UInt].None();
@@ -388,6 +429,8 @@ given String {
 
     private is_utf8_continuation_byte(b: UInt8): Bool = (b & 192) == 128;
 
+    /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
+    /// start of a UTF-8 sequence; `false` when the index is past the end.
     public is_rune_boundary(self, byte_index: UInt): Bool = {
         if byte_index > self.len then {
             return false;
@@ -410,6 +453,8 @@ given String {
         };
     };
 
+    /// Resolve `range` into the byte span it names, panicking when the range is
+    /// invalid or out of bounds or lands off a rune boundary.
     public slice_spec(self, range: Range[UInt]): SliceSpec = {
         let len = self.len;
         let mutable start: UInt = 0;
@@ -494,11 +539,14 @@ given String {
         return SliceSpec.new(offset = start, len = end - start);
     };
 
+    /// Return the substring that `range` names.
+    /// Panics when the range is invalid, out of bounds, or off a rune boundary.
     public substring(self, range: Range[UInt]): String = {
         let span = self.slice_spec(range);
         return self.make_substring(span.start(), span.len());
     };
 
+    /// Return the string with leading ASCII whitespace removed.
     public trim_ascii_start(self): String = {
         let mutable i: UInt = 0;
         while i < self.len and String.is_ascii_space(self.data[i]) then {
@@ -507,6 +555,7 @@ given String {
         return self.make_substring(i, self.len - i);
     };
 
+    /// Return the string with trailing ASCII whitespace removed.
     public trim_ascii_end(self): String = {
         let mutable end = self.len;
         while end > 0 and String.is_ascii_space(self.data[end - 1]) then {
@@ -515,11 +564,13 @@ given String {
         return self.make_substring(0, end);
     };
 
+    /// Return the string with leading and trailing ASCII whitespace removed.
     public trim_ascii(self): String = {
         let head = self.trim_ascii_start();
         return head.trim_ascii_end();
     };
 
+    /// Whether every byte is ASCII (below 128).
     public is_ascii(self): Bool = {
         for i in 0..<self.len then {
             if self.data[i] >= 128 then {
@@ -529,6 +580,7 @@ given String {
         return true;
     };
 
+    /// Whether the string is empty or holds only ASCII whitespace.
     public is_ascii_whitespace(self): Bool = {
         for i in 0..<self.len then {
             if not String.is_ascii_space(self.data[i]) then {
@@ -544,6 +596,7 @@ given String {
     private to_upper_byte(b: UInt8): UInt8 = if b is >= 97 and is <= 122 then b - 32
     else b;
 
+    /// Return a copy with ASCII letters lowercased; other bytes are unchanged.
     public to_ascii_lowercase(self): String = {
         let data = alloc_memory[UInt8](self.len + 1);
         for i in 0..<self.len then {
@@ -553,6 +606,7 @@ given String {
         return String(data, self.len);
     };
 
+    /// Return a copy with ASCII letters uppercased; other bytes are unchanged.
     public to_ascii_uppercase(self): String = {
         let data = alloc_memory[UInt8](self.len + 1);
         for i in 0..<self.len then {
@@ -562,6 +616,8 @@ given String {
         return String(data, self.len);
     };
 
+    /// Return a copy with each ASCII word titlecased: its first letter upper,
+    /// the rest lower.
     public to_ascii_titlecase(self): String = {
         let data = alloc_memory[UInt8](self.len + 1);
         let mutable in_word = false;
@@ -583,6 +639,8 @@ given String {
         return String(data, self.len);
     };
 
+    /// Search from byte index `start` for the first occurrence of `pat`, returning
+    /// its index or `None`; panics when `start` is past the end.
     public find_from(self, start: UInt, pat: String): Option[UInt] = {
         if pat.len == 0 then {
             return Option[UInt].None();
@@ -613,8 +671,10 @@ given String {
         return Option[UInt].None();
     };
 
+    /// Whether `pat` occurs anywhere in the string.
     public contains(self, pat: String): Bool = self.find_from(0, pat).is_some();
 
+    /// Return the string repeated `times` times, or the empty string when `times` is 0.
     public repeat(self, times: UInt): String = {
         if times == 0 then {
             return String.new();
@@ -630,8 +690,8 @@ given String {
         return String(data, total);
     };
 
-    // Replace only the first `n` occurrences of `pat` with `with`.
-    // If n == 0, returns a copy of the string unchanged.
+    /// Replace only the first `n` occurrences of `pat` with `with`.
+    /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
     public replace_n(self, pat: String, n: UInt, with: String =): String = {
         if pat.len == 0 then {
             panic("replace empty pattern");
@@ -666,8 +726,8 @@ given String {
         return result.to_string();
     };
 
-    // Split on the first occurrence of `sep`, returning (before, after).
-    // Returns None if `sep` is not found.
+    /// Split on the first occurrence of `sep`, returning (before, after).
+    /// Return `None` when `sep` is not found.
     public split_once(self, sep: String): Option[Pair[String, String]] = {
         when self.find(sep) in {
             .Some(idx) then {
@@ -682,8 +742,8 @@ given String {
         };
     };
 
-    // Split on the last occurrence of `sep`, returning (before, after).
-    // Returns None if `sep` is not found.
+    /// Split on the last occurrence of `sep`, returning (before, after).
+    /// Return `None` when `sep` is not found.
     public split_last_once(self, sep: String): Option[Pair[String, String]] = {
         when self.find_last(sep) in {
             .Some(idx) then {
@@ -698,6 +758,8 @@ given String {
         };
     };
 
+    /// Replace every occurrence of `pat` with `with`, left to right without overlap.
+    /// Panic on an empty `pat`; with no match, return the string unchanged.
     public replace_all(self, pat: String, with: String =): String = {
         if pat.len == 0 then {
             panic("replace empty pattern");
@@ -721,20 +783,28 @@ given String {
         return result.to_string();
     };
 
+    /// Return an iterator over the words separated by runs of ASCII whitespace;
+    /// leading and trailing whitespace produce no empty words.
     public split_ascii_whitespace(self): StringSplitAsciiWhitespaceIterator =
         StringSplitAsciiWhitespaceIterator(self, 0);
 
+    /// Return an iterator over the parts between occurrences of `sep`.
+    /// With no match the whole string is one part; an empty `sep` yields it once.
     public split(self, sep: String): StringSplitIterator = {
         return StringSplitIterator(self, sep, 0);
     };
 
+    /// Return an iterator over the lines split at `\n`, without the newline.
+    /// A trailing newline does not produce an extra empty line.
     public lines(self): StringLinesIterator = StringLinesIterator(self, 0);
 
+    /// Return the string without `prefix`, or unchanged when there is no such prefix.
     public trim_prefix(self, prefix: String): String = if self.starts_with(prefix) then self.make_substring(
         prefix.len,
         self.len - prefix.len,
     ) else self;
 
+    /// Return the string without `suffix`, or unchanged when there is no such suffix.
     public trim_suffix(self, suffix: String): String = {
         if self.ends_with(suffix) then {
             let remain = self.len - suffix.len;
@@ -744,6 +814,7 @@ given String {
         };
     };
 
+    /// Return the string without `prefix`, or `None` when there is no such prefix.
     public strip_prefix(self, prefix: String): Option[String] = {
         if self.starts_with(prefix) then {
             return Option[String].Some(
@@ -753,6 +824,7 @@ given String {
         return Option[String].None();
     };
 
+    /// Return the string without `suffix`, or `None` when there is no such suffix.
     public strip_suffix(self, suffix: String): Option[String] = {
         if self.ends_with(suffix) then {
             let remain = self.len - suffix.len;
@@ -761,13 +833,13 @@ given String {
         return Option[String].None();
     };
 
-    // Return byte iterator for iterating over raw UTF-8 bytes
+    /// Return an iterator over the raw UTF-8 bytes.
     public bytes(self): StringBytesIterator = StringBytesIterator(self, 0);
 
-    // Return rune iterator for iterating over Unicode code points
+    /// Return an iterator over the runes (Unicode code points) decoded from UTF-8.
     public runes(self): StringRunesIterator = StringRunesIterator(self, 0);
 
-    // Convert string to a List of Runes for random access
+    /// Convert the string to a `List` of runes for random access.
     public to_runes(self): List[Rune] = {
         let mutable list = List[Rune].new();
         for r in self.runes() then {
@@ -777,13 +849,17 @@ given String {
     };
 };
 
+/// `Default` for `String`: the empty string.
 given String: Default {
 
+    /// Create an empty string.
     public default(): Self = String.new();
 };
 
+/// `Eq` for `String`: equal when both hold the same UTF-8 bytes.
 given String: Eq {
 
+    /// Whether both strings hold the same UTF-8 bytes.
     public equals(self, other: String): Bool = {
         if self.len != other.len then {
             return false;
@@ -797,8 +873,10 @@ given String: Eq {
     };
 };
 
+/// `Ord` for `String`: byte-wise lexicographic order over the UTF-8 bytes.
 given String: Ord {
 
+    /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
     public compare(self, other: String): Int = {
         let min = if self.len < other.len then self.len else other.len;
         for i in 0..<min then {
@@ -816,8 +894,10 @@ given String: Ord {
     };
 };
 
+/// `Hash` for `String`: hashes the UTF-8 bytes.
 given String: Hash {
 
+    /// Hash the UTF-8 bytes in order.
     public hash(self): UInt = {
         let mutable h: UInt = 2166136261;
         for i in 0..<self.len then {
@@ -833,8 +913,11 @@ given String: Hash {
 // ============================================================================
 
 // Iterator types provide next() method
+/// `Iterator[String]` for `StringSplitAsciiWhitespaceIterator`: yields the
+/// whitespace-separated words one at a time.
 given StringSplitAsciiWhitespaceIterator: Iterator[String] {
 
+    /// Advance the iterator and return the next word, or `None` when exhausted.
     public next(self): Option[String] = {
         let len = self.source.count();
         let mutable i = self.index;
@@ -854,8 +937,11 @@ given StringSplitAsciiWhitespaceIterator: Iterator[String] {
     };
 };
 
+/// `Iterator[String]` for `StringSplitIterator`: yields the parts between
+/// separators one at a time.
 given StringSplitIterator: Iterator[String] {
 
+    /// Advance the iterator and return the next part, or `None` when exhausted.
     public next(self): Option[String] = {
         let len = self.source.count();
         if self.sep.count() == 0 then {
@@ -883,8 +969,10 @@ given StringSplitIterator: Iterator[String] {
     };
 };
 
+/// `Iterator[String]` for `StringLinesIterator`: yields the lines one at a time.
 given StringLinesIterator: Iterator[String] {
 
+    /// Advance the iterator and return the next line, or `None` when exhausted.
     public next(self): Option[String] = {
         let len = self.source.count();
         if self.index > len then {
@@ -913,12 +1001,14 @@ given StringLinesIterator: Iterator[String] {
 // Rune Iterator Types
 // ============================================================================
 
-// Iterator type for rune iteration (provides next() method)
+/// Iterator over the runes of a string, decoding UTF-8 as it goes.
 public type mutable StringRunesIterator(source: String, mutable byte_index: UInt);
 
+/// `Iterator[Rune]` for `StringRunesIterator`: yields the decoded runes one at a time.
 given StringRunesIterator: Iterator[Rune] {
 
-    // Decode next UTF-8 sequence and return Rune
+    /// Decode the next UTF-8 sequence and return it as a rune.
+    /// An invalid sequence decodes to the replacement character.
     public next(self): Option[Rune] = {
         let len = self.source.count();
         if self.byte_index >= len then {
@@ -1016,8 +1106,10 @@ given StringRunesIterator: Iterator[Rune] {
 // ============================================================================
 // String Bytes Iterator
 // ============================================================================
+/// `Iterator[UInt8]` for `StringBytesIterator`: yields the UTF-8 bytes one at a time.
 given StringBytesIterator: Iterator[UInt8] {
 
+    /// Advance the iterator and return the next byte, or `None` when exhausted.
     public next(self): Option[UInt8] = {
         if self.index >= self.source.count() then {
             return Option[UInt8].None();

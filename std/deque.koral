@@ -5,6 +5,8 @@
 // and list are already available.
 // ============================================================================
 
+/// A growable double-ended queue of `T` in a ring buffer: pushes and pops at
+/// both ends are O(1) amortized, and indexing is O(1).
 public type mutable Deque[T: Any](
     mutable source: *mutable T,
     mutable len: UInt,
@@ -12,6 +14,7 @@ public type mutable Deque[T: Any](
     mutable head: UInt,
 );
 
+/// `Drop` for `Deque[T]`: frees every element and the ring buffer when the last handle dies.
 given[T: Any] Deque[T]: Drop {
 
     drop(self): Void = {
@@ -23,28 +26,35 @@ given[T: Any] Deque[T]: Drop {
     };
 };
 
+/// A one-shot cursor that walks a `Deque[T]` from front to back.
 public type mutable DequeIterator[T: Any](source: Deque[T], mutable index: UInt);
 
+/// Construction, mutation, and query operations on `Deque[T]`.
 given[T: Any] Deque[T] {
 
+    /// Create an empty deque, with a small ring buffer allocated up front.
     public new(): Self = {
         let cap: UInt = 10;
         let source = alloc_memory[T](cap);
         return Deque[T](source, 0, cap, 0);
     };
 
+    /// Create an empty deque with room for at least `capacity` elements before the next reallocation.
     public with_capacity(capacity: UInt): Self = {
         let cap = if capacity < 1 then 1 else capacity;
         let source = alloc_memory[T](cap);
         return Deque[T](source, 0, cap, 0);
     };
 
+    /// The number of elements in the deque.
     public count(self): UInt = self.len;
 
+    /// Grow capacity so the deque can hold `additional` more elements without reallocating.
     public reserve(self, additional: UInt): Void = {
         self.ensure_capacity(self.len + additional);
     };
 
+    /// Whether the deque has no elements.
     public is_empty(self): Bool = self.len == 0;
 
     private physical_index(self, logical_index: UInt): UInt =
@@ -73,6 +83,7 @@ given[T: Any] Deque[T] {
         };
     };
 
+    /// Append `value` at the back end (amortized O(1)), without consuming the caller's value.
     public push_back(self, value: T): Void = {
         self.ensure_capacity(self.len + 1);
         let index = self.physical_index(self.len);
@@ -80,6 +91,7 @@ given[T: Any] Deque[T] {
         self.len = self.len + 1;
     };
 
+    /// Insert `value` at the front end (amortized O(1)), without consuming the caller's value.
     public push_front(self, value: T): Void = {
         self.ensure_capacity(self.len + 1);
         self.head = (self.head + self.cap - 1) % self.cap;
@@ -87,6 +99,7 @@ given[T: Any] Deque[T] {
         self.len = self.len + 1;
     };
 
+    /// Remove and return the front element, or `None` when the deque is empty.
     public pop_front(self): Option[T] = {
         if self.len == 0 then {
             return Option[T].None();
@@ -100,6 +113,7 @@ given[T: Any] Deque[T] {
         return Option[T].Some(value);
     };
 
+    /// Remove and return the back element, or `None` when the deque is empty.
     public pop_back(self): Option[T] = {
         if self.len == 0 then {
             return Option[T].None();
@@ -113,8 +127,10 @@ given[T: Any] Deque[T] {
         return Option[T].Some(value);
     };
 
+    /// The front element without removing it, or `None` when the deque is empty.
     public first(self): Option[T] = self.get(0);
 
+    /// The back element without removing it, or `None` when the deque is empty.
     public last(self): Option[T] = {
         if self.len == 0 then {
             return Option[T].None();
@@ -122,6 +138,7 @@ given[T: Any] Deque[T] {
         return self.get(self.len - 1);
     };
 
+    /// The element at logical index `index` (0 is the front), or `None` when out of range.
     public get(self, index: UInt): Option[T] = {
         if index >= self.len then {
             return Option[T].None();
@@ -146,6 +163,7 @@ given[T: Any] Deque[T] {
         self.source[physical] = value;
     };
 
+    /// Remove every element, keeping the allocated ring buffer.
     public clear(self): Void = {
         for i in 0..<self.len then {
             let index = self.physical_index(i);
@@ -155,7 +173,7 @@ given[T: Any] Deque[T] {
         self.head = 0;
     };
 
-    // Reverses the order of elements in-place. O(n).
+    /// Reverses the order of elements in place. O(n).
     public reverse(self): Void = {
         if self.len <= 1 then {
             return;
@@ -173,7 +191,7 @@ given[T: Any] Deque[T] {
         };
     };
 
-    // Retains only elements satisfying the predicate, preserving order. O(n).
+    /// Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate: (T) -> Bool): Void = {
         if self.len == 0 then {
             return;
@@ -199,9 +217,10 @@ given[T: Any] Deque[T] {
     };
 };
 
+/// `Clone` for `Deque[T]`: a new deque whose elements are copied one level.
 given[T: Any] Deque[T]: Clone {
 
-    // Independent shallow copy: new deque identity, elements copied one level.
+    /// Independent shallow copy: new deque identity, elements copied one level.
     public clone(self): Self = {
         let mutable result = Deque[T].with_capacity(self.len);
         for i in 0..<self.len then {
@@ -211,13 +230,17 @@ given[T: Any] Deque[T]: Clone {
     };
 };
 
+/// `Default` for `Deque[T]`: the empty deque.
 given[T: Any] Deque[T]: Default {
 
+    /// The empty deque.
     public default(): Self = Deque[T].new();
 };
 
+/// Membership tests on `Deque[T]` of `Eq` elements.
 given[T: Eq] Deque[T] {
 
+    /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool = {
         for i in 0..<self.len then {
             let physical = self.physical_index(i);
@@ -229,13 +252,17 @@ given[T: Eq] Deque[T] {
     };
 };
 
+/// `Iterable` for `Deque[T]`: hands out a fresh `DequeIterator[T]` on every call.
 given[T: Any] Deque[T]: Iterable[T, DequeIterator[T]] {
 
+    /// A fresh cursor at the front of the deque; the deque itself is left untouched.
     public iterator(self): DequeIterator[T] = DequeIterator[T](self, 0);
 };
 
+/// `Iterator` for `DequeIterator[T]`: yields elements from front to back.
 given[T: Any] DequeIterator[T]: Iterator[T] {
 
+    /// Return the next element front to back, or `None` once the cursor is exhausted.
     public next(self): Option[T] = {
         if self.index >= self.source.len then {
             return Option[T].None();

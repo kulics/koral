@@ -28,12 +28,14 @@ private let bucket_set_tag[K: Hash, V: Any](
     *tag_ptr = tag;
 };
 
+/// A hash map from `Hash` keys to values; iteration order is unspecified.
 public type mutable Dict[K: Hash, V: Any](
     mutable buckets: *mutable DictBucket[K, V],
     mutable size: UInt,
     mutable capacity: UInt,
 );
 
+/// `Drop` for `Dict[K, V]`: releases the bucket array.
 given[K: Hash, V: Any] Dict[K, V]: Drop {
 
     drop(self): Void = {
@@ -46,6 +48,7 @@ given[K: Hash, V: Any] Dict[K, V]: Drop {
     };
 };
 
+/// Iterator over a `Dict`'s key/value pairs, in unspecified order.
 public type mutable DictIterator[K: Hash, V: Any](
     source: Dict[K, V],
     mutable index: UInt,
@@ -54,6 +57,7 @@ public type mutable DictIterator[K: Hash, V: Any](
 // ============================================================================
 // Dict Methods
 // ============================================================================
+/// Building, querying, and mutating a dictionary.
 given[K: Hash, V: Any] Dict[K, V] {
 
     /// 空表不分配桶数组，首次 insert（走 rehash）时再分配。
@@ -63,6 +67,8 @@ given[K: Hash, V: Any] Dict[K, V] {
         return Dict[K, V](null, 0, 0);
     };
 
+    /// Create an empty dict with its buckets allocated up front, sized for about
+    /// `capacity` entries.
     public with_capacity(capacity: UInt): Self = {
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
@@ -78,6 +84,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         return Dict[K, V](buckets, 0, cap);
     };
 
+    /// Return the number of entries in the dict.
     public count(self): UInt = self.size;
 
     // Using when for bucket handling
@@ -167,6 +174,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Store `value` under `key`, replacing any entry already stored there.
     public insert(self, key: K, value: V): Void = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
@@ -189,6 +197,8 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Store `value` under `key` only if the key is absent; return whether it
+    /// was inserted.
     public try_insert(self, key: K, value: V): Bool = {
         if self.size * 2 >= self.capacity then {
             self.rehash();
@@ -210,12 +220,14 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Insert every entry of `other`, overwriting values whose keys already exist.
     public insert_dict(self, other: Dict[K, V]): Void = {
         for entry in other then {
             self.insert(entry.first, entry.second);
         };
     };
 
+    /// Return the value stored under `key`, or `None` if the key is absent.
     public get(self, key: K): Option[V] = {
         when self.find_slot(key) in {
             .None() then {
@@ -232,6 +244,8 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Return the value stored under `key`, or insert and return `value` when
+    /// the key is absent.
     public get_or_insert(self, key: K, value: V): V = {
         when self.get(key) in {
             .Some(v) then {
@@ -244,20 +258,24 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Return whether `key` has a stored value.
     public contains_key(self, key: K): Bool = when self.get(key) in {
         .Some(_) then true,
         .None() then false,
     };
 
+    /// Remove `key`'s entry if present, discarding its value.
     public remove(self, key: K): Void = {
         let _ = self.take(key);
     };
 
+    /// Remove `key`'s entry if present; return whether one was removed.
     public try_remove(self, key: K): Bool = when self.take(key) in {
         .Some(_) then true,
         .None() then false,
     };
 
+    /// Remove `key`'s entry and return its value, or `None` if the key is absent.
     public take(self, key: K): Option[V] = {
         when self.find_slot(key) in {
             .None() then {
@@ -278,8 +296,10 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
     };
 
+    /// Return whether the dict has no entries.
     public is_empty(self): Bool = self.size == 0;
 
+    /// Remove every entry from the dict.
     public clear(self): Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
@@ -291,7 +311,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         self.size = 0;
     };
 
-    // Retains only entries satisfying the predicate. O(n).
+    /// Keep only the entries whose key and value satisfy `predicate`; O(n) time.
     public retain(self, predicate: (K, V) -> Bool): Void = {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
@@ -336,9 +356,10 @@ given[K: Hash, V: Any] Dict[K, V] {
     };
 };
 
+/// `Clone` for `Dict[K, V]`: an independent shallow copy.
 given[K: Hash, V: Any] Dict[K, V]: Clone {
 
-    // Independent shallow copy: new dict identity, keys/values copied one level.
+    /// Copy the dict into a fresh identity, copying keys and values one level.
     public clone(self): Self = {
         let mutable result = Dict[K, V].with_capacity(self.size);
         for i in 0..<self.capacity then {
@@ -351,16 +372,20 @@ given[K: Hash, V: Any] Dict[K, V]: Clone {
     };
 };
 
+/// `Default` for `Dict[K, V]`: an empty dict.
 given[K: Hash, V: Any] Dict[K, V]: Default {
 
+    /// Return an empty dict.
     public default(): Self = Dict[K, V].new();
 };
 
 // ============================================================================
 // Dict Iterator
 // ============================================================================
+/// `Iterator` for `DictIterator[K, V]`: yields key/value pairs in unspecified order.
 given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
 
+    /// Yield the next key/value pair, or `None` after the last entry.
     public next(self): Option[Pair[K, V]] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
@@ -379,14 +404,16 @@ given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
 // Dict Keys and Values Types with Iterators
 // ============================================================================
 
-// DictKeysIterator - iterates over keys only
+/// Iterator over just the keys of a `Dict`, in unspecified order.
 public type mutable DictKeysIterator[K: Hash, V: Any](
     source: Dict[K, V],
     mutable index: UInt,
 );
 
+/// `Iterator` for `DictKeysIterator[K, V]`: yields the keys in unspecified order.
 given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
 
+    /// Yield the next key, or `None` after the last entry.
     public next(self): Option[K] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
@@ -399,14 +426,16 @@ given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
     };
 };
 
-// DictValuesIterator - iterates over values only
+/// Iterator over just the values of a `Dict`, in unspecified order.
 public type mutable DictValuesIterator[K: Hash, V: Any](
     source: Dict[K, V],
     mutable index: UInt,
 );
 
+/// `Iterator` for `DictValuesIterator[K, V]`: yields the values in unspecified order.
 given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
 
+    /// Yield the next value, or `None` after the last entry.
     public next(self): Option[V] = {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
@@ -419,20 +448,27 @@ given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
     };
 };
 
-// Add keys() and values() methods to Dict
+/// Key-only and value-only iterator constructors.
 given[K: Hash, V: Any] Dict[K, V] {
 
+    /// Return an iterator over the dict's keys, in unspecified order.
     public keys(self): DictKeysIterator[K, V] = DictKeysIterator[K, V](self, 0);
+    /// Return an iterator over the dict's values, in unspecified order.
     public values(self): DictValuesIterator[K, V] = DictValuesIterator[K, V](self, 0);
 };
 
+/// `Iterable` for `Dict[K, V]`: iterates key/value pairs in unspecified order.
 given[K: Hash, V: Any] Dict[K, V]: Iterable[Pair[K, V], DictIterator[K, V]] {
 
+    /// Return an iterator over the dict's key/value pairs.
     public iterator(self): DictIterator[K, V] = DictIterator[K, V](self, 0);
 };
 
+/// Grouping a list into a dictionary.
 given[T: Any] List[T] {
 
+    /// Group the elements by `key`, keeping each group's elements in encounter
+    /// order.
     public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]] = {
         let mutable groups = Dict[K, List[T]].new();
         for i in 0..<self.count() then {

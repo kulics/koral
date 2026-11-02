@@ -6,6 +6,7 @@ using "std" { ... };
 // Implements Reader / Writer / Seeker behavior for byte I/O.
 // ============================================================================
 
+/// In-memory byte stream with a single cursor, supporting `Reader`, `Writer`, and `Seeker`.
 public type mutable ByteBuffer(
     mutable data: *mutable UInt8,
     mutable len: UInt,
@@ -13,6 +14,7 @@ public type mutable ByteBuffer(
     mutable cursor: UInt,
 );
 
+/// Implements `Drop`, freeing the buffer's heap allocation.
 given ByteBuffer: Drop {
 
     drop(self): Void = {
@@ -20,23 +22,28 @@ given ByteBuffer: Drop {
     };
 };
 
+/// Creates `ByteBuffer` values that are empty, pre-sized, or copied from a string or byte list.
 given ByteBuffer {
 
+    /// Create an empty byte buffer.
     public new(): ByteBuffer = {
         let data = alloc_memory[UInt8](1);
         return ByteBuffer(data, 0, 1, 0);
     };
 
+    /// Create an empty byte buffer with room for at least `cap` bytes.
     public with_capacity(cap: UInt): ByteBuffer = {
         let actual_cap = if cap < 1 then UInt(1) else cap;
         let data = alloc_memory[UInt8](actual_cap);
         return ByteBuffer(data, 0, actual_cap, 0);
     };
 
+    /// Create a byte buffer holding the UTF-8 bytes of `s`.
     public from_string(s: String): ByteBuffer = {
         return ByteBuffer.from_bytes(s.to_bytes());
     };
 
+    /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer = {
         let len = bytes.count();
         let cap = if len < 1 then UInt(1) else len;
@@ -65,8 +72,10 @@ given ByteBuffer {
     };
 };
 
+/// Implements `Reader`, reading from the buffer's cursor.
 given ByteBuffer: Reader {
 
+    /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
@@ -90,8 +99,10 @@ given ByteBuffer: Reader {
     };
 };
 
+/// Implements `Writer`, writing at the buffer's cursor and growing the buffer as needed.
 given ByteBuffer: Writer {
 
+    /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
@@ -111,11 +122,14 @@ given ByteBuffer: Writer {
         return Result[UInt].Ok(n);
     };
 
+    /// Flush is a no-op here, since writes already land in the buffer.
     public flush(self): Result[Void] = Result[Void].Ok({});
 };
 
+/// Implements `Seeker`, moving the cursor within the buffer.
 given ByteBuffer: Seeker {
 
+    /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
     public seek(self, pos: SeekOrigin): Result[UInt64] = {
         let mutable target: Int64 = 0;
         when pos in {

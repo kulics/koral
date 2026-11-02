@@ -11,20 +11,24 @@ using "std" { ... };
 // a permit and wakes one waiting thread.
 // ============================================================================
 
+/// Counting semaphore that caps how many threads hold a permit at once.
 public type mutable Semaphore(
     private mutex: Mutex,
     private condvar: MutexCondvar,
     private mutable permits: UInt,
 );
 
+/// Creates the semaphore and takes and returns permits.
 given Semaphore {
 
+    /// Create a semaphore with `permits` permits available.
     public new(permits: UInt): Semaphore = {
         let mu = Mutex.new();
         let cv = mu.condvar();
         return Semaphore(mu, cv, permits);
     };
 
+    /// Take a permit, blocking until one is available.
     public acquire(self): Void = {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -34,6 +38,7 @@ given Semaphore {
         self.permits = self.permits - 1;
     };
 
+    /// Take a permit only if one is immediately available.
     public try_acquire(self): Bool = {
         self.mutex.lock();
         defer self.mutex.unlock();
@@ -44,6 +49,7 @@ given Semaphore {
         return false;
     };
 
+    /// Return a permit and wake one waiting thread.
     public release(self): Void = {
         self.mutex.lock();
         defer self.mutex.unlock();

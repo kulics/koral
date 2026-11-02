@@ -2,250 +2,382 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std API
+# std API
 
 ## Overview
-This page lists the public API of module `Std` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std" { ... };`.
 
 ## Free Functions
 ```koral
+/// 休眠指定时间
 public let sleep(d: Duration): Void;
 
+/// A `count`-byte list of zeros.
 public let make_bytes(count: UInt): List[UInt8];
 
+/// A `count`-byte list of uninitialized bytes, meant for buffers that are filled before being read.
 public let make_uninitialized_bytes(count: UInt): List[UInt8];
 
+/// Allocates uninitialized memory for `capacity` number of elements.
 public let intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
 
+/// Deallocates the memory pointed to by `p`.
+/// PRECONDITION: The memory must be deinitialized.
 public let intrinsic dealloc_memory[T: Any](p: *T): Void;
 
+/// Copies `count` elements from `source` to `dest`. Regions must NOT overlap.
 public let intrinsic copy_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
+/// Moves `count` elements from `source` to `dest`. Regions may overlap.
 public let intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
+/// Initializes the memory at `p` with `value`, taking ownership of the value.
 public let intrinsic init_memory[T: Any](p: *mutable T, value: T): Void;
 
+/// Drops the value at `p` and leaves the memory uninitialized.
 public let intrinsic deinit_memory[T: Any](p: *mutable T): Void;
 
+/// Moves the value out of `p` and leaves the memory uninitialized.
 public let intrinsic take_memory[T: Any](p: *mutable T): T;
 
+/// Creates a new OS thread executing the given closure.
+/// A `stack_size` of 0 uses the default stack size.
+/// Returns 0 on success, non-zero on failure.
+/// The closure is passed by value to the C runtime which invokes and releases it.
 public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: () -> Void, stack_size: UInt64): Int32;
 
+/// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;
 
+/// Return the smaller of `a` and `b`.
 public let min[T: Ord](a: T, b: T): T;
 
+/// Terminate the process with the given exit code.
 public let foreign exit(code: Int): Never;
 
+/// Terminate the process immediately.
 public let foreign abort(): Never;
 
+/// Get the last OS error (errno) as a human-readable String.
 public let last_error_message(): String;
 
+/// Return the command-line arguments, starting with the program name.
 public let args(): List[String];
 
+/// Print `Panic: ` and the message to standard error, then abort the process.
 public let panic(message: String): Never;
 
+/// Panic with `message` when `condition` is false.
 public let assert(condition: Bool, message: String): Void;
 
+/// Write `value`'s text to standard output without a newline, then flush.
 public let print[T: ToString](value: T): Void;
 
+/// Write `value`'s text and a newline to standard output, then flush.
 public let println[T: ToString](value: T): Void;
 
+/// Write `value`'s text to standard error without a newline, then flush.
 public let eprint[T: ToString](value: T): Void;
 
+/// Write `value`'s text and a newline to standard error, then flush.
 public let eprintln[T: ToString](value: T): Void;
 
+/// Read one line from standard input without its line ending, returning `None`
+/// at end of input; an empty line yields an empty string.
 public let scanln(): Option[String];
 ```
 
 ## Traits
 ```koral
+/// Types with an additive identity.
 public trait Zero {
+    /// Returns the additive identity of `Self`.
     zero(): Self;
 };
 
+/// Types with a multiplicative identity.
 public trait One {
+    /// Returns the multiplicative identity of `Self`.
     one(): Self;
 };
 
+/// Types that support addition of an `R` right-hand operand.
 public trait Add[R: Any] {
+    /// Returns the sum of `self` and `other`.
     add(self, other: R): Self;
 };
 
+/// Types that support subtraction of an `R` right-hand operand.
 public trait Sub[R: Any] {
+    /// Returns `self` minus `other`.
     sub(self, other: R): Self;
 };
 
+/// Types that support unary negation.
 public trait Neg {
+    /// Returns the negation of `self`.
     neg(self): Self;
 };
 
+/// Types that support multiplication by an `R` right-hand operand.
 public trait Mul[R: Any] {
+    /// Returns the product of `self` and `other`.
     mul(self, other: R): Self;
 };
 
+/// Types that support division by an `R` right-hand operand.
 public trait Div[R: Any] {
+    /// Returns `self` divided by `other`.
     div(self, other: R): Self;
 };
 
+/// Types that support remainder on division by an `R` right-hand operand.
 public trait Rem[R: Any] {
+    /// Returns the remainder of `self` divided by `other`.
     rem(self, other: R): Self;
 };
 
+/// Types whose values can be compared for equality.
 public trait Eq {
+    /// Returns whether `self` equals `other`.
     equals(self, other: Self): Bool;
 };
 
+/// Types that support three-way ordering comparison.
 public trait Ord: Eq {
+    /// Returns a negative number, zero, or a positive number as `self` is less than, equal to, or greater than `other`.
     compare(self, other: Self): Int;
 };
 
+/// Bounded trait for types that have minimum and maximum values.
 public trait Bounded: Ord {
+    /// Returns the maximum value of `Self`.
     max_value(): Self;
+    /// Returns the minimum value of `Self`.
     min_value(): Self;
 };
 
+/// A one-shot cursor over a sequence of `T`: it only advances, and `next` is the whole protocol.
 public trait Iterator[T: Any] {
+    /// Advance the cursor and return the next element, or `None` once it is exhausted.
     next(self): Option[T];
 };
 
+/// A source that can hand out a fresh cursor on every call.
 public trait Iterable[T: Any, R: Iterator[T]] {
+    /// Build a fresh cursor over this source; the source itself is not spent.
     iterator(self): R;
 };
 
+/// Types whose values step one at a time, enabling range iteration.
 public trait Step: Bounded {
+    /// Return the next value after `self`, or `None` at the type's maximum.
     succ(self): Option[Self];
+    /// Return the value before `self`, or `None` at the type's minimum.
     pred(self): Option[Self];
 };
 
+/// Types that can render themselves as a `String`.
 public trait ToString {
+    /// Return the display form of this value.
     to_string(self): String;
 };
 
+/// Hashing to a `UInt` for hash-based containers; values that are `Eq` must
+/// hash alike.
 public trait Hash: Eq {
+    /// Return a hash of this value; values that compare equal must hash alike.
     hash(self): UInt;
 };
 
+/// A failure that can describe itself as text.
 public trait Error {
+    /// Return a human-readable description of the failure.
     message(self): String;
 };
 
+/// Deterministic cleanup when a value leaves scope.
 public trait Drop {
+    /// Release the resources the value owns; called once when the value is dropped.
     drop(self): Void;
 };
 
+/// Types with a natural starting value.
 public trait Default {
+    /// Return the type's default value.
     default(): Self;
 };
 
+/// Explicit independent copy for shared (`type mutable`) objects.
+/// Semantics are shallow: the receiver's backing storage is duplicated and
+/// elements are copied one level, so nested shared objects stay shared.
+/// See `docs/design/type-semantics.md`.
 public trait Clone {
+    /// Return an independent shallow copy of this value.
     clone(self): Self;
 };
 ```
 
 ## Types
 ```koral
+/// A growable double-ended queue of `T` in a ring buffer: pushes and pops at
+/// both ends are O(1) amortized, and indexing is O(1).
 public type mutable Deque[T: Any];
 
+/// A one-shot cursor that walks a `Deque[T]` from front to back.
 public type mutable DequeIterator[T: Any];
 
+/// A hash map from `Hash` keys to values; iteration order is unspecified.
 public type mutable Dict[K: Hash, V: Any];
 
+/// Iterator over a `Dict`'s key/value pairs, in unspecified order.
 public type mutable DictIterator[K: Hash, V: Any];
 
+/// Iterator over just the keys of a `Dict`, in unspecified order.
 public type mutable DictKeysIterator[K: Hash, V: Any];
 
+/// Iterator over just the values of a `Dict`, in unspecified order.
 public type mutable DictValuesIterator[K: Hash, V: Any];
 
+/// Duration 表示时间间隔
+/// 内部存储与 C timespec 完全对齐
 public type Duration;
 
+/// Cursor adapter that keeps only the elements satisfying a predicate.
 public type mutable FilterIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that applies `mapper` to every element as it passes.
 public type mutable MapIterator[T: Any, U: Any, R: Iterator[T]];
 
+/// Cursor adapter that maps each element to an `Option`, keeping only the `Some` results.
 public type mutable FilterMapIterator[T: Any, U: Any, R: Iterator[T]];
 
+/// Cursor adapter that yields at most `limit` elements from the front of the source.
 public type mutable TakeIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that drops the first `n` elements of the source.
 public type mutable SkipIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that takes every `step_size`-th element, starting with the first.
 public type mutable StepIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that pairs each element with its zero-based index.
 public type mutable EnumerateIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that runs a side-effecting `action` on each element without changing it.
 public type mutable InspectIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that inserts a separator between consecutive elements, with none at the ends.
 public type mutable IntersperseIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that yields elements while a predicate holds, then stops.
 public type mutable TakeWhileIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that drops leading elements while a predicate holds, then yields the rest.
 public type mutable SkipWhileIterator[T: Any, R: Iterator[T]];
 
+/// Cursor adapter that walks one cursor to exhaustion, then a second of the same element type.
 public type mutable ChainIterator[T: Any, R1: Iterator[T], R2: Iterator[T]];
 
+/// Cursor adapter that pairs the elements of two cursors.
 public type mutable ZipIterator[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]];
 
+/// Cursor adapter that maps each element to a cursor and flattens the results, one inner cursor at a time.
 public type mutable FlatMapIterator[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]];
 
+/// A lazy pipeline: adapters compose stages, and every terminal runs them over
+/// a fresh cursor, so asking twice gives the same answer and the source is never spent.
 public type LazyView[T: Any, R: Iterator[T]];
 
+/// A growable ordered sequence of `T` in one contiguous buffer. Elements are
+/// stored by handle, so `type mutable` values stay shared with their source.
 public type mutable List[T: Any];
 
+/// A one-shot cursor that walks a `List[T]` from index 0 to the end.
 public type mutable ListIterator[T: Any];
 
+/// An optional value: either `Some` carrying a value or `None` carrying nothing.
 public type Option[T: Any] {
     None(),
     Some(value: T),
 };
 
+/// A boolean value, either `true` or `false`.
 public type intrinsic Bool;
 
+/// The type of computations that never produce a value.
 public type intrinsic Never;
 
+/// A 64-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int;
 
+/// An 8-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int8;
 
+/// A 16-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int16;
 
+/// A 32-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int32;
 
+/// A 64-bit signed integer; arithmetic panics on overflow.
 public type intrinsic Int64;
 
+/// A 64-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt;
 
+/// An 8-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt8;
 
+/// A 16-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt16;
 
+/// A 32-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt32;
 
+/// A 64-bit unsigned integer with no sign; arithmetic panics on overflow.
 public type intrinsic UInt64;
 
+/// A 64-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt;
 
+/// An 8-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt8;
 
+/// A 16-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt16;
 
+/// A 32-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt32;
 
+/// A 64-bit signed integer that wraps on overflow.
 public type intrinsic WrappingInt64;
 
+/// A 64-bit unsigned integer with no sign that wraps on overflow.
 public type intrinsic WrappingUInt;
 
+/// An 8-bit unsigned integer with no sign that wraps on overflow.
 public type intrinsic WrappingUInt8;
 
+/// A 16-bit unsigned integer with no sign that wraps on overflow.
 public type intrinsic WrappingUInt16;
 
+/// A 32-bit unsigned integer with no sign that wraps on overflow.
 public type intrinsic WrappingUInt32;
 
+/// A 64-bit unsigned integer with no sign that wraps on overflow.
 public type intrinsic WrappingUInt64;
 
+/// A 32-bit IEEE 754 floating-point number.
 public type intrinsic Float32;
 
+/// A 64-bit IEEE 754 floating-point number.
 public type intrinsic Float64;
 
+/// An interval over an `Ord` type: bounded on both sides (`a..b`, `a..<b`,
+/// `a<..b`, `a<..<b`), open-ended (`a...`, `a<...`, `...b`, `...<b`), or full (`...`).
 public type Range[T: Ord] {
     // Bound ranges (4 kinds)
     Closed(start: T, end: T), // a..b   : start <= x <= end
@@ -254,1936 +386,3120 @@ public type Range[T: Ord] {
     Open(start: T, end: T), // a<..<b : start < x < end
 
     // From ranges (2 kinds)
-    From(start: T), // a..    : start <= x <= max
-    After(start: T), // a<..   : start < x <= max
+    From(start: T), // a...   : start <= x <= max
+    After(start: T), // a<...  : start < x <= max
 
     // To ranges (2 kinds)
-    To(end: T), // ..b    : min <= x <= end
-    Until(end: T), // ..<b   : min <= x < end
+    To(end: T), // ...b   : min <= x <= end
+    Until(end: T), // ...<b  : min <= x < end
 
     // Full range (1 kind)
-    Full(), // ..     : min <= x <= max
+    Full(), // ...    : min <= x <= max
 };
 
+/// A slice descriptor: where a slice starts and how many elements it covers.
 public type SliceSpec;
 
+/// Iterator that steps a range's values one at a time, from its start bound to
+/// its end bound.
 public type mutable RangeIterator[T: Step];
 
+/// The outcome of a fallible operation: `Ok` carrying a value or `Error` carrying a failure.
 public type Result[T: Any] {
     Ok(value: T),
     Error(error: Error),
 };
 
+/// A Unicode code point from U+0000 to U+10FFFF, possibly invalid when built
+/// with `from_uint32_unchecked`.
 public type Rune;
 
+/// A hash set of `Hash` values; iteration order is unspecified.
 public type mutable Set[T: Hash];
 
+/// Iterator over a `Set`'s elements, in unspecified order.
 public type mutable SetIterator[T: Hash];
 
+/// String is immutable value data with fixed storage length.
+/// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
 public type String;
 
+/// Mutable builder for incremental string construction without relying on String alias mutation.
 public type mutable StringBuilder;
 
+/// Iterator over the whitespace-separated words of a string.
 public type mutable StringSplitAsciiWhitespaceIterator;
 
+/// Iterator over the parts of a string separated by a fixed separator.
 public type mutable StringSplitIterator;
 
+/// Iterator over the lines of a string, split at `\n`.
 public type mutable StringLinesIterator;
 
+/// Iterator over the raw UTF-8 bytes of a string.
 public type mutable StringBytesIterator;
 
+/// Iterator over the runes of a string, decoding UTF-8 as it goes.
 public type mutable StringRunesIterator;
 
+/// A generic tuple-like pair holding a `first` and a `second` value.
 public type Pair[T: Any, U: Any](public first: T, public second: U);
 
+/// Closure capture is copy-only, so a `let mutable` local cannot be captured.
+/// To carry mutable state into a closure, hold it in a `Cell` (a shared
+/// `type mutable` object) and capture the cell.
 public type mutable Cell[T: Any](public mutable value: T);
 ```
 
 ## Given Implementations
 ```koral
+/// `Zero` for `Int`: returns zero.
 given Int: Zero {
+    /// Returns 0.
     public zero(): Int;
 };
 
+/// `One` for `Int`: returns one.
 given Int: One {
+    /// Returns 1.
     public one(): Int;
 };
 
+/// `Add` for `Int`: sums `self` and `other`, panicking on overflow.
 given Int: Add[Int] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Int): Int;
 };
 
+/// `Sub` for `Int`: subtracts `other` from `self`, panicking on overflow.
 given Int: Sub[Int] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Int): Int;
 };
 
+/// `Neg` for `Int`: negates `self`, panicking at the minimum value.
 given Int: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Int;
 };
 
+/// `Mul` for `Int`: multiplies `self` by `other`, panicking on overflow.
 given Int: Mul[Int] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Int): Int;
 };
 
+/// `Div` for `Int`: divides `self` by `other` truncating toward zero, panicking on division by zero or overflow.
 given Int: Div[Int] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Int): Int;
 };
 
+/// `Rem` for `Int`: takes the remainder of `self` divided by `other` with the sign of `self`, panicking on division by zero or overflow.
 given Int: Rem[Int] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: Int): Int;
 };
 
+/// `Zero` for `Int8`: returns zero.
 given Int8: Zero {
+    /// Returns 0.
     public zero(): Int8;
 };
 
+/// `One` for `Int8`: returns one.
 given Int8: One {
+    /// Returns 1.
     public one(): Int8;
 };
 
+/// `Add` for `Int8`: sums `self` and `other`, panicking on overflow.
 given Int8: Add[Int8] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Int8): Int8;
 };
 
+/// `Sub` for `Int8`: subtracts `other` from `self`, panicking on overflow.
 given Int8: Sub[Int8] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Int8): Int8;
 };
 
+/// `Neg` for `Int8`: negates `self`, panicking at the minimum value.
 given Int8: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Int8;
 };
 
+/// `Mul` for `Int8`: multiplies `self` by `other`, panicking on overflow.
 given Int8: Mul[Int8] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Int8): Int8;
 };
 
+/// `Div` for `Int8`: divides `self` by `other` truncating toward zero, panicking on division by zero or overflow.
 given Int8: Div[Int8] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Int8): Int8;
 };
 
+/// `Rem` for `Int8`: takes the remainder of `self` divided by `other` with the sign of `self`, panicking on division by zero or overflow.
 given Int8: Rem[Int8] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: Int8): Int8;
 };
 
+/// `Zero` for `Int16`: returns zero.
 given Int16: Zero {
+    /// Returns 0.
     public zero(): Int16;
 };
 
+/// `One` for `Int16`: returns one.
 given Int16: One {
+    /// Returns 1.
     public one(): Int16;
 };
 
+/// `Add` for `Int16`: sums `self` and `other`, panicking on overflow.
 given Int16: Add[Int16] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Int16): Int16;
 };
 
+/// `Sub` for `Int16`: subtracts `other` from `self`, panicking on overflow.
 given Int16: Sub[Int16] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Int16): Int16;
 };
 
+/// `Neg` for `Int16`: negates `self`, panicking at the minimum value.
 given Int16: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Int16;
 };
 
+/// `Mul` for `Int16`: multiplies `self` by `other`, panicking on overflow.
 given Int16: Mul[Int16] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Int16): Int16;
 };
 
+/// `Div` for `Int16`: divides `self` by `other` truncating toward zero, panicking on division by zero or overflow.
 given Int16: Div[Int16] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Int16): Int16;
 };
 
+/// `Rem` for `Int16`: takes the remainder of `self` divided by `other` with the sign of `self`, panicking on division by zero or overflow.
 given Int16: Rem[Int16] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: Int16): Int16;
 };
 
+/// `Zero` for `Int32`: returns zero.
 given Int32: Zero {
+    /// Returns 0.
     public zero(): Int32;
 };
 
+/// `One` for `Int32`: returns one.
 given Int32: One {
+    /// Returns 1.
     public one(): Int32;
 };
 
+/// `Add` for `Int32`: sums `self` and `other`, panicking on overflow.
 given Int32: Add[Int32] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Int32): Int32;
 };
 
+/// `Sub` for `Int32`: subtracts `other` from `self`, panicking on overflow.
 given Int32: Sub[Int32] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Int32): Int32;
 };
 
+/// `Neg` for `Int32`: negates `self`, panicking at the minimum value.
 given Int32: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Int32;
 };
 
+/// `Mul` for `Int32`: multiplies `self` by `other`, panicking on overflow.
 given Int32: Mul[Int32] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Int32): Int32;
 };
 
+/// `Div` for `Int32`: divides `self` by `other` truncating toward zero, panicking on division by zero or overflow.
 given Int32: Div[Int32] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Int32): Int32;
 };
 
+/// `Rem` for `Int32`: takes the remainder of `self` divided by `other` with the sign of `self`, panicking on division by zero or overflow.
 given Int32: Rem[Int32] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: Int32): Int32;
 };
 
+/// `Zero` for `Int64`: returns zero.
 given Int64: Zero {
+    /// Returns 0.
     public zero(): Int64;
 };
 
+/// `One` for `Int64`: returns one.
 given Int64: One {
+    /// Returns 1.
     public one(): Int64;
 };
 
+/// `Add` for `Int64`: sums `self` and `other`, panicking on overflow.
 given Int64: Add[Int64] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Int64): Int64;
 };
 
+/// `Sub` for `Int64`: subtracts `other` from `self`, panicking on overflow.
 given Int64: Sub[Int64] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Int64): Int64;
 };
 
+/// `Neg` for `Int64`: negates `self`, panicking at the minimum value.
 given Int64: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Int64;
 };
 
+/// `Mul` for `Int64`: multiplies `self` by `other`, panicking on overflow.
 given Int64: Mul[Int64] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Int64): Int64;
 };
 
+/// `Div` for `Int64`: divides `self` by `other` truncating toward zero, panicking on division by zero or overflow.
 given Int64: Div[Int64] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Int64): Int64;
 };
 
+/// `Rem` for `Int64`: takes the remainder of `self` divided by `other` with the sign of `self`, panicking on division by zero or overflow.
 given Int64: Rem[Int64] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: Int64): Int64;
 };
 
+/// `Zero` for `UInt`: returns zero.
 given UInt: Zero {
+    /// Returns 0.
     public zero(): UInt;
 };
 
+/// `One` for `UInt`: returns one.
 given UInt: One {
+    /// Returns 1.
     public one(): UInt;
 };
 
+/// `Add` for `UInt`: sums `self` and `other`, panicking on overflow.
 given UInt: Add[UInt] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: UInt): UInt;
 };
 
+/// `Sub` for `UInt`: subtracts `other` from `self`, panicking on underflow.
 given UInt: Sub[UInt] {
+    /// Returns `self` minus `other`.
     public sub(self, other: UInt): UInt;
 };
 
+/// `Mul` for `UInt`: multiplies `self` by `other`, panicking on overflow.
 given UInt: Mul[UInt] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: UInt): UInt;
 };
 
+/// `Div` for `UInt`: divides `self` by `other`, panicking on division by zero.
 given UInt: Div[UInt] {
+    /// Returns `self` divided by `other`.
     public div(self, other: UInt): UInt;
 };
 
+/// `Rem` for `UInt`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given UInt: Rem[UInt] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: UInt): UInt;
 };
 
+/// `Zero` for `UInt8`: returns zero.
 given UInt8: Zero {
+    /// Returns 0.
     public zero(): UInt8;
 };
 
+/// `One` for `UInt8`: returns one.
 given UInt8: One {
+    /// Returns 1.
     public one(): UInt8;
 };
 
+/// `Add` for `UInt8`: sums `self` and `other`, panicking on overflow.
 given UInt8: Add[UInt8] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: UInt8): UInt8;
 };
 
+/// `Sub` for `UInt8`: subtracts `other` from `self`, panicking on underflow.
 given UInt8: Sub[UInt8] {
+    /// Returns `self` minus `other`.
     public sub(self, other: UInt8): UInt8;
 };
 
+/// `Mul` for `UInt8`: multiplies `self` by `other`, panicking on overflow.
 given UInt8: Mul[UInt8] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: UInt8): UInt8;
 };
 
+/// `Div` for `UInt8`: divides `self` by `other`, panicking on division by zero.
 given UInt8: Div[UInt8] {
+    /// Returns `self` divided by `other`.
     public div(self, other: UInt8): UInt8;
 };
 
+/// `Rem` for `UInt8`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given UInt8: Rem[UInt8] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: UInt8): UInt8;
 };
 
+/// `Zero` for `UInt16`: returns zero.
 given UInt16: Zero {
+    /// Returns 0.
     public zero(): UInt16;
 };
 
+/// `One` for `UInt16`: returns one.
 given UInt16: One {
+    /// Returns 1.
     public one(): UInt16;
 };
 
+/// `Add` for `UInt16`: sums `self` and `other`, panicking on overflow.
 given UInt16: Add[UInt16] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: UInt16): UInt16;
 };
 
+/// `Sub` for `UInt16`: subtracts `other` from `self`, panicking on underflow.
 given UInt16: Sub[UInt16] {
+    /// Returns `self` minus `other`.
     public sub(self, other: UInt16): UInt16;
 };
 
+/// `Mul` for `UInt16`: multiplies `self` by `other`, panicking on overflow.
 given UInt16: Mul[UInt16] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: UInt16): UInt16;
 };
 
+/// `Div` for `UInt16`: divides `self` by `other`, panicking on division by zero.
 given UInt16: Div[UInt16] {
+    /// Returns `self` divided by `other`.
     public div(self, other: UInt16): UInt16;
 };
 
+/// `Rem` for `UInt16`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given UInt16: Rem[UInt16] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: UInt16): UInt16;
 };
 
+/// `Zero` for `UInt32`: returns zero.
 given UInt32: Zero {
+    /// Returns 0.
     public zero(): UInt32;
 };
 
+/// `One` for `UInt32`: returns one.
 given UInt32: One {
+    /// Returns 1.
     public one(): UInt32;
 };
 
+/// `Add` for `UInt32`: sums `self` and `other`, panicking on overflow.
 given UInt32: Add[UInt32] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: UInt32): UInt32;
 };
 
+/// `Sub` for `UInt32`: subtracts `other` from `self`, panicking on underflow.
 given UInt32: Sub[UInt32] {
+    /// Returns `self` minus `other`.
     public sub(self, other: UInt32): UInt32;
 };
 
+/// `Mul` for `UInt32`: multiplies `self` by `other`, panicking on overflow.
 given UInt32: Mul[UInt32] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: UInt32): UInt32;
 };
 
+/// `Div` for `UInt32`: divides `self` by `other`, panicking on division by zero.
 given UInt32: Div[UInt32] {
+    /// Returns `self` divided by `other`.
     public div(self, other: UInt32): UInt32;
 };
 
+/// `Rem` for `UInt32`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given UInt32: Rem[UInt32] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: UInt32): UInt32;
 };
 
+/// `Zero` for `UInt64`: returns zero.
 given UInt64: Zero {
+    /// Returns 0.
     public zero(): UInt64;
 };
 
+/// `One` for `UInt64`: returns one.
 given UInt64: One {
+    /// Returns 1.
     public one(): UInt64;
 };
 
+/// `Add` for `UInt64`: sums `self` and `other`, panicking on overflow.
 given UInt64: Add[UInt64] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: UInt64): UInt64;
 };
 
+/// `Sub` for `UInt64`: subtracts `other` from `self`, panicking on underflow.
 given UInt64: Sub[UInt64] {
+    /// Returns `self` minus `other`.
     public sub(self, other: UInt64): UInt64;
 };
 
+/// `Mul` for `UInt64`: multiplies `self` by `other`, panicking on overflow.
 given UInt64: Mul[UInt64] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: UInt64): UInt64;
 };
 
+/// `Div` for `UInt64`: divides `self` by `other`, panicking on division by zero.
 given UInt64: Div[UInt64] {
+    /// Returns `self` divided by `other`.
     public div(self, other: UInt64): UInt64;
 };
 
+/// `Rem` for `UInt64`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given UInt64: Rem[UInt64] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: UInt64): UInt64;
 };
 
+/// `Zero` for `Float32`: returns 0.0.
 given Float32: Zero {
+    /// Returns 0.0.
     public zero(): Float32;
 };
 
+/// `One` for `Float32`: returns 1.0.
 given Float32: One {
+    /// Returns 1.0.
     public one(): Float32;
 };
 
+/// `Add` for `Float32`: sums `self` and `other` under IEEE 754 rounding.
 given Float32: Add[Float32] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Float32): Float32;
 };
 
+/// `Sub` for `Float32`: subtracts `other` from `self` under IEEE 754 rounding.
 given Float32: Sub[Float32] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Float32): Float32;
 };
 
+/// `Neg` for `Float32`: flips the sign of `self`.
 given Float32: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Float32;
 };
 
+/// `Mul` for `Float32`: multiplies `self` by `other` under IEEE 754 rounding.
 given Float32: Mul[Float32] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Float32): Float32;
 };
 
+/// `Div` for `Float32`: divides `self` by `other` under IEEE 754 rules, yielding infinity or NaN rather than panicking.
 given Float32: Div[Float32] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Float32): Float32;
 };
 
+/// `Zero` for `Float64`: returns 0.0.
 given Float64: Zero {
+    /// Returns 0.0.
     public zero(): Float64;
 };
 
+/// `One` for `Float64`: returns 1.0.
 given Float64: One {
+    /// Returns 1.0.
     public one(): Float64;
 };
 
+/// `Add` for `Float64`: sums `self` and `other` under IEEE 754 rounding.
 given Float64: Add[Float64] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: Float64): Float64;
 };
 
+/// `Sub` for `Float64`: subtracts `other` from `self` under IEEE 754 rounding.
 given Float64: Sub[Float64] {
+    /// Returns `self` minus `other`.
     public sub(self, other: Float64): Float64;
 };
 
+/// `Neg` for `Float64`: flips the sign of `self`.
 given Float64: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Float64;
 };
 
+/// `Mul` for `Float64`: multiplies `self` by `other` under IEEE 754 rounding.
 given Float64: Mul[Float64] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: Float64): Float64;
 };
 
+/// `Div` for `Float64`: divides `self` by `other` under IEEE 754 rules, yielding infinity or NaN rather than panicking.
 given Float64: Div[Float64] {
+    /// Returns `self` divided by `other`.
     public div(self, other: Float64): Float64;
 };
 
+/// `Add` for `String`: concatenates `self` and `other`.
 given String: Add[String] {
+    /// Returns the concatenation of `self` followed by `other`.
     public add(self, other: String): String;
 };
 
+/// `Zero` for `Duration`: returns a zero-length duration.
 given Duration: Zero {
+    /// Returns a zero-length duration.
     public zero(): Duration;
 };
 
+/// `Add` for `Duration`: adds `self` and `other`, carrying whole seconds.
 given Duration: Add[Duration] {
+    /// Returns the sum of `self` and `other`, with nanoseconds normalized below one second.
     public add(self, other: Duration): Duration;
 };
 
+/// `Sub` for `Duration`: subtracts `other` from `self`, which may be negative.
 given Duration: Sub[Duration] {
+    /// Returns `self` minus `other`, which is negative when `other` is longer.
     public sub(self, other: Duration): Duration;
 };
 
+/// `Neg` for `Duration`: negates `self`.
 given Duration: Neg {
+    /// Returns the negation of `self`.
     public neg(self): Duration;
 };
 
+/// `Mul` for `Duration`: scales `self` by the integer `k`, panicking on overflow.
 given Duration: Mul[Int] {
+    /// Returns `self` scaled by the integer factor `k`.
     public mul(self, k: Int): Duration;
 };
 
+/// `Div` for `Duration`: divides `self` by the integer `k`, panicking when `k` is zero.
 given Duration: Div[Int] {
+    /// Returns `self` divided by the integer divisor `k`, truncating toward zero.
     public div(self, k: Int): Duration;
 };
 
+/// `Add` for `WrappingInt8`: sums `self` and `other`, wrapping on overflow.
 given WrappingInt8: Add[WrappingInt8] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingInt8): WrappingInt8;
 };
 
+/// `Sub` for `WrappingInt8`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingInt8: Sub[WrappingInt8] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingInt8): WrappingInt8;
 };
 
+/// `Mul` for `WrappingInt8`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingInt8: Mul[WrappingInt8] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingInt8): WrappingInt8;
 };
 
+/// `Div` for `WrappingInt8`: divides `self` by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt8: Div[WrappingInt8] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingInt8): WrappingInt8;
 };
 
+/// `Rem` for `WrappingInt8`: takes the remainder of `self` divided by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt8: Rem[WrappingInt8] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingInt8): WrappingInt8;
 };
 
+/// `Add` for `WrappingInt16`: sums `self` and `other`, wrapping on overflow.
 given WrappingInt16: Add[WrappingInt16] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingInt16): WrappingInt16;
 };
 
+/// `Sub` for `WrappingInt16`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingInt16: Sub[WrappingInt16] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingInt16): WrappingInt16;
 };
 
+/// `Mul` for `WrappingInt16`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingInt16: Mul[WrappingInt16] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingInt16): WrappingInt16;
 };
 
+/// `Div` for `WrappingInt16`: divides `self` by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt16: Div[WrappingInt16] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingInt16): WrappingInt16;
 };
 
+/// `Rem` for `WrappingInt16`: takes the remainder of `self` divided by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt16: Rem[WrappingInt16] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingInt16): WrappingInt16;
 };
 
+/// `Add` for `WrappingInt32`: sums `self` and `other`, wrapping on overflow.
 given WrappingInt32: Add[WrappingInt32] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingInt32): WrappingInt32;
 };
 
+/// `Sub` for `WrappingInt32`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingInt32: Sub[WrappingInt32] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingInt32): WrappingInt32;
 };
 
+/// `Mul` for `WrappingInt32`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingInt32: Mul[WrappingInt32] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingInt32): WrappingInt32;
 };
 
+/// `Div` for `WrappingInt32`: divides `self` by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt32: Div[WrappingInt32] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingInt32): WrappingInt32;
 };
 
+/// `Rem` for `WrappingInt32`: takes the remainder of `self` divided by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt32: Rem[WrappingInt32] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingInt32): WrappingInt32;
 };
 
+/// `Add` for `WrappingInt64`: sums `self` and `other`, wrapping on overflow.
 given WrappingInt64: Add[WrappingInt64] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingInt64): WrappingInt64;
 };
 
+/// `Sub` for `WrappingInt64`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingInt64: Sub[WrappingInt64] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingInt64): WrappingInt64;
 };
 
+/// `Mul` for `WrappingInt64`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingInt64: Mul[WrappingInt64] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingInt64): WrappingInt64;
 };
 
+/// `Div` for `WrappingInt64`: divides `self` by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt64: Div[WrappingInt64] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingInt64): WrappingInt64;
 };
 
+/// `Rem` for `WrappingInt64`: takes the remainder of `self` divided by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt64: Rem[WrappingInt64] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingInt64): WrappingInt64;
 };
 
+/// `Add` for `WrappingUInt8`: sums `self` and `other`, wrapping on overflow.
 given WrappingUInt8: Add[WrappingUInt8] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingUInt8): WrappingUInt8;
 };
 
+/// `Sub` for `WrappingUInt8`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingUInt8: Sub[WrappingUInt8] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingUInt8): WrappingUInt8;
 };
 
+/// `Mul` for `WrappingUInt8`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingUInt8: Mul[WrappingUInt8] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingUInt8): WrappingUInt8;
 };
 
+/// `Div` for `WrappingUInt8`: divides `self` by `other`, panicking on division by zero.
 given WrappingUInt8: Div[WrappingUInt8] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingUInt8): WrappingUInt8;
 };
 
+/// `Rem` for `WrappingUInt8`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given WrappingUInt8: Rem[WrappingUInt8] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt8): WrappingUInt8;
 };
 
+/// `Add` for `WrappingUInt16`: sums `self` and `other`, wrapping on overflow.
 given WrappingUInt16: Add[WrappingUInt16] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingUInt16): WrappingUInt16;
 };
 
+/// `Sub` for `WrappingUInt16`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingUInt16: Sub[WrappingUInt16] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingUInt16): WrappingUInt16;
 };
 
+/// `Mul` for `WrappingUInt16`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingUInt16: Mul[WrappingUInt16] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingUInt16): WrappingUInt16;
 };
 
+/// `Div` for `WrappingUInt16`: divides `self` by `other`, panicking on division by zero.
 given WrappingUInt16: Div[WrappingUInt16] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingUInt16): WrappingUInt16;
 };
 
+/// `Rem` for `WrappingUInt16`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given WrappingUInt16: Rem[WrappingUInt16] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt16): WrappingUInt16;
 };
 
+/// `Add` for `WrappingUInt32`: sums `self` and `other`, wrapping on overflow.
 given WrappingUInt32: Add[WrappingUInt32] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingUInt32): WrappingUInt32;
 };
 
+/// `Sub` for `WrappingUInt32`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingUInt32: Sub[WrappingUInt32] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingUInt32): WrappingUInt32;
 };
 
+/// `Mul` for `WrappingUInt32`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingUInt32: Mul[WrappingUInt32] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingUInt32): WrappingUInt32;
 };
 
+/// `Div` for `WrappingUInt32`: divides `self` by `other`, panicking on division by zero.
 given WrappingUInt32: Div[WrappingUInt32] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingUInt32): WrappingUInt32;
 };
 
+/// `Rem` for `WrappingUInt32`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given WrappingUInt32: Rem[WrappingUInt32] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt32): WrappingUInt32;
 };
 
+/// `Add` for `WrappingUInt64`: sums `self` and `other`, wrapping on overflow.
 given WrappingUInt64: Add[WrappingUInt64] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingUInt64): WrappingUInt64;
 };
 
+/// `Sub` for `WrappingUInt64`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingUInt64: Sub[WrappingUInt64] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingUInt64): WrappingUInt64;
 };
 
+/// `Mul` for `WrappingUInt64`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingUInt64: Mul[WrappingUInt64] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingUInt64): WrappingUInt64;
 };
 
+/// `Div` for `WrappingUInt64`: divides `self` by `other`, panicking on division by zero.
 given WrappingUInt64: Div[WrappingUInt64] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingUInt64): WrappingUInt64;
 };
 
+/// `Rem` for `WrappingUInt64`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given WrappingUInt64: Rem[WrappingUInt64] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt64): WrappingUInt64;
 };
 
+/// `Add` for `WrappingInt`: sums `self` and `other`, wrapping on overflow.
 given WrappingInt: Add[WrappingInt] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingInt): WrappingInt;
 };
 
+/// `Sub` for `WrappingInt`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingInt: Sub[WrappingInt] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingInt): WrappingInt;
 };
 
+/// `Mul` for `WrappingInt`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingInt: Mul[WrappingInt] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingInt): WrappingInt;
 };
 
+/// `Div` for `WrappingInt`: divides `self` by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt: Div[WrappingInt] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingInt): WrappingInt;
 };
 
+/// `Rem` for `WrappingInt`: takes the remainder of `self` divided by `other`, wrapping on overflow and panicking on division by zero.
 given WrappingInt: Rem[WrappingInt] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingInt): WrappingInt;
 };
 
+/// `Add` for `WrappingUInt`: sums `self` and `other`, wrapping on overflow.
 given WrappingUInt: Add[WrappingUInt] {
+    /// Returns the sum of `self` and `other`.
     public add(self, other: WrappingUInt): WrappingUInt;
 };
 
+/// `Sub` for `WrappingUInt`: subtracts `other` from `self`, wrapping on overflow.
 given WrappingUInt: Sub[WrappingUInt] {
+    /// Returns `self` minus `other`.
     public sub(self, other: WrappingUInt): WrappingUInt;
 };
 
+/// `Mul` for `WrappingUInt`: multiplies `self` by `other`, wrapping on overflow.
 given WrappingUInt: Mul[WrappingUInt] {
+    /// Returns the product of `self` and `other`.
     public mul(self, other: WrappingUInt): WrappingUInt;
 };
 
+/// `Div` for `WrappingUInt`: divides `self` by `other`, panicking on division by zero.
 given WrappingUInt: Div[WrappingUInt] {
+    /// Returns `self` divided by `other`.
     public div(self, other: WrappingUInt): WrappingUInt;
 };
 
+/// `Rem` for `WrappingUInt`: takes the remainder of `self` divided by `other`, panicking on division by zero.
 given WrappingUInt: Rem[WrappingUInt] {
+    /// Returns the remainder of `self` divided by `other`.
     public rem(self, other: WrappingUInt): WrappingUInt;
 };
 
+/// `Eq` for `Bool`: compares by value.
 given Bool: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Bool): Bool;
 };
 
+/// `Ord` for `Bool`: orders `false` before `true`.
 given Bool: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Bool): Int;
 };
 
+/// `Eq` for `Int`: compares by value.
 given Int: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Int): Bool;
 };
 
+/// `Ord` for `Int`: orders by numeric value.
 given Int: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Int): Int;
 };
 
+/// `Bounded` for `Int`: the full signed 64-bit range.
 given Int: Bounded {
+    /// Returns the maximum value, 2^63 - 1.
     public max_value(): Self;
+    /// Returns the minimum value, -2^63.
     public min_value(): Self;
 };
 
+/// `Eq` for `Int8`: compares by value.
 given Int8: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Int8): Bool;
 };
 
+/// `Ord` for `Int8`: orders by numeric value.
 given Int8: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Int8): Int;
 };
 
+/// `Bounded` for `Int8`: the full signed 8-bit range.
 given Int8: Bounded {
+    /// Returns the maximum value, 127.
     public max_value(): Self;
+    /// Returns the minimum value, -128.
     public min_value(): Self;
 };
 
+/// `Eq` for `Int16`: compares by value.
 given Int16: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Int16): Bool;
 };
 
+/// `Ord` for `Int16`: orders by numeric value.
 given Int16: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Int16): Int;
 };
 
+/// `Bounded` for `Int16`: the full signed 16-bit range.
 given Int16: Bounded {
+    /// Returns the maximum value, 32767.
     public max_value(): Self;
+    /// Returns the minimum value, -32768.
     public min_value(): Self;
 };
 
+/// `Eq` for `Int32`: compares by value.
 given Int32: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Int32): Bool;
 };
 
+/// `Ord` for `Int32`: orders by numeric value.
 given Int32: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Int32): Int;
 };
 
+/// `Bounded` for `Int32`: the full signed 32-bit range.
 given Int32: Bounded {
+    /// Returns the maximum value, 2147483647.
     public max_value(): Self;
+    /// Returns the minimum value, -2147483648.
     public min_value(): Self;
 };
 
+/// `Eq` for `Int64`: compares by value.
 given Int64: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Int64): Bool;
 };
 
+/// `Ord` for `Int64`: orders by numeric value.
 given Int64: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Int64): Int;
 };
 
+/// `Bounded` for `Int64`: the full signed 64-bit range.
 given Int64: Bounded {
+    /// Returns the maximum value, 2^63 - 1.
     public max_value(): Self;
+    /// Returns the minimum value, -2^63.
     public min_value(): Self;
 };
 
+/// `Eq` for `UInt`: compares by value.
 given UInt: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: UInt): Bool;
 };
 
+/// `Ord` for `UInt`: orders by numeric value.
 given UInt: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: UInt): Int;
 };
 
+/// `Bounded` for `UInt`: the full unsigned 64-bit range.
 given UInt: Bounded {
+    /// Returns the maximum value, 2^64 - 1.
     public max_value(): Self;
+    /// Returns the minimum value, 0.
     public min_value(): Self;
 };
 
+/// `Eq` for `UInt8`: compares by value.
 given UInt8: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: UInt8): Bool;
 };
 
+/// `Ord` for `UInt8`: orders by numeric value.
 given UInt8: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: UInt8): Int;
 };
 
+/// `Bounded` for `UInt8`: the full unsigned 8-bit range.
 given UInt8: Bounded {
+    /// Returns the maximum value, 255.
     public max_value(): Self;
+    /// Returns the minimum value, 0.
     public min_value(): Self;
 };
 
+/// `Eq` for `UInt16`: compares by value.
 given UInt16: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: UInt16): Bool;
 };
 
+/// `Ord` for `UInt16`: orders by numeric value.
 given UInt16: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: UInt16): Int;
 };
 
+/// `Bounded` for `UInt16`: the full unsigned 16-bit range.
 given UInt16: Bounded {
+    /// Returns the maximum value, 65535.
     public max_value(): Self;
+    /// Returns the minimum value, 0.
     public min_value(): Self;
 };
 
+/// `Eq` for `UInt32`: compares by value.
 given UInt32: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: UInt32): Bool;
 };
 
+/// `Ord` for `UInt32`: orders by numeric value.
 given UInt32: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: UInt32): Int;
 };
 
+/// `Bounded` for `UInt32`: the full unsigned 32-bit range.
 given UInt32: Bounded {
+    /// Returns the maximum value, 4294967295.
     public max_value(): Self;
+    /// Returns the minimum value, 0.
     public min_value(): Self;
 };
 
+/// `Eq` for `UInt64`: compares by value.
 given UInt64: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: UInt64): Bool;
 };
 
+/// `Ord` for `UInt64`: orders by numeric value.
 given UInt64: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: UInt64): Int;
 };
 
+/// `Bounded` for `UInt64`: the full unsigned 64-bit range.
 given UInt64: Bounded {
+    /// Returns the maximum value, 2^64 - 1.
     public max_value(): Self;
+    /// Returns the minimum value, 0.
     public min_value(): Self;
 };
 
+/// `Eq` for `Float32`: IEEE equality where NaN is not equal to itself.
 given Float32: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Float32): Bool;
 };
 
+/// `Ord` for `Float32`: orders by value, with NaN comparing as equal to every value.
 given Float32: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Float32): Int;
 };
 
+/// `Bounded` for `Float32`: the finite extremes.
 given Float32: Bounded {
+    /// Returns the largest finite value.
     public max_value(): Self;
+    /// Returns the most negative finite value.
     public min_value(): Self;
 };
 
+/// `Eq` for `Float64`: IEEE equality where NaN is not equal to itself.
 given Float64: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: Float64): Bool;
 };
 
+/// `Ord` for `Float64`: orders by value, with NaN comparing as equal to every value.
 given Float64: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: Float64): Int;
 };
 
+/// `Bounded` for `Float64`: the finite extremes.
 given Float64: Bounded {
+    /// Returns the largest finite value.
     public max_value(): Self;
+    /// Returns the most negative finite value.
     public min_value(): Self;
 };
 
+/// `Eq` for `WrappingInt`: compares by value.
 given WrappingInt: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingInt): Bool;
 };
 
+/// `Ord` for `WrappingInt`: orders by numeric value.
 given WrappingInt: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingInt): Int;
 };
 
+/// `Eq` for `WrappingInt8`: compares by value.
 given WrappingInt8: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingInt8): Bool;
 };
 
+/// `Ord` for `WrappingInt8`: orders by numeric value.
 given WrappingInt8: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingInt8): Int;
 };
 
+/// `Eq` for `WrappingInt16`: compares by value.
 given WrappingInt16: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingInt16): Bool;
 };
 
+/// `Ord` for `WrappingInt16`: orders by numeric value.
 given WrappingInt16: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingInt16): Int;
 };
 
+/// `Eq` for `WrappingInt32`: compares by value.
 given WrappingInt32: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingInt32): Bool;
 };
 
+/// `Ord` for `WrappingInt32`: orders by numeric value.
 given WrappingInt32: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingInt32): Int;
 };
 
+/// `Eq` for `WrappingInt64`: compares by value.
 given WrappingInt64: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingInt64): Bool;
 };
 
+/// `Ord` for `WrappingInt64`: orders by numeric value.
 given WrappingInt64: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingInt64): Int;
 };
 
+/// `Eq` for `WrappingUInt`: compares by value.
 given WrappingUInt: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingUInt): Bool;
 };
 
+/// `Ord` for `WrappingUInt`: orders by numeric value.
 given WrappingUInt: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingUInt): Int;
 };
 
+/// `Eq` for `WrappingUInt8`: compares by value.
 given WrappingUInt8: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingUInt8): Bool;
 };
 
+/// `Ord` for `WrappingUInt8`: orders by numeric value.
 given WrappingUInt8: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingUInt8): Int;
 };
 
+/// `Eq` for `WrappingUInt16`: compares by value.
 given WrappingUInt16: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingUInt16): Bool;
 };
 
+/// `Ord` for `WrappingUInt16`: orders by numeric value.
 given WrappingUInt16: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingUInt16): Int;
 };
 
+/// `Eq` for `WrappingUInt32`: compares by value.
 given WrappingUInt32: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingUInt32): Bool;
 };
 
+/// `Ord` for `WrappingUInt32`: orders by numeric value.
 given WrappingUInt32: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingUInt32): Int;
 };
 
+/// `Eq` for `WrappingUInt64`: compares by value.
 given WrappingUInt64: Eq {
+    /// Returns whether `self` and `other` are equal.
     public equals(self, other: WrappingUInt64): Bool;
 };
 
+/// `Ord` for `WrappingUInt64`: orders by numeric value.
 given WrappingUInt64: Ord {
+    /// Returns -1, 0, or 1 as `self` is less than, equal to, or greater than `other`.
     public compare(self, other: WrappingUInt64): Int;
 };
 
+/// `Drop` for `Deque[T]`: frees every element and the ring buffer when the last handle dies.
 given[T: Any] Deque[T]: Drop {};
 
+/// Construction, mutation, and query operations on `Deque[T]`.
 given[T: Any] Deque[T] {
+    /// Create an empty deque, with a small ring buffer allocated up front.
     public new(): Self;
+    /// Create an empty deque with room for at least `capacity` elements before the next reallocation.
     public with_capacity(capacity: UInt): Self;
+    /// The number of elements in the deque.
     public count(self): UInt;
+    /// Grow capacity so the deque can hold `additional` more elements without reallocating.
     public reserve(self, additional: UInt): Void;
+    /// Whether the deque has no elements.
     public is_empty(self): Bool;
+    /// Append `value` at the back end (amortized O(1)), without consuming the caller's value.
     public push_back(self, value: T): Void;
+    /// Insert `value` at the front end (amortized O(1)), without consuming the caller's value.
     public push_front(self, value: T): Void;
+    /// Remove and return the front element, or `None` when the deque is empty.
     public pop_front(self): Option[T];
+    /// Remove and return the back element, or `None` when the deque is empty.
     public pop_back(self): Option[T];
+    /// The front element without removing it, or `None` when the deque is empty.
     public first(self): Option[T];
+    /// The back element without removing it, or `None` when the deque is empty.
     public last(self): Option[T];
+    /// The element at logical index `index` (0 is the front), or `None` when out of range.
     public get(self, index: UInt): Option[T];
+    /// Remove every element, keeping the allocated ring buffer.
     public clear(self): Void;
+    /// Reverses the order of elements in place. O(n).
     public reverse(self): Void;
+    /// Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate: (T) -> Bool): Void;
 };
 
+/// `Clone` for `Deque[T]`: a new deque whose elements are copied one level.
 given[T: Any] Deque[T]: Clone {
+    /// Independent shallow copy: new deque identity, elements copied one level.
     public clone(self): Self;
 };
 
+/// `Default` for `Deque[T]`: the empty deque.
 given[T: Any] Deque[T]: Default {
+    /// The empty deque.
     public default(): Self;
 };
 
+/// Membership tests on `Deque[T]` of `Eq` elements.
 given[T: Eq] Deque[T] {
+    /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool;
 };
 
+/// `Iterable` for `Deque[T]`: hands out a fresh `DequeIterator[T]` on every call.
 given[T: Any] Deque[T]: Iterable[T, DequeIterator[T]] {
+    /// A fresh cursor at the front of the deque; the deque itself is left untouched.
     public iterator(self): DequeIterator[T];
 };
 
+/// `Iterator` for `DequeIterator[T]`: yields elements from front to back.
 given[T: Any] DequeIterator[T]: Iterator[T] {
+    /// Return the next element front to back, or `None` once the cursor is exhausted.
     public next(self): Option[T];
 };
 
+/// `Drop` for `Dict[K, V]`: releases the bucket array.
 given[K: Hash, V: Any] Dict[K, V]: Drop {};
 
+/// Building, querying, and mutating a dictionary.
 given[K: Hash, V: Any] Dict[K, V] {
+    /// 空表不分配桶数组，首次 insert（走 rehash）时再分配。
+    /// 编译器里每个 `Scope` 都带一张 `Dict[String, Type]`，大量是空的或只有一两项，
+    /// 为它们每次付 16 桶 alloc + 16 次清零不值得。
     public new(): Self;
+    /// Create an empty dict with its buckets allocated up front, sized for about
+    /// `capacity` entries.
     public with_capacity(capacity: UInt): Self;
+    /// Return the number of entries in the dict.
     public count(self): UInt;
+    /// Store `value` under `key`, replacing any entry already stored there.
     public insert(self, key: K, value: V): Void;
+    /// Store `value` under `key` only if the key is absent; return whether it
+    /// was inserted.
     public try_insert(self, key: K, value: V): Bool;
+    /// Insert every entry of `other`, overwriting values whose keys already exist.
     public insert_dict(self, other: Dict[K, V]): Void;
+    /// Return the value stored under `key`, or `None` if the key is absent.
     public get(self, key: K): Option[V];
+    /// Return the value stored under `key`, or insert and return `value` when
+    /// the key is absent.
     public get_or_insert(self, key: K, value: V): V;
+    /// Return whether `key` has a stored value.
     public contains_key(self, key: K): Bool;
+    /// Remove `key`'s entry if present, discarding its value.
     public remove(self, key: K): Void;
+    /// Remove `key`'s entry if present; return whether one was removed.
     public try_remove(self, key: K): Bool;
+    /// Remove `key`'s entry and return its value, or `None` if the key is absent.
     public take(self, key: K): Option[V];
+    /// Return whether the dict has no entries.
     public is_empty(self): Bool;
+    /// Remove every entry from the dict.
     public clear(self): Void;
+    /// Keep only the entries whose key and value satisfy `predicate`; O(n) time.
     public retain(self, predicate: (K, V) -> Bool): Void;
 };
 
+/// `Clone` for `Dict[K, V]`: an independent shallow copy.
 given[K: Hash, V: Any] Dict[K, V]: Clone {
+    /// Copy the dict into a fresh identity, copying keys and values one level.
     public clone(self): Self;
 };
 
+/// `Default` for `Dict[K, V]`: an empty dict.
 given[K: Hash, V: Any] Dict[K, V]: Default {
+    /// Return an empty dict.
     public default(): Self;
 };
 
+/// `Iterator` for `DictIterator[K, V]`: yields key/value pairs in unspecified order.
 given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
+    /// Yield the next key/value pair, or `None` after the last entry.
     public next(self): Option[Pair[K, V]];
 };
 
+/// `Iterator` for `DictKeysIterator[K, V]`: yields the keys in unspecified order.
 given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
+    /// Yield the next key, or `None` after the last entry.
     public next(self): Option[K];
 };
 
+/// `Iterator` for `DictValuesIterator[K, V]`: yields the values in unspecified order.
 given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
+    /// Yield the next value, or `None` after the last entry.
     public next(self): Option[V];
 };
 
+/// Key-only and value-only iterator constructors.
 given[K: Hash, V: Any] Dict[K, V] {
+    /// Return an iterator over the dict's keys, in unspecified order.
     public keys(self): DictKeysIterator[K, V];
+    /// Return an iterator over the dict's values, in unspecified order.
     public values(self): DictValuesIterator[K, V];
 };
 
+/// `Iterable` for `Dict[K, V]`: iterates key/value pairs in unspecified order.
 given[K: Hash, V: Any] Dict[K, V]: Iterable[Pair[K, V], DictIterator[K, V]] {
+    /// Return an iterator over the dict's key/value pairs.
     public iterator(self): DictIterator[K, V];
 };
 
+/// Grouping a list into a dictionary.
 given[T: Any] List[T] {
+    /// Group the elements by `key`, keeping each group's elements in encounter
+    /// order.
     public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]];
 };
 
+/// Constructing and converting time intervals.
 given Duration {
+    /// 从秒和纳秒构造 Duration。
+    /// 要求 nanoseconds >= 0，且会归一化到 [0, 1_000_000_000) 区间。
     public new(seconds: Int64 =, nanoseconds: Int64 =): Result[Duration];
+    /// 转换为纳秒总数
     public as_nanoseconds(self): Int64;
+    /// 转换为微秒总数
     public as_microseconds(self): Int64;
+    /// 转换为毫秒总数
     public as_milliseconds(self): Int64;
+    /// 转换为秒数（截断）
     public as_seconds(self): Int64;
+    /// 转换为分钟数（截断）
     public as_minutes(self): Int64;
+    /// 转换为小时数（截断）
     public as_hours(self): Int64;
+    /// 比率（Duration / Duration -> Float64）
     public ratio(self, other: Duration): Float64;
 };
 
+/// `Default` for `Duration`: a zero-length interval.
 given Duration: Default {
+    /// Return a zero duration.
     public default(): Self;
 };
 
+/// `Eq` for `Duration`: compares seconds and nanoseconds.
 given Duration: Eq {
+    /// 相等比较
     public equals(self, other: Duration): Bool;
 };
 
+/// `Ord` for `Duration`: orders intervals by length.
 given Duration: Ord {
+    /// 三路比较
+    /// 返回: -1 (self < other), 0 (self == other), 1 (self > other)
     public compare(self, other: Duration): Int;
 };
 
+/// `Iterator` for `FilterIterator[T, R]`: pulls from the wrapped cursor until the predicate matches.
 given[T: Any, R: Iterator[T]] FilterIterator[T, R]: Iterator[T] {
+    /// Return the next element satisfying the predicate, or `None` when the source is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `MapIterator[T, U, R]`: yields `mapper` applied to each element.
 given[T: Any, U: Any, R: Iterator[T]] MapIterator[T, U, R]: Iterator[U] {
+    /// Return `mapper` applied to the next element, or `None` when the source is exhausted.
     public next(self): Option[U];
 };
 
+/// `Iterator` for `FilterMapIterator[T, U, R]`: yields the `Some` results of `mapper`.
 given[T: Any, U: Any, R: Iterator[T]] FilterMapIterator[T, U, R]: Iterator[U] {
+    /// Return the next element `mapper` turns into `Some`, or `None` when the source is exhausted.
     public next(self): Option[U];
 };
 
+/// `Iterator` for `TakeIterator[T, R]`: stops once `limit` elements have been yielded.
 given[T: Any, R: Iterator[T]] TakeIterator[T, R]: Iterator[T] {
+    /// Return the next of the first `limit` elements, or `None` once the limit is spent or the source is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `SkipIterator[T, R]`: drops the leading elements, then passes the rest through.
 given[T: Any, R: Iterator[T]] SkipIterator[T, R]: Iterator[T] {
+    /// Return the next element after the skipped prefix, or `None` when the source is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `StepIterator[T, R]`: yields one element out of every `step_size`.
 given[T: Any, R: Iterator[T]] StepIterator[T, R]: Iterator[T] {
+    /// Return the next kept element after dropping `step_size - 1` between them, or `None` when exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `EnumerateIterator[T, R]`: yields `(index, element)` pairs.
 given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[UInt, T]] {
+    /// Return the next `(index, element)` pair, or `None` when the source is exhausted.
     public next(self): Option[Pair[UInt, T]];
 };
 
+/// `Iterator` for `InspectIterator[T, R]`: passes elements through after inspecting them.
 given[T: Any, R: Iterator[T]] InspectIterator[T, R]: Iterator[T] {
+    /// Return the next element after running `action` on it, or `None` when the source is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `IntersperseIterator[T, R]`: alternates elements with the separator.
 given[T: Any, R: Iterator[T]] IntersperseIterator[T, R]: Iterator[T] {
+    /// Return the next element or the separator placed before it, alternating,
+    /// or `None` when the source is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `TakeWhileIterator[T, R]`: ends at the first element that fails the predicate.
 given[T: Any, R: Iterator[T]] TakeWhileIterator[T, R]: Iterator[T] {
+    /// Return the next element while the predicate holds; `None` after the first
+    /// failure or exhaustion. The failing element is consumed and not yielded.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `SkipWhileIterator[T, R]`: skips the predicate-matching prefix of the source.
 given[T: Any, R: Iterator[T]] SkipWhileIterator[T, R]: Iterator[T] {
+    /// Return the next element once skipping has stopped; the first element to
+    /// fail the predicate is yielded, not dropped.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `ChainIterator[T, R1, R2]`: runs `head` first, then `tail`.
 given[T: Any, R1: Iterator[T], R2: Iterator[T]] ChainIterator[T, R1, R2]: Iterator[T] {
+    /// Return the next element of `head`, or of `tail` once `head` is exhausted.
     public next(self): Option[T];
 };
 
+/// `Iterator` for `ZipIterator[A, B, R1, R2]`: yields `(left, right)` pairs.
 given[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]] ZipIterator[A, B, R1, R2]: Iterator[Pair[A, B]] {
+    /// Return the next `(left, right)` pair, or `None` when either side is exhausted.
     public next(self): Option[Pair[A, B]];
 };
 
+/// `Iterator` for `FlatMapIterator[T, U, R, InnerR]`: drains each inner cursor before advancing the source.
 given[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]] FlatMapIterator[T, U, R, InnerR]: Iterator[U] {
+    /// Return the next flattened element, or `None` when the source and every inner cursor are exhausted.
     public next(self): Option[U];
 };
 
+/// `Iterable` for `LazyView[T, R]`: `iterator` builds a fresh cursor from the pipeline's factory.
 given[T: Any, R: Iterator[T]] LazyView[T, R]: Iterable[T, R] {
+    /// Build a fresh cursor for this pipeline; the pipeline itself stays usable.
     public iterator(self): R;
 };
 
+/// Lazy adapters and terminals on `LazyView[T, R]`; adapters are only evaluated when a terminal runs.
 given[T: Any, R: Iterator[T]] LazyView[T, R] {
+    /// The pipeline itself: `lazy()` is the identity on a `LazyView`, so `x.lazy().lazy()` never nests.
     public lazy(self): LazyView[T, R];
+    /// Keep only the elements for which `fn` returns true.
     public filter(self, fn: (T) -> Bool): LazyView[T, FilterIterator[T, R]];
+    /// Apply `fn` to each element as it passes through the pipeline.
     public map[U: Any](self, fn: (T) -> U): LazyView[U, MapIterator[T, U, R]];
+    /// Apply `fn` to each element and keep only its `Some` results.
     public filter_map[U: Any](self, fn: (T) -> Option[U]): LazyView[U, FilterMapIterator[T, U, R]];
+    /// Yield at most the first `n` elements of the pipeline.
     public take(self, n: UInt): LazyView[T, TakeIterator[T, R]];
+    /// Drop the first `n` elements of the pipeline and yield the rest.
     public skip(self, n: UInt): LazyView[T, SkipIterator[T, R]];
+    /// Yield every `n`-th element of the pipeline, starting with the first. Panics when `n < 1`.
     public step_by(self, n: UInt): LazyView[T, StepIterator[T, R]];
+    /// Pair each element with its zero-based index.
     public enumerate(self): LazyView[Pair[UInt, T], EnumerateIterator[T, R]];
+    /// Run `fn` on each element as it passes, yielding the elements unchanged.
     public inspect(self, fn: (T) -> Void): LazyView[T, InspectIterator[T, R]];
+    /// Insert `v` between consecutive elements of the pipeline, with none at the ends.
     public intersperse(self, v: T): LazyView[T, IntersperseIterator[T, R]];
+    /// Take elements while `fn` holds, stopping at the first failure.
     public take_while(self, fn: (T) -> Bool): LazyView[T, TakeWhileIterator[T, R]];
+    /// Drop leading elements while `fn` holds, then yield the rest.
     public skip_while(self, fn: (T) -> Bool): LazyView[T, SkipWhileIterator[T, R]];
+    /// Yield this pipeline's elements, then `other`'s, in order.
     public chain[R2: Iterator[T], S2: Iterable[T, R2]](self, other: S2): LazyView[T, ChainIterator[T, R, R2]];
+    /// Pair this pipeline's elements with `other`'s, stopping at the shorter side.
     public zip[U: Any, R2: Iterator[U], S2: Iterable[U, R2]](self, other: S2): LazyView[Pair[T, U], ZipIterator[T, U, R, R2]];
+    /// Replace each element with the elements of the iterable `fn` returns, flattening the results.
     public flat_map[U: Any, InnerR: Iterator[U], InnerS: Iterable[U, InnerR]](self, fn: (T) -> InnerS): LazyView[U, FlatMapIterator[T, U, R, InnerR]];
+    /// Fold the pipeline into one value: `fn` receives `(acc, element)` pairs,
+    /// starting from `initial` and taking each result as the next accumulator.
     public fold[U: Any](self, initial: U, fn: (U, T) -> U): U;
+    /// Fold the pipeline into one value with `fn` over `(acc, element)` pairs,
+    /// using the first element as the starting accumulator. `None` when empty.
     public reduce(self, fn: (T, T) -> T): Option[T];
+    /// Collect every element into a new `List[T]`.
     public into_list(self): List[T];
+    /// Run `fn` on every element for its side effects.
     public for_each(self, fn: (T) -> Void): Void;
+    /// The number of elements the pipeline yields.
     public count(self): UInt;
+    /// The first element the pipeline yields, or `None` when it yields nothing.
     public first(self): Option[T];
+    /// The last element the pipeline yields, or `None` when it yields nothing.
     public last(self): Option[T];
+    /// The element at zero-based index `n`, or `None` when the pipeline yields fewer.
     public nth(self, n: UInt): Option[T];
+    /// The zero-based index of the first element satisfying `fn`, or `None` when none does.
     public position(self, fn: (T) -> Bool): Option[UInt];
+    /// The first element satisfying `fn`, or `None` when none does.
     public find(self, fn: (T) -> Bool): Option[T];
+    /// The first `Some` result of `fn` over the elements, or `None` when there is none.
     public find_map[U: Any](self, fn: (T) -> Option[U]): Option[U];
+    /// Whether `fn` holds for at least one element.
     public any(self, fn: (T) -> Bool): Bool;
+    /// Whether `fn` holds for every element (true for an empty pipeline).
     public all(self, fn: (T) -> Bool): Bool;
+    /// Whether the pipeline yields nothing. Builds a cursor, looks at one element,
+    /// and drops the cursor -- the pipeline itself is untouched.
     public is_empty(self): Bool;
+    /// The element with the greatest `fn` key, or `None` when empty. On ties, the first one wins.
     public max_by[K: Ord](self, fn: (T) -> K): Option[T];
+    /// The element with the smallest `fn` key, or `None` when empty. On ties, the first one wins.
     public min_by[K: Ord](self, fn: (T) -> K): Option[T];
 };
 
+/// Membership tests on `LazyView[T, R]` of `Eq` elements.
 given[T: Eq, R: Iterator[T]] LazyView[T, R] {
+    /// Whether any element equals `value`.
     public contains(self, value: T): Bool;
 };
 
+/// Extremum queries on `LazyView[T, R]` of `Ord` elements.
 given[T: Ord, R: Iterator[T]] LazyView[T, R] {
+    /// The greatest element, or `None` when empty. On ties, the first one wins.
     public max(self): Option[T];
+    /// The smallest element, or `None` when empty. On ties, the first one wins.
     public min(self): Option[T];
 };
 
+/// Set-collecting terminal for `LazyView[T, R]` of `Hash` elements.
 given[T: Hash, R: Iterator[T]] LazyView[T, R] {
+    /// Collect every element into a new `Set[T]`, collapsing duplicates.
     public into_set(self): Set[T];
 };
 
+/// Summation terminal for `LazyView[T, R]` of `Add[T] and Zero` elements.
 given[T: Add[T] and Zero, R: Iterator[T]] LazyView[T, R] {
+    /// The sum of every element via `Add`, or `T.zero()` when the pipeline is empty.
     public sum(self): T;
 };
 
+/// Product terminal for `LazyView[T, R]` of `Mul[T] and One` elements.
 given[T: Mul[T] and One, R: Iterator[T]] LazyView[T, R] {
+    /// The product of every element via `Mul`, or `T.one()` when the pipeline is empty.
     public product(self): T;
 };
 
+/// Average terminal for `LazyView[T, R]` of `Add`, `Div`, `Zero` and `One` elements.
 given[T: Add[T] and Div[T] and Zero and One, R: Iterator[T]] LazyView[T, R] {
+    /// The mean of the elements via `Add`/`Div` (integer types truncate), or
+    /// `None` for an empty pipeline to avoid division by zero.
     public average(self): Option[T];
 };
 
+/// The one door into lazy pipelines: `lazy()` added to every `Iterable`.
 given[T: Any, R: Iterator[T]] Iterable[T, R] {
+    /// Enter a lazy pipeline over this source. Adapters and terminals live on
+    /// `LazyView`, so `map` / `filter` / `to_list` stay free on the container itself.
     public lazy(self): LazyView[T, R];
 };
 
+/// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
 given[T: Any] List[T]: Drop {};
 
+/// Construction, mutation, and query operations on `List[T]`.
 given[T: Any] List[T] {
+    /// 空列表不分配缓冲区，首次 push 时再分配。
+    /// 编译器里有大量建完就丢（或一直为空）的临时列表，例如每个 `Scope` 的
+    /// `entry_list` / `local_entry_list`，为它们每次都付一次 alloc 不值得。
     public new(): Self;
+    /// Create an empty list with room for at least `capacity` elements before the next reallocation.
     public with_capacity(capacity: UInt): Self;
+    /// The number of elements in the list.
     public count(self): UInt;
+    /// Grow capacity so the list can hold `additional` more elements without reallocating.
     public reserve(self, additional: UInt): Void;
+    /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
     public push(self, value: T): Void;
+    /// Append the slice of `other` picked by `span`, defaulting to the whole list
+    /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
     public push_list(self, other: List[T], span: Range[UInt] = ...): Void;
+    /// Remove and return the last element, or `None` when the list is empty.
     public pop(self): Option[T];
+    /// Insert the slice of `other` picked by `span` (default: the whole list) at
+    /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
     public insert_list_at(self, index: UInt, other: List[T], span: Range[UInt] = ...): Void;
+    /// Insert `value` at `index` and shift later elements right. O(n).
+    /// Panics when `index > count`; `index == count` appends.
     public insert_at(self, index: UInt, value: T): Void;
+    /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
     public remove_at(self, index: UInt): Void;
+    /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
     public take_at(self, index: UInt): T;
+    /// The element at `index` without removing it, or `None` when out of range.
+    /// The list keeps the element: `type mutable` values come back shared with it.
     public get(self, index: UInt): Option[T];
+    /// The first element without removing it, or `None` when the list is empty.
     public first(self): Option[T];
+    /// The last element without removing it, or `None` when the list is empty.
     public last(self): Option[T];
+    /// Whether the list has no elements.
     public is_empty(self): Bool;
+    /// Remove every element, keeping the allocated capacity.
     public clear(self): Void;
+    /// Overwrite every element with `value`. All slots hold the one value;
+    /// `type mutable` values are shared into every slot, not cloned per element.
     public fill(self, value: T): Void;
+    /// Build a new list by applying `fn` to every element, in order.
     public map[U: Any](self, fn: (T) -> U): List[U];
+    /// Reverse the element order in place. O(n).
     public reverse(self): Void;
+    /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
+    /// Panics when the range is invalid or reaches past the end.
     public slice_spec(self, range: Range[UInt]): SliceSpec;
+    /// Return a new list holding the `range` slice of this one (elements shared
+    /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
     public sublist(self, range: Range[UInt]): List[T];
+    /// Concatenation: returns a new list, leaving both inputs usable.
+    /// Deliberately not `Add` — arithmetic traits stay off heap-owning containers.
     public concat(self, other: List[T]): List[T];
+    /// Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate: (T) -> Bool): Void;
+    /// Sort in place by the `Ord` key `key` extracts from each element.
+    /// Stable: elements with equal keys keep their relative order.
     public sort_by[K: Ord](self, key: (T) -> K): Void;
+    /// Binary search by the key `key` extracts; the list must already be sorted by that key.
+    /// Returns `(index, true)` when found, `(insertion_point, false)` otherwise. O(log n).
     public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[UInt, Bool];
 };
 
+/// Raw-pointer accessors for `List[T]` of `foreign` elements (the FFI boundary).
 given[T: foreign] List[T] {
+    /// The element buffer as a raw `*T`, for `foreign` elements only -- the FFI
+    /// bridge, not a generic escape hatch. Invalid after any reallocation or drop.
     public borrow_ptr(self): *T;
+    /// The element buffer as a raw `*mutable T`, for `foreign` elements only -- the
+    /// FFI bridge, not a generic escape hatch. Invalid after any reallocation or drop.
     public borrow_mut_ptr(self): *mutable T;
 };
 
+/// `Clone` for `List[T]`: a new list whose elements are copied one level.
 given[T: Any] List[T]: Clone {
+    /// Independent shallow copy: new list identity, elements copied one level.
     public clone(self): Self;
 };
 
+/// `Default` for `List[T]`: the empty list.
 given[T: Any] List[T]: Default {
+    /// The empty list.
     public default(): Self;
 };
 
+/// `Eq` for `List[T]`: element-wise equality in order.
 given[T: Eq] List[T]: Eq {
+    /// Whether `other` has the same length and pairwise-equal elements.
     public equals(self, other: List[T]): Bool;
 };
 
+/// `Hash` for `List[T]`: combines length and element hashes in order.
 given[T: Hash] List[T]: Hash {
+    /// A hash of the element sequence: length and elements combined in order.
     public hash(self): UInt;
 };
 
+/// `Ord` for `List[T]`: lexicographic comparison of elements, then length.
 given[T: Ord] List[T]: Ord {
+    /// Lexicographic three-way comparison (`-1`, `0`, or `1`); the shorter list
+    /// is smaller when one is a prefix of the other.
     public compare(self, other: List[T]): Int;
 };
 
+/// Membership and duplicate-removal operations on `List[T]` of `Eq` elements.
 given[T: Eq] List[T] {
+    /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool;
+    /// Removes consecutive duplicate elements. O(n).
+    /// For global dedup, sort first then call dedup.
     public dedup(self): Void;
 };
 
+/// `Iterator` for `ListIterator[T]`: yields list elements from index 0 upward.
 given[T: Any] ListIterator[T]: Iterator[T] {
+    /// Return the next element, or `None` once the cursor has walked the list.
     public next(self): Option[T];
 };
 
+/// `Iterable` for `List[T]`: hands out a fresh `ListIterator[T]` on every call.
 given[T: Any] List[T]: Iterable[T, ListIterator[T]] {
+    /// A fresh cursor from index 0; the list itself is left untouched.
     public iterator(self): ListIterator[T];
 };
 
+/// Stable merge-sort helpers backing `sort_by` on `List[T]`.
 given[T: Any] List[T] {};
 
+/// Ordering operations on `List[T]` of `Ord` elements.
 given[T: Ord] List[T] {
+    /// Binary search on a sorted list. O(log n).
+    /// Returns `(index, true)` if found, `(insertion_point, false)` if not found.
     public binary_search(self, target: T): Pair[UInt, Bool];
+    /// Sort in place in ascending order using the `Ord` trait.
+    /// Stable: equal elements keep their relative order.
     public sort(self): Void;
 };
 
+/// Querying, extracting, and transforming an optional value.
 given[T: Any] Option[T] {
+    /// Return whether the option holds a value.
     public is_some(self): Bool;
+    /// Return whether the option is empty.
     public is_none(self): Bool;
+    /// Return the held value; panics if the option is `None`.
     public unwrap(self): T;
+    /// Return the held value; panics with `message` if the option is `None`.
     public expect(self, message: String): T;
+    /// Return the held value, or `default` when the option is `None`.
     public unwrap_or(self, default: T): T;
+    /// Transform the held value with `f`: `Some(f(v))` for `Some(v)`, `None` for `None`.
     public map[U: Any](self, f: (T) -> U): Option[U];
+    /// Return `Some(value)` only when the predicate accepts `value`, otherwise `None`.
     public filter(self, predicate: (T) -> Bool): Option[T];
 };
 
+/// `Default` for `Option[T]`: the empty option.
 given[T: Any] Option[T]: Default {
+    /// Return the empty option, `None`.
     public default(): Self;
 };
 
+/// `Eq` for `Option[T]`: `None` matches `None`, and `Some` values compare with `==`.
 given[T: Eq] Option[T]: Eq {
+    /// Return whether `self` and `other` are both `None` or hold equal values.
     public equals(self, other: Option[T]): Bool;
 };
 
+/// Raw bit conversion for `Float32`.
 given Float32 {
+    /// Returns the raw IEEE 754 bit pattern of `self`.
     public to_bits(self): UInt32;
+    /// Builds a `Float32` from a raw IEEE 754 bit pattern.
     public from_bits(bits: UInt32): Float32;
 };
 
+/// Raw bit conversion for `Float64`.
 given Float64 {
+    /// Returns the raw IEEE 754 bit pattern of `self`.
     public to_bits(self): UInt64;
+    /// Builds a `Float64` from a raw IEEE 754 bit pattern.
     public from_bits(bits: UInt64): Float64;
 };
 
+/// Special values and classification for `Float32`.
 given Float32 {
+    /// Returns positive infinity.
     public inf(): Float32;
+    /// Returns a quiet NaN.
     public nan(): Float32;
+    /// Returns the smallest positive normal value.
     public min_normal(): Float32;
+    /// Returns the smallest positive denormal value.
     public min_denormal(): Float32;
+    /// Returns whether `self` is NaN.
     public is_nan(self): Bool;
+    /// Returns whether `self` is positive or negative infinity.
     public is_inf(self): Bool;
+    /// Returns whether `self` is normal (finite, non-zero, and not denormal).
     public is_normal(self): Bool;
 };
 
+/// Special values and classification for `Float64`.
 given Float64 {
+    /// Returns positive infinity.
     public inf(): Float64;
+    /// Returns a quiet NaN.
     public nan(): Float64;
+    /// Returns the smallest positive normal value.
     public min_normal(): Float64;
+    /// Returns the smallest positive denormal value.
     public min_denormal(): Float64;
+    /// Returns whether `self` is NaN.
     public is_nan(self): Bool;
+    /// Returns whether `self` is positive or negative infinity.
     public is_inf(self): Bool;
+    /// Returns whether `self` is normal (finite, non-zero, and not denormal).
     public is_normal(self): Bool;
 };
 
+/// Finite and sign classification for `Float64`.
 given Float64 {
+    /// Returns whether `self` is neither NaN nor infinity.
     public is_finite(self): Bool;
+    /// Returns whether the sign bit of `self` is positive, counting +0.0.
     public is_sign_positive(self): Bool;
+    /// Returns whether the sign bit of `self` is negative, counting -0.0.
     public is_sign_negative(self): Bool;
 };
 
+/// Finite and sign classification for `Float32`.
 given Float32 {
+    /// Returns whether `self` is neither NaN nor infinity.
     public is_finite(self): Bool;
+    /// Returns whether the sign bit of `self` is positive, counting +0.0.
     public is_sign_positive(self): Bool;
+    /// Returns whether the sign bit of `self` is negative, counting -0.0.
     public is_sign_negative(self): Bool;
 };
 
+/// Power-of-two helpers for `UInt`.
 given UInt {
+    /// Returns whether `self` is a non-zero power of two.
     public is_power_of_two(self): Bool;
+    /// Returns the smallest power of two greater than or equal to `self`, with 0 mapping to 1.
+    /// Panics when that power of two does not fit in the type.
     public next_power_of_two(self): Self;
 };
 
+/// Power-of-two helpers for `UInt64`.
 given UInt64 {
+    /// Returns whether `self` is a non-zero power of two.
     public is_power_of_two(self): Bool;
+    /// Returns the smallest power of two greater than or equal to `self`, with 0 mapping to 1.
+    /// Panics when that power of two does not fit in the type.
     public next_power_of_two(self): Self;
 };
 
+/// Power-of-two helpers for `UInt32`.
 given UInt32 {
+    /// Returns whether `self` is a non-zero power of two.
     public is_power_of_two(self): Bool;
+    /// Returns the smallest power of two greater than or equal to `self`, with 0 mapping to 1.
+    /// Panics when that power of two does not fit in the type.
     public next_power_of_two(self): Self;
 };
 
+/// Power-of-two helpers for `UInt16`.
 given UInt16 {
+    /// Returns whether `self` is a non-zero power of two.
     public is_power_of_two(self): Bool;
+    /// Returns the smallest power of two greater than or equal to `self`, with 0 mapping to 1.
+    /// Panics when that power of two does not fit in the type.
     public next_power_of_two(self): Self;
 };
 
+/// ASCII classification, case conversion, and power-of-two helpers for `UInt8`.
 given UInt8 {
+    /// Returns whether `self` is an ASCII code point below 128.
     public is_ascii(self): Bool;
+    /// Returns whether `self` is an ASCII letter (`A`-`Z` or `a`-`z`).
     public is_ascii_alphabetic(self): Bool;
+    /// Returns whether `self` is an ASCII letter or digit.
     public is_ascii_alphanumeric(self): Bool;
+    /// Returns whether `self` is an ASCII digit (`0`-`9`).
     public is_ascii_digit(self): Bool;
+    /// Returns whether `self` is an ASCII hexadecimal digit.
     public is_ascii_hexdigit(self): Bool;
+    /// Returns whether `self` is an ASCII whitespace character.
+    /// The set is space, tab, newline, vertical tab, form feed, and carriage return.
     public is_ascii_whitespace(self): Bool;
+    /// Returns whether `self` is an ASCII uppercase letter (`A`-`Z`).
     public is_ascii_uppercase(self): Bool;
+    /// Returns whether `self` is an ASCII lowercase letter (`a`-`z`).
     public is_ascii_lowercase(self): Bool;
+    /// Returns the ASCII lowercase form of `self`, or `self` unchanged.
     public to_ascii_lowercase(self): UInt8;
+    /// Returns the ASCII uppercase form of `self`, or `self` unchanged.
     public to_ascii_uppercase(self): UInt8;
+    /// Returns whether `self` and `other` are equal ignoring ASCII case.
     public equals_ascii_ignore_case(self, other: UInt8): Bool;
+    /// Returns whether `self` is a non-zero power of two.
     public is_power_of_two(self): Bool;
+    /// Returns the smallest power of two greater than or equal to `self`, with 0 mapping to 1.
+    /// Panics when that power of two does not fit in the type.
     public next_power_of_two(self): Self;
 };
 
+/// Inherent extensions for `Int`.
 given Int {};
 
+/// Inherent extensions for `Int64`.
 given Int64 {};
 
+/// Inherent extensions for `Int32`.
 given Int32 {};
 
+/// Inherent extensions for `Int16`.
 given Int16 {};
 
+/// Inherent extensions for `Int8`.
 given Int8 {};
 
+/// Construction and accessors for `SliceSpec`.
 given SliceSpec {
+    /// Create a spec for the `len` elements starting at `offset`.
     public new(offset: UInt =, len: UInt =): SliceSpec;
+    /// Return the slice's start offset.
     public start(self): UInt;
+    /// Return the offset just past the slice's last element.
     public end(self): UInt;
+    /// Return the number of elements the slice covers.
     public len(self): UInt;
 };
 
+/// Containment and emptiness checks for `Range` intervals.
 given[T: Ord] Range[T] {
+    /// Return whether `value` lies within the range, honoring each variant's
+    /// bound style.
     public contains(self, value: T): Bool;
+    /// Return whether the range contains no values; the open-ended and full
+    /// forms never do, while a bounded form is empty once its bounds cross.
     public is_empty(self): Bool;
 };
 
+/// `Step` for `Int`: steps by one, yielding `None` at the type's bounds.
 given Int: Step {
+    /// Return `self + 1`, or `None` at `Int.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `Int.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `Int8`: steps by one, yielding `None` at the type's bounds.
 given Int8: Step {
+    /// Return `self + 1`, or `None` at `Int8.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `Int8.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `Int16`: steps by one, yielding `None` at the type's bounds.
 given Int16: Step {
+    /// Return `self + 1`, or `None` at `Int16.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `Int16.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `Int32`: steps by one, yielding `None` at the type's bounds.
 given Int32: Step {
+    /// Return `self + 1`, or `None` at `Int32.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `Int32.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `Int64`: steps by one, yielding `None` at the type's bounds.
 given Int64: Step {
+    /// Return `self + 1`, or `None` at `Int64.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `Int64.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `UInt`: steps by one, yielding `None` at the type's bounds.
 given UInt: Step {
+    /// Return `self + 1`, or `None` at `UInt.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `UInt.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `UInt8`: steps by one, yielding `None` at the type's bounds.
 given UInt8: Step {
+    /// Return `self + 1`, or `None` at `UInt8.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `UInt8.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `UInt16`: steps by one, yielding `None` at the type's bounds.
 given UInt16: Step {
+    /// Return `self + 1`, or `None` at `UInt16.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `UInt16.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `UInt32`: steps by one, yielding `None` at the type's bounds.
 given UInt32: Step {
+    /// Return `self + 1`, or `None` at `UInt32.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `UInt32.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Step` for `UInt64`: steps by one, yielding `None` at the type's bounds.
 given UInt64: Step {
+    /// Return `self + 1`, or `None` at `UInt64.max_value()`.
     public succ(self): Option[Self];
+    /// Return `self - 1`, or `None` at `UInt64.min_value()`.
     public pred(self): Option[Self];
 };
 
+/// `Iterator` for `RangeIterator[T]`: yields values until the end bound is reached.
 given[T: Step] RangeIterator[T]: Iterator[T] {
+    /// Yield the next value in the range, or `None` once the end bound is reached.
     public next(self): Option[T];
 };
 
+/// `Iterable` for `Range[T]`: iterates exactly the values `contains` accepts,
+/// available when `T` can step.
 given[T: Step] Range[T]: Iterable[T, RangeIterator[T]] {
+    /// Return a `RangeIterator` covering this range's values.
     public iterator(self): RangeIterator[T];
 };
 
+/// Inspecting and extracting a `Result`.
 given[T: Any] Result[T] {
+    /// Return whether the result is `Ok`.
     public is_ok(self): Bool;
+    /// Return whether the result is `Error`.
     public is_error(self): Bool;
+    /// Return the `Ok` value; panics if the result is `Error`.
     public unwrap(self): T;
+    /// Return the `Ok` value; panics with `message` and the error text if the result is `Error`.
     public expect(self, message: String): T;
+    /// Return the `Error`; panics if the result is `Ok`.
     public unwrap_error(self): Error;
+    /// Return the `Ok` value, or `default` when the result is `Error`.
     public unwrap_or(self, default: T): T;
+    /// Transform the `Ok` value with `f`, leaving an `Error` unchanged.
     public map[U: Any](self, f: (T) -> U): Result[U];
 };
 
+/// Constructors and character classification for runes.
 given Rune {
+    /// Return the Unicode replacement character U+FFFD.
     public replacement_char(): Rune;
+    /// Create a rune from a code point; `Error` for a surrogate (U+D800..U+DFFF)
+    /// or a value above U+10FFFF.
     public from_uint32(value: UInt32): Result[Rune];
+    /// Create a rune from a code point with no validity check.
     public from_uint32_unchecked(value: UInt32): Rune;
+    /// Return the code point as a `UInt32`.
     public to_uint32(self): UInt32;
+    /// Return whether the rune is ASCII (U+0000..U+007F).
     public is_ascii(self): Bool;
+    /// Return whether the rune is an ASCII digit (0-9).
     public is_ascii_digit(self): Bool;
+    /// Return whether the rune is an ASCII hexadecimal digit (0-9, A-F, a-f).
     public is_ascii_hexdigit(self): Bool;
+    /// Return whether the rune is ASCII whitespace: space, tab, LF, CR, form
+    /// feed, or vertical tab.
     public is_ascii_whitespace(self): Bool;
+    /// Return whether the rune is an ASCII letter (A-Z, a-z).
     public is_ascii_alphabetic(self): Bool;
+    /// Return whether the rune is an ASCII letter or digit.
     public is_ascii_alphanumeric(self): Bool;
+    /// Return whether the rune is an ASCII uppercase letter (A-Z).
     public is_ascii_uppercase(self): Bool;
+    /// Return whether the rune is an ASCII lowercase letter (a-z).
     public is_ascii_lowercase(self): Bool;
+    /// Convert an ASCII uppercase letter to lowercase; any other rune is
+    /// returned unchanged.
     public to_ascii_lowercase(self): Rune;
+    /// Convert an ASCII lowercase letter to uppercase; any other rune is
+    /// returned unchanged.
     public to_ascii_uppercase(self): Rune;
+    /// Return whether the code point is a valid Unicode scalar value: at most
+    /// U+10FFFF and not a surrogate.
     public is_valid(self): Bool;
+    /// Return the number of UTF-8 bytes this rune encodes to; an invalid rune
+    /// reports 3, the length of its replacement encoding.
     public byte_count(self): UInt;
+    /// Return whether the rune is a line break: LF, CR, NEL, line separator,
+    /// or paragraph separator.
     public is_newline(self): Bool;
+    /// Return whether the runes are equal after folding ASCII case.
     public equals_ascii_ignore_case(self, other: Rune): Bool;
+    /// Return whether the rune may begin an identifier under Koral's current
+    /// lightweight identifier rules.
     public is_identifier_start(self): Bool;
+    /// Return whether the rune may continue an identifier under Koral's current
+    /// lightweight identifier rules.
     public is_identifier_continue(self): Bool;
 };
 
+/// `Eq` for `Rune`: compares code points.
 given Rune: Eq {
+    /// Return whether `self` and `other` have the same code point.
     public equals(self, other: Rune): Bool;
 };
 
+/// `Ord` for `Rune`: orders runes by code point.
 given Rune: Ord {
+    /// Compare code points, returning -1, 0, or 1 for less, equal, or greater.
     public compare(self, other: Rune): Int;
 };
 
+/// `ToString` for `Rune`: encodes the code point as UTF-8 text.
 given Rune: ToString {
+    /// Encode the rune as a UTF-8 string; an invalid rune encodes as the
+    /// replacement character.
     public to_string(self): String;
 };
 
+/// `Drop` for `Set[T]`: releases the bucket array.
 given[T: Hash] Set[T]: Drop {};
 
+/// Building, querying, and mutating a set.
 given[T: Hash] Set[T] {
+    /// 空集合不分配桶数组，首次 insert（走 rehash）时再分配。
     public new(): Self;
+    /// Create an empty set with its buckets allocated up front, sized for about
+    /// `capacity` elements.
     public with_capacity(capacity: UInt): Self;
+    /// Return the number of elements in the set.
     public count(self): UInt;
+    /// Add `value` to the set if it is not already present.
     public insert(self, value: T): Void;
+    /// Add `value` only if it is absent; return whether it was added.
     public try_insert(self, value: T): Bool;
+    /// Add every element of `other` to the set.
     public insert_set(self, other: Set[T]): Void;
+    /// Return whether `value` is in the set.
     public contains(self, value: T): Bool;
+    /// Remove `value` from the set if present, ignoring whether it was there.
     public remove(self, value: T): Void;
+    /// Remove `value` if present; return whether it was removed.
     public try_remove(self, value: T): Bool;
+    /// Return whether the set has no elements.
     public is_empty(self): Bool;
+    /// Return whether every element of `self` is also in `other`.
     public is_subset_of(self, other: Set[T]): Bool;
+    /// Return whether `self` contains every element of `other`.
     public is_superset_of(self, other: Set[T]): Bool;
+    /// Remove every element from the set.
     public clear(self): Void;
+    /// Keep only the elements that satisfy `predicate`; O(n) time.
     public retain(self, predicate: (T) -> Bool): Void;
+    /// Return a new set holding the elements of `self` or `other`.
     public union(self, other: Set[T]): Set[T];
+    /// Return a new set holding the elements present in both `self` and `other`.
     public intersection(self, other: Set[T]): Set[T];
+    /// Return a new set holding the elements of `self` that are not in `other`.
     public difference(self, other: Set[T]): Set[T];
+    /// Return a new set holding the elements in exactly one of `self` and `other`.
     public symmetric_difference(self, other: Set[T]): Set[T];
 };
 
+/// `Clone` for `Set[T]`: an independent shallow copy.
 given[T: Hash] Set[T]: Clone {
+    /// Copy the set into a fresh identity, copying elements one level.
     public clone(self): Self;
 };
 
+/// `Default` for `Set[T]`: an empty set.
 given[T: Hash] Set[T]: Default {
+    /// Return an empty set.
     public default(): Self;
 };
 
+/// `Iterable` for `Set[T]`: iterates elements in unspecified order.
 given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
+    /// Return an iterator over the set's elements.
     public iterator(self): SetIterator[T];
 };
 
+/// `Iterator` for `SetIterator[T]`: yields elements in unspecified order.
 given[T: Hash] SetIterator[T]: Iterator[T] {
+    /// Yield the next element, or `None` after the last one.
     public next(self): Option[T];
 };
 
+/// `Drop` for `String`: frees the string's UTF-8 buffer.
 given String: Drop {
+    /// Release the buffer owned by the string.
     public drop(self): Void;
 };
 
+/// `Drop` for `StringBuilder`: frees the builder's buffer.
 given StringBuilder: Drop {
+    /// Release the buffer owned by the builder.
     public drop(self): Void;
 };
 
+/// Construction and incremental building of strings.
 given StringBuilder {
+    /// Create an empty builder with a small initial capacity.
     public new(): StringBuilder;
+    /// Create an empty builder with room for at least `capacity` bytes.
     public with_capacity(capacity: UInt): StringBuilder;
+    /// The number of bytes pushed so far.
     public count(self): UInt;
+    /// Whether nothing has been pushed yet.
     public is_empty(self): Bool;
+    /// Append one raw byte to the builder.
+    /// The caller must keep the accumulated bytes valid UTF-8.
     public push_byte(self, value: UInt8): Void;
+    /// Append `other`, where `span` picks which slice to append, defaulting to
+    /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     public push_string(self, other: String, span: Range[UInt] = ...): Void;
+    /// Encode `rune` in UTF-8 and append it, substituting the replacement
+    /// character for an invalid rune.
     public push_rune(self, rune: Rune): Void;
+    /// Empty the builder, keeping its allocated capacity.
     public clear(self): Void;
+    /// Return a stable snapshot that does not alias future builder mutations.
     public to_string(self): String;
 };
 
+/// Construction, inspection, searching, and transformation of `String` values.
 given String {
+    /// Unsafe constructor: copy `len` bytes without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String;
+    /// Checked constructor: copy `len` bytes, validating UTF-8.
+    /// Return an error when the bytes are not valid UTF-8.
     public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String];
+    /// Copy `bytes` into a string, returning an error when they are not valid UTF-8.
     public from_bytes(bytes: List[UInt8]): Result[String];
+    /// Copy `bytes` into a string without validating UTF-8.
+    /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_bytes_unchecked(bytes: List[UInt8]): String;
+    /// Build a string from a null-terminated C string, returning an error when
+    /// it is not valid UTF-8.
     public from_cstring(cstr: *UInt8): Result[String];
+    /// Build a string from a null-terminated C string without validating UTF-8.
+    /// Behavior is undefined when the bytes are not valid UTF-8.
     public from_cstring_unchecked(cstr: *UInt8): String;
+    /// Create an empty string.
     public new(): String;
+    /// The length of the string in UTF-8 bytes, not runes.
     public count(self): UInt;
+    /// Whether the string is empty.
     public is_empty(self): Bool;
+    /// Borrow the internal null-terminated bytes; valid while the string lives.
     public borrow_ptr(self): *UInt8;
+    /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8];
+    /// Return the byte at `index`, or `None` when it is past the end.
+    /// The index is a byte offset and need not be a rune boundary.
     public get(self, index: UInt): Option[UInt8];
+    /// Whether the string begins with `prefix`.
     public starts_with(self, prefix: String): Bool;
+    /// Whether the string ends with `suffix`.
     public ends_with(self, suffix: String): Bool;
+    /// Return the byte index of the first occurrence of `pat`, or `None` when
+    /// absent; an empty pattern never matches.
     public find(self, pat: String): Option[UInt];
+    /// Return the byte index of the last occurrence of `pat`, or `None` when
+    /// absent; an empty pattern never matches.
     public find_last(self, pat: String): Option[UInt];
+    /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
+    /// start of a UTF-8 sequence; `false` when the index is past the end.
     public is_rune_boundary(self, byte_index: UInt): Bool;
+    /// Resolve `range` into the byte span it names, panicking when the range is
+    /// invalid or out of bounds or lands off a rune boundary.
     public slice_spec(self, range: Range[UInt]): SliceSpec;
+    /// Return the substring that `range` names.
+    /// Panics when the range is invalid, out of bounds, or off a rune boundary.
     public substring(self, range: Range[UInt]): String;
+    /// Return the string with leading ASCII whitespace removed.
     public trim_ascii_start(self): String;
+    /// Return the string with trailing ASCII whitespace removed.
     public trim_ascii_end(self): String;
+    /// Return the string with leading and trailing ASCII whitespace removed.
     public trim_ascii(self): String;
+    /// Whether every byte is ASCII (below 128).
     public is_ascii(self): Bool;
+    /// Whether the string is empty or holds only ASCII whitespace.
     public is_ascii_whitespace(self): Bool;
+    /// Return a copy with ASCII letters lowercased; other bytes are unchanged.
     public to_ascii_lowercase(self): String;
+    /// Return a copy with ASCII letters uppercased; other bytes are unchanged.
     public to_ascii_uppercase(self): String;
+    /// Return a copy with each ASCII word titlecased: its first letter upper,
+    /// the rest lower.
     public to_ascii_titlecase(self): String;
+    /// Search from byte index `start` for the first occurrence of `pat`, returning
+    /// its index or `None`; panics when `start` is past the end.
     public find_from(self, start: UInt, pat: String): Option[UInt];
+    /// Whether `pat` occurs anywhere in the string.
     public contains(self, pat: String): Bool;
+    /// Return the string repeated `times` times, or the empty string when `times` is 0.
     public repeat(self, times: UInt): String;
+    /// Replace only the first `n` occurrences of `pat` with `with`.
+    /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
     public replace_n(self, pat: String, n: UInt, with: String =): String;
+    /// Split on the first occurrence of `sep`, returning (before, after).
+    /// Return `None` when `sep` is not found.
     public split_once(self, sep: String): Option[Pair[String, String]];
+    /// Split on the last occurrence of `sep`, returning (before, after).
+    /// Return `None` when `sep` is not found.
     public split_last_once(self, sep: String): Option[Pair[String, String]];
+    /// Replace every occurrence of `pat` with `with`, left to right without overlap.
+    /// Panic on an empty `pat`; with no match, return the string unchanged.
     public replace_all(self, pat: String, with: String =): String;
+    /// Return an iterator over the words separated by runs of ASCII whitespace;
+    /// leading and trailing whitespace produce no empty words.
     public split_ascii_whitespace(self): StringSplitAsciiWhitespaceIterator;
+    /// Return an iterator over the parts between occurrences of `sep`.
+    /// With no match the whole string is one part; an empty `sep` yields it once.
     public split(self, sep: String): StringSplitIterator;
+    /// Return an iterator over the lines split at `\n`, without the newline.
+    /// A trailing newline does not produce an extra empty line.
     public lines(self): StringLinesIterator;
+    /// Return the string without `prefix`, or unchanged when there is no such prefix.
     public trim_prefix(self, prefix: String): String;
+    /// Return the string without `suffix`, or unchanged when there is no such suffix.
     public trim_suffix(self, suffix: String): String;
+    /// Return the string without `prefix`, or `None` when there is no such prefix.
     public strip_prefix(self, prefix: String): Option[String];
+    /// Return the string without `suffix`, or `None` when there is no such suffix.
     public strip_suffix(self, suffix: String): Option[String];
+    /// Return an iterator over the raw UTF-8 bytes.
     public bytes(self): StringBytesIterator;
+    /// Return an iterator over the runes (Unicode code points) decoded from UTF-8.
     public runes(self): StringRunesIterator;
+    /// Convert the string to a `List` of runes for random access.
     public to_runes(self): List[Rune];
 };
 
+/// `Default` for `String`: the empty string.
 given String: Default {
+    /// Create an empty string.
     public default(): Self;
 };
 
+/// `Eq` for `String`: equal when both hold the same UTF-8 bytes.
 given String: Eq {
+    /// Whether both strings hold the same UTF-8 bytes.
     public equals(self, other: String): Bool;
 };
 
+/// `Ord` for `String`: byte-wise lexicographic order over the UTF-8 bytes.
 given String: Ord {
+    /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
     public compare(self, other: String): Int;
 };
 
+/// `Hash` for `String`: hashes the UTF-8 bytes.
 given String: Hash {
+    /// Hash the UTF-8 bytes in order.
     public hash(self): UInt;
 };
 
+/// `Iterator[String]` for `StringSplitAsciiWhitespaceIterator`: yields the
+/// whitespace-separated words one at a time.
 given StringSplitAsciiWhitespaceIterator: Iterator[String] {
+    /// Advance the iterator and return the next word, or `None` when exhausted.
     public next(self): Option[String];
 };
 
+/// `Iterator[String]` for `StringSplitIterator`: yields the parts between
+/// separators one at a time.
 given StringSplitIterator: Iterator[String] {
+    /// Advance the iterator and return the next part, or `None` when exhausted.
     public next(self): Option[String];
 };
 
+/// `Iterator[String]` for `StringLinesIterator`: yields the lines one at a time.
 given StringLinesIterator: Iterator[String] {
+    /// Advance the iterator and return the next line, or `None` when exhausted.
     public next(self): Option[String];
 };
 
+/// `Iterator[Rune]` for `StringRunesIterator`: yields the decoded runes one at a time.
 given StringRunesIterator: Iterator[Rune] {
+    /// Decode the next UTF-8 sequence and return it as a rune.
+    /// An invalid sequence decodes to the replacement character.
     public next(self): Option[Rune];
 };
 
+/// `Iterator[UInt8]` for `StringBytesIterator`: yields the UTF-8 bytes one at a time.
 given StringBytesIterator: Iterator[UInt8] {
+    /// Advance the iterator and return the next byte, or `None` when exhausted.
     public next(self): Option[UInt8];
 };
 
+/// `ToString` for `String`: the string itself.
 given String: ToString {
+    /// Return the string unchanged.
     public to_string(self): String;
 };
 
+/// `ToString` for `Bool`: the text `true` or `false`.
 given Bool: ToString {
+    /// Return `true` or `false`.
     public to_string(self): String;
 };
 
+/// `ToString` for `Int`: decimal text, with a leading `-` for negative values.
 given Int: ToString {
+    /// Return the decimal representation, with a leading `-` when negative.
     public to_string(self): String;
 };
 
+/// `ToString` for `Int8`: decimal text, with a leading `-` for negative values.
 given Int8: ToString {
+    /// Return the decimal representation, with a leading `-` when negative.
     public to_string(self): String;
 };
 
+/// `ToString` for `Int16`: decimal text, with a leading `-` for negative values.
 given Int16: ToString {
+    /// Return the decimal representation, with a leading `-` when negative.
     public to_string(self): String;
 };
 
+/// `ToString` for `Int32`: decimal text, with a leading `-` for negative values.
 given Int32: ToString {
+    /// Return the decimal representation, with a leading `-` when negative.
     public to_string(self): String;
 };
 
+/// `ToString` for `Int64`: decimal text, with a leading `-` for negative values.
 given Int64: ToString {
+    /// Return the decimal representation, with a leading `-` when negative.
     public to_string(self): String;
 };
 
+/// `ToString` for `UInt`: decimal text.
 given UInt: ToString {
+    /// Return the decimal representation.
     public to_string(self): String;
 };
 
+/// `ToString` for `UInt8`: decimal text.
 given UInt8: ToString {
+    /// Return the decimal representation.
     public to_string(self): String;
 };
 
+/// `ToString` for `UInt16`: decimal text.
 given UInt16: ToString {
+    /// Return the decimal representation.
     public to_string(self): String;
 };
 
+/// `ToString` for `UInt32`: decimal text.
 given UInt32: ToString {
+    /// Return the decimal representation.
     public to_string(self): String;
 };
 
+/// `ToString` for `UInt64`: decimal text.
 given UInt64: ToString {
+    /// Return the decimal representation.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingInt`: prints what `Int` prints for these bits.
 given WrappingInt: ToString {
+    /// Return the decimal text `Int` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingInt8`: prints what `Int8` prints for these bits.
 given WrappingInt8: ToString {
+    /// Return the decimal text `Int8` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingInt16`: prints what `Int16` prints for these bits.
 given WrappingInt16: ToString {
+    /// Return the decimal text `Int16` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingInt32`: prints what `Int32` prints for these bits.
 given WrappingInt32: ToString {
+    /// Return the decimal text `Int32` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingInt64`: prints what `Int64` prints for these bits.
 given WrappingInt64: ToString {
+    /// Return the decimal text `Int64` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingUInt`: prints what `UInt` prints for these bits.
 given WrappingUInt: ToString {
+    /// Return the decimal text `UInt` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingUInt8`: prints what `UInt8` prints for these bits.
 given WrappingUInt8: ToString {
+    /// Return the decimal text `UInt8` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingUInt16`: prints what `UInt16` prints for these bits.
 given WrappingUInt16: ToString {
+    /// Return the decimal text `UInt16` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingUInt32`: prints what `UInt32` prints for these bits.
 given WrappingUInt32: ToString {
+    /// Return the decimal text `UInt32` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `WrappingUInt64`: prints what `UInt64` prints for these bits.
 given WrappingUInt64: ToString {
+    /// Return the decimal text `UInt64` would print for these bits.
     public to_string(self): String;
 };
 
+/// `ToString` for `Float32`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
 given Float32: ToString {
+    /// Return the value as decimal text with six fractional digits, or as
+    /// `NaN`, `Inf`, or `-Inf`.
     public to_string(self): String;
 };
 
+/// `ToString` for `Float64`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
 given Float64: ToString {
+    /// Return the value as decimal text with six fractional digits, or as
+    /// `NaN`, `Inf`, or `-Inf`.
     public to_string(self): String;
 };
 
+/// `ToString` for `Pair`: renders `(first, second)`.
 given[T: ToString, U: ToString] Pair[T, U]: ToString {
+    /// Return the pair as `(a, b)`, with both components rendered.
     public to_string(self): String;
 };
 
+/// `ToString` for `Option`: renders `Some(value)` or `None`.
 given[T: ToString] Option[T]: ToString {
+    /// Return `Some(...)` with the value rendered, or the text `None`.
     public to_string(self): String;
 };
 
+/// `ToString` for `List`: renders `[a, b, c]`.
 given[T: ToString] List[T]: ToString {
+    /// Return the list as `[a, b, c]`, or `[]` when empty.
     public to_string(self): String;
 };
 
+/// Joining the items of a lazy view into one string.
 given[T: ToString, R: Iterator[T]] LazyView[T, R] {
+    /// Return the items' display text joined by the given separator, or the
+    /// empty string when there are no items.
     public join_to_string(self, seperator: String): String;
 };
 
+/// Joining the items of a list into one string.
 given[T: ToString] List[T] {
+    /// Return the items' display text joined by the given separator, or the
+    /// empty string when the list is empty.
     public join_to_string(self, seperator: String): String;
 };
 
+/// `ToString` for `Dict`: renders `[key: value, ...]`.
 given[K: ToString and Hash, V: ToString] Dict[K, V]: ToString {
+    /// Return the dict as `[k: v, ...]`, or `[]` when empty.
     public to_string(self): String;
 };
 
+/// `ToString` for `Set`: renders `[a, b, ...]`.
 given[T: ToString and Hash] Set[T]: ToString {
+    /// Return the set as `[a, b, ...]`, or `[]` when empty.
     public to_string(self): String;
 };
 
+/// `ToString` for `Duration`: compact text such as `0s`, `150ms`, `1.5s`, or `1h2m3s`.
 given Duration: ToString {
+    /// Return the duration as compact text: `0s`, a sub-second unit below one
+    /// second, or `h`/`m`/`s` with a trimmed fractional second.
     public to_string(self): String;
 };
 
+/// Hash-combining helper available on every `Hash` value.
 given Hash {
+    /// Combines self hash with another hash value.
     public combine_hash(self, value: UInt): UInt;
 };
 
+/// `Error` for `String`: the string is its own failure message.
 given String: Error {
+    /// Return the string as the failure message.
     public message(self): String;
 };
 
+/// `Hash` for `Bool`: hashes `false` as 0 and `true` as 1.
 given Bool: Hash {
+    /// Return 1 for `true` and 0 for `false`.
     public hash(self): UInt;
 };
 
+/// `Default` for `Bool`: `false`.
 given Bool: Default {
+    /// Return `false`.
     public default(): Self;
 };
 
+/// `Hash` for `UInt`: the value itself.
 given UInt: Hash {
+    /// Return the value itself as the hash.
     public hash(self): UInt;
 };
 
+/// `Default` for `UInt`: 0.
 given UInt: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `UInt8`: the value widened to `UInt`.
 given UInt8: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `UInt8`: 0.
 given UInt8: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `UInt16`: the value widened to `UInt`.
 given UInt16: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `UInt16`: 0.
 given UInt16: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `UInt32`: the value widened to `UInt`.
 given UInt32: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `UInt32`: 0.
 given UInt32: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `UInt64`: mixes the high and low halves of the 64-bit value.
 given UInt64: Hash {
+    /// Return a hash mixing the value's high and low 32-bit halves.
     public hash(self): UInt;
 };
 
+/// `Default` for `UInt64`: 0.
 given UInt64: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `Int`: the value's bits as a `UInt`.
 given Int: Hash {
+    /// Return the value's bits as a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `Int`: 0.
 given Int: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `Int8`: hashes the two's-complement bit pattern, so a value and
+/// its `WrappingInt8` twin hash alike.
 given Int8: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, so negative values
+    /// hash by their bits and match their `WrappingInt8` twin.
     public hash(self): UInt;
 };
 
+/// `Default` for `Int8`: 0.
 given Int8: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `Int16`: hashes the two's-complement bit pattern, so a value and
+/// its `WrappingInt16` twin hash alike.
 given Int16: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, so negative values
+    /// hash by their bits and match their `WrappingInt16` twin.
     public hash(self): UInt;
 };
 
+/// `Default` for `Int16`: 0.
 given Int16: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `Int32`: hashes the two's-complement bit pattern, so a value and
+/// its `WrappingInt32` twin hash alike.
 given Int32: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, so negative values
+    /// hash by their bits and match their `WrappingInt32` twin.
     public hash(self): UInt;
 };
 
+/// `Default` for `Int32`: 0.
 given Int32: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `Int64`: mixes the high and low halves of the 64-bit value.
 given Int64: Hash {
+    /// Return a hash mixing the value's two's-complement halves.
     public hash(self): UInt;
 };
 
+/// `Default` for `Int64`: 0.
 given Int64: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Hash` for `WrappingUInt`: matches the plain `UInt` twin.
 given WrappingUInt: Hash {
+    /// Return the value itself as a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingUInt`: 0.
 given WrappingUInt: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingUInt`: wrapping integers copy by value.
 given WrappingUInt: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingUInt8`: matches the plain `UInt8` twin.
 given WrappingUInt8: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingUInt8`: 0.
 given WrappingUInt8: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingUInt8`: wrapping integers copy by value.
 given WrappingUInt8: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingUInt16`: matches the plain `UInt16` twin.
 given WrappingUInt16: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingUInt16`: 0.
 given WrappingUInt16: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingUInt16`: wrapping integers copy by value.
 given WrappingUInt16: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingUInt32`: matches the plain `UInt32` twin.
 given WrappingUInt32: Hash {
+    /// Return the value widened to a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingUInt32`: 0.
 given WrappingUInt32: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingUInt32`: wrapping integers copy by value.
 given WrappingUInt32: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingUInt64`: matches the plain `UInt64` twin.
 given WrappingUInt64: Hash {
+    /// Return a hash mixing the value's high and low 32-bit halves.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingUInt64`: 0.
 given WrappingUInt64: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingUInt64`: wrapping integers copy by value.
 given WrappingUInt64: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingInt`: matches the plain `Int` twin.
 given WrappingInt: Hash {
+    /// Return the value's bits as a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingInt`: 0.
 given WrappingInt: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingInt`: wrapping integers copy by value.
 given WrappingInt: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingInt8`: matches the plain `Int8` twin.
 given WrappingInt8: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, matching the plain
+    /// `Int8` twin's hash.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingInt8`: 0.
 given WrappingInt8: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingInt8`: wrapping integers copy by value.
 given WrappingInt8: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingInt16`: matches the plain `Int16` twin.
 given WrappingInt16: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, matching the plain
+    /// `Int16` twin's hash.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingInt16`: 0.
 given WrappingInt16: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingInt16`: wrapping integers copy by value.
 given WrappingInt16: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingInt32`: matches the plain `Int32` twin.
 given WrappingInt32: Hash {
+    /// Return the two's-complement bit pattern as a `UInt`, matching the plain
+    /// `Int32` twin's hash.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingInt32`: 0.
 given WrappingInt32: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingInt32`: wrapping integers copy by value.
 given WrappingInt32: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Hash` for `WrappingInt64`: matches the plain `Int64` twin.
 given WrappingInt64: Hash {
+    /// Return a hash mixing the value's two's-complement halves.
     public hash(self): UInt;
 };
 
+/// `Default` for `WrappingInt64`: 0.
 given WrappingInt64: Default {
+    /// Return 0.
     public default(): Self;
 };
 
+/// `Clone` for `WrappingInt64`: wrapping integers copy by value.
 given WrappingInt64: Clone {
+    /// Return a copy of the value.
     public clone(self): Self;
 };
 
+/// `Eq` for `*T`: compares pointer identity.
 given[T: Any] *T: Eq {
+    /// Return whether both pointers hold the same address.
     public equals(self, other: *T): Bool;
 };
 
+/// `Hash` for `*T`: hashes the pointer address.
 given[T: Any] *T: Hash {
+    /// Return the address as a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Eq` for `*mutable T`: compares pointer identity.
 given[T: Any] *mutable T: Eq {
+    /// Return whether both pointers hold the same address.
     public equals(self, other: *mutable T): Bool;
 };
 
+/// `Hash` for `*mutable T`: hashes the pointer address.
 given[T: Any] *mutable T: Hash {
+    /// Return the address as a `UInt`.
     public hash(self): UInt;
 };
 
+/// `Eq` for `Pair`: equal when both components are equal.
 given[T: Eq, U: Eq] Pair[T, U]: Eq {
+    /// Whether both components of the two pairs are equal.
     public equals(self, other: Pair[T, U]): Bool;
 };
 
+/// `Hash` for `Pair`: combines the hashes of both components.
 given[T: Hash, U: Hash] Pair[T, U]: Hash {
+    /// Hash both components and combine the results.
     public hash(self): UInt;
 };
 
+/// `Ord` for `Pair`: lexicographic, comparing `first` and then `second`.
 given[T: Ord, U: Ord] Pair[T, U]: Ord {
+    /// Compare `first`, then `second`, returning the first nonzero result.
     public compare(self, other: Pair[T, U]): Int;
 };
 
+/// Reading and writing the value held by a `Cell`.
 given[T: Any] Cell[T] {
+    /// Return the current value.
     public get(self): T;
+    /// Replace the held value.
     public set(self, value: T): Void;
 };
 
+/// Orderable values: the tool methods every `Ord` implementation inherits.
 given Ord {
+    /// Clamps self into the inclusive range [min, max].
     public clamp(self, min: Self =, max: Self =): Self;
 };
 ```

@@ -52,6 +52,7 @@ public type DirEntry(
     private _file_type: FileType,
 );
 
+/// Accessors for the entry name, full path, and type, plus metadata lookup.
 given DirEntry {
 
     /// File/directory name
@@ -63,16 +64,23 @@ given DirEntry {
     /// File type
     public file_type(self): FileType = self._file_type;
 
+    /// Return true when the entry is a regular file.
     public is_file(self): Bool = self._file_type.is_file();
+
+    /// Return true when the entry is a directory.
     public is_dir(self): Bool = self._file_type.is_dir();
+
+    /// Return true when the entry is a symbolic link.
     public is_symlink(self): Bool = self._file_type.is_symlink();
 
     /// Get full file metadata (triggers stat system call)
     public info(self): Result[FileInfo] = file_info(self._path);
 };
 
+/// ToString conformance summarizing name and type.
 given DirEntry: ToString {
 
+    /// Format as "DirEntry(name, type)".
     public to_string(self): String = {
         let mutable s = StringBuilder.new();
         s.push_string("DirEntry(");
@@ -95,14 +103,18 @@ given DirIteratorStorage: Drop {
     };
 };
 
+/// Iterator over the entries of one directory; the OS handle closes when the iterator is dropped.
 public type mutable DirIterator(storage: DirIteratorStorage);
 
 private type mutable WalkDirStorage(mutable stack: List[DirIterator]);
 
+/// Depth-first iterator over a whole directory tree, produced by walk_dir.
 public type mutable WalkDirIterator(mutable storage: WalkDirStorage);
 
+/// Iterator conformance yielding the entries of one directory.
 given DirIterator: Iterator[DirEntry] {
 
+    /// Return the next entry, skipping "." and "..", or None when the directory is exhausted.
     public next(self): Option[DirEntry] = {
         let entry = __koral_readdir(self.storage.handle);
         if entry == null then {
@@ -120,8 +132,10 @@ given DirIterator: Iterator[DirEntry] {
     };
 };
 
+/// Iterator conformance yielding every descendant depth-first.
 given WalkDirIterator: Iterator[DirEntry] {
 
+    /// Return the next descendant entry depth-first, or None when the walk is exhausted.
     public next(self): Option[DirEntry] = {
         let top_opt = self.storage.stack.pop();
         if top_opt is .None() then {

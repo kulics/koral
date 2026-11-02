@@ -550,7 +550,7 @@ public enum InterpolatedPart {
 public struct CallArg {
     public let label: String?
   public let expression: ExpressionNode?
-  /// The `label: value` pair as written. Argument-shape diagnostics -- an
+  /// The `label = value` pair as written. Argument-shape diagnostics -- an
   /// unknown label, a label on a positional parameter -- are about this pair,
   /// not about the call and not about the bare value, so it needs its own span.
   /// Defaults to `.unknown` for arguments the compiler synthesises.

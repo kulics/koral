@@ -2,159 +2,267 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Math API
+# std/math API
 
 ## Overview
-This page lists the public API of module `Std.Math` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/math` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/math" { ... };`.
 
 ## Free Functions
 ```koral
+/// Return the non-negative square root of x, or NaN when x is negative.
 public let sqrt[T: FloatingPoint](x: T): T;
 
+/// Return the cube root of x, which is defined for negative x.
 public let cbrt[T: FloatingPoint](x: T): T;
 
+/// Return the hypotenuse sqrt(x * x + y * y), computed without intermediate overflow.
 public let hypot[T: FloatingPoint](x: T, y: T): T;
 
+/// Return e raised to the power x.
 public let exp[T: FloatMath](x: T): T;
 
+/// Return 2 raised to the power x.
 public let exp2[T: FloatMath](x: T): T;
 
+/// Return e raised to the power x minus one, computed accurately near zero.
 public let exp_m1[T: FloatMath](x: T): T;
 
+/// Return the natural logarithm of x; zero yields negative infinity and negative x yields NaN.
 public let ln[T: FloatingPoint](x: T): T;
 
+/// Return the base-2 logarithm of x; zero yields negative infinity and negative x yields NaN.
 public let log2[T: FloatingPoint](x: T): T;
 
+/// Return the base-10 logarithm of x; zero yields negative infinity and negative x yields NaN.
 public let log10[T: FloatingPoint](x: T): T;
 
+/// Return the natural logarithm of 1 + x, computed accurately near zero.
 public let ln_1p[T: FloatMath](x: T): T;
 
+/// Return the sine of x, with x in radians.
 public let sin[T: FloatMath](x: T): T;
 
+/// Return the cosine of x, with x in radians.
 public let cos[T: FloatMath](x: T): T;
 
+/// Return the tangent of x, with x in radians.
 public let tan[T: FloatMath](x: T): T;
 
+/// Return the arcsine of x in radians within [-pi/2, pi/2], or NaN outside [-1, 1].
 public let asin[T: FloatMath](x: T): T;
 
+/// Return the arccosine of x in radians within [0, pi], or NaN outside [-1, 1].
 public let acos[T: FloatMath](x: T): T;
 
+/// Return the arctangent of x in radians within (-pi/2, pi/2).
 public let atan[T: FloatMath](x: T): T;
 
+/// Return the arctangent of y / x in radians within (-pi, pi], chosen by the signs of both arguments.
 public let atan2[T: FloatMath](y: T, x: T): T;
 
+/// Return the hyperbolic sine of x.
 public let sinh[T: FloatMath](x: T): T;
 
+/// Return the hyperbolic cosine of x.
 public let cosh[T: FloatMath](x: T): T;
 
+/// Return the hyperbolic tangent of x.
 public let tanh[T: FloatMath](x: T): T;
 
+/// Return the inverse hyperbolic sine of x.
 public let asinh[T: FloatMath](x: T): T;
 
+/// Return the inverse hyperbolic cosine of x, or NaN below 1.
 public let acosh[T: FloatMath](x: T): T;
 
+/// Return the inverse hyperbolic tangent of x, or NaN outside (-1, 1).
 public let atanh[T: FloatMath](x: T): T;
 
+/// Return x * mul + add fused into a single rounding.
 public let fma[T: FloatingPoint](x: T, mul: T, add: T): T;
 
+/// Return the linear interpolation between a and b at t, computed as a + t * (b - a).
 public let lerp[T: FloatingPoint](a: T, b: T, t: T): T;
 
+/// Return the error function of x.
 public let erf[T: FloatMath](x: T): T;
 
+/// Return the complementary error function 1 - erf(x).
 public let erfc[T: FloatMath](x: T): T;
 
+/// Return the gamma function of x, or NaN at the non-positive integers.
 public let gamma[T: FloatMath](x: T): T;
 
+/// Return the natural logarithm of the absolute value of the gamma function of x.
 public let log_gamma[T: FloatMath](x: T): T;
 
+/// Return the logarithm of x in the given base, computed as ln(x) / ln(base).
+/// The domain is x > 0 with a positive base different from 1.
 public let log[T: FloatingPoint](x: T, base: T =): T;
 
+/// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative.
 public let gcd[T: Integer](a: T, b: T): T;
 
+/// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero.
 public let lcm[T: Integer](a: T, b: T): T;
 
+/// Return the base-2 logarithm of |x| rounded down, panicking when x is zero.
 public let ilog2[T: Integer](x: T): UInt;
 
+/// Return the base-10 logarithm of |x| rounded down, panicking when x is zero.
 public let ilog10[T: Integer](x: T): UInt;
 ```
 
 ## Traits
 ```koral
+/// Types that support arithmetic, ordering, and absolute value.
 public trait Numeric: Add[Self] and Sub[Self] and Mul[Self] and Ord {
+    /// Return the absolute value of self.
+    /// For integers the minimum value overflows when negated: `Wrapping` types wrap back to it, the others panic.
     abs(self): Self;
 };
 
+/// Floating-point values with roots, powers, logarithms, rounding, and mathematical constants.
 public trait FloatingPoint: Numeric and Div[Self] and Neg {
+    /// Return the non-negative square root of x, or NaN when x is negative.
     sqrt(x: Self): Self;
+    /// Return the cube root of x, which is defined for negative x.
     cbrt(x: Self): Self;
+    /// Return self raised to the power exp; a negative base with a fractional exponent yields NaN.
     pow(self, exp: Self): Self;
+    /// Return self raised to the integer power exp; negative exp gives the reciprocal of the positive power.
     powi(self, exp: Int): Self;
+    /// Return the hypotenuse sqrt(x * x + y * y), computed without intermediate overflow.
     hypot(x: Self, y: Self): Self;
+    /// Return the logarithm of x in the given base, computed as ln(x) / ln(base).
+    /// The domain is x > 0 with a positive base different from 1.
     log(x: Self, base: Self =): Self;
+    /// Return the natural logarithm of x; zero yields negative infinity and negative x yields NaN.
     ln(x: Self): Self;
+    /// Return the base-2 logarithm of x; zero yields negative infinity and negative x yields NaN.
     log2(x: Self): Self;
+    /// Return the base-10 logarithm of x; zero yields negative infinity and negative x yields NaN.
     log10(x: Self): Self;
+    /// Round self toward negative infinity to an integral value.
     floor(self): Self;
+    /// Round self toward positive infinity to an integral value.
     ceil(self): Self;
+    /// Round self to the nearest integral value, with halfway cases rounding away from zero.
     round(self): Self;
+    /// Round self toward zero to an integral value.
     trunc(self): Self;
+    /// Return -1, 0, or 1 with the sign of self, or NaN when self is NaN.
     signum(self): Self;
+    /// Return the fractional part of self with the same sign as self.
     fract(self): Self;
+    /// Return self carrying the sign of sign.
     copysign(self, sign: Self): Self;
+    /// Return the remainder of self / y with the sign of self, or NaN when y is zero.
     fmod(self, y: Self): Self;
+    /// Return x * mul + add fused into a single rounding.
     fma(x: Self, mul: Self, add: Self): Self;
+    /// Convert self from degrees to radians.
     to_radians(self): Self;
+    /// Convert self from radians to degrees.
     to_degrees(self): Self;
+    /// Return an approximation of pi.
     pi(): Self;
+    /// Return an approximation of Euler's number e.
     e(): Self;
+    /// Return an approximation of tau, the full-turn constant 2 * pi.
     tau(): Self;
+    /// Return an approximation of the natural logarithm of 2.
     ln2(): Self;
+    /// Return an approximation of the natural logarithm of 10.
     ln10(): Self;
+    /// Return an approximation of the square root of 2.
     sqrt2(): Self;
 };
 
+/// Floating-point values with transcendental and special functions.
 public trait FloatMath: FloatingPoint {
+    /// Return e raised to the power x.
     exp(x: Self): Self;
+    /// Return 2 raised to the power x.
     exp2(x: Self): Self;
+    /// Return e raised to the power x minus one, computed accurately near zero.
     exp_m1(x: Self): Self;
+    /// Return the natural logarithm of 1 + x, computed accurately near zero.
     ln_1p(x: Self): Self;
+    /// Return the sine of x, with x in radians.
     sin(x: Self): Self;
+    /// Return the cosine of x, with x in radians.
     cos(x: Self): Self;
+    /// Return the tangent of x, with x in radians.
     tan(x: Self): Self;
+    /// Return the arcsine of x in radians within [-pi/2, pi/2], or NaN outside [-1, 1].
     asin(x: Self): Self;
+    /// Return the arccosine of x in radians within [0, pi], or NaN outside [-1, 1].
     acos(x: Self): Self;
+    /// Return the arctangent of x in radians within (-pi/2, pi/2).
     atan(x: Self): Self;
+    /// Return the arctangent of y / x in radians within (-pi, pi], chosen by the signs of both arguments.
     atan2(y: Self, x: Self): Self;
+    /// Return the hyperbolic sine of x.
     sinh(x: Self): Self;
+    /// Return the hyperbolic cosine of x.
     cosh(x: Self): Self;
+    /// Return the hyperbolic tangent of x.
     tanh(x: Self): Self;
+    /// Return the inverse hyperbolic sine of x.
     asinh(x: Self): Self;
+    /// Return the inverse hyperbolic cosine of x, or NaN below 1.
     acosh(x: Self): Self;
+    /// Return the inverse hyperbolic tangent of x, or NaN outside (-1, 1).
     atanh(x: Self): Self;
+    /// Return the error function of x.
     erf(x: Self): Self;
+    /// Return the complementary error function 1 - erf(x).
     erfc(x: Self): Self;
+    /// Return the gamma function of x, or NaN at the non-positive integers.
     gamma(x: Self): Self;
+    /// Return the natural logarithm of the absolute value of the gamma function of x.
     log_gamma(x: Self): Self;
 };
 
+/// Whole numbers with division, remainder, integer powers, and integer logarithms.
 public trait Integer: Numeric and Div[Self] and Rem[Self] {
+    /// Return self raised to the non-negative power exp, panicking on overflow unless the type wraps.
     pow(self, exp: UInt): Self;
+    /// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative.
     gcd(a: Self, b: Self): Self;
+    /// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero.
     lcm(a: Self, b: Self): Self;
+    /// Return the base-2 logarithm of |x| rounded down, panicking when x is zero.
     ilog2(x: Self): UInt;
+    /// Return the base-10 logarithm of |x| rounded down, panicking when x is zero.
     ilog10(x: Self): UInt;
 };
 
+/// Fixed-width binary integers with a total bit toolbox: bit operations cannot overflow and behave the same in every family.
+/// The bitwise operators (`& | ^ ~`, `<< >>`) are built in and not part of this trait.
 public trait BinaryInteger: Integer {
+    /// Return the number of one bits in the pattern.
     count_ones(self): UInt;
+    /// Return the number of zero bits in the pattern.
     count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or the full width when the pattern is zero.
     leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or the full width when the pattern is zero.
     trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or the full width when every bit is one.
     leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or the full width when every bit is one.
     trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo the bit width, with bits shifted off the top re-entering at the bottom.
     rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo the bit width, with bits shifted off the bottom re-entering at the top.
     rotate_right(self, n: UInt): Self;
+    /// Return the pattern with its bits in reverse order.
     reverse_bits(self): Self;
+    /// Return the value with its bytes in reverse order; single-byte values are unchanged.
     swap_bytes(self): Self;
 };
 ```
@@ -164,253 +272,423 @@ public trait BinaryInteger: Integer {
 
 ## Given Implementations
 ```koral
+/// `Numeric` for `Float64`: absolute value by clearing the sign bit.
 given Float64: Numeric {};
 
+/// `Default` for `Float64`: returns zero.
 given Float64: Default {
+    /// Return the default value of `Float64`, which is 0.0.
     public default(): Self;
 };
 
+/// `FloatingPoint` for `Float64`: roots, powers, logarithms, and rounding in double precision.
 given Float64: FloatingPoint {};
 
+/// `FloatMath` for `Float64`: transcendental and special functions in double precision.
 given Float64: FloatMath {};
 
+/// `Numeric` for `Float32`: absolute value by clearing the sign bit.
 given Float32: Numeric {};
 
+/// `Default` for `Float32`: returns zero.
 given Float32: Default {
+    /// Return the default value of `Float32`, which is 0.0.
     public default(): Self;
 };
 
+/// `FloatingPoint` for `Float32`: roots, powers, logarithms, and rounding in single precision.
 given Float32: FloatingPoint {};
 
+/// `FloatMath` for `Float32`: transcendental and special functions in single precision.
 given Float32: FloatMath {};
 
+/// `Numeric` for `Int8`: absolute value, panicking at the minimum value.
 given Int8: Numeric {};
 
+/// `Integer` for `Int8`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given Int8: Integer {};
 
+/// `BinaryInteger` for `Int8`: bit counting, rotation, and byte order over the 8-bit pattern.
 given Int8: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 8 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 8 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 8 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 8 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 8, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 8, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value unchanged, since a single byte has no byte order to swap.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `Int16`: absolute value, panicking at the minimum value.
 given Int16: Numeric {};
 
+/// `Integer` for `Int16`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given Int16: Integer {};
 
+/// `BinaryInteger` for `Int16`: bit counting, rotation, and byte order over the 16-bit pattern.
 given Int16: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 16 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 16 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 16 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 16 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 16, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 16, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its two bytes swapped.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `Int32`: absolute value, panicking at the minimum value.
 given Int32: Numeric {};
 
+/// `Integer` for `Int32`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given Int32: Integer {};
 
+/// `BinaryInteger` for `Int32`: bit counting, rotation, and byte order over the 32-bit pattern.
 given Int32: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 32 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 32 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 32 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 32 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 32, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 32, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its four bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `Int64`: absolute value, panicking at the minimum value.
 given Int64: Numeric {};
 
+/// `Integer` for `Int64`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given Int64: Integer {};
 
+/// `BinaryInteger` for `Int64`: bit counting, rotation, and byte order over the 64-bit pattern.
 given Int64: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 64 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 64 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 64 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 64 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 64, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 64, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its eight bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `UInt8`: absolute value, which is the value itself.
 given UInt8: Numeric {};
 
+/// `Integer` for `UInt8`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given UInt8: Integer {};
 
+/// `BinaryInteger` for `UInt8`: bit counting, rotation, and byte order over the 8-bit pattern.
 given UInt8: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 8 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 8 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 8 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 8 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 8, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 8, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value unchanged, since a single byte has no byte order to swap.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `UInt16`: absolute value, which is the value itself.
 given UInt16: Numeric {};
 
+/// `Integer` for `UInt16`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given UInt16: Integer {};
 
+/// `BinaryInteger` for `UInt16`: bit counting, rotation, and byte order over the 16-bit pattern.
 given UInt16: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 16 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 16 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 16 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 16 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 16, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 16, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its two bytes swapped.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `UInt32`: absolute value, which is the value itself.
 given UInt32: Numeric {};
 
+/// `Integer` for `UInt32`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given UInt32: Integer {};
 
+/// `BinaryInteger` for `UInt32`: bit counting, rotation, and byte order over the 32-bit pattern.
 given UInt32: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 32 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 32 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 32 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 32 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 32, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 32, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its four bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `UInt64`: absolute value, which is the value itself.
 given UInt64: Numeric {};
 
+/// `Integer` for `UInt64`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given UInt64: Integer {};
 
+/// `BinaryInteger` for `UInt64`: bit counting, rotation, and byte order over the 64-bit pattern.
 given UInt64: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 64 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 64 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 64 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 64 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 64, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 64, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its eight bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `Int`: absolute value, panicking at the minimum value.
 given Int: Numeric {};
 
+/// `Integer` for `Int`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given Int: Integer {};
 
+/// `BinaryInteger` for `Int`: bit counting, rotation, and byte order over the 64-bit pattern.
 given Int: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 64 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 64 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 64 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 64 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 64, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 64, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its eight bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `UInt`: absolute value, which is the value itself.
 given UInt: Numeric {};
 
+/// `Integer` for `UInt`: integer powers, gcd, lcm, and integer logarithms, panicking on overflow.
 given UInt: Integer {};
 
+/// `BinaryInteger` for `UInt`: bit counting, rotation, and byte order over the 64-bit pattern.
 given UInt: BinaryInteger {
+    /// Return the number of one bits in the value.
     public count_ones(self): UInt;
+    /// Return the number of zero bits in the value.
     public count_zeros(self): UInt;
+    /// Return the number of zero bits before the highest one bit, or 64 when the value is zero.
     public leading_zeros(self): UInt;
+    /// Return the number of zero bits after the lowest one bit, or 64 when the value is zero.
     public trailing_zeros(self): UInt;
+    /// Return the number of one bits before the highest zero bit, or 64 when every bit is one.
     public leading_ones(self): UInt;
+    /// Return the number of one bits after the lowest zero bit, or 64 when every bit is one.
     public trailing_ones(self): UInt;
+    /// Rotate the pattern left by n modulo 64, with bits shifted off the top re-entering at the bottom.
     public rotate_left(self, n: UInt): Self;
+    /// Rotate the pattern right by n modulo 64, with bits shifted off the bottom re-entering at the top.
     public rotate_right(self, n: UInt): Self;
+    /// Return the value with its bits in reverse order.
     public reverse_bits(self): Self;
+    /// Return the value with its eight bytes in reverse order.
     public swap_bytes(self): Self;
 };
 
+/// `Numeric` for `WrappingInt8`: absolute value, wrapping at the minimum value.
 given WrappingInt8: Numeric {};
 
+/// `Integer` for `WrappingInt8`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingInt8: Integer {};
 
+/// `BinaryInteger` for `WrappingInt8`: the same 8-bit toolbox as `Int8`.
 given WrappingInt8: BinaryInteger {};
 
+/// `Numeric` for `WrappingInt16`: absolute value, wrapping at the minimum value.
 given WrappingInt16: Numeric {};
 
+/// `Integer` for `WrappingInt16`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingInt16: Integer {};
 
+/// `BinaryInteger` for `WrappingInt16`: the same 16-bit toolbox as `Int16`.
 given WrappingInt16: BinaryInteger {};
 
+/// `Numeric` for `WrappingInt32`: absolute value, wrapping at the minimum value.
 given WrappingInt32: Numeric {};
 
+/// `Integer` for `WrappingInt32`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingInt32: Integer {};
 
+/// `BinaryInteger` for `WrappingInt32`: the same 32-bit toolbox as `Int32`.
 given WrappingInt32: BinaryInteger {};
 
+/// `Numeric` for `WrappingInt64`: absolute value, wrapping at the minimum value.
 given WrappingInt64: Numeric {};
 
+/// `Integer` for `WrappingInt64`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingInt64: Integer {};
 
+/// `BinaryInteger` for `WrappingInt64`: the same 64-bit toolbox as `Int64`.
 given WrappingInt64: BinaryInteger {};
 
+/// `Numeric` for `WrappingUInt8`: absolute value, which is the value itself.
 given WrappingUInt8: Numeric {};
 
+/// `Integer` for `WrappingUInt8`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingUInt8: Integer {};
 
+/// `BinaryInteger` for `WrappingUInt8`: the same 8-bit toolbox as `UInt8`.
 given WrappingUInt8: BinaryInteger {};
 
+/// `Numeric` for `WrappingUInt16`: absolute value, which is the value itself.
 given WrappingUInt16: Numeric {};
 
+/// `Integer` for `WrappingUInt16`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingUInt16: Integer {};
 
+/// `BinaryInteger` for `WrappingUInt16`: the same 16-bit toolbox as `UInt16`.
 given WrappingUInt16: BinaryInteger {};
 
+/// `Numeric` for `WrappingUInt32`: absolute value, which is the value itself.
 given WrappingUInt32: Numeric {};
 
+/// `Integer` for `WrappingUInt32`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingUInt32: Integer {};
 
+/// `BinaryInteger` for `WrappingUInt32`: the same 32-bit toolbox as `UInt32`.
 given WrappingUInt32: BinaryInteger {};
 
+/// `Numeric` for `WrappingUInt64`: absolute value, which is the value itself.
 given WrappingUInt64: Numeric {};
 
+/// `Integer` for `WrappingUInt64`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingUInt64: Integer {};
 
+/// `BinaryInteger` for `WrappingUInt64`: the same 64-bit toolbox as `UInt64`.
 given WrappingUInt64: BinaryInteger {};
 
+/// `Numeric` for `WrappingInt`: absolute value, wrapping at the minimum value.
 given WrappingInt: Numeric {};
 
+/// `Integer` for `WrappingInt`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingInt: Integer {};
 
+/// `BinaryInteger` for `WrappingInt`: the same 64-bit toolbox as `Int`.
 given WrappingInt: BinaryInteger {};
 
+/// `Numeric` for `WrappingUInt`: absolute value, which is the value itself.
 given WrappingUInt: Numeric {};
 
+/// `Integer` for `WrappingUInt`: integer powers, gcd, lcm, and integer logarithms, wrapping on overflow.
 given WrappingUInt: Integer {};
 
+/// `BinaryInteger` for `WrappingUInt`: the same 64-bit toolbox as `UInt`.
 given WrappingUInt: BinaryInteger {};
 ```

@@ -31,7 +31,7 @@ corpus gate: 217 files checked, 0 failed
 `mutable` 约束、具名参数、默认值、`using` 新写法都解析不了，而测试还是绿的：
 断言全在它认识的那部分语法上。后来又漏掉修饰符顺序（`foreign public let`）、
 trait 方法参数上的 `mutable`、`..` 与 rune 默认值、`(a, b)` 成对模式、
-`name Type` 绑定模式、跨行 import 列表——**每一条都是编译器接受、而它拒绝或改写**。
+`name: Type` 绑定模式、跨行 import 列表——**每一条都是编译器接受、而它拒绝或改写**。
 这些现在都有断言盯着；新语法进来时一并加。
 
 ### 2. 语料闸门 — 真实源码

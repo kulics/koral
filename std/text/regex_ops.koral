@@ -28,11 +28,15 @@ let foreign __koral_regex_free(handle: *UInt8): Void;
 // Regex — Compilation
 // ============================================================================
 
+/// Compile patterns into `Regex` values.
 given Regex {
 
+    /// Compile `pattern` with default flags into a `Regex`.
+    /// Returns `Result.Error` with the engine's message if the pattern is invalid.
     public compile(pattern: String): Result[Regex] =
         Regex.compile_with_flags(pattern, RegexFlag.none());
 
+    /// Compile `pattern` with `flags` applied, returning `Result.Error` on an invalid pattern.
     public compile_with_flags(pattern: String, flags: RegexFlag): Result[Regex] = {
         let c_flags = flags.to_c_flags();
 
@@ -94,9 +98,10 @@ given Regex {
 // Regex — Matching & Searching
 // ============================================================================
 
+/// Match testing and first-match search without capture detail.
 given Regex {
 
-    // 最快路径：不捕获任何 group，只测试是否匹配
+    /// Test whether the pattern matches anywhere in `text`, capturing no groups.
     public matches(self, text: String): Bool = {
         let starts = alloc_memory[Int32](1);
         let ends = alloc_memory[Int32](1);
@@ -108,7 +113,8 @@ given Regex {
         return matched > 0;
     };
 
-    // 轻量路径：只捕获 $0（整体匹配位置），不捕获子 group
+    /// Return the first match in `text`, recording only the whole match's span.
+    /// Returns `None` when the pattern does not match.
     public find(self, text: String): Option[Match] = Regex.find_at(self, text, 0);
 
     // 从指定偏移开始查找（内部方法，仅 $0）
@@ -142,11 +148,14 @@ given Regex {
 // Regex — Captures & Collection Methods
 // ============================================================================
 
+/// Capture-group search plus match and capture iterators.
 given Regex {
 
+    /// Iterate over every non-overlapping match in `text`, without capture groups.
     public find_all(self, text: String): MatchIterator = MatchIterator(self, text, 0);
 
-    // 完整路径：捕获所有 group
+    /// Return the first match in `text` with all of its capture groups.
+    /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures] =
         Regex.captures_at(self, text, 0);
 
@@ -181,6 +190,7 @@ given Regex {
         return Option[Captures].Some(Captures(text, start_list, end_list));
     };
 
+    /// Iterate over every non-overlapping match in `text`, each with its capture groups.
     public captures_all(self, text: String): CapturesIterator =
         CapturesIterator(self, text, 0);
 };
@@ -189,8 +199,11 @@ given Regex {
 // Regex — Replace
 // ============================================================================
 
+/// Substitution of the first match or of every match.
 given Regex {
 
+    /// Replace the first match in `text` with `with`, returning `text` unchanged if there is none.
+    /// In `with`, `$0`..`$9` expand to capture groups and `$$` produces a literal `$`.
     public replace(self, text: String, with: String =): String = {
         when self.captures(text) in {
             .None() then {
@@ -210,6 +223,7 @@ given Regex {
         };
     };
 
+    /// Replace every match in `text` with `with`, expanding `$0`..`$9` and `$$` as in `replace`.
     public replace_all(self, text: String, with: String =): String = {
         let mutable result = StringBuilder.new();
         let mutable offset: UInt = 0;
@@ -282,8 +296,10 @@ given Regex {
 // Regex — Split
 // ============================================================================
 
+/// Splitting text around matches.
 given Regex {
 
+    /// Split `text` around every match, yielding the pieces between matches and the trailing tail.
     public split(self, text: String): RegexSplitIterator =
         RegexSplitIterator(self, text, 0, false);
 };

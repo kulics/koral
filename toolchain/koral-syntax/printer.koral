@@ -2576,10 +2576,12 @@ given Printer {
 
     /// Renders a declaration the way generated API docs show it: the shape of
     /// the thing, bodies left out, only what a consumer of the module can see.
+    /// WHICH declarations reach a page is the caller's policy (`public` ones,
+    /// plus a `given` whose target type is public); what is shown of each one
+    /// is decided here:
     ///
-    ///   * a top-level declaration is shown only if it is `public`
-    ///   * a `given` block is always shown (it carries no access modifier), with
-    ///     its `public` members -- the rest belong to the implementor
+    ///   * a `given` shows its `public` members -- the rest belong to the
+    ///     implementor
     ///   * a trait shows every member: a trait's whole body is its interface
     ///   * a struct type shows fields that are not explicitly non-public, and an
     ///     enum type shows all of its cases
@@ -2818,7 +2820,8 @@ given Printer {
         .Empty() then {},
     };
 
-    /// Members of a trait or `given`, as signatures on their own lines.
+    /// Members of a trait or `given`, as signatures on their own lines, each
+    /// carrying the `///` doc-comment run that documents it.
     /// `public_only` is the `given` rule: a method a consumer cannot call is not
     /// part of the API surface, however interesting it is to the implementor.
     private print_member_signatures(
@@ -2832,7 +2835,7 @@ given Printer {
         let mutable shown: UInt = 0;
         for item in members then {
             when item in {
-                .Decl(d) then {
+                .Decl(d) or .DeclPreSemi(_, d) then {
                     if public_only and not Printer.is_public(Printer.decl_visibility(d)) then {
                         continue;
                     };
@@ -2847,12 +2850,13 @@ given Printer {
         };
         self.write_newline();
         self.indent += 1;
-        for item in members then {
-            when item in {
+        for pair in members.lazy().enumerate() then {
+            when pair.second in {
                 .Decl(d) then {
                     if public_only and not Printer.is_public(Printer.decl_visibility(d)) then {
                         continue;
                     };
+                    self.print_doc_run(members, pair.first);
                     self.print_signature(d);
                     self.write(";");
                     self.write_newline();
@@ -2861,6 +2865,7 @@ given Printer {
                     if public_only and not Printer.is_public(Printer.decl_visibility(d)) then {
                         continue;
                     };
+                    self.print_doc_run(members, pair.first);
                     self.print_signature(d);
                     self.print_pre_semi_comments(comments);
                     self.write(";");
@@ -2871,6 +2876,16 @@ given Printer {
         };
         self.indent -= 1;
         self.write_token(rb);
+    };
+
+    /// The doc-comment run above one rendered member, written a line at a time
+    /// ahead of the member's signature. An ordinary `//` note is not
+    /// documentation and stays off the page.
+    private print_doc_run(self, items: List[CstItem], index: UInt): Void = {
+        for c in doc_comments_above(items, index) then {
+            self.write(c);
+            self.write_newline();
+        };
     };
 
     public is_public(v: Option[Token]): Bool = when v in {
@@ -3098,6 +3113,43 @@ public let type_to_string(t: CstType): String = {
     let mutable printer = Printer.new();
     printer.print_type(t);
     return printer.result();
+};
+
+/// The `///` doc comments in the comment run directly above `items[index]` --
+/// the run a reader takes as that item's documentation. Any other item ends
+/// the run; an ordinary `//` or block comment inside it is a note to the
+/// maintainer, not documentation, and is left out. Returned as text: a line
+/// comment holds one line, and both callers -- the printer ahead of a member
+/// signature, the doc generator ahead of a page entry -- write lines.
+public let doc_comments_above(items: List[CstItem], index: UInt): List[String] = {
+    let mutable start = index;
+    while start > 0 then {
+        when items[start - 1] in {
+            .Comment(_) then {
+                start -= 1;
+            },
+            _ then {
+                break;
+            },
+        };
+    };
+    let mutable docs = List[String].new();
+    for i in start..<index then {
+        when items[i] in {
+            .Comment(t) then {
+                when t in {
+                    .LineComment(text) then {
+                        if text.starts_with("///") then {
+                            docs.push(text);
+                        };
+                    },
+                    _ then {},
+                };
+            },
+            _ then {},
+        };
+    };
+    return docs;
 };
 
 public let format_source(source: String): Result[String] = {

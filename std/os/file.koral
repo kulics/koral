@@ -89,6 +89,7 @@ let foreign __koral_fstat(fd: Int32, out: *KoralStatResult): Int32;
 /// For buffered I/O, wrap with std.io BufReader/BufWriter.
 public type mutable File(storage: FileStorage);
 
+/// Handle accessors, metadata queries, syncing, and whole-file advisory locking.
 given File {
 
     /// Returns the underlying OS file descriptor.
@@ -190,9 +191,11 @@ given File {
     };
 };
 
+/// Reader conformance reading directly from the file descriptor.
 given File: Reader {
 
-    // Unbuffered: directly calls POSIX read, errors returned immediately
+    /// Read bytes into the target list over the given span and return how many were read.
+    /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = into.slice_spec(span);
         let start = span.start();
@@ -209,9 +212,11 @@ given File: Reader {
     };
 };
 
+/// Writer conformance writing directly to the file descriptor.
 given File: Writer {
 
-    // Unbuffered: directly calls POSIX write, errors returned immediately
+    /// Write bytes from the source list over the given span and return how many were written.
+    /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
@@ -231,8 +236,10 @@ given File: Writer {
     public flush(self): Result[Void] = Result[Void].Ok({});
 };
 
+/// Seeker conformance repositioning the file offset.
 given File: Seeker {
 
+    /// Reposition the file offset from the given origin and return the new absolute offset.
     public seek(self, pos: SeekOrigin): Result[UInt64] = {
         let mutable offset: Int64 = 0;
         let mutable whence: Int32 = 0;

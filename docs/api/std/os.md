@@ -2,113 +2,186 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Os API
+# std/os API
 
 ## Overview
-This page lists the public API of module `Std.Os` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/os` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/os" { ... };`.
 
 ## Free Functions
 ```koral
+/// Create single directory (parent must exist)
 public let create_dir[T: IntoPath](path: T): Result[Void];
 
+/// Create directory recursively (creates all missing parent directories)
 public let create_dir_all[T: IntoPath](path: T): Result[Void];
 
+/// Remove empty directory
 public let remove_dir[T: IntoPath](path: T): Result[Void];
 
+/// Remove directory recursively (removes all contents first)
 public let remove_dir_all[T: IntoPath](path: T): Result[Void];
 
+/// Open a directory iterator.
+/// Handle is released in iterator drop logic.
 public let read_dir[T: IntoPath](path: T): Result[DirIterator];
 
+/// Recursively walk a directory tree (depth-first).
+/// Returned entries include both files and directories under `path`.
+/// The root path itself is not yielded.
 public let walk_dir[T: IntoPath](path: T): Result[WalkDirIterator];
 
+/// Create a temporary directory.
+/// When dir is empty path, uses the system temp directory.
+/// Returns the full path of the created temporary directory.
 public let create_temp_dir[T: IntoPath](dir: T, prefix: String =): Result[Path];
 
+/// Get environment variable by name (renamed from get_env)
 public let env(name: String): Option[String];
 
+/// Set environment variable (returns Result instead of Void)
 public let set_env(name: String, value: String): Result[Void];
 
+/// Remove (unset) an environment variable
 public let remove_env(name: String): Result[Void];
 
+/// List all environment variables as key-value pairs
 public let all_env(): List[Pair[String, String]];
 
+/// Get home directory
 public let home_dir(): Option[Path];
 
+/// Get temp directory
 public let temp_dir(): Path;
 
+/// Get current working directory
+///
+/// Returned in the canonical `/` form; the OS reports the platform spelling.
 public let current_dir(): Result[Path];
 
+/// Change current working directory
 public let set_current_dir[T: IntoPath](path: T): Result[Void];
 
+/// Get the system hostname
 public let hostname(): Result[String];
 
+/// Get the path of the current executable
+///
+/// Returned in the canonical `/` form.
 public let current_exe(): Result[Path];
 
+/// Read file content as a byte list (binary)
 public let read_file[T: IntoPath](path: T): Result[List[UInt8]];
 
+/// Write a byte list to file (binary, overwrite)
 public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void];
 
+/// Append a byte list to file (binary)
 public let append_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void];
 
+/// Read file content as a string (UTF-8 text)
 public let read_text_file[T: IntoPath](path: T): Result[String];
 
+/// Write a string to file (UTF-8 text, overwrite)
 public let write_text_file[T: IntoPath](path: T, content: String =): Result[Void];
 
+/// Append a string to file (UTF-8 text)
 public let append_text_file[T: IntoPath](path: T, content: String =): Result[Void];
 
+/// Copy file (reads source as bytes, writes to destination)
 public let copy_file[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void];
 
+/// Remove (delete) a file
 public let remove_file[T: IntoPath](path: T): Result[Void];
 
+/// Rename or move a file/directory
 public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void];
 
+/// Check if path exists on disk.
 public let path_exist[T: IntoPath](path: T): Bool;
 
+/// Convert to absolute path (does not resolve symlinks)
+///
+/// Always returns the canonical `/`-separated form: an already-absolute path is
+/// normalized too, so callers can compare or print the result without first
+/// asking which spelling it came in.
 public let absolute_path[T: IntoPath](path: T): Result[Path];
 
+/// Canonicalize path (resolves symlinks and relative components)
+///
+/// The result is normalized to the canonical `/` form even though the OS call
+/// underneath returns the platform spelling.
 public let canonicalize_path[T: IntoPath](path: T): Result[Path];
 
+/// Open a file and return a File handle (unbuffered, directly wraps fd).
 public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File];
 
+/// Create a new file (fails if file already exists).
 public let create_file[T: IntoPath](path: T): Result[File];
 
+/// Query file/directory metadata information (follows symlinks).
 public let file_info[T: IntoPath](path: T): Result[FileInfo];
 
+/// Query symlink metadata (does NOT follow symlinks).
 public let symlink_info[T: IntoPath](path: T): Result[FileInfo];
 
+/// Set file permissions
 public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void];
 
+/// Create a hard link at `link` pointing to `to`
 public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
 
+/// Create a symbolic link at `link` pointing to `to`
 public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
 
+/// Read the target path of a symbolic link
 public let read_symlink[T: IntoPath](path: T): Result[Path];
 
+/// Truncate a file to the specified size
 public let truncate_file[T: IntoPath](path: T, size: UInt64): Result[Void];
 
+/// Create a temporary file.
+/// When dir is empty, uses the system temp directory.
+/// Returns an open File handle (use file.path() to get the path).
 public let create_temp_file[T: IntoPath](dir: T, prefix: String =): Result[File];
 
+/// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator(): String;
 
+/// Whether the host is Windows.
+///
+/// Derived from the separator the runtime was compiled for, not from `OS` or
+/// any other environment variable: an env sniff answers "unset" in a stripped
+/// environment (`env -i`, some CI shells) and then `.exe` naming and PATH
+/// splitting both come out wrong.
 public let is_windows_host(): Bool;
 
+/// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator(): String;
 ```
 
 ## Traits
 ```koral
+/// Types accepted wherever a filesystem path is wanted, so functions can take strings or paths.
 public trait IntoPath {
+    /// Convert self into a Path value.
     into_path(self): Path;
 };
 ```
 
 ## Types
 ```koral
+/// Directory entry with type information
 public type DirEntry;
 
+/// Iterator over the entries of one directory; the OS handle closes when the iterator is dropped.
 public type mutable DirIterator;
 
+/// Depth-first iterator over a whole directory tree, produced by walk_dir.
 public type mutable WalkDirIterator;
 
+/// File open mode enumeration
 public type OpenMode {
     Read(), // O_RDONLY — read-only
     Write(), // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
@@ -117,8 +190,14 @@ public type OpenMode {
     ReadWrite(), // O_RDWR — read-write (file must exist)
 };
 
+/// File handle type — a shared handle over one OS file descriptor.
+/// Internally holds a FileStorage, shared via reference counting.
+/// The file descriptor is automatically closed when the last reference is released.
+/// Unbuffered design: directly wraps the file descriptor (fd).
+/// For buffered I/O, wrap with std.io BufReader/BufWriter.
 public type mutable File;
 
+/// File type enumeration for distinguishing file system entity types
 public type FileType {
     RegularFile(),
     Directory(),
@@ -126,151 +205,256 @@ public type FileType {
     Other(),
 };
 
+/// File permission type wrapping Unix-style 9-bit permission bits
 public type Permission;
 
+/// File metadata information (all fields private, accessed via methods)
+/// Timestamps use Duration (secs + nanos, aligned with C timespec), preserving nanosecond precision
 public type FileInfo;
 
+/// A filesystem path manipulated purely as text, without touching the disk.
 public type Path;
 ```
 
 ## Given Implementations
 ```koral
+/// Accessors for the entry name, full path, and type, plus metadata lookup.
 given DirEntry {
+    /// File/directory name
     public name(self): String;
+    /// Full path
     public path(self): Path;
+    /// File type
     public file_type(self): FileType;
+    /// Return true when the entry is a regular file.
     public is_file(self): Bool;
+    /// Return true when the entry is a directory.
     public is_dir(self): Bool;
+    /// Return true when the entry is a symbolic link.
     public is_symlink(self): Bool;
+    /// Get full file metadata (triggers stat system call)
     public info(self): Result[FileInfo];
 };
 
+/// ToString conformance summarizing name and type.
 given DirEntry: ToString {
+    /// Format as "DirEntry(name, type)".
     public to_string(self): String;
 };
 
-given DirIteratorStorage: Drop {};
-
+/// Iterator conformance yielding the entries of one directory.
 given DirIterator: Iterator[DirEntry] {
+    /// Return the next entry, skipping "." and "..", or None when the directory is exhausted.
     public next(self): Option[DirEntry];
 };
 
+/// Iterator conformance yielding every descendant depth-first.
 given WalkDirIterator: Iterator[DirEntry] {
+    /// Return the next descendant entry depth-first, or None when the walk is exhausted.
     public next(self): Option[DirEntry];
 };
 
-given FileStorage: Drop {};
-
+/// Handle accessors, metadata queries, syncing, and whole-file advisory locking.
 given File {
+    /// Returns the underlying OS file descriptor.
+    /// This is a low-level operation for interop with OS APIs and cross-module fd sharing.
     public fd(self): Int;
+    /// Get the file path (returns the normalized path from when the file was opened).
+    /// Does not resolve symlinks or relative paths; use canonicalize_path for that.
     public path(self): Path;
+    /// Get file metadata by querying via the file descriptor (no path needed).
     public info(self): Result[FileInfo];
+    /// Sync file data to disk (fsync, ensures physical persistence).
     public sync(self): Result[Void];
+    /// Acquire an exclusive lock (blocking, waits until acquired)
     public lock(self): Result[Void];
+    /// Acquire a shared lock (blocking, waits until acquired)
     public lock_shared(self): Result[Void];
+    /// Try to acquire an exclusive lock (non-blocking)
+    /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock(self): Result[Bool];
+    /// Try to acquire a shared lock (non-blocking)
+    /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_shared(self): Result[Bool];
+    /// Release the lock
     public unlock(self): Result[Void];
 };
 
+/// Reader conformance reading directly from the file descriptor.
 given File: Reader {
+    /// Read bytes into the target list over the given span and return how many were read.
+    /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
 };
 
+/// Writer conformance writing directly to the file descriptor.
 given File: Writer {
+    /// Write bytes from the source list over the given span and return how many were written.
+    /// Unbuffered: each call hits the file descriptor and errors surface immediately.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    /// flush is a no-op on unbuffered File (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
 
+/// Seeker conformance repositioning the file offset.
 given File: Seeker {
+    /// Reposition the file offset from the given origin and return the new absolute offset.
     public seek(self, pos: SeekOrigin): Result[UInt64];
 };
 
+/// Convenience checks for each file type case.
 given FileType {
+    /// Returns true only when the file type is RegularFile
     public is_file(self): Bool;
+    /// Returns true only when the file type is Directory
     public is_dir(self): Bool;
+    /// Returns true only when the file type is Symlink
     public is_symlink(self): Bool;
 };
 
+/// ToString conformance spelling each case as "file", "directory", "symlink", or "other".
 given FileType: ToString {
+    /// Returns the string representation of the file type
     public to_string(self): String;
 };
 
+/// Constructors and bit accessors for the 9 Unix-style permission bits.
 given Permission {
+    /// Create from numeric mode value (e.g. 0o755 = 493), keeping only low 9 bits
     public from_mode(mode: UInt32): Permission;
+    /// Get the raw permission bits
     public mode(self): UInt32;
+    /// Owner read permission
     public has_owner_read(self): Bool;
+    /// Owner write permission
     public has_owner_write(self): Bool;
+    /// Owner execute permission
     public has_owner_exec(self): Bool;
+    /// Group read permission
     public has_group_read(self): Bool;
+    /// Group write permission
     public has_group_write(self): Bool;
+    /// Group execute permission
     public has_group_exec(self): Bool;
+    /// Other read permission
     public has_other_read(self): Bool;
+    /// Other write permission
     public has_other_write(self): Bool;
+    /// Other execute permission
     public has_other_exec(self): Bool;
+    /// Factory method: read-only for all (0o444 = 292)
     public readonly(): Permission;
+    /// Factory method: owner read-write, group/other read (0o644 = 420)
     public read_write(): Permission;
+    /// Factory method: owner all, group/other read+exec (0o755 = 493)
     public executable(): Permission;
 };
 
+/// ToString conformance rendering the classic "rwxrwxrwx" form.
 given Permission: ToString {
+    /// Returns "rwxrwxrwx" format permission string
     public to_string(self): String;
 };
 
+/// Accessors for size, type, permissions, and timestamps.
 given FileInfo {
+    /// File size in bytes
     public file_size(self): UInt64;
+    /// File type
     public file_type(self): FileType;
+    /// File permissions
     public permissions(self): Permission;
+    /// Modification time
     public modified_time(self): DateTime;
+    /// Access time
     public accessed_time(self): DateTime;
+    /// Creation time (platforms that don't support this return epoch)
     public created_time(self): DateTime;
+    /// Return true when the entry is a regular file.
     public is_file(self): Bool;
+    /// Return true when the entry is a directory.
     public is_dir(self): Bool;
+    /// Return true when the entry is a symbolic link.
     public is_symlink(self): Bool;
 };
 
+/// ToString conformance summarizing size, type, and permissions.
 given FileInfo: ToString {
+    /// Format as "FileInfo(size=..., type=..., perm=...)".
     public to_string(self): String;
 };
 
+/// Eq conformance over the raw permission bits.
 given Permission: Eq {
+    /// Compare two permissions by their raw bits.
     public equals(self, other: Permission): Bool;
 };
 
+/// IntoPath conformance wrapping a string as a Path.
 given String: IntoPath {
+    /// Wrap this string as a Path without normalization.
     public into_path(self): Path;
 };
 
+/// IntoPath conformance returning the path unchanged.
 given Path: IntoPath {
+    /// Return this path unchanged.
     public into_path(self): Path;
 };
 
+/// Path inspection and manipulation: components, extensions, joining, and normalization.
 given Path {
+    /// 判断路径是否为空
     public is_empty(self): Bool;
+    /// 判断是否为绝对路径
     public is_absolute(self): Bool;
+    /// 拼接路径组件，返回新 Path
+    ///
+    /// 永远用 `/` 拼接——这是用户态的规范形，与平台无关。传给操作系统之前由
+    /// 运行时的各 syscall 边界负责翻译成平台分隔符。
     public join[T: IntoPath](self, path: T): Path;
+    /// 返回父目录路径
     public dir_name(self): Path;
+    /// 返回最后一个路径组件名称
     public base_name(self): String;
+    /// 返回文件扩展名（包含点号，如 ".txt"；无扩展名返回空字符串）
     public ext_name(self): String;
+    /// 返回文件名去掉扩展名后的部分（如 "file.txt" → "file"，"archive.tar.gz" → "archive.tar"）
     public stem_name(self): String;
+    /// 返回替换了扩展名的新 Path
     public with_ext_name(self, ext: String): Path;
+    /// 返回替换了最后一个组件名称的新 Path
     public with_base_name(self, name: String): Path;
+    /// 规范化路径：统一为 `/` 分隔符，并解析 `.` 与 `..` 组件。
+    ///
+    /// 这是用户态的规范形，平台无关。传给操作系统之前由运行时各 syscall 边界
+    /// 负责翻译成平台分隔符，所以这里刻意不翻成 `\`。
     public normalize(self): Path;
+    /// 将路径拆分为组件列表
     public components(self): List[String];
+    /// 判断路径是否以指定前缀开头（按组件匹配）
     public starts_with(self, prefix: Path): Bool;
+    /// 判断路径是否以指定后缀结尾（按组件匹配）
     public ends_with(self, suffix: Path): Bool;
+    /// 计算相对于 base 的相对路径
     public relative_to[T: IntoPath](self, base: T): Result[Path];
 };
 
+/// Eq conformance comparing the underlying path text.
 given Path: Eq {
+    /// Report whether two paths have identical text.
     public equals(self, other: Path): Bool;
 };
 
+/// Hash conformance over the underlying path text.
 given Path: Hash {
+    /// Hash the underlying path text.
     public hash(self): UInt;
 };
 
+/// ToString conformance returning the underlying path text.
 given Path: ToString {
+    /// Return the underlying path text.
     public to_string(self): String;
 };
 ```

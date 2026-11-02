@@ -18,7 +18,7 @@ extension Parser {
     return try parsePrimaryPattern()
   }
 
-  /// Parse a single pattern argument, which may be a named pattern (label: pattern) or positional (pattern).
+  /// Parse a single pattern argument, which may be a named pattern (label = pattern) or positional (pattern).
   private func parsePatternArgument() throws -> PatternArg {
     // The rest marker is a slot of its own: it is never labeled (there is no
     // field for the swallowed slots to land on) and never a full pattern.
@@ -26,7 +26,7 @@ extension Parser {
       return PatternArg(label: nil, pattern: try parseRestPatternSlot())
     }
     if let name = currentLabeledArgumentName(allowUnderscore: false) {
-      // `label: ...` has no meaning -- the rest marker swallows unnamed slots.
+      // `label = ...` has no meaning -- the rest marker swallows unnamed slots.
       // The labelled path below treats every failure as a failed lookahead and
       // falls through, so reject this one before entering it.
       let probeState = lexer.saveState()

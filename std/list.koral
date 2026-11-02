@@ -7,12 +7,15 @@
 // ============================================================================
 // List Type Definition
 // ============================================================================
+/// A growable ordered sequence of `T` in one contiguous buffer. Elements are
+/// stored by handle, so `type mutable` values stay shared with their source.
 public type mutable List[T: Any](
     mutable source: *mutable T,
     mutable len: UInt,
     mutable cap: UInt,
 );
 
+/// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
 given[T: Any] List[T]: Drop {
 
     drop(self): Void = {
@@ -23,11 +26,13 @@ given[T: Any] List[T]: Drop {
     };
 };
 
+/// A one-shot cursor that walks a `List[T]` from index 0 to the end.
 public type mutable ListIterator[T: Any](source: List[T], mutable index: UInt);
 
 // ============================================================================
 // List Methods
 // ============================================================================
+/// Construction, mutation, and query operations on `List[T]`.
 given[T: Any] List[T] {
 
     /// 空列表不分配缓冲区，首次 push 时再分配。
@@ -37,14 +42,17 @@ given[T: Any] List[T] {
         return List[T](null, 0, 0);
     };
 
+    /// Create an empty list with room for at least `capacity` elements before the next reallocation.
     public with_capacity(capacity: UInt): Self = {
         let cap = if capacity < 1 then 1 else capacity;
         let source = alloc_memory[T](cap);
         return List[T](source, 0, cap);
     };
 
+    /// The number of elements in the list.
     public count(self): UInt = self.len;
 
+    /// Grow capacity so the list can hold `additional` more elements without reallocating.
     public reserve(self, additional: UInt): Void = {
         self.ensure_capacity(self.len + additional);
     };
@@ -69,14 +77,15 @@ given[T: Any] List[T] {
         };
     };
 
+    /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
     public push(self, value: T): Void = {
         self.ensure_capacity(self.len + 1);
         init_memory(self.source + self.len, value);
         self.len = self.len + 1;
     };
 
-    // `span` picks which slice of `other` to append, defaulting to all of it --
-    // the same shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
+    /// Append the slice of `other` picked by `span`, defaulting to the whole list
+    /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
     public push_list(self, other: List[T], span: Range[UInt] = ...): Void = {
         let spec = other.slice_spec(span);
         let start = spec.start();
@@ -93,6 +102,7 @@ given[T: Any] List[T] {
     };
 
     // Using if is pattern matching
+    /// Remove and return the last element, or `None` when the list is empty.
     public pop(self): Option[T] = {
         if self.len == 0 then {
             return Option[T].None();
@@ -102,7 +112,8 @@ given[T: Any] List[T] {
         return Option[T].Some(value);
     };
 
-    // `span` picks which slice of `other` to insert, defaulting to all of it.
+    /// Insert the slice of `other` picked by `span` (default: the whole list) at
+    /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
     public insert_list_at(self, index: UInt, other: List[T], span: Range[UInt] = ...): Void = {
         if index > self.len then {
             panic("List insert_list_at index out of bounds");
@@ -141,6 +152,8 @@ given[T: Any] List[T] {
         self.len = self.len + other_len;
     };
 
+    /// Insert `value` at `index` and shift later elements right. O(n).
+    /// Panics when `index > count`; `index == count` appends.
     public insert_at(self, index: UInt, value: T): Void = {
         if index > self.len then {
             panic("List insert_at index out of bounds");
@@ -159,10 +172,12 @@ given[T: Any] List[T] {
         self.len = self.len + 1;
     };
 
+    /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
     public remove_at(self, index: UInt): Void = {
         let _ = self.take_at(index);
     };
 
+    /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
     public take_at(self, index: UInt): T = {
         if index >= self.len then {
             panic("List remove_at index out of bounds");
@@ -181,6 +196,8 @@ given[T: Any] List[T] {
         return value;
     };
 
+    /// The element at `index` without removing it, or `None` when out of range.
+    /// The list keeps the element: `type mutable` values come back shared with it.
     public get(self, index: UInt): Option[T] = {
         if index >= self.len then {
             return Option[T].None();
@@ -202,8 +219,10 @@ given[T: Any] List[T] {
         self.source[key] = value;
     };
 
+    /// The first element without removing it, or `None` when the list is empty.
     public first(self): Option[T] = self.get(0);
 
+    /// The last element without removing it, or `None` when the list is empty.
     public last(self): Option[T] = {
         if self.len == 0 then {
             return Option[T].None();
@@ -211,8 +230,10 @@ given[T: Any] List[T] {
         return self.get(self.len - 1);
     };
 
+    /// Whether the list has no elements.
     public is_empty(self): Bool = self.len == 0;
 
+    /// Remove every element, keeping the allocated capacity.
     public clear(self): Void = {
         for i in 0..<self.len then {
             deinit_memory(self.source + i);
@@ -220,6 +241,8 @@ given[T: Any] List[T] {
         self.len = 0;
     };
 
+    /// Overwrite every element with `value`. All slots hold the one value;
+    /// `type mutable` values are shared into every slot, not cloned per element.
     public fill(self, value: T): Void = {
         if self.len == 0 then {
             return;
@@ -229,6 +252,7 @@ given[T: Any] List[T] {
         };
     };
 
+    /// Build a new list by applying `fn` to every element, in order.
     public map[U: Any](self, fn: (T) -> U): List[U] = {
         let mutable result = List[U].with_capacity(self.len);
         for i in 0..<self.len then {
@@ -237,6 +261,7 @@ given[T: Any] List[T] {
         return result;
     };
 
+    /// Reverse the element order in place. O(n).
     public reverse(self): Void = {
         if self.len <= 1 then {
             return;
@@ -265,6 +290,8 @@ given[T: Any] List[T] {
         return result;
     };
 
+    /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
+    /// Panics when the range is invalid or reaches past the end.
     public slice_spec(self, range: Range[UInt]): SliceSpec = {
         let len = self.len;
         let mutable start: UInt = 0;
@@ -348,6 +375,8 @@ given[T: Any] List[T] {
         return SliceSpec.new(offset = start, len = end - start);
     };
 
+    /// Return a new list holding the `range` slice of this one (elements shared
+    /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
     public sublist(self, range: Range[UInt]): List[T] = {
         let span = self.slice_spec(range);
         return self.make_slice(span.start(), span.len());
@@ -366,7 +395,7 @@ given[T: Any] List[T] {
         return result;
     };
 
-    // Retains only elements satisfying the predicate, preserving order. O(n).
+    /// Retains only elements satisfying the predicate, preserving order. O(n).
     public retain(self, predicate: (T) -> Bool): Void = {
         if self.len == 0 then {
             return;
@@ -389,8 +418,8 @@ given[T: Any] List[T] {
         self.len = write;
     };
 
-    // Sort in-place using a key extraction function
-    // key extracts an ordering-comparable value from each element
+    /// Sort in place by the `Ord` key `key` extracts from each element.
+    /// Stable: elements with equal keys keep their relative order.
     public sort_by[K: Ord](self, key: (T) -> K): Void = {
         if self.len <= 1 then {
             return;
@@ -398,8 +427,8 @@ given[T: Any] List[T] {
         self.merge_sort_by_key(key, 0, self.len);
     };
 
-    // Binary search by key extraction. List must be sorted by the same key.
-    // Returns (index, true) if found, (insertion_point, false) if not found.
+    /// Binary search by the key `key` extracts; the list must already be sorted by that key.
+    /// Returns `(index, true)` when found, `(insertion_point, false)` otherwise. O(log n).
     public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[UInt, Bool] = {
         let mutable lo: UInt = 0;
         let mutable hi = self.len;
@@ -418,21 +447,24 @@ given[T: Any] List[T] {
     };
 };
 
+/// Raw-pointer accessors for `List[T]` of `foreign` elements (the FFI boundary).
 given[T: foreign] List[T] {
 
-    // FFI bridge for element types whose representation is fixed outside
-    // Koral's layout freedom. Not a generic "any T -> *T" escape hatch:
-    // `T` must satisfy the `foreign` constraint.
+    /// The element buffer as a raw `*T`, for `foreign` elements only -- the FFI
+    /// bridge, not a generic escape hatch. Invalid after any reallocation or drop.
     public borrow_ptr(self): *T = self.source;
 
+    /// The element buffer as a raw `*mutable T`, for `foreign` elements only -- the
+    /// FFI bridge, not a generic escape hatch. Invalid after any reallocation or drop.
     public borrow_mut_ptr(self): *mutable T = {
         return self.source;
     };
 };
 
+/// `Clone` for `List[T]`: a new list whose elements are copied one level.
 given[T: Any] List[T]: Clone {
 
-    // Independent shallow copy: new list identity, elements copied one level.
+    /// Independent shallow copy: new list identity, elements copied one level.
     public clone(self): Self = {
         let mutable result = List[T].with_capacity(self.len);
         for i in 0..<self.len then {
@@ -442,13 +474,17 @@ given[T: Any] List[T]: Clone {
     };
 };
 
+/// `Default` for `List[T]`: the empty list.
 given[T: Any] List[T]: Default {
 
+    /// The empty list.
     public default(): Self = List[T].new();
 };
 
+/// `Eq` for `List[T]`: element-wise equality in order.
 given[T: Eq] List[T]: Eq {
 
+    /// Whether `other` has the same length and pairwise-equal elements.
     public equals(self, other: List[T]): Bool = {
         if self.len != other.len then {
             return false;
@@ -462,8 +498,10 @@ given[T: Eq] List[T]: Eq {
     };
 };
 
+/// `Hash` for `List[T]`: combines length and element hashes in order.
 given[T: Hash] List[T]: Hash {
 
+    /// A hash of the element sequence: length and elements combined in order.
     public hash(self): UInt = {
         let mutable h: UInt = self.len.hash();
         for i in 0..<self.len then {
@@ -473,8 +511,11 @@ given[T: Hash] List[T]: Hash {
     };
 };
 
+/// `Ord` for `List[T]`: lexicographic comparison of elements, then length.
 given[T: Ord] List[T]: Ord {
 
+    /// Lexicographic three-way comparison (`-1`, `0`, or `1`); the shorter list
+    /// is smaller when one is a prefix of the other.
     public compare(self, other: List[T]): Int = {
         let self_len = self.len;
         let other_len = other.len;
@@ -499,8 +540,10 @@ given[T: Ord] List[T]: Ord {
     };
 };
 
+/// Membership and duplicate-removal operations on `List[T]` of `Eq` elements.
 given[T: Eq] List[T] {
 
+    /// Whether any element equals `value`. O(n).
     public contains(self, value: T): Bool = {
         for i in 0..<self.len then {
             if self.source[i] == value then {
@@ -510,8 +553,8 @@ given[T: Eq] List[T] {
         return false;
     };
 
-    // Removes consecutive duplicate elements. Requires T: Eq. O(n).
-    // For global dedup, sort first then call dedup.
+    /// Removes consecutive duplicate elements. O(n).
+    /// For global dedup, sort first then call dedup.
     public dedup(self): Void = {
         if self.len <= 1 then {
             return;
@@ -536,6 +579,7 @@ given[T: Eq] List[T] {
     };
 };
 
+/// A `count`-byte list of zeros.
 public let make_bytes(count: UInt): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
     if count == 0 then {
@@ -549,6 +593,7 @@ public let make_bytes(count: UInt): List[UInt8] = {
     return bytes;
 };
 
+/// A `count`-byte list of uninitialized bytes, meant for buffers that are filled before being read.
 public let make_uninitialized_bytes(count: UInt): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
     bytes.len = count;
@@ -558,8 +603,10 @@ public let make_uninitialized_bytes(count: UInt): List[UInt8] = {
 // ============================================================================
 // List Iterator - Using new pattern matching
 // ============================================================================
+/// `Iterator` for `ListIterator[T]`: yields list elements from index 0 upward.
 given[T: Any] ListIterator[T]: Iterator[T] {
 
+    /// Return the next element, or `None` once the cursor has walked the list.
     public next(self): Option[T] = {
         if self.index >= self.source.len then {
             return Option[T].None();
@@ -570,14 +617,17 @@ given[T: Any] ListIterator[T]: Iterator[T] {
     };
 };
 
+/// `Iterable` for `List[T]`: hands out a fresh `ListIterator[T]` on every call.
 given[T: Any] List[T]: Iterable[T, ListIterator[T]] {
 
+    /// A fresh cursor from index 0; the list itself is left untouched.
     public iterator(self): ListIterator[T] = ListIterator[T](self, 0);
 };
 
 // ============================================================================
 // List Sorting - sort_by with key function
 // ============================================================================
+/// Stable merge-sort helpers backing `sort_by` on `List[T]`.
 given[T: Any] List[T] {
 
     // Merge sort implementation with key function
@@ -639,10 +689,11 @@ given[T: Any] List[T] {
     };
 };
 
+/// Ordering operations on `List[T]` of `Ord` elements.
 given[T: Ord] List[T] {
 
-    // Binary search on a sorted list.
-    // Returns (index, true) if found, (insertion_point, false) if not found.
+    /// Binary search on a sorted list. O(log n).
+    /// Returns `(index, true)` if found, `(insertion_point, false)` if not found.
     public binary_search(self, target: T): Pair[UInt, Bool] = {
         let mutable lo: UInt = 0;
         let mutable hi = self.len;
@@ -660,7 +711,8 @@ given[T: Ord] List[T] {
         return Pair[UInt, Bool](lo, false);
     };
 
-    // Sort in-place in ascending order using Ord trait
+    /// Sort in place in ascending order using the `Ord` trait.
+    /// Stable: equal elements keep their relative order.
     public sort(self): Void = {
         if self.len <= 1 then {
             return;

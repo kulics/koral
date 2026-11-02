@@ -29,13 +29,15 @@
 // has no `lazy()`. To run a pipeline over it, collect first (`into_list()`).
 // ============================================================================
 
-// Generic Iterator trait: a one-shot cursor. Nothing more.
+/// A one-shot cursor over a sequence of `T`: it only advances, and `next` is the whole protocol.
 public trait Iterator[T: Any] {
+    /// Advance the cursor and return the next element, or `None` once it is exhausted.
     next(self): Option[T];
 };
 
-// Iterable trait - types that can produce a fresh iterator on every call
+/// A source that can hand out a fresh cursor on every call.
 public trait Iterable[T: Any, R: Iterator[T]] {
+    /// Build a fresh cursor over this source; the source itself is not spent.
     iterator(self): R;
 };
 
@@ -43,14 +45,16 @@ public trait Iterable[T: Any, R: Iterator[T]] {
 // Cursors - one-shot, `type mutable`, implement Iterator
 // ============================================================================
 
-// FilterIterator - filters elements based on predicate
+/// Cursor adapter that keeps only the elements satisfying a predicate.
 public type mutable FilterIterator[T: Any, R: Iterator[T]](
     iter: R,
     predicate: (T) -> Bool,
 );
 
+/// `Iterator` for `FilterIterator[T, R]`: pulls from the wrapped cursor until the predicate matches.
 given[T: Any, R: Iterator[T]] FilterIterator[T, R]: Iterator[T] {
 
+    /// Return the next element satisfying the predicate, or `None` when the source is exhausted.
     public next(self): Option[T] = {
         while self.iter.next() is .Some(v) then {
             if self.predicate(v) then {
@@ -61,25 +65,29 @@ given[T: Any, R: Iterator[T]] FilterIterator[T, R]: Iterator[T] {
     };
 };
 
-// MapIterator - transforms elements using mapper function
+/// Cursor adapter that applies `mapper` to every element as it passes.
 public type mutable MapIterator[T: Any, U: Any, R: Iterator[T]](
     iter: R,
     mapper: (T) -> U,
 );
 
+/// `Iterator` for `MapIterator[T, U, R]`: yields `mapper` applied to each element.
 given[T: Any, U: Any, R: Iterator[T]] MapIterator[T, U, R]: Iterator[U] {
 
+    /// Return `mapper` applied to the next element, or `None` when the source is exhausted.
     public next(self): Option[U] = self.iter.next() and then as v in self.mapper(v);
 };
 
-// FilterMapIterator - filters and transforms in one operation
+/// Cursor adapter that maps each element to an `Option`, keeping only the `Some` results.
 public type mutable FilterMapIterator[T: Any, U: Any, R: Iterator[T]](
     iter: R,
     mapper: (T) -> Option[U],
 );
 
+/// `Iterator` for `FilterMapIterator[T, U, R]`: yields the `Some` results of `mapper`.
 given[T: Any, U: Any, R: Iterator[T]] FilterMapIterator[T, U, R]: Iterator[U] {
 
+    /// Return the next element `mapper` turns into `Some`, or `None` when the source is exhausted.
     public next(self): Option[U] = {
         while self.iter.next() is .Some(v) then {
             when self.mapper(v) in {
@@ -93,11 +101,13 @@ given[T: Any, U: Any, R: Iterator[T]] FilterMapIterator[T, U, R]: Iterator[U] {
     };
 };
 
-// TakeIterator - takes first n elements
+/// Cursor adapter that yields at most `limit` elements from the front of the source.
 public type mutable TakeIterator[T: Any, R: Iterator[T]](iter: R, mutable limit: UInt);
 
+/// `Iterator` for `TakeIterator[T, R]`: stops once `limit` elements have been yielded.
 given[T: Any, R: Iterator[T]] TakeIterator[T, R]: Iterator[T] {
 
+    /// Return the next of the first `limit` elements, or `None` once the limit is spent or the source is exhausted.
     public next(self): Option[T] = {
         if self.limit == 0 then {
             return Option[T].None();
@@ -107,11 +117,13 @@ given[T: Any, R: Iterator[T]] TakeIterator[T, R]: Iterator[T] {
     };
 };
 
-// SkipIterator - skips first n elements
+/// Cursor adapter that drops the first `n` elements of the source.
 public type mutable SkipIterator[T: Any, R: Iterator[T]](iter: R, mutable to_skip: UInt);
 
+/// `Iterator` for `SkipIterator[T, R]`: drops the leading elements, then passes the rest through.
 given[T: Any, R: Iterator[T]] SkipIterator[T, R]: Iterator[T] {
 
+    /// Return the next element after the skipped prefix, or `None` when the source is exhausted.
     public next(self): Option[T] = {
         while self.to_skip > 0 then {
             self.iter.next() or else {
@@ -123,15 +135,17 @@ given[T: Any, R: Iterator[T]] SkipIterator[T, R]: Iterator[T] {
     };
 };
 
-// StepIterator - takes every nth element
+/// Cursor adapter that takes every `step_size`-th element, starting with the first.
 public type mutable StepIterator[T: Any, R: Iterator[T]](
     iter: R,
     step_size: UInt,
     mutable first: Bool,
 );
 
+/// `Iterator` for `StepIterator[T, R]`: yields one element out of every `step_size`.
 given[T: Any, R: Iterator[T]] StepIterator[T, R]: Iterator[T] {
 
+    /// Return the next kept element after dropping `step_size - 1` between them, or `None` when exhausted.
     public next(self): Option[T] = {
         if self.first then {
             self.first = false;
@@ -149,14 +163,16 @@ given[T: Any, R: Iterator[T]] StepIterator[T, R]: Iterator[T] {
     };
 };
 
-// EnumerateIterator - pairs each element with its index
+/// Cursor adapter that pairs each element with its zero-based index.
 public type mutable EnumerateIterator[T: Any, R: Iterator[T]](
     iter: R,
     mutable index: UInt,
 );
 
+/// `Iterator` for `EnumerateIterator[T, R]`: yields `(index, element)` pairs.
 given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[UInt, T]] {
 
+    /// Return the next `(index, element)` pair, or `None` when the source is exhausted.
     public next(self): Option[Pair[UInt, T]] = {
         return self.iter.next() and then as v in {
             let idx = self.index;
@@ -166,14 +182,16 @@ given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[UInt, T]] {
     };
 };
 
-// InspectIterator - executes side effect without modifying elements
+/// Cursor adapter that runs a side-effecting `action` on each element without changing it.
 public type mutable InspectIterator[T: Any, R: Iterator[T]](
     iter: R,
     action: (T) -> Void,
 );
 
+/// `Iterator` for `InspectIterator[T, R]`: passes elements through after inspecting them.
 given[T: Any, R: Iterator[T]] InspectIterator[T, R]: Iterator[T] {
 
+    /// Return the next element after running `action` on it, or `None` when the source is exhausted.
     public next(self): Option[T] = {
         return self.iter.next() and then as v in {
             self.action(v);
@@ -182,7 +200,7 @@ given[T: Any, R: Iterator[T]] InspectIterator[T, R]: Iterator[T] {
     };
 };
 
-// IntersperseIterator - inserts separator between elements
+/// Cursor adapter that inserts a separator between consecutive elements, with none at the ends.
 public type mutable IntersperseIterator[T: Any, R: Iterator[T]](
     iter: R,
     separator: T,
@@ -190,8 +208,11 @@ public type mutable IntersperseIterator[T: Any, R: Iterator[T]](
     mutable pending: Option[T],
 );
 
+/// `Iterator` for `IntersperseIterator[T, R]`: alternates elements with the separator.
 given[T: Any, R: Iterator[T]] IntersperseIterator[T, R]: Iterator[T] {
 
+    /// Return the next element or the separator placed before it, alternating,
+    /// or `None` when the source is exhausted.
     public next(self): Option[T] = {
         // If we need to return separator
         if self.next_is_separator then {
@@ -241,15 +262,18 @@ given[T: Any, R: Iterator[T]] IntersperseIterator[T, R]: Iterator[T] {
     };
 };
 
-// TakeWhileIterator - takes elements while predicate is true
+/// Cursor adapter that yields elements while a predicate holds, then stops.
 public type mutable TakeWhileIterator[T: Any, R: Iterator[T]](
     iter: R,
     predicate: (T) -> Bool,
     mutable done: Bool,
 );
 
+/// `Iterator` for `TakeWhileIterator[T, R]`: ends at the first element that fails the predicate.
 given[T: Any, R: Iterator[T]] TakeWhileIterator[T, R]: Iterator[T] {
 
+    /// Return the next element while the predicate holds; `None` after the first
+    /// failure or exhaustion. The failing element is consumed and not yielded.
     public next(self): Option[T] = {
         if self.done then {
             return Option[T].None();
@@ -270,15 +294,18 @@ given[T: Any, R: Iterator[T]] TakeWhileIterator[T, R]: Iterator[T] {
     };
 };
 
-// SkipWhileIterator - skips elements while predicate is true
+/// Cursor adapter that drops leading elements while a predicate holds, then yields the rest.
 public type mutable SkipWhileIterator[T: Any, R: Iterator[T]](
     iter: R,
     predicate: (T) -> Bool,
     mutable skipping: Bool,
 );
 
+/// `Iterator` for `SkipWhileIterator[T, R]`: skips the predicate-matching prefix of the source.
 given[T: Any, R: Iterator[T]] SkipWhileIterator[T, R]: Iterator[T] {
 
+    /// Return the next element once skipping has stopped; the first element to
+    /// fail the predicate is yielded, not dropped.
     public next(self): Option[T] = {
         if not self.skipping then {
             return self.iter.next();
@@ -293,15 +320,17 @@ given[T: Any, R: Iterator[T]] SkipWhileIterator[T, R]: Iterator[T] {
     };
 };
 
-// ChainIterator - chains two iterators of the same element type
+/// Cursor adapter that walks one cursor to exhaustion, then a second of the same element type.
 public type mutable ChainIterator[T: Any, R1: Iterator[T], R2: Iterator[T]](
     head: R1,
     tail: R2,
     mutable use_tail: Bool,
 );
 
+/// `Iterator` for `ChainIterator[T, R1, R2]`: runs `head` first, then `tail`.
 given[T: Any, R1: Iterator[T], R2: Iterator[T]] ChainIterator[T, R1, R2]: Iterator[T] {
 
+    /// Return the next element of `head`, or of `tail` once `head` is exhausted.
     public next(self): Option[T] = {
         if not self.use_tail then {
             when self.head.next() in {
@@ -317,14 +346,16 @@ given[T: Any, R1: Iterator[T], R2: Iterator[T]] ChainIterator[T, R1, R2]: Iterat
     };
 };
 
-// ZipIterator - zips two iterators into pairs
+/// Cursor adapter that pairs the elements of two cursors.
 public type mutable ZipIterator[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]](
     left: R1,
     right: R2,
 );
 
+/// `Iterator` for `ZipIterator[A, B, R1, R2]`: yields `(left, right)` pairs.
 given[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]] ZipIterator[A, B, R1, R2]: Iterator[Pair[A, B]] {
 
+    /// Return the next `(left, right)` pair, or `None` when either side is exhausted.
     public next(self): Option[Pair[A, B]] = {
         return when self.left.next() in {
             .Some(a) then when self.right.next() in {
@@ -336,15 +367,17 @@ given[A: Any, B: Any, R1: Iterator[A], R2: Iterator[B]] ZipIterator[A, B, R1, R2
     };
 };
 
-// FlatMapIterator - flattens nested iterators (fully lazy)
+/// Cursor adapter that maps each element to a cursor and flattens the results, one inner cursor at a time.
 public type mutable FlatMapIterator[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]](
     outer: R,
     mapper: (T) -> InnerR,
     mutable current_inner: Option[InnerR],
 );
 
+/// `Iterator` for `FlatMapIterator[T, U, R, InnerR]`: drains each inner cursor before advancing the source.
 given[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]] FlatMapIterator[T, U, R, InnerR]: Iterator[U] {
 
+    /// Return the next flattened element, or `None` when the source and every inner cursor are exhausted.
     public next(self): Option[U] = {
         while true then {
             when self.current_inner in {
@@ -386,33 +419,40 @@ given[T: Any, U: Any, R: Iterator[T], InnerR: Iterator[U]] FlatMapIterator[T, U,
 // two parameters wide (`T` and the cursor type `R`) no matter how long the
 // chain gets, and it means no per-stage view type has to exist at all.
 
+/// A lazy pipeline: adapters compose stages, and every terminal runs them over
+/// a fresh cursor, so asking twice gives the same answer and the source is never spent.
 public type LazyView[T: Any, R: Iterator[T]](make: () -> R);
 
+/// `Iterable` for `LazyView[T, R]`: `iterator` builds a fresh cursor from the pipeline's factory.
 given[T: Any, R: Iterator[T]] LazyView[T, R]: Iterable[T, R] {
 
+    /// Build a fresh cursor for this pipeline; the pipeline itself stays usable.
     public iterator(self): R = (self.make)();
 };
 
+/// Lazy adapters and terminals on `LazyView[T, R]`; adapters are only evaluated when a terminal runs.
 given[T: Any, R: Iterator[T]] LazyView[T, R] {
 
-    // More specific than the `Iterable` extension: a LazyView is already a
-    // pipeline, so `x.lazy().lazy()` is `x.lazy()` and not a nesting.
+    /// The pipeline itself: `lazy()` is the identity on a `LazyView`, so `x.lazy().lazy()` never nests.
     public lazy(self): LazyView[T, R] = self;
 
     // ========================================================================
     // Adapters - each one wraps the cursor this view already builds
     // ========================================================================
 
+    /// Keep only the elements for which `fn` returns true.
     public filter(self, fn: (T) -> Bool): LazyView[T, FilterIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, FilterIterator[T, R]](() => FilterIterator[T, R](base(), fn));
     };
 
+    /// Apply `fn` to each element as it passes through the pipeline.
     public map[U: Any](self, fn: (T) -> U): LazyView[U, MapIterator[T, U, R]] = {
         let base = self.make;
         return LazyView[U, MapIterator[T, U, R]](() => MapIterator[T, U, R](base(), fn));
     };
 
+    /// Apply `fn` to each element and keep only its `Some` results.
     public filter_map[U: Any](
         self,
         fn: (T) -> Option[U],
@@ -423,16 +463,19 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Yield at most the first `n` elements of the pipeline.
     public take(self, n: UInt): LazyView[T, TakeIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, TakeIterator[T, R]](() => TakeIterator[T, R](base(), n));
     };
 
+    /// Drop the first `n` elements of the pipeline and yield the rest.
     public skip(self, n: UInt): LazyView[T, SkipIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, SkipIterator[T, R]](() => SkipIterator[T, R](base(), n));
     };
 
+    /// Yield every `n`-th element of the pipeline, starting with the first. Panics when `n < 1`.
     public step_by(self, n: UInt): LazyView[T, StepIterator[T, R]] = {
         if n < 1 then {
             panic("step size must be at least 1");
@@ -443,6 +486,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Pair each element with its zero-based index.
     public enumerate(self): LazyView[Pair[UInt, T], EnumerateIterator[T, R]] = {
         let base = self.make;
         return LazyView[Pair[UInt, T], EnumerateIterator[T, R]](
@@ -450,6 +494,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Run `fn` on each element as it passes, yielding the elements unchanged.
     public inspect(self, fn: (T) -> Void): LazyView[T, InspectIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, InspectIterator[T, R]](
@@ -457,6 +502,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Insert `v` between consecutive elements of the pipeline, with none at the ends.
     public intersperse(self, v: T): LazyView[T, IntersperseIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, IntersperseIterator[T, R]](
@@ -464,6 +510,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Take elements while `fn` holds, stopping at the first failure.
     public take_while(self, fn: (T) -> Bool): LazyView[T, TakeWhileIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, TakeWhileIterator[T, R]](
@@ -471,6 +518,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Drop leading elements while `fn` holds, then yield the rest.
     public skip_while(self, fn: (T) -> Bool): LazyView[T, SkipWhileIterator[T, R]] = {
         let base = self.make;
         return LazyView[T, SkipWhileIterator[T, R]](
@@ -478,6 +526,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Yield this pipeline's elements, then `other`'s, in order.
     public chain[R2: Iterator[T], S2: Iterable[T, R2]](
         self,
         other: S2,
@@ -489,6 +538,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Pair this pipeline's elements with `other`'s, stopping at the shorter side.
     public zip[U: Any, R2: Iterator[U], S2: Iterable[U, R2]](
         self,
         other: S2,
@@ -500,6 +550,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         );
     };
 
+    /// Replace each element with the elements of the iterable `fn` returns, flattening the results.
     public flat_map[U: Any, InnerR: Iterator[U], InnerS: Iterable[U, InnerR]](
         self,
         fn: (T) -> InnerS,
@@ -519,7 +570,8 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
     // Terminals - each one on a fresh cursor, then throw the cursor away
     // ========================================================================
 
-    // Fold - reduce with initial value
+    /// Fold the pipeline into one value: `fn` receives `(acc, element)` pairs,
+    /// starting from `initial` and taking each result as the next accumulator.
     public fold[U: Any](self, initial: U, fn: (U, T) -> U): U = {
         let mutable acc = initial;
         let iter = self.iterator();
@@ -529,7 +581,8 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return acc;
     };
 
-    // Reduce - reduce without initial value
+    /// Fold the pipeline into one value with `fn` over `(acc, element)` pairs,
+    /// using the first element as the starting accumulator. `None` when empty.
     public reduce(self, fn: (T, T) -> T): Option[T] = {
         let iter = self.iterator();
         when iter.next() in {
@@ -546,7 +599,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         };
     };
 
-    // ToList - collect into List
+    /// Collect every element into a new `List[T]`.
     public into_list(self): List[T] = {
         let mutable result: List[T] = [];
         let iter = self.iterator();
@@ -556,7 +609,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return result;
     };
 
-    // ForEach - execute side effect for each element
+    /// Run `fn` on every element for its side effects.
     public for_each(self, fn: (T) -> Void): Void = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -564,7 +617,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         };
     };
 
-    // Count - count elements
+    /// The number of elements the pipeline yields.
     public count(self): UInt = {
         let mutable n: UInt = 0;
         let iter = self.iterator();
@@ -574,13 +627,13 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return n;
     };
 
-    // First - get first element
+    /// The first element the pipeline yields, or `None` when it yields nothing.
     public first(self): Option[T] = {
         let iter = self.iterator();
         return iter.next();
     };
 
-    // Last - get last element
+    /// The last element the pipeline yields, or `None` when it yields nothing.
     public last(self): Option[T] = {
         let mutable result = Option[T].None();
         let iter = self.iterator();
@@ -590,7 +643,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return result;
     };
 
-    // Nth - get element at index
+    /// The element at zero-based index `n`, or `None` when the pipeline yields fewer.
     public nth(self, n: UInt): Option[T] = {
         let iter = self.iterator();
         let mutable i: UInt = 0;
@@ -603,7 +656,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return Option[T].None();
     };
 
-    // Position - find index of first element matching predicate
+    /// The zero-based index of the first element satisfying `fn`, or `None` when none does.
     public position(self, fn: (T) -> Bool): Option[UInt] = {
         let iter = self.iterator();
         let mutable i: UInt = 0;
@@ -616,7 +669,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return Option[UInt].None();
     };
 
-    // Find - find first element matching predicate
+    /// The first element satisfying `fn`, or `None` when none does.
     public find(self, fn: (T) -> Bool): Option[T] = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -627,7 +680,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return Option[T].None();
     };
 
-    // FindMap - find first element that maps to Some
+    /// The first `Some` result of `fn` over the elements, or `None` when there is none.
     public find_map[U: Any](self, fn: (T) -> Option[U]): Option[U] = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -641,7 +694,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return Option[U].None();
     };
 
-    // Any - check if any element matches predicate
+    /// Whether `fn` holds for at least one element.
     public any(self, fn: (T) -> Bool): Bool = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -652,7 +705,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return false;
     };
 
-    // All - check if all elements match predicate
+    /// Whether `fn` holds for every element (true for an empty pipeline).
     public all(self, fn: (T) -> Bool): Bool = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -663,16 +716,14 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         return true;
     };
 
-    // IsEmpty - check if there is nothing to iterate
-    //
-    // Observational: it builds a cursor, looks at one element, and throws the
-    // cursor away. The pipeline is untouched.
+    /// Whether the pipeline yields nothing. Builds a cursor, looks at one element,
+    /// and drops the cursor -- the pipeline itself is untouched.
     public is_empty(self): Bool = {
         let iter = self.iterator();
         return iter.next().is_none();
     };
 
-    // MaxBy - find element with maximum key
+    /// The element with the greatest `fn` key, or `None` when empty. On ties, the first one wins.
     public max_by[K: Ord](self, fn: (T) -> K): Option[T] = {
         let iter = self.iterator();
         when iter.next() in {
@@ -694,7 +745,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         };
     };
 
-    // MinBy - find element with minimum key
+    /// The element with the smallest `fn` key, or `None` when empty. On ties, the first one wins.
     public min_by[K: Ord](self, fn: (T) -> K): Option[T] = {
         let iter = self.iterator();
         when iter.next() in {
@@ -720,9 +771,10 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
 // ============================================================================
 // Terminals with Eq constraint
 // ============================================================================
+/// Membership tests on `LazyView[T, R]` of `Eq` elements.
 given[T: Eq, R: Iterator[T]] LazyView[T, R] {
 
-    // Contains - check if a value appears
+    /// Whether any element equals `value`.
     public contains(self, value: T): Bool = {
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -737,9 +789,10 @@ given[T: Eq, R: Iterator[T]] LazyView[T, R] {
 // ============================================================================
 // Terminals with Ord constraint
 // ============================================================================
+/// Extremum queries on `LazyView[T, R]` of `Ord` elements.
 given[T: Ord, R: Iterator[T]] LazyView[T, R] {
 
-    // Max - find maximum element
+    /// The greatest element, or `None` when empty. On ties, the first one wins.
     public max(self): Option[T] = {
         let iter = self.iterator();
         when iter.next() in {
@@ -758,7 +811,7 @@ given[T: Ord, R: Iterator[T]] LazyView[T, R] {
         };
     };
 
-    // Min - find minimum element
+    /// The smallest element, or `None` when empty. On ties, the first one wins.
     public min(self): Option[T] = {
         let iter = self.iterator();
         when iter.next() in {
@@ -781,9 +834,10 @@ given[T: Ord, R: Iterator[T]] LazyView[T, R] {
 // ============================================================================
 // Terminals with Hash constraint
 // ============================================================================
+/// Set-collecting terminal for `LazyView[T, R]` of `Hash` elements.
 given[T: Hash, R: Iterator[T]] LazyView[T, R] {
 
-    // ToSet - collect into Set
+    /// Collect every element into a new `Set[T]`, collapsing duplicates.
     public into_set(self): Set[T] = {
         let mutable result = Set[T].new();
         let iter = self.iterator();
@@ -797,9 +851,10 @@ given[T: Hash, R: Iterator[T]] LazyView[T, R] {
 // ============================================================================
 // Numeric Aggregations
 // ============================================================================
+/// Summation terminal for `LazyView[T, R]` of `Add[T] and Zero` elements.
 given[T: Add[T] and Zero, R: Iterator[T]] LazyView[T, R] {
 
-    // Sum - sums elements using Zero.zero/Add.add
+    /// The sum of every element via `Add`, or `T.zero()` when the pipeline is empty.
     public sum(self): T = {
         let mutable acc = T.zero();
         let iter = self.iterator();
@@ -810,9 +865,10 @@ given[T: Add[T] and Zero, R: Iterator[T]] LazyView[T, R] {
     };
 };
 
+/// Product terminal for `LazyView[T, R]` of `Mul[T] and One` elements.
 given[T: Mul[T] and One, R: Iterator[T]] LazyView[T, R] {
 
-    // Product - multiplies elements using One.one/Mul.mul
+    /// The product of every element via `Mul`, or `T.one()` when the pipeline is empty.
     public product(self): T = {
         let mutable acc = T.one();
         let iter = self.iterator();
@@ -823,9 +879,11 @@ given[T: Mul[T] and One, R: Iterator[T]] LazyView[T, R] {
     };
 };
 
+/// Average terminal for `LazyView[T, R]` of `Add`, `Div`, `Zero` and `One` elements.
 given[T: Add[T] and Div[T] and Zero and One, R: Iterator[T]] LazyView[T, R] {
 
-    // Average - returns None for empty pipelines to avoid division by zero.
+    /// The mean of the elements via `Add`/`Div` (integer types truncate), or
+    /// `None` for an empty pipeline to avoid division by zero.
     public average(self): Option[T] = {
         let mutable acc = T.zero();
         let mutable count = 0;
@@ -843,11 +901,11 @@ given[T: Add[T] and Div[T] and Zero and One, R: Iterator[T]] LazyView[T, R] {
 // ============================================================================
 // The one door in
 // ============================================================================
+/// The one door into lazy pipelines: `lazy()` added to every `Iterable`.
 given[T: Any, R: Iterator[T]] Iterable[T, R] {
 
-    // Enter a lazy pipeline. Adapters and terminals live on `LazyView`, so
-    // nothing lazy is spelled on the container -- `map`, `filter`, `to_list`
-    // and friends stay free there for a future eager api.
+    /// Enter a lazy pipeline over this source. Adapters and terminals live on
+    /// `LazyView`, so `map` / `filter` / `to_list` stay free on the container itself.
     public lazy(self): LazyView[T, R] = {
         let src = self;
         return LazyView[T, R](() => src.iterator());

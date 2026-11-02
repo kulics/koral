@@ -2,103 +2,155 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Rand API
+# std/rand API
 
 ## Overview
-This page lists the public API of module `Std.Rand` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/rand` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/rand" { ... };`.
 
 ## Free Functions
 ```koral
+/// Create a Random instance backed by a system-entropy-seeded DefaultRandomSource.
 public let default_random(): Random[DefaultRandomSource];
 ```
 
 ## Traits
 ```koral
+/// A stateful source of raw random bits; `generate` advances the source's own progression state without consuming the receiver.
+/// Implementors are handles around shared mutable state and must be declared `type mutable` — declaring it `type` would claim the sharing is unobservable while every `generate` call is observable through it.
 public trait RandomSource {
+    /// Return the next 64 random bits and advance the source's state.
     generate(self): UInt64;
 };
 
+/// Types that can produce a random Self value from any RandomSource.
+/// The source stays a plain parameter, so a `type mutable` source is passed as the shared handle it is and call sites need no ceremony.
 public trait Randomizable {
+    /// Draw a random Self value from the given source, advancing the source.
     random[R: RandomSource](source: R): Self;
 };
 ```
 
 ## Types
 ```koral
+/// A random value generator wrapping any RandomSource with typed draws and collection helpers.
 public type mutable Random[R: RandomSource];
 
+/// A xoshiro256** pseudo-random generator with 256-bit state and period 2^256-1, not cryptographically secure.
+/// Copies share one underlying state, so generating through any copy advances them all.
 public type mutable DefaultRandomSource;
 ```
 
 ## Given Implementations
 ```koral
+/// Typed draws, bounded integers, and collection utilities over the wrapped source.
 given[R: RandomSource] Random[R] {
+    /// Construct from a RandomSource instance.
     public new(rng: R): Random[R];
+    /// Generate a random value of any Randomizable type.
     public next[T: Randomizable](self): T;
+    /// Generate a random Int within the given range, honoring its inclusive and exclusive bounds.
+    /// Panics if the range is empty.
     public next_int(self, range: Range[Int]): Int;
+    /// Generate a random UInt within the given range, honoring its inclusive and exclusive bounds.
+    /// Panics if the range is empty.
     public next_uint(self, range: Range[UInt]): UInt;
+    /// Randomly shuffle a list in place using the Fisher-Yates algorithm.
     public shuffle[T: Any](self, list: List[T]): Void;
+    /// Pick a uniformly random element from a list. Returns None if the list is empty.
     public choose[T: Any](self, list: List[T]): Option[T];
 };
 
+/// Randomizable conformance drawing the source's full 64-bit output.
 given UInt64: Randomizable {
+    /// Return the source's next generated 64-bit value.
     public random[R: RandomSource](source: R): UInt64;
 };
 
+/// Randomizable conformance drawing the high 32 bits of the source's output.
 given UInt32: Randomizable {
+    /// Return a UInt32 built from the high 32 bits of the source's output.
     public random[R: RandomSource](source: R): UInt32;
 };
 
+/// Randomizable conformance drawing the high 16 bits of the source's output.
 given UInt16: Randomizable {
+    /// Return a UInt16 built from the high 16 bits of the source's output.
     public random[R: RandomSource](source: R): UInt16;
 };
 
+/// Randomizable conformance drawing the high 8 bits of the source's output.
 given UInt8: Randomizable {
+    /// Return a UInt8 built from the high 8 bits of the source's output.
     public random[R: RandomSource](source: R): UInt8;
 };
 
+/// Randomizable conformance reinterpreting the source's 64 bits as a signed value.
 given Int64: Randomizable {
+    /// Return the source's next 64 bits reinterpreted as a signed Int64.
     public random[R: RandomSource](source: R): Int64;
 };
 
+/// Randomizable conformance reinterpreting 32 random bits as a signed value.
 given Int32: Randomizable {
+    /// Return 32 random bits reinterpreted as a signed Int32.
     public random[R: RandomSource](source: R): Int32;
 };
 
+/// Randomizable conformance reinterpreting 16 random bits as a signed value.
 given Int16: Randomizable {
+    /// Return 16 random bits reinterpreted as a signed Int16.
     public random[R: RandomSource](source: R): Int16;
 };
 
+/// Randomizable conformance reinterpreting 8 random bits as a signed value.
 given Int8: Randomizable {
+    /// Return 8 random bits reinterpreted as a signed Int8.
     public random[R: RandomSource](source: R): Int8;
 };
 
+/// Randomizable conformance producing a Float64 uniformly distributed in [0.0, 1.0).
 given Float64: Randomizable {
+    /// Return a Float64 uniformly distributed in [0.0, 1.0), using 53 bits of entropy.
     public random[R: RandomSource](source: R): Float64;
 };
 
+/// Randomizable conformance producing a Float32 uniformly distributed in [0.0, 1.0).
 given Float32: Randomizable {
+    /// Return a Float32 uniformly distributed in [0.0, 1.0), using 24 bits of entropy.
     public random[R: RandomSource](source: R): Float32;
 };
 
+/// Randomizable conformance drawing a Bool from the highest bit of the source's output.
 given Bool: Randomizable {
+    /// Return a Bool drawn from the highest bit of the source's output.
     public random[R: RandomSource](source: R): Bool;
 };
 
+/// Randomizable conformance drawing a pointer-sized unsigned value.
 given UInt: Randomizable {
+    /// Return a pointer-sized UInt built from the source's generated bits.
     public random[R: RandomSource](source: R): UInt;
 };
 
+/// Randomizable conformance drawing a pointer-sized signed value.
 given Int: Randomizable {
+    /// Return a pointer-sized Int built from the source's generated bits.
     public random[R: RandomSource](source: R): Int;
 };
 
+/// Seeding constructors for DefaultRandomSource from explicit state words or system entropy.
 given DefaultRandomSource {
+    /// Create from explicit seed values. Panics if all zeros.
     public from_seed(s0: UInt64, s1: UInt64, s2: UInt64, s3: UInt64): DefaultRandomSource;
+    /// Create with system entropy. Panics if entropy source fails.
     public new(): DefaultRandomSource;
 };
 
+/// RandomSource conformance producing raw 64-bit output from the xoshiro256** algorithm.
 given DefaultRandomSource: RandomSource {
+    /// Return the next pseudo-random UInt64, advancing the shared generator state.
     public generate(self): UInt64;
 };
 ```

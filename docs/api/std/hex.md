@@ -2,15 +2,23 @@
      Regenerate: bin/toolchain-doc-gen/koral_doc
      Verify:     bin/toolchain-doc-gen/koral_doc --check -->
 
-# Std.Hex API
+# std/hex API
 
 ## Overview
-This page lists the public API of module `Std.Hex` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+This page lists the public API of module `std/hex` (declaration-only syntax), organized by free functions, traits, types, and given implementations.
+
+Import the module with `using "std/hex" { ... };`.
 
 ## Free Functions
 ```koral
+/// Encode bytes as lowercase hexadecimal text. Two characters per byte, so the
+/// result is always `bytes.count() * 2` long. Never fails.
 public let encode_hex(bytes: List[UInt8]): String;
 
+/// Decode hexadecimal text back to bytes. Accepts uppercase and lowercase.
+///
+/// Fails on an odd number of characters, or on a character that is not a hex
+/// digit; the message says which and where.
 public let decode_hex(s: String): Result[List[UInt8]];
 ```
 
