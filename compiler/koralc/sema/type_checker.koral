@@ -1499,7 +1499,16 @@ given TypeChecker {
             or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
             or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
             or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType() or .VoidType()
-            or .NeverType() or .PointerType(_) or .MutablePointerType(_) or .OpaqueType(_) then true,
+            or .NeverType() or .OpaqueType(_) then true,
+            // A raw pointer crosses only as far as what it POINTS AT does:
+            // `*Bad` hands a Koral-managed pointee to C just as much as `Bad`
+            // would. `*Void` is C's `void*` and stays legal.
+            .PointerType(inner) or .MutablePointerType(inner) then {
+                inner is .VoidType() or self.satisfies_foreign_constraint(inner)
+            },
+            // A bare C function pointer crosses; its components are gated at
+            // type resolution.
+            .ForeignFunctionType(_, _) then true,
             _ then false,
         };
     };
@@ -1582,6 +1591,7 @@ given TypeChecker {
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
             .ReferenceType(_) then "Managed reference types (* / *mutable) cannot be used in foreign functions",
             .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions",
+            .PointerType(inner) or .MutablePointerType(inner) then "pointee type '\(self.context().type_display_name(inner))' does not satisfy the 'foreign' constraint",
             .FunctionType(...) then "Function types cannot be used in foreign functions",
             .GenericParameter(_) or .GenericStruct(_, _) or .GenericEnum(_, _) then "Generic parameters cannot be used in foreign functions",
             _ then "Type '\(self.context().type_display_name(t))' is not compatible with FFI",

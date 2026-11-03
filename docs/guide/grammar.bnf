@@ -99,9 +99,13 @@
 <positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
 <positional-param> ::= "mutable"? <identifier> ":" <type-annotation>
 // 说明：
-// 1) foreign 变量声明必须有类型（支持 mutable）
+// 1) foreign 变量声明必须有类型（支持 mutable），且类型整个在 `foreign` 封闭
+//    集合里（可按值收 `type foreign` / `[N]T`——全局量是 C 直接读的布局对象）
 // 2) foreign 函数不允许函数体，不支持泛型
 // 3) foreign 函数不支持命名参数，所有参数必须是位置参数（不带 `=`）
+// 4) foreign 函数参数/返回只收：标量、`*T` / `*mutable T`（pointee 也要在集合
+//    内，`*Void` 即 C 的 `void*`）、`*` 后的 `type foreign`、组件同规则的
+//    `foreign (A) -> R`；按值结构体/数组不进函数边界（写 `*T`）
 
 <function-signature> ::= "(" <func-param-list>? ")" ":" <type-annotation>
 <func-param-list> ::= <func-param> ("," <func-param>)* ","?
@@ -156,8 +160,8 @@
 // 2) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
 // 3) 字段只收裸 `name: Type`：C 布局是位置的、公开的、恒可写的，所以没有访问
 //    修饰符、`mutable` 标记、命名字段或默认值——改不了什么的标记只会撒谎
-// 4) 字段类型必须过 FFI 边界（`foreign` 约束那组封闭集合），禁止直接自递归（写 `*Self`）；
-//    不接受泛型参数
+// 4) 字段类型必须过 FFI 边界（`foreign` 约束那组封闭集合；`*Void` 是 C 的
+//    `void*`，放行），禁止直接自递归（写 `*Self`）；不接受泛型参数
 // 5) 语义是可变值语义：赋值/传参按值拷贝，self 是拷贝（无可变 self），显式 `Drop` 拒绝
 <foreign-field-list> ::= <foreign-field> ("," <foreign-field>)* ","?
 <foreign-field> ::= <identifier> ":" <type-annotation>
@@ -228,8 +232,9 @@
 // 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）——
 //    主体必须声明为 `type mutable`
 // 2) 类型种类约束关键字 `foreign`（同样不是 trait 名）——主体的表示由
-//    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` 指针、
-//    `type foreign` 声明，以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
+//    Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` 指针（pointee 也要
+//    在集合内，`*Void` 即 C 的 `void*` 例外放行）、`type foreign` 声明，
+//    以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
 //    用户声明不能认领（`type` 的布局由编译器选，不在其中）
 // 3) 简单 trait 名（如 Eq）
 // 4) 泛型 trait（如 Iterator[T]）

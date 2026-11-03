@@ -125,7 +125,8 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 它满足的是一个**封闭集合**，由编译器判定：
 
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
-- 裸指针：`*T`、`*mutable T`（指向的类型也要在集合里）
+- 裸指针：`*T`、`*mutable T`（指向的类型也要在集合里；`*Void` / `*mutable Void` 是
+  C 的 `void*`，作为特例放行——`Void` 只在 pointee 位不算出界）
 - `type foreign` 声明（布局就是 C 的那个，不透明形 `type foreign X {}` 同样在内）
 - `[N]T` 定长数组（元素也要在集合里；C 布局即 `T data[N]`，用单字段包装
   struct 表示——C 标准保证同布局，赋值/传参/返回却是合法 C）

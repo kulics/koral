@@ -1169,10 +1169,11 @@ public class TypeChecker {
          .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
          .float32, .float64, .bool, .void, .never:
       return true
-    case .pointer:
-      return true
-    case .mutablePointer:
-      return true
+    case .pointer(let inner), .mutablePointer(let inner):
+      // A raw pointer crosses only as far as what it POINTS AT does:
+      // `*Bad` hands a Koral-managed pointee to C just as much as `Bad`
+      // would. `*Void` is C's `void*` and stays legal.
+      return inner == .void || satisfiesForeignConstraint(inner)
     case .weakReference, .mutableWeakReference:
       return false
     case .borrowedReference, .mutableBorrowedReference:
@@ -1208,6 +1209,8 @@ public class TypeChecker {
       return "Managed reference types (* / *mutable) cannot be used in foreign functions"
     case .borrowedReference, .mutableBorrowedReference:
       return "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions"
+    case .pointer(let inner), .mutablePointer(let inner):
+      return "pointee type '\(inner)' does not satisfy the 'foreign' constraint"
     case .function:
       return "Function types cannot be used in foreign functions"
     case .genericParameter, .genericStruct, .genericEnum:

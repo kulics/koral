@@ -774,7 +774,7 @@ extension TypeChecker {
   /// may therefore cross the FFI boundary. A CLOSED set, decided by the compiler
   /// and not claimable by any user declaration: the built-in scalars (including
   /// std's `Rune`), raw pointers, and `foreign type` declarations.
-  private func satisfiesForeignConstraint(_ type: Type) -> Bool {
+  func satisfiesForeignConstraint(_ type: Type) -> Bool {
     switch type {
     case .bool, .int, .int8, .int16, .int32, .int64,
          .uint, .uint8, .uint16, .uint32, .uint64,
@@ -785,8 +785,8 @@ extension TypeChecker {
     case .pointer(let inner), .mutablePointer(let inner):
       // A raw pointer is only FFI-shaped as far as what it POINTS AT is:
       // `*String` carries a managed pointee across the boundary just as much
-      // as `String` does.
-      return satisfiesForeignConstraint(inner)
+      // as `String` does. `*Void` is C's `void*` and crosses.
+      return inner == .void || satisfiesForeignConstraint(inner)
     case .structure(let defId):
       return context.isForeignStruct(defId) || context.isStdNominal(defId, context.stdRuneDefId)
     case .opaque:

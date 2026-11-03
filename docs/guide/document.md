@@ -1634,7 +1634,8 @@ it from the type's own declaration.
   weak references require (`x as ?T` / `?expr` spell it).
 - `T: foreign` — the subject's representation is fixed outside Koral's layout
   freedom and may cross the FFI boundary: a built-in scalar, a `*` /
-  `*mutable` pointer, a `type foreign` declaration, or std's `Rune`. It is
+  `*mutable` pointer (to one of these, or to `Void` — C's `void*`), a
+  `type foreign` declaration, or std's `Rune`. It is
   a **closed set**; a Koral `type` is not in it, because the compiler chooses its
   layout. This is what `List.borrow_ptr` / `borrow_mut_ptr` require.
 
@@ -3191,6 +3192,30 @@ let foreign exit(code: Int): Never;
 let foreign abort(): Never;
 ```
 
+#### Boundary Types
+
+What may cross a `let foreign` function boundary is a closed set decided by the
+compiler — parameter and return types must be:
+
+- a built-in scalar (std's `Rune` included); `Void` / `Never` in return
+  position;
+- a raw pointer `*T` / `*mutable T` **whose pointee crosses too** — `*Box` and
+  `*Void` are fine, `*Bad` and `*(closure)` are not: a raw pointer is only as
+  FFI-shaped as what it points at;
+- a `type foreign` handle behind `*` (an opaque `type foreign CFile {}` appears
+  only as `*CFile`);
+- a `foreign (A) -> R` function pointer whose components pass the same rules.
+
+A Koral `type`, closure or managed reference never crosses — by value or
+behind a pointer. A `type foreign` struct or `[N]T` array crosses **by value
+only as a global** (`let foreign v: KoralTimespec;`): a foreign global is a
+layout object C reads directly, while function parameters and returns take
+`*T` (a C array parameter really is a pointer).
+
+> **`*Void` is `void*`.** `*Void` / `*mutable Void` are C's `void*` spellings
+> and stay legal at every boundary — parameters, returns, function-pointer
+> components, globals and `type foreign` fields.
+
 #### Foreign Types
 
 Declare external C types:
@@ -3211,9 +3236,9 @@ The rules are C's, spelled in Koral:
   `mutable` marker, no named fields, no defaults. C layout is public and
   always writable; a marker that changes nothing would only lie.
 - Every field type must cross the FFI boundary — a built-in scalar (std's
-  `Rune` included), a `*` / `*mutable` pointer to one, or another
-  `type foreign` declaration: the same closed set the `foreign` constraint
-  names. Direct self-recursion is refused (write `*Self`).
+  `Rune` included), a `*` / `*mutable` pointer to one (or to `Void`, C's
+  `void*`), or another `type foreign` declaration: the same closed set the
+  `foreign` constraint names. Direct self-recursion is refused (write `*Self`).
 - `type foreign` values follow **mutable value semantics**: assignment and
   argument passing copy. `self` in a method is such a copy, so there is no
   mutable self — to mutate a receiver, take a `*mutable T` parameter.
@@ -3280,7 +3305,8 @@ let main(): Int = {
 ```
 
 - Calls are positional-only, straight to C. Every signature component must
-  cross the FFI boundary (the same closed set as `let foreign`).
+  cross the FFI boundary under the same rules as `let foreign` parameters and
+  returns (see [Boundary Types](#boundary-types)).
 - A lambda or Koral function value is a closure and does not convert;
   assigning one is the ordinary type mismatch.
 

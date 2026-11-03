@@ -2813,6 +2813,10 @@ extension TypeChecker {
       try assertNoBorrowedReferenceType(type, context: "foreign global type", span: span)
       // Both messages name the SYMBOL, so both point at its name.
       try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
+      // A foreign global is a layout object C reads directly (by-value
+      // foreign structs/arrays included), so its TYPE must be in the closed
+      // 'foreign' set -- not merely FFI-shaped like a function parameter.
+      try enforceForeignConstraint(type, context: "foreign global type", span: typeNode.span)
 
       let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {

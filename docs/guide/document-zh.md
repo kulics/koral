@@ -1602,7 +1602,7 @@ let describe[T: ToString and Hash](value: T): String = value.to_string();
 约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
 - `T: mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`x as ?T` / `?expr` 亦然）。
-- `T: foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` / `*mutable` 指针、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
+- `T: foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` / `*mutable` 指针（指向集合内类型，或 `Void`——C 的 `void*`）、`type foreign` 声明，或 std 的 `Rune`。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
 
 ```koral
 let consume[I: Iterator[Int]](iter: I): Void = {};
@@ -3051,6 +3051,25 @@ let foreign exit(code: Int): Never;
 let foreign abort(): Never;
 ```
 
+#### 边界类型
+
+能过 `let foreign` 函数边界的类型是编译器定的封闭集合——参数与返回类型必须是：
+
+- 内建标量（含 std 的 `Rune`）；`Void` / `Never` 只在返回位；
+- raw pointer `*T` / `*mutable T`，**且 pointee 也得在集合内**——`*Box`、`*Void`
+  可以，`*Bad`、`*(closure)` 不行：raw pointer 能过边界只到它指向的东西为止；
+- 藏在 `*` 后面的 `type foreign` 句柄（不透明 `type foreign CFile {}` 只以
+  `*CFile` 出现）；
+- 组件同规则的 `foreign (A) -> R` 函数指针。
+
+Koral `type`、闭包、托管引用永远不跨界——按值或隔着指针都不行。`type foreign`
+结构体与 `[N]T` 数组**只在全局量位按值跨界**（`let foreign v: KoralTimespec;`）：
+foreign 全局量是 C 直接读取的布局对象，而函数参数/返回写 `*T`（C 数组参数的真身
+就是指针）。
+
+> **`*Void` 就是 `void*`。** `*Void` / `*mutable Void` 是 C `void*` 的拼写，在
+> 每个边界上都合法——参数、返回、函数指针组件、全局量与 `type foreign` 字段。
+
 #### Foreign 类型
 
 声明外部 C 类型：
@@ -3067,7 +3086,7 @@ type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 
 - foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明——也不接受泛型参数。
 - 字段只收裸 `name: Type`：位置字段，没有访问修饰符、`mutable` 标记、命名字段、默认值。C 布局是公开且恒可写的；改不了什么的标记只会撒谎。
-- 每个字段类型都必须能过 FFI 边界——内建标量（含 std 的 `Rune`）、指向它们的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。禁止直接自递归（写 `*Self`）。
+- 每个字段类型都必须能过 FFI 边界——内建标量（含 std 的 `Rune`）、指向它们（或 `Void`，即 C 的 `void*`）的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。禁止直接自递归（写 `*Self`）。
 - foreign 值是**可变值语义**：赋值与传参按值拷贝。方法里的 `self` 就是这样一个拷贝，所以没有可变 self——要改接收者就收 `*mutable T` 参数。
 - 显式 `Drop` 被拒绝：C 值没有析构（代码生成用纯 C 赋值拷贝它、drop 是空操作）。
 
@@ -3120,7 +3139,7 @@ let main(): Int = {
 };
 ```
 
-- 调用只用位置参数、直呼 C。签名的每个组件都必须过 FFI 边界（与 `let foreign` 同一封闭集合）。
+- 调用只用位置参数、直呼 C。签名的每个组件都必须按 `let foreign` 参数/返回的同一套规则过 FFI 边界（见[边界类型](#边界类型)）。
 - lambda 或 Koral 函数值是闭包，不做转换；赋值进去就是普通的类型不匹配。
 
 ### Intrinsic 声明
