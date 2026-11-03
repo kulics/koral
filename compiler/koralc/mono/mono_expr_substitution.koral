@@ -659,6 +659,24 @@ private let substitution_method_lookup_base_type(
     };
 };
 
+/// Is `method_name` a REQUIREMENT of the trait a placeholder dispatches
+/// through? Answered from the trait's declaration -- a tool name is not a
+/// requirement, and a rebuilt placeholder node's own field is not evidence
+/// either way (it carries the resolved item's DefId).
+private let placeholder_method_is_requirement(
+    mono: Monomorphizer,
+    trait_type: Type,
+    method_name: String,
+): Bool = {
+    return when trait_type in {
+        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+            trait_def_id,
+            method_name,
+        ) is .Some(_),
+        _ then false,
+    };
+};
+
 private let substitution_trait_object_type(t: Type): Option[Type] = {
     return when t in {
         .TraitObject(trait_def_id, type_args) then Option[Type].Some(
@@ -1316,6 +1334,11 @@ private let substitute_expr_kind(
                         // `resolveTraitPlaceholderMethodByIdentity`): the trait
                         // method's DefId is the identity, resolved once at
                         // definition time and carried on the node.
+                        let is_requirement_name = placeholder_method_is_requirement(
+                            mono,
+                            trait_type,
+                            method_name,
+                        );
                         let trait_item_def_id = if trait_method_def_id.is_valid() then trait_method_def_id
                         else method.def_id;
                         let mutable rebound_method_opt = resolve_trait_placeholder_method_by_identity(
@@ -1325,7 +1348,16 @@ private let substitute_expr_kind(
                             resolved_method_type_args,
                             lookup_base_type,
                         );
-                        if rebound_method_opt is .None() then {
+                        // The name bridge answers from the RECEIVER's method
+                        // slot, which is exactly what a constraint-bound call
+                        // must never consult: the body was checked against the
+                        // bound, and the receiver's own inherent method (or a
+                        // different trait's) would silently win the name. A
+                        // REQUIREMENT keeps the bridge as a last resort for
+                        // witnesses not yet keyed; a TOOL never crosses it --
+                        // its shared body is instantiated below / by the
+                        // trait-placeholder call path.
+                        if rebound_method_opt is .None() and is_requirement_name then {
                             rebound_method_opt = substitution_lookup_receiver_method_symbol(
                                 mono,
                                 lookup_base_type,
@@ -1347,7 +1379,7 @@ private let substitute_expr_kind(
                                 resolved_method_type_args,
                                 lookup_base_type,
                             );
-                            if rebound_method_opt is .None() then {
+                            if rebound_method_opt is .None() and is_requirement_name then {
                                 rebound_method_opt = substitution_lookup_receiver_method_symbol(
                                     mono,
                                     lookup_base_type,
@@ -1489,6 +1521,14 @@ private let substitute_expr_kind(
                             expected_types
                         };
                         let mutable rebound_method = method;
+                        // A method whose RECEIVER is the trait object is the
+                        // shared `R_TO_<Trait>_<def>_<method>(TraitRef self)`
+                        // body: its DefId is its identity and the binding is
+                        // final. Re-deriving "which method" from a spelling
+                        // here once handed such a call to the receiver's own
+                        // same-named inherent method.
+                        let shared_trait_receiver = method_receiver_is_trait_object(mono, method.symbol_type);
+                        if not shared_trait_receiver then {
                         // Identity-priority (Swift's
                         // `resolveMethodInstanceByIdentityForReceiver`): the
                         // definition-time DefId is authoritative. Only when no
@@ -1542,6 +1582,7 @@ private let substitute_expr_kind(
                                     .None() then {},
                                 };
                             };
+                        };
                         };
                         if rebound_method.def_id.id > 0 and rebound_method.def_id.id != method.def_id.id then {
                             let adjusted_base = align_method_reference_base_for_bound_method(
@@ -1765,6 +1806,12 @@ private let substitute_expr_kind(
                 mono,
                 new_base.expr_type,
             );
+            // A method whose RECEIVER is the trait object is the shared
+            // `R_TO_<Trait>_<def>_<method>(TraitRef self)` body: its DefId is
+            // its identity and the binding is final. The name lookup below
+            // answers from the receiver's method slot -- it once handed such a
+            // call to the receiver's own same-named inherent method.
+            let shared_trait_receiver = method_receiver_is_trait_object(mono, method.symbol_type);
             let lookup_seed_method = Symbol(
                 method.def_id,
                 normalize_method_symbol_type_for_base(
@@ -1774,16 +1821,27 @@ private let substitute_expr_kind(
                 ),
                 method.kind,
             );
-            new_method = Symbol(
-                new_method.def_id,
-                normalize_method_symbol_type_for_base(
-                    mono,
-                    new_method.symbol_type,
-                    binding_receiver_type,
-                ),
-                new_method.kind,
-            );
-            if not has_generic_parameter(binding_receiver_type) then {
+            if shared_trait_receiver then {
+                // Keep the DECLARED shared signature; normalizing its receiver
+                // to the caller's type would re-name the C symbol after the
+                // receiver and collide with the receiver's own method.
+                new_method = Symbol(
+                    new_method.def_id,
+                    method.symbol_type,
+                    new_method.kind,
+                );
+            } else {
+                new_method = Symbol(
+                    new_method.def_id,
+                    normalize_method_symbol_type_for_base(
+                        mono,
+                        new_method.symbol_type,
+                        binding_receiver_type,
+                    ),
+                    new_method.kind,
+                );
+            };
+            if not has_generic_parameter(binding_receiver_type) and not shared_trait_receiver then {
                 when substitution_lookup_receiver_method_symbol(
                     mono,
                     binding_receiver_type,
@@ -2007,50 +2065,64 @@ private let substitute_expr_kind(
                             mono,
                             new_method,
                         );
-                        when substitution_lookup_receiver_method_symbol(
+                        // Identity first: the bound's method -- the requirement
+                        // DefId, or the tool's own -- is the identity this call
+                        // was checked against. The name bridge below answers
+                        // from the RECEIVER's method slot, which is exactly what
+                        // a constraint-bound call must never consult (the
+                        // receiver's inherent method would silently win the
+                        // name), so it is kept only as a last resort for a
+                        // REQUIREMENT witness not yet keyed by identity.
+                        // Whether the name is a requirement comes from the
+                        // TRAIT's declaration, never from the node's field: a
+                        // rebuilt placeholder carries the tool's own DefId
+                        // there and would read as a requirement.
+                        let is_requirement_name = placeholder_method_is_requirement(
                             mono,
-                            lookup_base_type,
-                            new_method,
-                            Option[Type].Some(normalized_expected_method_type),
-                        ) in {
-                            .Some(concrete_method) then {
-                                let resolved_method_type = resolve_parameterized_type(
-                                    mono,
-                                    concrete_method.symbol_type,
-                                );
-                                let adjusted_base = align_method_reference_base_for_bound_method(
-                                    mono,
-                                    new_base,
-                                    concrete_method,
-                                );
-                                return TypedExprKind.MethodReference(
-                                    adjusted_base,
-                                    adjusted_base.expr_type,
-                                    Symbol(
-                                        concrete_method.def_id,
-                                        resolved_method_type,
-                                        concrete_method.kind,
-                                    ),
-                                    List[Type].new(),
-                                    new_method_type_args,
-                                    dispatch_callsite,
-                                );
-                            },
-                            .None() then {},
-                        };
-
-                        instantiate_trait_placeholder_method(
-                            mono,
-                            lookup_base_type,
+                            trait_type,
                             method_name,
-                            new_method_type_args,
                         );
-                        when substitution_lookup_receiver_method_symbol(
+                        let trait_item_def_id = if trait_method_def_id.is_valid() then trait_method_def_id
+                        else new_method.def_id;
+                        let mutable rebound_method_opt = resolve_trait_placeholder_method_by_identity(
                             mono,
+                            trait_item_def_id,
+                            normalized_expected_method_type,
+                            new_method_type_args,
                             lookup_base_type,
-                            new_method,
-                            Option[Type].Some(normalized_expected_method_type),
-                        ) in {
+                        );
+                        if rebound_method_opt is .None() and is_requirement_name then {
+                            rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                                mono,
+                                lookup_base_type,
+                                new_method,
+                                Option[Type].Some(normalized_expected_method_type),
+                            );
+                        };
+                        if rebound_method_opt is .None() then {
+                            instantiate_trait_placeholder_method(
+                                mono,
+                                lookup_base_type,
+                                method_name,
+                                new_method_type_args,
+                            );
+                            rebound_method_opt = resolve_trait_placeholder_method_by_identity(
+                                mono,
+                                trait_item_def_id,
+                                normalized_expected_method_type,
+                                new_method_type_args,
+                                lookup_base_type,
+                            );
+                            if rebound_method_opt is .None() and is_requirement_name then {
+                                rebound_method_opt = substitution_lookup_receiver_method_symbol(
+                                    mono,
+                                    lookup_base_type,
+                                    new_method,
+                                    Option[Type].Some(normalized_expected_method_type),
+                                );
+                            };
+                        };
+                        when rebound_method_opt in {
                             .Some(concrete_method) then {
                                 let resolved_method_type = resolve_parameterized_type(
                                     mono,

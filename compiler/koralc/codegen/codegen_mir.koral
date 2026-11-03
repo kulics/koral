@@ -3881,22 +3881,34 @@ given MIRFunctionCodeEmitter {
                 let mutable base_type = self.type_of_value(base);
                 when base_type in {
                     .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {
+                        // A reference to a TRAIT OBJECT is the fat handle
+                        // itself (`struct __koral_TraitRef` in both shapes), so
+                        // dereferencing one is the identity -- there is no
+                        // pointee behind `.ptr` to load. This must be the
+                        // arm's VALUE: an earlier form computed the identity
+                        // access as a discarded `when` and then always emitted
+                        // the payload load, reading the receiver's data pointer
+                        // as a TraitRef.
                         when self.trait_object_target_name(pointee) in {
-                            .Some(_) then {
+                            .Some(_) then MIRPlaceAccess(
+                                base_emission.expression,
+                                base_emission.cleanup,
+                            ),
+                            .None() then {
+                                let mutable path = StringBuilder.new();
+                                path.push_string("(*(");
+                                path.push_string(
+                                    self.codegen.c_type_name(pointee),
+                                );
+                                path.push_string("*)");
+                                path.push_string(base_emission.expression);
+                                path.push_string(".ptr)");
                                 MIRPlaceAccess(
-                                    base_emission.expression,
+                                    path.to_string(),
                                     base_emission.cleanup,
                                 )
                             },
-                            .None() then {},
-                        };
-                        let mutable path = StringBuilder.new();
-                        path.push_string("(*(");
-                        path.push_string(self.codegen.c_type_name(pointee));
-                        path.push_string("*)");
-                        path.push_string(base_emission.expression);
-                        path.push_string(".ptr)");
-                        MIRPlaceAccess(path.to_string(), base_emission.cleanup)
+                        }
                     },
                     _ then {
                         let mutable path = StringBuilder.new();

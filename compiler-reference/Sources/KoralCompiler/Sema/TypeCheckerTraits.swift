@@ -22,12 +22,6 @@ extension TypeChecker {
     return qualifiedTraits[qualifiedTraitKey(name, modulePath: modulePath)]
   }
 
-  /// A trait declared SOMEWHERE under this spelling, imported here or not.
-  /// NOT resolution -- see `traitInfo`.
-  func declaredSomewhere(_ name: String) -> TraitDeclInfo? {
-    return traits[name]
-  }
-
   func visibleTraitInfo(_ name: String) -> TraitDeclInfo? {
     return traitInfo(name, modulePath: currentModulePath)
   }
@@ -631,23 +625,29 @@ extension TypeChecker {
   /// Returns (isObjectSafe, reasons) where reasons lists why it's not safe.
   /// Uses objectSafetyCache for memoization and visited set for cycle detection.
   func checkObjectSafety(_ traitName: String) throws -> (Bool, [String]) {
-    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
-    let cacheKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    // The spelling resolves ONCE, in the module whose scope names it -- an
+    // aliased import exists only there, so re-resolving it in the DECLARING
+    // module (the old walk key) said "Undefined trait" for every alias. The
+    // walk below is on the declaration the spelling lands on.
+    guard let entryInfo = visibleTraitInfo(traitName) else {
+      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
+    }
+    let cacheKey = qualifiedTraitKey(traitName, modulePath: currentModulePath)
     if let cached = objectSafetyCache[cacheKey] {
       return cached
     }
     var visited: Set<String> = []
-    let result = try checkObjectSafetyHelper(traitName, modulePath: modulePath, visited: &visited)
+    let result = try checkObjectSafetyHelper(entryInfo, displayName: traitName, visited: &visited)
     objectSafetyCache[cacheKey] = result
     return result
   }
 
   private func checkObjectSafetyHelper(
-    _ traitName: String,
-    modulePath: [String],
+    _ traitInfo: TraitDeclInfo,
+    displayName: String,
     visited: inout Set<String>
   ) throws -> (Bool, [String]) {
-    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
+    let visitKey = qualifiedTraitKey(displayName, modulePath: traitInfo.modulePath)
     // Cycle detection: if already in the check chain, treat as safe to avoid infinite recursion
     if visited.contains(visitKey) {
       return (true, [])
@@ -659,15 +659,11 @@ extension TypeChecker {
       return cached
     }
 
-    guard let traitInfo = traitInfo(traitName, modulePath: modulePath) else {
-      throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
-    }
-
     var reasons: [String] = []
 
     // Check all methods (including inherited)
     var flattenVisited: Set<UInt64> = []
-    let allMethods = try flattenedTraitMethodsHelper(traitInfo, name: traitName, visited: &flattenVisited)
+    let allMethods = try flattenedTraitMethodsHelper(traitInfo, name: displayName, visited: &flattenVisited)
 
     for (name, method) in allMethods {
       // Rule 1: method must not have generic type parameters
@@ -695,7 +691,18 @@ extension TypeChecker {
 
     // Check parent traits' object safety (using visited to prevent cycles)
     for superTrait in traitInfo.superTraits {
-      let (parentSafe, parentReasons) = try checkObjectSafetyHelper(superTrait.baseName, modulePath: traitInfo.modulePath, visited: &visited)
+      // The bound carries the parent's DECLARATION; the parent's spelling is
+      // written in THIS trait's own source, so a name fallback resolves it
+      // against this trait's module -- never the bare index.
+      let parentInfo: TraitDeclInfo
+      if let boundDefId = superTrait.defId, boundDefId.isValid, let byDef = traitDeclsByDefId[boundDefId] {
+        parentInfo = byDef
+      } else if let byName = self.traitInfo(superTrait.baseName, modulePath: traitInfo.modulePath) {
+        parentInfo = byName
+      } else {
+        throw SemanticError(.generic("Undefined trait: \(superTrait.baseName)"), span: currentSpan)
+      }
+      let (parentSafe, parentReasons) = try checkObjectSafetyHelper(parentInfo, displayName: superTrait.baseName, visited: &visited)
       if !parentSafe {
         reasons.append(contentsOf: parentReasons.map { "inherited from \(superTrait.baseName): \($0)" })
       }
@@ -747,44 +754,13 @@ extension TypeChecker {
 
   /// Returns an ordered list of trait methods for vtable layout.
   /// Parent trait methods come first (in declaration order), then the trait's own methods.
+  /// The spelling resolves once, in this module's scope (an aliased import
+  /// exists only here); the walk is on the declaration it lands on.
   func orderedTraitMethods(_ traitName: String) throws -> [(name: String, signature: TraitMethodSignature)] {
-    let modulePath = visibleTraitInfo(traitName)?.modulePath ?? currentModulePath
-    var visited: Set<String> = []
-    return try orderedTraitMethodsHelper(traitName, modulePath: modulePath, visited: &visited)
-  }
-
-  private func orderedTraitMethodsHelper(
-    _ traitName: String,
-    modulePath: [String],
-    visited: inout Set<String>
-  ) throws -> [(name: String, signature: TraitMethodSignature)] {
-    let visitKey = qualifiedTraitKey(traitName, modulePath: modulePath)
-    if visited.contains(visitKey) { return [] }
-    visited.insert(visitKey)
-
-    guard let decl = traitInfo(traitName, modulePath: modulePath) else {
+    guard let info = visibleTraitInfo(traitName) else {
       throw SemanticError(.generic("Undefined trait: \(traitName)"), span: currentSpan)
     }
-
-    var result: [(name: String, signature: TraitMethodSignature)] = []
-    var seen: Set<String> = []
-
-    // Parent trait methods first
-    for parent in decl.superTraits {
-      let parentMethods = try orderedTraitMethodsHelper(parent.baseName, modulePath: decl.modulePath, visited: &visited)
-      for entry in parentMethods where !seen.contains(entry.name) {
-        result.append(entry)
-        seen.insert(entry.name)
-      }
-    }
-
-    // Then this trait's own methods
-    for m in decl.methods where !seen.contains(m.name) {
-      result.append((name: m.name, signature: m))
-      seen.insert(m.name)
-    }
-
-    return result
+    return try orderedTraitMethods(forDefId: info.defId)
   }
 
   /// The trait a receiver's type names, by DECLARATION.
@@ -904,6 +880,90 @@ extension TypeChecker {
           if let existing = result[method.name] {
             if existing.method.defId != method.defId {
               throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitName)'"), span: currentSpan)
+            }
+            continue
+          }
+          result[method.name] = (method: method, typeParams: block.traitTypeParams)
+        }
+      }
+    }
+
+    return result
+  }
+
+  /// The single trait declaration whose own name is `name`, when the
+  /// compilation holds exactly one. An ambiguous spelling resolves to nothing:
+  /// picking whichever registered last is the bare-index bug.
+  private func uniqueTraitNamed(_ name: String) -> TraitDeclInfo? {
+    var found: TraitDeclInfo?
+    for (_, info) in traitDeclsByDefId where info.name == name {
+      if found != nil { return nil }
+      found = info
+    }
+    return found
+  }
+
+  /// The flattened tool methods of the trait DECLARATION at `defId`, walking
+  /// parents by identity. The `given Trait { ... }` spelling resolves only in
+  /// the module that wrote it, so a name-keyed walk cannot reach a trait
+  /// imported under an alias and shares one bucket between same-named traits.
+  func flattenedTraitToolMethodEntries(
+    forDefId defId: DefId
+  ) throws -> [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] {
+    var visited: Set<UInt64> = []
+    return try flattenedTraitToolMethodEntriesHelperForDef(defId, visited: &visited)
+  }
+
+  /// The tool method `name` of the trait DECLARATION at `defId`, or nil.
+  func traitToolMethod(
+    forDefId defId: DefId,
+    named name: String
+  ) throws -> (method: MethodDeclaration, typeParams: [TypeParameterDecl])? {
+    return try flattenedTraitToolMethodEntries(forDefId: defId)[name]
+  }
+
+  private func flattenedTraitToolMethodEntriesHelperForDef(
+    _ traitDefId: DefId,
+    visited: inout Set<UInt64>
+  ) throws -> [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] {
+    if visited.contains(traitDefId.id) {
+      return [:]
+    }
+    visited.insert(traitDefId.id)
+    guard let traitInfo = traitDeclsByDefId[traitDefId] else {
+      throw SemanticError(.generic("Undefined trait: \(traitDefId)"), span: currentSpan)
+    }
+
+    var result: [String: (method: MethodDeclaration, typeParams: [TypeParameterDecl])] = [:]
+
+    for parent in traitInfo.superTraits {
+      // The bound carries the parent's DECLARATION; a bound recorded before
+      // identity falls back to the unique declaration of its spelling.
+      let parentDefId: DefId
+      if let boundDefId = parent.defId, boundDefId.isValid {
+        parentDefId = boundDefId
+      } else {
+        parentDefId = uniqueTraitNamed(parent.baseName)?.defId ?? .invalid
+      }
+      guard parentDefId.isValid else { continue }
+      let parentMethods = try flattenedTraitToolMethodEntriesHelperForDef(parentDefId, visited: &visited)
+      for (name, method) in parentMethods {
+        if let existing = result[name] {
+          if existing.method.defId != method.method.defId {
+            throw SemanticError(.generic("Ambiguous tool method '\(name)' inherited in trait '\(traitInfo.name)'"), span: currentSpan)
+          }
+          continue
+        }
+        result[name] = method
+      }
+    }
+
+    if let blocks = traitToolBlocksByDefId[traitDefId] {
+      for block in blocks {
+        for method in block.methods {
+          if let existing = result[method.name] {
+            if existing.method.defId != method.defId {
+              throw SemanticError(.generic("Trait tool method conflict '\(method.name)' in trait '\(traitInfo.name)'"), span: currentSpan)
             }
             continue
           }

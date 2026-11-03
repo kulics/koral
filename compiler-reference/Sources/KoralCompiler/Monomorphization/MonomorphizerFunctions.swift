@@ -1892,11 +1892,12 @@ extension Monomorphizer {
         return .function(parameters: [Parameter(type: baseType, kind: .byVal)], returns: .genericParameter(name: methodName))
     }
 
-    private func lookupTraitTargetExtensionMethod(
+    internal func lookupTraitTargetExtensionMethod(
         on selfType: Type,
         name: String,
         methodTypeArgs: [Type],
-        expectedMethodType: Type?
+        expectedMethodType: Type?,
+        traitFilter traitDefId: DefId? = nil
     ) throws -> Symbol? {
         guard let expectedMethodType else {
             return nil
@@ -1914,6 +1915,15 @@ extension Monomorphizer {
             guard case .decl(let ownerDefId) = owner,
                 input.genericTemplates.isTraitDefId(ownerDefId)
             else {
+                continue
+            }
+            // The caller holds the trait the call was checked against; only
+            // THAT trait's tool templates may answer. Without the filter two
+            // traits with a same-named tool collide and the wrong body (or a
+            // swallowed ambiguity) comes back.
+            if let traitDefId,
+               ownerDefId != traitDefId,
+               context.templateDeclaration(of: ownerDefId) != context.templateDeclaration(of: traitDefId) {
                 continue
             }
             for methodInfo in methods where nameCandidates.contains(methodInfo.method.name) {
@@ -1953,6 +1963,57 @@ extension Monomorphizer {
         return matches.first
     }
     
+    /// Resolve the TOOL method a constraint-matched call stands for and build
+    /// its callee. One shape for all four call sites (both monomorphizer
+    /// passes, concrete and trait-object receivers): the lookup is keyed by the
+    /// bound trait's DECLARATION, the receiver is aligned to the tool's own
+    /// self type, and the arguments are aligned to its parameters. Returns nil
+    /// when the name is a requirement (requirements live in the vtable, not in
+    /// the template table) or the trait has no such tool.
+    internal func resolveToolFallbackCall(
+        traitDefId: DefId,
+        receiver: TypedExpressionNode,
+        receiverBaseType: Type,
+        methodName: String,
+        methodTypeArgs: [Type],
+        expectedCallType: Type,
+        arguments: [TypedExpressionNode]
+    ) -> (callee: TypedExpressionNode, arguments: [TypedExpressionNode])? {
+        guard !orderedTraitMethodsForDef(traitDefId).contains(where: { $0.name == methodName }) else {
+            return nil
+        }
+        guard let toolMethod = try? lookupTraitTargetExtensionMethod(
+            on: receiverBaseType,
+            name: methodName,
+            methodTypeArgs: methodTypeArgs,
+            expectedMethodType: expectedCallType,
+            traitFilter: traitDefId
+        ) ?? nil else {
+            return nil
+        }
+        let resolvedToolType = resolveParameterizedType(toolMethod.type)
+        var alignedArgs = arguments
+        if case .function(let params, _) = resolvedToolType {
+            alignedArgs = zip(alignedArgs, params.dropFirst()).map { arg, param in
+                alignMethodReferenceBase(
+                    arg,
+                    to: .function(
+                        parameters: [Parameter(type: param.type, kind: param.kind)],
+                        returns: param.type
+                    )
+                )
+            }
+        }
+        let callee = TypedExpressionNode.methodReference(
+            base: alignMethodReferenceBase(receiver, to: resolvedToolType),
+            method: Symbol(defId: toolMethod.defId, type: resolvedToolType, kind: toolMethod.kind),
+            typeArgs: nil,
+            methodTypeArgs: methodTypeArgs,
+            type: resolvedToolType
+        )
+        return (callee, alignedArgs)
+    }
+
     // MARK: - Helper Methods
     
     /// Checks if a type supports builtin equality comparison.
@@ -1978,50 +2039,86 @@ extension Monomorphizer {
 
     // MARK: - Trait Object Method Resolution
 
-    /// Returns an ordered list of trait methods for vtable layout.
-    /// Parent trait methods come first (in declaration order), then the trait's own methods.
-    /// This mirrors the logic in TypeCheckerTraits.swift's orderedTraitMethods.
-    internal func orderedTraitMethods(_ traitName: String) -> [(name: String, signature: TraitMethodSignature)] {
-        var visited: Set<String> = []
-        return orderedTraitMethodsHelper(traitName, visited: &visited)
+    /// The trait DECLARATION's vtable layout: parent methods first (in
+    /// declaration order), then its own. The walk is by DECLARATION -- two
+    /// same-named traits from different modules are different nodes and must
+    /// not share a visit slot.
+    internal func orderedTraitMethodsForDef(
+        _ traitDefId: DefId
+    ) -> [(name: String, signature: TraitMethodSignature)] {
+        var visited: Set<UInt64> = []
+        var seen: Set<String> = []
+        var result: [(name: String, signature: TraitMethodSignature)] = []
+        orderedTraitMethodsHelperForDef(
+            traitDefId,
+            visited: &visited,
+            seen: &seen,
+            result: &result
+        )
+        return result
     }
 
-    private func orderedTraitMethodsHelper(
-        _ traitName: String,
-        visited: inout Set<String>
-    ) -> [(name: String, signature: TraitMethodSignature)] {
-        if visited.contains(traitName) { return [] }
-        visited.insert(traitName)
-
-        guard let decl = input.genericTemplates.traits[traitName] else {
-            return []
+    private func orderedTraitMethodsHelperForDef(
+        _ traitDefId: DefId,
+        visited: inout Set<UInt64>,
+        seen: inout Set<String>,
+        result: inout [(name: String, signature: TraitMethodSignature)]
+    ) {
+        guard visited.insert(traitDefId.id).inserted,
+              let decl = input.genericTemplates.traitDecl(forDefId: traitDefId) else {
+            return
         }
-
-        var result: [(name: String, signature: TraitMethodSignature)] = []
-        var seen: Set<String> = []
-
-        // Parent trait methods first
         for parent in decl.superTraits {
-            let parentMethods = orderedTraitMethodsHelper(parent.baseName, visited: &visited)
-            for entry in parentMethods where !seen.contains(entry.name) {
-                result.append(entry)
-                seen.insert(entry.name)
+            // The bound carries the parent's DECLARATION. A bound recorded
+            // before identity falls back to the unique declaration of its
+            // spelling -- never the bare name index.
+            let parentDefId: DefId
+            if let boundDefId = parent.defId, boundDefId.isValid {
+                parentDefId = boundDefId
+            } else {
+                parentDefId = traitDeclsByDefIdNamed(parent.baseName)?.defId ?? .invalid
             }
+            guard parentDefId.isValid else { continue }
+            orderedTraitMethodsHelperForDef(
+                parentDefId,
+                visited: &visited,
+                seen: &seen,
+                result: &result
+            )
         }
-
-        // Then this trait's own methods
         for m in decl.methods where !seen.contains(m.name) {
             result.append((name: m.name, signature: m))
             seen.insert(m.name)
         }
-
-        return result
     }
 
-    /// Computes the vtable index for a method in a trait.
-    /// Methods are ordered by declaration order, with parent trait methods first.
-    internal func vtableMethodIndex(traitName: String, methodName: String) -> Int? {
-        let ordered = orderedTraitMethods(traitName)
+    /// The trait declarations whose own name is `name`. More than one entry is
+    /// a same-name collision across modules; the caller must not pick by
+    /// recency.
+    internal func traitDeclsNamed(_ name: String) -> [TraitDeclInfo] {
+        var found: [TraitDeclInfo] = []
+        for (_, info) in input.genericTemplates.traitDeclsByDefId {
+            if Type.spelling(info.defId) == name {
+                found.append(info)
+            }
+        }
+        return found
+    }
+
+    /// The single trait declaration answering to `name`, when the compilation
+    /// holds exactly one. An ambiguous spelling resolves to nothing here --
+    /// picking whichever module registered last is exactly the bug this
+    /// replaces.
+    internal func traitDeclsByDefIdNamed(_ name: String) -> TraitDeclInfo? {
+        let matches = traitDeclsNamed(name)
+        return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// The vtable slot of `methodName` in the trait DECLARATION's layout. The
+    /// caller holds the trait's DefId; no spelling round-trips through the bare
+    /// name index on the way.
+    internal func vtableMethodIndex(traitDefId: DefId, methodName: String) -> Int? {
+        let ordered = orderedTraitMethodsForDef(traitDefId)
         return ordered.firstIndex(where: { $0.name == methodName })
     }
 

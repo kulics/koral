@@ -241,6 +241,10 @@ public type mutable GenericTemplateRegistry(
     mutable extension_methods: Dict[MethodOwner, List[GenericExtensionMethodTemplate]],
     mutable intrinsic_extension_methods: Dict[MethodOwner, List[IntrinsicExtensionEntry]],
     mutable trait_tool_blocks: Dict[String, List[TraitToolBlock]],
+    // Tool blocks indexed by the trait DECLARATION. `trait_tool_blocks` is
+    // keyed by the spelling written at the `given Trait { ... }` site and
+    // cannot answer "which trait?" for a same-named or aliased trait.
+    mutable trait_tool_blocks_by_def_id: Dict[UInt, List[TraitToolBlock]],
     mutable traits: Dict[String, TraitDeclInfo],
     // Traits indexed by DECLARATION. `traits` above is keyed by spelling and
     // exists for name resolution only; any test of the form "is this identity a
@@ -327,6 +331,7 @@ given GenericTemplateRegistry {
             Dict[MethodOwner, List[GenericExtensionMethodTemplate]].new(),
             Dict[MethodOwner, List[IntrinsicExtensionEntry]].new(),
             Dict[String, List[TraitToolBlock]].new(),
+            Dict[UInt, List[TraitToolBlock]].new(),
             Dict[String, TraitDeclInfo].new(),
             Dict[UInt, TraitDeclInfo].new(),
             Dict[MethodOwner, Dict[String, Symbol]].new(),
@@ -381,21 +386,19 @@ given GenericTemplateRegistry {
         return found;
     };
 
-    /// Candidate registry keys for `spelling`, in priority order:
+    /// Resolution keys for `spelling`, in priority order:
     ///
     ///   1. this module's own declaration (its qualified key),
     ///   2. a symbol import,
     ///   3. a batch/module import (`using "m" { ... };`) -- no symbol
-    ///      edge, so the spelling is the same in the imported module,
-    ///   4. the unqualified key.
+    ///      edge, so the spelling is the same in the imported module.
     ///
-    /// (4) is last on purpose and is NOT a resolution: that key is last-wins
-    /// across modules, so it cannot answer "which `Box`?". It is kept so a name
-    /// that is declared somewhere but imported nowhere can still produce
-    /// `... is defined in module 'M'. Import it explicitly`.
-    /// (rustc_resolve resolves per module from that module's imports; there is
-    /// no global name table to fall back on.)
-    private candidate_keys(self, spelling: String): List[String] = {
+    /// The unqualified key is NOT here: it is last-wins across modules, so it
+    /// cannot answer "which `Box`?" (docs/design/name-resolution.md §15-§16 --
+    /// the bare index is not resolution). (rustc_resolve resolves per module
+    /// from that module's imports; there is no global name table to fall back
+    /// on.)
+    private resolution_keys(self, spelling: String): List[String] = {
         let mutable keys = List[String].new();
         if not self.current_module_path.is_empty() then {
             keys.push(qualified_symbol_key(self.current_module_path, spelling));
@@ -418,9 +421,16 @@ given GenericTemplateRegistry {
             },
             .None() then {},
         };
-        // The unqualified key first (a real empty-path symbol of this
-        // spelling), then the name index (`bare_symbol_key`). The two are
-        // separate key spaces -- see `bare_symbol_key`.
+        return keys;
+    };
+
+    /// `resolution_keys` plus the unqualified key and the name index
+    /// (`bare_symbol_key` -- separate key spaces, see `bare_symbol_key`).
+    /// The unqualified half is last on purpose and is NOT a resolution: it is
+    /// kept so a name that is declared somewhere but imported nowhere can still
+    /// produce `... is defined in module 'M'. Import it explicitly`.
+    private candidate_keys(self, spelling: String): List[String] = {
+        let mutable keys = self.resolution_keys(spelling);
         keys.push(spelling);
         keys.push(bare_symbol_key(spelling));
         return keys;
@@ -428,7 +438,7 @@ given GenericTemplateRegistry {
 
     // Resolve a trait name (consolidated from 8 duplicate sites).
     public resolve_trait_name(self, candidate: String): Option[String] = {
-        for key in self.candidate_keys(candidate) then {
+        for key in self.resolution_keys(candidate) then {
             if self.traits.contains_key(key) then {
                 return Option[String].Some(key);
             };

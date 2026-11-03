@@ -820,6 +820,7 @@ let resolve_trait_placeholder_call_callee(
     base_expr: TypedExpr,
     trait_type: Type,
     method: Symbol,
+    trait_method_def_id: DefId,
     method_type_args: List[Type],
     dispatch_callsite: Option[DefId],
     new_args: List[TypedExpr],
@@ -893,6 +894,119 @@ let resolve_trait_placeholder_call_callee(
                             expr.span,
                         ),
                     );
+                };
+                // A TOOL method is not in the vtable -- it is not a
+                // requirement -- but it is still part of the trait's face and
+                // callable on an erased receiver. The body is the trait's
+                // shared instance: the tool template instantiated for the
+                // TRAIT OBJECT (`R_TO_<Trait>_<def>_<method>(TraitRef self)`),
+                // whose `Self` IS the erased receiver, so the call needs no
+                // boxing.
+                let is_requirement_name = when trait_type in {
+                    .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+                        trait_def_id,
+                        logical_method_name,
+                    ) is .Some(_),
+                    _ then false,
+                };
+                if not is_requirement_name then {
+                    let shared_trait_def_id = when trait_object_type in {
+                        .TraitObject(td, _) then td,
+                        _ then def_id_invalid(),
+                    };
+                    when select_trait_tool_template_cached(
+                        mono,
+                        shared_trait_def_id,
+                        logical_method_name,
+                        Option[UInt].None(),
+                        Option[UInt].Some(UInt(0)),
+                    ) in {
+                        .Some(tool_template) then {
+                            let shared_method_sym = mono.instantiate_extension_method_impl(
+                                trait_object_type,
+                                MethodOwner.Decl(shared_trait_def_id),
+                                tool_template,
+                                List[Type].new(),
+                                List[Type].new(),
+                            );
+                            if shared_method_sym.def_id.id > 0 then {
+                                // Sema adapts a trait-object receiver through a
+                                // borrow (`DerefExpr(RefExpr(obj))` and friends)
+                                // for the vtable's `__koral_Ref` convention. The
+                                // shared body takes the trait object ITSELF
+                                // (`struct __koral_TraitRef` by value) -- the same
+                                // shape an ordinary `f(d: Tag)` parameter has --
+                                // so peel the ref wrappers down to the object.
+                                let mutable trait_receiver = base_expr;
+                                let mutable peel_depth = UInt(0);
+                                let mutable peeling = true;
+                                while peeling then {
+                                    if peel_depth >= UInt(4) then {
+                                        peeling = false;
+                                    } else {
+                                        peel_depth += UInt(1);
+                                        let mutable descended = false;
+                                        when trait_receiver.expr_kind in {
+                                            .RefExpr(inner) or .DerefExpr(inner) then {
+                                                let inner_type = resolve_parameterized_type(
+                                                    mono,
+                                                    inner.expr_type,
+                                                );
+                                                when inner_type in {
+                                                    .TraitObject(...) or .ReferenceType(_)
+                                                    or .MutableReferenceType(_)
+                                                    or .BorrowedReferenceType(_)
+                                                    or .MutableBorrowedReferenceType(_) then {
+                                                        trait_receiver = inner;
+                                                        descended = true;
+                                                    },
+                                                    _ then {},
+                                                };
+                                            },
+                                            _ then {},
+                                        };
+                                        if not descended then {
+                                            peeling = false;
+                                        };
+                                    };
+                                };
+                                // The shared body takes the trait object ITSELF
+                                // (`struct __koral_TraitRef` by value) -- the same
+                                // shape an ordinary `f(d: Tag)` parameter has. The
+                                // call is therefore an ordinary call with the
+                                // receiver as its first ARGUMENT: a
+                                // MethodReference callee would run the
+                                // receiver-ref machinery, which for a tracked
+                                // handle borrows the object's payload and hands
+                                // the callee garbage behind a `TraitRef` cast.
+                                let shared_return = when shared_method_sym.symbol_type in {
+                                    .FunctionType(_, ret) then resolve_parameterized_type(
+                                        mono,
+                                        ret,
+                                    ),
+                                    _ then resolved_call_type,
+                                };
+                                let mutable shared_args = List[TypedExpr].new();
+                                shared_args.push(trait_receiver);
+                                for arg in new_args then {
+                                    shared_args.push(arg);
+                                };
+                                let shared_callee = TypedExpr(
+                                    TypedExprKind.Variable(shared_method_sym),
+                                    shared_method_sym.symbol_type,
+                                    expr.span,
+                                );
+                                return Option[TypedExpr].Some(
+                                    TypedExpr(
+                                        TypedExprKind.Call(shared_callee, shared_args),
+                                        shared_return,
+                                        expr.span,
+                                    ),
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
                 };
             },
             _ then {},
@@ -986,6 +1100,81 @@ let resolve_trait_placeholder_call_callee(
                     types_to_param_entries(expected_call_param_types),
                     resolved_call_type,
                 );
+                // TOOL fallback: the call matched a tool method BY THE
+                // CONSTRAINT (see `is_requirement_name`), and the receiver
+                // type may not answer for it at all -- an inherent method that
+                // owns the name swallows the per-conformance materialization
+                // (`materialize_trait_tool_members_for_conformance` skip (b')).
+                // The body is then the tool DECLARATION's template, instantiated
+                // for the RECEIVER's own type: `Self` binds to the receiver, so
+                // no boxing or unboxing is needed, and the instance's C name
+                // (`<Type>_<method>_d<decl>`) cannot collide with the inherent
+                // method's (`<Type>_<method>`). `trait_method_def_id` carries
+                // the tool's identity, resolved once at check time.
+                let is_requirement_name = when trait_type in {
+                    .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+                        trait_def_id,
+                        method_name,
+                    ) is .Some(_),
+                    _ then false,
+                };
+                if trait_method_def_id.is_valid() and not is_requirement_name then {
+                    let tool_trait_def_id = when trait_type in {
+                        .TraitObject(td, _) then td,
+                        _ then def_id_invalid(),
+                    };
+                    when select_trait_tool_template_cached(
+                        mono,
+                        tool_trait_def_id,
+                        method_name,
+                        Option[UInt].None(),
+                        Option[UInt].Some(UInt(0)),
+                    ) in {
+                        .Some(tool_template) then {
+                            let tool_method_sym = mono.instantiate_extension_method_impl(
+                                base_type,
+                                MethodOwner.Decl(tool_trait_def_id),
+                                tool_template,
+                                List[Type].new(),
+                                resolved_method_type_args_ref,
+                            );
+                            if tool_method_sym.def_id.id > 0 then {
+                                let adapted_base = align_method_reference_base_for_bound_method(
+                                    mono,
+                                    base_expr,
+                                    tool_method_sym,
+                                );
+                                let tool_callee = TypedExpr(
+                                    TypedExprKind.MethodReference(
+                                        adapted_base,
+                                        adapted_base.expr_type,
+                                        tool_method_sym,
+                                        List[Type].new(),
+                                        method_type_args,
+                                        dispatch_callsite,
+                                    ),
+                                    tool_method_sym.symbol_type,
+                                    adapted_base.span,
+                                );
+                                let tool_return = when tool_method_sym.symbol_type in {
+                                    .FunctionType(_, ret) then resolve_parameterized_type(
+                                        mono,
+                                        ret,
+                                    ),
+                                    _ then resolved_call_type,
+                                };
+                                return Option[TypedExpr].Some(
+                                    TypedExpr(
+                                        TypedExprKind.Call(tool_callee, new_args),
+                                        tool_return,
+                                        expr.span,
+                                    ),
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
                 let rebound_method = bind_receiver_method_symbol(
                     mono,
                     base_type,
@@ -1045,6 +1234,31 @@ let resolve_method_reference_call_callee(
     new_args: List[TypedExpr],
     resolved_call_type: Type,
 ): TypedExpr = {
+    // A method whose RECEIVER is the trait object is the shared trait-tool
+    // body (`R_TO_<Trait>_<def>_<method>(TraitRef self)`): its DefId is its
+    // identity and the binding is final. The strategies below re-derive
+    // "which method" from a spelling -- they once rebound such a call to the
+    // receiver's own same-named inherent method.
+    let shared_trait_receiver = method_receiver_is_trait_object(mono, method.symbol_type);
+    if shared_trait_receiver then {
+        let shared_callee = TypedExpr(
+            TypedExprKind.MethodReference(
+                resolved_base,
+                resolved_base.expr_type,
+                method,
+                type_args,
+                method_type_args,
+                dispatch_callsite,
+            ),
+            method.symbol_type,
+            resolved_base.span,
+        );
+        return TypedExpr(
+            TypedExprKind.Call(shared_callee, new_args),
+            resolved_call_type,
+            expr.span,
+        );
+    };
     let mutable declared_receiver_type = resolve_parameterized_type(mono, receiver_type);
     let mutable inferred_receiver_type = resolve_parameterized_type(
         mono,
@@ -1564,30 +1778,24 @@ let resolve_method_reference_call_callee(
         bound_method,
         Option[String].Some(mono.storage.context.symbol_name(method)),
     );
-    let receiver_trait_name_opt = when effective_receiver_type in {
-        .TraitObject(trait_def_id, _) then Option[String].Some(
-            def_id_spelling(trait_def_id),
-        ),
+    let receiver_trait_def_id_opt = when effective_receiver_type in {
+        .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
         .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(trait_def_id, _) then Option[String].Some(
-                def_id_spelling(trait_def_id),
-            ),
-            _ then Option[String].None(),
+            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            _ then Option[DefId].None(),
         },
         .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
         or .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(trait_def_id, _) then Option[String].Some(
-                def_id_spelling(trait_def_id),
-            ),
-            _ then Option[String].None(),
+            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            _ then Option[DefId].None(),
         },
-        _ then Option[String].None(),
+        _ then Option[DefId].None(),
     };
-    when receiver_trait_name_opt in {
-        .Some(trait_name) then {
+    when receiver_trait_def_id_opt in {
+        .Some(receiver_trait_def_id) then {
             let logical_method_name = when effective_dispatch_callsite in {
                 .Some(def_id) then when mono.receiver_method_dispatch_info(def_id) in {
                     .Some(info) then info.method_name,
@@ -1595,7 +1803,11 @@ let resolve_method_reference_call_callee(
                 },
                 .None() then get_semantic_method_name(mono, bound_method),
             };
-            if vtable_method_index(mono, trait_name, logical_method_name) < 0 then {
+            if vtable_method_index_for_def(
+                mono,
+                receiver_trait_def_id,
+                logical_method_name,
+            ) < 0 then {
                 let callee_expr = TypedExpr(
                     TypedExprKind.Variable(bound_method),
                     bound_method.symbol_type,
@@ -1759,13 +1971,14 @@ let resolve_special_call_callee(
     resolved_call_type: Type,
 ): Option[TypedExpr] = {
     return when new_callee.expr_kind in {
-        .TraitMethodPlaceholder(base_expr, trait_type, method, _, method_type_args, dispatch_callsite) then {
+        .TraitMethodPlaceholder(base_expr, trait_type, method, trait_method_def_id, method_type_args, dispatch_callsite) then {
             resolve_trait_placeholder_call_callee(
                 mono,
                 expr,
                 base_expr,
                 trait_type,
                 method,
+                trait_method_def_id,
                 method_type_args,
                 dispatch_callsite,
                 new_args,

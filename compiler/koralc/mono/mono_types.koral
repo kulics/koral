@@ -219,6 +219,54 @@ public let make_extension_method_layout_name(
     return out.to_string();
 };
 
+/// Whether a type IS (or wraps) the trait object itself.
+private let type_is_trait_object_handle(t: Type): Bool = {
+    return when t in {
+        .TraitObject(...) then true,
+        .ReferenceType(inner) or .MutableReferenceType(inner)
+        or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then type_is_trait_object_handle(
+            inner,
+        ),
+        _ then false,
+    };
+};
+
+/// Whether a method's RECEIVER is the trait object itself -- the shared
+/// trait-tool body shape (`R_TO_<Trait>_<def>_<method>(TraitRef self)`).
+///
+/// One definition for the four call sites (mono expression substitution, mono
+/// call resolution, and the MIR name sweep): a predicate that answers
+/// differently at different layers lets a call rebind at one and not the next.
+/// The parameter types are resolved first -- a still-parameterized receiver
+/// shape must not answer "no" where a resolved one answers "yes".
+public let method_receiver_is_trait_object(
+    mono: Monomorphizer,
+    symbol_type: Type,
+): Bool = {
+    return when symbol_type in {
+        .FunctionType(params, _) then when params.get(UInt(0)) in {
+            .Some(entry) then type_is_trait_object_handle(
+                resolve_parameterized_type(mono, entry.param_type),
+            ),
+            .None() then false,
+        },
+        _ then false,
+    };
+};
+
+/// The same question for callers holding fully-instantiated types -- MIR
+/// lowering runs after monomorphization and holds no `Monomorphizer`. Every
+/// type it sees is already concrete, so no resolution step exists to diverge.
+public let method_receiver_is_trait_object_instantiated(symbol_type: Type): Bool = {
+    return when symbol_type in {
+        .FunctionType(params, _) then when params.get(UInt(0)) in {
+            .Some(entry) then type_is_trait_object_handle(entry.param_type),
+            .None() then false,
+        },
+        _ then false,
+    };
+};
+
 /// Key of one instantiated extension method: WHICH type, WHICH method, which
 /// method type arguments.
 ///

@@ -1139,7 +1139,10 @@ given TypeChecker {
                     members,
                     typed_members,
                 );
-                when self.storage.trait_registry.validate_inheritance_graph(name) in {
+                when self.storage.trait_registry.validate_inheritance_graph(
+                    name,
+                    self.storage.module_path,
+                ) in {
                     .Ok(_) then {},
                     .Error(message) then {
                         self.push_diagnostic(message.message(), unknown_span());
@@ -1203,7 +1206,17 @@ given TypeChecker {
                         retain_checked_template_bodies,
                         List[TypeParameterDecl].new(),
                     );
-                    if not self.contains_generic_parameter(resolved_target) then {
+                    // A trait tool declaration's members live as extension
+                    // templates keyed on the trait (`check_given_members_for_type`
+                    // retains the template body), exactly like a generic given's;
+                    // they must not also be registered as concrete methods on the
+                    // trait-object owner. That registration is what used to emit
+                    // the `R_TO_*` shared body as a plain given member -- with
+                    // `Self` still generic after the template change, its symbol
+                    // type would be unlowerable.
+                    if trait_tool_name is .None() and not self.contains_generic_parameter(
+                        resolved_target,
+                    ) then {
                         self.register_conformance_method_signatures_for_concrete_type(
                             resolved_target,
                             typed_members,

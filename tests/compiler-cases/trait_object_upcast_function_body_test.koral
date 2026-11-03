@@ -1,0 +1,168 @@
+// EXPECT: PASS
+// Implicit upcast (concrete value -> trait object) must behave the same in
+// every conversion position a function body can be written in. Each row below
+// is one writing form; the compilers used to disagree on some of them:
+// return-statement bodies and collection literals (seed only) and block
+// tails, given-method bodies and `or else` defaults (bootstrap only). One
+// rule: where an expected type exists, the conversion is inserted there.
+
+trait Drawable {
+    draw(self): String;
+};
+
+type Circle(r: Int);
+
+given Circle: Drawable {
+    draw(self): String = "c(\(self.r))";
+};
+
+type Holder(d: Drawable);
+
+given Holder {
+    show(self): String = self.d.draw();
+};
+
+let take(d: Drawable): String = {
+    return d.draw();
+};
+
+let ret_stmt(r: Int): Drawable = {
+    return Circle(r);
+};
+
+let ret_tail_ctor(r: Int): Drawable = {
+    Circle(r)
+};
+
+let ret_tail_call(r: Int): Drawable = {
+    ret_stmt(r)
+};
+
+let ret_tail_var(r: Int): Drawable = {
+    let c = Circle(r);
+    c
+};
+
+let ret_in_nested_block(flag: Bool, r: Int): Drawable = {
+    if flag then {
+        return Circle(r);
+    };
+    return Circle(0);
+};
+
+given Holder {
+    inherent_body(self, r: Int): Drawable = Circle(r);
+};
+
+trait Factory {
+    build(self, r: Int): Drawable;
+};
+
+type Bench();
+
+given Bench: Factory {
+    build(self, r: Int): Drawable = Circle(r);
+};
+
+let check(label: String, got: String, want: String): Bool = {
+    if got != want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main(): Int = {
+    let mutable passed: Bool = true;
+    let c = Circle(1);
+
+    // -- let initializers -----------------------------------------------
+    let d_let_ctor: Drawable = Circle(2);
+    passed = check("let-ctor", d_let_ctor.draw(), "c(2)") and passed;
+    let d_let_call: Drawable = ret_stmt(3);
+    passed = check("let-call", d_let_call.draw(), "c(3)") and passed;
+    let d_let_lvalue: Drawable = c;
+    passed = check("let-lvalue", d_let_lvalue.draw(), "c(1)") and passed;
+
+    // -- assignment -----------------------------------------------------
+    let mutable d_assign: Drawable = Circle(0);
+    d_assign = Circle(4);
+    passed = check("assign-ctor", d_assign.draw(), "c(4)") and passed;
+    d_assign = ret_stmt(5);
+    passed = check("assign-call", d_assign.draw(), "c(5)") and passed;
+
+    // -- arguments ------------------------------------------------------
+    passed = check("arg-free-fn", take(Circle(6)), "c(6)") and passed;
+    passed = check("arg-method", Holder(c).show(), "c(1)") and passed;
+    let holder = Holder(Circle(7));
+    passed = check("arg-ctor", holder.show(), "c(7)") and passed;
+
+    // -- return ---------------------------------------------------------
+    passed = check("return-stmt", ret_stmt(8).draw(), "c(8)") and passed;
+    passed = check("return-tail-ctor", ret_tail_ctor(9).draw(), "c(9)") and passed;
+    passed = check("return-tail-call", ret_tail_call(10).draw(), "c(10)") and passed;
+    passed = check("return-tail-var", ret_tail_var(11).draw(), "c(11)") and passed;
+
+    // -- method (inherent / trait impl) bodies ---------------------------
+    let h = Holder(c);
+    passed = check("method-body-inherent", h.inherent_body(12).draw(), "c(12)") and passed;
+    let b = Bench();
+    passed = check("method-body-trait-impl", b.build(13).draw(), "c(13)") and passed;
+
+    // -- block tails (call / construction / variable) --------------------
+    let d_tail_ctor: Drawable = { Circle(14) };
+    passed = check("tail-ctor", d_tail_ctor.draw(), "c(14)") and passed;
+    let d_tail_call: Drawable = { ret_stmt(15) };
+    passed = check("tail-call", d_tail_call.draw(), "c(15)") and passed;
+    let d_tail_var: Drawable = {
+        let inner = Circle(16);
+        inner
+    };
+    passed = check("tail-var", d_tail_var.draw(), "c(16)") and passed;
+
+    // -- branch merges ---------------------------------------------------
+    let d_if: Drawable = if true then Circle(18) else Circle(99);
+    passed = check("if-merge", d_if.draw(), "c(18)") and passed;
+    let d_when: Drawable = when 1 in {
+        1 then Circle(19),
+        _ then Circle(99),
+    };
+    passed = check("when-merge", d_when.draw(), "c(19)") and passed;
+
+    // -- `or else` default ----------------------------------------------
+    let empty = Option[Drawable].None();
+    let d_or_else: Drawable = empty or else Circle(20);
+    passed = check("or-else", d_or_else.draw(), "c(20)") and passed;
+
+    // -- collections ------------------------------------------------------
+    let xs: List[Drawable] = [Circle(21)];
+    passed = check("list-literal", xs[0].draw(), "c(21)") and passed;
+    let mutable ys = List[Drawable].new();
+    ys.push(Circle(22));
+    passed = check("list-push", ys[0].draw(), "c(22)") and passed;
+    let nested: List[List[Drawable]] = [[Circle(23)]];
+    passed = check("nested-list-literal", nested[0][0].draw(), "c(23)") and passed;
+    let ds: Dict[String, Drawable] = ["k": Circle(24)];
+    passed = check("dict-literal", ds["k"].draw(), "c(24)") and passed;
+    let mutable dd = Dict[String, Drawable].new();
+    dd.insert("k", Circle(25));
+    passed = check("dict-insert", dd["k"].draw(), "c(25)") and passed;
+    let some: Option[Drawable] = Option[Drawable].Some(Circle(26));
+    passed = check("option-payload", (some or else Circle(99)).draw(), "c(26)") and passed;
+
+    // -- nested blocks and returns from nested scopes ---------------------
+    let d_nested: Drawable = {
+        let outer: Drawable = {
+            Circle(27)
+        };
+        outer
+    };
+    passed = check("nested-block", d_nested.draw(), "c(27)") and passed;
+    passed = check("return-in-nested", ret_in_nested_block(true, 28).draw(), "c(28)") and passed;
+
+    if passed then {
+        println("PASS");
+        return 0;
+    };
+    return 1;
+};

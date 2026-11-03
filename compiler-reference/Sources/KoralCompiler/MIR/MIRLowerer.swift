@@ -249,19 +249,20 @@ final class MIRLowerer {
     ordered: inout [InstantiatedTraitMethod]
   ) {
     let visitKey = "\(traitRef.cacheKey)|self=\(context.getDebugName(concreteType))"
-    // The ref already carries its declaration, so look that up rather than
-    // re-resolving the spelling (an alias, or a same-named trait from another
-    // module). The name path remains only for a ref that never got one.
+    // The ref already carries its declaration -- that is the identity. A ref
+    // with no declaration is an error state, not a name to re-read: the bare
+    // index is last-wins across modules and would lay out the vtable of
+    // whichever same-named trait registered last.
     let traitInfo = traitRef.traitDefId.isValid
       ? program.traitDeclsByDefId[traitRef.traitDefId]
-      : program.traits[traitRef.traitName]
+      : nil
     guard visitedTraits.insert(visitKey).inserted,
           let traitInfo else {
       return
     }
 
     let substitution = traitTypeParameterSubstitution(
-      traitName: traitRef.traitName,
+      traitInfo: traitInfo,
       traitTypeArgs: traitRef.traitTypeArgs,
       concreteType: concreteType
     )
@@ -311,12 +312,12 @@ final class MIRLowerer {
   }
 
   private func traitTypeParameterSubstitution(
-    traitName: String,
+    traitInfo: TraitDeclInfo,
     traitTypeArgs: [Type],
     concreteType: Type
   ) -> [String: Type] {
     var result: [String: Type] = ["Self": concreteType]
-    guard let traitInfo = program.traits[traitName], !traitInfo.typeParameters.isEmpty else {
+    guard !traitInfo.typeParameters.isEmpty else {
       return result
     }
     for (index, parameter) in traitInfo.typeParameters.enumerated() where index < traitTypeArgs.count {
@@ -2192,12 +2193,13 @@ private final class MIRFunctionBuilder {
   private func resolveWrappedPatternType(
     inner: TypeNode,
     substitution: [String: Type],
+    modulePath: [String],
     wrap: (Type) -> Type
   ) -> Type? {
-    if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution) {
+    if let traitInner = resolvePatternTraitObjectType(inner, substitution: substitution, modulePath: modulePath) {
       return wrap(traitInner)
     }
-    guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+    guard let resolved = resolvePatternTypeNode(inner, substitution: substitution, modulePath: modulePath) else {
       return nil
     }
     return wrap(resolved)
@@ -2225,7 +2227,7 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  private func resolvePatternTypeNode(_ node: TypeNode, substitution: [String: Type]) -> Type? {
+  private func resolvePatternTypeNode(_ node: TypeNode, substitution: [String: Type], modulePath: [String] = []) -> Type? {
     switch node {
     case .identifier(let name, _):
       if let substituted = substitution[name] {
@@ -2263,20 +2265,20 @@ private final class MIRFunctionBuilder {
       }
       return nil
     case .reference(let inner, let mutable, _):
-      return resolveWrappedPatternType(inner: inner, substitution: substitution) {
+      return resolveWrappedPatternType(inner: inner, substitution: substitution, modulePath: modulePath) {
         mutable ? .mutableReference(inner: $0) : .reference(inner: $0)
       }
     case .weakReference(let inner, let mutable, _):
-      return resolveWrappedPatternType(inner: inner, substitution: substitution) {
+      return resolveWrappedPatternType(inner: inner, substitution: substitution, modulePath: modulePath) {
         mutable ? .mutableWeakReference(inner: $0) : .weakReference(inner: $0)
       }
     case .pointer(let inner, let mutable, _):
-      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution) else {
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution, modulePath: modulePath) else {
         return nil
       }
       return mutable ? .mutablePointer(element: resolved) : .pointer(element: resolved)
     case .generic(let base, let args, _):
-      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution, modulePath: modulePath) }
       guard resolvedArgs.count == args.count else { return nil }
       for global in program.globalNodes {
         switch global {
@@ -2307,9 +2309,9 @@ private final class MIRFunctionBuilder {
       }
       return nil
     case .functionType(let paramTypes, let returnType, _):
-      let resolvedParams = paramTypes.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      let resolvedParams = paramTypes.compactMap { resolvePatternTypeNode($0, substitution: substitution, modulePath: modulePath) }
       guard resolvedParams.count == paramTypes.count,
-            let resolvedReturn = resolvePatternTypeNode(returnType, substitution: substitution) else {
+            let resolvedReturn = resolvePatternTypeNode(returnType, substitution: substitution, modulePath: modulePath) else {
         return nil
       }
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
@@ -2333,20 +2335,46 @@ private final class MIRFunctionBuilder {
 
   private func resolvePatternTraitObjectType(
     _ node: TypeNode,
-    substitution: [String: Type]
+    substitution: [String: Type],
+    modulePath: [String]
   ) -> Type? {
+    // A trait name resolves where the TYPE NAMING IT was declared -- the same
+    // module whose scope the type checker resolved it in. The bare name index
+    // cannot answer "which `Tag`?".
+    func traitDefId(named name: String) -> DefId? {
+      if let defId = context.lookupDefId(modulePath: modulePath, name: name, sourceFile: nil),
+         program.traitDeclsByDefId[defId] != nil {
+        return defId
+      }
+      return uniqueTraitDefIdNamed(name)
+    }
     switch node {
     case .identifier(let name, _):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
-      guard resolvePatternTypeNode(node, substitution: substitution) == nil else { return nil }
-      return .traitObject(traitDefId: program.traits[name]?.defId ?? .invalid, typeArgs: [])
+      guard resolvePatternTypeNode(node, substitution: substitution, modulePath: modulePath) == nil else { return nil }
+      return .traitObject(traitDefId: traitDefId(named: name) ?? .invalid, typeArgs: [])
     case .generic(let base, let args, _):
-      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution, modulePath: modulePath) }
       guard resolvedArgs.count == args.count else { return nil }
-      return .traitObject(traitDefId: program.traits[base]?.defId ?? .invalid, typeArgs: resolvedArgs)
+      return .traitObject(traitDefId: traitDefId(named: base) ?? .invalid, typeArgs: resolvedArgs)
     default:
       return nil
     }
+  }
+
+  /// The single trait declaration answering to `name`, when the compilation
+  /// holds exactly one. An ambiguous spelling resolves to nothing here -- the
+  /// bare name index is last-wins across modules and would silently name
+  /// whichever same-named trait registered last.
+  private func uniqueTraitDefIdNamed(_ name: String) -> DefId? {
+    var found: DefId?
+    for (defId, info) in program.traitDeclsByDefId {
+      if Type.spelling(info.defId) == name || Type.spelling(defId) == name {
+        if found != nil { return nil }
+        found = defId
+      }
+    }
+    return found
   }
 
   private func resolvedPatternStructMembers(
@@ -2408,7 +2436,7 @@ private final class MIRFunctionBuilder {
       var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
       resolvedMembers.reserveCapacity(info.parameters.count)
       for member in info.parameters {
-        guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
+        guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution, modulePath: context.getModulePath(tplDefId) ?? []) else {
           return nil
         }
         resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named, defaultValue: member.defaultValue))
@@ -2455,7 +2483,7 @@ private final class MIRFunctionBuilder {
         var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
         resolvedParams.reserveCapacity(caseDecl.parameters.count)
         for parameter in caseDecl.parameters {
-          guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
+          guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution, modulePath: context.getModulePath(tplDefId) ?? []) else {
             return nil
           }
           resolvedParams.append((name: parameter.name, type: resolvedType, access: AccessModifier.public, named: parameter.named, defaultValue: parameter.defaultValue))
@@ -2541,7 +2569,7 @@ private final class MIRFunctionBuilder {
     var resolvedMembers: [(name: String, type: Type, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
     resolvedMembers.reserveCapacity(info.parameters.count)
     for member in info.parameters {
-      guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution) else {
+      guard let resolvedType = resolvePatternTypeNode(member.type, substitution: substitution, modulePath: context.getModulePath(templateDefId) ?? []) else {
         return nil
       }
       resolvedMembers.append((name: member.name, type: resolvedType, mutable: member.mutable, access: member.access, named: member.named, defaultValue: member.defaultValue))
@@ -2569,7 +2597,7 @@ private final class MIRFunctionBuilder {
       var resolvedParams: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
       resolvedParams.reserveCapacity(caseDecl.parameters.count)
       for parameter in caseDecl.parameters {
-        guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution) else {
+        guard let resolvedType = resolvePatternTypeNode(parameter.type, substitution: substitution, modulePath: context.getModulePath(templateDefId) ?? []) else {
           return nil
         }
         resolvedParams.append((name: parameter.name, type: resolvedType, access: .public, named: parameter.named, defaultValue: parameter.defaultValue))

@@ -47,6 +47,25 @@ extension TypeChecker {
     return r
   }
 
+  /// Who owns a method name on a type's extension table.
+  ///
+  /// An INHERENT method (`given X { m }`) or a trait REQUIREMENT witness owns
+  /// the name; a materialized trait TOOL never does -- an inherent method
+  /// simply overrides a tool (guide: "Inherent type methods win over trait tool
+  /// methods"). An inherent name colliding with a requirement name is a
+  /// definition error in every registration order, never a priority contest.
+  func slotOwnedByInherentOrRequirement(owner: MethodOwner, name: String) -> Bool {
+    if inherentMethodNames[owner]?.contains(name) == true {
+      return true
+    }
+    for traitDefId in methodProviderTraits[owner]?[name] ?? [] {
+      if traitMethodDefId(traitDefId: traitDefId, methodName: name) != nil {
+        return true
+      }
+    }
+    return false
+  }
+
   /// Does the method face admit `owner.name` here?
   func methodFaceAllows(owner: MethodOwner, name: String) -> Bool {
     if inherentMethodNames[owner]?.contains(name) == true {

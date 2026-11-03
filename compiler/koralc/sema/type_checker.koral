@@ -2591,14 +2591,19 @@ given TypeChecker {
                 return false;
             };
             seen_names.push(member.name);
-            for requirement in trait_info.methods then {
-                if requirement.name == member.name then {
-                    self.push_diagnostic(
-                        "Trait entity method '\(member.name)' conflicts with requirement in trait '\(trait_name)'",
-                        span,
-                    );
-                    return false;
-                };
+            // Requirements of the trait AND its parents: a tool named like any
+            // inherited requirement is the same conflict as one named like the
+            // trait's own.
+            if self.trait_declares_requirement_in_trait(
+                trait_info.def_id,
+                member.name,
+                Set[UInt].new(),
+            ) then {
+                self.push_diagnostic(
+                    "Trait entity method '\(member.name)' conflicts with requirement in trait '\(trait_name)'",
+                    span,
+                );
+                return false;
             };
         };
 
@@ -2645,21 +2650,62 @@ given TypeChecker {
                 ),
             );
         };
-        updated_blocks.push(
-            TraitToolBlock(
-                trait_name,
-                self.to_template_type_params(type_params),
-                members_with_ids,
-                self.storage.file_path,
-                self.storage.module_path,
-                self.storage.package_id,
-            ),
+        let new_block = TraitToolBlock(
+            trait_name,
+            self.to_template_type_params(type_params),
+            members_with_ids,
+            self.storage.file_path,
+            self.storage.module_path,
+            self.storage.package_id,
         );
+        updated_blocks.push(new_block);
         self.storage.generic_templates.trait_tool_blocks.insert(
             trait_name,
             updated_blocks,
         );
+        // Indexed by the trait DECLARATION too: the spelling bucket cannot
+        // answer "which trait?" for a same-named or aliased trait, and the
+        // identity walk reads this one.
+        let def_key = trait_info.def_id.id;
+        let mutable def_blocks = self.storage.generic_templates.trait_tool_blocks_by_def_id.get(
+            def_key,
+        ) or else List[TraitToolBlock].new();
+        def_blocks.push(new_block);
+        self.storage.generic_templates.trait_tool_blocks_by_def_id.insert(
+            def_key,
+            def_blocks,
+        );
         return true;
+    };
+
+    /// Who owns a method name on a concrete type's method table.
+    ///
+    /// An INHERENT method (`given X { m }`) or a trait REQUIREMENT witness owns
+    /// the name; a materialized trait TOOL never does -- an inherent method
+    /// simply overrides a tool (guide: "Inherent type methods win over trait
+    /// tool methods"). An inherent name colliding with a requirement name is a
+    /// definition error in every registration order, never a priority contest.
+    slot_owned_by_inherent_or_requirement(
+        self,
+        type_key: MethodOwner,
+        method_name: String,
+    ): Bool = {
+        if self.storage.method_table.is_inherent(type_key, method_name) then {
+            return true;
+        };
+        for trait_def_id in self.storage.method_table.providing_traits(
+            type_key,
+            method_name,
+        ) then {
+            if self.trait_declares_requirement_in_trait(
+                trait_def_id,
+                method_name,
+                Set[UInt].new(),
+            ) then {
+                return true;
+            };
+        };
+        return false;
     };
 
     // Swift `ownRequirements` — methods a trait declares as requirements, as opposed
@@ -2771,8 +2817,12 @@ given TypeChecker {
             };
         };
 
-        let blocks = self.storage.generic_templates.trait_tool_blocks.get(trait_name) or else List[TraitToolBlock].new(
-        );
+        // The DECLARATION's own bucket: the spelling bucket is keyed by what
+        // the `given Trait { ... }` site wrote and cannot answer for a trait
+        // reached under an alias or a same-named sibling.
+        let blocks = self.storage.generic_templates.trait_tool_blocks_by_def_id.get(
+            trait_def_id.id,
+        ) or else List[TraitToolBlock].new();
         for block in blocks then {
             for method in block.methods then {
                 if result.contains_key(method.name) then {
@@ -4129,7 +4179,12 @@ given TypeChecker {
                 .None() then owner_type_params.is_empty() and m.type_params.is_empty(),
             };
             if should_register_as_inherent then {
-                if self.lookup_method_signature(type_key, m.name) is .Some(_) then {
+                // An inherent method colliding with another INHERENT method or
+                // with a trait REQUIREMENT witness is a definition error in
+                // every registration order. A trait TOOL occupying the name is
+                // not a conflict: the inherent method simply overrides it.
+                if self.lookup_method_signature(type_key, m.name) is .Some(_)
+                    and self.slot_owned_by_inherent_or_requirement(type_key, m.name) then {
                     self.push_diagnostic(
                         self.duplicate_definition_message(m.name),
                         unknown_span(),
@@ -4231,6 +4286,27 @@ given TypeChecker {
                             ),
                             .None() then {},
                         };
+                    } else {
+                        // The slot is taken. A REQUIREMENT witness may not share
+                        // its name with an INHERENT method on the same type --
+                        // that is a definition error in every declaration order
+                        // (the reverse order is caught by the inherent path
+                        // above), never a priority contest. Other occupants stay
+                        // silent here; pass 3 reports the ambiguity.
+                        when conformance_trait_name in {
+                            .Some(trait_name) then {
+                                if self.storage.method_table.is_inherent(
+                                    type_key,
+                                    m.name,
+                                ) and self.trait_declares_requirement(trait_name, m.name) then {
+                                    self.push_diagnostic(
+                                        self.duplicate_definition_message(m.name),
+                                        unknown_span(),
+                                    );
+                                };
+                            },
+                            .None() then {},
+                        };
                     };
                 };
                 continue;
@@ -4260,6 +4336,10 @@ given TypeChecker {
                     println("[sema-pass2-given-step] member=\(m.name) step=register");
                 };
                 self.storage.method_table.register(type_key, m.name, method_symbol);
+                // Mark the slot INHERENT at the signature pass already: a later
+                // tool materialization must see it (an inherent method owns the
+                // name) no matter which pass or module order runs first.
+                self.storage.method_table.mark_inherent(type_key, m.name);
             };
         };
     };

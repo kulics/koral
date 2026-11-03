@@ -1648,7 +1648,13 @@ extension TypeChecker {
           try enforceGivenOwnerLocality(owner, span: span)
         }
 
-        let requirementNames = Set(traitInfo.methods.map { $0.name })
+        // Requirements of the trait AND its parents: a tool named like any
+        // inherited requirement is the same conflict as one named like the
+        // trait's own.
+        let requirementNames = Set(
+          ((try? flattenedTraitMethods(forDefId: traitInfo.defId))?.keys).map { Array($0) }
+            ?? traitInfo.methods.map { $0.name }
+        )
         for method in methods {
           if requirementNames.contains(method.name) {
             throw SemanticError(.generic(
@@ -1666,14 +1672,83 @@ extension TypeChecker {
             }
           }
         }
-        existingBlocks.append(
-          TraitToolBlock(
-            traitName: traitName,
-            traitTypeParams: typeParams,
-            methods: storedMethods
-          )
+        let newToolBlock = TraitToolBlock(
+          traitName: traitName,
+          traitTypeParams: typeParams,
+          methods: storedMethods
         )
+        existingBlocks.append(newToolBlock)
         traitToolBlocks[traitName] = existingBlocks
+        // Indexed by the trait DECLARATION too: the spelling bucket cannot
+        // answer "which trait?" for a same-named or aliased trait, and the
+        // identity walk reads this one.
+        traitToolBlocksByDefId[traitInfo.defId, default: []].append(newToolBlock)
+
+        // A non-generic tool block's methods are ALSO extension templates keyed
+        // on the trait's declaration -- exactly like a generic
+        // `given[T] Trait[T] { ... }` -- so a call site can instantiate the body
+        // per receiver (a concrete clone for a bounded generic call, the shared
+        // body for a trait object). Stopping at `traitToolBlocks` left the
+        // method with a signature but no body to monomorphize whenever the
+        // per-conformance materialization is skipped (an inherent method owning
+        // the name on the receiver).
+        let toolOwnerKey = methodOwnerForName(traitName) ?? .builtin(traitName)
+        if genericExtensionMethods[toolOwnerKey] == nil {
+          genericExtensionMethods[toolOwnerKey] = []
+        }
+        for method in methods {
+          let (checkedParams, checkedReturnType) = try withNewScope {
+            currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
+            genericTraitBounds["Self"] = [.trait(defId: traitInfo.defId, name: traitName, args: [])]
+
+            for typeParam in method.typeParameters {
+              currentScope.defineGenericParameter(
+                typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            try recordGenericTraitBounds(method.typeParameters)
+
+            try currentScope.defineType("Self", type: .genericParameter(name: "Self"))
+            let selfType: Type = .genericParameter(name: "Self")
+            let receiverMutable = isMutableNominalReceiverType(selfType)
+            let selfBindingType = adjustReceiverParameterType(
+              paramName: "self",
+              resolvedType: selfType,
+              receiverMutable: receiverMutable
+            )
+            currentScope.define("self", selfBindingType, mutable: receiverMutable)
+
+            let returnType = try resolveTypeNode(method.returnType)
+            let params = try method.parameters.map { param -> Symbol in
+              let resolvedParamType = try resolveTypeNode(param.type)
+              let paramType = adjustReceiverParameterType(
+                paramName: param.name,
+                resolvedType: resolvedParamType,
+                receiverMutable: receiverMutable
+              )
+              return makeLocalSymbol(
+                name: param.name, type: paramType,
+                kind: .variable(variableKindForResolvedParameter(
+                  paramName: param.name,
+                  mutable: param.mutable,
+                  type: paramType,
+                  receiverMutable: receiverMutable)))
+            }
+            return (params, returnType)
+          }
+
+          let registeredMethod = storedMethods.first(where: { $0.name == method.name }) ?? method
+          genericExtensionMethods[toolOwnerKey]!.append(GenericExtensionMethodTemplate(
+            typeParams: [],
+            method: registeredMethod,
+            conformanceTraitName: nil,
+            sourceFile: currentSourceFile,
+            modulePath: currentModulePath,
+            packageID: currentPackageID,
+            checkedBody: nil,
+            checkedParameters: checkedParams,
+            checkedReturnType: checkedReturnType
+          ))
+        }
         return
       }
 
@@ -1726,7 +1801,7 @@ extension TypeChecker {
         // For trait-target generic given (e.g. `given[T] [T]Iterator`),
         // Self is a generic parameter constrained by that trait.
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
-        let isTraitTarget = traits[baseName] != nil
+        let isTraitTarget = visibleTraitInfo(baseName) != nil
         let genericSelfType: Type
         if isTraitTarget {
           genericSelfType = .genericParameter(name: "Self")
@@ -1751,7 +1826,7 @@ extension TypeChecker {
 
             if isTraitTarget {
               currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
-              genericTraitBounds["Self"] = [.trait(defId: .invalid, name: baseName, args: args)]
+              genericTraitBounds["Self"] = [.trait(defId: visibleTraitInfo(baseName)?.defId ?? .invalid, name: baseName, args: args)]
             }
 
             // Register method-level type parameters
@@ -1907,8 +1982,12 @@ extension TypeChecker {
           )
 
           if registeredMethod.typeParameters.isEmpty {
-            // Check for duplicate method name on this type
-            if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil {
+            // Check for duplicate method name on this type. An inherent method
+            // (or a trait REQUIREMENT witness) owns its name -- colliding with
+            // one is a definition error in every registration order. A trait
+            // TOOL copy never owns the name: the inherent method overrides it.
+            if extensionMethods[methodOwnerKey]![registeredMethod.name] != nil,
+               slotOwnedByInherentOrRequirement(owner: methodOwnerKey, name: registeredMethod.name) {
               throw SemanticError.duplicateDefinition(registeredMethod.name, span: span)
             }
 
@@ -2154,6 +2233,26 @@ extension TypeChecker {
             enforceTypeDeclarationModuleLocality: false,
             providingTrait: visibleTraitInfo(traitName)?.defId
           )
+        } else if let traitInfo = visibleTraitInfo(traitName) {
+          // The name is already taken on this type. A REQUIREMENT witness may
+          // not share its name with an INHERENT method -- that is a definition
+          // error in every declaration order (the reverse order is caught by
+          // the registration above), never a priority contest. A trait TOOL
+          // occupying the name is fine: the inherent method simply overrides it.
+          let methodOwnerKey = context.methodOwner(of: selfType)
+          // Requirements of the trait AND its parents: the collision rule is
+          // "every registration order", and an inherited requirement occupies
+          // the name exactly as the trait's own does (koralc's
+          // `trait_declares_requirement` recurses parents).
+          let requirementNames = Set(
+            ((try? flattenedTraitMethods(forDefId: traitInfo.defId))?.keys).map { Array($0) }
+              ?? traitInfo.methods.map { $0.name }
+          )
+          for method in preRegisteredMethods where requirementNames.contains(method.name) {
+            if inherentMethodNames[methodOwnerKey]?.contains(method.name) == true {
+              throw SemanticError.duplicateDefinition(method.name, span: span)
+            }
+          }
         }
       }
 
@@ -2639,7 +2738,10 @@ extension TypeChecker {
           // returns early on `actual_count == 0` for the same spelling, and the
           // two compilers must agree.
           if case .generic(_, let args, _) = parent {
-            let traitInfo = traits[constraint.baseName]
+            // The same decl `validateTraitName` just validated -- read its
+            // arity through the visible (module-scoped) lookup, never the bare
+            // index, whose last-wins entry may name another module's trait.
+            let traitInfo = visibleTraitInfo(constraint.baseName)
             let expectedCount = traitInfo?.typeParameters.count ?? 0
             if expectedCount != args.count {
               throw SemanticError.typeMismatch(
@@ -3110,8 +3212,61 @@ extension TypeChecker {
       // Keep generic `given[T] [T]Trait { ... }` on the generic given path.
       if typeParams.isEmpty,
         let traitConstraint = try? SemaUtils.resolveTraitConstraint(from: typeNode),
-        let traitInfo = traits[traitConstraint.baseName],
+        // The trait this module's spelling denotes -- never the bare name
+        // index, whose last-wins entry would route a `given` for a local TYPE
+        // through the tool path whenever any module in the compilation
+        // declares a trait of the same name.
+        let traitInfo = visibleTraitInfo(traitConstraint.baseName),
         traitInfo.typeParameters.count == typeParams.count {
+        // The templates were registered in Pass 2 (collectGivenSignatures);
+        // check their bodies the way a generic trait-target given's are: `Self`
+        // is a generic parameter constrained by the trait, so the body is
+        // written against -- and only sees -- the trait's face.
+        let baseName = traitConstraint.baseName
+        let toolOwnerKey = methodOwnerForName(baseName) ?? .builtin(baseName)
+        guard let templates = genericExtensionMethods[toolOwnerKey] else {
+          return nil
+        }
+        for method in methods {
+          guard let templateIndex = templates.firstIndex(where: {
+            $0.method.name == method.name &&
+              $0.typeParams.isEmpty &&
+              $0.checkedBody == nil
+          }) else {
+            continue
+          }
+          let template = templates[templateIndex]
+          let checkedBody = try withNewScope {
+            currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
+            genericTraitBounds["Self"] = [.trait(defId: traitInfo.defId, name: baseName, args: [])]
+
+            for typeParam in method.typeParameters {
+              currentScope.defineGenericParameter(
+                typeParam.name, type: .genericParameter(name: typeParam.name))
+            }
+            try recordGenericTraitBounds(method.typeParameters)
+
+            try currentScope.defineType("Self", type: .genericParameter(name: "Self"))
+            let (typedBody, _) = try checkFunctionBody(
+              template.checkedParameters ?? [],
+              template.checkedReturnType ?? .void,
+              method.body
+            )
+            return typedBody
+          }
+          genericExtensionMethods[toolOwnerKey]![templateIndex] = GenericExtensionMethodTemplate(
+            typeParams: template.typeParams,
+            method: template.method,
+            conformanceTraitName: template.conformanceTraitName,
+            conformanceTraitDefId: template.conformanceTraitDefId,
+            sourceFile: template.sourceFile,
+            modulePath: template.modulePath,
+            packageID: template.packageID,
+            checkedBody: checkedBody,
+            checkedParameters: template.checkedParameters,
+            checkedReturnType: template.checkedReturnType
+          )
+        }
         return nil
       }
 
@@ -3129,7 +3284,7 @@ extension TypeChecker {
         // For trait-target generic given (e.g. `given[T] [T]Iterator`),
         // Self is a generic parameter constrained by that trait.
         let genericSelfArgs = typeParams.map { Type.genericParameter(name: $0.name) }
-        let isTraitTarget = traits[baseName] != nil
+        let isTraitTarget = visibleTraitInfo(baseName) != nil
         let genericSelfType: Type
         if isTraitTarget {
           genericSelfType = .genericParameter(name: "Self")
@@ -3174,7 +3329,7 @@ extension TypeChecker {
             if isTraitTarget {
               currentScope.defineGenericParameter("Self", type: .genericParameter(name: "Self"))
               if case .generic(_, let traitArgs, _) = typeNode {
-                genericTraitBounds["Self"] = [.trait(defId: .invalid, name: baseName, args: traitArgs)]
+                genericTraitBounds["Self"] = [.trait(defId: visibleTraitInfo(baseName)?.defId ?? .invalid, name: baseName, args: traitArgs)]
               }
             }
             
@@ -3903,6 +4058,12 @@ extension TypeChecker {
           continue
         }
         if methodInfos.contains(where: { $0.method.name == toolName }) {
+          continue
+        }
+        // An inherent method owns its name (guide: "Inherent type methods win
+        // over trait tool methods") -- never overwrite one with a tool copy,
+        // in any registration order.
+        if inherentMethodNames[context.methodOwner(of: selfType)]?.contains(toolName) == true {
           continue
         }
 

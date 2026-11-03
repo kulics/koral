@@ -978,7 +978,12 @@ given MIRFunctionBuilder {
         for entry in self.program.callables_named(method_name) then {
             let def_id = entry.first;
             let info = entry.second;
-            when trait_def_id_opt in {
+            // The trait filter shapes the TRAIT-RECEIVER bucket only. A direct
+            // match (the receiver's own method) must survive it: the trait may
+            // have been INFERRED from a same-named tool body's signature, and
+            // filtering the direct candidates away then handed the call to that
+            // tool -- an inherent method lost its own name to a spelling match.
+            let trait_side_ok = when trait_def_id_opt in {
                 .Some(trait_def_id) then {
                     let same_trait = when info.trait_conformance_def_id in {
                         .Some(info_trait_def_id) then info_trait_def_id == trait_def_id,
@@ -991,11 +996,9 @@ given MIRFunctionBuilder {
                         ),
                         .None() then false,
                     };
-                    if not same_trait and not owner_is_trait_receiver then {
-                        continue;
-                    };
+                    same_trait or owner_is_trait_receiver
                 },
-                .None() then {},
+                .None() then true,
             };
             when self.context.get_function_type(def_id) in {
                 .Some(function_type) then {
@@ -1036,7 +1039,7 @@ given MIRFunctionBuilder {
                         },
                         .None() then false,
                     };
-                    if signature_matches_via_trait and owner_matches_trait_receiver then {
+                    if trait_side_ok and signature_matches_via_trait and owner_matches_trait_receiver then {
                         trait_receiver_matched.push(def_id);
                     };
                 },
@@ -1100,6 +1103,19 @@ given MIRFunctionBuilder {
         result_type: Type,
     ): Option[Symbol] = {
         let _ = args;
+        // A method whose RECEIVER is the trait object is the shared trait-tool
+        // body (`R_TO_<Trait>_<def>_<method>(TraitRef self)`): its DefId is its
+        // identity and the binding is final. The dispatch sweep below
+        // re-derives "which method" from the SPELLING -- it once handed such a
+        // call to the receiver's own same-named inherent method.
+        let shared_trait_receiver = method_receiver_is_trait_object_instantiated(
+            method.symbol_type,
+        );
+        if shared_trait_receiver then {
+            return Option[Symbol].Some(
+                Symbol(method.def_id, method.symbol_type, method.kind),
+            );
+        };
         let mutable expected_method_type = method.symbol_type;
         when callee_type in {
             .FunctionType(params, _) then {

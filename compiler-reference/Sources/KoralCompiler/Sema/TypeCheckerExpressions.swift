@@ -3549,12 +3549,19 @@ extension TypeChecker {
       return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns), span: .unknown)
     case .fixedArray(let size, let element):
       return .fixedArray(size: size, element: try toTypeNode(element), span: .unknown)
-    case .module, .typeVariable, .traitObject:
+    case .traitObject(let traitDefId, let traitArgs):
+      // A trait object is spelled as the trait name (with its arguments, if
+      // any); re-encoding through that spelling rebuilds the same trait-object
+      // type when the call's type argument is resolved again.
+      let name = Type.spelling(traitDefId)
+      if traitArgs.isEmpty {
+        return .identifier(name, span: .unknown)
+      }
+      return .generic(base: name, args: try traitArgs.map { try toTypeNode($0) }, span: .unknown)
+    case .module, .typeVariable:
       throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
     case .error:
       throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
-    case .fixedArray(let size, let element):
-      return .fixedArray(size: size, element: try toTypeNode(element), span: .unknown)
     case .foreignFunction(let params, let returns):
       let ffNodes = try params.map { try toTypeNode($0.type) }
       return .foreignFunction(paramTypes: ffNodes, returnType: try toTypeNode(returns), span: .unknown)
@@ -3953,7 +3960,14 @@ extension TypeChecker {
     // Identity from the bound, not from a second lookup of its spelling.
     let traitDefId = resolveBound(traitConstraint).defId ?? .invalid
 
-    guard let traitInfo = traits[traitName] else {
+    // The bound carried the trait's DECLARATION; read the arity from it. The
+    // visible decl is the fallback for bounds recorded before identity.
+    let traitInfo: TraitDeclInfo
+    if traitDefId.isValid, let byDef = traitDeclsByDefId[traitDefId] {
+      traitInfo = byDef
+    } else if let visible = visibleTraitInfo(traitName) {
+      traitInfo = visible
+    } else {
       throw SemanticError.undefinedType(traitName)
     }
 
@@ -7061,8 +7075,13 @@ extension TypeChecker {
           )
         }
 
+        // The tool face of the bound's DECLARATION when it carries one; the
+        // name walk is only for bounds recorded before identity.
         let toolMethods = try flattenedTraitToolMethods(traitName)
-        if let entityMethod = toolMethods[memberName], entityMethod.parameters.first?.name == "self" {
+        let boundToolEntry = traitDefId.isValid
+          ? (try? traitToolMethod(forDefId: traitDefId, named: memberName))
+          : nil
+        if let entityMethod = boundToolEntry?.method ?? toolMethods[memberName], entityMethod.parameters.first?.name == "self" {
           let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: typeToLookup)
           let base: TypedExpressionNode
           if typedPath.isEmpty {
@@ -7127,6 +7146,40 @@ extension TypeChecker {
           base = .memberPath(source: typedBase, path: typedPath)
         }
         return .methodReference(base: base, method: methodSym, typeArgs: nil, methodTypeArgs: nil, type: methodSym.type)
+      }
+
+      // A TOOL method is part of the trait's face too -- callable on an erased
+      // receiver. Same shape as the generic-parameter fallback above: the call
+      // is a trait method placeholder, resolved at instantiation to the trait's
+      // shared body (`Self` = the trait object).
+      let traitName = Type.spelling(tplDefId)
+      // The tool face of the DECLARATION: the spelling is display only -- it
+      // may be an alias known only in another module -- so the walk is by
+      // identity, exactly like the requirement face above.
+      let toolEntityMethod = (try? traitToolMethod(forDefId: tplDefId, named: memberName))?.method
+      if let entityMethod = toolEntityMethod, entityMethod.parameters.first?.name == "self" {
+        let toolTraitObjType: Type = traitObjectType(traitName: traitName, typeArgs: traitTypeArgs)
+        let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: toolTraitObjType)
+        let base: TypedExpressionNode
+        if typedPath.isEmpty {
+          base = typedBase
+        } else {
+          base = .memberPath(source: typedBase, path: typedPath)
+        }
+        recordTraitPlaceholderInstantiation(
+          baseType: base.type,
+          methodName: memberName,
+          methodTypeArgs: []
+        )
+        return .traitMethodPlaceholder(
+          traitName: traitName,
+          traitDefId: tplDefId,
+          traitMethodDefId: traitMethodDefId(traitDefId: tplDefId, methodName: memberName) ?? entityMethod.defId,
+          methodName: memberName,
+          base: base,
+          methodTypeArgs: [],
+          type: expectedType
+        )
       }
     }
     

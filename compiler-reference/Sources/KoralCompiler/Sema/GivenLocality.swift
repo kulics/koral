@@ -17,7 +17,9 @@ extension TypeChecker {
   }
 
   func givenTraitOwner(named traitName: String) -> GivenOwner? {
-    guard let traitInfo = traits[traitName] else { return nil }
+    // The trait this module's spelling denotes -- its own declaration or an
+    // import -- never the bare name index (last-wins across modules).
+    guard let traitInfo = visibleTraitInfo(traitName) else { return nil }
     return GivenOwner(kind: .trait, displayName: traitName, modulePath: traitInfo.modulePath)
   }
 

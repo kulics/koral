@@ -779,6 +779,18 @@ given TypeChecker {
                 member.name,
             );
             let source_def_id = self.context().get_original_def_id(member.def_id) or else member.def_id;
+            // An INHERENT method owns its name: a trait tool copied onto the
+            // type (and a requirement witness -- already reported at the
+            // signature pass) never overwrites the slot. This is what makes
+            // "inherent wins over trait tool methods" hold in every
+            // registration order; the collision report itself happens once, in
+            // `collect_given_signatures`.
+            if not mark_inherent and self.storage.method_table.is_inherent(
+                type_key,
+                member.name,
+            ) then {
+                continue;
+            };
             // Registered ONCE, under the owner identity. An instance resolves to
             // its template's declaration and a plain nominal to its own, so this
             // one key already covers every spelling a lookup might use. The
@@ -807,8 +819,8 @@ given TypeChecker {
             // Two DISTINCT declarations reaching one slot is an ambiguity in the
             // type's method table -- it exists whether or not anyone calls the
             // method, so it is reported here rather than at a lookup. An INHERENT
-            // method owns the slot, so a trait conformance alongside `given T { }`
-            // is a coexistence, not a conflict; the flag is read after the
+            // method owns the slot outright (it is skipped above), so this only
+            // ever sees trait-side occupants; the flag is read after the
             // inherent mark so both registration orders agree.
             if made_ambiguous and not self.storage.method_table.is_inherent(
                 type_key,

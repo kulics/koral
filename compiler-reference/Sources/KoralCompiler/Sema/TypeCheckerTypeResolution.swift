@@ -671,17 +671,20 @@ extension TypeChecker {
   }
 
   private func validateCanonicalTraitRef(_ traitRef: CanonicalTraitRef) throws -> TraitDeclInfo {
-    try validateTraitName(traitRef.traitName)
-
     // This is the boundary where a spelling becomes a declaration
     // (rustc_resolve: `Res::Def(DefKind::Trait, DefId)`), so resolving the name
-    // here is correct. But when the ref already carries its declaration we use
-    // that and never re-read the name -- a spelling can be an alias or a
-    // same-named trait from another module. Either way the diagnostic prints
-    // the spelling.
-    let traitInfo = traitRef.traitDefId.isValid
-      ? traitDeclsByDefId[traitRef.traitDefId]
-      : traits[traitRef.traitName]
+    // here is correct -- but ONLY for a ref that carries no declaration yet.
+    // When the ref already carries its DefId, the spelling is display only: it
+    // may be an alias known only in the importing module, and validating it as
+    // a name here (the old first step) rejected every aliased use. Either way
+    // the diagnostic prints the spelling.
+    let traitInfo: TraitDeclInfo?
+    if traitRef.traitDefId.isValid {
+      traitInfo = traitDeclsByDefId[traitRef.traitDefId]
+    } else {
+      try validateTraitName(traitRef.traitName)
+      traitInfo = visibleTraitInfo(traitRef.traitName)
+    }
     guard let traitInfo else {
       throw SemanticError(.generic("Undefined trait: \(traitRef.traitName)"), span: currentSpan)
     }
@@ -921,15 +924,16 @@ extension TypeChecker {
   func enforceTraitConformance(
     _ selfType: Type,
     traitName: String,
+    traitDefId: DefId = .invalid,
     context: String? = nil
   ) throws {
     try enforceTraitConformance(
       selfType,
-      traitRef: canonicalTraitRef(traitName: traitName),
+      traitRef: canonicalTraitRef(traitName: traitName, traitDefId: traitDefId),
       context: context
     )
   }
-  
+
   /// Checks if a type conforms to a generic trait with specific type arguments.
   /// For example, checking if ListIterator conforms to [Int]Iterator.
   /// - Parameters:
@@ -941,11 +945,12 @@ extension TypeChecker {
     _ selfType: Type,
     traitName: String,
     traitTypeArgs: [Type],
+    traitDefId: DefId = .invalid,
     context: String? = nil
   ) throws {
     try enforceTraitConformance(
       selfType,
-      traitRef: canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs),
+      traitRef: canonicalTraitRef(traitName: traitName, traitDefId: traitDefId, traitTypeArgs: traitTypeArgs),
       context: context
     )
   }
@@ -1163,6 +1168,13 @@ extension TypeChecker {
     if expr.type == .error {
       return expr
     }
+    // A `Never` value -- a body whose paths all `return` -- fits any expected
+    // type: each returned value was already coerced where it was written.
+    // Erasing `Never` itself to a trait object would blame the wrapper for a
+    // conversion the return statements already made.
+    if expr.type == .never {
+      return expr
+    }
     if case .pointer = expected,
        case .intrinsicCall(.nullPtr) = expr {
       return .intrinsicCall(.nullPtr(resultType: expected))
@@ -1223,8 +1235,11 @@ extension TypeChecker {
   /// and the source type is a compatible concrete type.
   /// Returns the original expression unchanged if no conversion is needed.
   func tryTraitObjectConversion(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode {
-    // Extract trait object info from expected type
+    // Extract trait object info from expected type. The DECLARATION travels
+    // with it: the spelling is display only and may be an alias known only in
+    // this module, so nothing downstream may re-resolve it by name.
     let traitName: String
+    let traitDefId: DefId
     let traitTypeArgs: [Type]
     let expectsMutableReference: Bool
     switch expected {
@@ -1237,6 +1252,7 @@ extension TypeChecker {
       }()
       if case .traitObject(let tplDefId, let args) = inner {
         traitName = Type.spelling(tplDefId)
+        traitDefId = tplDefId
         traitTypeArgs = args
       } else {
         return expr
@@ -1245,6 +1261,7 @@ extension TypeChecker {
       expectsMutableReference = false
       if case .traitObject(let tplDefId, let args) = inner {
         traitName = Type.spelling(tplDefId)
+        traitDefId = tplDefId
         traitTypeArgs = args
       } else {
         return expr
@@ -1253,6 +1270,7 @@ extension TypeChecker {
       expectsMutableReference = false
       if case .traitObject(let tplDefId, let args) = inner {
         traitName = Type.spelling(tplDefId)
+        traitDefId = tplDefId
         traitTypeArgs = args
       } else {
         return expr
@@ -1313,16 +1331,16 @@ extension TypeChecker {
              hasTraitBound(paramName, traitName) {
             // Bound generic parameters can be erased directly to the trait object.
           } else {
-            try enforceTraitConformance(expr.type, traitName: traitName)
+            try enforceTraitConformance(expr.type, traitName: traitName, traitDefId: traitDefId)
           }
         } else {
-          try enforceGenericTraitConformance(expr.type, traitName: traitName, traitTypeArgs: traitTypeArgs, context: nil)
+          try enforceGenericTraitConformance(expr.type, traitName: traitName, traitTypeArgs: traitTypeArgs, traitDefId: traitDefId, context: nil)
         }
 
         let conversion: TypedExpressionNode = .traitObjectConversion(
           inner: tempRef,
           traitName: traitName,
-          traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+          traitDefId: traitDefId,
           traitTypeArgs: traitTypeArgs,
           concreteType: expr.type,
           type: expected
@@ -1337,16 +1355,16 @@ extension TypeChecker {
          hasTraitBound(paramName, traitName) {
         // Bound generic parameters can be erased directly to the trait object.
       } else {
-        try enforceTraitConformance(concreteType, traitName: traitName)
+        try enforceTraitConformance(concreteType, traitName: traitName, traitDefId: traitDefId)
       }
     } else {
-      try enforceGenericTraitConformance(concreteType, traitName: traitName, traitTypeArgs: traitTypeArgs, context: nil)
+      try enforceGenericTraitConformance(concreteType, traitName: traitName, traitTypeArgs: traitTypeArgs, traitDefId: traitDefId, context: nil)
     }
 
     return .traitObjectConversion(
       inner: sourceForConversion,
       traitName: traitName,
-      traitDefId: visibleTraitInfo(traitName)?.defId ?? .invalid,
+      traitDefId: traitDefId,
       traitTypeArgs: traitTypeArgs,
       concreteType: concreteType,
       type: expected

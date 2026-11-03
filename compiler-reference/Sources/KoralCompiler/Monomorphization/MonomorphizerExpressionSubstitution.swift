@@ -328,15 +328,34 @@ extension Monomorphizer {
                         type: resolvedMethodType
                     )
                 } else {
-                    newCallee = .traitMethodPlaceholder(
-                        traitName: traitName,
+                    // A TOOL method matched BY THE CONSTRAINT may have no
+                    // per-type materialization here (an inherent method owning
+                    // the name on the receiver swallows it), but the tool's
+                    // body is an extension template of the trait: instantiate
+                    // it for the receiver's own type. Requirement names never
+                    // land in the template table, so this cannot hijack one.
+                    if let toolCall = resolveToolFallbackCall(
                         traitDefId: traitDefId,
-                        traitMethodDefId: traitMethodDefId,
+                        receiver: base,
+                        receiverBaseType: lookupBaseType,
                         methodName: methodName,
-                        base: base,
                         methodTypeArgs: methodTypeArgs,
-                        type: newType
-                    )
+                        expectedCallType: expectedCallType,
+                        arguments: newArguments
+                    ) {
+                        newCallee = toolCall.callee
+                        newArguments = toolCall.arguments
+                    } else {
+                        newCallee = .traitMethodPlaceholder(
+                            traitName: traitName,
+                            traitDefId: traitDefId,
+                            traitMethodDefId: traitMethodDefId,
+                            methodName: methodName,
+                            base: base,
+                            methodTypeArgs: methodTypeArgs,
+                            type: newType
+                        )
+                    }
                 }
             }
 
@@ -394,24 +413,24 @@ extension Monomorphizer {
             // This handles the case where a generic function like [T ToString]f(a T ref)
             // is instantiated with T = traitObject("ToString") — method calls on the
             // trait object parameter must use vtable dynamic dispatch.
-            if case .traitMethodPlaceholder(_, _, _, let methodName, let base, _, _) = newCallee {
+            if case .traitMethodPlaceholder(_, _, _, let methodName, let base, let methodTypeArgs, _) = newCallee {
                 if let traitObjInfo = extractTraitObjectType(base.type) {
-                    if let methodIndex = vtableMethodIndex(traitName: traitObjInfo.traitName, methodName: methodName) {
-                        // If the base is a deref of a trait object reference, use the
-                        // un-dereferenced reference as the receiver. traitMethodCall expects
-                        // a TraitRef (reference type), not a bare traitObject value.
-                        let receiver: TypedExpressionNode
-                        if case .derefExpression(let inner, _) = base,
-                           case .reference(let refInner) = inner.type,
-                           case .traitObject = refInner {
-                            receiver = inner
-                        } else if case .derefExpression(let inner, _) = base,
-                                  case .mutableReference(let refInner) = inner.type,
-                           case .traitObject = refInner {
-                            receiver = inner
-                        } else {
-                            receiver = base
-                        }
+                    // If the base is a deref of a trait object reference, use the
+                    // un-dereferenced reference as the receiver. traitMethodCall expects
+                    // a TraitRef (reference type), not a bare traitObject value.
+                    let receiver: TypedExpressionNode
+                    if case .derefExpression(let inner, _) = base,
+                       case .reference(let refInner) = inner.type,
+                       case .traitObject = refInner {
+                        receiver = inner
+                    } else if case .derefExpression(let inner, _) = base,
+                              case .mutableReference(let refInner) = inner.type,
+                       case .traitObject = refInner {
+                        receiver = inner
+                    } else {
+                        receiver = base
+                    }
+                    if let methodIndex = vtableMethodIndex(traitDefId: traitObjInfo.traitDefId, methodName: methodName) {
                         return .traitMethodCall(
                             receiver: receiver,
                             traitName: traitObjInfo.traitName,
@@ -421,6 +440,27 @@ extension Monomorphizer {
                             arguments: newArguments,
                             type: newType
                         )
+                    }
+                    // A TOOL method is not in the vtable -- it is not a
+                    // requirement -- but it is part of the trait's face and
+                    // callable on an erased receiver. The body is the trait's
+                    // shared instance: the tool template instantiated for the
+                    // TRAIT OBJECT (`Self` = the erased receiver).
+                    if let sharedCall = resolveToolFallbackCall(
+                        traitDefId: traitObjInfo.traitDefId,
+                        receiver: receiver,
+                        receiverBaseType: base.type,
+                        methodName: methodName,
+                        methodTypeArgs: methodTypeArgs,
+                        expectedCallType: Type.function(
+                            parameters: [Parameter(type: base.type, kind: .byVal)]
+                                + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
+                            returns: newType
+                        ),
+                        arguments: newArguments
+                    ) {
+                        newCallee = sharedCall.callee
+                        newArguments = sharedCall.arguments
                     }
                 }
             }

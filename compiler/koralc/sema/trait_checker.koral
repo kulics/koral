@@ -103,16 +103,6 @@ given TraitRegistry {
         return self.traits_by_def_id.get(def_id.id);
     };
 
-    public get(self, name: String): Option[TraitInfo] = {
-        // By spelling: the unqualified key first (a real empty-path symbol),
-        // then the name index (`bare_symbol_key`). The two are separate key
-        // spaces; see `bare_symbol_key`.
-        return when self.traits.get(name) in {
-            .Some(info) then Option[TraitInfo].Some(info),
-            .None() then self.traits.get(bare_symbol_key(name)),
-        };
-    };
-
     /// The trait `name` denotes in `module_path`: its own declaration, or one
     /// it IMPORTED under that spelling. Both land on the same key.
     ///
@@ -120,7 +110,7 @@ given TraitRegistry {
     /// so it cannot answer "which `Tag`?" -- and answering from it is what let
     /// a bound written against one module's trait be satisfied by another's.
     /// That index exists only to name the declaring module in the
-    /// "Import it explicitly" diagnostic; see `declared_somewhere`.
+    /// "Import it explicitly" diagnostic.
     public get_in_module(self, name: String, module_path: List[String]): Option[TraitInfo] = {
         // An EMPTY `module_path` also consults the name index: before the two
         // key spaces were split, `qualified_symbol_key([], name)` and the index
@@ -138,27 +128,24 @@ given TraitRegistry {
         return Option[TraitInfo].None();
     };
 
-    /// A trait declared SOMEWHERE under this spelling, imported here or not.
-    ///
-    /// NOT resolution. The only use is naming the declaring module in
-    /// "Import it explicitly", exactly like `unimportedTemplateDefId` on the
-    /// generic-template side -- it must never win over `get_in_module`.
-    public declared_somewhere(self, name: String): Option[TraitInfo] = {
-        return when self.traits.get(name) in {
-            .Some(info) then Option[TraitInfo].Some(info),
-            .None() then self.traits.get(bare_symbol_key(name)),
-        };
-    };
-
-    public validate_inheritance_graph(self, trait_name: String): Result[Void] = {
-        // The walk is keyed by DECLARATION, not by spelling: two same-named
-        // traits from different modules are different nodes and must not share
-        // a visited slot. The spellings are kept alongside only to print the
-        // cycle.
+    /// Validate the inheritance graph of the trait `name` denotes in
+    /// `module_path`. The spelling is resolved ONCE, here; the walk below is by
+    /// DECLARATION -- two same-named traits from different modules are
+    /// different nodes and must not share a visited slot. The spellings are
+    /// kept alongside only to print the cycle.
+    public validate_inheritance_graph(
+        self,
+        trait_name: String,
+        module_path: List[String],
+    ): Result[Void] = {
         let mutable visited = List[UInt].new();
         let mutable stack = List[UInt].new();
         let mutable stack_names = List[String].new();
-        return self.validate_inheritance_graph_internal(
+        let root = self.get_in_module(trait_name, module_path) or else {
+            return Result[Void].Ok({});
+        };
+        return self.validate_inheritance_graph_walk(
+            root,
             trait_name,
             visited,
             stack,
@@ -166,35 +153,34 @@ given TraitRegistry {
         );
     };
 
-    private validate_inheritance_graph_internal(
+    private validate_inheritance_graph_walk(
         self,
-        trait_name: String,
+        info: TraitInfo,
+        display_name: String,
         visited: List[UInt],
         stack: List[UInt],
         stack_names: List[String],
     ): Result[Void] = {
-        let info = self.get(trait_name) or else {
-            return Result[Void].Ok({});
-        };
         if stack.contains(info.def_id.id) then {
             let mutable cycle = StringBuilder.new();
             cycle.push_string(stack_names.join_to_string(" -> "));
             if not cycle.is_empty() then {
                 cycle.push_string(" -> ");
             };
-            cycle.push_string(trait_name);
+            cycle.push_string(display_name);
             return Result[Void].Error("Cyclic trait inheritance: " + cycle.to_string());
         };
         if visited.contains(info.def_id.id) then {
             return Result[Void].Ok({});
         };
         stack.push(info.def_id.id);
-        stack_names.push(trait_name);
+        stack_names.push(display_name);
         for parent in info.parent_traits then {
             let parent_info = self.traits_by_def_id.get(parent.def_id.id) or else {
                 continue;
             };
-            let _ = self.validate_inheritance_graph_internal(
+            let _ = self.validate_inheritance_graph_walk(
+                parent_info,
                 parent_info.name,
                 visited,
                 stack,
@@ -205,15 +191,6 @@ given TraitRegistry {
         let _ = stack_names.pop();
         visited.push(info.def_id.id);
         return Result[Void].Ok({});
-    };
-
-    // 展平 Trait 继承层次，获取所有需要实现的方法（含父 Trait）
-    // 同名方法以最近定义的 Trait 为准
-    public flatten_methods(
-        self,
-        trait_name: String,
-    ): Result[Dict[String, TypedTraitMember]] = {
-        return self.flatten_methods_in_module(trait_name, List[String].new());
     };
 
     /// The spelling is resolved to a declaration here, once; the walk is by
@@ -279,10 +256,6 @@ given TraitRegistry {
 
     // 检查 Trait 是否对象安全
     // 规则：无泛型方法，参数/返回值中不使用 Self（receiver 除外）
-    public check_object_safety(self, trait_name: String): Result[Bool] = {
-        return self.check_object_safety_in_module(trait_name, List[String].new());
-    };
-
     /// Object safety of a trait identified by DECLARATION.
     ///
     /// The `DefId` selects the trait; the name is used only afterwards to pick a

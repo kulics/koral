@@ -188,6 +188,9 @@ public class TypeChecker {
   var traitDeclsByDefId: [DefId: TraitDeclInfo] = [:]
   // Trait tool methods declared via `given Trait { ... }`.
   var traitToolBlocks: [String: [TraitToolBlock]] = [:]
+  // The same blocks indexed by the trait DECLARATION: the spelling bucket
+  // cannot answer "which trait?" for a same-named or aliased trait.
+  var traitToolBlocksByDefId: [DefId: [TraitToolBlock]] = [:]
   // Explicit nominal conformances.
   var explicitConformances: Set<ConformanceKey> = []
   var declaredConformances: Set<ConformanceKey> = []

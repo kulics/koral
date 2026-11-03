@@ -397,10 +397,38 @@ given TypeChecker {
                 method_name,
             ) in {
                 .Some(id) then id,
-                .None() then def_id_invalid(),
+                // A TOOL method is a trait item too: its DECLARATION DefId is
+                // the identity mono resolves by (the shared `R_TO_...` body).
+                // Without it the call carried a minted symbol and mono could
+                // only re-derive "which method" from the spelling -- where the
+                // receiver's own inherent method waits to steal the name.
+                .None() then self.trait_tool_method_def_id(trait_def_id, method_name),
             },
             _ then def_id_invalid(),
         };
+    };
+
+    /// The DECLARATION DefId of the trait-tool method `method_name`, walking
+    /// the trait's tool blocks. Invalid when the name is no tool of the trait.
+    /// The walk is BY DECLARATION: the trait's spelling is display only and
+    /// does not resolve in a module that imports the trait under an alias.
+    trait_tool_method_def_id(self, trait_def_id: DefId, method_name: String): DefId = {
+        when self.flattened_trait_tool_methods_in_trait(
+            trait_def_id,
+            def_id_spelling(trait_def_id),
+            Set[UInt].new(),
+        ) in {
+            .Ok(tool_methods) then {
+                when tool_methods.get(method_name) in {
+                    .Some(entry) then {
+                        return entry.method.def_id;
+                    },
+                    .None() then {},
+                };
+            },
+            .Error(_) then {},
+        };
+        return def_id_invalid();
     };
 
     reused_given_member_signature(
@@ -1217,14 +1245,17 @@ given TypeChecker {
             target_type,
         );
         // Swift TypeCheckerPasses: `Self = .genericParameter("Self")` plus the
-        // `Self : Trait[args]` bound are installed ONLY for generic givens
-        // (`given[T ...] [T]Trait { ... }`, the `!typeParams.isEmpty` branch).
-        // For a non-generic given or a `given Trait { ... }` tool block, `Self` is
-        // the resolved target type. Applying the generic form to every trait
-        // target rewrote `Self` for std's trait-tool methods and broke their
-        // signature resolution.
-        let use_generic_self = self.as_trait_object_type(target_type) is .Some(_) and not type_params.is_empty(
-        );
+        // `Self : Trait[args]` bound are installed for EVERY trait-targeted
+        // given -- generic (`given[T ...] [T]Trait { ... }`) and non-generic
+        // tool blocks (`given Trait { ... }`) alike. A tool body is written
+        // against the trait interface, so `Self` must stay a parameter the
+        // instantiation can bind: the receiver's own type for a concrete call,
+        // the trait object for the shared body. (An earlier form gave a
+        // non-generic tool block its resolved target as `Self`, which fixed
+        // the then-concrete path's signature but left every template
+        // instantiation carrying a closed `TraitObject` where the call site
+        // had a concrete receiver.)
+        let use_generic_self = self.as_trait_object_type(target_type) is .Some(_);
         let generic_self_trait = if use_generic_self then self.as_trait_object_type(
             target_type,
         ) else Option[Type].None();
@@ -1322,15 +1353,21 @@ given TypeChecker {
                     "[sema-given-member] file=\(self.storage.file_path) member=\(m.name)",
                 );
             };
-            let should_retain_template_body = not is_trait_tool_declaration and (is_generic_given_target or not m.type_params.is_empty(
-            ));
+            // A trait TOOL declaration (`given Trait { ... }`) is a template
+            // exactly like a generic given: its body is checked once against
+            // the bound and instantiated per receiver (a concrete clone for a
+            // generic call, the shared `R_TO_*` body for a trait object). It
+            // used to skip this path and be copied per conformance instead --
+            // which left the tool with no instantiation entry whenever an
+            // inherent method owned the name on the receiver.
+            let should_retain_template_body = is_generic_given_target or not m.type_params.is_empty();
             let skip_template_typed_body_boxing = self.skip_template_typed_body_boxing_debug_enabled(
             );
             let should_store_checked_body = (retain_checked_template_bodies or should_retain_template_body) and not (skip_template_typed_body_boxing and should_retain_template_body);
-            // `Self` for a `given Trait { ... }` tool block is the trait object type
-            // itself, matching how a trait requirement's `Self` is instantiated at a
-            // call site. The target arrives wrapped in a reference when the trait is
-            // written as a type; unwrap it so `Self` means the same thing in both
+            // `Self` is the generic parameter whenever the target is a trait
+            // (see `use_generic_self`), else the resolved target type. The
+            // target arrives wrapped in a reference when the trait is written
+            // as a type; unwrap it so `Self` means the same thing in both
             // directions.
             let effective_member_self_type = if use_generic_self then {
                 Type.GenericParameter("Self")
@@ -1410,7 +1447,15 @@ given TypeChecker {
                     defer {
                         self.storage.current_scope = prev_scope;
                     };
-                    let result = self.check_expr_scoped_ref(b, .Some(ret), method_scope);
+                    let raw_result = self.check_expr_scoped_ref(b, .Some(ret), method_scope);
+                    // A method body's value is adapted like a free function's
+                    // body (see type_checker_decls): an implicit upcast in
+                    // `= make()` position is the same conversion everywhere.
+                    let result = self.adapt_expr_to_expected_type_at(
+                        raw_result,
+                        .Some(ret),
+                        Option[SourceSpan].Some(expr_span(b)),
+                    );
                     self.validate_body_return_type(result, ret);
                     if should_store_checked_body then Option[TypedExpr].Some(result)
                     else Option[TypedExpr].None()
@@ -1499,7 +1544,12 @@ given TypeChecker {
                     self.to_template_type_params(m.type_params),
                 );
                 context.register_method_param_specs(
-                    self.extension_template_key(target_type),
+                    // The trait the block extends is the owner even when the
+                    // target arrives under a reference modifier -- must agree
+                    // with `update_extension_method_checked_template` and with
+                    // `select_trait_tool_template_cached`, which key the trait
+                    // by its declaration.
+                    self.trait_extension_template_key(target_type),
                     method_name,
                     param_specs,
                 );
@@ -1516,7 +1566,7 @@ given TypeChecker {
                     .None() then {},
                 };
                 self.register_extension_method_template(
-                    self.extension_template_key(target_type),
+                    self.trait_extension_template_key(target_type),
                     declared_type_params,
                     when conformance_trait_name in {
                         .Some(_) then Option[Type].Some(target_type),
@@ -1853,6 +1903,18 @@ given TypeChecker {
                         if existing.name == tool_name then {
                             already_present = true;
                         };
+                    };
+                    // (b') an INHERENT method owns its name (guide: "Inherent
+                    // type methods win over trait tool methods"). Copying the
+                    // tool anyway gives the type two bodies answering to one
+                    // name -- the materialized copy and the inherent method --
+                    // and the emitted symbol is named for the slot, so the
+                    // winner became a registration-order accident.
+                    if not already_present and self.storage.method_table.is_inherent(
+                        self.extension_template_key(target_type),
+                        tool_name,
+                    ) then {
+                        already_present = true;
                     };
                     // (c) already materialized for this target. Swift's
                     // `concreteExtensionMethods` is `[typeName: [methodName: Symbol]]`
