@@ -1016,6 +1016,11 @@ public type Type {
 
     // Compound types
     FunctionType(params: List[FunctionParamEntry], return_type: Type),
+    /// 定长数组：`[N]Inner`。C 布局（单字段包装 struct），可变值语义；
+    /// 元素只能是 foreign 兼容的类型。
+    FixedArrayType(len: UInt, inner: Type),
+    /// foreign 函数指针：`foreign (A) -> R`。裸 C 函数指针，可为 null。
+    ForeignFunctionType(params: List[FunctionParamEntry], return_type: Type),
     StructureType(def_id: DefId),
     EnumType(def_id: DefId),
     ReferenceType(inner: Type),
@@ -1244,6 +1249,22 @@ public let stable_type_key(t: Type): String = {
         },
         .TypeVar(tv) then "TV#\(tv.id)",
         .Unknown() then "Unknown",
+        .FixedArrayType(len, inner) then "Arr(\(len))\(stable_type_key(inner))",
+        .ForeignFunctionType(params, return_type) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("FFn(");
+            let mutable first = true;
+            for p in params then {
+                if not first then {
+                    out.push_string(",");
+                };
+                out.push_string(stable_type_key(p.param_type));
+                first = false;
+            };
+            out.push_string(")->");
+            out.push_string(stable_type_key(return_type));
+            out.to_string()
+        },
     };
 };
 
@@ -1412,6 +1433,22 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
         .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
+        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string_impl(inner, depth + UInt(1)))",
+        .ForeignFunctionType(params, return_type) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("foreign (");
+            let mutable first = true;
+            for p in params then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_to_string_impl(p.param_type, depth + UInt(1)));
+                first = false;
+            };
+            out.push_string(") -> ");
+            out.push_string(type_to_string_impl(return_type, depth + UInt(1)));
+            out.to_string()
+        },
     };
     return type_string_prefixes(chain) + inner_string;
 };
@@ -1621,6 +1658,18 @@ public let stable_type_hash(t: Type): UInt = {
         },
         .Unknown() then {
             hash = stable_hash_combine_value(hash, UInt(34));
+        },
+        .FixedArrayType(len, inner) then {
+            hash = stable_hash_combine_value(hash, UInt(33));
+            hash = stable_hash_combine_value(hash, len);
+            hash = stable_hash_combine_value(hash, stable_type_hash(inner));
+        },
+        .ForeignFunctionType(params, return_type) then {
+            hash = stable_hash_combine_value(hash, UInt(34));
+            for p in params then {
+                hash = stable_hash_combine_value(hash, stable_type_hash(p.param_type));
+            };
+            hash = stable_hash_combine_value(hash, stable_type_hash(return_type));
         },
     };
     return hash;
@@ -1993,6 +2042,26 @@ given Type: Eq {
             _ then false,
         },
         .Unknown() then other is .Unknown(),
+        .FixedArrayType(l_len, l_inner) then when other in {
+            .FixedArrayType(r_len, r_inner) then l_len == r_len and l_inner == r_inner,
+            _ then false,
+        },
+        .ForeignFunctionType(l_params, l_ret) then when other in {
+            .ForeignFunctionType(r_params, r_ret) then {
+                if l_params.count() != r_params.count() then {
+                    false
+                } else {
+                    let mutable same = l_ret == r_ret;
+                    for pair in l_params.lazy().enumerate() then {
+                        if not (pair.second.param_type == r_params[pair.first].param_type) then {
+                            same = false;
+                        };
+                    };
+                    same
+                }
+            },
+            _ then false,
+        },
     };
 };
 

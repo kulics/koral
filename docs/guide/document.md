@@ -1711,6 +1711,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 - **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. **A type that implements `Drop` is the exception**: its destructor runs once per object, so the sharing is observable and such a type is treated like `type mutable` here.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
+- **`type foreign`** (mutable value semantics): a C-layout value. Assignment and argument passing copy; the copy is modified in place through `let mutable`, `mutable` parameters and `*mutable T` links, and `self` is a plain copy — there is no mutable self. Its fields are always-writable C slots, and its contents are limited to types that cross the FFI boundary (see [External Interop](#6-external-interop)).
 - **Raw pointers**: the pointer types are `*T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
 - **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
 
@@ -3202,7 +3203,86 @@ type foreign CFile {};
 type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 ```
 
-A `type foreign` cannot be declared `mutable` — mutability is a property of Koral's own nominal declarations.
+The rules are C's, spelled in Koral:
+
+- A `type foreign` cannot be declared `mutable` — mutability is a property of
+  Koral's own nominal declarations — and it takes no generic parameters.
+- Fields are bare `name: Type`: positional, with no access modifiers, no
+  `mutable` marker, no named fields, no defaults. C layout is public and
+  always writable; a marker that changes nothing would only lie.
+- Every field type must cross the FFI boundary — a built-in scalar (std's
+  `Rune` included), a `*` / `*mutable` pointer to one, or another
+  `type foreign` declaration: the same closed set the `foreign` constraint
+  names. Direct self-recursion is refused (write `*Self`).
+- `type foreign` values follow **mutable value semantics**: assignment and
+  argument passing copy. `self` in a method is such a copy, so there is no
+  mutable self — to mutate a receiver, take a `*mutable T` parameter.
+- An explicit `Drop` is refused: a C value has no destructor (codegen copies
+  it with plain C assignment and drops it as a no-op).
+
+In-place writes (`x.v = value`, `x.a.b = value`) follow the same matrix as
+any value type:
+
+| Write through | Allowed |
+| --- | --- |
+| `let mutable` binding | yes |
+| `mutable` parameter (its local copy — it does **not** write back) | yes |
+| `*mutable T` link (the pointer's TYPE decides, not its binding) | yes |
+| a `type mutable` object's `mutable` field, through any path reaching it | yes |
+| `let` binding, plain parameter, `self`, `*T` link, temporary | no |
+
+A read-only handle segment (`*T`) in the middle of a chain resets write
+permission for the rest of it. `&mutable` / `&mutable expr` forms a
+`*mutable T` and needs one of the writable forms above.
+
+#### Fixed-Size Arrays
+
+`[N]T` is a C-layout fixed array of N elements of `T`: mutable value semantics
+(copies on assignment and passing; the same write matrix as above applies to
+`a[i] = v`). `T` must cross the FFI boundary — a built-in scalar, a `*` /
+`*mutable` pointer, another `type foreign` or `type foreign`'s array-friendly
+forms.
+
+```koral
+type foreign Buf(data: [4]Int32, len: Int32);
+
+let main(): Int = {
+    let mutable a: [4]Int32 = [1, 2, 3, 4];   // exactly N elements
+    let mutable z: [4]Int32 = [];             // the zeroed buffer
+    a[2] = Int32(9);                          // subscript writes into storage
+    let p: *Int32 = &a[0];                    // element address
+    return 0;
+};
+```
+
+- Non-empty literals carry exactly N elements; `[]` is the all-zero buffer.
+- `a[i]` is unchecked C indexing (as with `*T`); `[N]T` cannot cross a
+  function boundary at the FFI (`let foreign` params/returns take `*T` —
+  that is what a C array parameter really is).
+
+#### Foreign Function Types
+
+`foreign (T) -> R` is a bare C function pointer. It is **not** a Koral
+closure: only `let foreign` functions and same-typed values inhabit it, and
+`null` joins it the way it joins `*T`.
+
+```koral
+let foreign abs(x: Int32): Int32;
+
+let main(): Int = {
+    let f: foreign (Int32) -> Int32 = abs;    // a `let foreign` function
+    let cb: foreign (Int32) -> Int32 = null;  // nullable, like *T
+    if cb != null then {
+        println(f(Int32(-1)).to_string());
+    };
+    return 0;
+};
+```
+
+- Calls are positional-only, straight to C. Every signature component must
+  cross the FFI boundary (the same closed set as `let foreign`).
+- A lambda or Koral function value is a closure and does not convert;
+  assigning one is the ordinary type mismatch.
 
 ### Intrinsic Declarations
 

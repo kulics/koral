@@ -4,6 +4,25 @@ let drop_thunk_marker(): String = {
     return "/* __koral_drop_thunks__ */\n";
 };
 
+let fixed_array_typedef_marker(): String = {
+    return "/* __koral_array_typedefs__ */\n";
+};
+
+let fn_ptr_typedef_marker(): String = {
+    return "/* __koral_fnptr_typedefs__ */\n";
+};
+
+/// 定长数组包装 struct 的 typedef：形状 → 名字，以及待 splice 的 typedef 文本。
+/// 名字由 codegen 的命名路径统一发（指针命名等递归都经过它），顺序即注册
+/// 顺序（内层形状先注册），生成的 typedef 天然有序。
+let mutable fixed_array_typedef_names: Dict[String, String] = Dict[String, String].new();
+let mutable fixed_array_typedef_texts: List[String] = List[String].new();
+
+/// foreign 函数指针的 typedef：形状 → 名字，以及待 splice 的 typedef 文本
+/// （`typedef R (*name)(params);`）。
+let mutable foreign_function_typedef_names: Dict[String, String] = Dict[String, String].new();
+let mutable foreign_function_typedef_texts: List[String] = List[String].new();
+
 /// niche 布局的描述：用「空位模式」而不是 tag 来区分 case。
 type EnumNicheLayout(
     empty_case_index: UInt,
@@ -353,15 +372,96 @@ given CodeGen {
 
     /// 在类型声明之后、函数体之前插入 thunk 定义。
     public emit_drop_thunk_definitions(self, source: String): String = {
+        // The array typedefs splice unconditionally: a program can use fixed
+        // arrays and never drop anything.
+        let mutable with_typedefs = source.replace_all(
+            fixed_array_typedef_marker(),
+            with = self.fixed_array_typedef_code(),
+        );
+        with_typedefs = with_typedefs.replace_all(
+            fn_ptr_typedef_marker(),
+            with = self.foreign_function_typedef_code(),
+        );
         if self.drop_thunk_defs.count() == 0 then {
-            return source;
+            return with_typedefs;
         };
         let mutable code = StringBuilder.new();
         for thunk in self.drop_thunk_defs then {
             code.push_string(thunk);
             code.push_string("\n");
         };
-        return source.replace_all(drop_thunk_marker(), with = code.to_string());
+        return with_typedefs.replace_all(drop_thunk_marker(), with = code.to_string());
+    };
+
+    /// 定长数组的包装 struct typedef 名（首次出现时登记形状）。
+    public fixed_array_type_name(self, len: UInt, inner: Type): String = {
+        let key = "[\(len)]\(self.c_type_name(inner))";
+        when fixed_array_typedef_names.get(key) in {
+            .Some(existing) then existing,
+            .None() then {
+                let name = "__koral_arr_\(fixed_array_typedef_texts.count())";
+                fixed_array_typedef_names.insert(key, name);
+                fixed_array_typedef_texts.push(
+                    "typedef struct { \(self.c_type_name(inner)) data[\(len)]; } \(name);",
+                );
+                name
+            },
+        }
+    };
+
+    fixed_array_typedef_code(self): String = {
+        let mutable code = StringBuilder.new();
+        for text in fixed_array_typedef_texts then {
+            code.push_string(text);
+            code.push_string("\n");
+        };
+        return code.to_string();
+    };
+
+    /// foreign 函数指针的 typedef 名（首次出现时登记形状）。
+    public foreign_function_type_name(self, params: List[FunctionParamEntry], return_type: Type): String = {
+        let mutable key = StringBuilder.new();
+        key.push_string("Fn(");
+        let mutable first = true;
+        for p in params then {
+            if not first then {
+                key.push_string(",");
+            };
+            key.push_string(self.c_type_name(p.param_type));
+            first = false;
+        };
+        key.push_string(")->");
+        key.push_string(self.c_type_name(return_type));
+        let key_text = key.to_string();
+        when foreign_function_typedef_names.get(key_text) in {
+            .Some(existing) then existing,
+            .None() then {
+                let name = "__koral_fnptr_\(foreign_function_typedef_texts.count())";
+                foreign_function_typedef_names.insert(key_text, name);
+                let mutable param_str = StringBuilder.new();
+                let mutable p_first = true;
+                for p in params then {
+                    if not p_first then {
+                        param_str.push_string(", ");
+                    };
+                    param_str.push_string(self.c_type_name(p.param_type));
+                    p_first = false;
+                };
+                foreign_function_typedef_texts.push(
+                    "typedef \(self.c_type_name(return_type)) (*\(name))(\(param_str.to_string()));",
+                );
+                name
+            },
+        }
+    };
+
+    foreign_function_typedef_code(self): String = {
+        let mutable code = StringBuilder.new();
+        for text in foreign_function_typedef_texts then {
+            code.push_string(text);
+            code.push_string("\n");
+        };
+        return code.to_string();
     };
 
     public append_drop_statement(self, var_type: Type, value: String): Void = {

@@ -381,6 +381,17 @@ given CodeGen {
                     self.resolve_type_node_for_vtable(return_type, bindings),
                 )
             },
+            .FixedArray(len, element, span) then Type.FixedArrayType(len, self.resolve_type_node_for_vtable(element, bindings)),
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.resolve_type_node_for_vtable(pt, bindings));
+                };
+                Type.ForeignFunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.resolve_type_node_for_vtable(return_type, bindings),
+                )
+            },
         };
     };
 
@@ -1634,6 +1645,7 @@ given CodeGen {
             .Intrinsic(node) then when node in {
                 .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
                 or .TakeMemory(_, result_type) or .NullPtr(result_type)
+                or .FixedArrayLiteral(result_type, _)
                 or .TraitObjectDowncast(_, result_type) then result_type,
                 _ then Type.Unknown(),
             },
@@ -1994,6 +2006,11 @@ given CodeGen {
                 self.collect_trait_object_conversions_in_value(stack_size, out);
             },
             .NullPtr(_) then {},
+            .FixedArrayLiteral(_, elements) then {
+                for element in elements then {
+                    self.collect_trait_object_conversions_in_value(element, out);
+                };
+            },
         };
     };
 

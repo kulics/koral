@@ -247,6 +247,11 @@ public indirect enum Type: CustomStringConvertible {
   case void
   case never
   case function(parameters: [Parameter], returns: Type)
+  /// Fixed-size array: `[N]Element`. C layout (`T data[N]`), mutable value
+  /// semantics; only FFI-shaped elements cross into one.
+  case fixedArray(size: UInt64, element: Type)
+  /// A bare C function pointer: `foreign (A) -> R`. Nullable like `*T`.
+  case foreignFunction(parameters: [Parameter], returns: Type)
   case structure(defId: DefId)
   case reference(inner: Type)
   case mutableReference(inner: Type)
@@ -282,10 +287,14 @@ public indirect enum Type: CustomStringConvertible {
   }
 
   /// Returns whether this nominal type was declared as `type mutable`.
+  /// Generic instantiations answer through their template: `Box[Int]` shares
+  /// `Box`'s identity as a mutable object.
   public func isTypeMutable(in context: CompilerContext) -> Bool {
     switch self {
     case .structure(let defId):
       return context.isTypeMutable(defId)
+    case .genericStruct(let tplDefId, _):
+      return context.isGenericStructTemplateMutable(tplDefId)
     default:
       return false
     }
@@ -407,6 +416,11 @@ public indirect enum Type: CustomStringConvertible {
     case .function(let params, let returns):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
       return "(\(paramTypes)) -> \(returns)"
+    case .fixedArray(let size, let element):
+      return "[\(size)]\(element.description)"
+    case .foreignFunction(let params, let returns):
+      let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
+      return "foreign (\(paramTypes)) -> \(returns)"
     case .structure(let defId):
       if let context = SemanticErrorContext.currentCompilerContext {
         return context.getDebugName(self)
@@ -627,6 +641,16 @@ public indirect enum Type: CustomStringConvertible {
       }
     case .error:
       hasher.combine(32)
+    case .fixedArray(let size, let element):
+      hasher.combine(33)
+      hasher.combine(Int(size))
+      hasher.combine(element.stableHashKey)
+    case .foreignFunction(let params, let returns):
+      hasher.combine(34)
+      for param in params {
+        hasher.combine(param.type.stableHashKey)
+      }
+      hasher.combine(returns.stableHashKey)
     }
     return hasher.state
   }
@@ -663,6 +687,11 @@ public indirect enum Type: CustomStringConvertible {
     case .function(let params, let returns):
       let paramStr = params.map { $0.type.stableKey }.joined(separator: ",")
       return "Fn(\(paramStr))->\(returns.stableKey)"
+    case .fixedArray(let size, let element):
+      return "Arr(\(size))\(element.stableKey)"
+    case .foreignFunction(let params, let returns):
+      let paramStr = params.map { $0.type.stableKey }.joined(separator: ",")
+      return "FFn(\(paramStr))->\(returns.stableKey)"
     case .structure(let defId):
       return "S#\(defId.id)"
     case .`enum`(let defId):
@@ -803,6 +832,10 @@ public indirect enum Type: CustomStringConvertible {
       return self
     case .error:
       return self
+    case .fixedArray(let size, let element):
+      return .fixedArray(size: size, element: element.canonical)
+    case .foreignFunction(let params, let returns):
+      return .foreignFunction(parameters: params, returns: returns.canonical)
     }
   }
 }
@@ -918,6 +951,12 @@ extension Type: Equatable, Hashable {
       return true
 
     case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
+      return lParams == rParams && lReturns == rReturns
+
+    case (.fixedArray(let lSize, let lElement), .fixedArray(let rSize, let rElement)):
+      return lSize == rSize && lElement == rElement
+
+    case (.foreignFunction(let lParams, let lReturns), .foreignFunction(let rParams, let rReturns)):
       return lParams == rParams && lReturns == rReturns
 
     // struct/enum 相等性基于 DefId

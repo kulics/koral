@@ -204,10 +204,19 @@ given MIRFunctionBuilder {
                                         self.preferred_function_type(callable_method)
                                     }
                                 },
+                                .ForeignFunctionType(_, _) then {
+                                    if not self.context.contains_generic_parameter(
+                                        callable_method.symbol_type,
+                                    ) then {
+                                        callable_method.symbol_type
+                                    } else {
+                                        self.preferred_function_type(callable_method)
+                                    }
+                                },
                                 _ then self.preferred_function_type(callable_method),
                             };
                             let method_params = when method_type in {
-                                .FunctionType(params, _) then params,
+                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then params,
                                 _ then List[FunctionParamEntry].new(),
                             };
                             let mutable values = List[MIRValue].new();
@@ -352,6 +361,34 @@ given MIRFunctionBuilder {
         let mutable method_type = self.receiver_aware_method_type(method);
         return when method_type in {
             .FunctionType(params, _) then {
+                if params.is_empty() then {
+                    return Option[MIRValue].None();
+                };
+                let receiver_param = params[UInt(0)];
+                let kind = when receiver_param.pass_kind in {
+                    .ByReference() then Option[MIRReferenceKind].Some(
+                        MIRReferenceKind.Shared(),
+                    ),
+                    .ByMutableReference() then Option[MIRReferenceKind].Some(
+                        MIRReferenceKind.Mutable(),
+                    ),
+                    .ByValue() then Option[MIRReferenceKind].None(),
+                };
+                when kind in {
+                    .Some(ref_kind) then when self.lower_place(base) in {
+                        .Some(place) then Option[MIRValue].Some(
+                            MIRValue.Ref(
+                                place,
+                                ref_kind,
+                                MIRReferenceAllocation.StackBorrow(),
+                            ),
+                        ),
+                        .None() then Option[MIRValue].None(),
+                    },
+                    .None() then Option[MIRValue].None(),
+                }
+            },
+            .ForeignFunctionType(params, _) then {
                 if params.is_empty() then {
                     return Option[MIRValue].None();
                 };
@@ -528,6 +565,46 @@ given MIRFunctionBuilder {
         };
         return when method_type in {
             .FunctionType(params, _) then {
+                if params.is_empty() then {
+                    return normalized_base_type;
+                };
+                let mutable receiver_param_type = (params[UInt(0)]).param_type;
+                when receiver_param_type in {
+                    .MutableReferenceType(_) then when normalized_base_type in {
+                        .MutableReferenceType(_) then normalized_base_type,
+                        .ReferenceType(actual_inner) then {
+                            if self.receiver_lookup_type(actual_inner) == self.receiver_lookup_type(
+                                inner_type,
+                            ) then normalized_base_type
+                            else Type.MutableReferenceType(inner_type)
+                        },
+                        _ then Type.MutableReferenceType(inner_type),
+                    },
+                    .ReferenceType(_) then when normalized_base_type in {
+                        .ReferenceType(_) then normalized_base_type,
+                        _ then Type.ReferenceType(inner_type),
+                    },
+                    .WeakReferenceType(_) then when normalized_base_type in {
+                        .WeakReferenceType(_) or .MutableWeakReferenceType(_) then normalized_base_type,
+                        _ then Type.WeakReferenceType(inner_type),
+                    },
+                    .MutableWeakReferenceType(_) then when normalized_base_type in {
+                        .MutableWeakReferenceType(_) then normalized_base_type,
+                        _ then Type.MutableWeakReferenceType(inner_type),
+                    },
+                    .MutablePointerType(_) then when normalized_base_type in {
+                        .MutablePointerType(_) then normalized_base_type,
+                        _ then Type.MutablePointerType(inner_type),
+                    },
+                    .PointerType(_) then when normalized_base_type in {
+                        .PointerType(_) then normalized_base_type,
+                        .MutablePointerType(_) then Type.PointerType(inner_type),
+                        _ then Type.PointerType(inner_type),
+                    },
+                    _ then inner_type,
+                }
+            },
+            .ForeignFunctionType(params, _) then {
                 if params.is_empty() then {
                     return normalized_base_type;
                 };
@@ -857,6 +934,34 @@ given MIRFunctionBuilder {
                                     break;
                                 };
                             },
+                            .ForeignFunctionType(params, _) then {
+                                if params.is_empty() then {
+                                    continue;
+                                };
+                                let first_param_type = self.normalized_method_lookup_receiver_type(
+                                    (params[UInt(0)]).param_type,
+                                );
+                                let candidate_trait_def_id = when first_param_type in {
+                                    .TraitObject(candidate_trait, _) then candidate_trait,
+                                    _ then def_id_invalid(),
+                                };
+                                if not candidate_trait_def_id.is_valid() then {
+                                    continue;
+                                };
+                                if not self.static_method_signature_matches_call_via_trait_receiver(
+                                    function_type,
+                                    expected_type,
+                                    candidate_trait_def_id,
+                                ) then {
+                                    continue;
+                                };
+                                if not inferred_trait_def_id.is_valid() then {
+                                    inferred_trait_def_id = candidate_trait_def_id;
+                                } else if inferred_trait_def_id != candidate_trait_def_id then {
+                                    trait_ambiguous = true;
+                                    break;
+                                };
+                            },
                             _ then {},
                         },
                         .None() then {},
@@ -1000,6 +1105,9 @@ given MIRFunctionBuilder {
             .FunctionType(params, _) then {
                 expected_method_type = Type.FunctionType(params, result_type);
             },
+            .ForeignFunctionType(params, _) then {
+                expected_method_type = Type.ForeignFunctionType(params, result_type);
+            },
             _ then {},
         };
         when self.resolve_method_symbol_by_dispatch_identity(
@@ -1015,6 +1123,13 @@ given MIRFunctionBuilder {
         // 1. method.type already concrete — the monomorphizer substituted it.
         when method.symbol_type in {
             .FunctionType(_, _) then {
+                if not self.context.contains_generic_parameter(method.symbol_type) then {
+                    return Option[Symbol].Some(
+                        Symbol(method.def_id, method.symbol_type, method.kind),
+                    );
+                };
+            },
+            .ForeignFunctionType(_, _) then {
                 if not self.context.contains_generic_parameter(method.symbol_type) then {
                     return Option[Symbol].Some(
                         Symbol(method.def_id, method.symbol_type, method.kind),
@@ -1042,12 +1157,28 @@ given MIRFunctionBuilder {
                     );
                 };
             },
+            .ForeignFunctionType(_, _) then {
+                if not self.context.contains_generic_parameter(preferred_type) then {
+                    return Option[Symbol].Some(
+                        Symbol(method.def_id, preferred_type, method.kind),
+                    );
+                };
+            },
             _ then {},
         };
         // 4. Build concreteType from calleeType params + resultType.
         when callee_type in {
             .FunctionType(params, _) then {
                 let concrete_type = Type.FunctionType(params, result_type);
+                if self.context.contains_generic_parameter(concrete_type) then {
+                    return Option[Symbol].None();
+                };
+                return Option[Symbol].Some(
+                    Symbol(method.def_id, concrete_type, method.kind),
+                );
+            },
+            .ForeignFunctionType(params, _) then {
+                let concrete_type = Type.ForeignFunctionType(params, result_type);
                 if self.context.contains_generic_parameter(concrete_type) then {
                     return Option[Symbol].None();
                 };

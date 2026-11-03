@@ -1,0 +1,37 @@
+// EXPECT: foreign value mutation ok
+// `type foreign` is mutable VALUE semantics: copies on assignment and argument
+// passing, in-place writes only through `let mutable`, `mutable` params (the
+// local copy -- they do not write back), and `*mutable T` links.
+
+type foreign Box(v: Int32);
+
+let bump(mutable b: Box): Void = {
+    b.v = b.v + Int32(1);
+};
+
+type foreign Outer(p: *mutable Box);
+
+let main(): Int = {
+    let mutable b = Box(Int32(1));
+    b.v = Int32(2);
+    assert(b.v == Int32(2), "let mutable writes in place");
+
+    bump(b);
+    assert(b.v == Int32(2), "mutable params do not write back");
+
+    let p: *mutable Box = &mutable b;
+    p.v = Int32(7);
+    assert(b.v == Int32(7), "mutable pointers write through");
+
+    let mutable c = b;
+    c.v = Int32(9);
+    assert(b.v == Int32(7), "foreign values copy on assignment");
+    assert(c.v == Int32(9), "the copy is independent");
+
+    let mutable o = Outer(&mutable c);
+    o.p.v = Int32(11);
+    assert(c.v == Int32(11), "mutable pointer field chain writes through");
+
+    println("foreign value mutation ok");
+    return 0;
+};

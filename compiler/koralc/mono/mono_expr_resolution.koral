@@ -296,7 +296,7 @@ public let resolve_types_in_expression(mono: Monomorphizer, expr: TypedExpr): Ty
                 declared_resolved_type,
             ) then declared_resolved_type
             else when bound_callee.expr_type in {
-                .FunctionType(_, return_type_ref) then resolve_parameterized_type(
+                .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then resolve_parameterized_type(
                     mono,
                     return_type_ref,
                 ),
@@ -528,8 +528,10 @@ let instantiated_extension_method_type_matches_expected_pattern(
     };
     return when expected in {
         .GenericParameter(_) then true,
-        .FunctionType(expected_params, expected_return) then when actual in {
-            .FunctionType(actual_params, actual_return) then {
+        .FunctionType(expected_params, expected_return)
+        or .ForeignFunctionType(expected_params, expected_return) then when actual in {
+            .FunctionType(actual_params, actual_return)
+            or .ForeignFunctionType(actual_params, actual_return) then {
                 if actual_params.count() != expected_params.count() then {
                     return false;
                 };
@@ -1206,6 +1208,11 @@ let mono_register_pattern_binding_types_in_expr(
         },
         .IntrinsicCall(node) then {
             when node in {
+                .FixedArrayLiteral(_, elements) then {
+                    for element in elements then {
+                        mono_register_pattern_binding_types_in_expr(mono, element, bindings);
+                    };
+                },
                 .DowngradeRef(ref_expr, _) then mono_register_pattern_binding_types_in_expr(
                     mono,
                     ref_expr,

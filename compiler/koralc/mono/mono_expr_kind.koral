@@ -207,7 +207,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 declared_return_type,
             ) then declared_return_type
             else when bound_callee.expr_type in {
-                .FunctionType(_, return_type_ref) then resolve_parameterized_type(
+                .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then resolve_parameterized_type(
                     mono,
                     return_type_ref,
                 ),
@@ -217,6 +217,16 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
         },
         .IntrinsicCall(node) then {
             let new_node = when node in {
+                .FixedArrayLiteral(result_type, elements) then {
+                    let mutable new_elements = List[TypedExpr].new();
+                    for element in elements then {
+                        new_elements.push(resolve_types_in_expression(mono, element));
+                    };
+                    TypedIntrinsic.FixedArrayLiteral(
+                        resolve_parameterized_type(mono, result_type),
+                        new_elements,
+                    )
+                },
                 .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(
                     resolve_types_in_expression(mono, ref_expr),
                     resolve_parameterized_type(mono, result_type),
@@ -591,7 +601,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 .None() then {
                     if not has_generic_parameter(lookup_base_type) and method_name != "" then {
                         let expected_return_type = when normalized_expected_method_type in {
-                            .FunctionType(_, return_type) then resolve_parameterized_type(
+                            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                                 mono,
                                 return_type,
                             ),

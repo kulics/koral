@@ -190,6 +190,22 @@ private let type_display_with_depth(
         .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv) then (tv).display(),
         .Unknown() then "?",
+        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string(inner))",
+        .ForeignFunctionType(params, return_type) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("foreign (");
+            let mutable first = true;
+            for p in params then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_to_string(p.param_type));
+                first = false;
+            };
+            out.push_string(") -> ");
+            out.push_string(type_to_string(return_type));
+            out.to_string()
+        },
     };
 };
 
@@ -465,6 +481,14 @@ private let print_typed_expr_named(
         },
         .IntrinsicCall(node) then {
             when node in {
+                .FixedArrayLiteral(result_type, elements) then {
+                    println(
+                        "\(prefix)Intrinsic.fixed_array_literal -> \(type_display(result_type, type_names))\(type_ann)",
+                    );
+                    for element in elements then {
+                        print_typed_expr_named(element, level + 1, type_names);
+                    };
+                },
                 .DowngradeRef(ref_expr, result_type) then {
                     println(
                         "\(prefix)Intrinsic.downgrade_ref -> \(type_display(result_type, type_names))\(type_ann)",

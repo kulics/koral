@@ -1523,6 +1523,14 @@ given TypeChecker {
                 };
                 self.contains_borrowed_reference_type(return_type)
             },
+            .ForeignFunctionType(params, return_type) then {
+                for param in params then {
+                    if self.contains_borrowed_reference_type(param.param_type) then {
+                        return true;
+                    };
+                };
+                self.contains_borrowed_reference_type(return_type)
+            },
             .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
                 for arg in args then {
                     if self.contains_borrowed_reference_type(arg) then {
@@ -1548,6 +1556,14 @@ given TypeChecker {
                 };
                 self.contains_never_type(return_type)
             },
+            .ForeignFunctionType(params, return_type) then {
+                for param in params then {
+                    if self.contains_never_type(param.param_type) then {
+                        return true;
+                    };
+                };
+                self.contains_never_type(return_type)
+            },
             .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
                 for arg in args then {
                     if self.contains_never_type(arg) then {
@@ -1564,10 +1580,10 @@ given TypeChecker {
         return when t in {
             .StructureType(_) then "Koral struct types cannot be used in foreign functions",
             .EnumType(_) then "Koral enum types cannot be used in foreign functions",
-            .ReferenceType(_) then "Compiler-internal managed wrapper types cannot be used in foreign functions",
-            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "Weak reference types cannot be used in foreign functions",
+            .ReferenceType(_) then "Managed reference types (* / *mutable) cannot be used in foreign functions",
+            .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions",
             .FunctionType(...) then "Function types cannot be used in foreign functions",
-            .GenericParameter(_) then "Generic parameters cannot be used in foreign functions",
+            .GenericParameter(_) or .GenericStruct(_, _) or .GenericEnum(_, _) then "Generic parameters cannot be used in foreign functions",
             _ then "Type '\(self.context().type_display_name(t))' is not compatible with FFI",
         };
     };
@@ -1696,6 +1712,15 @@ given TypeChecker {
                 let resolved_ret = self.canonicalize_alias_type(return_type);
                 make_function_type(resolved_params, resolved_ret)
             },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(intern_type(self.canonicalize_alias_type(pt)));
+                };
+                let resolved_ret = self.canonicalize_alias_type(return_type);
+                Type.ForeignFunctionType(types_to_param_entries(resolved_params), resolved_ret)
+            },
             _ then t,
         };
     };
@@ -1735,6 +1760,17 @@ given TypeChecker {
                     resolved_params.push(self.concretize_default_literal_type(pt));
                 };
                 Type.FunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.concretize_default_literal_type(return_type),
+                )
+            },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.concretize_default_literal_type(pt));
+                };
+                Type.ForeignFunctionType(
                     types_to_param_entries(resolved_params),
                     self.concretize_default_literal_type(return_type),
                 )
@@ -1799,6 +1835,24 @@ given TypeChecker {
             .FunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable out = StringBuilder.new();
+                out.push_byte('(');
+                let mutable first = true;
+                for pt in param_types then {
+                    if not first then {
+                        out.push_string(", ");
+                    };
+                    out.push_string(self.display_type_name(pt));
+                    first = false;
+                };
+                out.push_byte(')');
+                out.push_string(" -> ");
+                out.push_string(self.display_type_name(return_type));
+                out.to_string()
+            },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable out = StringBuilder.new();
+                out.push_string("foreign ");
                 out.push_byte('(');
                 let mutable first = true;
                 for pt in param_types then {
@@ -3340,7 +3394,9 @@ given TypeChecker {
                 };
                 let stable_ret = resolved_ret;
                 let mutable context = self.context();
-                let mutable fn_type = Type.FunctionType(
+                // A `let foreign` function IS a bare C function pointer: its
+                // value type is `foreign (..) -> ..`, not a Koral closure.
+                let mutable fn_type = Type.ForeignFunctionType(
                     types_to_param_entries(self.to_type_ref_list(stable_param_types)),
                     stable_ret,
                 );
@@ -3365,10 +3421,42 @@ given TypeChecker {
                 ) is .Some(t) and t is .StructureType(def_id) then {
                     let mutable sf = List[StructField].new();
                     for f in raw_fields then {
+                        let field_type = self.resolve_type(f.type_name);
+                        // Foreign struct fields must be FFI-shaped. The three
+                        // bans the seed checks, in its order: borrowed
+                        // references, Never, and direct self-recursion (write
+                        // `*Self`) -- then the `foreign` constraint itself.
+                        if type_contains_borrowed_reference(field_type) then {
+                            self.push_diagnostic(
+                                "foreign struct field '\(f.name)' cannot contain borrowed `ref` / `ref mutable` types: '\(self.context().type_display_name(field_type))'",
+                                span,
+                            );
+                        };
+                        if type_contains_never(field_type) then {
+                            self.push_diagnostic(
+                                "foreign struct field '\(f.name)' cannot contain Never type: '\(self.context().type_display_name(field_type))'",
+                                span,
+                            );
+                        };
+                        if field_type is .StructureType(field_def) and field_def == def_id then {
+                            self.push_diagnostic(
+                                "Invalid operation Direct recursion in foreign struct \(name) not allowed (use ptr) between types \(f.name) and ",
+                                span,
+                            );
+                        };
+                        if not self.satisfies_foreign_constraint(field_type) then {
+                            self.push_diagnostic(
+                                self.foreign_constraint_violation_message(
+                                    field_type,
+                                    "foreign struct field '\(f.name)'",
+                                ),
+                                span,
+                            );
+                        };
                         sf.push(
                             StructField(
                                 f.name,
-                                self.resolve_type(f.type_name),
+                                field_type,
                                 true,
                                 f.access,
                                 f.named,
@@ -4278,6 +4366,14 @@ given TypeChecker {
                 self.copy_type_node_ref(return_type),
                 span,
             ),
+            .FixedArray(len, element, span) then TypeNode.FixedArray(len, self.copy_type_node_ref(element), span),
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable copied_params = List[TypeNode].new();
+                for pt in param_types then {
+                    copied_params.push(self.copy_type_node_ref(pt));
+                };
+                TypeNode.ForeignFunction(copied_params, self.copy_type_node_ref(return_type), span)
+            },
         };
     };
 

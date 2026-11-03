@@ -77,6 +77,31 @@ given TypeSubstitution {
                     t
                 }
             },
+            .ForeignFunctionType(params, ret) then {
+                let mutable changed = false;
+                let mutable new_params = List[Type].new();
+                for param in params then {
+                    let original = param.param_type;
+                    let substituted = self.apply_impl(original);
+                    if original != substituted then {
+                        changed = true;
+                    };
+                    new_params.push(substituted);
+                };
+                let original_ret = ret;
+                let substituted_ret = self.apply_impl(original_ret);
+                if original_ret != substituted_ret then {
+                    changed = true;
+                };
+                if changed then {
+                    Type.ForeignFunctionType(
+                        types_to_param_entries(new_params),
+                        substituted_ret,
+                    )
+                } else {
+                    t
+                }
+            },
             .MutableReferenceType(inner) then {
                 let substituted = self.apply_impl(inner);
                 if inner == substituted then t
@@ -379,6 +404,14 @@ given ConstraintSolver {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
+                for entry in params then {
+                    if self.type_contains_tv(entry.param_type) then {
+                        return true;
+                    };
+                };
+                self.type_contains_tv(ret)
+            },
+            .ForeignFunctionType(params, ret) then {
                 for entry in params then {
                     if self.type_contains_tv(entry.param_type) then {
                         return true;

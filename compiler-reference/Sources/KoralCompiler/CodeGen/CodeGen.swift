@@ -912,6 +912,10 @@ public class CodeGen {
     let declarations = sortTypeDeclarations(collectTypeDeclarations(globals))
     generateTypeForwardDeclarations(declarations)
     generateManagedNominalWrapperDeclarations(declarations)
+    // Fixed-array wrapper typedefs are collected as types are spelled and
+    // spliced in here at the end (the drop-thunk pattern).
+    buffer += Self.arrayTypedefMarker
+    buffer += Self.fnPtrTypedefMarker
     profileCodegenPhase("type-declarations", start: typeDeclStart)
 
     let userMainScanStart = DispatchTime.now()
@@ -1307,6 +1311,9 @@ public class CodeGen {
     if case .traitObject = type {
       return "struct __koral_TraitRef"
     }
+    if case .fixedArray(let size, let element) = type {
+      return TypeHandlerRegistry.shared.fixedArrayTypeName(size: size, element: element)
+    }
 
     switch type {
     case .genericParameter,
@@ -1322,6 +1329,29 @@ public class CodeGen {
     let resolved = TypeHandlerRegistry.shared.generateConcreteCTypeName(type)
     cTypeNameCache[type] = resolved
     return resolved
+  }
+
+  /// A fixed array is a single-field wrapper struct: `struct { T data[N]; }`.
+  /// The C standard gives that exactly the layout of a bare `T[N]` (first
+  /// member at offset 0, no trailing padding), so a `type foreign` field of
+  /// array type lines up with a real C header -- while unlike a bare array
+  /// the wrapper assigns, passes and returns as legal C. Shapes are named by
+  /// the TypeHandler registry (every naming path goes through it).
+  private func generateForeignFunctionTypedefs() -> String {
+    var out = ""
+    for def in TypeHandlerRegistry.shared.usedForeignFunctionTypedefs {
+      let paramStr = def.params.map { cTypeName($0.type) }.joined(separator: ", ")
+      out += "typedef \(cTypeName(def.returns)) (*\(def.name))(\(paramStr));\n"
+    }
+    return out
+  }
+
+  private func generateFixedArrayTypedefs() -> String {
+    var out = ""
+    for def in TypeHandlerRegistry.shared.usedFixedArrayTypedefs {
+      out += "typedef struct { \(cTypeName(def.element)) data[\(def.size)]; } \(def.name);\n"
+    }
+    return out
   }
 
   func nominalTypeCName(_ type: Type) -> String {
@@ -1658,6 +1688,8 @@ public class CodeGen {
   // 剩下的（典型是 `Ref[Y]`，其 drop 依赖内层类型）按需物化一个 thunk。
 
   private static let dropThunkMarker = "/* __koral_drop_thunks__ */\n"
+  private static let arrayTypedefMarker = "/* __koral_array_typedefs__ */\n"
+  private static let fnPtrTypedefMarker = "/* __koral_fnptr_typedefs__ */\n"
 
   /// 「原地销毁一个 `type` 类型 C 值」的 `__koral_Dtor` 表达式。
   /// 没有 drop glue 的类型返回 `NULL`。
@@ -1742,6 +1774,11 @@ public class CodeGen {
 
   /// 在类型声明之后、函数体之前插入 thunk 定义。
   func emitDropThunkDefinitions() {
+    // The array typedefs splice unconditionally: a program can use fixed
+    // arrays and never drop anything.
+    buffer = buffer.replacingOccurrences(of: Self.arrayTypedefMarker, with: generateFixedArrayTypedefs())
+    buffer = buffer.replacingOccurrences(
+      of: Self.fnPtrTypedefMarker, with: generateForeignFunctionTypedefs())
     guard !dropThunkDefs.isEmpty else { return }
     var thunkCode = ""
     for thunk in dropThunkDefs {
@@ -1770,6 +1807,8 @@ public class CodeGen {
     case .function(_, let returns):
       let s = cTypeName(returns)
       return s
+    case .foreignFunction(_, let returns):
+      return cTypeName(returns)
     default:
       fatalError("Expected function type")
     }
@@ -1778,6 +1817,8 @@ public class CodeGen {
   /// 获取函数类型的返回类型（作为 Type）
   func getFunctionReturnTypeAsType(_ type: Type) -> Type? {
     switch type {
+    case .foreignFunction(_, let returns):
+      return returns
     case .function(_, let returns):
       return returns
     default:

@@ -36,6 +36,10 @@ public type TypeNode {
     Generic(base: String, args: List[TypeNode], span: SourceSpan),
     InferredSelf(span: SourceSpan),
     FunctionType(param_types: List[TypeNode], return_type: TypeNode, span: SourceSpan),
+    /// 定长数组：`[N]Element`
+    FixedArray(len: UInt, element: TypeNode, span: SourceSpan),
+    /// foreign 函数指针：`foreign (A, B) -> R`
+    ForeignFunction(param_types: List[TypeNode], return_type: TypeNode, span: SourceSpan),
 };
 
 /// Where a type is written.
@@ -43,7 +47,7 @@ public let type_node_span(node: TypeNode): SourceSpan = {
     return when node in {
         .Identifier(_, span) or .Reference(_, _, span) or .BorrowedReference(_, _, span)
         or .Pointer(_, _, span) or .WeakReference(_, _, span) or .Generic(_, _, span) or .InferredSelf(span)
-        or .FunctionType(_, _, span) then span,
+        or .FunctionType(_, _, span) or .FixedArray(_, _, span) or .ForeignFunction(_, _, span) then span,
     };
 };
 
@@ -71,6 +75,8 @@ public let type_node_with_span(node: TypeNode, span: SourceSpan): TypeNode = {
             return_type,
             span,
         ),
+        .FixedArray(len, element, _) then TypeNode.FixedArray(len, element, span),
+        .ForeignFunction(param_types, return_type, _) then TypeNode.ForeignFunction(param_types, return_type, span),
     };
 };
 
@@ -109,6 +115,22 @@ public let type_node_spelling(node: TypeNode): String = {
             out.to_string()
         },
         .InferredSelf(_) then "Self",
+        .FixedArray(len, element, _) then "[\(len)]\(type_node_spelling(element))",
+        .ForeignFunction(param_types, return_type, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("foreign (");
+            let mutable first = true;
+            for pt in param_types then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_node_spelling(pt));
+                first = false;
+            };
+            out.push_string(") -> ");
+            out.push_string(type_node_spelling(return_type));
+            out.to_string()
+        },
         .FunctionType(param_types, return_type, _) then {
             let mutable out = StringBuilder.new();
             out.push_byte('(');
@@ -138,6 +160,8 @@ public let type_node_name(node: TypeNode): String = {
         or .WeakReference(inner, _, _) then type_node_name(inner),
         .InferredSelf(_) then "self",
         .FunctionType(_, _, _) then "fn",
+        .FixedArray(_, element, _) then type_node_name(element),
+        .ForeignFunction(_, _, _) then "fn",
     };
 };
 
@@ -253,6 +277,22 @@ public let type_node_display(node: TypeNode): String = {
             };
             out.push_byte(')');
             out.push_string(" -> ");
+            out.push_string(type_node_display(return_type));
+            out.to_string()
+        },
+        .FixedArray(len, element, _) then "[\(len)]\(type_node_display(element))",
+        .ForeignFunction(param_types, return_type, _) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("foreign (");
+            let mutable first = true;
+            for pt in param_types then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(type_node_display(pt));
+                first = false;
+            };
+            out.push_string(") -> ");
             out.push_string(type_node_display(return_type));
             out.to_string()
         },

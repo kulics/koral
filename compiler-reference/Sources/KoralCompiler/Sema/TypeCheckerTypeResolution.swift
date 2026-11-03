@@ -433,7 +433,29 @@ extension TypeChecker {
       let resolvedReturnType = try resolveTypeNode(returnType)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
-      
+
+    case .fixedArray(let size, let elementNode, let nodeSpan):
+      // A fixed-size array is C layout: only FFI-shaped elements fit in one.
+      let element = try resolveTypeNode(elementNode)
+      try enforceForeignConstraint(element, context: "fixed array element type", span: nodeSpan)
+      return .fixedArray(size: size, element: element)
+    case .foreignFunction(let paramTypes, let returnType, let nodeSpan):
+      // A bare C function pointer. Its signature is C's: every component
+      // must cross the FFI boundary.
+      let resolvedParams = try paramTypes.map { try resolveTypeNode($0) }
+      for paramType in resolvedParams {
+        if !isFfiCompatibleType(paramType) {
+          throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
+        }
+      }
+      let resolvedReturn = try resolveTypeNode(returnType)
+      if !isFfiCompatibleType(resolvedReturn) {
+        throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
+      }
+      return .foreignFunction(
+        parameters: resolvedParams.map { Parameter(type: $0, kind: .byVal) },
+        returns: resolvedReturn)
+
     case .weakReference(let inner, let mutable, let span):
       let resolved = try resolveIndirectionTypeNode(inner: inner, mutable: mutable, wrap: wrapWeakReference)
       if case .weakReference(let innerType) = resolved {
@@ -497,7 +519,26 @@ extension TypeChecker {
       let resolvedReturnType = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: parameters, returns: resolvedReturnType)
-      
+
+    case .fixedArray(let size, let elementNode, let nodeSpan):
+      let element = try resolveTypeNodeWithSubstitution(elementNode, substitution: substitution)
+      try enforceForeignConstraint(element, context: "fixed array element type", span: nodeSpan)
+      return .fixedArray(size: size, element: element)
+    case .foreignFunction(let paramTypes, let returnType, let nodeSpan):
+      let resolvedParams = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
+      for paramType in resolvedParams {
+        if !isFfiCompatibleType(paramType) {
+          throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
+        }
+      }
+      let resolvedReturn = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
+      if !isFfiCompatibleType(resolvedReturn) {
+        throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
+      }
+      return .foreignFunction(
+        parameters: resolvedParams.map { Parameter(type: $0, kind: .byVal) },
+        returns: resolvedReturn)
+
     case .inferredSelf:
       if let substitutedType = substitution["Self"] {
         return substitutedType
@@ -748,15 +789,29 @@ extension TypeChecker {
       return satisfiesForeignConstraint(inner)
     case .structure(let defId):
       return context.isForeignStruct(defId) || context.isStdNominal(defId, context.stdRuneDefId)
+    case .opaque:
+      // An opaque `type foreign X {}` handle: the classic incomplete-struct
+      // pointer pattern. Its representation is C's, so it crosses.
+      return true
     case .genericParameter(let name):
       return genericParamHasShapeBound(name) { if case .foreign = $0 { return true }; return false }
+    case .fixedArray(_, let element):
+      // A fixed array is C layout as long as what it holds is.
+      return satisfiesForeignConstraint(element)
+    case .foreignFunction(let params, let returns):
+      // A bare C function pointer crosses when its signature is FFI-shaped
+      // (its return may be Void/Never).
+      for param in params {
+        if !satisfiesForeignConstraint(param.type) { return false }
+      }
+      return returns == .void || returns == .never || satisfiesForeignConstraint(returns)
     default:
       return false
     }
   }
 
   /// Checks that a type satisfies the 'foreign' constraint.
-  private func enforceForeignConstraint(_ type: Type, context ctx: String? = nil) throws {
+  func enforceForeignConstraint(_ type: Type, context ctx: String? = nil, span: SourceSpan? = nil) throws {
     if case .error = type {
       return
     }
@@ -766,7 +821,7 @@ extension TypeChecker {
     let ctxText = ctx.map { " (\($0))" } ?? ""
     throw SemanticError(.generic(
       "Type '\(type)' does not satisfy the 'foreign' constraint\(ctxText). Only built-in scalars, raw pointers and 'foreign type' declarations cross the FFI boundary."
-    ), span: currentSpan)
+    ), span: span ?? currentSpan)
   }
 
   private func context_isTypeMutable(_ defId: DefId) -> Bool {

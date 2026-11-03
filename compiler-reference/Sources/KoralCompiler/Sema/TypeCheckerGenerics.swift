@@ -236,6 +236,10 @@ extension TypeChecker {
           try unify(node: returnType, type: returns, inferred: &inferred, typeParams: typeParams)
         }
       }
+    case .fixedArray(let size, let elementNode, _):
+      if case .fixedArray(let actualSize, let actualElement) = type, actualSize == size {
+        try unify(node: elementNode, type: actualElement, inferred: &inferred, typeParams: typeParams)
+      }
     case .weakReference(let inner, let mutable, _):
       if mutable, case .mutableWeakReference(let innerType) = type {
         try unify(node: inner, type: innerType, inferred: &inferred, typeParams: typeParams)
@@ -246,6 +250,18 @@ extension TypeChecker {
         default:
           break
         }
+      }
+    case .fixedArray(let size, let elementNode, _):
+      if case .fixedArray(let actualSize, let actualElement) = type, actualSize == size {
+        try unify(node: elementNode, type: actualElement, inferred: &inferred, typeParams: typeParams)
+      }
+    case .foreignFunction(let paramNodes, let returnNode, _):
+      if case .foreignFunction(let actualParams, let actualReturns) = type,
+        paramNodes.count == actualParams.count {
+        for (paramNode, param) in zip(paramNodes, actualParams) {
+          try unify(node: paramNode, type: param.type, inferred: &inferred, typeParams: typeParams)
+        }
+        try unify(node: returnNode, type: actualReturns, inferred: &inferred, typeParams: typeParams)
       }
     }
   }

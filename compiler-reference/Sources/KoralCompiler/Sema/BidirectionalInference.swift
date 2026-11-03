@@ -532,6 +532,8 @@ public class BidirectionalInference {
                 parameters: paramTypes.map { Parameter(type: $0, kind: .byVal) },
                 returns: retType
             )
+        case .fixedArray(let size, let element, _):
+            return .fixedArray(size: size, element: resolveTypeNode(element))
         case .generic(let base, let args, _):
             let argTypes = args.map { resolveTypeNode($0) }
             // RESOLUTION: a TypeNode spelling is matched to its declaration once,
@@ -548,6 +550,11 @@ public class BidirectionalInference {
             return mutable
                 ? .mutableWeakReference(inner: resolveTypeNode(inner))
                 : .weakReference(inner: resolveTypeNode(inner))
+        case .foreignFunction(let paramTypes, let returnType, _):
+            return .foreignFunction(
+                parameters: paramTypes.map { Parameter(type: resolveTypeNode($0), kind: .byVal) },
+                returns: resolveTypeNode(returnType)
+            )
         }
     }
     

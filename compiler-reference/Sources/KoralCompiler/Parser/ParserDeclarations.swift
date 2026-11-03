@@ -219,6 +219,15 @@ extension Parser {
 
       let typeParams = try parseTypeParameters()
 
+      // `type foreign` takes no generic parameters: its layout is C's, not a
+      // Koral instantiation. Both parsers used to accept `[...]` and drop it.
+      if isForeign && !typeParams.isEmpty {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "Foreign type does not support generics"
+        )
+      }
+
       // `type foreign` and `type mutable` are mutually exclusive: mutability is
       // a property of Koral's own nominal declarations, and an external type's
       // layout is C's, not ours. Anchored where koralc anchors it.

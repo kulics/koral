@@ -215,6 +215,38 @@ let normalize_type_resolution_trait_placeholder_expected_method_type(
                 resolve_parameterized_type(mono, return_type),
             )
         },
+        .ForeignFunctionType(params, return_type) then {
+            if params.is_empty() then {
+                return resolved_method_type;
+            };
+            let first_param = params[UInt(0)];
+            let normalized_receiver = when first_param.param_type in {
+                .ReferenceType(_) then Type.ReferenceType(lookup_base_type),
+                .MutableReferenceType(_) then Type.MutableReferenceType(
+                    lookup_base_type,
+                ),
+                .BorrowedReferenceType(_) then Type.BorrowedReferenceType(
+                    lookup_base_type,
+                ),
+                .MutableBorrowedReferenceType(_) then Type.MutableBorrowedReferenceType(
+                    lookup_base_type,
+                ),
+                .WeakReferenceType(_) then Type.WeakReferenceType(lookup_base_type),
+                .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(
+                    lookup_base_type,
+                ),
+                _ then lookup_base_type,
+            };
+            let mutable normalized_params = List[FunctionParamEntry].new();
+            normalized_params.push(
+                FunctionParamEntry(normalized_receiver, first_param.pass_kind),
+            );
+            normalized_params.push_list(params, span = 1..<params.count());
+            Type.ForeignFunctionType(
+                normalized_params,
+                resolve_parameterized_type(mono, return_type),
+            )
+        },
         _ then resolved_method_type,
     };
 };
@@ -503,6 +535,21 @@ let trait_tool_expected_self_type(
                                         };
                                     };
                                 },
+                                .ForeignFunctionType(fn_params, _) then {
+                                    let param_types = param_entry_types(fn_params);
+                                    if param_types.count() > UInt(0) then {
+                                        let first_param = resolve_parameterized_type(
+                                            mono,
+                                            (param_types[UInt(0)]),
+                                        );
+                                        when first_param in {
+                                            .TraitObject(_, _) then {
+                                                return Option[Type].Some(first_param);
+                                            },
+                                            _ then {},
+                                        };
+                                    };
+                                },
                                 _ then {},
                             },
                             .None() then {},
@@ -555,6 +602,16 @@ let adapt_receiver_expr_for_method(
             method.symbol_type,
         ) in {
             .FunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params);
+                if param_types.count() == 0 then {
+                    Option[Type].None()
+                } else {
+                    Option[Type].Some(
+                        resolve_parameterized_type(mono, (param_types[UInt(0)])),
+                    )
+                }
+            },
+            .ForeignFunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     Option[Type].None()
@@ -725,6 +782,9 @@ let adapt_call_args_for_method(
         .FunctionType(fn_params, _) then {
             param_types = param_entry_types(fn_params);
         },
+        .ForeignFunctionType(fn_params, _) then {
+            param_types = param_entry_types(fn_params);
+        },
         _ then {},
     };
     let param_offset = if param_types.count() == args.count() + UInt(1) then UInt(1)
@@ -787,6 +847,19 @@ let resolve_alias_receiver_match_type(mono: Monomorphizer, t: Type): Type = {
             };
             make_function_type(
                 param_types,
+                resolve_alias_receiver_match_type(mono, return_type),
+            )
+        },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let mutable param_types = List[Type].new();
+            for entry in fn_params then {
+                param_types.push(
+                    resolve_alias_receiver_match_type(mono, entry.param_type),
+                );
+            };
+            Type.ForeignFunctionType(types_to_param_entries(
+                param_types,
+                ),
                 resolve_alias_receiver_match_type(mono, return_type),
             )
         },
@@ -909,6 +982,17 @@ let method_def_id_matches_receiver_exactly(
                     concrete_receiver_type,
                 )
             },
+            .ForeignFunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params);
+                if param_types.count() == 0 then {
+                    return false;
+                };
+                receiver_match_keys_equal(
+                    mono,
+                    (param_types[UInt(0)]),
+                    concrete_receiver_type,
+                )
+            },
             _ then false,
         },
         .None() then false,
@@ -926,6 +1010,30 @@ let method_symbol_receiver_matches(
     );
     return when resolved_method_type in {
         .FunctionType(fn_params, _) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.is_empty() then {
+                return false;
+            };
+            let mutable expected_receiver_type = resolve_parameterized_type(
+                mono,
+                (param_types[UInt(0)]),
+            );
+            let mutable actual_receiver_type = resolve_parameterized_type(
+                mono,
+                receiver_type,
+            );
+            let expected_is_ref_like = type_is_tracked_handle(expected_receiver_type);
+            let actual_is_ref_like = type_is_tracked_handle(actual_receiver_type);
+            if expected_is_ref_like and not actual_is_ref_like then {
+                return false;
+            };
+            receiver_param_matches_actual_receiver(
+                mono,
+                expected_receiver_type,
+                actual_receiver_type,
+            )
+        },
+        .ForeignFunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.is_empty() then {
                 return false;
@@ -1101,10 +1209,42 @@ let method_signature_matches_receiver_type(
                     )
                 }
             },
+            .ForeignFunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params);
+                if param_types.count() == 0 then {
+                    false
+                } else {
+                    let declared_receiver_type = resolve_parameterized_type(
+                        mono,
+                        (param_types[UInt(0)]),
+                    );
+                    receiver_match_keys_equal(
+                        mono,
+                        declared_receiver_type,
+                        concrete_receiver_type,
+                    )
+                }
+            },
             _ then false,
         },
         .None() then when resolve_parameterized_type(mono, method.symbol_type) in {
             .FunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params);
+                if param_types.count() == 0 then {
+                    false
+                } else {
+                    let declared_receiver_type = resolve_parameterized_type(
+                        mono,
+                        (param_types[UInt(0)]),
+                    );
+                    receiver_match_keys_equal(
+                        mono,
+                        declared_receiver_type,
+                        concrete_receiver_type,
+                    )
+                }
+            },
+            .ForeignFunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     false

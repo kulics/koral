@@ -122,6 +122,17 @@ let normalize_trait_placeholder_type(mono: Monomorphizer, t: Type): Type = {
             let normalized_return = normalize_trait_placeholder_type(mono, return_type);
             make_function_type(normalized_params, normalized_return)
         },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable normalized_params = List[Type].new();
+            for param_type in param_types then {
+                normalized_params.push(
+                    normalize_trait_placeholder_type(mono, param_type),
+                );
+            };
+            let normalized_return = normalize_trait_placeholder_type(mono, return_type);
+            Type.ForeignFunctionType(types_to_param_entries(normalized_params), normalized_return)
+        },
         .GenericParameter(name) then {
             // Resolve Self using current_self_type if available
             if name == "Self" then {
@@ -398,6 +409,13 @@ let collect_resolve_children(mono: Monomorphizer, t: Type): List[Type] = {
             };
             children.push(return_type);
         },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            for pt in param_types then {
+                children.push(pt);
+            };
+            children.push(return_type);
+        },
         .GenericStruct(_, args) or .GenericEnum(_, args) then {
             for arg in args then {
                 children.push(arg);
@@ -536,6 +554,26 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
                 return t;
             };
             let result = make_function_type(new_param_types, resolved_return);
+            mono.storage.resolved_parameterized_types.insert(t, result);
+            return result;
+        },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable new_param_types = List[Type].with_capacity(param_types.count());
+            let mutable changed = false;
+            for pt in param_types then {
+                let resolved = resolve_parameterized_type_cached(mono, pt);
+                if resolved != pt then {
+                    changed = true;
+                };
+                new_param_types.push(resolved);
+            };
+            let resolved_return = resolve_parameterized_type_cached(mono, return_type);
+            if not changed and resolved_return == return_type then {
+                mono.storage.resolved_parameterized_types.insert(t, t);
+                return t;
+            };
+            let result = Type.ForeignFunctionType(types_to_param_entries(new_param_types), resolved_return);
             mono.storage.resolved_parameterized_types.insert(t, result);
             return result;
         },
@@ -827,6 +865,23 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
                 return t;
             };
             return make_function_type(new_param_types, resolved_return);
+        },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable new_param_types = List[Type].with_capacity(param_types.count());
+            let mutable changed = false;
+            for pt in param_types then {
+                let resolved = resolve_parameterized_type(mono, pt);
+                if resolved != pt then {
+                    changed = true;
+                };
+                new_param_types.push(resolved);
+            };
+            let resolved_return = resolve_parameterized_type(mono, return_type);
+            if not changed and resolved_return == return_type then {
+                return t;
+            };
+            return Type.ForeignFunctionType(types_to_param_entries(new_param_types), resolved_return);
         },
         .OpaqueType(def_id) then {
             if mono.storage.context.lookup_type(def_id) is .None() then {

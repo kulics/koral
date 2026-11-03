@@ -382,8 +382,22 @@ final class MIRLowerer {
       }
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: params, returns: resolvedReturn)
+    case .fixedArray(let size, let element, _):
+      guard let resolved = resolveVTableTypeNode(element, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
+        return nil
+      }
+      return .fixedArray(size: size, element: resolved)
     case .inferredSelf:
       return traitTypeParamSubstitution["Self"]
+    case .foreignFunction(let paramTypes, let returnType, _):
+      let ffParams = paramTypes.compactMap {
+        resolveVTableTypeNode($0, traitTypeParamSubstitution: traitTypeParamSubstitution)
+      }
+      guard ffParams.count == paramTypes.count,
+            let ffReturn = resolveVTableTypeNode(returnType, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
+        return nil
+      }
+      return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
     }
   }
 
@@ -2300,6 +2314,18 @@ private final class MIRFunctionBuilder {
       }
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
       return .function(parameters: params, returns: resolvedReturn)
+    case .fixedArray(let size, let element, _):
+      guard let resolved = resolvePatternTypeNode(element, substitution: substitution) else {
+        return nil
+      }
+      return .fixedArray(size: size, element: resolved)
+    case .foreignFunction(let paramTypes, let returnType, _):
+      let ffParams = paramTypes.compactMap { resolvePatternTypeNode($0, substitution: substitution) }
+      guard ffParams.count == paramTypes.count,
+            let ffReturn = resolvePatternTypeNode(returnType, substitution: substitution) else {
+        return nil
+      }
+      return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
     case .inferredSelf:
       return substitution["Self"]
     }
@@ -4186,6 +4212,8 @@ private final class MIRFunctionBuilder {
       return .takeMemory(ptr: lowerValue(ptr), resultType: intrinsic.type)
     case .nullPtr(let resultType):
       return .nullPtr(resultType: resultType)
+    case .fixedArrayLiteral(let resultType, let elements):
+      return .fixedArrayLiteral(resultType: resultType, elements: elements.map { lowerValue($0) })
     case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
       return .spawnThread(
         outHandle: lowerValue(outHandle),

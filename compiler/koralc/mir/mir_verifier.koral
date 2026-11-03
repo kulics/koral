@@ -493,6 +493,18 @@ given MIRVerifier {
         local_types: Dict[UInt, Type],
     ): Result[Void] = {
         return when node in {
+            .FixedArrayLiteral(result_type, elements) then {
+                for element in elements then {
+                    let _ = self.verify_value(function, element, local_ids, local_types) or return;
+                };
+                if self.program.context.contains_generic_parameter(result_type) then {
+                    return self.fail(
+                        function,
+                        "fixed array literal has unresolved generic type",
+                    );
+                };
+                Result[Void].Ok({})
+            },
             .TraitObjectMatches(value, trait_name, trait_def_id, trait_type_args, concrete_type) then {
                 let _ = self.verify_value(function, value, local_ids, local_types) or return;
                 if self.program.context.contains_generic_parameter(concrete_type) then {
@@ -990,7 +1002,7 @@ given MIRVerifier {
         when resolved in {
             .Some(t) then {
                 return when t in {
-                    .FunctionType(params, _) then Option[UInt].Some(params.count()),
+                    .FunctionType(params, _) or .ForeignFunctionType(params, _) then Option[UInt].Some(params.count()),
                     _ then Option[UInt].None(),
                 };
             },

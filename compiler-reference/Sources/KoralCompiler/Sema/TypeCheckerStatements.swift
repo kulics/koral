@@ -332,9 +332,19 @@ extension TypeChecker {
         ), span: outerBaseExpr.span)
       case .pointer:
         return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
+      case .fixedArray:
+        // Elements live in the array's storage: the array VALUE must sit at a
+        // writable location, exactly as `arr = v` would require. The validated
+        // base then serves as the element place's root.
+        let resolvedBase = try resolveLValue(outerBaseExpr)
+        guard typedOuterArgs.count == 1 else {
+          throw SemanticError.invalidArgumentCount(function: "subscript", expected: 1, got: typedOuterArgs.count)
+        }
+        return try buildFixedArrayElementPlace(
+          base: resolvedBase, index: typedOuterArgs[0], span: outerBaseExpr.span)
       case .none:
         throw SemanticError(.generic(
-          "subscript is only supported for String, List, Deque, Dict, and pointer types"
+          "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
         ), span: outerBaseExpr.span)
       }
     }
@@ -561,6 +571,41 @@ extension TypeChecker {
             throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
           }
 
+          // Fixed arrays write into the array's storage through an element
+          // place; the array VALUE must sit at a writable location (the
+          // mutation matrix), exactly as `arr = v` would require.
+          if case .fixedArray(_, let element) = resolveBuiltinSubscriptKind(baseType: typedBase.type) {
+            let resolvedBase: TypedExpressionNode
+            if case .subscriptExpression = baseExpr {
+              // The writable-base resolver already validated the array chain.
+              resolvedBase = typedBase
+            } else {
+              resolvedBase = try resolveLValue(baseExpr)
+            }
+            let elementPlace = try buildFixedArrayElementPlace(
+              base: resolvedBase, index: typedArgs[0], span: span)
+            var typedRhs = try inferTypedExpression(value)
+            typedRhs = try coerceLiteral(typedRhs, to: element)
+            if typedRhs.type != .never && typedRhs.type != .error && element != .error
+              && typedRhs.type != element {
+              throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
+            }
+            if let arithmeticOp = compoundOpToArithmeticOp(op) {
+              let newValue = try buildArithmeticExpression(
+                op: arithmeticOp, lhs: elementPlace, rhs: typedRhs, span: span)
+              return .assignment(target: elementPlace, operator: nil, value: newValue, span: span)
+            } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
+              if isIntegerScalarType(element) && element == typedRhs.type {
+                return .assignment(target: elementPlace, operator: op, value: typedRhs, span: span)
+              }
+              let newValue = try buildBitwiseExpression(
+                op: bitwiseOp, lhs: elementPlace, rhs: typedRhs, span: span)
+              return .assignment(target: elementPlace, operator: nil, value: newValue, span: span)
+            } else {
+              fatalError("Unknown compound assignment operator")
+            }
+          }
+
           // Evaluate base (by reference), args once.
           let baseStoredExpr: TypedExpressionNode
           let baseStoredType: Type
@@ -768,11 +813,31 @@ extension TypeChecker {
           expectedValueType = element
         case .dict(_, let element):
           expectedValueType = element
+        case .fixedArray(_, let element):
+          // `arr[i] = v` writes into the array's storage through an element
+          // place; the array VALUE must sit at a writable location (the
+          // mutation matrix), exactly as `arr = v` would require.
+          let resolvedBase: TypedExpressionNode
+          if case .subscriptExpression = baseExpr {
+            // The writable-base resolver already validated the array chain.
+            resolvedBase = typedBase
+          } else {
+            resolvedBase = try resolveLValue(baseExpr)
+          }
+          let elementPlace = try buildFixedArrayElementPlace(
+            base: resolvedBase, index: typedArgs[0], span: span)
+          var typedValue = try inferTypedExpression(value)
+          typedValue = try coerceLiteral(typedValue, to: element)
+          if typedValue.type != .never && typedValue.type != .error && element != .error
+            && typedValue.type != element {
+            throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
+          }
+          return .assignment(target: elementPlace, operator: nil, value: typedValue, span: span)
         case .pointer:
           fatalError("pointer case should have returned above")
         case .none:
           throw SemanticError(.generic(
-            "subscript is only supported for String, List, Deque, Dict, and pointer types"
+            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
           ), span: span)
         }
 

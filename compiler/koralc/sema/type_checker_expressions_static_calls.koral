@@ -552,7 +552,7 @@ given TypeChecker {
             );
         };
         let closure_ok = when closure.expr_type in {
-            .FunctionType(fn_params, return_type) then fn_params.is_empty() and return_type is .VoidType(),
+            .FunctionType(fn_params, return_type) or .ForeignFunctionType(fn_params, return_type) then fn_params.is_empty() and return_type is .VoidType(),
             _ then false,
         };
         if not closure_ok then {
@@ -1778,6 +1778,14 @@ given TypeChecker {
         return when method_opt in {
             .Some(method) then when method.symbol_type in {
                 .FunctionType(params, _) then {
+                    if params.count() > UInt(0) then {
+                        let self_param = (params[UInt(0)]).param_type;
+                        type_is_any_ref(self_param) and type_is_mutable_handle(self_param)
+                    } else {
+                        false
+                    }
+                },
+                .ForeignFunctionType(params, _) then {
                     if params.count() > UInt(0) then {
                         let self_param = (params[UInt(0)]).param_type;
                         type_is_any_ref(self_param) and type_is_mutable_handle(self_param)
@@ -3518,7 +3526,7 @@ given TypeChecker {
                 cached_method_sig = Option[Symbol].Some(bound_method);
                 method_param_types_for_inference = List[Type].new();
                 let param_types = when bound_method.symbol_type in {
-                    .FunctionType(params, _) then param_entry_types(params),
+                    .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                     _ then List[Type].new(),
                 };
                 for param_type in param_types.lazy().skip(1) then {
@@ -3555,7 +3563,7 @@ given TypeChecker {
                             cached_method_sig = Option[Symbol].Some(method);
                             method_param_types_for_inference = List[Type].new();
                             let param_types = when method.symbol_type in {
-                                .FunctionType(params, _) then param_entry_types(params),
+                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
                             for param_type in param_types.lazy().skip(1) then {
@@ -3577,7 +3585,7 @@ given TypeChecker {
             },
             _ then {},
         };
-        if not has_method_call_bindings and typed_callee.expr_type is not .FunctionType(...) then {
+        if not has_method_call_bindings and typed_callee.expr_type is not .FunctionType(...) and typed_callee.expr_type is not .ForeignFunctionType(_, _) then {
             when callee in {
                 .MemberPath(base_expr, path, _) then if not path.is_empty() then {
                     let method_name = path[path.count() - 1];
@@ -3604,7 +3612,7 @@ given TypeChecker {
                             cached_method_sig = Option[Symbol].Some(method);
                             method_param_types_for_inference = List[Type].new();
                             let param_types = when method.symbol_type in {
-                                .FunctionType(params, _) then param_entry_types(params),
+                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
                             for param_type in param_types.lazy().skip(1) then {
@@ -3884,7 +3892,7 @@ given TypeChecker {
                         ) in {
                             .Some(method_index) then {
                                 let return_type = when typed_callee.expr_type in {
-                                    .FunctionType(_, return_type_ref) then return_type_ref,
+                                    .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
                                     _ then Type.Unknown(),
                                 };
                                 let trait_receiver = when base.expr_kind in {
@@ -4498,7 +4506,7 @@ given TypeChecker {
                 let method_ret_type = when ret_type in {
                     .Unknown() then when direct_method_signature_opt in {
                         .Some(method_symbol) then when method_symbol.symbol_type in {
-                            .FunctionType(_, ret) then ret,
+                            .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
                             _ then self.resolve_method_return_type(
                                 adapted_base.expr_type,
                                 method_name,
@@ -4796,7 +4804,7 @@ given TypeChecker {
                     let method_ret_type = when ret_type in {
                         .Unknown() then when direct_method_signature_opt in {
                             .Some(method_symbol) then when method_symbol.symbol_type in {
-                                .FunctionType(_, ret) then ret,
+                                .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
                                 _ then self.resolve_method_return_type(
                                     adapted_base.expr_type,
                                     method_name,
@@ -5143,7 +5151,7 @@ given TypeChecker {
                 _ then Option[TypedExpr].None(),
             },
         };
-        let result = structured_call_opt or else if typed_callee.expr_type is not .FunctionType(...) then {
+        let result = structured_call_opt or else if typed_callee.expr_type is not .FunctionType(...) and typed_callee.expr_type is not .ForeignFunctionType(_, _) then {
                 when callee in {
                     .MemberPath(base_expr, path, _) then if not path.is_empty() then self.missing_member_call_expr(
                         typed_callee,

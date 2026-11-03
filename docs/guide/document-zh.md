@@ -1669,6 +1669,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 - **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察，这里按 `type mutable` 对待。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
+- **`type foreign`**（可变值语义）：C 布局的值。赋值与传参按值拷贝；拷贝经 `let mutable`、`mutable` 参数、`*mutable T` 链接就地修改，`self` 是普通拷贝——没有可变 self。字段是恒可写的 C 槽位，内容限于能过 FFI 边界的类型（见[外部互操作](#6-外部互操作)）。
 - **raw pointer**：指针类型是 `*T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
 - **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
 
@@ -3062,7 +3063,65 @@ type foreign CFile {};
 type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 ```
 
-foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明。
+规则就是 C 的规则，用 Koral 的拼写：
+
+- foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明——也不接受泛型参数。
+- 字段只收裸 `name: Type`：位置字段，没有访问修饰符、`mutable` 标记、命名字段、默认值。C 布局是公开且恒可写的；改不了什么的标记只会撒谎。
+- 每个字段类型都必须能过 FFI 边界——内建标量（含 std 的 `Rune`）、指向它们的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。禁止直接自递归（写 `*Self`）。
+- foreign 值是**可变值语义**：赋值与传参按值拷贝。方法里的 `self` 就是这样一个拷贝，所以没有可变 self——要改接收者就收 `*mutable T` 参数。
+- 显式 `Drop` 被拒绝：C 值没有析构（代码生成用纯 C 赋值拷贝它、drop 是空操作）。
+
+就地写入（`x.v = value`、`x.a.b = value`）与所有值类型同一套矩阵：
+
+| 写入路径 | 允许 |
+| --- | --- |
+| `let mutable` 绑定 | ✓ |
+| `mutable` 参数（本地拷贝——**不写回**） | ✓ |
+| `*mutable T` 链接（指针的**类型**说了算，不是绑定） | ✓ |
+| `type mutable` 对象的 `mutable` 字段（任何够到对象的路径） | ✓ |
+| `let` 绑定、普通参数、`self`、`*T` 链接、临时值 | ✗ |
+
+链中段出现只读句柄（`*T`）会重置其后整段的写权限。`&mutable` / `&mutable expr` 构造 `*mutable T`，要求目标属于上面可写的形式。
+
+#### 定长数组
+
+`[N]T` 是 C 布局的 N 元定长数组：可变值语义（赋值与传参按值拷贝；`a[i] = v` 与上面同一套写入矩阵）。元素 `T` 必须过 FFI 边界——内建标量、`*` / `*mutable` 指针、另一个 `type foreign` 等封闭集合内的类型。
+
+```koral
+type foreign Buf(data: [4]Int32, len: Int32);
+
+let main(): Int = {
+    let mutable a: [4]Int32 = [1, 2, 3, 4];   // 恰好 N 个元素
+    let mutable z: [4]Int32 = [];             // 全零缓冲
+    a[2] = Int32(9);                          // 下标写入存储
+    let p: *Int32 = &a[0];                    // 元素地址
+    return 0;
+};
+```
+
+- 非空字面量恰好 N 个元素；`[]` 是全零缓冲。
+- `a[i]` 不查边界（与 `*T` 同款 C 下标）；`[N]T` 不能过 FFI 函数边界
+  （`let foreign` 的参数/返回写 `*T`——那才是 C 数组参数的真身）。
+
+#### Foreign 函数类型
+
+`foreign (T) -> R` 是裸 C 函数指针。它**不是** Koral 闭包：只有 `let foreign` 函数和同类型值能住进它，`null` 与 `*T` 同款加入。
+
+```koral
+let foreign abs(x: Int32): Int32;
+
+let main(): Int = {
+    let f: foreign (Int32) -> Int32 = abs;    // `let foreign` 函数
+    let cb: foreign (Int32) -> Int32 = null;  // 可为 null，同 *T
+    if cb != null then {
+        println(f(Int32(-1)).to_string());
+    };
+    return 0;
+};
+```
+
+- 调用只用位置参数、直呼 C。签名的每个组件都必须过 FFI 边界（与 `let foreign` 同一封闭集合）。
+- lambda 或 Koral 函数值是闭包，不做转换；赋值进去就是普通的类型不匹配。
 
 ### Intrinsic 声明
 

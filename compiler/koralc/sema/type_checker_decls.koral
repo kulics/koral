@@ -293,6 +293,18 @@ given TypeChecker {
         target_type: Type,
         members: List[TypedGivenMember],
     ): Void = {
+        // A `type foreign` value is C's: codegen copies it with plain C
+        // assignment and drops it as a no-op, so a `drop` here would silently
+        // never run. Refuse it instead of lying. (Opaque foreign handles too.)
+        let is_foreign_target = when target_type in {
+            .StructureType(def_id) then self.context().is_foreign_struct(def_id),
+            .OpaqueType(_) then true,
+            _ then false,
+        };
+        if is_foreign_target then {
+            self.push_diagnostic("Foreign type cannot implement Drop", unknown_span());
+            return;
+        };
         // In the simplified type system, drop(self) is the accepted signature.
         // The parameter type is Self (the type itself), not *mutable Self.
         let mutable expected_param_type = target_type;
@@ -718,6 +730,38 @@ given TypeChecker {
             .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let typed_params = self.check_params(params);
+                // Seed-parity signature gates: an opaque handle cannot cross
+                // by value (write `<X> ptr`), a parameter cannot be `Never`,
+                // and the return cannot carry a borrowed `ref`.
+                if resolved_ret is .OpaqueType(_) then {
+                    let spelled = self.context().type_display_name(resolved_ret);
+                    self.push_diagnostic(
+                        "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
+                        span,
+                    );
+                };
+                for param in params then {
+                    let param_type = self.resolve_type(param.type_name);
+                    if param_type is .OpaqueType(_) then {
+                        let spelled = self.context().type_display_name(param_type);
+                        self.push_diagnostic(
+                            "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
+                            span,
+                        );
+                    };
+                    if self.contains_never_type(param_type) then {
+                        self.push_diagnostic(
+                            "foreign function parameter '\(param.name)' cannot contain Never type: '\(self.context().type_display_name(param_type))'",
+                            span,
+                        );
+                    };
+                };
+                if self.contains_borrowed_reference_type(resolved_ret) then {
+                    self.push_diagnostic(
+                        "foreign function return type cannot contain borrowed `ref` / `ref mutable` types: '\(self.context().type_display_name(resolved_ret))'",
+                        span,
+                    );
+                };
                 let mutable signature_types = List[Type].new();
                 for param in typed_params then {
                     signature_types.push(param.param_type);
@@ -748,7 +792,9 @@ given TypeChecker {
                 for param in typed_params then {
                     param_refs.push(param.param_type);
                 };
-                let fn_type = make_function_type(param_refs, resolved_ret);
+                // A `let foreign` function IS a bare C function pointer: its value type
+                // is `foreign (..) -> ..`, not a Koral closure.
+                let fn_type = Type.ForeignFunctionType(types_to_param_entries(param_refs), resolved_ret);
                 TypedDecl.ForeignFunctionDecl(
                     access,
                     name,
@@ -767,6 +813,19 @@ given TypeChecker {
             },
             .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
+                if resolved is .OpaqueType(_) then {
+                    let spelled = self.context().type_display_name(resolved);
+                    self.push_diagnostic(
+                        "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
+                        span,
+                    );
+                };
+                if self.contains_borrowed_reference_type(resolved) then {
+                    self.push_diagnostic(
+                        "foreign global type cannot contain borrowed `ref` / `ref mutable` types: '\(self.context().type_display_name(resolved))'",
+                        span,
+                    );
+                };
                 self.validate_signature_type_visibility(
                     name,
                     access,

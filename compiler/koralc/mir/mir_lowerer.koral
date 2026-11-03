@@ -1218,6 +1218,20 @@ given MIRLowerer {
                     self.resolve_trait_type_node_with_bindings(return_type, bindings),
                 )
             },
+            .FixedArray(len, element, span) then {
+                let resolved_element = self.resolve_trait_type_node_with_bindings(element, bindings);
+                Type.FixedArrayType(len, resolved_element)
+            },
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.resolve_trait_type_node_with_bindings(pt, bindings));
+                };
+                Type.ForeignFunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.resolve_trait_type_node_with_bindings(return_type, bindings),
+                )
+            },
         };
     };
 
@@ -1288,6 +1302,19 @@ given MIRLowerer {
                 };
                 make_function_type(
                     bound_params,
+                    self.apply_type_bindings(return_type, bindings),
+                )
+            },
+            .ForeignFunctionType(params, return_type) then {
+                let mutable bound_params = List[Type].new();
+                for param in params then {
+                    bound_params.push(
+                        self.apply_type_bindings(param.param_type, bindings),
+                    );
+                };
+                Type.ForeignFunctionType(types_to_param_entries(
+                    bound_params,
+                    ),
                     self.apply_type_bindings(return_type, bindings),
                 )
             },

@@ -197,6 +197,10 @@ final class MIRFunctionCodeEmitter {
         walkValue(owner)
       case .nullPtr:
         break
+      case .fixedArrayLiteral(_, let elements):
+        for element in elements {
+          walkValue(element)
+        }
       case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
         walkValue(outHandle)
         walkValue(outTid)
@@ -1410,6 +1414,10 @@ final class MIRFunctionCodeEmitter {
     case .local(let local):
       return MIRValueEmission(expression: localName(for: local), cleanups: [])
     case .function(let symbol):
+      if case .foreignFunction = symbol.type {
+        // A `let foreign` function value IS the bare C function pointer.
+        return MIRValueEmission(expression: codeGen.callableName(for: symbol), cleanups: [])
+      }
       let funcName = codeGen.callableName(for: symbol)
       let closureExpr = codeGen.nextTempWithInit(
         cType: "struct __koral_Closure",
@@ -1528,12 +1536,16 @@ final class MIRFunctionCodeEmitter {
         parameterTypes = exactParameterTypes
       } else if case .function(let parameters, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
         parameterTypes = parameters.map(\.type)
+      } else if case .foreignFunction(let parameters, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
+        parameterTypes = parameters.map(\.type)
       } else {
         parameterTypes = []
       }
     default:
       let calleeType = resolver.type(of: call.callee) ?? .void
       if case .function(let parameters, _) = calleeType {
+        parameterTypes = parameters.map(\.type)
+      } else if case .foreignFunction(let parameters, _) = calleeType {
         parameterTypes = parameters.map(\.type)
       } else {
         parameterTypes = []
@@ -1552,11 +1564,17 @@ final class MIRFunctionCodeEmitter {
       expression = emitDirectCall(functionName: codeGen.callableName(for: symbol), arguments: argumentList, returnType: call.type)
     default:
       let calleeType = resolver.type(of: call.callee) ?? .void
-      guard case .function(let parameters, let returns) = calleeType else {
+      switch calleeType {
+      case .function(let parameters, let returns):
+        let calleeExpr = emitOperandExpression(call.callee)
+        expression = emitClosureCall(closureExpr: calleeExpr, parameters: parameters, returnType: returns, arguments: argumentList)
+      case .foreignFunction:
+        // A bare C function pointer: a plain C call through the pointer.
+        let calleeExpr = emitOperandExpression(call.callee)
+        expression = "(\(calleeExpr))(\(argumentList.joined(separator: ", ")))"
+      default:
         fatalError("Unsupported MIR callee type in \(function.identifier.defId.id): \(calleeType)")
       }
-      let calleeExpr = emitOperandExpression(call.callee)
-      expression = emitClosureCall(closureExpr: calleeExpr, parameters: parameters, returnType: returns, arguments: argumentList)
     }
 
     for (argument, ownership) in zip(call.arguments, call.argumentOwnerships) {
@@ -2342,6 +2360,27 @@ final class MIRFunctionCodeEmitter {
 
     case .nullPtr(let resultType):
       let expression = codeGen.nextTempWithInit(cType: codeGen.cTypeName(resultType), initExpr: "NULL")
+      return MIRValueEmission(expression: expression, cleanups: [])
+
+    case .fixedArrayLiteral(let resultType, let elements):
+      let cType = codeGen.cTypeName(resultType)
+      if elements.isEmpty {
+        // The `{0}` idiom zeroes the whole wrapper.
+        let expression = codeGen.nextTempWithInit(cType: cType, initExpr: "(\(cType)){0}")
+        return MIRValueEmission(expression: expression, cleanups: [])
+      }
+      var parts: [String] = []
+      var literalCleanups: [MIRValueCleanup] = []
+      for element in elements {
+        let emission = emitValue(element, sourceMode: true)
+        parts.append(emission.expression)
+        literalCleanups.append(contentsOf: emission.cleanups)
+      }
+      let expression = codeGen.nextTempWithInit(
+        cType: cType,
+        initExpr: "(\(cType)){ .data = { \(parts.joined(separator: ", ")) } }"
+      )
+      emitCleanups(literalCleanups)
       return MIRValueEmission(expression: expression, cleanups: [])
 
     case .spawnThread(let outHandle, let outTid, let closure, let stackSize):

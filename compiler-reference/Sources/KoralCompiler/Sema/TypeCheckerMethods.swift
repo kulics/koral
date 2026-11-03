@@ -1274,6 +1274,7 @@ extension TypeChecker {
     case deque(element: Type)
     case dict(key: Type, value: Type)
     case pointer(element: Type, mutable: Bool)
+    case fixedArray(size: UInt64, element: Type)
   }
 
   private func builtinSubscriptBaseType(_ type: Type) -> Type {
@@ -1325,9 +1326,33 @@ extension TypeChecker {
       return .pointer(element: element, mutable: false)
     case .mutablePointer(let element):
       return .pointer(element: element, mutable: true)
+    case .fixedArray(let size, let element):
+      return .fixedArray(size: size, element: element)
     default:
       return nil
     }
+  }
+
+  /// The element place of a fixed-array subscript: `*((T*)&base + i)`. The
+  /// wrapper struct's first member is the bare C array, so the wrapper's
+  /// address IS the data pointer; this rides the pointer arithmetic lowering
+  /// and the resulting unsafe-deref is a place inside the array's storage.
+  /// (Bounds are unchecked here, as for `*T`.)
+  func buildFixedArrayElementPlace(
+    base: TypedExpressionNode,
+    index: TypedExpressionNode,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    guard case .fixedArray(_, let element) = builtinSubscriptBaseType(base.type) else {
+      throw SemanticError(.generic("Fixed array subscript requires a fixed array base"), span: span)
+    }
+    let ptrOfBase: TypedExpressionNode = .ptrExpression(
+      expression: base, type: .mutablePointer(element: builtinSubscriptBaseType(base.type)))
+    let dataPtr = TypedExpressionNode.castExpression(
+      expression: ptrOfBase, type: .mutablePointer(element: element), span: span)
+    let offsetExpr: TypedExpressionNode = .arithmeticExpression(
+      left: dataPtr, op: .plus, right: index, type: .mutablePointer(element: element), span: span)
+    return .unsafeDerefExpression(expression: offsetExpr, type: element)
   }
 
   func buildBuiltinSubscriptHelperCall(
@@ -1466,7 +1491,7 @@ extension TypeChecker {
 
     guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
       throw SemanticError(.generic(
-        "subscript is only supported for String, List, Deque, Dict, and pointer types"
+        "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
       ), span: span)
     }
 
@@ -1475,6 +1500,10 @@ extension TypeChecker {
       case .reference, .mutableReference:
         switch builtinKind {
         case .pointer:
+          break
+        case .fixedArray:
+          // The element place is addressable storage (the array's own), so a
+          // reference to it is fine -- unlike collection get results.
           break
         case .string, .list, .deque, .dict:
           throw SemanticError(.generic("Collection subscript results are values, not addressable references"), span: currentSpan)
@@ -1489,6 +1518,13 @@ extension TypeChecker {
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
     case .dict:
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .fixedArray:
+      guard args.count == 1 else {
+        throw SemanticError.invalidArgumentCount(function: "subscript", expected: 1, got: args.count)
+      }
+      var index = args[0]
+      index = try coerceLiteral(index, to: .uint)
+      return try buildFixedArrayElementPlace(base: base, index: index, span: span)
     case .pointer:
       fatalError("pointer subscript should have returned above")
     }

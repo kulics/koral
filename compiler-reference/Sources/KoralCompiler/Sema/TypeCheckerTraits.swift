@@ -723,6 +723,12 @@ extension TypeChecker {
       return args.contains { containsSelfType($0) }
     case .functionType(let paramTypes, let returnType, _):
       return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
+    case .fixedArray(_, let element, _):
+      return containsSelfType(element)
+    case .fixedArray(_, let element, _):
+      return containsSelfType(element)
+    case .foreignFunction(let paramTypes, let returnType, _):
+      return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
     }
   }
 

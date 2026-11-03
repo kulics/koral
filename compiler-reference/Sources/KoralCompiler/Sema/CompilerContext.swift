@@ -248,7 +248,7 @@ public final class CompilerContext: @unchecked Sendable {
              .function, .reference, .mutableReference, .borrowedReference,
              .mutableBorrowedReference, .pointer, .mutablePointer,
              .weakReference, .mutableWeakReference, .genericParameter,
-             .module, .typeVariable, .traitObject:
+             .module, .typeVariable, .traitObject, .fixedArray, .foreignFunction:
             return false
 
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
@@ -346,6 +346,10 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .structure(let defId), .`enum`(let defId), .opaque(let defId):
             return (isTypeMutable(defId) || hasExplicitDrop(defId)) ? [] : [defId]
+        case .fixedArray(_, let element):
+            // An array member needs its element's full layout, the way a
+            // struct member does (a `*T` field needs only a forward decl).
+            return directNominalValueDependencies(in: element)
         case .genericStruct(let tplDefId, let args):
             // The type carries the template's DECLARATION; the spelling is not read.
             if tplDefId.isValid,
@@ -368,6 +372,8 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .error:
             return []
+        case .foreignFunction(_, let returns):
+            return directNominalValueDependencies(in: returns)
         }
     }
 
@@ -603,6 +609,10 @@ public final class CompilerContext: @unchecked Sendable {
         case .function(let params, let returns):
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
+        case .fixedArray(let size, let element): return "[\(size)]\(getDebugName(element))"
+        case .foreignFunction(let params, let returns):
+            let ffParamStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
+            return "foreign (\(ffParamStr)) -> \(getDebugName(returns))"
         case .reference(let inner): return "*\(getDebugName(inner))"
         case .mutableReference(let inner): return "*mutable \(getDebugName(inner))"
         case .borrowedReference(let inner): return "ref *\(getDebugName(inner))"
@@ -667,6 +677,15 @@ public final class CompilerContext: @unchecked Sendable {
             }
             result.append(contentsOf: freeTypeVariables(in: returns))
             return result
+        case .fixedArray(_, let element):
+            return freeTypeVariables(in: element)
+        case .foreignFunction(let params, let returns):
+            var ffResult: [TypeVariable] = []
+            for param in params {
+                ffResult.append(contentsOf: freeTypeVariables(in: param.type))
+            }
+            ffResult.append(contentsOf: freeTypeVariables(in: returns))
+            return ffResult
         case .structure(let defId):
             var result: [TypeVariable] = []
             for member in defIdMap.getStructMembers(defId) ?? [] {
@@ -759,6 +778,14 @@ public final class CompilerContext: @unchecked Sendable {
             }
             out += "_" + getLayoutKey(returns)
             return out
+        case .fixedArray(let size, let element): return "A\(size)_\(getLayoutKey(element))"
+        case .foreignFunction(let params, let returns):
+            var ffOut = "FFn_\(params.count)"
+            for p in params {
+                ffOut += "_" + getLayoutKey(p.type)
+            }
+            ffOut += "_" + getLayoutKey(returns)
+            return ffOut
         case .reference(let inner): return "R_\(getLayoutKey(inner))"
         case .mutableReference(let inner): return "MR_\(getLayoutKey(inner))"
         case .borrowedReference(let inner): return "BR_\(getLayoutKey(inner))"
@@ -844,6 +871,11 @@ public final class CompilerContext: @unchecked Sendable {
              .float32, .float64, .bool, .void, .never:
             return false
         case .function(let params, let returns):
+            return containsGenericParameterInternal(returns, visited: &visited)
+                || params.contains { containsGenericParameterInternal($0.type, visited: &visited) }
+        case .fixedArray(_, let element):
+            return containsGenericParameterInternal(element, visited: &visited)
+        case .foreignFunction(let params, let returns):
             return containsGenericParameterInternal(returns, visited: &visited)
                 || params.contains { containsGenericParameterInternal($0.type, visited: &visited) }
         case .structure(let defId):

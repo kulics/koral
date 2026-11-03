@@ -838,6 +838,8 @@ given Parser {
             .Star() or .QuestionMark() or .KwSelfType() then true,
             // A function type opens with its parameter list: `(T1, T2) -> R`.
             .LParen() then true,
+            // A fixed-size array opens with its size: `[N]T`.
+            .LBracket() then true,
             .Identifier(_) then true,
             _ then false,
         };
@@ -1381,6 +1383,104 @@ given Parser {
                         );
                     },
                 };
+            },
+            .KwForeign() then {
+                // foreign 函数指针：`foreign (A, B) -> R`。不是 Koral 闭包：
+                // 只有 `let foreign` 函数和同类型值能住进它。
+                self.advance();
+                if self.current().kind is not .LParen() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Expected '(' of a foreign function type",
+                        ),
+                    );
+                };
+                self.advance();
+                let mutable param_types = List[TypeNode].new();
+                while self.current().kind is not .RParen() then {
+                    param_types.push(self.parse_type() or return);
+                    if self.current().kind is .Comma() then {
+                        self.advance();
+                    };
+                };
+                self.advance();
+                if self.current().kind is not .Arrow() then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Expected '->' of a foreign function type",
+                        ),
+                    );
+                };
+                self.advance();
+                let return_type = self.parse_type() or return;
+                return .Ok(
+                    TypeNode.ForeignFunction(param_types, return_type, self.span_from_start(start)),
+                );
+            },
+            .LBracket() then {
+                // 定长数组：`[N]Element`。N 是正整数字面量；元素是其后的完整
+                // 类型，所以 `[2]*Int` 是两个 `*Int`，`*[2]Int` 是数组指针。
+                self.advance();
+                let size_token = self.current();
+                if size_token.kind is not .IntegerLiteral(_) then {
+                    return .Error(
+                        self.unexpected_token_error_at(
+                            token_text(self.current()),
+                            "an integer array size",
+                            self.current(),
+                        ),
+                    );
+                };
+                let mutable size: UInt = 0;
+                let mutable size_ok = false;
+                size_ok = when size_token.kind in {
+                    .IntegerLiteral(v) then {
+                        if v.is_empty() then {
+                            false
+                        } else {
+                            let mutable digits_ok = true;
+                            let mutable acc: UInt = 0;
+                            for b in v.to_bytes() then {
+                                if b < UInt8(48) or b > UInt8(57) then {
+                                    digits_ok = false;
+                                } else if acc > UInt(1844674407370955161) then {
+                                    // Same complaint the seed gives a literal
+                                    // that does not fit its integer parser.
+                                    digits_ok = false;
+                                } else {
+                                    acc = acc * UInt(10) + UInt(b - UInt8(48));
+                                };
+                            };
+                            size = acc;
+                            digits_ok and acc >= UInt(1)
+                        }
+                    },
+                    _ then false,
+                };
+                // The seed consumes the literal first and blames the token
+                // after it for a bad size; mirror the order byte for byte.
+                self.advance();
+                if not size_ok then {
+                    return .Error(
+                        self.parser_error_at_current(
+                            "Fixed array size must be at least 1",
+                        ),
+                    );
+                };
+                if self.current().kind is not .RBracket() then {
+                    return .Error(
+                        self.unexpected_token_error_at(
+                            token_text(self.current()),
+                            "']'",
+                            self.current(),
+                        ),
+                    );
+                };
+                self.advance();
+                let element = self.parse_type() or return;
+                return .Ok(
+                    TypeNode.FixedArray(size, element, self.span_from_start(start)),
+                );
             },
             .Identifier(module_or_name) then {
                 self.advance();
@@ -1980,6 +2080,14 @@ given Parser {
         };
         let type_params = self.parse_type_parameters() or return;
 
+        // `type foreign` takes no generic parameters: its layout is C's, not a
+        // Koral instantiation. Both parsers used to accept `[...]` and drop it.
+        if decl_is_foreign and not type_params.is_empty() then {
+            return .Error(
+                self.parser_error_at_current("Foreign type does not support generics"),
+            );
+        };
+
         // `type foreign` and `type mutable` are mutually exclusive: mutability
         // is a property of Koral's own nominal declarations, and an external
         // type's layout is C's, not ours.
@@ -2020,6 +2128,56 @@ given Parser {
                 };
                 self.advance();
                 let mutable fields = List[Field].new();
+                if decl_is_foreign then {
+                    // Foreign fields are bare `name: Type`: C layout is
+                    // positional, public and always writable, so there is no
+                    // access, `mutable`, named or default spelling to accept.
+                    // This is the seed's foreignTypeDeclaration loop, byte for
+                    // byte -- including which token each error blames.
+                    while true then {
+                        when self.current().kind in {
+                            .RParen() then {
+                                self.advance();
+                                break;
+                            },
+                            _ then {},
+                        };
+                        let field_name = self.expect_identifier("field name") or return;
+                        if self.current().kind is .Colon() then {
+                            self.advance();
+                        } else {
+                            return .Error(
+                                self.parser_error_at_current(
+                                    "expected ':' after field name '\(field_name)'",
+                                ),
+                            );
+                        };
+                        let field_type = self.parse_type() or return;
+                        fields.push(
+                            Field(
+                                AccessModifier.Internal(),
+                                field_name,
+                                false,
+                                field_type,
+                                false,
+                                Option[Expr].None(),
+                            ),
+                        );
+                        if self.current().kind is .Comma() then {
+                            self.advance();
+                        };
+                    };
+                    let _ = self.require_semicolon() or return;
+                    return .Ok(
+                        Decl.ForeignTypeDecl(
+                            access,
+                            name,
+                            Option[List[Field]].Some(fields),
+                            self.span_from_start(start),
+                            self.token_span(name_token),
+                        ),
+                    );
+                };
                 let mutable seen_named_field = false;
                 while true then {
                     when self.current().kind in {
@@ -2155,7 +2313,7 @@ given Parser {
                     };
                     return .Error(
                         self.parser_error_at_current(
-                            "foreign type must use an empty body: {}",
+                            "Unexpected token: \(token_kind_description(self.current())), expected: '}'",
                         ),
                     );
                 };

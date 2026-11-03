@@ -346,6 +346,7 @@ indirect enum MIRIntrinsic {
   case deinitMemory(ptr: MIRValue)
   case takeMemory(ptr: MIRValue, resultType: Type)
   case nullPtr(resultType: Type)
+  case fixedArrayLiteral(resultType: Type, elements: [MIRValue])
   case spawnThread(outHandle: MIRValue, outTid: MIRValue, closure: MIRValue, stackSize: MIRValue)
 }
 

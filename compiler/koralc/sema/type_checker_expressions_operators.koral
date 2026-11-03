@@ -27,6 +27,22 @@ given TypeChecker {
                 );
                 return receiver_matches and arg_matches;
             },
+            .ForeignFunctionType(params, _) then {
+                if params.count() < UInt(2) then {
+                    return false;
+                };
+                let mutable receiver_type = (params[UInt(0)]).param_type;
+                let mutable arg_type = (params[UInt(1)]).param_type;
+                let receiver_matches = self.same_expr_type(receiver_type, base_type) or self.type_matches_expected_pattern(
+                    receiver_type,
+                    base_type,
+                );
+                let arg_matches = self.same_expr_type(arg_type, rhs_type) or self.type_matches_expected_pattern(
+                    arg_type,
+                    rhs_type,
+                );
+                return receiver_matches and arg_matches;
+            },
             _ then true,
         };
     };
@@ -1546,6 +1562,16 @@ given TypeChecker {
             },
             .IntrinsicCall(node) then {
                 when node in {
+                    .FixedArrayLiteral(_, elements) then {
+                        for element in elements then {
+                            self.validate_lambda_captures_in_expr(
+                                element,
+                                local_names,
+                                local_ids,
+                                reported_ids,
+                            );
+                        };
+                    },
                     .DowngradeRef(ref_expr, _) then {
                         self.validate_lambda_captures_in_expr(
                             ref_expr,
@@ -2302,7 +2328,7 @@ given TypeChecker {
             or .WrappingInt8Type() or .WrappingInt16Type() or .WrappingInt32Type() or .WrappingInt64Type()
             or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
             or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType()
-            or .MutablePointerType(_) or .PointerType(_) then true,
+            or .MutablePointerType(_) or .PointerType(_) or .ForeignFunctionType(_, _) then true,
             _ then false,
         };
     };

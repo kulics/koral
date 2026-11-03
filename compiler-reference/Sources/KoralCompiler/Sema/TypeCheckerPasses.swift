@@ -69,6 +69,19 @@ extension TypeChecker {
     returnType: Type,
     selfType: Type
   ) throws {
+    // A `type foreign` value is C's: codegen copies it with plain C assignment
+    // and drops it as a no-op, so a `drop` here would silently never run.
+    // Refuse it instead of lying. (Opaque foreign handles too.)
+    switch selfType {
+    case .structure(let selfDefId):
+      if context.isForeignStruct(selfDefId) {
+        throw SemanticError(.generic("Foreign type cannot implement Drop"), span: currentSpan)
+      }
+    case .opaque:
+      throw SemanticError(.generic("Foreign type cannot implement Drop"), span: currentSpan)
+    default:
+      break
+    }
     // Only accept: drop(self) — self is the receiver, type is SelfType.
     // Each part of that signature is a separate requirement, so each gets its
     // own sentence. Routing these through `invalidOperation` rendered them as
@@ -1392,6 +1405,12 @@ extension TypeChecker {
       let placeholder: Type = fields == nil
         ? .opaque(defId: defId)
         : .structure(defId: defId)
+      if fields != nil, case .structure(let selfDefId) = placeholder {
+        // Mark the type as foreign NOW: pass 2 checks every field type for FFI
+        // compatibility, and a foreign struct's own `*Self` fields (or mutual
+        // `*Other` pointers between foreign structs) must see it as foreign.
+        context.updateForeignStructFields(defId: selfDefId, fields: [])
+      }
       if isPrivate {
         try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: placeholder)
       } else {
@@ -2346,6 +2365,7 @@ extension TypeChecker {
         let fieldType = try resolveTypeNode(field.type)
         try assertNoBorrowedReferenceType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         try assertNoNeverType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
+        try enforceForeignConstraint(fieldType, context: "foreign struct field '\(field.name)'")
         if fieldType == placeholder {
           throw SemanticError.invalidOperation(
             op: "Direct recursion in foreign struct \(name) not allowed (use ptr)",
@@ -2519,7 +2539,9 @@ extension TypeChecker {
         signatureTypes: params.map { $0.type } + [returnType],
         span: nameSpan
       )
-      let functionType = Type.function(parameters: params, returns: returnType)
+      // A `let foreign` function IS a bare C function pointer: its value type
+      // is `foreign (..) -> ..`, not a Koral closure.
+      let functionType = Type.foreignFunction(parameters: params, returns: returnType)
       if isPrivate {
         currentScope.definePrivateFunction(name, sourceFile: currentSourceFile, type: functionType, modulePath: currentModulePath)
       } else {
@@ -2989,7 +3011,9 @@ extension TypeChecker {
           kind: .variable(param.mutable ? .MutableValue : .Value))
       }
 
-      let functionType = Type.function(
+      // A `let foreign` function IS a bare C function pointer: its value type
+      // is `foreign (..) -> ..`, not a Koral closure.
+      let functionType = Type.foreignFunction(
         parameters: params.map {
           Parameter(type: $0.type, kind: passKindForParameterType($0.type))
         },

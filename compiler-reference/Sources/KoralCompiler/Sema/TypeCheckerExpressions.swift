@@ -3076,6 +3076,7 @@ extension TypeChecker {
     case set(element: Type)
     case map(key: Type, value: Type)
     case range(element: Type)
+    case fixedArray(size: UInt64, element: Type)
   }
 
   /// `null` -- a pointer literal. It has no type of its own: it JOINS the
@@ -3097,7 +3098,7 @@ extension TypeChecker {
       return failedExpression()
     }
     switch expectedType {
-    case .pointer, .mutablePointer:
+    case .pointer, .mutablePointer, .foreignFunction:
       return .intrinsicCall(.nullPtr(resultType: expectedType))
     default:
       try handleError(
@@ -3127,6 +3128,9 @@ extension TypeChecker {
     switch target {
     case .list, .set, .map:
       return try buildWithCapacityCall(targetType: expectedType, count: 0)
+    case .fixedArray:
+      // `[]` is the zeroed buffer (the C `{0}` idiom).
+      return .intrinsicCall(.fixedArrayLiteral(resultType: expectedType, elements: []))
     case .range(let elementType):
       // Generate Range[T].Full() enum construction
       let rangeType = genericEnumType(template: "Range", args: [elementType])
@@ -3152,6 +3156,27 @@ extension TypeChecker {
     }
 
     switch target {
+    case .fixedArray(let size, let element):
+      // Non-empty literals carry exactly N elements; `[]` (handled above) is
+      // the zeroed buffer.
+      guard elements.count == Int(size) else {
+        throw SemanticError(
+          .generic("Fixed array literal expects exactly \(size) elements, got \(elements.count)"),
+          span: span
+        )
+      }
+      var typedElements: [TypedExpressionNode] = []
+      for elementExpr in elements {
+        var typed = try inferTypedExpression(elementExpr, expectedType: element)
+        typed = try coerceLiteral(typed, to: element)
+        if typed.type != .never && typed.type != .error && element != .error
+          && typed.type != element {
+          throw SemanticError.typeMismatch(expected: element.description, got: typed.type.description)
+        }
+        typedElements.append(typed)
+      }
+      let resultType = expectedType ?? .fixedArray(size: size, element: element)
+      return .intrinsicCall(.fixedArrayLiteral(resultType: resultType, elements: typedElements))
     case .list(let elementType):
       let listType = genericStructType(template: "List", args: [elementType])
       return try lowerCollectionLiteral(
@@ -3203,7 +3228,7 @@ extension TypeChecker {
       case .map(let k, let v):
         keyType = k
         valueType = v
-      case .list, .set, .range:
+      case .list, .set, .range, .fixedArray:
         throw SemanticError(
           .generic("Dict literal can only be assigned to [K, V]Dict"),
           span: span
@@ -3226,6 +3251,8 @@ extension TypeChecker {
 
   private func classifyCollectionTarget(_ type: Type, span: SourceSpan) throws -> CollectionTargetKind? {
     switch type {
+    case .fixedArray(let size, let element):
+      return .fixedArray(size: size, element: element)
     case .genericStruct(let defId, let args):
       switch Type.spelling(defId) {
       case "List":
@@ -3520,10 +3547,17 @@ extension TypeChecker {
     case .function(let params, let returns):
       let paramNodes = try params.map { try toTypeNode($0.type) }
       return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns), span: .unknown)
+    case .fixedArray(let size, let element):
+      return .fixedArray(size: size, element: try toTypeNode(element), span: .unknown)
     case .module, .typeVariable, .traitObject:
       throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
     case .error:
       throw SemanticError(.generic("Unsupported type in collection literal lowering: \(type.description)"), span: currentSpan)
+    case .fixedArray(let size, let element):
+      return .fixedArray(size: size, element: try toTypeNode(element), span: .unknown)
+    case .foreignFunction(let params, let returns):
+      let ffNodes = try params.map { try toTypeNode($0.type) }
+      return .foreignFunction(paramTypes: ffNodes, returnType: try toTypeNode(returns), span: .unknown)
     }
   }
 
@@ -5198,8 +5232,16 @@ extension TypeChecker {
       return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
     }
 
-    // Function call
-    if case .function(let params, let returns) = typedCallee.type {
+    // Function call (a bare `foreign (..) -> ..` pointer is callable too:
+    // positional arguments, a direct C call).
+    let callableSignature: ([Parameter], Type)? = {
+      switch typedCallee.type {
+      case .function(let params, let returns): return (params, returns)
+      case .foreignFunction(let params, let returns): return (params, returns)
+      default: return nil
+      }
+    }()
+    if case let .some((params, returns)) = callableSignature {
       // Free function / function value: plan labels + defaults through the
       // unified planner using the callee's declared parameter labels.
       let calleeDefId: DefId? = {
@@ -8710,9 +8752,21 @@ extension TypeChecker {
             ), span: outerBaseExpr.span)
           case .pointer:
             return try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
+          case .fixedArray:
+            // Elements live in the array's storage: the array VALUE must sit
+            // at a writable location (the mutation matrix), exactly as
+            // `arr = v` would require. The validated base then serves as the
+            // element place's root.
+            let resolvedBase = try resolveLValue(outerBaseExpr)
+            guard typedOuterArgs.count == 1 else {
+              throw SemanticError.invalidArgumentCount(
+                function: "subscript", expected: 1, got: typedOuterArgs.count)
+            }
+            return try buildFixedArrayElementPlace(
+              base: resolvedBase, index: typedOuterArgs[0], span: outerBaseExpr.span)
           case .none:
             throw SemanticError(.generic(
-              "subscript is only supported for String, List, Deque, Dict, and pointer types"
+              "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
             ), span: outerBaseExpr.span)
           }
         }
@@ -8817,8 +8871,26 @@ extension TypeChecker {
               throw SemanticError(.unknownForeignField(type: typeName, field: memberName), span: currentSpan)
             }
 
+            // Foreign fields are C layout: always mutable, always public. The
+            // VALUE they live in still follows the mutation matrix: an
+            // immutable binding, a plain parameter, `self` (a value copy), a
+            // read-only pointer segment, or a temporary cannot be modified in
+            // place. Only `let mutable`, `mutable` params, `*mutable T` links
+            // and `type mutable` objects can.
+            let currentAllowsMutation = isMutableRefLikeType(currentType)
+              || valueMutationAllowed
+              || (isLastMember && currentType.isTypeMutable(in: context))
+            if isLastMember && !currentAllowsMutation {
+              throw SemanticError.assignToImmutable(memberName)
+            }
+
             resolvedPath.append(
               makeLocalSymbol(name: field.name, type: field.type, kind: .variable(.MutableValue)))
+            if isMutableRefLikeType(field.type) {
+              valueMutationAllowed = true
+            } else if isReadOnlyRefLikeType(field.type) {
+              valueMutationAllowed = false
+            }
             currentType = field.type
             continue
           }
@@ -8993,8 +9065,10 @@ extension TypeChecker {
       }
 
     default:
+      // A call result, literal, or block is not addressable storage. (This
+      // used to spell `String(describing: expr)` -- a Swift reflection dump.)
       throw SemanticError.invalidOperation(
-        op: "assignment target", type1: String(describing: expr), type2: "")
+        op: "assignment target", type1: "temporary", type2: "")
     }
   }
 

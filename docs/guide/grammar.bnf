@@ -149,11 +149,18 @@
 <type-body> ::= "(" <field-list>? ")"                 // struct
               | "{" <variant-list>? "}"                // enum (sum type)
 
-<foreign-type-body> ::= "(" <field-list>? ")"    // FFI struct with fields
+<foreign-type-body> ::= "(" <foreign-field-list>? ")"    // FFI struct with fields
                       | "{" "}"                   // opaque type (empty enum, no variants)
 // 说明：
 // 1) `type foreign` 可以有字段（用于 FFI 结构体布局对齐），也可以用空大括号表示不透明类型
 // 2) 空大括号 `{}` 表示没有变体的 enum，与普通 enum 语法一致
+// 3) 字段只收裸 `name: Type`：C 布局是位置的、公开的、恒可写的，所以没有访问
+//    修饰符、`mutable` 标记、命名字段或默认值——改不了什么的标记只会撒谎
+// 4) 字段类型必须过 FFI 边界（`foreign` 约束那组封闭集合），禁止直接自递归（写 `*Self`）；
+//    不接受泛型参数
+// 5) 语义是可变值语义：赋值/传参按值拷贝，self 是拷贝（无可变 self），显式 `Drop` 拒绝
+<foreign-field-list> ::= <foreign-field> ("," <foreign-field>)* ","?
+<foreign-field> ::= <identifier> ":" <type-annotation>
 
 <field-list> ::= <field> ("," <field>)* ","?
 <field> ::= <access-modifier>? "mutable"? <identifier> ":" <type-annotation>                                    // positional field
@@ -238,8 +245,21 @@
 <type-atom> ::= <type-identifier>
               | <generic-type>
               | <function-type>
+              | <fixed-array-type>
+              | <foreign-function-type>
               | "(" <type> ")"
               | "Self"
+
+// 定长数组：`[N]Type`。N 是 ≥1 的整数字面量；元素是其后的完整类型
+//（`[2]*Int` 是两个 `*Int`，`*[2]Int` 是数组指针），且必须过 FFI 边界
+//（`foreign` 约束那组封闭集合）。C 布局，可变值语义；`[]` 字面量是全零缓冲，
+// 非空字面量恰好 N 个。下标 `a[i]` 不查边界（与 `*T` 同款）。
+<fixed-array-type> ::= "[" <integer-literal> "]" <type>
+
+// foreign 函数指针：`foreign (T1, ..) -> R`。裸 C 函数指针（可为 null），
+// 不是 Koral 闭包：只有 `let foreign` 函数与同类型值能住进它，lambda 不行。
+// 签名组件必须过 FFI 边界；调用是直呼 C。
+<foreign-function-type> ::= "foreign" <function-type>
 
 <type-prefix> ::= "*" "mutable"?
                | "?"

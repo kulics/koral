@@ -1181,12 +1181,20 @@ public class TypeChecker {
       return true
     case .structure, .`enum`, .reference, .mutableReference, .function, .genericParameter:
       return false
+    case .fixedArray:
+      // A bare C array parameter decays to a pointer; passing one by value
+      // would not match any real prototype. Write `*T` at the boundary.
+      return false
     case .genericStruct, .genericEnum, .module, .typeVariable:
       return false
     case .traitObject:
       return false
     case .error:
       return false
+    case .foreignFunction:
+      // A bare C function pointer crosses; its components are gated at
+      // type resolution.
+      return true
     }
   }
 

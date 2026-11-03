@@ -438,6 +438,33 @@ given TypeChecker {
                         ),
                     )
                 },
+                .ForeignFunctionType(param_entries, return_type_ref) then {
+                    if param_entries.count() != param_specs.count() then {
+                        return Option[ReusedGivenMemberSignature].None();
+                    };
+                    let mutable params = List[TypedParam].new();
+                    for pair in param_entries.lazy().enumerate() then {
+                        let idx = pair.first;
+                        let entry = pair.second;
+                        let spec = param_specs[idx];
+                        params.push(
+                            TypedParam(
+                                spec.name,
+                                spec.is_mutable,
+                                entry.param_type,
+                                spec.named,
+                                spec.default_value,
+                            ),
+                        );
+                    };
+                    Option[ReusedGivenMemberSignature].Some(
+                        ReusedGivenMemberSignature(
+                            method_symbol.def_id,
+                            params,
+                            return_type_ref,
+                        ),
+                    )
+                },
                 _ then Option[ReusedGivenMemberSignature].None(),
             },
             .None() then Option[ReusedGivenMemberSignature].None(),
@@ -852,6 +879,26 @@ given TypeChecker {
                     bindings,
                 );
                 return make_function_type(resolved_params, resolved_ret);
+            },
+            .FixedArray(len, element, span) then {
+                let resolved_element = self.resolve_type_with_self_and_bindings(element, self_type, bindings);
+                if not self.satisfies_foreign_constraint(resolved_element) then {
+                    self.push_diagnostic(
+                        self.foreign_constraint_violation_message(resolved_element, "fixed array element type"),
+                        type_node_span(node),
+                    );
+                };
+                Type.FixedArrayType(len, resolved_element)
+            },
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.resolve_type_with_self_and_bindings(pt, self_type, bindings));
+                };
+                Type.ForeignFunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.resolve_type_with_self_and_bindings(return_type, self_type, bindings),
+                )
             },
         };
     };

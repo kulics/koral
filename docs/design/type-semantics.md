@@ -125,14 +125,28 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 它满足的是一个**封闭集合**，由编译器判定：
 
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
-- 裸指针：`*T`、`*mutable T`
-- `type foreign` 声明（布局就是 C 的那个）
+- 裸指针：`*T`、`*mutable T`（指向的类型也要在集合里）
+- `type foreign` 声明（布局就是 C 的那个，不透明形 `type foreign X {}` 同样在内）
+- `[N]T` 定长数组（元素也要在集合里；C 布局即 `T data[N]`，用单字段包装
+  struct 表示——C 标准保证同布局，赋值/传参/返回却是合法 C）
+- `foreign (A) -> R` 函数指针（签名组件也要过界，返回可 `Void`/`Never`）
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 
 **用户声明不能认领 `foreign`。** 这正是它取代 `Pod` 的理由：`Pod` 是空 marker trait，
 用户可以写 `given MyType: Pod {}` 把自己的类型标成 FFI 安全——一个安全洞。
 而 Koral `type` 的布局由编译器选，跨边界的裸指针对它没有意义；要跨 FFI 的结构体应当
 写 `type foreign`。
+
+`type foreign` 的值语义是**可变值语义**：赋值/传参按值拷贝；就地修改只经
+`let mutable`、`mutable` 参数（本地拷贝，不写回）、`*mutable T` 链接，
+以及 `type mutable` 对象的 `mutable` 字段（对象语义）。`self` 是值拷贝——
+不提供可变 self，要改接收者收 `*mutable T`。字段只收裸 `name: Type`（C 布局
+位置、公开、恒可写），字段类型必须在上面的封闭集合里；显式 `Drop` 拒绝
+（代码生成对 foreign 值的 drop 是空操作，接受它就是撒谎）。
+
+`[N]T` 与 `type foreign` 同档：可变值语义、同一套写入矩阵；`foreign (A) -> R`
+则是裸 C 函数指针——`null` 与 `*T` 同族，`let foreign` 函数与同类型值入住，
+lambda/闭包不转换（那是一个带环境的 Koral 值，不是 C 指针）。
 
 ### `Drop` 让共享可观察
 

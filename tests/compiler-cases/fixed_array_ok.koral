@@ -1,0 +1,41 @@
+// EXPECT: fixed array ok
+// `[N]T` is a C-layout fixed array: mutable value semantics, copies on
+// assignment, element writes through the mutation matrix, `[]` zeroes, and
+// `[N]T` fields inside `type foreign` line up with a real C header.
+
+type foreign Buf(data: [4]Int32, len: Int32);
+
+let main(): Int = {
+    let mutable a: [4]Int32 = [1, 2, 3, 4];
+    assert(a[0] == Int32(1), "read first");
+    assert(a[3] == Int32(4), "read last");
+    a[2] = Int32(9);
+    assert(a[2] == Int32(9), "element write");
+    a[0] += Int32(5);
+    assert(a[0] == Int32(6), "compound add");
+
+    let mutable z: [4]Int32 = [];
+    assert(z[0] == Int32(0), "empty literal zeroes");
+    assert(z[3] == Int32(0), "all zeroes");
+
+    let mutable c = a;
+    c[0] = Int32(100);
+    assert(a[0] == Int32(6), "copy is independent");
+    assert(c[0] == Int32(100), "copy got the write");
+
+    let mutable m: [2][3]Int32 = [[1, 2, 3], [4, 5, 6]];
+    m[1][2] = Int32(9);
+    assert(m[1][2] == Int32(9), "nested write");
+    assert(m[0][2] == Int32(3), "nested read");
+
+    let p: *Int32 = &a[1];
+    assert(*p == Int32(2), "element address");
+
+    let mutable b = Buf([7, 8, 9, 10], Int32(4));
+    b.data[2] = Int32(50);
+    assert(b.data[2] == Int32(50), "foreign field array write");
+    assert(b.len == Int32(4), "foreign field read");
+
+    println("fixed array ok");
+    return 0;
+};

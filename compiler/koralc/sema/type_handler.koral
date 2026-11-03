@@ -24,6 +24,7 @@ public type TypeHandlerKind {
     Module(),
     TypeVariable(),
     Opaque(),
+    FixedArray(),
 };
 
 /// 从 Type 获取对应的 TypeHandlerKind
@@ -53,7 +54,8 @@ public let type_handler_kind_from(t: Type): TypeHandlerKind = {
         .TraitObject(...) then TypeHandlerKind.Reference(),
         .TypeVar(_) then TypeHandlerKind.TypeVariable(),
         .Unknown() then TypeHandlerKind.Primitive(),
-    };
+        .FixedArrayType(_, _) then TypeHandlerKind.FixedArray(),
+        .ForeignFunctionType(_, _) then TypeHandlerKind.Function(),    };
 };
 
 // ── TypeHandlerResult types ───────────────────────────────────────────────────
@@ -147,6 +149,82 @@ public let type_is_mutable_handle(t: Type): Bool = {
     };
 };
 
+/// 递归扫描：类型内部是否藏着 borrowed `ref`（种子的
+/// `Type.containsBorrowedReference`）。
+public let type_contains_borrowed_reference(t: Type): Bool = {
+    return when t in {
+        .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then true,
+        .FixedArrayType(_, inner) then type_contains_borrowed_reference(inner),
+        .FunctionType(params, ret) then {
+            for p in params then {
+                if type_contains_borrowed_reference(p.param_type) then {
+                    return true;
+                };
+            };
+            type_contains_borrowed_reference(ret)
+        },
+        .ForeignFunctionType(params, ret) then {
+            for p in params then {
+                if type_contains_borrowed_reference(p.param_type) then {
+                    return true;
+                };
+            };
+            type_contains_borrowed_reference(ret)
+        },
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
+        or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+            type_contains_borrowed_reference(inner)
+        },
+        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+            for a in args then {
+                if type_contains_borrowed_reference(a) then {
+                    return true;
+                };
+            };
+            false
+        },
+        _ then false,
+    };
+};
+
+/// 递归扫描：类型内部是否藏着 `Never`（种子的 `containsNeverType`）。
+public let type_contains_never(t: Type): Bool = {
+    return when t in {
+        .NeverType() then true,
+        .FixedArrayType(_, inner) then type_contains_never(inner),
+        .FunctionType(params, ret) then {
+            for p in params then {
+                if type_contains_never(p.param_type) then {
+                    return true;
+                };
+            };
+            type_contains_never(ret)
+        },
+        .ForeignFunctionType(params, ret) then {
+            for p in params then {
+                if type_contains_never(p.param_type) then {
+                    return true;
+                };
+            };
+            type_contains_never(ret)
+        },
+        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+        or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner)
+        or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
+            type_contains_never(inner)
+        },
+        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+            for a in args then {
+                if type_contains_never(a) then {
+                    return true;
+                };
+            };
+            false
+        },
+        _ then false,
+    };
+};
+
 // ── TypeHandler 查询函数 ──────────────────────────────────────────────────────
 
 /// 检查类型是否需要 copy 函数
@@ -227,6 +305,12 @@ public let type_mentions_unresolved_generic_placeholder(t: Type): Bool = {
                     worklist.push(entry.param_type);
                 };
             },
+            .ForeignFunctionType(params, ret) then {
+                worklist.push(ret);
+                for entry in params then {
+                    worklist.push(entry.param_type);
+                };
+            },
             .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
             or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
                 worklist.push(inner);
@@ -252,6 +336,12 @@ private let collect_type_children(
     let mutable children = List[Type].new();
     when t in {
         .FunctionType(params, ret) then {
+            children.push(ret);
+            for entry in params then {
+                children.push(entry.param_type);
+            };
+        },
+        .ForeignFunctionType(params, ret) then {
             children.push(ret);
             for entry in params then {
                 children.push(entry.param_type);

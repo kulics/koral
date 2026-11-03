@@ -166,6 +166,8 @@ struct MIRTypeResolver {
       return .bool
     case .traitObjectDowncast(_, let resultType):
       return resultType
+    case .fixedArrayLiteral(let resultType, _):
+      return resultType
     case .spawnThread:
       return .int32
     case .deallocMemory,

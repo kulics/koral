@@ -3138,11 +3138,22 @@ given TypeChecker {
                                 value_type,
                             )
                         },
+                        .FixedArray(_, _) then {
+                            let index_expr = if args.is_empty() then make_typed_expr(
+                                TypedExprKind.IntegerLiteral("0"),
+                                Type.UIntType(),
+                            ) else self.check_expr_scoped_ref(
+                                (args[UInt(0)]),
+                                Option[Type].Some(Type.UIntType()),
+                                scope,
+                            );
+                            self.build_fixed_array_element_place(typed_base, index_expr)
+                        },
                     },
                     .None() then {
                         self.push_expr_diagnostic(
                             expr,
-                            "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                         );
                         self.empty_typed_block(Type.Unknown())
                     },
@@ -3174,7 +3185,8 @@ given TypeChecker {
                     return self.empty_typed_block(Type.Unknown());
                 };
                 when expected_type in {
-                    .PointerType(_) or .MutablePointerType(_) then make_typed_expr(
+                    .PointerType(_) or .MutablePointerType(_) or .ForeignFunctionType(_, _)
+                    then make_typed_expr(
                         TypedExprKind.IntrinsicCall(
                             TypedIntrinsic.NullPtr(expected_type),
                         ),
@@ -3595,6 +3607,17 @@ given TypeChecker {
                                         );
                                     };
                                 },
+                                .FixedArray(_, _) then {
+                                    for arg in args then {
+                                        typed_args.push(
+                                            self.check_expr_scoped_ref(
+                                                arg,
+                                                Option[Type].Some(Type.UIntType()),
+                                                scope,
+                                            ),
+                                        );
+                                    };
+                                },
                             },
                             .None() then {},
                         };
@@ -3649,8 +3672,8 @@ given TypeChecker {
                 ) then {
                     let value_name = self.ref_target_expr_name(inner);
                     self.push_diagnostic(
-                        "Cannot take 'mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * links) can use 'mutable'.",
-                        self.ast_expr_span(inner),
+                        "Cannot take '&mutable' from immutable binding '\(value_name)'",
+                        self.ast_expr_span(expr),
                     );
                     return self.empty_typed_block(Type.Unknown());
                 };
@@ -3737,8 +3760,8 @@ given TypeChecker {
                 ) then {
                     let value_name = self.ref_target_expr_name(inner);
                     self.push_diagnostic(
-                        "Cannot take 'mutable' from immutable binding '\(value_name)'. Only 'let mutable' lvalues (and lvalues reached through * links) can use 'mutable'.",
-                        self.ast_expr_span(inner),
+                        "Cannot take '&mutable' from immutable binding '\(value_name)'",
+                        self.ast_expr_span(expr),
                     );
                     return self.empty_typed_block(Type.Unknown());
                 };

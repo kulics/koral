@@ -1678,6 +1678,12 @@ private let collect_generic_parameter_names_from_type(t: Type): List[String] = {
                 };
                 stack.push(ret);
             },
+            .ForeignFunctionType(params, ret) then {
+                for param in params then {
+                    stack.push(param.param_type);
+                };
+                stack.push(ret);
+            },
             .GenericStruct(_, args) or .GenericEnum(_, args) then {
                 for arg in args then {
                     stack.push(arg);
@@ -1745,6 +1751,41 @@ private let infer_method_type_args_by_signature(
                                 );
                             };
                         },
+                        .ForeignFunctionType(expected_params, expected_returns) then {
+                            let expected_types = param_entry_types(expected_params);
+                            let mutable bindings = Dict[String, Type].new();
+                            for pair in checked_params.lazy().zip[
+                                Type,
+                                ListIterator[Type],
+                                List[Type],
+                            ](expected_types).skip(1) then {
+                                let _ = unify_generic_type_pattern(
+                                    mono,
+                                    (pair.first).symbol_type,
+                                    pair.second,
+                                    collect_generic_parameter_names_from_type(
+                                        (pair.first).symbol_type,
+                                    ),
+                                    bindings,
+                                );
+                            };
+                            let _ = unify_generic_type_pattern(
+                                mono,
+                                checked_return,
+                                expected_returns,
+                                collect_generic_parameter_names_from_type(
+                                    checked_return,
+                                ),
+                                bindings,
+                            );
+                            for type_param in template.method.type_params then {
+                                out.push(
+                                    bindings.get(type_param.name) or else Type.GenericParameter(
+                                            type_param.name,
+                                        ),
+                                );
+                            };
+                        },
                         _ then {},
                     }
                 },
@@ -1767,7 +1808,7 @@ public let infer_trait_extension_type_args_by_method_type(
     method_type_args: List[Type],
 ): Option[List[Type]] = {
     let (actual_params, actual_return) = when expected_method_type in {
-        .FunctionType(params, ret) then Pair(params, ret),
+        .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
         _ then {
             return Option[List[Type]].None();
         },
@@ -1920,9 +1961,10 @@ private let symbol_matches_full_method_type(
                 full_method_type,
             ) then true
             else when resolved_hit_type in {
-                .FunctionType(hit_params, hit_returns) then {
+                .FunctionType(hit_params, hit_returns) or .ForeignFunctionType(hit_params, hit_returns) then {
                     when full_method_type in {
-                        .FunctionType(expected_params, expected_returns) then {
+                        .FunctionType(expected_params, expected_returns)
+                        or .ForeignFunctionType(expected_params, expected_returns) then {
                             let hit_types = param_entry_types(hit_params);
                             let expected_types = param_entry_types(expected_params);
                             if hit_types.count() != expected_types.count() then false
@@ -1959,8 +2001,9 @@ private let symbol_matches_full_method_type_via_trait_receiver(
 ): Bool = {
     return when mono.storage.context.get_symbol_type(hit_def_id) in {
         .Some(hit_type) then when resolve_parameterized_type(mono, hit_type) in {
-            .FunctionType(hit_params, hit_returns) then when full_method_type in {
-                .FunctionType(expected_params, expected_returns) then {
+            .FunctionType(hit_params, hit_returns) or .ForeignFunctionType(hit_params, hit_returns) then when full_method_type in {
+                .FunctionType(expected_params, expected_returns)
+                or .ForeignFunctionType(expected_params, expected_returns) then {
                     let hit_types = param_entry_types(hit_params);
                     let expected_types = param_entry_types(expected_params);
                     if hit_types.count() != expected_types.count() or hit_types.is_empty(
@@ -2532,7 +2575,7 @@ public let resolve_standalone_method_function_reference(
         substituted_function_type,
     );
     let (fn_params, fn_returns) = when resolved_function_type in {
-        .FunctionType(params, ret) then Pair(params, ret),
+        .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
         _ then {
             return Option[Symbol].None();
         },

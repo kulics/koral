@@ -335,7 +335,7 @@ let resolved_method_return_type(
         mono,
         method.symbol_type,
     ) in {
-        .FunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
         _ then resolve_parameterized_type(mono, method.symbol_type),
     };
     let mutable fallback_type = resolve_parameterized_type(mono, fallback);
@@ -388,6 +388,20 @@ let method_has_compatible_ref_like_receiver(
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
     return when resolved_method_type in {
         .FunctionType(fn_params, _) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.is_empty() then {
+                return false;
+            };
+            let mutable first_param_type = resolve_parameterized_type(
+                mono,
+                (param_types[UInt(0)]),
+            );
+            when first_param_type.compatible_indirection_inners(resolved_base_type) in {
+                .Some(inners) then inners.expected_inner == inners.actual_inner,
+                .None() then false,
+            }
+        },
+        .ForeignFunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.is_empty() then {
                 return false;

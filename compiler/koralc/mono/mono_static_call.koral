@@ -519,6 +519,125 @@ let resolve_static_method_call_to_call(
                     };
                 };
             },
+            .ForeignFunctionType(fn_params, _) then {
+                if not new_args.is_empty() and fn_params.count() == new_args.count() then {
+                    let receiver_param_type = resolve_parameterized_type(
+                        mono,
+                        (fn_params[UInt(0)]).param_type,
+                    );
+                    let first_arg = new_args[UInt(0)];
+                    let actual_receiver_expr = static_dispatch_receiver_expr(first_arg);
+                    let actual_receiver_type = resolve_parameterized_type(
+                        mono,
+                        actual_receiver_expr.expr_type,
+                    );
+                    let owner_matches = when mono.concrete_callable_info(sym.def_id) in {
+                        .Some(info) then when info.owner_type in {
+                            .Some(owner_type) then {
+                                let normalized_owner_type = resolve_parameterized_type(
+                                    mono,
+                                    owner_type,
+                                );
+                                let owner_is_self_param = when receiver_param_type in {
+                                    .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                                    or .BorrowedReferenceType(inner_ref)
+                                    or .MutableBorrowedReferenceType(inner_ref)
+                                    or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref) then mono.storage.context.get_layout_key(
+                                        resolve_parameterized_type(mono, inner_ref),
+                                    ) == mono.storage.context.get_layout_key(
+                                        normalized_owner_type,
+                                    ),
+                                    _ then mono.storage.context.get_layout_key(
+                                        receiver_param_type,
+                                    ) == mono.storage.context.get_layout_key(
+                                        normalized_owner_type,
+                                    ),
+                                };
+                                owner_is_self_param and mono.storage.context.get_layout_key(
+                                    normalized_owner_type,
+                                ) == mono.storage.context.get_layout_key(
+                                    resolve_parameterized_type(mono, new_receiver_type),
+                                )
+                            },
+                            .None() then false,
+                        },
+                        .None() then false,
+                    };
+                    let receiver_matches = when receiver_param_type in {
+                        _ then receiver_param_matches_actual_receiver(
+                            mono,
+                            receiver_param_type,
+                            actual_receiver_type,
+                        ),
+                    };
+                    if owner_matches and receiver_matches then {
+                        let receiver_trait_name_opt = when new_receiver_type in {
+                            .TraitObject(trait_def_id, _) then Option[String].Some(
+                                def_id_spelling(trait_def_id),
+                            ),
+                            .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
+                            or .WeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                                mono,
+                                inner_ref,
+                            ) in {
+                                .TraitObject(trait_def_id, _) then Option[String].Some(
+                                    def_id_spelling(trait_def_id),
+                                ),
+                                _ then Option[String].None(),
+                            },
+                            .MutableWeakReferenceType(inner_ref) then when resolve_parameterized_type(
+                                mono,
+                                inner_ref,
+                            ) in {
+                                .TraitObject(tplDefId, _) then Option[String].Some(
+                                    def_id_spelling(tplDefId),
+                                ),
+                                _ then Option[String].None(),
+                            },
+                            _ then Option[String].None(),
+                        };
+                        when receiver_trait_name_opt in {
+                            .Some(trait_name) then {
+                                if vtable_method_index(mono, trait_name, method_name) < 0 then {
+                                    let callee_expr = TypedExpr(
+                                        TypedExprKind.Variable(sym),
+                                        sym.symbol_type,
+                                        expr.span,
+                                    );
+                                    return TypedExprKind.Call(callee_expr, new_args);
+                                };
+                            },
+                            .None() then {},
+                        };
+                        let receiver_arg = adapt_receiver_expr_for_method(
+                            mono,
+                            actual_receiver_expr,
+                            sym,
+                        );
+                        let method_args = new_args.lazy().skip(1).into_list();
+                        let dispatch_callsite = ensure_receiver_dispatch_callsite(
+                            mono,
+                            Option[DefId].None(),
+                            new_receiver_type,
+                            sym,
+                            Option[String].Some(method_name),
+                        );
+                        let callee_expr = TypedExpr(
+                            TypedExprKind.MethodReference(
+                                receiver_arg,
+                                receiver_arg.expr_type,
+                                sym,
+                                List[Type].new(),
+                                List[Type].new(),
+                                dispatch_callsite,
+                            ),
+                            sym.symbol_type,
+                            receiver_arg.span,
+                        );
+                        return TypedExprKind.Call(callee_expr, method_args);
+                    };
+                };
+            },
             _ then {},
         },
         .None() then {},
@@ -534,6 +653,9 @@ let resolve_static_method_call_to_call(
             let resolved_symbol_type = resolve_parameterized_type(mono, sym.symbol_type);
             when resolved_symbol_type in {
                 .FunctionType(...) then {
+                    func_type = resolved_symbol_type;
+                },
+                .ForeignFunctionType(...) then {
                     func_type = resolved_symbol_type;
                 },
                 _ then {},
@@ -1100,6 +1222,58 @@ let find_declared_static_receiver_method(
                     let mutable signature_matches = true;
                     when symbol_type in {
                         .FunctionType(fn_params, return_type_ref) then {
+                            let param_types = param_entry_types(fn_params);
+                            if param_types.count() != args.count() then {
+                                signature_matches = false;
+                            } else {
+                                for pair in args.lazy().enumerate() then {
+                                    let arg_i = pair.first;
+                                    let actual_arg_expr = if arg_i == UInt(0) then {
+                                        let arg_expr = args[arg_i];
+                                        static_dispatch_receiver_expr(arg_expr)
+                                    } else {
+                                        args[arg_i]
+                                    };
+                                    let mutable actual_arg_type = resolve_parameterized_type(
+                                        mono,
+                                        actual_arg_expr.expr_type,
+                                    );
+                                    let mutable expected_param_type = resolve_parameterized_type(
+                                        mono,
+                                        (param_types[arg_i]),
+                                    );
+                                    if mono.storage.context.get_layout_key(
+                                        actual_arg_type,
+                                    ) != mono.storage.context.get_layout_key(
+                                        expected_param_type,
+                                    ) then {
+                                        signature_matches = false;
+                                        break;
+                                    };
+                                };
+                            };
+
+                            if signature_matches then {
+                                let concrete_expected_return = resolve_parameterized_type(
+                                    mono,
+                                    expected_return_type,
+                                );
+                                if not has_generic_parameter(concrete_expected_return) then {
+                                    let concrete_member_return = resolve_parameterized_type(
+                                        mono,
+                                        return_type_ref,
+                                    );
+                                    if mono.storage.context.get_layout_key(
+                                        concrete_member_return,
+                                    ) != mono.storage.context.get_layout_key(
+                                        concrete_expected_return,
+                                    ) then {
+                                        signature_matches = false;
+                                    };
+                                };
+                            };
+                        },
+                        .ForeignFunctionType(fn_params, return_type_ref) then {
                             let param_types = param_entry_types(fn_params);
                             if param_types.count() != args.count() then {
                                 signature_matches = false;

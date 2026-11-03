@@ -187,6 +187,22 @@ given TypeChecker {
                 }
             },
             .GenericParameter(name) then self.generic_param_is_foreign_bounded(name),
+            // An opaque `type foreign X {}` handle: the classic incomplete
+            // struct pointer pattern. Its representation is C's, so it crosses.
+            .OpaqueType(_) then true,
+            // A fixed array is C layout as long as what it holds is.
+            .FixedArrayType(_, inner) then self.satisfies_foreign_constraint(inner),
+            // A bare C function pointer crosses when its signature is
+            // FFI-shaped (its return may be Void/Never).
+            .ForeignFunctionType(params, return_type) then {
+                let mutable ok = true;
+                for p in params then {
+                    if not self.satisfies_foreign_constraint(p.param_type) then {
+                        ok = false;
+                    };
+                };
+                ok and (return_type is .VoidType() or return_type is .NeverType() or self.satisfies_foreign_constraint(return_type))
+            },
             _ then false,
         };
     };
@@ -405,6 +421,20 @@ given TypeChecker {
                 required_access,
             ),
             .FunctionType(params, return_type) then {
+                for param in params then {
+                    when self.first_signature_visibility_violation(
+                        param.param_type,
+                        required_access,
+                    ) in {
+                        .Some(violation) then {
+                            return .Some(violation);
+                        },
+                        .None() then {},
+                    };
+                };
+                self.first_signature_visibility_violation(return_type, required_access)
+            },
+            .ForeignFunctionType(params, return_type) then {
                 for param in params then {
                     when self.first_signature_visibility_violation(
                         param.param_type,

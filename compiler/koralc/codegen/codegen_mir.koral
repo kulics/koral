@@ -362,6 +362,20 @@ private let mir_walk_intrinsic_uses(
             active_scopes,
         ),
         .NullPtr(_) then {},
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                mir_walk_value_uses(
+                    shared_use_scope_by_local,
+                    first_use_block_by_local,
+                    multiple_use_blocks_by_local,
+                    tracked_drop_local_ids,
+                    parent_scope_by_scope,
+                    element,
+                    block,
+                    active_scopes,
+                );
+            };
+        },
         .SpawnThread(out_handle, out_tid, closure, stack_size) then {
             mir_walk_value_uses(
                 shared_use_scope_by_local,
@@ -1554,6 +1568,29 @@ given MIRFunctionCodeEmitter {
                 };
                 true
             },
+            .ForeignFunctionType(params, _) then {
+                if params.count() != arguments.count() then {
+                    return false;
+                };
+                for pair in arguments.lazy().enumerate() then {
+                    let i = pair.first;
+                    let mutable expected_param_type = self.codegen.function_type_param_type(
+                        function_type,
+                        i,
+                    ) or else Type.Unknown();
+                    let mutable actual_param_type = self.type_of_value(pair.second);
+                    let expected_key = self.codegen.concrete_layout_key_for_type(
+                        self.codegen.concretize_codegen_type(expected_param_type),
+                    );
+                    let actual_key = self.codegen.concrete_layout_key_for_type(
+                        self.codegen.concretize_codegen_type(actual_param_type),
+                    );
+                    if expected_key != actual_key then {
+                        return false;
+                    };
+                };
+                true
+            },
             _ then false,
         };
     };
@@ -1731,6 +1768,11 @@ given MIRFunctionCodeEmitter {
                             pts.push(p.param_type);
                         };
                     },
+                    .ForeignFunctionType(params, _) then {
+                        for p in params then {
+                            pts.push(p.param_type);
+                        };
+                    },
                     _ then {},
                 };
                 pts
@@ -1776,12 +1818,34 @@ given MIRFunctionCodeEmitter {
                 let callee_name = self.callable_name_for_symbol(symbol);
                 self.emit_direct_call(callee_name, arg_values, call.result_type)
             },
-            _ then self.emit_closure_call(
-                self.emit_operand_expression(call.callee),
-                self.type_of_operand(call.callee),
-                arg_values,
-                call.result_type,
-            ),
+            _ then {
+                let callee_type = self.type_of_operand(call.callee);
+                if callee_type is .ForeignFunctionType(_, _) then {
+                    // A bare C function pointer: a plain C call through it.
+                    let callee_expr = self.emit_operand_expression(call.callee);
+                    let mutable call_text = StringBuilder.new();
+                    call_text.push_string("(");
+                    call_text.push_string(callee_expr);
+                    call_text.push_string(")(");
+                    let mutable first_arg = true;
+                    for a in arg_values then {
+                        if not first_arg then {
+                            call_text.push_string(", ");
+                        };
+                        call_text.push_string(a);
+                        first_arg = false;
+                    };
+                    call_text.push_string(")");
+                    call_text.to_string()
+                } else {
+                    self.emit_closure_call(
+                        self.emit_operand_expression(call.callee),
+                        callee_type,
+                        arg_values,
+                        call.result_type,
+                    )
+                }
+            },
         };
         for pair in ownerships.lazy().zip[
             MIRValue,
@@ -2083,6 +2147,9 @@ given MIRFunctionCodeEmitter {
         let mutable param_types = List[String].new();
         when callee_type in {
             .FunctionType(params, _) then for param in params then {
+                param_types.push(self.codegen.c_type_name(param.param_type));
+            },
+            .ForeignFunctionType(params, _) then for param in params then {
                 param_types.push(self.codegen.c_type_name(param.param_type));
             },
             _ then {},
@@ -3389,6 +3456,36 @@ given MIRFunctionCodeEmitter {
                 );
                 MIRValueEmission(expression, Option[MIRValueCleanup].None())
             },
+            .FixedArrayLiteral(result_type, elements) then {
+                let c_type = self.codegen.c_type_name(result_type);
+                if elements.is_empty() then {
+                    // The `{0}` idiom zeroes the whole wrapper.
+                    let expression = self.codegen.next_temp_with_init(
+                        c_type,
+                        "(\(c_type)){0}",
+                    );
+                    MIRValueEmission(expression, Option[MIRValueCleanup].None())
+                } else {
+                    let mutable init_text = StringBuilder.new();
+                    init_text.push_string("(\(c_type)){ .data = { ");
+                    let mutable first = true;
+                    for element in elements then {
+                        let emission = self.emit_value(element);
+                        if not first then {
+                            init_text.push_string(", ");
+                        };
+                        init_text.push_string(emission.expression);
+                        self.emit_cleanup(emission.cleanup);
+                        first = false;
+                    };
+                    init_text.push_string(" } }");
+                    let expression = self.codegen.next_temp_with_init(
+                        c_type,
+                        init_text.to_string(),
+                    );
+                    MIRValueEmission(expression, Option[MIRValueCleanup].None())
+                }
+            },
             .SpawnThread(out_handle, out_tid, closure, stack_size) then self.emit_spawn_thread(
                 out_handle,
                 out_tid,
@@ -3456,7 +3553,7 @@ given MIRFunctionCodeEmitter {
         let lambda_name = self.next_lambda_name();
         // Extract function parameters and return type from lambda_type
         let (function_params, return_type) = when lambda.lambda_type in {
-            .FunctionType(params, ret) then Pair(params, ret),
+            .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
             _ then Pair(List[FunctionParamEntry].new(), Type.VoidType()),
         };
 
@@ -3893,6 +3990,7 @@ given MIRFunctionCodeEmitter {
             .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
             .TraitObjectMatches(_, _, _, _, _) then Type.BoolType(),
             .TraitObjectDowncast(_, result_type) or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
+            .FixedArrayLiteral(result_type, _) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
             _ then Type.VoidType(),
         };

@@ -223,6 +223,10 @@ private final class MIRStatsCounter {
       count(owner)
     case .nullPtr:
       break
+    case .fixedArrayLiteral(_, let elements):
+      for element in elements {
+        count(element)
+      }
     case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
       count(outHandle)
       count(outTid)

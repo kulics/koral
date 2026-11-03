@@ -541,7 +541,7 @@ given CompilerContext {
     public get_function_type(self, def_id: DefId): Option[Type] = {
         return when self.get_symbol_type(def_id) in {
             .Some(symbol_type) then when symbol_type in {
-                .FunctionType(...) then Option[Type].Some(symbol_type),
+                .FunctionType(...) or .ForeignFunctionType(_, _) then Option[Type].Some(symbol_type),
                 _ then Option[Type].None(),
             },
             .None() then Option[Type].None(),
@@ -551,7 +551,7 @@ given CompilerContext {
     public get_function_return_type(self, def_id: DefId): Option[Type] = {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
-                .FunctionType(_, return_type_ref) then Option[Type].Some(
+                .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then Option[Type].Some(
                     return_type_ref,
                 ),
                 _ then Option[Type].None(),
@@ -564,6 +564,11 @@ given CompilerContext {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
                 .FunctionType(params, _) then {
+                    if arg_index < params.count() then Option[Type].Some(
+                        params[arg_index].param_type,
+                    ) else Option[Type].None()
+                },
+                .ForeignFunctionType(params, _) then {
                     if arg_index < params.count() then Option[Type].Some(
                         params[arg_index].param_type,
                     ) else Option[Type].None()
@@ -1075,10 +1080,12 @@ given CompilerContext {
             .VoidType() then MethodOwner.Builtin("Void"),
             .NeverType() then MethodOwner.Builtin("Never"),
             .FunctionType(...) then MethodOwner.Builtin("Function"),
+            .ForeignFunctionType(_, _) then MethodOwner.Builtin("FnPtr"),
             .GenericParameter(name) then MethodOwner.Builtin("TypeParam.\(name)"),
             .ModuleType(_) then MethodOwner.Builtin("Module"),
             .TypeVar(_) then MethodOwner.Builtin("TypeVar"),
             .Unknown() then MethodOwner.Builtin("Unknown"),
+            .FixedArrayType(_, _) then MethodOwner.Builtin("Array"),
         };
     };
 
@@ -1332,6 +1339,19 @@ given CompilerContext {
                 out.push_string(self.get_debug_name(ret));
                 out.to_string()
             },
+            .ForeignFunctionType(params, ret) then {
+                let mutable parts = List[String].new();
+                for entry in params then {
+                    parts.push(self.get_debug_name(entry.param_type));
+                };
+                let mutable out = StringBuilder.new();
+                out.push_byte('(');
+                out.push_string(join_strings(parts, ", "));
+                out.push_byte(')');
+                out.push_string(" -> ");
+                out.push_string(self.get_debug_name(ret));
+                out.to_string()
+            },
             .ReferenceType(inner) then "*\(self.get_debug_name(inner))",
             .BorrowedReferenceType(inner) then "ref *\(self.get_debug_name(inner))",
             .MutableReferenceType(inner) then "*mutable \(self.get_debug_name(inner))",
@@ -1413,6 +1433,22 @@ given CompilerContext {
             },
             .TypeVar(tv) then "?\(tv.id)",
             .Unknown() then "?",
+        .FixedArrayType(len, inner) then "[\(len)]\(self.get_debug_name(inner))",
+        .ForeignFunctionType(params, return_type) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("foreign (");
+            let mutable first = true;
+            for p in params then {
+                if not first then {
+                    out.push_string(", ");
+                };
+                out.push_string(self.get_debug_name(p.param_type));
+                first = false;
+            };
+            out.push_string(") -> ");
+            out.push_string(self.get_debug_name(return_type));
+            out.to_string()
+        },
         };
     };
 
@@ -1423,6 +1459,17 @@ given CompilerContext {
         return when t in {
             .TypeVar(_) then true,
             .FunctionType(params, ret) then {
+                if self.contains_type_variable(ret) then {
+                    return true;
+                };
+                for entry in params then {
+                    if self.contains_type_variable(entry.param_type) then {
+                        return true;
+                    };
+                };
+                false
+            },
+            .ForeignFunctionType(params, ret) then {
                 if self.contains_type_variable(ret) then {
                     return true;
                 };
@@ -1525,6 +1572,20 @@ given CompilerContext {
                 out.push_string(self.get_layout_key(return_type));
                 out.to_string()
             },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable out = StringBuilder.new();
+                out.push_string("Fn");
+                out.push_byte('_');
+                out.push_string(param_types.count().to_string());
+                for pt in param_types then {
+                    out.push_byte('_');
+                    out.push_string(self.get_layout_key(pt));
+                };
+                out.push_byte('_');
+                out.push_string(self.get_layout_key(return_type));
+                out.to_string()
+            },
             .ReferenceType(inner) then "R_\(self.get_layout_key(inner))",
             .MutableReferenceType(inner) then "MR_\(self.get_layout_key(inner))",
             .PointerType(inner) then "P_\(self.get_layout_key(inner))",
@@ -1595,6 +1656,18 @@ given CompilerContext {
             .ModuleType(info) then "M_\(self.symbol_key_for_module_path(info.module_path))",
             .TypeVar(tv) then "TV_\(tv.id)",
             .Unknown() then "Unknown",
+        .FixedArrayType(len, inner) then "A\(len)_\(self.compute_layout_key(inner))",
+        .ForeignFunctionType(params, return_type) then {
+            let mutable out = StringBuilder.new();
+            out.push_string("FFn_\(params.count())");
+            for p in params then {
+                out.push_string("_");
+                out.push_string(self.compute_layout_key(p.param_type));
+            };
+            out.push_string("_");
+            out.push_string(self.compute_layout_key(return_type));
+            out.to_string()
+        },
         };
     };
 

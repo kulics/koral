@@ -131,7 +131,7 @@ private let recover_unknown_expr_type(
             _ then fallback,
         },
         .Call(callee, _) then when resolve_parameterized_type(mono, callee.expr_type) in {
-            .FunctionType(_, return_type) then resolve_parameterized_type(
+            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                 mono,
                 return_type,
             ),
@@ -477,6 +477,95 @@ private let synthetic_args_from_expected_method_type(
                 );
             };
         },
+        .ForeignFunctionType(expected_params, _) then {
+            let param_types = param_entry_types(expected_params);
+            let mutable start_idx: UInt = 0;
+            if not param_types.is_empty() then {
+                let mutable first_param_type = resolve_parameterized_type(
+                    mono,
+                    (param_types[UInt(0)]),
+                );
+                let receiver_matches = if mono.storage.context.get_layout_key(
+                    first_param_type,
+                ) == mono.storage.context.get_layout_key(resolved_receiver_type) then {
+                    true
+                } else when first_param_type in {
+                    .ReferenceType(lhs) then when resolved_receiver_type in {
+                        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(resolved_receiver_type),
+                        .ReferenceType(rhs) or .MutableReferenceType(rhs) or .BorrowedReferenceType(rhs)
+                        or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    .MutableReferenceType(lhs) then when resolved_receiver_type in {
+                        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(resolved_receiver_type),
+                        .MutableReferenceType(rhs) or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    .BorrowedReferenceType(lhs) then when resolved_receiver_type in {
+                        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(resolved_receiver_type),
+                        .ReferenceType(rhs) or .MutableReferenceType(rhs) or .BorrowedReferenceType(rhs)
+                        or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    .MutableBorrowedReferenceType(lhs) then when resolved_receiver_type in {
+                        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(resolved_receiver_type),
+                        .MutableReferenceType(rhs) or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    .WeakReferenceType(lhs) then when resolved_receiver_type in {
+                        .WeakReferenceType(rhs) or .MutableWeakReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    .MutableWeakReferenceType(lhs) then when resolved_receiver_type in {
+                        .MutableWeakReferenceType(rhs) then mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, lhs),
+                        ) == mono.storage.context.get_layout_key(
+                            resolve_parameterized_type(mono, rhs),
+                        ),
+                        _ then false,
+                    },
+                    _ then false,
+                };
+                if receiver_matches then {
+                    start_idx = 1;
+                };
+            };
+            for idx in start_idx..<param_types.count() then {
+                args.push(
+                    make_expected_type_placeholder_expr(
+                        resolve_parameterized_type(mono, (param_types[idx])),
+                    ),
+                );
+            };
+        },
         _ then {},
     };
     return args;
@@ -503,7 +592,7 @@ private let bind_receiver_method_symbol_for_expected_type(
         mono,
         expected_method_type,
     ) in {
-        .FunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
         _ then resolve_parameterized_type(mono, method.symbol_type),
     };
     let rebound = try_bind_generic_method_call(
@@ -625,6 +714,38 @@ private let normalize_trait_placeholder_expected_method_type(
                 resolve_parameterized_type(mono, return_type),
             )
         },
+        .ForeignFunctionType(params, return_type) then {
+            if params.is_empty() then {
+                return resolved_method_type;
+            };
+            let first_param = params[UInt(0)];
+            let normalized_receiver = when first_param.param_type in {
+                .ReferenceType(_) then Type.ReferenceType(lookup_base_type),
+                .MutableReferenceType(_) then Type.MutableReferenceType(
+                    lookup_base_type,
+                ),
+                .BorrowedReferenceType(_) then Type.BorrowedReferenceType(
+                    lookup_base_type,
+                ),
+                .MutableBorrowedReferenceType(_) then Type.MutableBorrowedReferenceType(
+                    lookup_base_type,
+                ),
+                .WeakReferenceType(_) then Type.WeakReferenceType(lookup_base_type),
+                .MutableWeakReferenceType(_) then Type.MutableWeakReferenceType(
+                    lookup_base_type,
+                ),
+                _ then lookup_base_type,
+            };
+            let mutable normalized_params = List[FunctionParamEntry].new();
+            normalized_params.push(
+                FunctionParamEntry(normalized_receiver, first_param.pass_kind),
+            );
+            normalized_params.push_list(params, span = 1..<params.count());
+            Type.ForeignFunctionType(
+                normalized_params,
+                resolve_parameterized_type(mono, return_type),
+            )
+        },
         _ then resolved_method_type,
     };
 };
@@ -679,6 +800,43 @@ private let normalize_method_symbol_type_for_base(
                 );
             };
             Type.FunctionType(
+                normalized_params,
+                resolve_parameterized_type(mono, return_type),
+            )
+        },
+        .ForeignFunctionType(fn_params, return_type) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.is_empty() then {
+                return resolved_method_type;
+            };
+            let mutable first_param_type = resolve_parameterized_type(
+                mono,
+                (param_types[UInt(0)]),
+            );
+            // A reference-like first parameter whose pointee has the base
+            // type's layout IS the base type -- a `self` handed over as `*T`
+            // for a method declared on `T`. Anything else keeps the parameter.
+            let normalized_first_param = when first_param_type in {
+                .ReferenceType(inner) or .MutableReferenceType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) where mono.storage.context.get_layout_key(
+                    resolve_parameterized_type(mono, inner),
+                ) == mono.storage.context.get_layout_key(resolved_base_type) then resolved_base_type,
+                _ then first_param_type,
+            };
+            if mono.storage.context.get_layout_key(normalized_first_param) == mono.storage.context.get_layout_key(
+                first_param_type,
+            ) then {
+                return resolved_method_type;
+            };
+            let mutable normalized_params = List[FunctionParamEntry].new();
+            normalized_params.push(make_function_param_entry(normalized_first_param));
+            for idx in 1..<param_types.count() then {
+                normalized_params.push(
+                    make_function_param_entry(
+                        resolve_parameterized_type(mono, (param_types[idx])),
+                    ),
+                );
+            };
+            Type.ForeignFunctionType(
                 normalized_params,
                 resolve_parameterized_type(mono, return_type),
             )
@@ -758,6 +916,69 @@ private let substitution_method_has_compatible_ref_like_receiver(
                 _ then false,
             }
         },
+        .ForeignFunctionType(fn_params, _) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.is_empty() then {
+                return false;
+            };
+            let mutable first_param_type = resolve_parameterized_type(
+                mono,
+                (param_types[UInt(0)]),
+            );
+            when first_param_type in {
+                .ReferenceType(lhs) then when resolved_base_type in {
+                    .ReferenceType(rhs) or .MutableReferenceType(rhs) or .BorrowedReferenceType(rhs)
+                    or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                .MutableReferenceType(lhs) then when resolved_base_type in {
+                    .MutableReferenceType(rhs) or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                .BorrowedReferenceType(lhs) then when resolved_base_type in {
+                    .ReferenceType(rhs) or .MutableReferenceType(rhs) or .BorrowedReferenceType(rhs)
+                    or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                .MutableBorrowedReferenceType(lhs) then when resolved_base_type in {
+                    .MutableReferenceType(rhs) or .MutableBorrowedReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                .WeakReferenceType(lhs) then when resolved_base_type in {
+                    .WeakReferenceType(rhs) or .MutableWeakReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                .MutableWeakReferenceType(lhs) then when resolved_base_type in {
+                    .MutableWeakReferenceType(rhs) then mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, lhs),
+                    ) == mono.storage.context.get_layout_key(
+                        resolve_parameterized_type(mono, rhs),
+                    ),
+                    _ then false,
+                },
+                _ then false,
+            }
+        },
         _ then false,
     };
 };
@@ -770,7 +991,7 @@ private let recover_method_return_type(
     let mutable method_type = resolve_parameterized_type(mono, method.symbol_type);
     let mutable fallback_type = resolve_parameterized_type(mono, fallback);
     return when method_type in {
-        .FunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
         _ then fallback_type,
     };
 };
@@ -1906,6 +2127,16 @@ private let substitute_expr_kind(
         },
         .IntrinsicCall(node) then {
             let new_node = when node in {
+                .FixedArrayLiteral(result_type, elements) then {
+                    let mutable new_elements = List[TypedExpr].new();
+                    for element in elements then {
+                        new_elements.push(substitute_types_in_expression(mono, element, substitution));
+                    };
+                    TypedIntrinsic.FixedArrayLiteral(
+                        mono.substitute_type_impl(result_type, substitution),
+                        new_elements,
+                    )
+                },
                 .DowngradeRef(ref_expr, result_type) then TypedIntrinsic.DowngradeRef(
                     substitute_types_in_expression(mono, ref_expr, substitution),
                     mono.substitute_type_impl(result_type, substitution),
@@ -2257,6 +2488,54 @@ private let remapped_function_def_id_for_type(
                                 .None() then {},
                             };
                         },
+                        .ForeignFunctionType(fn_params, return_type) then {
+                            let mutable inferred = Dict[String, Type].new();
+                            let param_types = param_entry_types(fn_params);
+                            for pair in template.parameters.lazy().zip[
+                                Type,
+                                ListIterator[Type],
+                                List[Type],
+                            ](param_types) then {
+                                bind_generic_function_type_node(
+                                    mono,
+                                    pair.first.param_type,
+                                    (pair.second),
+                                    template.type_parameters,
+                                    inferred,
+                                );
+                            };
+                            bind_generic_function_type_node(
+                                mono,
+                                template.return_type,
+                                return_type,
+                                template.type_parameters,
+                                inferred,
+                            );
+
+                            let mutable boxed_type_args = List[Type].new();
+                            for type_param in template.type_parameters then {
+                                let bound = inferred.get(type_param.name) or else Type.GenericParameter(
+                                    type_param.name,
+                                );
+                                if has_generic_parameter(bound) then {
+                                    return symbol.def_id;
+                                };
+                                boxed_type_args.push(bound);
+                            };
+
+                            let instantiated = mono.instantiate_function_impl(
+                                template,
+                                boxed_type_args,
+                            );
+                            if not instantiated.mangled_name.is_empty() then when mono.storage.instantiated_function_symbols.get(
+                                instantiated.mangled_name,
+                            ) in {
+                                .Some(instantiated_symbol) then {
+                                    return instantiated_symbol.def_id;
+                                },
+                                .None() then {},
+                            };
+                        },
                         _ then {},
                     };
                 },
@@ -2399,8 +2678,9 @@ private let bind_generic_function_type_from_shape(
             },
             _ then {},
         },
-        .FunctionType(pattern_params, pattern_return) then when actual in {
-            .FunctionType(fn_params, ret_type) then {
+        .FunctionType(pattern_params, pattern_return)
+        or .ForeignFunctionType(pattern_params, pattern_return) then when actual in {
+            .FunctionType(fn_params, ret_type) or .ForeignFunctionType(fn_params, ret_type) then {
                 let param_types = param_entry_types(fn_params);
                 for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
                     param_types,
@@ -2590,6 +2870,78 @@ private let method_type_matches_expected_pattern(
                     expected_return,
                 );
             },
+            .ForeignFunctionType(actual_params, actual_return) then {
+                if actual_params.count() != expected_params.count() then {
+                    return false;
+                };
+                for pair in actual_params.lazy().zip[
+                    FunctionParamEntry,
+                    ListIterator[FunctionParamEntry],
+                    List[FunctionParamEntry],
+                ](expected_params) then {
+                    if not method_type_matches_expected_pattern(
+                        mono,
+                        (pair.first).param_type,
+                        (pair.second).param_type,
+                    ) then {
+                        return false;
+                    };
+                };
+                return method_type_matches_expected_pattern(
+                    mono,
+                    actual_return,
+                    expected_return,
+                );
+            },
+            _ then false,
+        },
+        .ForeignFunctionType(expected_params, expected_return) then when normalized_actual in {
+            .FunctionType(actual_params, actual_return) then {
+                if actual_params.count() != expected_params.count() then {
+                    return false;
+                };
+                for pair in actual_params.lazy().zip[
+                    FunctionParamEntry,
+                    ListIterator[FunctionParamEntry],
+                    List[FunctionParamEntry],
+                ](expected_params) then {
+                    if not method_type_matches_expected_pattern(
+                        mono,
+                        (pair.first).param_type,
+                        (pair.second).param_type,
+                    ) then {
+                        return false;
+                    };
+                };
+                return method_type_matches_expected_pattern(
+                    mono,
+                    actual_return,
+                    expected_return,
+                );
+            },
+            .ForeignFunctionType(actual_params, actual_return) then {
+                if actual_params.count() != expected_params.count() then {
+                    return false;
+                };
+                for pair in actual_params.lazy().zip[
+                    FunctionParamEntry,
+                    ListIterator[FunctionParamEntry],
+                    List[FunctionParamEntry],
+                ](expected_params) then {
+                    if not method_type_matches_expected_pattern(
+                        mono,
+                        (pair.first).param_type,
+                        (pair.second).param_type,
+                    ) then {
+                        return false;
+                    };
+                };
+                return method_type_matches_expected_pattern(
+                    mono,
+                    actual_return,
+                    expected_return,
+                );
+            },
             _ then false,
         },
         _ then false,
@@ -2658,6 +3010,27 @@ private let finalize_direct_method_candidate(
     let resolved_expected = resolve_parameterized_type(mono, expected);
     when resolved_expected in {
         .FunctionType(expected_params, _) then {
+            if expected_params.is_empty() then {
+                return Option[Symbol].Some(resolved_symbol);
+            };
+            let expected_receiver = resolve_parameterized_type(
+                mono,
+                (expected_params[UInt(0)]).param_type,
+            );
+            let expected_receiver_is_ref_like = type_is_tracked_handle(expected_receiver);
+            if not expected_receiver_is_ref_like then {
+                return Option[Symbol].Some(resolved_symbol);
+            };
+            if method_type_matches_expected(
+                mono,
+                resolved_symbol.symbol_type,
+                Option[Type].Some(resolved_expected),
+            ) then {
+                return Option[Symbol].Some(resolved_symbol);
+            };
+            return Option[Symbol].None();
+        },
+        .ForeignFunctionType(expected_params, _) then {
             if expected_params.is_empty() then {
                 return Option[Symbol].Some(resolved_symbol);
             };
@@ -2877,6 +3250,117 @@ private let method_type_matches_expected_for_wrapper_receiver(
                             expected_return,
                         );
                     },
+                    .ForeignFunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let mutable candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let mutable expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if not method_type_matches_expected_pattern(
+                                mono,
+                                candidate_param_type,
+                                expected_param_type,
+                            ) then {
+                                return false;
+                            };
+                        };
+                        return method_type_matches_expected_pattern(
+                            mono,
+                            candidate_return,
+                            expected_return,
+                        );
+                    },
+                    _ then false,
+                },
+            };
+        },
+        .ForeignFunctionType(candidate_params, candidate_return) then {
+            if candidate_params.count() == 0 then {
+                return false;
+            };
+            if not strict_wrapper_receiver_param_matches(
+                mono,
+                (candidate_params[UInt(0)]).param_type,
+                receiver_type,
+            ) then {
+                return false;
+            };
+            return when expected_opt in {
+                .None() then true,
+                .Some(expected) then when resolve_parameterized_type(mono, expected) in {
+                    .FunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let mutable candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let mutable expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if not method_type_matches_expected_pattern(
+                                mono,
+                                candidate_param_type,
+                                expected_param_type,
+                            ) then {
+                                return false;
+                            };
+                        };
+                        return method_type_matches_expected_pattern(
+                            mono,
+                            candidate_return,
+                            expected_return,
+                        );
+                    },
+                    .ForeignFunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let mutable candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let mutable expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if not method_type_matches_expected_pattern(
+                                mono,
+                                candidate_param_type,
+                                expected_param_type,
+                            ) then {
+                                return false;
+                            };
+                        };
+                        return method_type_matches_expected_pattern(
+                            mono,
+                            candidate_return,
+                            expected_return,
+                        );
+                    },
                     _ then false,
                 },
             };
@@ -2911,6 +3395,102 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
                 .None() then true,
                 .Some(expected) then when resolve_parameterized_type(mono, expected) in {
                     .FunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if candidate_param_type != expected_param_type then {
+                                return false;
+                            };
+                        };
+                        return resolve_parameterized_type(mono, candidate_return) == resolve_parameterized_type(
+                            mono,
+                            expected_return,
+                        );
+                    },
+                    .ForeignFunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if candidate_param_type != expected_param_type then {
+                                return false;
+                            };
+                        };
+                        return resolve_parameterized_type(mono, candidate_return) == resolve_parameterized_type(
+                            mono,
+                            expected_return,
+                        );
+                    },
+                    _ then false,
+                },
+            };
+        },
+        .ForeignFunctionType(candidate_params, candidate_return) then {
+            if candidate_params.count() == 0 then {
+                return false;
+            };
+            if not wrapper_receiver_param_matches(
+                mono,
+                (candidate_params[UInt(0)]).param_type,
+                receiver_type,
+            ) then {
+                return false;
+            };
+            return when expected_opt in {
+                .None() then true,
+                .Some(expected) then when resolve_parameterized_type(mono, expected) in {
+                    .FunctionType(expected_params, expected_return) then {
+                        if candidate_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in candidate_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params).skip(1) then {
+                            let candidate_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.first).param_type,
+                            );
+                            let expected_param_type = resolve_parameterized_type(
+                                mono,
+                                (pair.second).param_type,
+                            );
+                            if candidate_param_type != expected_param_type then {
+                                return false;
+                            };
+                        };
+                        return resolve_parameterized_type(mono, candidate_return) == resolve_parameterized_type(
+                            mono,
+                            expected_return,
+                        );
+                    },
+                    .ForeignFunctionType(expected_params, expected_return) then {
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
@@ -3376,7 +3956,7 @@ let bind_receiver_method_symbol(
             mono,
             expected_method_type,
         ) in {
-            .FunctionType(_, return_type) then resolve_parameterized_type(
+            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                 mono,
                 return_type,
             ),
@@ -3905,6 +4485,16 @@ let align_method_reference_base_for_bound_method(
         method.symbol_type,
     ) in {
         .FunctionType(fn_params, _) then {
+            let param_types = param_entry_types(fn_params);
+            if param_types.count() == 0 then {
+                Option[Type].None()
+            } else {
+                Option[Type].Some(
+                    resolve_parameterized_type(mono, (param_types[UInt(0)])),
+                )
+            }
+        },
+        .ForeignFunctionType(fn_params, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.count() == 0 then {
                 Option[Type].None()

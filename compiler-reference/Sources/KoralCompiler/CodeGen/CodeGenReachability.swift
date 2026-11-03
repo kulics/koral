@@ -209,6 +209,10 @@ extension CodeGen {
       collectValueRefs(ptr, &out)
     case .nullPtr:
       break
+    case .fixedArrayLiteral(_, let elements):
+      for element in elements {
+        collectValueRefs(element, &out)
+      }
     case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
       collectValueRefs(outHandle, &out)
       collectValueRefs(outTid, &out)

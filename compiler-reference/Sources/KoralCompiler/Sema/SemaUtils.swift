@@ -61,7 +61,7 @@ public enum SemaUtils {
              .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64,
              .bool,
-             .pointer:
+             .pointer, .foreignFunction:
             return true
         default:
             return false
@@ -296,6 +296,9 @@ public enum SemaUtils {
                 parameters: newParams,
                 returns: substituteType(returns, substitution: substitution, context: context)
             )
+
+        case .fixedArray(let size, let element):
+            return .fixedArray(size: size, element: substituteType(element, substitution: substitution, context: context))
             
         case .structure:
             // The type IS its DefId; its members are not part of the type
@@ -339,6 +342,19 @@ public enum SemaUtils {
             return .traitObject(traitDefId: defId, typeArgs: newArgs)
         case .error:
             return type
+        case .fixedArray(let size, let element):
+            return .fixedArray(size: size, element: substituteType(element, substitution: substitution, context: context))
+        case .foreignFunction(let params, let returns):
+            let ffParams = params.map { param in
+                Parameter(
+                    type: substituteType(param.type, substitution: substitution, context: context),
+                    kind: param.kind
+                )
+            }
+            return .foreignFunction(
+                parameters: ffParams,
+                returns: substituteType(returns, substitution: substitution, context: context)
+            )
         }
     }
     

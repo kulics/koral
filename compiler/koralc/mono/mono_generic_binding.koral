@@ -616,6 +616,74 @@ let collect_generic_bindings_from_shape(
                         bindings,
                     );
                 },
+                .ForeignFunctionType(fn_params, ret_type) then {
+                    let param_types = param_entry_types(fn_params);
+                    for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        param_types,
+                    ) then {
+                        collect_generic_bindings_from_shape(
+                            mono,
+                            (pair.first).param_type,
+                            (pair.second),
+                            type_params,
+                            bindings,
+                        );
+                    };
+                    collect_generic_bindings_from_shape(
+                        mono,
+                        pattern_return,
+                        ret_type,
+                        type_params,
+                        bindings,
+                    );
+                },
+                _ then {},
+            };
+        },
+        .ForeignFunctionType(pattern_params, pattern_return) then {
+            when actual in {
+                .FunctionType(fn_params, ret_type) then {
+                    let param_types = param_entry_types(fn_params);
+                    for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        param_types,
+                    ) then {
+                        collect_generic_bindings_from_shape(
+                            mono,
+                            (pair.first).param_type,
+                            (pair.second),
+                            type_params,
+                            bindings,
+                        );
+                    };
+                    collect_generic_bindings_from_shape(
+                        mono,
+                        pattern_return,
+                        ret_type,
+                        type_params,
+                        bindings,
+                    );
+                },
+                .ForeignFunctionType(fn_params, ret_type) then {
+                    let param_types = param_entry_types(fn_params);
+                    for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
+                        param_types,
+                    ) then {
+                        collect_generic_bindings_from_shape(
+                            mono,
+                            (pair.first).param_type,
+                            (pair.second),
+                            type_params,
+                            bindings,
+                        );
+                    };
+                    collect_generic_bindings_from_shape(
+                        mono,
+                        pattern_return,
+                        ret_type,
+                        type_params,
+                        bindings,
+                    );
+                },
                 _ then {},
             };
         },
@@ -743,6 +811,15 @@ let type_node_mentions_type_parameter(
             type_node_mentions_type_parameter(ret_node, type_param_name)
         },
         .InferredSelf(span) then false,
+        .FixedArray(_, element, span) then type_node_mentions_type_parameter(element, type_param_name),
+        .ForeignFunction(param_types, return_type, span) then {
+            for pt in param_types then {
+                if type_node_mentions_type_parameter(pt, type_param_name) then {
+                    return true;
+                };
+            };
+            type_node_mentions_type_parameter(return_type, type_param_name)
+        },
     };
 };
 
@@ -908,6 +985,17 @@ let canonical_type_for_generic_binding(mono: Monomorphizer, t: Type): Type = {
                 new_params.push(canonical_type_for_generic_binding(mono, param_type));
             };
             Type.FunctionType(
+                types_to_param_entries(new_params),
+                canonical_type_for_generic_binding(mono, return_type_ref),
+            )
+        },
+        .ForeignFunctionType(fn_params, return_type_ref) then {
+            let param_types = param_entry_types(fn_params);
+            let mutable new_params = List[Type].new();
+            for param_type in param_types then {
+                new_params.push(canonical_type_for_generic_binding(mono, param_type));
+            };
+            Type.ForeignFunctionType(
                 types_to_param_entries(new_params),
                 canonical_type_for_generic_binding(mono, return_type_ref),
             )
@@ -1296,6 +1384,89 @@ public let unify_generic_type_pattern(
                         inferred,
                     )
                 },
+                .ForeignFunctionType(actual_params, actual_return) then {
+                    if pattern_params.count() != actual_params.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (actual_params[i]).param_type,
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches and unify_generic_type_pattern(
+                        mono,
+                        pattern_return,
+                        actual_return,
+                        type_param_names,
+                        inferred,
+                    )
+                },
+                _ then false,
+            }
+        },
+        .ForeignFunctionType(pattern_params, pattern_return) then {
+            when normalized_actual in {
+                .FunctionType(actual_params, actual_return) then {
+                    if pattern_params.count() != actual_params.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (actual_params[i]).param_type,
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches and unify_generic_type_pattern(
+                        mono,
+                        pattern_return,
+                        actual_return,
+                        type_param_names,
+                        inferred,
+                    )
+                },
+                .ForeignFunctionType(actual_params, actual_return) then {
+                    if pattern_params.count() != actual_params.count() then {
+                        return false;
+                    };
+                    let mutable matches = true;
+                    let mutable i: UInt = 0;
+                    while i < pattern_params.count() then {
+                        if not unify_generic_type_pattern(
+                            mono,
+                            (pattern_params[i]).param_type,
+                            (actual_params[i]).param_type,
+                            type_param_names,
+                            inferred,
+                        ) then {
+                            matches = false;
+                        };
+                        i += 1;
+                    };
+                    matches and unify_generic_type_pattern(
+                        mono,
+                        pattern_return,
+                        actual_return,
+                        type_param_names,
+                        inferred,
+                    )
+                },
                 _ then false,
             }
         },
@@ -1390,6 +1561,53 @@ let collect_generic_type_bindings(
         .FunctionType(exp_params, exp_ret) then {
             when actual in {
                 .FunctionType(act_params, act_ret) then {
+                    for pair in exp_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](act_params) then {
+                        collect_generic_type_bindings(
+                            (pair.first).param_type,
+                            (pair.second).param_type,
+                            bindings,
+                        );
+                    };
+                    collect_generic_type_bindings(exp_ret, act_ret, bindings);
+                },
+                .ForeignFunctionType(act_params, act_ret) then {
+                    for pair in exp_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](act_params) then {
+                        collect_generic_type_bindings(
+                            (pair.first).param_type,
+                            (pair.second).param_type,
+                            bindings,
+                        );
+                    };
+                    collect_generic_type_bindings(exp_ret, act_ret, bindings);
+                },
+                _ then {},
+            };
+        },
+        .ForeignFunctionType(exp_params, exp_ret) then {
+            when actual in {
+                .FunctionType(act_params, act_ret) then {
+                    for pair in exp_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](act_params) then {
+                        collect_generic_type_bindings(
+                            (pair.first).param_type,
+                            (pair.second).param_type,
+                            bindings,
+                        );
+                    };
+                    collect_generic_type_bindings(exp_ret, act_ret, bindings);
+                },
+                .ForeignFunctionType(act_params, act_ret) then {
                     for pair in exp_params.lazy().zip[
                         FunctionParamEntry,
                         ListIterator[FunctionParamEntry],

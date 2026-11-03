@@ -364,6 +364,7 @@ public indirect enum TypedIntrinsic {
   case deinitMemory(ptr: TypedExpressionNode)
   case takeMemory(ptr: TypedExpressionNode)
   case nullPtr(resultType: Type)
+  case fixedArrayLiteral(resultType: Type, elements: [TypedExpressionNode])
 
   // Thread Operations
   case spawnThread(outHandle: TypedExpressionNode, outTid: TypedExpressionNode, closure: TypedExpressionNode, stackSize: TypedExpressionNode)
@@ -385,6 +386,7 @@ public indirect enum TypedIntrinsic {
       if case .mutablePointer(let element) = ptr.type { return element }
       fatalError("takeMemory on non-pointer")
     case .nullPtr(let resultType): return resultType
+    case .fixedArrayLiteral(let resultType, _): return resultType
     case .spawnThread: return .int32
 
 

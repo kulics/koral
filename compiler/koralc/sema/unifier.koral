@@ -200,29 +200,36 @@ given Unifier {
             return Result[Void].Ok({});
         };
 
-        // 两边都是 FunctionType
-        if lhs_r is .FunctionType(lhs_params, lhs_ret) then {
-            if rhs_r is .FunctionType(rhs_params, rhs_ret) then {
-                if not (lhs_params.count() == rhs_params.count()) then {
-                    return Result[Void].Error(
-                        UnificationError.ArityMismatch(lhs_r, rhs_r, span),
-                    );
-                };
-                for pair in lhs_params.lazy().zip[
-                    FunctionParamEntry,
-                    ListIterator[FunctionParamEntry],
-                    List[FunctionParamEntry],
-                ](rhs_params) then {
-                    let lp = (pair.first).param_type;
-                    let rp = (pair.second).param_type;
-                    let _ = self.unify(lp, rp, span) or return;
-                };
-                return self.unify(lhs_ret, rhs_ret, span);
-            } else {
-                return Result[Void].Error(
-                    UnificationError.TypeMismatch(lhs_r, rhs_r, span),
-                );
-            };
+        // 两边都是函数形状（含 foreign 函数指针——签名同形）
+        when lhs_r in {
+            .FunctionType(lhs_params, lhs_ret) or .ForeignFunctionType(lhs_params, lhs_ret) then {
+                when rhs_r in {
+                    .FunctionType(rhs_params, rhs_ret)
+                    or .ForeignFunctionType(rhs_params, rhs_ret) then {
+                        if not (lhs_params.count() == rhs_params.count()) then {
+                            return Result[Void].Error(
+                                UnificationError.ArityMismatch(lhs_r, rhs_r, span),
+                            );
+                        };
+                        for pair in lhs_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](rhs_params) then {
+                            let lp = (pair.first).param_type;
+                            let rp = (pair.second).param_type;
+                            let _ = self.unify(lp, rp, span) or return;
+                        };
+                        return self.unify(lhs_ret, rhs_ret, span);
+                    },
+                    _ then {
+                        return Result[Void].Error(
+                            UnificationError.TypeMismatch(lhs_r, rhs_r, span),
+                        );
+                    },
+                }
+            },
+            _ then {},
         };
 
         // 两边都是 GenericStruct
@@ -411,10 +418,15 @@ given Unifier {
                 if original_ret != resolved_ret then {
                     changed = true;
                 };
-                if changed then Type.FunctionType(
-                    types_to_param_entries(new_params),
-                    resolved_ret,
-                ) else t
+                if changed then {
+                    if t is .ForeignFunctionType(_, _) then Type.ForeignFunctionType(
+                        types_to_param_entries(new_params),
+                        resolved_ret,
+                    ) else Type.FunctionType(
+                        types_to_param_entries(new_params),
+                        resolved_ret,
+                    )
+                } else t
             },
             .GenericStruct(template_def_id, args) then {
                 let mutable changed = false;
@@ -505,10 +517,15 @@ given Unifier {
                 if original_ret != resolved_ret then {
                     changed = true;
                 };
-                if changed then Type.FunctionType(
-                    types_to_param_entries(new_params),
-                    resolved_ret,
-                ) else t
+                if changed then {
+                    if t is .ForeignFunctionType(_, _) then Type.ForeignFunctionType(
+                        types_to_param_entries(new_params),
+                        resolved_ret,
+                    ) else Type.FunctionType(
+                        types_to_param_entries(new_params),
+                        resolved_ret,
+                    )
+                } else t
             },
             .ReferenceType(inner) then {
                 let resolved = self.resolve_deep(inner);

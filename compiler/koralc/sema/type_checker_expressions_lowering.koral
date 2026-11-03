@@ -134,7 +134,7 @@ given TypeChecker {
                         ) then {
                             if not self.can_take_mutable_ref_of_expr(receiver) then {
                                 self.push_diagnostic_at_span(
-                                    "Cannot take mutable raw address of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through dereference or raw-pointer links) can use '&mutable'.",
+                                    "Cannot take '&mutable' of immutable value: \(self.ref_target_typed_name(receiver)). Only 'let mutable' lvalues (and lvalues reached through * links) can use '&mutable'.",
                                     self.typed_expr_span(receiver),
                                 );
                                 return receiver;
@@ -163,7 +163,7 @@ given TypeChecker {
                             receiver,
                         ) then {
                             self.push_diagnostic_at_span(
-                                "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
+                                "Cannot call 'mutable self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
                                 self.typed_expr_span(receiver),
                             );
                             return make_typed_expr(
@@ -209,7 +209,7 @@ given TypeChecker {
                             receiver,
                         ) then {
                             self.push_diagnostic_at_span(
-                                "Cannot call 'self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
+                                "Cannot call 'mutable self' method '\(method_name)' on an rvalue; store the value in a 'let mutable' variable first",
                                 self.typed_expr_span(receiver),
                             );
                             return make_typed_expr(
@@ -371,10 +371,17 @@ given TypeChecker {
                     );
                     make_typed_expr(TypedExprKind.DerefExpr(offset_expr), element_type)
                 },
+                .FixedArray(_, _) then {
+                    let index_expr = if typed_args.is_empty() then make_typed_expr(
+                        TypedExprKind.IntegerLiteral("0"),
+                        Type.UIntType(),
+                    ) else (typed_args[UInt(0)]);
+                    self.build_fixed_array_element_place(typed_base, index_expr)
+                },
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                     self.typed_expr_span(typed_base),
                 );
                 self.empty_typed_block(result_type)
@@ -1019,6 +1026,22 @@ given TypeChecker {
         expected: Option[Type],
         scope: Scope,
     ): TypedExpr = {
+        // A fixed array takes its own literal shape: exactly N elements for
+        // `[N]T` (`[]` is the zeroed buffer, handled by lower_empty_literal).
+        if expected is .Some(expected_type) then {
+            when expected_type in {
+                .FixedArrayType(len, element) then {
+                    return self.lower_fixed_array_literal_expr(
+                        elements,
+                        len,
+                        element,
+                        expected_type,
+                        scope,
+                    );
+                },
+                _ then {},
+            };
+        };
         if expected is .None() and elements.is_empty() then {
             self.push_diagnostic(
                 "Cannot infer type for empty collection literal '[]'. Add an explicit type annotation.",
@@ -1048,6 +1071,32 @@ given TypeChecker {
             expected,
         );
         return self.lower_collection_literal_from_typed(typed_elems, result_type);
+    };
+
+    /// 定长数组字面量：恰好 N 个元素（`[]` 走 lower_empty_literal，是全零缓冲）。
+    lower_fixed_array_literal_expr(
+        self,
+        elements: List[Expr],
+        len: UInt,
+        element: Type,
+        result_type: Type,
+        scope: Scope,
+    ): TypedExpr = {
+        if elements.count() != len then {
+            self.push_diagnostic(
+                "Fixed array literal expects exactly \(len) elements, got \(elements.count())",
+                unknown_span(),
+            );
+            return self.empty_typed_block(Type.Unknown());
+        };
+        let mutable typed_elems = List[TypedExpr].new();
+        for e in elements then {
+            typed_elems.push(self.check_expr_scoped_ref(e, Option[Type].Some(element), scope));
+        };
+        return make_typed_expr(
+            TypedExprKind.IntrinsicCall(TypedIntrinsic.FixedArrayLiteral(result_type, typed_elems)),
+            result_type,
+        );
     };
 
     lower_dict_literal_expr(
@@ -1101,6 +1150,20 @@ given TypeChecker {
             .Some(et) then if self.is_unresolved_expr_type(et) then Option[Type].None()
             else expected,
             .None() then expected,
+        };
+        if resolved_expected is .Some(fixed_array_type) then {
+            when fixed_array_type in {
+                .FixedArrayType(_, _) then {
+                    // `[]` is the zeroed buffer (the C `{0}` idiom).
+                    return make_typed_expr(
+                        TypedExprKind.IntrinsicCall(
+                            TypedIntrinsic.FixedArrayLiteral(fixed_array_type, List[TypedExpr].new()),
+                        ),
+                        fixed_array_type,
+                    );
+                },
+                _ then {},
+            };
         };
         when resolved_expected in {
             .Some(et) then {

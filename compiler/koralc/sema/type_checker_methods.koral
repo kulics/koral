@@ -6,6 +6,7 @@ private type BuiltinSubscriptKind {
     Deque(element: Type),
     Dict(key: Type, value: Type),
     Pointer(element: Type, is_mutable: Bool),
+    FixedArray(len: UInt, inner: Type),
 };
 
 given TypeChecker {
@@ -22,14 +23,14 @@ given TypeChecker {
 
     method_param_count(self, method: Symbol): UInt = {
         return when method.symbol_type in {
-            .FunctionType(params, _) then params.count(),
+            .FunctionType(params, _) or .ForeignFunctionType(params, _) then params.count(),
             _ then UInt(0),
         };
     };
 
     method_param_type(self, method: Symbol, index: UInt): Option[Type] = {
         return when method.symbol_type in {
-            .FunctionType(params, _) then if index < params.count() then Option[Type].Some(
+            .FunctionType(params, _) or .ForeignFunctionType(params, _) then if index < params.count() then Option[Type].Some(
                 (params[index]).param_type,
             ) else Option[Type].None(),
             _ then Option[Type].None(),
@@ -38,7 +39,7 @@ given TypeChecker {
 
     method_return_type(self, method: Symbol): Type = {
         return when method.symbol_type in {
-            .FunctionType(_, return_type_ref) then return_type_ref,
+            .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
@@ -127,6 +128,13 @@ given TypeChecker {
                 };
                 out
             },
+            .ForeignFunctionType(params, _) then {
+                let mutable out = List[Type].new();
+                for entry in params then {
+                    out.push(entry.param_type);
+                };
+                out
+            },
             _ then List[Type].new(),
         };
     };
@@ -197,8 +205,39 @@ given TypeChecker {
             .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(
                 BuiltinSubscriptKind.Pointer(inner, true),
             ),
+            .FixedArrayType(len, inner) then Option[BuiltinSubscriptKind].Some(
+                BuiltinSubscriptKind.FixedArray(len, inner),
+            ),
             _ then Option[BuiltinSubscriptKind].None(),
         };
+    };
+
+    /// 定长数组下标的元素位点：`*((*T*)&base + i)`。包装 struct 的首成员就是
+    /// 裸 C 数组，所以包装值的地址就是数据指针；这里借指针算术降级，得到的
+    /// unsafe-deref 就是数组存储里的一个位点。（与 `*T` 同款，下标不查边界。）
+    build_fixed_array_element_place(
+        self,
+        base: TypedExpr,
+        index: TypedExpr,
+    ): TypedExpr = {
+        let base_type = self.builtin_subscript_base_type(base.expr_type);
+        let element = when base_type in {
+            .FixedArrayType(_, inner) then inner,
+            _ then Type.Unknown(),
+        };
+        let ptr_of_base = make_typed_expr(
+            TypedExprKind.PtrExpr(base),
+            Type.MutablePointerType(base_type),
+        );
+        let data_ptr = make_typed_expr(
+            TypedExprKind.CastExpr(Type.MutablePointerType(element), ptr_of_base),
+            Type.MutablePointerType(element),
+        );
+        let offset_expr = make_typed_expr(
+            TypedExprKind.ArithmeticExpr(data_ptr, ArithmeticOperator.Add(), index),
+            Type.MutablePointerType(element),
+        );
+        return make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), element);
     };
 
     /// Type arguments of an applied nominal, whichever spelling it is in.
@@ -390,10 +429,17 @@ given TypeChecker {
                     ) else Option[Type].Some(Type.ReferenceType(element_type));
                     self.adapt_expr_to_expected_type(deref_expr, expected_ref_type)
                 },
+                .FixedArray(_, _) then {
+                    let index_expr = if args.is_empty() then make_typed_expr(
+                        TypedExprKind.IntegerLiteral("0"),
+                        Type.UIntType(),
+                    ) else (args[UInt(0)]);
+                    self.build_fixed_array_element_place(base, index_expr)
+                },
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                     self.typed_expr_span(base),
                 );
                 make_typed_expr(
@@ -944,58 +990,6 @@ given TypeChecker {
         return self.resolve_member_type_ref(base_type, member);
     };
 
-    member_decl_is_mutable(self, base_type: Type, member: String): Bool = {
-        // Same no-peel rule as `resolve_member_type_ref`: a weak handle declares
-        // no members, so nothing on one can be mutable by declaration.
-        let inner_type = when base_type in {
-            .MutableReferenceType(inner) or .MutablePointerType(inner) or .ReferenceType(inner)
-            or .MutableBorrowedReferenceType(inner) or .BorrowedReferenceType(inner) or .PointerType(inner) then inner,
-            _ then base_type,
-        };
-        return when inner_type in {
-            .StructureType(def_id) then {
-                if self.context().is_foreign_struct(def_id) then {
-                    return true;
-                };
-                when self.context().get_struct_fields(def_id) in {
-                    .Some(fields) then {
-                        let mutable found = false;
-                        for field in fields then {
-                            if field.name == member then {
-                                found = true;
-                                return field.is_mutable;
-                            };
-                        };
-                        not found
-                    },
-                    .None() then true,
-                }
-            },
-            // Identity: the template's DECLARATION, not its spelling.
-            .GenericStruct(template_def_id, _) then when self.storage.generic_templates.struct_by_def_id(
-                template_def_id,
-            ) in {
-                .Some(struct_template) then when self.context().get_struct_fields(
-                    struct_template.def_id,
-                ) in {
-                    .Some(fields) then {
-                        let mutable found = false;
-                        for field in fields then {
-                            if field.name == member then {
-                                found = true;
-                                return field.is_mutable;
-                            };
-                        };
-                        not found
-                    },
-                    .None() then true,
-                },
-                .None() then true,
-            },
-            _ then true,
-        };
-    };
-
     normalize_type_for_bindings(self, t: Type): Type = {
         return when t in {
             .StructureType(def_id) then {
@@ -1217,6 +1211,58 @@ given TypeChecker {
         };
     };
 
+    member_decl_is_mutable(self, base_type: Type, member: String): Bool = {
+        // Same no-peel rule as `resolve_member_type_ref`: a weak handle declares
+        // no members, so nothing on one can be mutable by declaration.
+        let inner_type = when base_type in {
+            .MutableReferenceType(inner) or .MutablePointerType(inner) or .ReferenceType(inner)
+            or .MutableBorrowedReferenceType(inner) or .BorrowedReferenceType(inner) or .PointerType(inner) then inner,
+            _ then base_type,
+        };
+        return when inner_type in {
+            .StructureType(def_id) then {
+                if self.context().is_foreign_struct(def_id) then {
+                    return true;
+                };
+                when self.context().get_struct_fields(def_id) in {
+                    .Some(fields) then {
+                        let mutable found = false;
+                        for field in fields then {
+                            if field.name == member then {
+                                found = true;
+                                return field.is_mutable;
+                            };
+                        };
+                        not found
+                    },
+                    .None() then true,
+                }
+            },
+            // Identity: the template's DECLARATION, not its spelling.
+            .GenericStruct(template_def_id, _) then when self.storage.generic_templates.struct_by_def_id(
+                template_def_id,
+            ) in {
+                .Some(struct_template) then when self.context().get_struct_fields(
+                    struct_template.def_id,
+                ) in {
+                    .Some(fields) then {
+                        let mutable found = false;
+                        for field in fields then {
+                            if field.name == member then {
+                                found = true;
+                                return field.is_mutable;
+                            };
+                        };
+                        not found
+                    },
+                    .None() then true,
+                },
+                .None() then true,
+            },
+            _ then true,
+        };
+    };
+
     infer_type_bindings_persistent(
         self,
         pattern: Type,
@@ -1321,8 +1367,43 @@ given TypeChecker {
                     };
                     self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings)
                 },
+                .ForeignFunctionType(c_params, c_ret) then {
+                    if p_params.count() != c_params.count() then {
+                        return bindings;
+                    };
+                    let mutable current_bindings = bindings;
+                    let mutable i: UInt = 0;
+                    while i < p_params.count() then {
+                        current_bindings = self.infer_type_bindings_persistent(
+                            (p_params[i]).param_type,
+                            (c_params[i]).param_type,
+                            current_bindings,
+                        );
+                        i += 1;
+                    };
+                    self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings)
+                },
                 _ then bindings,
             },
+            .ForeignFunctionType(p_params, p_ret) then when normalized_concrete in {
+                    .FunctionType(c_params, c_ret) or .ForeignFunctionType(c_params, c_ret) then {
+                        if p_params.count() != c_params.count() then {
+                            return bindings;
+                        };
+                        let mutable current_bindings = bindings;
+                        let mutable i: UInt = 0;
+                        while i < p_params.count() then {
+                            current_bindings = self.infer_type_bindings_persistent(
+                                (p_params[i]).param_type,
+                                (c_params[i]).param_type,
+                                current_bindings,
+                            );
+                            i += 1;
+                        };
+                        self.infer_type_bindings_persistent(p_ret, c_ret, current_bindings)
+                    },
+                    _ then bindings,
+                },
             // Identity: the template's DECLARATION, not its spelling.
             .GenericStruct(p_def_id, p_args) then when normalized_concrete in {
                 .GenericStruct(c_def_id, c_args) then {
@@ -1405,6 +1486,17 @@ given TypeChecker {
                     replaced_params.push(self.apply_type_bindings(param_ref, bindings));
                 };
                 Type.FunctionType(
+                    types_to_param_entries(replaced_params),
+                    self.apply_type_bindings(return_type, bindings),
+                )
+            },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable replaced_params = List[Type].new();
+                for param_ref in param_types then {
+                    replaced_params.push(self.apply_type_bindings(param_ref, bindings));
+                };
+                Type.ForeignFunctionType(
                     types_to_param_entries(replaced_params),
                     self.apply_type_bindings(return_type, bindings),
                 )
@@ -2051,6 +2143,20 @@ given TypeChecker {
                 };
                 let replaced_ret = self.replace_type_occurrence(ret, pattern, replacement);
                 make_function_type(replaced_params, replaced_ret)
+            },
+            .ForeignFunctionType(params, ret) then {
+                let mutable replaced_params = List[Type].new();
+                for entry in params then {
+                    replaced_params.push(
+                        self.replace_type_occurrence(
+                            entry.param_type,
+                            pattern,
+                            replacement,
+                        ),
+                    );
+                };
+                let replaced_ret = self.replace_type_occurrence(ret, pattern, replacement);
+                Type.ForeignFunctionType(types_to_param_entries(replaced_params), replaced_ret)
             },
             _ then t,
         };
@@ -3040,6 +3146,12 @@ given TypeChecker {
                 };
                 self.collect_ancestor_bindings(ret, bindings);
             },
+            .ForeignFunctionType(params, ret) then {
+                for entry in params then {
+                    self.collect_ancestor_bindings(entry.param_type, bindings);
+                };
+                self.collect_ancestor_bindings(ret, bindings);
+            },
             _ then {},
         };
     };
@@ -3141,6 +3253,27 @@ given TypeChecker {
                     );
                 };
                 Type.FunctionType(
+                    types_to_param_entries(replaced_params),
+                    self.bind_conformance_trait_self_type(
+                        return_type,
+                        bound_trait_def_id,
+                        concrete_receiver,
+                    ),
+                )
+            },
+            .ForeignFunctionType(fn_params, return_type) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable replaced_params = List[Type].new();
+                for param_ref in param_types then {
+                    replaced_params.push(
+                        self.bind_conformance_trait_self_type(
+                            param_ref,
+                            bound_trait_def_id,
+                            concrete_receiver,
+                        ),
+                    );
+                };
+                Type.ForeignFunctionType(
                     types_to_param_entries(replaced_params),
                     self.bind_conformance_trait_self_type(
                         return_type,
@@ -3436,6 +3569,22 @@ given TypeChecker {
                 seen,
             ),
             .FunctionType(params, ret) then {
+                for entry in params then {
+                    self.collect_unbound_method_generic_param_names(
+                        entry.param_type,
+                        receiver_bindings,
+                        ordered,
+                        seen,
+                    );
+                };
+                self.collect_unbound_method_generic_param_names(
+                    ret,
+                    receiver_bindings,
+                    ordered,
+                    seen,
+                );
+            },
+            .ForeignFunctionType(params, ret) then {
                 for entry in params then {
                     self.collect_unbound_method_generic_param_names(
                         entry.param_type,
@@ -4928,7 +5077,7 @@ given TypeChecker {
                 };
                 let sym_name = self.context().symbol_name(sym);
                 return when sym.symbol_type in {
-                    .FunctionType(_, ret) then ret,
+                    .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
                     .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then sym.symbol_type,
                     _ then if self.resolve_type_name_binding(sym_name) is .Some(t) then t
                     else Type.Unknown(),
@@ -4943,6 +5092,9 @@ given TypeChecker {
                     .FunctionType(_, ret) then {
                         return ret;
                     },
+                    .ForeignFunctionType(_, ret) then {
+                        return ret;
+                    },
                     _ then {},
                 };
                 return self.resolve_method_return_type(
@@ -4953,6 +5105,9 @@ given TypeChecker {
             .MethodReference(base, _, method, _, _, _) then {
                 when method.symbol_type in {
                     .FunctionType(_, ret) then {
+                        return ret;
+                    },
+                    .ForeignFunctionType(_, ret) then {
                         return ret;
                     },
                     _ then {},
@@ -4983,6 +5138,9 @@ given TypeChecker {
             .StaticMethodCall(receiver_type, _, method, _, _, _) then {
                 when method.symbol_type in {
                     .FunctionType(_, ret) then {
+                        return ret;
+                    },
+                    .ForeignFunctionType(_, ret) then {
                         return ret;
                     },
                     .Unknown() then {},
@@ -5021,6 +5179,9 @@ given TypeChecker {
             .FunctionType(_, ret) then {
                 return ret;
             },
+            .ForeignFunctionType(_, ret) then {
+                return ret;
+            },
             _ then {},
         };
         return Type.Unknown();
@@ -5035,6 +5196,11 @@ given TypeChecker {
                     let mutable out = List[Type].new();
                     when function_type in {
                         .FunctionType(fn_params, _) then {
+                            for parameter in fn_params then {
+                                out.push(parameter.param_type);
+                            };
+                        },
+                        .ForeignFunctionType(fn_params, _) then {
                             for parameter in fn_params then {
                                 out.push(parameter.param_type);
                             };
@@ -5055,6 +5221,13 @@ given TypeChecker {
                 };
                 when sym.symbol_type in {
                     .FunctionType(params, _) then {
+                        let mutable out = List[Type].new();
+                        for entry in params then {
+                            out.push(entry.param_type);
+                        };
+                        return out;
+                    },
+                    .ForeignFunctionType(params, _) then {
                         let mutable out = List[Type].new();
                         for entry in params then {
                             out.push(entry.param_type);
@@ -5135,6 +5308,13 @@ given TypeChecker {
         };
         when callee.expr_type in {
             .FunctionType(params, _) then {
+                let mutable out = List[Type].new();
+                for entry in params then {
+                    out.push(entry.param_type);
+                };
+                return out;
+            },
+            .ForeignFunctionType(params, _) then {
                 let mutable out = List[Type].new();
                 for entry in params then {
                     out.push(entry.param_type);

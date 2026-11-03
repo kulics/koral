@@ -802,7 +802,7 @@ given TypeChecker {
 
     function_like_type(self, t: Type): Option[Type] = {
         return when t in {
-            .FunctionType(...) then Option[Type].Some(t),
+            .FunctionType(...) or .ForeignFunctionType(_, _) then Option[Type].Some(t),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
             or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
             or .MutableWeakReferenceType(inner) then self.function_like_type(inner),
@@ -827,10 +827,10 @@ given TypeChecker {
             return true;
         };
         let param_count = when callable_type in {
-            .FunctionType(fn_params, _) then fn_params.count(),
+            .FunctionType(fn_params, _) or .ForeignFunctionType(fn_params, _) then fn_params.count(),
             _ then UInt(0),
         };
-        if callable_type is not .FunctionType(...) then {
+        if callable_type is not .FunctionType(...) and callable_type is not .ForeignFunctionType(_, _) then {
             return true;
         };
         if args.count() != param_count then {
@@ -849,6 +849,17 @@ given TypeChecker {
     ): List[FunctionParamSpec] = {
         return when fn_type in {
             .FunctionType(fn_params, _) then {
+                let param_types = param_entry_types(fn_params);
+                let mutable specs = List[FunctionParamSpec].new();
+                for _ in param_types then {
+                    specs.push(
+                        FunctionParamSpec("", false, false, false, Option[Expr].None()),
+                    );
+                };
+
+                return specs;
+            },
+            .ForeignFunctionType(fn_params, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable specs = List[FunctionParamSpec].new();
                 for _ in param_types then {

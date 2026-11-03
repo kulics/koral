@@ -226,6 +226,17 @@ public let resolve_type_node(
         .InferredSelf(_) then {
             substitution.get("Self") or else Type.Unknown()
         },
+        .FixedArray(len, element, span) then Type.FixedArrayType(len, resolve_type_node(mono, element, substitution)),
+        .ForeignFunction(param_types, return_type, span) then {
+            let mutable resolved_params = List[Type].new();
+            for pt in param_types then {
+                resolved_params.push(resolve_type_node(mono, pt, substitution));
+            };
+            Type.ForeignFunctionType(
+                types_to_param_entries(resolved_params),
+                resolve_type_node(mono, return_type, substitution),
+            )
+        },
     };
 };
 
@@ -378,6 +389,17 @@ public let resolve_type_node_identity(
         },
         // `Self` in a shape position is the receiver, not something to bind.
         .InferredSelf(span) then Type.Unknown(),
+        .FixedArray(len, element, span) then Type.FixedArrayType(len, resolve_type_node_identity(mono, element, type_params)),
+        .ForeignFunction(param_types, return_type, span) then {
+            let mutable resolved_params = List[Type].new();
+            for pt in param_types then {
+                resolved_params.push(resolve_type_node_identity(mono, pt, type_params));
+            };
+            Type.ForeignFunctionType(
+                types_to_param_entries(resolved_params),
+                resolve_type_node_identity(mono, return_type, type_params),
+            )
+        },
     };
 };
 

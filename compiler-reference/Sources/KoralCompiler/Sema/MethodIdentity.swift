@@ -192,6 +192,8 @@ extension CompilerContext {
       return .builtin("Ptr")
     case .mutablePointer:
       return .builtin("MutPtr")
+    case .fixedArray:
+      return .builtin("Array")
     case .weakReference:
       return .builtin("WeakRef")
     case .mutableWeakReference:
@@ -228,6 +230,10 @@ extension CompilerContext {
     case .module: return .builtin("Module")
     case .error: return .builtin("Error")
     case .typeVariable: return .builtin("TypeVar")
+    case .fixedArray:
+      return .builtin("Array")
+    case .foreignFunction:
+      return .builtin("FnPtr")
     }
   }
 

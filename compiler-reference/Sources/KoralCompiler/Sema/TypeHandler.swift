@@ -117,6 +117,7 @@ public enum TypeHandlerKind: Hashable {
     case module         // 模块类型
     case typeVariable   // 类型变量
     case opaque         // 不透明类型
+    case fixedArray     // 定长数组（单字段包装 struct）
 }
 
 // MARK: - Default Implementation
@@ -205,6 +206,10 @@ extension TypeHandlerKind {
             return .opaque
         case .traitObject:
             return .reference  // trait object 在 C 层面是 struct Ref，与 reference 相同
+        case .fixedArray:
+            return .fixedArray
+        case .foreignFunction:
+            return .function
         case .error:
             return .primitive
         }
@@ -985,7 +990,7 @@ public class ReferenceHandler: TypeHandler {
             default:
                 return "void*"
             }
-            let elementCType = TypeHandlerRegistry.shared.handler(for: inner).generateCTypeName(inner)
+            let elementCType = TypeHandlerRegistry.shared.generateCTypeName(inner)
             return "\(elementCType)*"
         }
         let context = TypeHandlerRegistry.shared.currentContext
@@ -1293,8 +1298,7 @@ public class PointerHandler: TypeHandler {
             return "void*"
         }
         // 递归获取元素类型的 C 类型名
-        let registry = TypeHandlerRegistry.shared
-        let elementCType = registry.handler(for: element).generateCTypeName(element)
+        let elementCType = TypeHandlerRegistry.shared.generateCTypeName(element)
         return "\(elementCType)*"
     }
     
@@ -1362,6 +1366,49 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
 
     /// 可选的 C 类型名解析器（用于 CodeGen 注入冲突安全命名）
     private var cTypeNameResolver: ((Type) -> String?)?
+
+    /// 定长数组的包装 struct typedef：形状 → 名字。名字由注册表统一发
+    /// （指针命名等递归路径都经过这里），typedef 文本由 CodeGen splice。
+    /// 顺序即注册顺序：内层形状先注册，生成的 typedef 天然有序。
+    private var fixedArrayTypedefs: [(name: String, size: UInt64, element: Type)] = []
+    private var fixedArrayNameByKey: [String: String] = [:]
+
+    /// 定长数组形状的 typedef 名（首次出现时登记形状）。
+    public func fixedArrayTypeName(size: UInt64, element: Type) -> String {
+        let key = "[\(size)]" + generateCTypeName(element)
+        if let existing = fixedArrayNameByKey[key] {
+            return existing
+        }
+        let name = "__koral_arr_\(fixedArrayTypedefs.count)"
+        fixedArrayNameByKey[key] = name
+        fixedArrayTypedefs.append((name: name, size: size, element: element))
+        return name
+    }
+
+    /// 所有已命名的定长数组形状（CodeGen 生成 typedef 用）。
+    public var usedFixedArrayTypedefs: [(name: String, size: UInt64, element: Type)] {
+        return fixedArrayTypedefs
+    }
+
+    /// foreign 函数指针的 typedef：形状 → 名字。C 侧是
+    /// `typedef R (*name)(params);`。
+    private var foreignFunctionTypedefs: [(name: String, params: [Parameter], returns: Type)] = []
+    private var foreignFunctionNameByKey: [String: String] = [:]
+
+    public func foreignFunctionTypeName(params: [Parameter], returns: Type) -> String {
+        let key = "Fn(" + params.map { generateCTypeName($0.type) }.joined(separator: ",") + ")->" + generateCTypeName(returns)
+        if let existing = foreignFunctionNameByKey[key] {
+            return existing
+        }
+        let name = "__koral_fnptr_\(foreignFunctionTypedefs.count)"
+        foreignFunctionNameByKey[key] = name
+        foreignFunctionTypedefs.append((name: name, params: params, returns: returns))
+        return name
+    }
+
+    public var usedForeignFunctionTypedefs: [(name: String, params: [Parameter], returns: Type)] {
+        return foreignFunctionTypedefs
+    }
 
     /// 可选的 drop glue 函数指针解析器（CodeGen 注入）。
     /// 头里不存析构函数之后，`__koral_release_value` 的 dtor 参数要按内层类型
@@ -1464,6 +1511,12 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
         if let override = cTypeNameResolver?(type) {
             return override
         }
+        if case .fixedArray(let size, let element) = type {
+            return fixedArrayTypeName(size: size, element: element)
+        }
+        if case .foreignFunction(let params, let returns) = type {
+            return foreignFunctionTypeName(params: params, returns: returns)
+        }
         return handler(for: type).generateCTypeName(type)
     }
 
@@ -1485,11 +1538,18 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     
     /// 生成拷贝代码
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {
+        if case .fixedArray = type {
+            // The wrapper struct assigns like any C aggregate.
+            return "\(dest) = \(source);\n"
+        }
         return handler(for: type).generateCopyCode(type, source: source, dest: dest)
     }
-    
+
     /// 生成析构代码
     public func generateDropCode(_ type: Type, value: String) -> String {
+        if case .fixedArray = type {
+            return ""
+        }
         return handler(for: type).generateDropCode(type, value: value)
     }
     

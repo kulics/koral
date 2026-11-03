@@ -233,10 +233,18 @@ extension Monomorphizer {
             let resolvedReturnType = try resolveTypeNode(returnType, substitution: substitution)
             let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
             return .function(parameters: parameters, returns: resolvedReturnType)
+
+        case .fixedArray(let size, let element, _):
+            let resolvedElement = try resolveTypeNode(element, substitution: substitution)
+            return .fixedArray(size: size, element: resolvedElement)
             
         case .weakReference(let inner, let mutable, _):
             let innerType = try resolveTypeNode(inner, substitution: substitution)
             return mutable ? .mutableWeakReference(inner: innerType) : .weakReference(inner: innerType)
+        case .foreignFunction(let paramTypes, let returnType, _):
+            let ffParams = try paramTypes.map { try resolveTypeNode($0, substitution: substitution) }
+            let ffReturn = try resolveTypeNode(returnType, substitution: substitution)
+            return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
         }
     }
     
@@ -1785,6 +1793,12 @@ extension Monomorphizer {
             return .takeMemory(ptr: resolveTypesInExpression(ptr))
         case .nullPtr(let resultType):
             return .nullPtr(resultType: resultType)
+
+        case .fixedArrayLiteral(let resultType, let elements):
+            return .fixedArrayLiteral(
+                resultType: resolveParameterizedType(resultType),
+                elements: elements.map { resolveTypesInExpression($0) }
+            )
             
         case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
             return .spawnThread(

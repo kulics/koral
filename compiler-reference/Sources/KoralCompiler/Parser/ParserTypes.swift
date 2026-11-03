@@ -86,10 +86,16 @@ extension Parser {
       return .weakReference(inner, mutable: mutable, span: span)
     case .generic(let base, let args, _):
       return .generic(base: base, args: args, span: span)
+    case .fixedArray(let size, let element, _):
+      return .fixedArray(size: size, element: element, span: span)
     case .inferredSelf:
       return .inferredSelf(span: span)
     case .functionType(let paramTypes, let returnType, _):
       return .functionType(paramTypes: paramTypes, returnType: returnType, span: span)
+    case .fixedArray(let size, let element, _):
+      return .fixedArray(size: size, element: element, span: span)
+    case .foreignFunction(let paramTypes, let returnType, _):
+      return .foreignFunction(paramTypes: paramTypes, returnType: returnType, span: span)
     }
   }
 
@@ -146,6 +152,56 @@ extension Parser {
     if currentToken === .selfTypeKeyword {
       try match(.selfTypeKeyword)
       return .inferredSelf(span: startSpan)
+    }
+
+    if currentToken === .leftBracket {
+      // Fixed-size array: `[N]Element`. The size is a positive integer
+      // literal; the element is the full type that follows, so `[2]*Int` is
+      // two `*Int` and `*[2]Int` is a pointer to an array.
+      try match(.leftBracket)
+      guard case .integer(let raw) = currentToken else {
+        throw ParserError.unexpectedToken(
+          span: currentSpan, got: currentToken.description,
+          expected: "an integer array size")
+      }
+      try match(.integer(raw))
+      guard let size = UInt64(raw), size >= 1 else {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan, message: "Fixed array size must be at least 1")
+      }
+      try match(.rightBracket)
+      let element = try parseType()
+      return .fixedArray(size: size, element: element,
+                         span: SourceSpan(start: startSpan.start, end: element.span.end))
+    }
+
+    if currentToken === .foreignKeyword {
+      // A bare C function pointer: `foreign (A, B) -> R`. Not a Koral closure:
+      // only `let foreign` functions and same-typed values inhabit it.
+      try match(.foreignKeyword)
+      guard currentToken === .leftParen else {
+        throw ParserError.unexpectedToken(
+          span: currentSpan, got: currentToken.description,
+          expected: "'(' of a foreign function type")
+      }
+      try match(.leftParen)
+      var paramTypes: [TypeNode] = []
+      while currentToken !== .rightParen {
+        paramTypes.append(try parseType())
+        if currentToken === .comma {
+          try match(.comma)
+        }
+      }
+      try match(.rightParen)
+      guard currentToken === .arrow else {
+        throw ParserError.unexpectedToken(
+          span: currentSpan, got: currentToken.description,
+          expected: "'->' of a foreign function type")
+      }
+      try match(.arrow)
+      let returnType = try parseType()
+      return .foreignFunction(paramTypes: paramTypes, returnType: returnType,
+                              span: SourceSpan(start: startSpan.start, end: returnType.span.end))
     }
 
     if currentToken === .leftParen {

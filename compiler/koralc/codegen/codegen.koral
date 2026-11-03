@@ -343,6 +343,19 @@ given CodeGen {
                     self.concretize_codegen_type(return_type_ref),
                 )
             },
+            .ForeignFunctionType(fn_params, return_type_ref) then {
+                let mutable concrete_param_types = List[Type].new();
+                for entry in fn_params then {
+                    concrete_param_types.push(
+                        self.concretize_codegen_type(entry.param_type),
+                    );
+                };
+                Type.ForeignFunctionType(types_to_param_entries(
+                    concrete_param_types,
+                    ),
+                    self.concretize_codegen_type(return_type_ref),
+                )
+            },
             _ then t,
         };
     };
@@ -449,6 +462,19 @@ given CodeGen {
                 };
                 make_function_type(
                     bound_param_types,
+                    self.apply_codegen_type_bindings(return_type_ref, bindings),
+                )
+            },
+            .ForeignFunctionType(fn_params, return_type_ref) then {
+                let mutable bound_param_types = List[Type].new();
+                for entry in fn_params then {
+                    bound_param_types.push(
+                        self.apply_codegen_type_bindings(entry.param_type, bindings),
+                    );
+                };
+                Type.ForeignFunctionType(types_to_param_entries(
+                    bound_param_types,
+                    ),
                     self.apply_codegen_type_bindings(return_type_ref, bindings),
                 )
             },
@@ -600,6 +626,22 @@ given CodeGen {
                 );
                 make_function_type(bound_param_types, bound_return_type)
             },
+            .ForeignFunctionType(fn_params, return_type_ref) then {
+                let mutable bound_param_types = List[Type].new();
+                for entry in fn_params then {
+                    bound_param_types.push(
+                        self.apply_codegen_type_bindings(
+                            entry.param_type,
+                            receiver_bindings,
+                        ),
+                    );
+                };
+                let mutable bound_return_type = self.apply_codegen_type_bindings(
+                    return_type_ref,
+                    receiver_bindings,
+                );
+                Type.ForeignFunctionType(types_to_param_entries(bound_param_types), bound_return_type)
+            },
             _ then fn_type,
         };
     };
@@ -620,14 +662,14 @@ given CodeGen {
 
     function_type_param_count(self, fn_type: Type): UInt = {
         return when fn_type in {
-            .FunctionType(fn_params, _) then fn_params.count(),
+            .FunctionType(fn_params, _) or .ForeignFunctionType(fn_params, _) then fn_params.count(),
             _ then UInt(0),
         };
     };
 
     function_type_param_type(self, fn_type: Type, index: UInt): Option[Type] = {
         return when fn_type in {
-            .FunctionType(fn_params, _) then if index < fn_params.count() then Option[Type].Some(
+            .FunctionType(fn_params, _) or .ForeignFunctionType(fn_params, _) then if index < fn_params.count() then Option[Type].Some(
                 (fn_params[index]).param_type,
             ) else Option[Type].None(),
             _ then Option[Type].None(),
@@ -636,7 +678,7 @@ given CodeGen {
 
     function_type_return_type(self, fn_type: Type): Type = {
         return when fn_type in {
-            .FunctionType(_, return_type_ref) then return_type_ref,
+            .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
@@ -1239,7 +1281,7 @@ given CodeGen {
         if symbol.kind is .Function() then {
             return true;
         };
-        return symbol.symbol_type is .FunctionType(...);
+        return symbol.symbol_type is .FunctionType(...) or symbol.symbol_type is .ForeignFunctionType(_, _);
     };
 
     should_use_current_owner_resolution(self, symbol: Symbol): Bool = {
@@ -1724,6 +1766,22 @@ given CodeGen {
                             };
                         };
                     },
+                    .ForeignFunctionType(params, _) then {
+                        if not params.is_empty() then {
+                            let mutable receiver_type = params[UInt(0)].param_type;
+                            if not self.context.contains_generic_parameter(
+                                receiver_type,
+                            ) then {
+                                let owner_c_name = self.emitted_type_c_name_fallback(
+                                    receiver_type,
+                                );
+                                return self.compose_method_c_name(
+                                    owner_c_name,
+                                    method_suffix,
+                                );
+                            };
+                        };
+                    },
                     _ then {},
                 };
             };
@@ -1734,6 +1792,23 @@ given CodeGen {
                 if method_suffix == "into_list" then {
                     when symbol.symbol_type in {
                         .FunctionType(params, _) then {
+                            if not params.is_empty() then {
+                                let mutable receiver_type = params[UInt(0)].param_type;
+                                let receiver_is_ref_like = type_is_handle(receiver_type);
+                                if not receiver_is_ref_like and not self.context.contains_generic_parameter(
+                                    receiver_type,
+                                ) then {
+                                    let owner_c_name = self.emitted_type_c_name_fallback(
+                                        receiver_type,
+                                    );
+                                    return self.compose_method_c_name(
+                                        owner_c_name,
+                                        method_suffix,
+                                    );
+                                };
+                            };
+                        },
+                        .ForeignFunctionType(params, _) then {
                             if not params.is_empty() then {
                                 let mutable receiver_type = params[UInt(0)].param_type;
                                 let receiver_is_ref_like = type_is_handle(receiver_type);
@@ -1764,6 +1839,20 @@ given CodeGen {
         let _ = self;
         return when function_type in {
             .FunctionType(params, _) then {
+                if params.is_empty() then {
+                    return Option[Type].None();
+                };
+                let mutable receiver_type = params[UInt(0)].param_type;
+                Option[Type].Some(
+                    when receiver_type in {
+                        .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
+                        or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
+                        or .MutableWeakReferenceType(inner) then inner,
+                        _ then receiver_type,
+                    },
+                )
+            },
+            .ForeignFunctionType(params, _) then {
                 if params.is_empty() then {
                     return Option[Type].None();
                 };
@@ -2406,6 +2495,15 @@ given CodeGen {
     };
 
     compute_c_type_name_uncached(self, t: Type): String = {
+        when t in {
+            .FixedArrayType(len, inner) then {
+                return self.fixed_array_type_name(len, inner);
+            },
+            .ForeignFunctionType(params, return_type) then {
+                return self.foreign_function_type_name(params, return_type);
+            },
+            _ then {},
+        };
         let kind = type_handler_kind_from(t);
         when kind in {
             .Primitive() then {
@@ -2450,9 +2548,16 @@ given CodeGen {
                 };
                 self.cache_c_type_name(return_type);
             },
+            .ForeignFunctionType(params, return_type) then {
+                for entry in params then {
+                    self.cache_c_type_name(entry.param_type);
+                };
+                self.cache_c_type_name(return_type);
+            },
             .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then for arg in args then {
                 self.cache_c_type_name(arg);
             },
+            .FixedArrayType(_, inner) then self.cache_c_type_name(inner),
             _ then {},
         };
         self.c_type_name_cache.insert(key, self.compute_c_type_name_uncached(t));

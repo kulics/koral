@@ -384,6 +384,12 @@ final class MIRVerifier {
       try verifyValue(owner, in: function, localIDs: localIDs)
     case .nullPtr(let resultType):
       try verifyConcrete(resultType, in: function, description: "intrinsic has unresolved generic type")
+    case .fixedArrayLiteral(let resultType, let elements):
+      try verifyConcrete(resultType, in: function, description: "intrinsic has unresolved generic type")
+      let localIDs = Set(function.locals.map(\.id))
+      for element in elements {
+        try verifyValue(element, in: function, localIDs: localIDs)
+      }
     case .spawnThread(let outHandle, let outTid, let closure, let stackSize):
       let localIDs = Set(function.locals.map(\.id))
       try verifyValue(outHandle, in: function, localIDs: localIDs)

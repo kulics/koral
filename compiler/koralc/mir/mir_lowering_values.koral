@@ -41,6 +41,13 @@ given MIRFunctionBuilder {
                 result_type,
             ),
             .NullPtr(result_type) then MIRIntrinsic.NullPtr(result_type),
+            .FixedArrayLiteral(result_type, elements) then {
+                let mutable lowered = List[MIRValue].new();
+                for element in elements then {
+                    lowered.push(self.lower_value(element));
+                };
+                MIRIntrinsic.FixedArrayLiteral(result_type, lowered)
+            },
             .SpawnThread(out_handle, out_tid, closure, stack_size) then MIRIntrinsic.SpawnThread(
                 self.lower_value(out_handle),
                 self.lower_value(out_tid),
@@ -53,7 +60,8 @@ given MIRFunctionBuilder {
     intrinsic_result_type(self, intrinsic_node: TypedIntrinsic): Type = {
         return when intrinsic_node in {
             .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
-            or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
+            or .TakeMemory(_, result_type) or .NullPtr(result_type)
+            or .FixedArrayLiteral(result_type, _) then result_type,
             .SpawnThread(_, _, _, _) then Type.Int32Type(),
             _ then Type.VoidType(),
         };
@@ -94,7 +102,7 @@ given MIRFunctionBuilder {
             param_symbols.push(symbol);
         };
         let effective_return_type = when lambda_type in {
-            .FunctionType(_, fn_return_type) then fn_return_type,
+            .FunctionType(_, fn_return_type) or .ForeignFunctionType(_, fn_return_type) then fn_return_type,
             _ then return_type,
         };
         let mutable function_type = Type.FunctionType(

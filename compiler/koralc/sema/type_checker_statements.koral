@@ -736,10 +736,28 @@ given TypeChecker {
                                 element_type,
                             )
                         },
+                        .FixedArray(_, _) then {
+                            // Elements live in the array's storage: the array
+                            // VALUE must sit at a writable location (the
+                            // mutation matrix), exactly as `arr = v` requires.
+                            let resolved_base = self.require_fixed_array_base_writable(
+                                outer_base,
+                                scope,
+                            );
+                            let index_expr = if outer_args.is_empty() then make_typed_expr(
+                                TypedExprKind.IntegerLiteral("0"),
+                                Type.UIntType(),
+                            ) else self.check_expr_scoped_ref(
+                                (outer_args[UInt(0)]),
+                                Option[Type].Some(Type.UIntType()),
+                                scope,
+                            );
+                            self.build_fixed_array_element_place(resolved_base, index_expr)
+                        },
                     },
                     .None() then {
                         self.push_diagnostic_at_span(
-                            "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                             self.typed_expr_span(typed_outer_base),
                         );
                         self.empty_typed_block(Type.Unknown())
@@ -886,6 +904,101 @@ given TypeChecker {
                         unknown_span(),
                     );
                 },
+                .FixedArray(_, element_type) then {
+                    
+                    let resolved_base = self.require_fixed_array_base_writable(base, scope);
+                    let index_arg = args[0];
+                    let typed_index = self.check_expr_scoped_ref(
+                        index_arg,
+                        Option[Type].Some(Type.UIntType()),
+                        scope,
+                    );
+                    let lvalue_expr = self.build_fixed_array_element_place(
+                        resolved_base,
+                        typed_index,
+                    );
+                    let lowered_value = when op in {
+                        .Some(compound_op) then {
+                            let typed_rhs = self.check_expr_scoped_ref(
+                                value,
+                                .Some(element_type),
+                                scope,
+                            );
+                            when compound_op in {
+                                .AddAssign() then self.combine_compound_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Add(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .SubtractAssign() then self.combine_compound_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Subtract(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .MultiplyAssign() then self.combine_compound_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Multiply(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .DivideAssign() then self.combine_compound_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Divide(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .RemainderAssign() then self.combine_compound_arithmetic_operands(
+                                    lvalue_expr,
+                                    ArithmeticOperator.Remainder(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .BitAndAssign() then self.combine_compound_bitwise_operands(
+                                    lvalue_expr,
+                                    BitwiseOperator.BitAnd(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .BitOrAssign() then self.combine_compound_bitwise_operands(
+                                    lvalue_expr,
+                                    BitwiseOperator.BitOr(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .BitXorAssign() then self.combine_compound_bitwise_operands(
+                                    lvalue_expr,
+                                    BitwiseOperator.BitXor(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .LeftShiftAssign() then self.combine_compound_bitwise_operands(
+                                    lvalue_expr,
+                                    BitwiseOperator.LeftShift(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                                .RightShiftAssign() then self.combine_compound_bitwise_operands(
+                                    lvalue_expr,
+                                    BitwiseOperator.RightShift(),
+                                    typed_rhs,
+                                    target_span,
+                                ),
+                            }
+                        },
+                        .None() then self.check_expr_scoped_ref(
+                            value,
+                            .Some(element_type),
+                            scope,
+                        ),
+                    };
+                    return TypedStatement.AssignmentStmt(
+                        lvalue_expr,
+                        lowered_value,
+                        unknown_span(),
+                    );
+                },
                 .String() then {
                     self.push_diagnostic_at_span(
                         "String subscript returns a UInt8 value and cannot be assigned",
@@ -900,7 +1013,7 @@ given TypeChecker {
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                     target_span,
                 );
                 return TypedStatement.ExprStmt(
@@ -1532,20 +1645,42 @@ given TypeChecker {
                 };
                 // A target whose member already failed to resolve has been
                 // diagnosed; mutability is not the rule that applies to it.
-                if not self.assignment_target_has_unresolved_member(typed_target) then {
-                    when self.first_immutable_field_in_assignment_target(typed_target) in {
-                        .Some(field_hit) then {
-                            self.push_diagnostic(
-                                "Cannot assign to immutable field '\(field_hit.first)' of type '\(field_hit.second)'",
-                                span,
-                            );
+                // The same goes for a target the temporary gate already
+                // reported (it recovers as an Unknown-typed block).
+                if not self.assignment_target_has_unresolved_member(typed_target) and not (
+                    typed_target.expr_type is .Unknown()
+                ) then {
+                    when typed_target.expr_kind in {
+                        .MemberPath(_, _) then {
+                            when self.first_immutable_field_in_assignment_target(typed_target) in {
+                                .Some(field_hit) then {
+                                    self.push_diagnostic(
+                                        "Cannot assign to immutable field '\(field_hit.first)' of type '\(field_hit.second)'",
+                                        span,
+                                    );
+                                },
+                                .None() then {
+                                    if not self.assignment_target_location_is_writable(
+                                        typed_target,
+                                    ) then {
+                                        let target_name = self.assignment_target_error_name(
+                                            target,
+                                            typed_target,
+                                        );
+                                        self.push_diagnostic(
+                                            "Cannot assign to immutable variable: \(target_name)",
+                                            span,
+                                        );
+                                    };
+                                },
+                            };
                         },
-                        .None() then {
-                            if not self.assignment_target_root_is_mutable(
-                                target,
-                                typed_target,
-                                scope,
-                            ) then {
+                        .DerefExpr(_) or .UnsafeDerefExpr(_) then {},
+                        .Variable(sym) then {
+                            // Whole-variable assignment: the BINDING must be
+                            // mutable. A handle type does not help -- `let p:
+                            // *mutable T` cannot be rebound.
+                            if not sym.is_mutable() then {
                                 let target_name = self.assignment_target_error_name(
                                     target,
                                     typed_target,
@@ -1555,6 +1690,14 @@ given TypeChecker {
                                     span,
                                 );
                             };
+                        },
+                        _ then {
+                            // A call result, literal or block is not
+                            // addressable storage.
+                            self.push_diagnostic(
+                                "Invalid operation assignment target between types temporary and ",
+                                span,
+                            );
                         },
                     };
                 };
@@ -1891,26 +2034,147 @@ given TypeChecker {
         };
     };
 
-    assignment_target_root_is_mutable_typed(self, target: TypedExpr): Bool = {
-        if self.assignment_target_traverses_ref_like_link(target) then {
-            return true;
+    /// Non-weak handles (strong refs, borrowed refs, raw pointers) -- the
+    /// seed's `isNonWeakHandle`. A weak handle is opaque until `upgrade`d and
+    /// is not a writable base either.
+    assignment_type_is_non_weak_handle(self, t: Type): Bool = {
+        return type_is_owned_ref(t) or type_is_borrowed_ref(t) or type_is_raw_pointer(t);
+    };
+
+    /// Mutable handle spellings (`*mutable T`, `ref mutable`, ...): a link
+    /// that keeps write permission alive down the chain.
+    assignment_type_is_mutable_link(self, t: Type): Bool = {
+        return type_is_mutable_handle(t);
+    };
+
+    /// Read-only handle spellings: such a segment RESETS write permission for
+    /// the rest of the chain.
+    assignment_type_is_read_only_link(self, t: Type): Bool = {
+        return type_is_handle(t) and not type_is_mutable_handle(t);
+    };
+
+    /// Addressable storage: a variable, a member path rooted in one, or a
+    /// dereference target. Calls, literals and blocks are not.
+    assignment_base_is_addressable(self, typed: TypedExpr): Bool = {
+        return when typed.expr_kind in {
+            .Variable(_) then true,
+            .MemberPath(base, _) then self.assignment_base_is_addressable(base),
+            .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
+            _ then false,
         };
-        return when target.expr_kind in {
+    };
+
+    /// The base's own write permission -- the seed's `baseAllowsValueMutation`
+    /// plus its `baseIsMutableNominal` seed.
+    assignment_base_allows_write(self, typed: TypedExpr): Bool = {
+        return when typed.expr_kind in {
             .Variable(sym) then {
                 if sym.is_mutable() then {
                     return true;
                 };
-                // In type mutable types, self allows field mutation even
-                // though the binding itself is not mutable.
-                if self.is_type_mutable_nominal(sym.symbol_type) then {
+                return self.assignment_type_is_mutable_link(sym.symbol_type)
+                    or self.is_type_mutable_nominal(sym.symbol_type);
+            },
+            .MemberPath(base, path) then {
+                if self.assignment_base_allows_write(base) then {
                     return true;
                 };
-                return false;
+                for segment in path then {
+                    if self.assignment_type_is_mutable_link(segment.symbol_type) then {
+                        return true;
+                    };
+                };
+                false
             },
-            .MemberPath(base, _) then self.assignment_target_root_is_mutable_typed(base),
             .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
             _ then false,
         };
+    };
+
+    /// The temporary gate (seed parity): a call result, literal or block is
+    /// not addressable storage and cannot be written in place. A handle value
+    /// or a `type mutable` object passes; what it may write is decided by the
+    /// matrix walk below.
+    assignment_target_base_is_temporary(self, typed: TypedExpr): Bool = {
+        // A base that already objected (recovering as Unknown) gets no second
+        // verdict -- the seed stops at the first error too.
+        if typed.expr_type is .Unknown() then {
+            return false;
+        };
+        if self.assignment_type_is_non_weak_handle(typed.expr_type) then {
+            return false;
+        };
+        if self.is_type_mutable_nominal(typed.expr_type) then {
+            return false;
+        };
+        return not self.assignment_base_is_addressable(typed);
+    };
+
+    /// The mutation-matrix walk (seed parity): can this member path's LOCATION
+    /// be modified in place? The base starts the permission; a mutable link
+    /// segment grants it, a read-only link segment resets it, and the last
+    /// segment also wins when its owner is a `type mutable` object (object
+    /// semantics: mutability is a property of the object, not the binding).
+    assignment_target_location_is_writable(self, target: TypedExpr): Bool = {
+        return when target.expr_kind in {
+            .MemberPath(base, path) then {
+                let mutable writable = self.assignment_base_allows_write(base)
+                    or self.is_type_mutable_nominal(base.expr_type);
+                let mutable current = base.expr_type;
+                for pair in path.lazy().enumerate() then {
+                    let segment = pair.second;
+                    let is_last = pair.first + UInt(1) == path.count();
+                    let segment_type = segment.symbol_type;
+                    let current_allows = self.assignment_type_is_mutable_link(current)
+                        or writable
+                        or (is_last and self.is_type_mutable_nominal(current));
+                    if is_last then {
+                        // The last segment decides: it is the location being
+                        // written. (A non-mutable one never gets here -- the
+                        // field rule blamed it first.)
+                        return segment.is_mutable() and current_allows;
+                    };
+                    if self.assignment_type_is_mutable_link(segment_type) then {
+                        writable = true;
+                    } else if self.assignment_type_is_read_only_link(segment_type) then {
+                        writable = false;
+                    };
+                    current = segment_type;
+                };
+                writable
+            },
+            .Variable(sym) then sym.is_mutable(),
+            .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
+            _ then false,
+        };
+    };
+
+    /// 定长数组下标写入的基址校验：与整值赋值 `arr = v` 同一套矩阵
+    /// （种子在 resolveLValue(base) 里做的事）。返回解析好的基址。
+    require_fixed_array_base_writable(self, base_expr: Expr, scope: Scope): TypedExpr = {
+        let typed_base = self.check_assignment_target_expr_ref(base_expr, scope);
+        if not self.assignment_target_has_unresolved_member(typed_base) and not (
+            typed_base.expr_type is .Unknown()
+        ) then {
+            when self.first_immutable_field_in_assignment_target(typed_base) in {
+                .Some(field_hit) then {
+                    self.push_diagnostic(
+                        "Cannot assign to immutable field '\(field_hit.first)' of type '\(field_hit.second)'",
+                        expr_span(base_expr),
+                    );
+                },
+                .None() then {
+                    if not self.assignment_target_location_is_writable(typed_base) then {
+                        let target_name = self.assignment_target_error_name(base_expr, typed_base);
+                        self.push_diagnostic(
+                            "Cannot assign to immutable variable: \(target_name)",
+                            expr_span(base_expr),
+                        );
+                    };
+                },
+            };
+        };
+        return typed_base;
     };
 
     /// Returns true if the type is a nominal type declared as `type mutable`.
@@ -1927,25 +2191,6 @@ given TypeChecker {
             },
             .EnumType(def_id) then self.context().def_id_map.is_struct_mutable(def_id),
             _ then false,
-        };
-    };
-
-    assignment_target_root_is_mutable(
-        self,
-        original_target: Expr,
-        target: TypedExpr,
-        scope: Scope,
-    ): Bool = {
-        return when self.assignment_target_root_identifier(original_target) in {
-            .Some(name) then when self.lookup_assignment_root_symbol(name, scope) in {
-                // A mutable root, or one that is a reference into something
-                // mutable, is writable. Anything else is decided by the target.
-                .Some(sym) where sym.is_mutable() or self.is_ref_like_assignment_type(
-                    sym.symbol_type,
-                ) then true,
-                _ then self.assignment_target_root_is_mutable_typed(target),
-            },
-            .None() then self.assignment_target_root_is_mutable_typed(target),
         };
     };
 
@@ -2034,6 +2279,17 @@ given TypeChecker {
                         inner_ref.expr_type,
                     ),
                     _ then inferred_base,
+                };
+                // Temporary gate (seed parity): a call result, literal or
+                // block is not addressable storage. Diagnose here, before
+                // member resolution, the same way the seed's resolveLValue
+                // gates before its member loop -- one error, this one.
+                if self.assignment_target_base_is_temporary(typed_base) then {
+                    self.push_diagnostic_at_span(
+                        "Invalid operation assignment target between types temporary member path and ",
+                        expr_span(target),
+                    );
+                    return self.empty_typed_block(Type.Unknown());
                 };
                 // Resolve member path on the writable base, computing field types.
                 // A weak handle is NOT peeled: it is a HANDLE, opaque until
@@ -2157,10 +2413,28 @@ given TypeChecker {
                                 element_type,
                             )
                         },
+                        .FixedArray(_, _) then {
+                            // Elements live in the array's storage: the array
+                            // VALUE must sit at a writable location (the
+                            // mutation matrix), exactly as `arr = v` requires.
+                            let resolved_base = self.require_fixed_array_base_writable(
+                                outer_base,
+                                scope,
+                            );
+                            let index_expr = if outer_args.is_empty() then make_typed_expr(
+                                TypedExprKind.IntegerLiteral("0"),
+                                Type.UIntType(),
+                            ) else self.check_expr_scoped_ref(
+                                (outer_args[UInt(0)]),
+                                Option[Type].Some(Type.UIntType()),
+                                scope,
+                            );
+                            self.build_fixed_array_element_place(resolved_base, index_expr)
+                        },
                     },
                     .None() then {
                         self.push_diagnostic_at_span(
-                            "subscript is only supported for String, List, Deque, Dict, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
                             self.typed_expr_span(typed_outer_base),
                         );
                         self.empty_typed_block(Type.Unknown())
@@ -2274,7 +2548,7 @@ given TypeChecker {
                     let segment_type = segment.symbol_type;
                     let mutable can_traverse_immutable_segment = false;
                     if not is_last then {
-                        can_traverse_immutable_segment = self.is_ref_like_assignment_type(
+                        can_traverse_immutable_segment = self.assignment_type_is_non_weak_handle(
                             segment_type,
                         ) or self.is_type_mutable_nominal(segment_type);
                     };

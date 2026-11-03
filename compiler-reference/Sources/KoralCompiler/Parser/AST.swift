@@ -101,6 +101,10 @@ public indirect enum TypeNode: CustomStringConvertible {
   case inferredSelf(span: SourceSpan)
   /// Function type: (ParamType1, ParamType2, ...) -> ReturnType
   case functionType(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
+  /// Fixed-size array: `[N]Element`
+  case fixedArray(size: UInt64, element: TypeNode, span: SourceSpan)
+  /// Foreign function pointer: `foreign (A, B) -> R`
+  case foreignFunction(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
 
   /// Where this type is written.
   public var span: SourceSpan {
@@ -112,9 +116,11 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .generic(_, _, let span): return span
     case .inferredSelf(let span): return span
     case .functionType(_, _, let span): return span
+    case .fixedArray(_, _, let span): return span
+    case .foreignFunction(_, _, let span): return span
     }
   }
-  
+
   public var description: String {
     switch self {
     case .identifier(let name, _):
@@ -134,6 +140,11 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .functionType(let paramTypes, let returnType, _):
       let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
       return "(\(paramsStr)) -> \(returnType)"
+    case .fixedArray(let size, let element, _):
+      return "[\(size)]\(element)"
+    case .foreignFunction(let paramTypes, let returnType, _):
+      let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
+      return "foreign (\(paramsStr)) -> \(returnType)"
     }
   }
 }

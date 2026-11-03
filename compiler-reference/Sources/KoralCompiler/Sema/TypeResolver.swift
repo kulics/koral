@@ -775,7 +775,13 @@ public class TypeResolver: CompilerPass {
             return extractTypeName(from: inner)
         case .weakReference(let inner, _, _):
             return extractTypeName(from: inner)
+        case .fixedArray(_, let element, _):
+            return extractTypeName(from: element)
         case .functionType, .inferredSelf:
+            return ""
+        case .fixedArray(_, let element, _):
+            return extractTypeName(from: element)
+        case .foreignFunction(_, _, _):
             return ""
         }
     }

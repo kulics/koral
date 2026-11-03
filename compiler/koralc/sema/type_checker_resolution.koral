@@ -304,6 +304,37 @@ given TypeChecker {
                 let resolved_ret = self.resolve_type(return_type);
                 return make_function_type(resolved_params, resolved_ret);
             },
+            .FixedArray(len, element, span) then {
+                let resolved_element = self.resolve_type(element);
+                if not self.satisfies_foreign_constraint(resolved_element) then {
+                    self.push_diagnostic(
+                        self.foreign_constraint_violation_message(resolved_element, "fixed array element type"),
+                        type_node_span(node),
+                    );
+                };
+                Type.FixedArrayType(len, resolved_element)
+            },
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    let rp = self.resolve_type(pt);
+                    if not self.is_ffi_compatible_type(rp) then {
+                        self.push_diagnostic(
+                            "FFI incompatible type '\(self.context().type_display_name(rp))': \(self.ffi_type_error(rp))",
+                            type_node_span(node),
+                        );
+                    };
+                    resolved_params.push(rp);
+                };
+                let resolved_ret = self.resolve_type(return_type);
+                if not self.is_ffi_compatible_type(resolved_ret) then {
+                    self.push_diagnostic(
+                        "FFI incompatible type '\(self.context().type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))",
+                        type_node_span(node),
+                    );
+                };
+                Type.ForeignFunctionType(types_to_param_entries(resolved_params), resolved_ret)
+            },
         };
     };
 
@@ -443,6 +474,26 @@ given TypeChecker {
                 };
                 let resolved_ret = self.resolve_type_with_bindings(return_type, bindings);
                 return make_function_type(resolved_params, resolved_ret);
+            },
+            .FixedArray(len, element, span) then {
+                let resolved_element = self.resolve_type_with_bindings(element, bindings);
+                if not self.satisfies_foreign_constraint(resolved_element) then {
+                    self.push_diagnostic(
+                        self.foreign_constraint_violation_message(resolved_element, "fixed array element type"),
+                        type_node_span(node),
+                    );
+                };
+                Type.FixedArrayType(len, resolved_element)
+            },
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.resolve_type_with_bindings(pt, bindings));
+                };
+                Type.ForeignFunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.resolve_type_with_bindings(return_type, bindings),
+                )
             },
         };
     };
@@ -650,6 +701,26 @@ given TypeChecker {
                 };
                 let resolved_ret = self.resolve_type_in_scope(return_type, scope);
                 return make_function_type(resolved_params, resolved_ret);
+            },
+            .FixedArray(len, element, span) then {
+                let resolved_element = self.resolve_type_in_scope(element, scope);
+                if not self.satisfies_foreign_constraint(resolved_element) then {
+                    self.push_diagnostic(
+                        self.foreign_constraint_violation_message(resolved_element, "fixed array element type"),
+                        type_node_span(node),
+                    );
+                };
+                Type.FixedArrayType(len, resolved_element)
+            },
+            .ForeignFunction(param_types, return_type, span) then {
+                let mutable resolved_params = List[Type].new();
+                for pt in param_types then {
+                    resolved_params.push(self.resolve_type_in_scope(pt, scope));
+                };
+                Type.ForeignFunctionType(
+                    types_to_param_entries(resolved_params),
+                    self.resolve_type_in_scope(return_type, scope),
+                )
             },
         };
     };
