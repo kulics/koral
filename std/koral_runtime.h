@@ -86,6 +86,18 @@ void __koral_panic_numeric_conversion_overflow(const char* loc);
 void __koral_panic_division_by_zero(const char* loc);
 void __koral_panic_remainder_by_zero(const char* loc);
 
+// Global-initializer support (accessor + state model): the generated accessor
+// of a global serializes its slow path through a recursive lock, tracks the
+// chain of initializers currently running, and panics on re-entrance with the
+// cycle path. State values: 0 = uninitialized, 1 = initializing, 2 = done.
+uint8_t __koral_global_state_ready(uint8_t* state);
+void __koral_global_state_finish(uint8_t* state);
+void __koral_global_init_lock(void);
+void __koral_global_init_unlock(void);
+void __koral_global_init_push(const char* name);
+void __koral_global_init_pop(void);
+void __koral_global_init_cycle(const char* name);
+
 // Float -> wrapping-integer conversion (numeric-families design): step one is
 // the domain check -- NaN and +-inf have no truncatable integer value and
 // panic -- step two takes the truncated-toward-zero value's low `width_bits`

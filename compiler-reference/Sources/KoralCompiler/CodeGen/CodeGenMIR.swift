@@ -2493,7 +2493,13 @@ final class MIRFunctionCodeEmitter {
         ?? codeGen.context.getCIdentifier(defId)
         ?? sanitizeCIdentifier(codeGen.context.getName(defId) ?? "global_\(defId.id)")
       let type = resolver.type(of: place) ?? .void
-      return MIRPlaceAccess(path: name, cleanups: [])
+      if codeGen.isForeignGlobalVar(defId) {
+        // A foreign global is a bare extern (no initializer of ours to run).
+        return MIRPlaceAccess(path: name, cleanups: [])
+      }
+      // Koral globals go through their accessor so the initializer is
+      // guaranteed to have run before the storage is touched.
+      return MIRPlaceAccess(path: "(*__koral_gptr_\(name)())", cleanups: [])
     case .field(let base, let field):
       let baseAccess = emitPlaceAccess(base)
       let baseType = resolver.type(of: base) ?? .void

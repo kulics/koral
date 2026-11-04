@@ -665,6 +665,41 @@ given CodeGen {
                 _ then {},
             };
         };
+        // Each Koral global carries a state value (0 = uninitialized,
+        // 1 = initializing, 2 = done) and an accessor that guarantees its
+        // initializer has run before the storage is touched -- the runtime
+        // half of the global-variable contract.
+        for global in self.program.globals then {
+            when global in {
+                .GlobalVariable(identifier, initializer_function, _, decl_type) then {
+                    let mutable c_type = self.c_type_name(decl_type);
+                    let c_name = self.c_identifier_for_symbol(identifier);
+                    let init_name = self.callable_c_name(initializer_function);
+                    let display_name = self.context.symbol_name(identifier);
+                    self.buffer.push_string("uint8_t __koral_gstate_\(c_name) = 0;\n");
+                    self.buffer.push_string("\(c_type)* __koral_gptr_\(c_name)(void) {\n");
+                    self.buffer.push_string(
+                        "    if (__koral_global_state_ready(&__koral_gstate_\(c_name))) return &\(c_name);\n",
+                    );
+                    self.buffer.push_string("    __koral_global_init_lock();\n");
+                    self.buffer.push_string(
+                        "    if (__koral_gstate_\(c_name) == 2) { __koral_global_init_unlock(); return &\(c_name); }\n",
+                    );
+                    self.buffer.push_string(
+                        "    if (__koral_gstate_\(c_name) == 1) { __koral_global_init_cycle(\"\(display_name)\"); }\n",
+                    );
+                    self.buffer.push_string("    __koral_gstate_\(c_name) = 1;\n");
+                    self.buffer.push_string("    __koral_global_init_push(\"\(display_name)\");\n");
+                    self.buffer.push_string("    \(c_name) = \(init_name)();\n");
+                    self.buffer.push_string("    __koral_global_init_pop();\n");
+                    self.buffer.push_string("    __koral_global_state_finish(&__koral_gstate_\(c_name));\n");
+                    self.buffer.push_string("    __koral_global_init_unlock();\n");
+                    self.buffer.push_string("    return &\(c_name);\n");
+                    self.buffer.push_string("}\n");
+                },
+                _ then {},
+            };
+        };
         self.buffer.push_string("\n");
     };
 
@@ -831,13 +866,17 @@ given CodeGen {
     };
 
     emit_mir_global_initializers(self): Void = {
+        // Run every initializer before the user's main: declaration order
+        // within a module, modules in `using` topological order (dependencies
+        // first). The accessors make the order observable but not load-bearing
+        // -- an initializer that reads a not-yet-run global initializes it on
+        // the spot.
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(identifier, initializer_function, _, _) then {
+                .GlobalVariable(identifier, _, _, _) then {
                     let var_name = self.c_identifier_for_symbol(identifier);
-                    let initializer_name = self.callable_c_name(initializer_function);
                     self.add_indent();
-                    self.buffer.push_string("\(var_name) = \(initializer_name)();\n");
+                    self.buffer.push_string("(void)__koral_gptr_\(var_name)();\n");
                 },
                 _ then {},
             };

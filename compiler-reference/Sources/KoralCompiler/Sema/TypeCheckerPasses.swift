@@ -247,10 +247,17 @@ extension TypeChecker {
   private func hasConflictingGlobalDefinition(
     name: String,
     access: AccessModifier,
-    sourceFile: String
+    sourceFile: String,
+    ownDefId: DefId? = nil
   ) -> Bool {
+    // A `let` pre-binds its own name at registration (the compile-time
+    // accessor); that binding is the declaration's own name slot, never a
+    // conflict. Two `let`s of one name are caught by the registration claim.
     if access == .private {
-      return currentScope.lookup(name, sourceFile: sourceFile) != nil
+      guard let defId = currentScope.lookup(name, sourceFile: sourceFile) else {
+        return false
+      }
+      return defId != ownDefId
     }
 
     guard let existing = currentScope.lookupWithInfo(name) else {
@@ -261,7 +268,7 @@ extension TypeChecker {
       return false
     }
 
-    return true
+    return existing.defId != ownDefId
   }
 
   /// Performs type checking on the AST and returns the TypeCheckerOutput.
@@ -2694,6 +2701,184 @@ extension TypeChecker {
     }
   }
 
+  // MARK: - Pending Global Initializers
+
+  /// Register a top-level `let` initializer before any body is checked, so a
+  /// reference can force the check of the global it names -- declared before
+  /// or after. The compile-time mirror of the runtime accessor guarantee.
+  /// An annotated global's type is settled here (resolved exactly once), so
+  /// only an inferred type can ever need the force.
+  func registerPendingGlobalInit(_ decl: GlobalNode, isStdLib: Bool) throws {
+    guard case .globalVariableDeclaration(let name, let typeNode, _, let isMut, let access, let span, let nameSpan) = decl else {
+      return
+    }
+
+    // The collection-time DefId, resolved exactly the way makeGlobalSymbol
+    // would: a declaration has one DefId from collection to definition, and
+    // an import binding may already hold it.
+    let myDefId: DefId
+    if access == .private {
+      myDefId = defIdMap.lookupExact(
+        modulePath: currentModulePath, name: name, sourceFile: currentSourceFile)
+        ?? defIdMap.allocate(
+          modulePath: currentModulePath, name: name, kind: .variable,
+          sourceFile: currentSourceFile, access: access, packageID: currentPackageID, span: span)
+    } else {
+      myDefId = defIdMap.lookup(modulePath: currentModulePath, name: name)
+        ?? defIdMap.allocate(
+          modulePath: currentModulePath, name: name, kind: .variable,
+          sourceFile: currentSourceFile, access: access, packageID: currentPackageID, span: span)
+    }
+
+    // Two top-level `let`s of one name are one mistake, reported once at the
+    // second. The first claim keeps the spelling -- references resolve to it,
+    // and the second declaration is poisoned to silent.
+    let claimKey = access == .private
+      ? "\(name)@\(currentSourceFile)"
+      : defIdMap.symbolKey(modulePath: currentModulePath, name: name)
+    let isDuplicate = !globalInitNameClaims.insert(claimKey).inserted
+
+    // An annotated type is resolved exactly once, here: the check must not
+    // resolve it again, or the same mistake prints twice.
+    var annotatedType: Type? = nil
+    if let typeNode {
+      do {
+        annotatedType = try resolveTypeNode(typeNode)
+      } catch let error as SemanticError {
+        try? handleError(error)
+        annotatedType = .error
+      }
+    }
+
+    let kind: SymbolKind = .variable(isMut ? .MutableValue : .Value)
+    let entry = PendingGlobalInit(
+      decl: decl,
+      defId: myDefId,
+      name: name,
+      isMutable: isMut,
+      annotatedType: annotatedType,
+      sourceFile: currentSourceFile,
+      modulePath: currentModulePath,
+      packageID: currentPackageID,
+      isStdLib: isStdLib
+    )
+    if isDuplicate {
+      // The first claim owns the name and the identity; this one is silent.
+      try? handleError(SemanticError.duplicateDefinition(name, span: nameSpan))
+      poisonPendingGlobalInit(entry)
+      pendingGlobalInits[myDefId.id] = entry
+      return
+    }
+
+    // Pre-bind the name with the annotated type (or the error placeholder an
+    // inferred global carries until its check settles the real one), so a
+    // forward reference resolves instead of failing as undefined. The define
+    // completes the collection-time placeholder -- it must run while the
+    // DefId still carries no symbol info, or it mints a second identity for
+    // one declaration.
+    if access == .private {
+      currentScope.definePrivateSymbol(
+        name, sourceFile: currentSourceFile, type: annotatedType ?? .error,
+        mutable: isMut, modulePath: currentModulePath)
+    } else {
+      currentScope.defineWithModulePath(
+        name, annotatedType ?? .error, mutable: isMut,
+        modulePath: currentModulePath, access: access)
+    }
+
+    if let annotatedType {
+      // Annotated: settled from registration, so a reference never forces.
+      entry.settledSymbol = Symbol(defId: myDefId, type: annotatedType, kind: kind)
+    }
+    pendingGlobalInits[myDefId.id] = entry
+  }
+
+  /// A reference to a global whose initializer is still pending forces its
+  /// check now; the refreshed symbol (with the settled type) comes back for
+  /// the reference to use. A `Checking` entry is re-entrance: an inference
+  /// cycle, reported once and poisoned to silence.
+  func forcePendingGlobalInit(defId: DefId, referenceSpan: SourceSpan) throws -> Symbol? {
+    guard let entry = pendingGlobalInits[defId.id], entry.settledSymbol == nil else {
+      return nil
+    }
+    switch entry.state {
+    case .done:
+      return entry.settledSymbol
+    case .checking:
+      reportGlobalInitCycle(reentered: entry, referenceSpan: referenceSpan)
+      return nil
+    case .unchecked:
+      break
+    }
+
+    // Run the same code path that checks it in the in-order pass, under the
+    // declaration's own ambient context.
+    let savedName = currentFileName
+    let savedSourceFile = currentSourceFile
+    let savedModulePath = currentModulePath
+    let savedPackageID = currentPackageID
+    let savedSpan = currentSpan
+    let savedStdLib = isCurrentDeclStdLib
+    currentFileName = entry.sourceFile
+    currentSourceFile = entry.sourceFile
+    currentModulePath = entry.modulePath
+    currentPackageID = entry.packageID
+    currentSpan = entry.decl.span
+    isCurrentDeclStdLib = entry.isStdLib
+    defer {
+      currentFileName = savedName
+      currentSourceFile = savedSourceFile
+      currentModulePath = savedModulePath
+      currentPackageID = savedPackageID
+      currentSpan = savedSpan
+      isCurrentDeclStdLib = savedStdLib
+    }
+    do {
+      _ = try checkGlobalDeclaration(entry.decl)
+    } catch {
+      // The check aborted before it could settle: bind the name at error type
+      // so later references neither re-force nor cascade.
+      poisonPendingGlobalInit(entry)
+      throw error
+    }
+    return entry.settledSymbol
+  }
+
+  /// The initializer of the re-entered global reached itself through its
+  /// references and no type annotation breaks the knot: the types are
+  /// uninferrable. Report the cycle path once and poison its members so the
+  /// silence holds.
+  func reportGlobalInitCycle(reentered: PendingGlobalInit, referenceSpan: SourceSpan) {
+    let stack = globalInitForceStack
+    let start = stack.firstIndex { $0 === reentered } ?? 0
+    var path = ""
+    for frame in stack[start...] {
+      path += frame.name + " -> "
+    }
+    path += reentered.name
+    let error = SemanticError(
+      .generic(
+        "cannot infer type of global '\(reentered.name)': initialization cycle \(path) (add a type annotation)"),
+      span: referenceSpan
+    )
+    // The name is already bound at the error placeholder; settle the members
+    // so the cycle is reported exactly once and later uses are silent.
+    for frame in stack[start...] {
+      poisonPendingGlobalInit(frame)
+    }
+    try? handleError(error)
+  }
+
+  /// Settle a global at error type: no check will run for it, and references
+  /// see the error type instead of re-forcing or complaining about a name.
+  func poisonPendingGlobalInit(_ entry: PendingGlobalInit) {
+    entry.state = .done
+    entry.cachedTypedNode = nil
+    entry.settledSymbol = Symbol(defId: entry.defId, type: .error, kind: entry.variableKind)
+    defIdMap.addSymbolInfo(
+      defId: entry.defId, type: .error, kind: entry.variableKind, isMutable: entry.isMutable)
+  }
+
   func checkGlobalDeclaration(_ decl: GlobalNode) throws -> TypedGlobalNode? {
     // A declaration body is a fresh function scope: `break` / `continue` must not
     // see a loop (or a defer) left behind by a previously checked declaration.
@@ -2813,69 +2998,153 @@ extension TypeChecker {
       // For private variables, allow same name in different files
       let isPrivate = (access == .private)
 
-      if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
-        throw SemanticError.duplicateDefinition(name, span: nameSpan)
-      }
-
-      // Resolve expected type: explicit annotation or nil for inference. A
-      // type that fails to resolve still becomes the variable's own type --
-      // at error type -- so later uses of the name see the variable they
-      // wrote instead of an undefined name.
-      var expectedType: Type? = nil
-      if typeNode != nil {
-        do {
-          let resolvedType = try resolveTypeNode(typeNode!)
-          try assertNotOpaqueType(resolvedType, span: span)
-          try assertNoBorrowedReferenceType(resolvedType, context: "global variable type", span: span)
-          try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [resolvedType], span: nameSpan)
-          expectedType = resolvedType
-        } catch let error as SemanticError {
-          try? handleError(error)
-          expectedType = .error
-        }
-      }
-
-      // Type-check the initializer, passing expected type for inference/coercion
-      var typedValue: TypedExpressionNode
-      if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
-        typedValue = try inferLambdaExpression(
-          parameters: parameters,
-          returnType: returnType,
-          body: body,
-          expectedType: expectedType
-        )
-      } else {
-        typedValue = try inferTypedExpression(value, expectedType: expectedType)
-      }
-
-      // Determine the final type: explicit annotation takes precedence, otherwise infer from value
-      let type: Type
-      if let expectedType = expectedType {
-        type = expectedType
-        if typedValue.type != .never && typedValue.type != .error && type != .error && typedValue.type != type {
-          throw SemanticError.typeMismatch(
-            expected: type.description, got: typedValue.type.description)
-        }
-      } else {
-        type = typedValue.type
-        try assertNotOpaqueType(type, span: span)
-        try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
-        try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
-      }
-
+      // The pending-init state machine: a global is checked exactly once --
+      // in order or forced by a reference -- and a `Checking` re-entrance has
+      // already been reported as an inference cycle (poisoned silence here).
+      let myDefId: DefId
       if isPrivate {
-        currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut, modulePath: currentModulePath)
+        myDefId = defIdMap.lookupExact(
+          modulePath: currentModulePath, name: name, sourceFile: currentSourceFile)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath, name: name, kind: .variable,
+            sourceFile: currentSourceFile, access: access, packageID: currentPackageID, span: span)
       } else {
-        currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath, access: access)
+        myDefId = defIdMap.lookup(modulePath: currentModulePath, name: name)
+          ?? defIdMap.allocate(
+            modulePath: currentModulePath, name: name, kind: .variable,
+            sourceFile: currentSourceFile, access: access, packageID: currentPackageID, span: span)
+      }
+      let entry = pendingGlobalInits[myDefId.id]
+      if let entry {
+        switch entry.state {
+        case .done, .checking:
+          // Already checked on demand (or poisoned): hand back the cached
+          // result -- a poisoned entry's cache is empty and stays silent.
+          return entry.cachedTypedNode
+        case .unchecked:
+          break
+        }
+        entry.state = .checking
+        globalInitForceStack.append(entry)
       }
 
-      let symbol = makeGlobalSymbol(name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value), access: access)
+      do {
+        if hasConflictingGlobalDefinition(
+          name: name, access: access, sourceFile: currentSourceFile, ownDefId: myDefId)
+        {
+          throw SemanticError.duplicateDefinition(name, span: nameSpan)
+        }
 
-      return .globalVariable(
-        identifier: symbol,
-        value: typedValue,
-        kind: isMut ? .MutableValue : .Value
-      )
+        // Resolve expected type: explicit annotation or nil for inference. A
+        // type that fails to resolve still becomes the variable's own type --
+        // at error type -- so later uses of the name see the variable they
+        // wrote instead of an undefined name.
+        var expectedType: Type? = nil
+        if typeNode != nil {
+          if let annotated = entry?.annotatedType {
+            // The annotation was resolved exactly once, at registration. Only
+            // its assertions remain; a failed resolution already settled the
+            // type at error.
+            if annotated != .error {
+              do {
+                try assertNotOpaqueType(annotated, span: span)
+                try assertNoBorrowedReferenceType(annotated, context: "global variable type", span: span)
+                try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [annotated], span: nameSpan)
+                expectedType = annotated
+              } catch let error as SemanticError {
+                try? handleError(error)
+                expectedType = .error
+              }
+            } else {
+              expectedType = .error
+            }
+          } else {
+            do {
+              let resolvedType = try resolveTypeNode(typeNode!)
+              try assertNotOpaqueType(resolvedType, span: span)
+              try assertNoBorrowedReferenceType(resolvedType, context: "global variable type", span: span)
+              try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [resolvedType], span: nameSpan)
+              expectedType = resolvedType
+            } catch let error as SemanticError {
+              try? handleError(error)
+              expectedType = .error
+            }
+          }
+        }
+
+        // Type-check the initializer, passing expected type for inference/coercion.
+        // A global initializer may reference any global, declared before or
+        // after: the accessor model initializes on first access at run time,
+        // and the reference forces the referenced global's check here first
+        // when its type is still pending.
+        var typedValue: TypedExpressionNode
+        if case .lambdaExpression(let parameters, let returnType, let body, _) = value {
+          typedValue = try inferLambdaExpression(
+            parameters: parameters,
+            returnType: returnType,
+            body: body,
+            expectedType: expectedType
+          )
+        } else {
+          typedValue = try inferTypedExpression(value, expectedType: expectedType)
+        }
+
+        // Determine the final type: explicit annotation takes precedence, otherwise infer from value
+        let type: Type
+        if let expectedType = expectedType {
+          type = expectedType
+          if typedValue.type != .never && typedValue.type != .error && type != .error && typedValue.type != type {
+            throw SemanticError.typeMismatch(
+              expected: type.description, got: typedValue.type.description)
+          }
+        } else {
+          type = typedValue.type
+          try assertNotOpaqueType(type, span: span)
+          try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
+          try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
+        }
+
+        let symbol = makeGlobalSymbol(
+          name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value),
+          access: access, preferredDefId: myDefId)
+
+        // Settle the name's type. The name itself was bound at registration;
+        // re-binding here would mint a second identity for one declaration.
+        if entry != nil {
+          defIdMap.addSymbolInfo(
+            defId: myDefId, type: type,
+            kind: .variable(isMut ? .MutableValue : .Value), isMutable: isMut)
+        } else if isPrivate {
+          currentScope.definePrivateSymbol(name, sourceFile: currentSourceFile, type: type, mutable: isMut, modulePath: currentModulePath)
+        } else {
+          currentScope.defineWithModulePath(name, type, mutable: isMut, modulePath: currentModulePath, access: access)
+        }
+
+        let node = TypedGlobalNode.globalVariable(
+          identifier: symbol,
+          value: typedValue,
+          kind: isMut ? .MutableValue : .Value
+        )
+        if let entry {
+          entry.state = .done
+          entry.settledSymbol = symbol
+          entry.cachedTypedNode = node
+          if globalInitForceStack.last === entry {
+            globalInitForceStack.removeLast()
+          }
+        }
+        return node
+      } catch {
+        // The check aborted before it could settle: bind the name at error
+        // type so later references neither re-force nor cascade.
+        if let entry {
+          poisonPendingGlobalInit(entry)
+          if globalInitForceStack.last === entry {
+            globalInitForceStack.removeLast()
+          }
+        }
+        throw error
+      }
 
     case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
       self.currentSpan = span

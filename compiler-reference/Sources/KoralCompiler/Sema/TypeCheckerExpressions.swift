@@ -2154,6 +2154,16 @@ extension TypeChecker {
       // DefId, so no use can re-mint one.
       let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? info.defId
 
+      // A reference to a global whose type is still unsettled forces its
+      // initializer's check now -- the compile-time accessor. The refreshed
+      // symbol carries the settled type; a re-entrant check is an inference
+      // cycle and keeps the poisoned symbol (silence). Annotated globals
+      // carry their type from registration and never force.
+      var symbolType = info.type
+      if let settled = try forcePendingGlobalInit(defId: defId, referenceSpan: nameSpan) {
+        symbolType = settled.type
+      }
+
       let resolvedDefKind = defIdMap.getKind(defId) ?? fallbackDefKind
       let symbolKind: SymbolKind
       if resolvedDefKind == .function {
@@ -2165,7 +2175,7 @@ extension TypeChecker {
       if defIdMap.getSymbolType(defId) == nil {
         defIdMap.addSymbolInfo(
           defId: defId,
-          type: info.type,
+          type: symbolType,
           kind: symbolKind,
           isMutable: info.mutable
         )
@@ -2173,10 +2183,10 @@ extension TypeChecker {
 
       let symbol = Symbol(
         defId: defId,
-        type: info.type,
+        type: symbolType,
         kind: symbolKind
       )
-      
+
       return .variable(identifier: symbol)
 
     case .blockExpression(let statements, let tailExpression, _):
@@ -8775,7 +8785,14 @@ extension TypeChecker {
         ), span: nameSpan)
       }
       let defId = currentScope.lookup(name, sourceFile: currentSourceFile) ?? resolvedInfo.defId
-      guard let type = defIdMap.getSymbolType(defId) else {
+      // A write forces the global's initializer check exactly like a read:
+      // the accessor guarantee holds for assignments too. The refreshed type
+      // is the settled one; a re-entrant check is an inference cycle.
+      var symbolType = defIdMap.getSymbolType(defId)
+      if let settled = try forcePendingGlobalInit(defId: defId, referenceSpan: nameSpan) {
+        symbolType = settled.type
+      }
+      guard let type = symbolType else {
         throw SemanticError.undefinedVariable(name)
       }
       guard defIdMap.isSymbolMutable(defId) ?? resolvedInfo.mutable else { throw SemanticError.assignToImmutable(name) }

@@ -3885,6 +3885,9 @@ given MIRFunctionCodeEmitter {
                 MIRPlaceAccess(name, Option[MIRValueCleanup].None())
             },
             .Global(def_id) then {
+                // Koral globals go through their accessor so the initializer
+                // is guaranteed to have run; foreign globals are bare externs
+                // (no initializer of ours to run).
                 let name = when self.codegen.context.get_symbol(def_id) in {
                     .Some(symbol) then self.codegen.c_identifier_for_symbol_value(
                         symbol,
@@ -3893,7 +3896,14 @@ given MIRFunctionCodeEmitter {
                         self.context_name(def_id),
                     ),
                 };
-                MIRPlaceAccess(name, Option[MIRValueCleanup].None())
+                if self.codegen.is_foreign_global_var_def_id(def_id) then {
+                    MIRPlaceAccess(name, Option[MIRValueCleanup].None())
+                } else {
+                    MIRPlaceAccess(
+                        "(*__koral_gptr_\(name)())",
+                        Option[MIRValueCleanup].None(),
+                    )
+                }
             },
             .Field(base, field) then {
                 let base_access = self.emit_place_access(base);

@@ -384,6 +384,139 @@ given TypeChecker {
         };
     };
 
+    /// Register a top-level `let` initializer before any body is checked, so a
+    /// reference can force the check of the global it names -- declared before
+    /// or after. The compile-time mirror of the runtime accessor guarantee.
+    /// An annotated globals' types are settled here (resolved exactly once), so
+    /// only an inferred type can ever need the force.
+    register_pending_global_init(self, decl: Decl, retain_templates: Bool): Void = {
+        when decl in {
+            .LetDecl(access, name, is_mutable, type_name, _, span, _) then {
+                let def_id = self.get_or_allocate_top_level_def_id(
+                    name,
+                    DefKind.Variable(),
+                    access,
+                    span,
+                );
+                let annotated_type = when type_name in {
+                    .Some(ta) then {
+                        let t = self.resolve_type(ta);
+                        let variable_kind = if is_mutable then VariableKind.MutableValue()
+                        else VariableKind.Value();
+                        let _ = self.make_top_level_symbol(
+                            name,
+                            t,
+                            SymbolKind.Variable(variable_kind),
+                            access,
+                            span,
+                            is_mutable,
+                        );
+                        Option[Type].Some(t)
+                    },
+                    .None() then Option[Type].None(),
+                };
+                self.storage.pending_global_inits.insert(
+                    def_id.id,
+                    GlobalInitEntry(
+                        decl,
+                        retain_templates,
+                        annotated_type,
+                        GlobalInitState.Unchecked(),
+                        Option[TypedDecl].None(),
+                    ),
+                );
+            },
+            .ForeignLetDecl(access, name, is_mutable, type_name, span, _) then {
+                // Foreign globals are annotated by definition; settle the type
+                // here so a reference never needs the force.
+                let t = self.resolve_type(type_name);
+                let variable_kind = if is_mutable then VariableKind.MutableValue()
+                else VariableKind.Value();
+                let _ = self.make_top_level_symbol(
+                    name,
+                    t,
+                    SymbolKind.Variable(variable_kind),
+                    access,
+                    span,
+                    is_mutable,
+                );
+            },
+            _ then {},
+        };
+    };
+
+    /// A reference to a global whose initializer is still pending forces its
+    /// check now; the refreshed symbol (with the settled type) comes back for
+    /// the reference to use. A `Checking` entry is re-entrance: an inference
+    /// cycle, reported once.
+    force_pending_global_init(self, def_id: DefId, span: SourceSpan): Option[Symbol] = {
+        when self.storage.pending_global_inits.get(def_id.id) in {
+            .Some(entry) then {
+                when entry.state in {
+                    .Done() then {
+                        return Option[Symbol].None();
+                    },
+                    .Checking() then {
+                        self.report_global_init_cycle(def_id, span);
+                        return Option[Symbol].None();
+                    },
+                    .Unchecked() then {},
+                };
+                let typed = self.check_decl(entry.decl, entry.retain_templates);
+                let settled = self.finalize_checked_decl_constraints(
+                    Option[TypedDecl].Some(typed),
+                ) or else typed;
+                entry.checked = Option[TypedDecl].Some(settled);
+                entry.state = GlobalInitState.Done();
+                return when settled in {
+                    .LetDecl(_, _, _, _, _, _, sym) then Option[Symbol].Some(sym),
+                    _ then Option[Symbol].None(),
+                };
+            },
+            .None() then {},
+        };
+        return Option[Symbol].None();
+    };
+
+    /// The initializer of `def_id` reached itself through its references and no
+    /// type annotation breaks the knot: the types are uninferrable. Report the
+    /// cycle path once and poison its members so the silence holds.
+    report_global_init_cycle(self, def_id: DefId, span: SourceSpan): Void = {
+        let name = self.context().get_name(def_id) or else "?";
+        let stack = self.storage.global_init_force_stack;
+        let mutable start = UInt(0);
+        let mutable i = UInt(0);
+        while i < stack.count() then {
+            if stack[i] == def_id.id then {
+                start = i;
+                break;
+            };
+            i += UInt(1);
+        };
+        let mutable path = "";
+        let mutable j = start;
+        while j < stack.count() then {
+            let frame_name = self.context().get_name(DefId(stack[j])) or else "?";
+            path = path + frame_name + " -> ";
+            j += UInt(1);
+        };
+        path = path + name;
+        self.push_diagnostic_at_span(
+            "cannot infer type of global '\(name)': initialization cycle \(path) (add a type annotation)",
+            span,
+        );
+        let mutable k = start;
+        while k < stack.count() then {
+            when self.storage.pending_global_inits.get(stack[k]) in {
+                .Some(e) then {
+                    e.state = GlobalInitState.Done();
+                },
+                .None() then {},
+            };
+            k += UInt(1);
+        };
+    };
+
     check_decl(self, decl: Decl, retain_checked_template_bodies: Bool): TypedDecl = {
         let outer_span = self.enter_current_span(self.decl_span(decl));
         defer {
@@ -391,19 +524,66 @@ given TypeChecker {
         };
         return when decl in {
             .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
-                let expected_type = when type_name in {
-                    .Some(ta) then Option[Type].Some(self.resolve_type(ta)),
-                    .None() then Option[Type].None(),
+                let def_id = self.get_or_allocate_top_level_def_id(
+                    name,
+                    DefKind.Variable(),
+                    access,
+                    span,
+                );
+                let entry_opt = self.storage.pending_global_inits.get(def_id.id);
+                when entry_opt in {
+                    .Some(entry) then {
+                        when entry.state in {
+                            .Done() then {
+                                // Already checked on demand -- hand back the
+                                // cached result. (A poisoned entry's `checked`
+                                // is filled by the unwinding check; a stub of
+                                // unknown type only if it somehow is not.)
+                                return when entry.checked in {
+                                    .Some(cached) then cached,
+                                    .None() then TypedDecl.LetDecl(
+                                        access,
+                                        name,
+                                        is_mutable,
+                                        Type.Unknown(),
+                                        self.empty_typed_block(Type.Unknown()),
+                                        span,
+                                        Symbol(
+                                            def_id,
+                                            Type.Unknown(),
+                                            SymbolKind.Variable(
+                                                if is_mutable then VariableKind.MutableValue()
+                                                else VariableKind.Value(),
+                                            ),
+                                        ),
+                                    ),
+                                };
+                            },
+                            _ then {},
+                        };
+                        entry.state = GlobalInitState.Checking();
+                    },
+                    .None() then {},
                 };
-                // A global `let` may read a global `let` declared before it and
-                // no other: forward references -- and therefore every cycle --
-                // would read a zero the runtime has not written yet (§ global
-                // initialization order).
-                let prev_in_global_init = self.storage.in_global_init;
-                self.storage.in_global_init = true;
+                self.storage.global_init_force_stack.push(def_id.id);
+                defer {
+                    self.storage.global_init_force_stack.pop();
+                };
+                // The annotated type, if any, was resolved once at registration
+                // and is already bound on the symbol.
+                let expected_type = when entry_opt in {
+                    .Some(entry) then entry.annotated_type,
+                    .None() then when type_name in {
+                        .Some(ta) then Option[Type].Some(self.resolve_type(ta)),
+                        .None() then Option[Type].None(),
+                    },
+                };
+                // A global initializer may reference any global, declared
+                // before or after: the accessor model initializes on first
+                // access at runtime, and the initializer's own check forces the
+                // referenced global's check first when its type is still
+                // pending.
                 let typed_init = self.check_expr_global_ref(initializer, expected_type);
-                self.storage.in_global_init = prev_in_global_init;
-                self.storage.initialized_globals.insert(name);
                 let resolved = expected_type or else typed_init.expr_type;
                 self.validate_signature_type_visibility(
                     name,
@@ -445,7 +625,7 @@ given TypeChecker {
                     span,
                     is_mutable,
                 );
-                TypedDecl.LetDecl(
+                let result = TypedDecl.LetDecl(
                     access,
                     name,
                     is_mutable,
@@ -453,7 +633,15 @@ given TypeChecker {
                     stable_initializer,
                     span,
                     sym,
-                )
+                );
+                when entry_opt in {
+                    .Some(entry) then {
+                        entry.checked = Option[TypedDecl].Some(result);
+                        entry.state = GlobalInitState.Done();
+                    },
+                    .None() then {},
+                };
+                result
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
                 // Enter function context — cleanup via defer (Swift: withNewScope pattern)

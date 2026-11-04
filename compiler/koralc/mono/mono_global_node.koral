@@ -567,10 +567,14 @@ public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): T
             };
             TypedDecl.IntrinsicGivenDecl(resolved_target, resolved_members, span)
         },
-        // LetDecl: resolve decl type and initializer expression.
+        // LetDecl: resolve decl type and initializer expression. The
+        // initializer is re-resolved every fixpoint round, exactly like
+        // function bodies: its static calls only bind to instantiated
+        // constructors (e.g. `List[T].new`) once `remappedFunctionDefIds` is
+        // populated, and the per-round cache is cleared for the same reason.
         .LetDecl(access, name, is_mutable, decl_type, initializer, span, id) then {
             let mutable resolved_type = resolve_parameterized_type(mono, decl_type);
-            if mono.storage.context.get_concrete_global_initializer(id.def_id) is .Some(_) then {
+            if mono.storage.resolved_global_initializer_ids.contains(id.def_id.id) then {
                 return TypedDecl.LetDecl(
                     access,
                     name,
@@ -588,6 +592,7 @@ public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): T
                     id,
                 );
             };
+            mono.storage.resolved_global_initializer_ids.insert(id.def_id.id);
             let source_initializer = mono.storage.context.take_concrete_global_initializer(
                 id.def_id,
             ) or else initializer;

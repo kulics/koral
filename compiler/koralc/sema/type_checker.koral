@@ -7,6 +7,26 @@ using "std/os" { env };
 // All mutable checker state lives in storage so TypeChecker can be passed by
 // value without losing mutations (mirrors the List/storage ref pattern).
 
+/// Compile-time mirror of the runtime global-accessor state machine: a global
+/// initializer is checked on demand and `Checking` re-entrance is an inference
+/// cycle -- only a type annotation can break one.
+type GlobalInitState {
+    Unchecked(),
+    Checking(),
+    Done(),
+};
+
+/// A pending global-initializer check: the declaration to run, and what came
+/// out of it once it has run. `annotated_type` is the declared type resolved
+/// once up front -- a reference may use it before the initializer is checked.
+type mutable GlobalInitEntry(
+    decl: Decl,
+    retain_templates: Bool,
+    annotated_type: Option[Type],
+    mutable state: GlobalInitState,
+    mutable checked: Option[TypedDecl],
+);
+
 type mutable TypeCheckerStorage(
     mutable global_scope: Scope,
     mutable context: CompilerContext,
@@ -89,16 +109,13 @@ type mutable TypeCheckerStorage(
     /// checked and blames the ambient call, so `Point(300, 0)` points at
     /// `Point` while `let x UInt8 = 300` still points at the literal.
     mutable range_blame_span: Option[SourceSpan],
-    /// Global `let` initializers run in declaration order; a later one may read
-    /// an earlier one, never the reverse. `initialized_globals` holds the names
-    /// whose initializer has already been checked, so a forward reference -- and
-    /// therefore every cycle -- is visible at the point of use instead of
-    /// quietly reading the zero the runtime has not written yet.
-    mutable initialized_globals: Set[String],
-    /// True while a global `let` initializer is being checked. The order rule
-    /// applies there and nowhere else: a function body may freely call forward
-    /// to any global.
-    mutable in_global_init: Bool,
+    /// Global initializers are checked on demand -- a reference to a global
+    /// whose initializer is still pending forces its check first (the
+    /// compile-time mirror of the runtime accessor). Keyed by DefId.
+    mutable pending_global_inits: Dict[UInt, GlobalInitEntry],
+    /// The chain of global initializers being checked right now (DefIds,
+    /// outermost first) -- the compile-time cycle path.
+    mutable global_init_force_stack: List[UInt],
     /// The first unresolvable dot-form name a pattern lowering met. The
     /// when/is checker consumes it (`take_pattern_case_miss`) and reports it
     /// at ITS span -- the seed blames the whole `when`, not the pattern -- so
@@ -311,8 +328,8 @@ given TypeChecker {
             global_scope,
             unknown_span(),
             Option[SourceSpan].None(),
-            Set[String].new(),
-            false,
+            Dict[UInt, GlobalInitEntry].new(),
+            List[UInt].new(),
             Option[PatternCaseMiss].None(),
         );
         return TypeChecker(s);
@@ -2203,6 +2220,11 @@ given TypeChecker {
         self.collect_signatures(program);
         let mutable typed_decls = List[TypedDecl].new();
         let skip_typed_decl_retention = self.skip_typed_decl_retention_debug_enabled();
+        // Register every top-level `let` before any check runs, so a reference
+        // can force the check of the global it names.
+        for decl in program.declarations then {
+            self.register_pending_global_init(decl, retain_checked_template_bodies);
+        };
         for decl in program.declarations then {
             when decl in {
                 _ then {
@@ -2305,6 +2327,15 @@ given TypeChecker {
                 "[sema-phase] pass2: collect signatures done next_def_id=\(self.context().next_def_id())",
             );
             println("[sema-phase] pass3: check decl begin");
+        };
+        // Register every top-level `let` before any check runs, so a reference
+        // can force the check of the global it names -- in any module.
+        for pair in nodes then {
+            self.storage.file_path = pair.first.source_file;
+            self.storage.module_path = pair.second;
+            self.install_name_resolution_context();
+            self.storage.package_id = pair.first.package_id;
+            self.register_pending_global_init(pair.first.decl, retain_checked_template_bodies);
         };
         // Pass 3: check bodies
         let mutable typed_decls = List[TypedDecl].new();

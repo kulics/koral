@@ -186,6 +186,12 @@ public class CodeGen {
     return defId.id
   }
 
+  /// A foreign global is a bare extern: no initializer of ours to run, so its
+  /// places keep the bare C name instead of going through an accessor.
+  func isForeignGlobalVar(_ defId: DefId) -> Bool {
+    return foreignGlobalVarDefIds.contains(defIdKey(defId))
+  }
+
   func qualifiedName(for symbol: Symbol) -> String {
     if foreignFunctionDefIds.contains(symbol.defId.id) {
       let name = context.getName(symbol.defId) ?? "<unknown>"
@@ -997,11 +1003,37 @@ public class CodeGen {
       }
     }
     for global in globals {
-      if case .globalVariable(let identifier, let initializerFunction, _) = global {
+      if case .globalVariable(let identifier, _, _) = global {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
         buffer += "\(cType) \(cName);\n"
+      }
+    }
+    // Each Koral global carries a state value (0 = uninitialized,
+    // 1 = initializing, 2 = done) and an accessor that guarantees its
+    // initializer has run before the storage is touched -- the runtime
+    // half of the global-variable contract.
+    for global in globals {
+      if case .globalVariable(let identifier, let initializerFunction, _) = global {
+        let cType = cTypeName(identifier.type)
+        let cName = cIdentifier(for: identifier)
+        let initName = cIdentifier(for: initializerFunction)
+        let displayName = context.getName(identifier.defId) ?? cName
         globalInitializations.append((cName, initializerFunction))
+        buffer += "uint8_t __koral_gstate_\(cName) = 0;\n"
+        buffer += "\(cType)* __koral_gptr_\(cName)(void) {\n"
+        buffer += "    if (__koral_global_state_ready(&__koral_gstate_\(cName))) return &\(cName);\n"
+        buffer += "    __koral_global_init_lock();\n"
+        buffer += "    if (__koral_gstate_\(cName) == 2) { __koral_global_init_unlock(); return &\(cName); }\n"
+        buffer += "    if (__koral_gstate_\(cName) == 1) { __koral_global_init_cycle(\"\(displayName)\"); }\n"
+        buffer += "    __koral_gstate_\(cName) = 1;\n"
+        buffer += "    __koral_global_init_push(\"\(displayName)\");\n"
+        buffer += "    \(cName) = \(initName)();\n"
+        buffer += "    __koral_global_init_pop();\n"
+        buffer += "    __koral_global_state_finish(&__koral_gstate_\(cName));\n"
+        buffer += "    __koral_global_init_unlock();\n"
+        buffer += "    return &\(cName);\n"
+        buffer += "}\n"
       }
     }
     buffer += "\n"
@@ -1038,12 +1070,15 @@ public class CodeGen {
       addIndent()
       buffer += "__koral_set_args((int32_t)argc, (uint8_t**)argv);\n"
 
-      // 生成全局变量初始化
+      // Run every initializer before the user's main: declaration order
+      // within a module, modules in `using` topological order (dependencies
+      // first). The accessors make the order observable but not load-bearing
+      // -- an initializer that reads a not-yet-run global initializes it on
+      // the spot.
       if !globalInitializations.isEmpty {
-        for (name, initializer) in globalInitializations {
-          let resultVar = "\(cIdentifier(for: initializer))()"
+        for (name, _) in globalInitializations {
           addIndent()
-          buffer += "\(name) = \(resultVar);\n"
+          buffer += "(void)__koral_gptr_\(name)();\n"
         }
       }
       

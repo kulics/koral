@@ -88,14 +88,32 @@ public class BodyChecker: CompilerPass {
             declarations.append((decl: node, sourceInfo: checker.nodeSourceInfoMap[index], originalIndex: index))
         }
         
+        // Register every top-level `let` before any check runs, so a reference
+        // can force the check of the global it names -- declared before or
+        // after. The compile-time mirror of the runtime accessor guarantee:
+        // an initializer that reads a not-yet-checked global settles its type
+        // on the spot, and a cycle between two inferred initializers is a
+        // compile-time error.
+        for entry in declarations {
+            let decl = entry.decl
+            let isStdLib = entry.originalIndex < coreGlobalCount
+            let sourceInfo = entry.sourceInfo
+            checker.isCurrentDeclStdLib = isStdLib
+            checker.currentFileName = sourceInfo?.sourceFile ?? (isStdLib ? checker.coreFileName : checker.userFileName)
+            checker.currentSourceFile = sourceInfo?.sourceFile ?? checker.currentFileName
+            checker.currentModulePath = sourceInfo?.modulePath ?? []
+            checker.currentPackageID = sourceInfo?.packageID ?? ""
+            checker.currentSpan = decl.span
+            try checker.registerPendingGlobalInit(decl, isStdLib: isStdLib)
+        }
+
         // Pass 3 is two phases, and the split is semantic -- it is the rule
-        // the bootstrap gives a reader: a global initializer meets only the
-        // declarations written before it (a same-module forward reference is
-        // `Undefined variable`), while a function body may name any
-        // declaration in the program, including a global in a module that
-        // sorts after its own. One interleaved pass got that backwards: a
-        // body was checked at its node position and could not see a
-        // later-sorted module's global at all.
+        // the bootstrap gives a reader: a global initializer may name any
+        // global (a forward reference initializes on first access at run
+        // time, and forces the check here), while a function body is checked
+        // after every declaration exists. One interleaved pass got that
+        // backwards: a body was checked at its node position and could not see
+        // a later-sorted module's global at all.
         //
         // Phase 3a: everything whose checking IS definition -- global values
         // (initializer included), types, foreign entries -- in node order, so

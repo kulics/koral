@@ -189,8 +189,87 @@ given MIRLowerer {
         return unique;
     };
 
+    /// Rank every program module for the global-initializer order: `using`
+    /// topological order -- dependencies first -- with ties broken by module
+    /// path. Fully determined by the import graph, so both compilers run
+    /// initializers in the same order. Isolated modules rank among themselves
+    /// by path; leftovers (only possible on an illegal `using` cycle) get the
+    /// remaining ranks in path order.
+    global_init_module_ranks(self): Dict[String, UInt] = {
+        let deps = Dict[String, Set[String]].new();
+        let dependents = Dict[String, Set[String]].new();
+        let universe = Set[String].new();
+        let add_edge: (String, String) -> Void = (src, dst) => {
+            if src == dst then {
+                return;
+            };
+            universe.insert(src);
+            universe.insert(dst);
+            let src_deps = deps.get_or_insert(src, Set[String].new());
+            src_deps.insert(dst);
+            let dst_dependents = dependents.get_or_insert(dst, Set[String].new());
+            dst_dependents.insert(src);
+        };
+        for edge in self.program.import_graph.edges then {
+            add_edge(join_path(edge.source, "."), join_path(edge.target, "."));
+        };
+        for edge in self.program.import_graph.symbol_imports then {
+            add_edge(join_path(edge.module, "."), join_path(edge.target, "."));
+        };
+        let mutable rank_of = Dict[String, UInt].new();
+        let mutable ready = List[String].new();
+        for m in universe then {
+            if (deps.get(m) or else Set[String].new()).count() == UInt(0) then {
+                ready.push(m);
+            };
+        };
+        let mutable next_rank = UInt(0);
+        while not ready.is_empty() then {
+            let mutable best_i = UInt(0);
+            let mutable i = UInt(1);
+            while i < ready.count() then {
+                if ready[i].compare(ready[best_i]) < 0 then {
+                    best_i = i;
+                };
+                i += UInt(1);
+            };
+            let m = ready.take_at(best_i);
+            rank_of.insert(m, next_rank);
+            next_rank += UInt(1);
+            let m_dependents = dependents.get(m) or else Set[String].new();
+            for dependent in m_dependents then {
+                when deps.get(dependent) in {
+                    .Some(dep_set) then {
+                        dep_set.remove(m);
+                        if dep_set.count() == UInt(0) then {
+                            ready.push(dependent);
+                        };
+                    },
+                    .None() then {
+                        ready.push(dependent);
+                    },
+                };
+            };
+        };
+        // `using` cycles are rejected at load time; anything left here is
+        // ordered by path so the output stays deterministic.
+        let mutable leftovers = List[String].new();
+        for m in universe then {
+            if not rank_of.contains_key(m) then {
+                leftovers.push(m);
+            };
+        };
+        leftovers.sort_by((m) => m);
+        for m in leftovers then {
+            rank_of.insert(m, next_rank);
+            next_rank += UInt(1);
+        };
+        return rank_of;
+    };
+
     public metadata_program(self): MIRProgram = {
         let mutable collected_globals = List[MIRGlobal].new();
+        let mutable global_var_entries = List[MIRGlobal].new();
 
         for request in self.unique_vtable_requests() then {
             collected_globals.push(
@@ -222,7 +301,7 @@ given MIRLowerer {
                 },
                 .LetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
                     let init_function = self.make_global_initializer_symbol(identifier);
-                    collected_globals.push(
+                    global_var_entries.push(
                         MIRGlobal.GlobalVariable(
                             identifier,
                             init_function,
@@ -320,14 +399,52 @@ given MIRLowerer {
             };
         };
 
-        // `program.global_nodes` is in DECLARATION order and the loop above
-        // walked it forward, so `collected_globals` is already in the order the
-        // seed emits: vtables first, then the nodes in declaration order.
-        // Global `let` initializers run in exactly this order (see
-        // `emit_mir_global_initializers`), so a later binding can read an
-        // earlier one -- `let a = 1; let b = a + 1` gives `b == 2`. The old
-        // pop-into-`globals` loop reversed the list and ran the initializers
-        // backwards.
+        // Global `let` initializers run before main in the order the
+        // GlobalVariable entries appear in `collected_globals` (see
+        // `emit_mir_global_initializers`): declaration order within a module,
+        // modules in `using` topological order -- dependencies first -- so a
+        // later binding can read an earlier one (`let a = 1; let b = a + 1`
+        // gives `b == 2`) and a module's globals run after the modules it
+        // uses. The sort key is (module rank, declaration order).
+        let ranks = self.global_init_module_ranks();
+        let mutable buckets = Dict[UInt, List[MIRGlobal]].new();
+        let mutable max_rank = UInt(0);
+        for entry in global_var_entries then {
+            let rank = when entry in {
+                .GlobalVariable(identifier, _, _, _) then {
+                    when self.context.def_id_map.get_module_path(identifier.def_id) in {
+                        .Some(path) then ranks.get(join_path(path, ".")) or else UInt(0),
+                        .None() then UInt(0),
+                    }
+                },
+                _ then UInt(0),
+            };
+            when buckets.get(rank) in {
+                .Some(bucket) then {
+                    bucket.push(entry);
+                },
+                .None() then {
+                    let bucket = List[MIRGlobal].new();
+                    bucket.push(entry);
+                    buckets.insert(rank, bucket);
+                },
+            };
+            if rank > max_rank then {
+                max_rank = rank;
+            };
+        };
+        let mutable r = UInt(0);
+        while r <= max_rank then {
+            when buckets.get(r) in {
+                .Some(bucket) then {
+                    for entry in bucket then {
+                        collected_globals.push(entry);
+                    };
+                },
+                .None() then {},
+            };
+            r += UInt(1);
+        };
 
         let program = MIRProgram(
             collected_globals,

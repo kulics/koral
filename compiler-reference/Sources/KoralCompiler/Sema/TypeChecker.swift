@@ -24,6 +24,69 @@ enum ExpressionUsage: Equatable {
   case statement
 }
 
+/// Compile-time mirror of the runtime global-accessor state machine: a global
+/// initializer is checked on demand and `Checking` re-entrance is an inference
+/// cycle -- only a type annotation can break one.
+enum GlobalInitState {
+  case unchecked
+  case checking
+  case done
+}
+
+/// A pending global-initializer check: the declaration to run, the ambient
+/// context to run it under, and what came out of it once it has run.
+/// `annotatedType` is the declared type resolved once up front -- a reference
+/// may use it before the initializer is checked, and it never forces.
+final class PendingGlobalInit {
+  let decl: GlobalNode
+  let defId: DefId
+  let name: String
+  let isMutable: Bool
+  /// The declared type, resolved exactly once at registration. `nil` for an
+  /// inferred global -- the only kind whose check a reference can force.
+  let annotatedType: Type?
+  /// Ambient context of the declaration, so a forced check reports as if it
+  /// were running at its own position in the pass-3 loop.
+  let sourceFile: String
+  let modulePath: [String]
+  let packageID: String
+  let isStdLib: Bool
+
+  var state: GlobalInitState = .unchecked
+  /// The settled symbol (its type refreshed) once the check has run. Its
+  /// absence is what makes a reference force the check.
+  var settledSymbol: Symbol?
+  /// The typed node the check produced, reused by the in-order pass so the
+  /// declaration is checked exactly once.
+  var cachedTypedNode: TypedGlobalNode?
+
+  init(
+    decl: GlobalNode,
+    defId: DefId,
+    name: String,
+    isMutable: Bool,
+    annotatedType: Type?,
+    sourceFile: String,
+    modulePath: [String],
+    packageID: String,
+    isStdLib: Bool
+  ) {
+    self.decl = decl
+    self.defId = defId
+    self.name = name
+    self.isMutable = isMutable
+    self.annotatedType = annotatedType
+    self.sourceFile = sourceFile
+    self.modulePath = modulePath
+    self.packageID = packageID
+    self.isStdLib = isStdLib
+  }
+
+  var variableKind: SymbolKind {
+    .variable(isMutable ? .MutableValue : .Value)
+  }
+}
+
 struct ConformanceKey: Hashable {
   let selfType: ConformanceTypeKey
   /// Identity of the conformed trait's declaration. `traitName` is display-only.
@@ -357,6 +420,24 @@ public class TypeChecker {
   /// denote. Pass state on the checker because `TypeCheckerPasses` is an
   /// extension and cannot hold stored properties.
   var importedNameBindings: [String: DefId?] = [:]
+
+  // MARK: - Pending Global Initializers
+
+  /// Top-level `let` declarations registered before any body is checked, keyed
+  /// by the collection-time DefId. A reference to an unsettled global forces
+  /// its check now -- the compile-time mirror of the runtime accessor
+  /// guarantee -- so a global is checked exactly once, in order or on demand.
+  var pendingGlobalInits: [UInt64: PendingGlobalInit] = [:]
+
+  /// The globals whose initializers are being checked right now, outermost
+  /// first. A reference that re-enters one of them is an inference cycle; the
+  /// stack is the cycle path the diagnostic prints.
+  var globalInitForceStack: [PendingGlobalInit] = []
+
+  /// Name slots a registration pass has already claimed, keyed like the scope
+  /// binding (`name@file` for private, module-qualified otherwise). Two
+  /// top-level `let`s of one name are one mistake, reported once at the second.
+  var globalInitNameClaims: Set<String> = []
 
   /// std's root module, resolved once. `nil` under `--no-std`, where there is
   /// no prelude to collide with. Used by the §3.3 import-collision check.

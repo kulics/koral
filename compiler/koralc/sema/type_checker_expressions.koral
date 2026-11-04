@@ -434,7 +434,7 @@ given TypeChecker {
         ) else self.lookup_shared_symbol(name);
         let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then Option[Symbol].None(
         ) else self.resolve_imported_alias_symbol(name);
-        let sym = if local_sym_opt is .Some(s) then s
+        let mutable sym = if local_sym_opt is .Some(s) then s
         else if file_sym_opt is .Some(s) then s
         else if global_sym_opt is .Some(s) then s
         else if alias_sym_opt is .Some(s) then s
@@ -478,22 +478,17 @@ given TypeChecker {
             let def_id = self.allocate_unindexed_def_id(name, def_kind);
             Symbol(def_id, fallback_type, symbol_kind)
         };
-        // Global `let` initializers run in declaration order. Reading one that
-        // has not been checked yet is a forward reference -- and a cycle is
-        // always made of those -- so it would load the zero the runtime has not
-        // written over yet. Only same-module globals: an imported one was
-        // initialized with its own module.
-        if self.storage.in_global_init and local_sym_opt is .None() and sym.kind is .Variable(_) then {
-            if file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then {
-                if not self.storage.initialized_globals.contains(name) then {
-                    // Worded as the seed does: its globals are defined only
-                    // after their initializer is checked, so a forward
-                    // reference is already an "Undefined variable" there and
-                    // the two must agree verbatim. A message that names the
-                    // initialization order is a strictly better follow-up and
-                    // needs both sides moved at once.
-                    self.push_diagnostic_at_span("Undefined variable: \(name)", span);
-                };
+        // A reference to a global whose type is still unsettled forces its
+        // initializer's check now -- the compile-time accessor. The refreshed
+        // symbol carries the settled type; a re-entrant check is an inference
+        // cycle and keeps the pending symbol (poisoned silence). Annotated
+        // globals carry their type from registration and never force.
+        if sym.kind is .Variable(_) and sym.symbol_type is .Unknown() then {
+            when self.force_pending_global_init(sym.def_id, span) in {
+                .Some(fresh) then {
+                    sym = fresh;
+                },
+                .None() then {},
             };
         };
         let mutable normalized_sym = sym;

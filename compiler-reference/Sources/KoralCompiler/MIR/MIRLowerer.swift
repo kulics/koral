@@ -83,6 +83,14 @@ final class MIRLowerer {
       }
     }
 
+    // Global `let` initializers run before main in the order the
+    // GlobalVariable entries appear here (see the C main emission):
+    // declaration order within a module, modules in `using` topological
+    // order -- dependencies first -- so a later binding can read an earlier
+    // one and a module's globals run after the modules it uses. The sort key
+    // is the module's rank; equal-rank entries keep declaration order.
+    globals = reorderGlobalVariablesByInitOrder(globals)
+
     let loweredProgram = MIRProgram(
       globals: globals,
       functions: functions,
@@ -94,6 +102,84 @@ final class MIRLowerer {
       receiverMethodDispatch: program.receiverMethodDispatch
     )
     return loweredProgram
+  }
+
+  /// Reorder only the GlobalVariable entries, by their module's init rank.
+  /// Other entries keep their slots; the relative order of the globals is
+  /// what the eager pre-main pass observes.
+  private func reorderGlobalVariablesByInitOrder(_ globals: [MIRGlobal]) -> [MIRGlobal] {
+    let ranks = globalInitModuleRanks()
+    var slots: [Int] = []
+    var entries: [(rank: Int, index: Int, entry: MIRGlobal)] = []
+    for (index, global) in globals.enumerated() {
+      if case .globalVariable(let identifier, _, _) = global {
+        slots.append(index)
+        let moduleKey = (context.getModulePath(identifier.defId) ?? []).joined(separator: ".")
+        entries.append((rank: ranks[moduleKey] ?? 0, index: index, entry: global))
+      }
+    }
+    // Stable on (rank, declaration index): one module's globals are one
+    // rank's bucket, in declaration order.
+    entries.sort { ($0.rank, $0.index) < ($1.rank, $1.index) }
+    var result = globals
+    for (slot, item) in zip(slots, entries) {
+      result[slot] = item.entry
+    }
+    return result
+  }
+
+  /// Rank every program module for the global-initializer order: `using`
+  /// topological order -- dependencies first -- with ties broken by module
+  /// path. Fully determined by the import graph, so both compilers run
+  /// initializers in the same order. Isolated modules rank among themselves
+  /// by path; leftovers (only possible on an illegal `using` cycle) get the
+  /// remaining ranks in path order.
+  private func globalInitModuleRanks() -> [String: Int] {
+    var deps: [String: Set<String>] = [:]
+    var dependents: [String: Set<String>] = [:]
+    var universe = Set<String>()
+    func addEdge(_ src: String, _ dst: String) {
+      if src == dst { return }
+      universe.insert(src)
+      universe.insert(dst)
+      deps[src, default: []].insert(dst)
+      dependents[dst, default: []].insert(src)
+    }
+    if let graph = context.defIdMap.currentImportGraph {
+      for edge in graph.edges {
+        addEdge(edge.source.joined(separator: "."), edge.target.joined(separator: "."))
+      }
+      for symbolImport in graph.symbolImports {
+        addEdge(symbolImport.module.joined(separator: "."), symbolImport.target.joined(separator: "."))
+      }
+    }
+    var rankOf: [String: Int] = [:]
+    var ready: [String] = []
+    for module in universe where (deps[module] ?? []).isEmpty {
+      ready.append(module)
+    }
+    var nextRank = 0
+    while !ready.isEmpty {
+      var bestIndex = 0
+      for index in 1..<ready.count where ready[index] < ready[bestIndex] {
+        bestIndex = index
+      }
+      let module = ready.remove(at: bestIndex)
+      rankOf[module] = nextRank
+      nextRank += 1
+      for dependent in dependents[module] ?? [] {
+        if deps[dependent]?.remove(module) != nil, (deps[dependent] ?? []).isEmpty {
+          ready.append(dependent)
+        }
+      }
+    }
+    // `using` cycles are rejected at load time; anything left here is
+    // ordered by path so the output stays deterministic.
+    for module in universe.filter({ rankOf[$0] == nil }).sorted() {
+      rankOf[module] = nextRank
+      nextRank += 1
+    }
+    return rankOf
   }
 
   /// For std Drop implementations, `drop(self)` lowers to a mutable pointer

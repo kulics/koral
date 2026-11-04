@@ -5190,3 +5190,112 @@ int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr
 }
 
 #endif  // _WIN32 || _WIN64
+
+// ============================================================================
+// Global-initializer support (accessor + state model)
+// ============================================================================
+// A generated global accessor serializes its slow path through the recursive
+// lock below: same-thread re-entrance passes the lock and is caught by the
+// state value (1 = initializing => cycle), another thread waits until the
+// initializer has finished (state 2 is published with release ordering).
+
+uint8_t __koral_global_state_ready(uint8_t* state) {
+    return __atomic_load_n(state, __ATOMIC_ACQUIRE) == 2;
+}
+
+void __koral_global_state_finish(uint8_t* state) {
+    __atomic_store_n(state, 2, __ATOMIC_RELEASE);
+}
+
+#if defined(_WIN32) || defined(_WIN64)
+
+static CRITICAL_SECTION __koral_global_init_mutex;
+static INIT_ONCE __koral_global_init_once = INIT_ONCE_STATIC_INIT;
+
+static BOOL CALLBACK __koral_global_init_mutex_boot(PINIT_ONCE once, PVOID param, PVOID* ctx) {
+    (void)once; (void)param; (void)ctx;
+    InitializeCriticalSection(&__koral_global_init_mutex);
+    return TRUE;
+}
+
+void __koral_global_init_lock(void) {
+    InitOnceExecuteOnce(&__koral_global_init_once, __koral_global_init_mutex_boot, NULL, NULL);
+    EnterCriticalSection(&__koral_global_init_mutex);
+}
+
+void __koral_global_init_unlock(void) {
+    LeaveCriticalSection(&__koral_global_init_mutex);
+}
+
+#else
+
+static pthread_mutex_t __koral_global_init_mutex;
+static pthread_once_t __koral_global_init_once = PTHREAD_ONCE_INIT;
+
+static void __koral_global_init_mutex_boot(void) {
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
+    pthread_mutex_init(&__koral_global_init_mutex, &attr);
+    pthread_mutexattr_destroy(&attr);
+}
+
+void __koral_global_init_lock(void) {
+    pthread_once(&__koral_global_init_once, __koral_global_init_mutex_boot);
+    pthread_mutex_lock(&__koral_global_init_mutex);
+}
+
+void __koral_global_init_unlock(void) {
+    pthread_mutex_unlock(&__koral_global_init_mutex);
+}
+
+#endif
+
+static const char** __koral_global_init_stack = NULL;
+static size_t __koral_global_init_depth = 0;
+static size_t __koral_global_init_capacity = 0;
+
+void __koral_global_init_push(const char* name) {
+    if (__koral_global_init_depth == __koral_global_init_capacity) {
+        size_t new_cap = __koral_global_init_capacity == 0 ? 16 : __koral_global_init_capacity * 2;
+        const char** grown =
+            (const char**)realloc((void*)__koral_global_init_stack, new_cap * sizeof(const char*));
+        if (grown == NULL) {
+            __koral_panic_print("out of memory while tracking global initialization", NULL);
+        }
+        __koral_global_init_stack = grown;
+        __koral_global_init_capacity = new_cap;
+    }
+    __koral_global_init_stack[__koral_global_init_depth] = name;
+    __koral_global_init_depth += 1;
+}
+
+void __koral_global_init_pop(void) {
+    if (__koral_global_init_depth > 0) {
+        __koral_global_init_depth -= 1;
+    }
+}
+
+void __koral_global_init_cycle(const char* name) {
+    size_t start = 0;
+    for (size_t i = 0; i < __koral_global_init_depth; i++) {
+        if (strcmp(__koral_global_init_stack[i], name) == 0) {
+            start = i;
+            break;
+        }
+    }
+    size_t len = strlen("global initialization cycle: ") + strlen(name) + 1;
+    for (size_t i = start; i < __koral_global_init_depth; i++) {
+        len += strlen(__koral_global_init_stack[i]) + 4;
+    }
+    char* msg = (char*)malloc(len);
+    if (msg == NULL) {
+        __koral_panic_print("out of memory while reporting a global initialization cycle", NULL);
+    }
+    size_t off = (size_t)snprintf(msg, len, "global initialization cycle: ");
+    for (size_t i = start; i < __koral_global_init_depth; i++) {
+        off += (size_t)snprintf(msg + off, len - off, "%s -> ", __koral_global_init_stack[i]);
+    }
+    snprintf(msg + off, len - off, "%s", name);
+    __koral_panic_print(msg, NULL);
+}
