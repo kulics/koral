@@ -1214,6 +1214,10 @@ public class TypeChecker {
       return "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions"
     case .pointer(let inner), .mutablePointer(let inner):
       return "pointee type '\(inner)' does not satisfy the 'foreign' constraint"
+    case .void:
+      return "a parameter cannot be 'Void' (C has no void values)"
+    case .never:
+      return "a parameter cannot be 'Never'"
     case .function:
       return "Function types cannot be used in foreign functions"
     case .genericParameter, .genericStruct, .genericEnum:
@@ -1667,6 +1671,20 @@ public class TypeChecker {
     if case .opaque(let defId) = type {
       let typeName = context.getName(defId) ?? type.description
       throw SemanticError(.opaqueTypeCannotBeInstantiated(typeName: typeName), span: span)
+    }
+  }
+
+  /// An opaque `type foreign X {}` has no layout: it may only live behind `*`.
+  /// A bare one -- including one sitting inside a by-value `[N]T` -- names an
+  /// incomplete-type object that no C declaration can hold.
+  func assertNotOpaqueValueType(_ type: Type, span: SourceSpan) throws {
+    switch type {
+    case .opaque:
+      try assertNotOpaqueType(type, span: span)
+    case .fixedArray(_, let element):
+      try assertNotOpaqueValueType(element, span: span)
+    default:
+      return
     }
   }
 

@@ -66,7 +66,7 @@ values; `while` and `for` always produce `Void`.
 
 | 写法 | 求值 |
 |---|---|
-| `a and then b` | 先 `a`。是 `Some`/`Ok` 才求 `b`（`it` 为解包值）；否则直接传播，`b` 不求值 |
+| `a and then b` | 先 `a`。是 `Some`/`Ok` 才求 `b`（解包值经链式接收者或 `as` 绑定进入 `b`）；否则直接传播，`b` 不求值 |
 | `a or else b` | 先 `a`。是 `None`/`Error` 才求 `b`；否则用 `a` 的值，`b` 不求值 |
 | `a or return` | 先 `a`。是 `None`/`Error` 就从所在函数返回，后面的都不求值 |
 

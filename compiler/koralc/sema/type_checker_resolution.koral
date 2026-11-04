@@ -318,7 +318,16 @@ given TypeChecker {
                 let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
                     let rp = self.resolve_type(pt);
-                    if not self.is_ffi_compatible_type(rp) then {
+                    // A C function pointer's parameter slot has the same shape
+                    // rules as a `let foreign` one: no `Void` / `Never` values,
+                    // no opaque handles.
+                    if rp is .OpaqueType(_) then {
+                        self.push_diagnostic(
+                            self.opaque_instantiation_message(rp),
+                            type_node_span(node),
+                        );
+                    };
+                    if (rp is .VoidType()) or (rp is .NeverType()) or (not self.is_ffi_compatible_type(rp)) then {
                         self.push_diagnostic(
                             "FFI incompatible type '\(self.context().type_display_name(rp))': \(self.ffi_type_error(rp))",
                             type_node_span(node),
@@ -327,6 +336,12 @@ given TypeChecker {
                     resolved_params.push(rp);
                 };
                 let resolved_ret = self.resolve_type(return_type);
+                if resolved_ret is .OpaqueType(_) then {
+                    self.push_diagnostic(
+                        self.opaque_instantiation_message(resolved_ret),
+                        type_node_span(node),
+                    );
+                };
                 if not self.is_ffi_compatible_type(resolved_ret) then {
                     self.push_diagnostic(
                         "FFI incompatible type '\(self.context().type_display_name(resolved_ret))': \(self.ffi_type_error(resolved_ret))",

@@ -859,7 +859,7 @@ let p = Point(trace(9), trace(10));   // [9][10]
 
 // Short-circuit: the right side never runs when the left decides the result.
 let e = traceb(false) and traceb(true);   // [false side] only
-let f = opt_none and then trace(11);      // transform skipped
+let f = opt_none and then as v in trace(v);   // transform skipped
 let g = opt_some or else trace(12);       // default skipped
 ```
 
@@ -3197,13 +3197,16 @@ let foreign abort(): Never;
 What may cross a `let foreign` function boundary is a closed set decided by the
 compiler — parameter and return types must be:
 
-- a built-in scalar (std's `Rune` included); `Void` / `Never` in return
-  position;
+- a built-in scalar (std's `Rune` included); `Void` / `Never` are legal in
+  **return** position only — C has no void values, so a parameter cannot be
+  either, and `foreign (Void) -> R` would just be the zero-argument pointer
+  spelled wrong;
 - a raw pointer `*T` / `*mutable T` **whose pointee crosses too** — `*Box` and
   `*Void` are fine, `*Bad` and `*(closure)` are not: a raw pointer is only as
   FFI-shaped as what it points at;
 - a `type foreign` handle behind `*` (an opaque `type foreign CFile {}` appears
-  only as `*CFile`);
+  only as `*CFile` — it has no layout, so no field, global or function-pointer
+  component may hold one by value);
 - a `foreign (A) -> R` function pointer whose components pass the same rules.
 
 A Koral `type`, closure or managed reference never crosses — by value or
@@ -3238,7 +3241,9 @@ The rules are C's, spelled in Koral:
 - Every field type must cross the FFI boundary — a built-in scalar (std's
   `Rune` included), a `*` / `*mutable` pointer to one (or to `Void`, C's
   `void*`), or another `type foreign` declaration: the same closed set the
-  `foreign` constraint names. Direct self-recursion is refused (write `*Self`).
+  `foreign` constraint names. An opaque `type foreign X {}` still appears only
+  behind `*` — it has no layout to store. Direct self-recursion is refused
+  (write `*Self`).
 - `type foreign` values follow **mutable value semantics**: assignment and
   argument passing copy. `self` in a method is such a copy, so there is no
   mutable self — to mutate a receiver, take a `*mutable T` parameter.

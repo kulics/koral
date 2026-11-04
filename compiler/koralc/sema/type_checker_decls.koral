@@ -781,7 +781,10 @@ given TypeChecker {
                 };
                 for param in params then {
                     let param_type = self.resolve_type(param.type_name);
-                    if not self.is_ffi_compatible_type(param_type) then {
+                    // `Void` in a parameter slot would generate `f(void x)` --
+                    // C has no void values. `Never` is owned by the
+                    // contains_never_type check above.
+                    if (param_type is .VoidType()) or (not self.is_ffi_compatible_type(param_type)) then {
                         self.push_diagnostic(
                             "FFI incompatible type '\(self.context().type_display_name(param_type))': \(self.ffi_type_error(param_type))",
                             type_node_span(param.type_name),
@@ -813,10 +816,9 @@ given TypeChecker {
             },
             .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
-                if resolved is .OpaqueType(_) then {
-                    let spelled = self.context().type_display_name(resolved);
+                if self.opaque_by_value_type(resolved) is .Some(opaque_t) then {
                     self.push_diagnostic(
-                        "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
+                        self.opaque_instantiation_message(opaque_t),
                         span,
                     );
                 };

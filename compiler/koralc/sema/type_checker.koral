@@ -1513,6 +1513,22 @@ given TypeChecker {
         };
     };
 
+    /// An opaque `type foreign X {}` has no layout: it may only live behind `*`.
+    /// A bare one -- including one sitting inside a by-value `[N]T` -- names an
+    /// incomplete-type object that no C declaration can hold.
+    opaque_by_value_type(self, t: Type): Option[Type] = {
+        return when t in {
+            .OpaqueType(_) then Option[Type].Some(t),
+            .FixedArrayType(_, inner) then self.opaque_by_value_type(inner),
+            _ then Option[Type].None(),
+        };
+    };
+
+    opaque_instantiation_message(self, t: Type): String = {
+        let spelled = self.context().type_display_name(t);
+        return "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead";
+    };
+
     contains_borrowed_reference_type(self, t: Type): Bool = {
         return when t in {
             .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then true,
@@ -1592,6 +1608,8 @@ given TypeChecker {
             .ReferenceType(_) then "Managed reference types (* / *mutable) cannot be used in foreign functions",
             .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then "Borrowed `ref` / `ref mutable` types cannot be used in foreign functions",
             .PointerType(inner) or .MutablePointerType(inner) then "pointee type '\(self.context().type_display_name(inner))' does not satisfy the 'foreign' constraint",
+            .VoidType() then "a parameter cannot be 'Void' (C has no void values)",
+            .NeverType() then "a parameter cannot be 'Never'",
             .FunctionType(...) then "Function types cannot be used in foreign functions",
             .GenericParameter(_) or .GenericStruct(_, _) or .GenericEnum(_, _) then "Generic parameters cannot be used in foreign functions",
             _ then "Type '\(self.context().type_display_name(t))' is not compatible with FFI",
@@ -3495,6 +3513,13 @@ given TypeChecker {
                         if type_contains_never(field_type) then {
                             self.push_diagnostic(
                                 "foreign struct field '\(f.name)' cannot contain Never type: '\(self.context().type_display_name(field_type))'",
+                                span,
+                            );
+                        };
+                        // An opaque field has no layout; only `*FILE` can hold one.
+                        if self.opaque_by_value_type(field_type) is .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
                                 span,
                             );
                         };

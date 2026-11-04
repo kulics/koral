@@ -63,9 +63,8 @@ the other, never both (`guide/grammar.bnf`, `<expression>`). Parentheses are the
 way to cross, so a printer that drops one turns accepted source into a rejected mix —
 `toolchain/koralfmt/test_fmt.koral` asserts the parentheses survive.
 
-Reserved words must match too: `it` is reserved (it cannot be a declaration
-name) but stays legal in **expression position** as the implicit lambda
-parameter.
+Reserved words must match too. `it` is **not** one of them: it is an ordinary
+identifier -- free as a declaration name (`let it = 5`) and as a parameter.
 
 **Newlines carry no meaning.** Only `;` ends a statement, so an expression may
 span lines after *any* token — there is no set of line-leading words that

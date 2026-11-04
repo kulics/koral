@@ -444,11 +444,15 @@ extension TypeChecker {
       // must cross the FFI boundary.
       let resolvedParams = try paramTypes.map { try resolveTypeNode($0) }
       for paramType in resolvedParams {
-        if !isFfiCompatibleType(paramType) {
+        // A C function pointer's parameter slot has the same shape rules as a
+        // `let foreign` one: no `Void` / `Never` values, no opaque handles.
+        try assertNotOpaqueType(paramType, span: nodeSpan)
+        if paramType == .void || paramType == .never || !isFfiCompatibleType(paramType) {
           throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
         }
       }
       let resolvedReturn = try resolveTypeNode(returnType)
+      try assertNotOpaqueType(resolvedReturn, span: nodeSpan)
       if !isFfiCompatibleType(resolvedReturn) {
         throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
       }
@@ -527,11 +531,15 @@ extension TypeChecker {
     case .foreignFunction(let paramTypes, let returnType, let nodeSpan):
       let resolvedParams = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
       for paramType in resolvedParams {
-        if !isFfiCompatibleType(paramType) {
+        // A C function pointer's parameter slot has the same shape rules as a
+        // `let foreign` one: no `Void` / `Never` values, no opaque handles.
+        try assertNotOpaqueType(paramType, span: nodeSpan)
+        if paramType == .void || paramType == .never || !isFfiCompatibleType(paramType) {
           throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
         }
       }
       let resolvedReturn = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
+      try assertNotOpaqueType(resolvedReturn, span: nodeSpan)
       if !isFfiCompatibleType(resolvedReturn) {
         throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
       }

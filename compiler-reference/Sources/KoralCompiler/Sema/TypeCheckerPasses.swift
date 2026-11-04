@@ -2464,6 +2464,8 @@ extension TypeChecker {
         let fieldType = try resolveTypeNode(field.type)
         try assertNoBorrowedReferenceType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         try assertNoNeverType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
+        // An opaque field has no layout; only `*FILE` can hold one.
+        try assertNotOpaqueValueType(fieldType, span: span)
         try enforceForeignConstraint(fieldType, context: "foreign struct field '\(field.name)'")
         if fieldType == placeholder {
           throw SemanticError.invalidOperation(
@@ -2911,7 +2913,7 @@ extension TypeChecker {
     case .foreignLetDeclaration(let name, let typeNode, let mutable, let access, let span, let nameSpan):
       self.currentSpan = span
       let type = try resolveTypeNode(typeNode)
-      try assertNotOpaqueType(type, span: span)
+      try assertNotOpaqueValueType(type, span: span)
       try assertNoBorrowedReferenceType(type, context: "foreign global type", span: span)
       // Both messages name the SYMBOL, so both point at its name.
       try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
@@ -3106,7 +3108,9 @@ extension TypeChecker {
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
         try assertNoNeverType(paramType, context: "foreign function parameter '\(param.name)'", span: span)
-        if !isFfiCompatibleType(paramType) {
+        // `Void` in a parameter slot would generate `f(void x)` -- C has no
+        // void values. `Never` is owned by assertNoNeverType above.
+        if paramType == .void || !isFfiCompatibleType(paramType) {
           throw SemanticError(
             .ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)),
             span: param.type.span

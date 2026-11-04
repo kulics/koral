@@ -830,7 +830,7 @@ let p = Point(trace(9), trace(10));   // [9][10]
 
 // 短路：左侧已决定结果时右侧从不运行。
 let e = traceb(false) and traceb(true);   // 只有 [false 侧]
-let f = opt_none and then trace(11);      // 跳过变换体
+let f = opt_none and then as v in trace(v);   // 跳过变换体
 let g = opt_some or else trace(12);       // 跳过默认值
 ```
 
@@ -3055,11 +3055,12 @@ let foreign abort(): Never;
 
 能过 `let foreign` 函数边界的类型是编译器定的封闭集合——参数与返回类型必须是：
 
-- 内建标量（含 std 的 `Rune`）；`Void` / `Never` 只在返回位；
+- 内建标量（含 std 的 `Rune`）；`Void` / `Never` 只在**返回位**合法——C 没有
+  void 值，参数位不收它们；`foreign (Void) -> R` 也只是把零参指针写错了拼写；
 - raw pointer `*T` / `*mutable T`，**且 pointee 也得在集合内**——`*Box`、`*Void`
   可以，`*Bad`、`*(closure)` 不行：raw pointer 能过边界只到它指向的东西为止；
 - 藏在 `*` 后面的 `type foreign` 句柄（不透明 `type foreign CFile {}` 只以
-  `*CFile` 出现）；
+  `*CFile` 出现——它没有布局，字段、全局量、函数指针组件都不能按值持有它）；
 - 组件同规则的 `foreign (A) -> R` 函数指针。
 
 Koral `type`、闭包、托管引用永远不跨界——按值或隔着指针都不行。`type foreign`
@@ -3086,7 +3087,7 @@ type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 
 - foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明——也不接受泛型参数。
 - 字段只收裸 `name: Type`：位置字段，没有访问修饰符、`mutable` 标记、命名字段、默认值。C 布局是公开且恒可写的；改不了什么的标记只会撒谎。
-- 每个字段类型都必须能过 FFI 边界——内建标量（含 std 的 `Rune`）、指向它们（或 `Void`，即 C 的 `void*`）的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。禁止直接自递归（写 `*Self`）。
+- 每个字段类型都必须能过 FFI 边界——内建标量（含 std 的 `Rune`）、指向它们（或 `Void`，即 C 的 `void*`）的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。不透明 `type foreign X {}` 仍只出现在 `*` 后——它没有可存储的布局。禁止直接自递归（写 `*Self`）。
 - foreign 值是**可变值语义**：赋值与传参按值拷贝。方法里的 `self` 就是这样一个拷贝，所以没有可变 self——要改接收者就收 `*mutable T` 参数。
 - 显式 `Drop` 被拒绝：C 值没有析构（代码生成用纯 C 赋值拷贝它、drop 是空操作）。
 

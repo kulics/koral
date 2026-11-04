@@ -10293,8 +10293,9 @@ extension TypeChecker {
     let resultType = innerType
     switch kind {
     case .option:
-      // `it` is the unwrapped value: bound by the Some pattern so references in
-      // the default expression resolve to the same DefId.
+      // The Some pattern carries the unwrapped value as this arm's result; the
+      // payload symbol is its carrier so a binder's references in the default
+      // expression resolve to the same DefId.
       let itSym = underscoreSymbol
       let somePattern = TypedPattern.enumCase(caseName: "Some", tagIndex: 1,
                                                 elements: [.variable(symbol: itSym)])

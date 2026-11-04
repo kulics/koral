@@ -488,10 +488,11 @@ extension Parser {
     }
   }
 
-  /// The right operand of one `and then` link. Three shapes:
+  /// The right operand of one `and then` link. Two shapes:
   ///   `.f(x).g`       -- receiver-elided member chain on the unwrapped value
   ///   `as v in body`  -- explicit binder, body is a layer operand
-  ///   anything else   -- a plain layer operand (legacy; goes away with `it`)
+  /// Anything else is refused: there is no plain-operand form -- the
+  /// unwrapped value has no implicit name.
   ///
   /// A leading dot here is the chain, never an implicit member: `and then` does
   /// not push an expected type into the transform, so the implicit-member

@@ -127,10 +127,12 @@ weak 能力写作 **`mutable` 约束 + `?T`**，不设 marker trait。
 - 内置标量：`Bool`、`Int`/`Int8..64`、`UInt`/`UInt8..64`、`Float32`、`Float64`
 - 裸指针：`*T`、`*mutable T`（指向的类型也要在集合里；`*Void` / `*mutable Void` 是
   C 的 `void*`，作为特例放行——`Void` 只在 pointee 位不算出界）
-- `type foreign` 声明（布局就是 C 的那个，不透明形 `type foreign X {}` 同样在内）
+- `type foreign` 声明（布局就是 C 的那个，不透明形 `type foreign X {}` 同样在内；
+  不透明形没有布局，只以 `*X` 出现——按值的字段、全局量、函数参数/组件一律拒绝）
 - `[N]T` 定长数组（元素也要在集合里；C 布局即 `T data[N]`，用单字段包装
   struct 表示——C 标准保证同布局，赋值/传参/返回却是合法 C）
-- `foreign (A) -> R` 函数指针（签名组件也要过界，返回可 `Void`/`Never`）
+- `foreign (A) -> R` 函数指针（签名组件也要过界；返回位可 `Void`/`Never`，
+  参数位不收——C 没有 void 值，`foreign (Void) -> R` 就是零参指针的错误拼写）
 - std 的 `Rune`（唯一的名义类型：它成为名义只是为了带方法，表示是固定的 Unicode 标量）
 
 **用户声明不能认领 `foreign`。** 这正是它取代 `Pod` 的理由：`Pod` 是空 marker trait，
