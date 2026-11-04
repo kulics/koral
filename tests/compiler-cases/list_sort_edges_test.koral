@@ -1,0 +1,139 @@
+// EXPECT: list sort edge tests passed
+// Edge and shape coverage for the List sort implementation: empty / single /
+// two-element lists, the insertion-sort cutoff boundary (32), duplicate-heavy
+// and reversed input across the merge path, and permutation preservation.
+
+let check_non_decreasing(xs: List[Int]): Void = {
+    let count = xs.count();
+    let mutable i = UInt(1);
+    while i < count then {
+        assert(xs[i - 1] <= xs[i], "ints non-decreasing");
+        i = i + 1;
+    };
+};
+
+let build_desc(count: Int): List[Int] = {
+    let mutable xs = List[Int].new();
+    let mutable n = count;
+    while n > 0 then {
+        xs.push(n);
+        n = n - 1;
+    };
+    return xs;
+};
+
+let main(): Void = {
+    // === Empty ===
+    let mutable empty = List[Int].new();
+    empty.sort();
+    assert(empty.count() == 0, "empty sort");
+    empty.sort_by((x) => x);
+    assert(empty.count() == 0, "empty sort_by");
+
+    // === Single ===
+    let mutable single = List[Int].new();
+    single.push(42);
+    single.sort();
+    assert(single[0] == 42, "single sort");
+    let mutable single_by = List[Int].new();
+    single_by.push(42);
+    single_by.sort_by((x) => x);
+    assert(single_by[0] == 42, "single sort_by");
+
+    // === Two elements, both orders ===
+    let mutable two_up = List[Int].new();
+    two_up.push(3);
+    two_up.push(9);
+    two_up.sort();
+    assert(two_up[0] == 3 and two_up[1] == 9, "two sorted stays");
+    let mutable two_down = List[Int].new();
+    two_down.push(9);
+    two_down.push(3);
+    two_down.sort_by((x) => x);
+    assert(two_down[0] == 3 and two_down[1] == 9, "two sorted by");
+
+    // === Three elements ===
+    let mutable three = List[Int].new();
+    three.push(2);
+    three.push(3);
+    three.push(1);
+    three.sort();
+    assert(three[0] == 1 and three[1] == 2 and three[2] == 3, "three sort");
+
+    // === All equal (duplicate-heavy) ===
+    let mutable dups = List[Int].new();
+    let mutable d = 0;
+    while d < 100 then {
+        dups.push(7);
+        d = d + 1;
+    };
+    dups.sort();
+    check_non_decreasing(dups);
+    assert(dups[0] == 7 and dups[99] == 7, "dups stay 7");
+
+    // === Reverse input across the cutoff boundaries ===
+    let mutable desc32 = build_desc(32);
+    desc32.sort();
+    check_non_decreasing(desc32);
+    assert(desc32[0] == 1 and desc32[31] == 32, "desc 32");
+    let mutable desc33 = build_desc(33);
+    desc33.sort();
+    check_non_decreasing(desc33);
+    assert(desc33[0] == 1 and desc33[32] == 33, "desc 33");
+    let mutable desc65 = build_desc(65);
+    desc65.sort_by((x) => x);
+    check_non_decreasing(desc65);
+    assert(desc65[0] == 1 and desc65[64] == 65, "desc 65 by");
+
+    // === Already sorted stays sorted (fast path) ===
+    let mutable asc = List[Int].new();
+    let mutable a = 0;
+    while a < 200 then {
+        asc.push(a);
+        a = a + 1;
+    };
+    asc.sort();
+    check_non_decreasing(asc);
+    assert(asc[0] == 0 and asc[199] == 199, "asc stays");
+
+    // === LCG 1000: sorted + permutation (sum and min/max preserved) ===
+    let mutable state: Int64 = 42;
+    let mutable xs = List[Int].new();
+    let mutable sum: Int = 0;
+    let mutable i = UInt(0);
+    while i < 1000 then {
+        state = (state * Int64(1103515245) + Int64(12345)) % Int64(2147483648);
+        let v = Int(state % Int64(1000));
+        xs.push(v);
+        sum = sum + v;
+        i = i + 1;
+    };
+    xs.sort();
+    check_non_decreasing(xs);
+    let mutable sum2: Int = 0;
+    let mutable k = UInt(0);
+    while k < 1000 then {
+        sum2 = sum2 + xs[k];
+        k = k + 1;
+    };
+    assert(sum == sum2, "sort is a permutation");
+
+    // === Same input through sort_by (identity key) ===
+    let mutable state2: Int64 = 42;
+    let mutable ys = List[Int].new();
+    let mutable j = UInt(0);
+    while j < 1000 then {
+        state2 = (state2 * Int64(1103515245) + Int64(12345)) % Int64(2147483648);
+        ys.push(Int(state2 % Int64(1000)));
+        j = j + 1;
+    };
+    ys.sort_by((x) => x);
+    check_non_decreasing(ys);
+    let mutable m = UInt(0);
+    while m < 1000 then {
+        assert(ys[m] == xs[m], "sort_by matches sort");
+        m = m + 1;
+    };
+
+    println("list sort edge tests passed");
+};

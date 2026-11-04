@@ -38,20 +38,37 @@ private let radix_prefix(tc: UInt8): String = if tc == 'b' then "0b"
 else if tc == 'o' then "0o"
 else if tc == 'x' then "0x" else if tc == 'X' then "0X" else "";
 
-// Apply padding and alignment to a string according to the format spec.
-private let apply_padding(s: String, spec: FormatSpec): String = {
+// Count the runes of `s` by walking UTF-8 sequence starts.
+private let rune_count(s: String): UInt = {
     let len = s.count();
+    let mutable pos: UInt = 0;
+    let mutable n: UInt = 0;
+    while pos < len then {
+        pos += 1;
+        while pos < len and not s.is_rune_boundary(pos) then {
+            pos += 1;
+        };
+        n += 1;
+    };
+    return n;
+};
+
+// Apply padding and alignment to a string according to the format spec.
+// Width counts runes; zero padding never reaches here (String.format rejects
+// it), so the fill is always the spec's fill rune.
+private let apply_padding(s: String, spec: FormatSpec): String = {
+    let len = rune_count(s);
     if len >= spec.width then {
         return s;
     };
-    let fill = if spec.zero_pad then '0' else spec.fill;
-    let align = if spec.zero_pad then '>' else spec.align;
+    let fill = spec.fill;
+    let align = spec.align;
     let pad_total = spec.width - len;
     if align == '<' then {
         let mutable result = StringBuilder.with_capacity(spec.width);
         result.push_string(s);
         for _ in 0..<pad_total then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         return result.to_string();
     } else if align == '^' then {
@@ -59,18 +76,18 @@ private let apply_padding(s: String, spec: FormatSpec): String = {
         let right_pad = pad_total - left_pad;
         let mutable result = StringBuilder.with_capacity(spec.width);
         for _ in 0..<left_pad then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         result.push_string(s);
         for _ in 0..<right_pad then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         return result.to_string();
     } else {
         // '>' right-align (default)
         let mutable result = StringBuilder.with_capacity(spec.width);
         for _ in 0..<pad_total then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         result.push_string(s);
         return result.to_string();
@@ -96,9 +113,12 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
         return prefix + body;
     };
 
-    let zero_effective = spec.zero_pad and spec.align == '>';
-    let fill = if zero_effective then '0' else spec.fill;
-    let align = if zero_effective then '=' else spec.align;
+    // Python's `0` flag: an explicit fill already chose the padding, so the
+    // flag is ignored; otherwise it means fill '0', keeping an explicit align
+    // and defaulting to '=' when none was written.
+    let zero_effective = spec.zero_pad and not spec.fill_explicit;
+    let fill = if zero_effective then Rune.from_uint32_unchecked(48) else spec.fill;
+    let align = if zero_effective and not spec.align_explicit then '=' else spec.align;
     let pad_total = spec.width - content_len;
 
     if align == '<' then {
@@ -106,7 +126,7 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
         result.push_string(prefix);
         result.push_string(body);
         for _ in 0..<pad_total then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         return result.to_string();
     };
@@ -116,12 +136,12 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
         let right_pad = pad_total - left_pad;
         let mutable result = StringBuilder.with_capacity(spec.width);
         for _ in 0..<left_pad then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         result.push_string(prefix);
         result.push_string(body);
         for _ in 0..<right_pad then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         return result.to_string();
     };
@@ -130,7 +150,7 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
         let mutable result = StringBuilder.with_capacity(spec.width);
         result.push_string(prefix);
         for _ in 0..<pad_total then {
-            result.push_byte(fill);
+            result.push_rune(fill);
         };
         result.push_string(body);
         return result.to_string();
@@ -138,22 +158,29 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
 
     let mutable result = StringBuilder.with_capacity(spec.width);
     for _ in 0..<pad_total then {
-        result.push_byte(fill);
+        result.push_rune(fill);
     };
     result.push_string(prefix);
     result.push_string(body);
     return result.to_string();
 };
 
-private let string_spec_has_align(spec: String): Bool = {
-    let len = spec.count();
-    if len >= 2 and is_align_char(spec[1]) then {
-        return true;
+// Return the prefix of `s` holding at most `max_runes` runes, cut on a rune boundary.
+private let truncate_to_runes(s: String, max_runes: UInt): String = {
+    let len = s.count();
+    let mutable byte_pos: UInt = 0;
+    let mutable taken: UInt = 0;
+    while taken < max_runes and byte_pos < len then {
+        byte_pos += 1;
+        while byte_pos < len and not s.is_rune_boundary(byte_pos) then {
+            byte_pos += 1;
+        };
+        taken += 1;
     };
-    if len >= 1 and is_align_char(spec[0]) then {
-        return true;
+    if byte_pos >= len then {
+        return s;
     };
-    return false;
+    return s.substring(0..<byte_pos);
 };
 
 private let grouping_size(tc: UInt8, grouping: UInt8): UInt = {
@@ -294,8 +321,11 @@ given Int: Formattable {
             panic("precision not allowed for integer format");
         };
 
+        // `Int.min_value()` has no positive counterpart in `Int`, so the
+        // magnitude is taken through `UInt` -- `0 - self` overflows exactly there.
         let is_negative = self < 0;
-        let mutable n = if is_negative then 0 - self else self;
+        let mutable n: UInt = if is_negative then UInt(0 - (self + 1)) + 1
+        else UInt(self);
         let radix = type_char_to_radix(tc);
         let uppercase = tc == 'X';
 
@@ -305,9 +335,9 @@ given Int: Formattable {
             digits.push_byte('0');
         } else {
             while n > 0 then {
-                let d = UInt((n % Int(radix)));
+                let d = n % radix;
                 digits.push_byte(digit_to_char(d, uppercase));
-                n = n / Int(radix);
+                n = n / radix;
             };
         };
 
@@ -613,7 +643,7 @@ given String: Formattable {
         if tc != 0 and tc != 's' then {
             panic("unsupported format type '" + tc.to_string() + "' for String");
         };
-        if fmt.sign != '-' then {
+        if fmt.sign_explicit then {
             panic("sign not allowed for string format");
         };
         if fmt.alt_form then {
@@ -625,14 +655,17 @@ given String: Formattable {
         if fmt.grouping != 0 then {
             panic("grouping not allowed for string format");
         };
+        if fmt.align == '=' then {
+            panic("'=' alignment not allowed in string format specifier");
+        };
 
-        if not string_spec_has_align(spec) then {
+        if not fmt.align_explicit then {
             fmt.align = '<';
         };
 
-        let out = if fmt.precision >= 0 and UInt(fmt.precision) < self.count() then self.substring(
-            0..<UInt(fmt.precision),
-        ) else self;
+        // Precision counts runes, so truncation walks to a rune boundary.
+        let out = if fmt.precision >= 0 then truncate_to_runes(self, UInt(fmt.precision))
+        else self;
 
         return apply_padding(out, fmt);
     };

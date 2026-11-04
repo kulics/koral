@@ -85,7 +85,9 @@ public let eprint[T: ToString](value: T): Void;
 public let eprintln[T: ToString](value: T): Void;
 
 /// Read one line from standard input without its line ending, returning `None`
-/// at end of input; an empty line yields an empty string.
+/// at end of input; an empty line yields an empty string. The line ending is
+/// `\n` or `\r\n` (a single trailing `\r` is dropped); any other `\r` is
+/// content and kept.
 public let scanln(): Option[String];
 ```
 
@@ -266,6 +268,8 @@ public type mutable Deque[T: Any];
 public type mutable DequeIterator[T: Any];
 
 /// A hash map from `Hash` keys to values; iteration order is unspecified.
+/// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
+/// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Dict[K: Hash, V: Any];
 
 /// Iterator over a `Dict`'s key/value pairs, in unspecified order.
@@ -451,6 +455,8 @@ public type Result[T: Any] {
 public type Rune;
 
 /// A hash set of `Hash` values; iteration order is unspecified.
+/// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
+/// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Set[T: Hash];
 
 /// Iterator over a `Set`'s elements, in unspecified order.
@@ -2628,11 +2634,11 @@ given Duration {
     public as_microseconds(self): Int64;
     /// 转换为毫秒总数
     public as_milliseconds(self): Int64;
-    /// 转换为秒数（截断）
+    /// 转换为秒数（向零截断）
     public as_seconds(self): Int64;
-    /// 转换为分钟数（截断）
+    /// 转换为分钟数（向零截断）
     public as_minutes(self): Int64;
-    /// 转换为小时数（截断）
+    /// 转换为小时数（向零截断）
     public as_hours(self): Int64;
     /// 比率（Duration / Duration -> Float64）
     public ratio(self, other: Duration): Float64;

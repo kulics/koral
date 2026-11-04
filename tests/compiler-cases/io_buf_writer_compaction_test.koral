@@ -1,0 +1,96 @@
+// EXPECT: All BufWriter compaction tests passed
+
+using "std/io" { ... };
+
+// Sink writer that accepts at most `quota` bytes per write call (`-1` = no
+// limit) and, once the quota runs out, either answers `Ok(0)` (WriteZero) or
+// fails with an error, controlled by `zero_is_error`.
+type mutable QuotaWriter(
+    mutable sink: List[UInt8],
+    mutable quota: Int,
+    mutable zero_is_error: Bool,
+);
+
+given QuotaWriter: Writer {
+    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+        let spec = from.slice_spec(span);
+        let start = spec.start();
+        let end = spec.end();
+        if end <= start then {
+            return Result[UInt].Ok(0);
+        };
+        if self.quota == 0 then {
+            if self.zero_is_error then {
+                return Result[UInt].Error("quota exhausted");
+            };
+            return Result[UInt].Ok(0);
+        };
+        let mutable take = end - start;
+        if self.quota > 0 and Int(take) > self.quota then {
+            take = UInt(self.quota);
+        };
+        self.sink.push_list(from, span = start..<(start + take));
+        self.quota = self.quota - Int(take);
+        return Result[UInt].Ok(take);
+    };
+
+    public flush(self): Result[Void] = Result[Void].Ok({});
+};
+
+let main(): Void = {
+    // WriteZero path: the inner sink takes "ab" then answers Ok(0). The
+    // buffer must drop the written prefix, so a retried flush emits "cdef"
+    // only and the sink ends up with "abcdef" exactly once.
+    let qw1 = QuotaWriter(List[UInt8].new(), 2, false);
+    let w1 = BufWriter[QuotaWriter].with_capacity(16, qw1);
+    w1.write_string("abcdef").unwrap();
+    when w1.flush() in {
+        .Ok(_) then assert(false, "flush should report WriteZero"),
+        .Error(e) then assert(
+            e.message() == "write returned zero bytes",
+            "WriteZero message",
+        ),
+    };
+    assert(
+        String.from_bytes(qw1.sink).unwrap() == "ab",
+        "WriteZero drops the written prefix",
+    );
+    qw1.quota = -1;
+    w1.flush().unwrap();
+    assert(
+        String.from_bytes(qw1.sink).unwrap() == "abcdef",
+        "WriteZero retry emits only the remainder",
+    );
+
+    // Error path: the inner sink takes "ab" then fails. Same compaction rule.
+    let qw2 = QuotaWriter(List[UInt8].new(), 2, true);
+    let w2 = BufWriter[QuotaWriter].with_capacity(16, qw2);
+    w2.write_string("abcdef").unwrap();
+    when w2.flush() in {
+        .Ok(_) then assert(false, "flush should report the inner error"),
+        .Error(e) then assert(e.message() == "quota exhausted", "inner error message"),
+    };
+    assert(
+        String.from_bytes(qw2.sink).unwrap() == "ab",
+        "error path drops the written prefix",
+    );
+    qw2.quota = -1;
+    w2.flush().unwrap();
+    assert(
+        String.from_bytes(qw2.sink).unwrap() == "abcdef",
+        "error path retry emits only the remainder",
+    );
+
+    // Uninterrupted flush drains everything exactly once; a second flush is a no-op.
+    let qw3 = QuotaWriter(List[UInt8].new(), -1, false);
+    let w3 = BufWriter[QuotaWriter].with_capacity(16, qw3);
+    w3.write_string("xyz").unwrap();
+    w3.flush().unwrap();
+    w3.flush().unwrap();
+    assert(
+        String.from_bytes(qw3.sink).unwrap() == "xyz",
+        "clean flush drains exactly once",
+    );
+
+    println("All BufWriter compaction tests passed");
+};

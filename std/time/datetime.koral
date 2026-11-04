@@ -37,6 +37,7 @@ given TimeZone {
             else Int(offset_secs);
             let hours = abs_secs / 3600;
             let mins = (abs_secs % 3600) / 60;
+            let secs = abs_secs % 60;
             let mutable result = StringBuilder.new();
             if offset_secs < 0 then {
                 result.push_byte('-');
@@ -52,6 +53,13 @@ given TimeZone {
                 result.push_byte('0');
             };
             result.push_string(mins.to_string());
+            if secs != 0 then {
+                result.push_byte(':');
+                if secs < 10 then {
+                    result.push_byte('0');
+                };
+                result.push_string(secs.to_string());
+            };
             result.to_string()
         },
     };
@@ -76,6 +84,28 @@ given TimeZone {
 // ============================================================================
 // DateTime Static Constructors
 // ============================================================================
+
+/// Resolve local epoch seconds to a UTC instant in the given timezone.
+/// The UTC offset is iterated to a fixed point: a single probe would read the
+/// local wall time as if it were UTC and land on the wrong side of a DST
+/// transition for wall times within |offset| of it.
+let resolve_local_secs(local_secs: Int64, nanos32: Int32, timezone: TimeZone): DateTime = {
+    let mutable offset_secs = timezone.offset_at(DateTime(local_secs, nanos32, timezone)).secs;
+    let mutable unix_secs = local_secs - offset_secs;
+    let mutable stable = false;
+    let mutable rounds = 0;
+    while not stable and rounds < 8 then {
+        let probe = timezone.offset_at(DateTime(unix_secs, nanos32, timezone)).secs;
+        if probe == offset_secs then {
+            stable = true;
+        } else {
+            offset_secs = probe;
+            unix_secs = local_secs - offset_secs;
+            rounds = rounds + 1;
+        };
+    };
+    return DateTime(unix_secs, nanos32, timezone);
+};
 
 /// Constructors from wall-clock readings, Unix timestamps, and date/time parts.
 given DateTime {
@@ -115,20 +145,14 @@ given DateTime {
         local_secs = local_secs + Int64(time.minute()) * 60;
         local_secs = local_secs + Int64(time.second());
         let nanos32 = Int32(time.nanosecond());
-        let temp = DateTime(local_secs, nanos32, timezone);
-        let offset = timezone.offset_at(temp);
-        let unix_secs = local_secs - offset.secs;
-        return DateTime(unix_secs, nanos32, timezone);
+        return resolve_local_secs(local_secs, nanos32, timezone);
     };
 
     /// Creates a DateTime from a Date at midnight in the given timezone.
     public from_date_at_midnight(date: Date, timezone: TimeZone): DateTime = {
         let day_count = days_from_civil(date.year(), date.month(), date.day());
         let local_secs = day_count * 86400;
-        let temp = DateTime(local_secs, 0, timezone);
-        let offset = timezone.offset_at(temp);
-        let unix_secs = local_secs - offset.secs;
-        return DateTime(unix_secs, 0, timezone);
+        return resolve_local_secs(local_secs, 0, timezone);
     };
 };
 
@@ -215,7 +239,7 @@ given DateTime {
         );
     };
 
-    /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
+    /// Returns the day of week (1=Monday .. 7=Sunday, ISO 8601).
     public weekday(self): Int = self.date().weekday();
 };
 
@@ -345,7 +369,8 @@ given DateTime: ToString {
     /// Formats as ISO 8601 string.
     /// UTC: "2024-01-15T10:30:00Z"
     /// Fixed offset: "2024-01-15T10:30:00+08:00"
-    /// With nanos: "2024-01-15T10:30:00.123456789Z"
+    /// With nanos: "2024-01-15T10:30:00.123Z" ("HH:MM:SS[.fraction, trailing zeros trimmed]").
+    /// An offset with a seconds component renders ":SS" after the minutes.
     public to_string(self): String = {
         let mutable result = StringBuilder.new();
 
@@ -421,6 +446,11 @@ given DateTime: ToString {
             push_padded(result, oh, 2);
             result.push_byte(':');
             push_padded(result, om, 2);
+            let os = abs_offset % 60;
+            if os != 0 then {
+                result.push_byte(':');
+                push_padded(result, os, 2);
+            };
         };
 
         return result.to_string();
@@ -432,7 +462,7 @@ given DateTime: Parseable {
 
     /// Parses an ISO 8601 string into a DateTime.
     /// Supports: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00",
-    ///           "2024-01-15T10:30:00.123456789Z"
+    ///           "2024-01-15T10:30:00.123456789Z", "2024-01-15T10:30:00+08:00:00"
     /// Returns Error with a description if the string does not match.
     public parse(s: String): Result[DateTime] = {
         let len = Int(s.count());
@@ -537,7 +567,19 @@ given DateTime: Parseable {
                 );
             };
             pos = pos + 2;
-            let offset_secs = sign * (oh.value * 3600 + om.value * 60);
+            let mutable extra_secs = 0;
+            if pos < len and s[UInt(pos)] == UInt8(58) then {
+                pos = pos + 1;
+                let os = parse_digits(s, pos, 2);
+                if os.value < 0 or os.value > 59 then {
+                    return Result[DateTime].Error(
+                        "invalid ISO 8601: expected 2-digit timezone second",
+                    );
+                };
+                pos = pos + 2;
+                extra_secs = os.value;
+            };
+            let offset_secs = sign * (oh.value * 3600 + om.value * 60 + extra_secs);
             let tz_result = TimeZone.from_offset(1s * offset_secs);
             when tz_result in {
                 .Ok(t) then t,

@@ -1,0 +1,639 @@
+// codegen_borrowed_self.koral - borrowed-self (guaranteed self) analysis
+//
+// Swift's "guaranteed self" / ARC retain-release pair elision: a method whose
+// `self` never escapes can receive its receiver handle +0 (unretained struct
+// copy) and must not release it at exit. Every call site of such a method then
+// skips the `__koral_*_copy` retain it used to pay, and the callee skips the
+// matching `__koral_*_drop` -- one retain/release pair elided per call layer.
+// Nested calls on `self` inside such a body (`self.ensure_capacity(...)`)
+// elide their pair too, so chains like push -> ensure_capacity pay zero
+// refcount ops. The language contract allows this outright: "Reference
+// counting is an implementation detail. The compiler may use ARC and hidden
+// storage internally." (docs/guide/document.md)
+//
+// The convention is adopted PER METHOD and must hold at EVERY entry point:
+//   - call sites: `MIRFunctionCodeEmitter.apply_borrowed_self_receiver_convention`
+//     rewrites the self slot (argument 0) of direct calls to `Borrow()`, which
+//     `emit_direct_call_argument` already lowers as a +0 pass.
+//   - the callee: `build_mir_function_emit_plan` marks the self local
+//     non-owning, so it gets no tracked init flag and no epilogue drop.
+//   - vtable wrappers: `generate_wrapper_function` must not copy the receiver
+//     for a borrowed method (belt only -- the analysis excludes vtable
+//     targets from the set, see below).
+//
+// ── The analysis rule ────────────────────────────────────────────────────────
+//
+// A method's `self` (parameter 0, named "self", managed nominal handle type)
+// is NON-ESCAPING iff its body reads/mutates through `self` but never hands
+// the handle onward. Concretely, the body must contain NONE of:
+//
+//   1. a bare `self`-handle flow outside the receiver slot of a direct call to
+//      another non-escaping-self method -- i.e. any `PlaceRead(self)` /
+//      `Operand(self)` other than (a) argument 0 of a `MIRCall` to a set
+//      member with a Copy/Borrow read, or (b) a `let x = self`-shaped binding
+//      that `emit_assign` turns into a retained copy owned by a call-local
+//      slot. This covers RETURNS of self, storing self into struct/list/dict
+//      elements or globals, passing self to unknown/extern targets, and
+//      passing self onward to a method whose own self escapes (the fixpoint).
+//   2. a Move/Take read of a place rooted at `self` (a Field/EnumPayload chain
+//      reaching the self local) -- a move-out invalidates the owner's slot and
+//      cannot be paired under a +0 handle.
+//   3. a `Drop` / `Retain` / `Release` statement touching a self-rooted place
+//      -- the ledger has no +1 there to release.
+//   4. an assignment TO the `self` slot itself (the borrowed handle is not
+//      ours to replace).
+//   5. a `Ref` / `Pointer` value of a self-rooted place -- "a reference to
+//      self" may outlive the call.
+//   6. a closure capture of the bare `self` handle -- the closure outlives the
+//      call (capturing a projected FIELD value is a plain copy and fine).
+//
+// Field/projection READS through self (Copy/Borrow) are fine: they retain a
+// copy that the normal machinery owns and releases. The fixpoint is the
+// greatest one over the receiver-pass edges (item 1a): start with every
+// candidate assumed non-escaping and demote until stable, so self-recursive
+// and mutually recursive readers stay eligible.
+//
+// A function is not even a CANDIDATE (stays on the owned convention) if:
+//   - its self parameter is not a managed nominal handle (reference/pointer/
+//     trait-object self runs on the existing reference machinery; drop bodies
+//     take a pointer-typed self and are excluded by the same shape check);
+//   - its symbol is ever used as a VALUE (boxed into a closure / bound-method
+//     trampoline / function pointer) -- those invocations keep the owned ABI;
+//   - any call to it has an unsafe self-slot shape (misaligned ownership list,
+//     no receiver, a CONSUMED slot 0, or a slot-0 value whose embedded
+//     ownership consumes the source place). A consumed slot 0 is a chain
+//     temporary (`create(1).transform().get_value()`'s intermediates): the
+//     owned convention transfers the temporary's +1 into the call and drops
+//     it at the callee epilogue, and that timing is observable through a user
+//     `Drop`. Borrowing is only invisible when the receiver is a place that
+//     still owns a count after the call ("a place read is Copy(); a chain
+//     temporary is Move()"), so the borrow is restricted to Copy receivers
+//     and a method with even one consumed-receiver call site keeps the owned
+//     convention at EVERY call site -- the ABI is uniform per function. The
+//     same slot-0 rule covers `consume_moved_source` shapes: that would
+//     suppress the owner's drop while the borrowed callee releases nothing,
+//     leaking the +1. Vtable reachability is handled by the wrapper's safety
+//     net instead of an exclusion: trait dispatch always wraps by-value self
+//     (`generate_wrapper_function`), and the wrapper pairs the call site's
+//     retain with its own release regardless of the method's convention.
+
+/// What a body walk is doing.
+type BorrowedSelfWalkMode {
+    /// Global usage scan: find value-position function symbols (address
+    /// taken) and unsafe call shapes. Runs over every function once.
+    GlobalUsage(),
+    /// Self-escape scan for one candidate method.
+    SelfEscape(),
+};
+
+/// Mutable state threaded through one body walk.
+type mutable BorrowedSelfWalk(
+    mode: BorrowedSelfWalkMode,
+    self_local_id: UInt,
+    // Every phase-1 candidate, keyed by DefId. A bare-self receiver passed to
+    // a candidate records a fixpoint edge; one passed to anybody else escapes.
+    candidates: Dict[UInt, Bool],
+    unsafe_callees: Dict[UInt, Bool],
+    receiver_deps: Dict[UInt, Bool],
+    mutable escaped: Bool,
+);
+
+/// Fixpoint node for one candidate method.
+type mutable BorrowedSelfCandidateInfo(
+    mutable local_ok: Bool,
+    receiver_deps: Dict[UInt, Bool],
+);
+
+/// The self parameter's shape: a managed nominal handle (List/String/...
+/// style `struct { void* ptr; }` values with copy/drop glue). Reference,
+/// pointer, and trait-object selves run on the existing conventions, and a
+/// std Drop body's self is re-typed to a mutable pointer by `make_function`,
+/// so this one shape check excludes all of them.
+let borrowed_self_type_is_candidate(t: Type): Bool = {
+    return when t in {
+        .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then type_needs_drop(t),
+        _ then false,
+    };
+};
+
+/// Root classification of a place relative to the self local:
+/// 0 = not self-rooted, 1 = self-rooted projection (Field/EnumPayload chain),
+/// 2 = the bare self local. Deref/PointerElement bases are VALUE bases and are
+/// walked separately; codegen's `root_local_of_place` treats them the same way
+/// (a Move read through them is already forced to a retained copy, so their
+/// behavior cannot change under the borrowed convention).
+let borrowed_self_place_root_kind(place: MIRPlace, self_local_id: UInt): UInt = {
+    let mutable current = place;
+    let mutable via_projection = false;
+    while true then {
+        when current in {
+            .Local(local) then {
+                if local.raw_value == self_local_id then {
+                    return if via_projection then UInt(1) else UInt(2);
+                };
+                return UInt(0);
+            },
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                via_projection = true;
+                current = base;
+            },
+            .Global(_) or .Deref(_, _) or .PointerElement(_, _) then {
+                return UInt(0);
+            },
+        };
+    };
+    return UInt(0);
+};
+
+/// A slot-0 argument that consumes its source place when emitted: the
+/// `consume_moved_source` / `consume_moved_place` shapes. Under the borrowed
+/// convention the callee releases nothing, so a consumed source would leak
+/// its +1; such call shapes disqualify the callee instead.
+let borrowed_self_arg0_consumable(value: MIRValue): Bool = {
+    return when value in {
+        .PlaceRead(_, ownership) then ownership is .Move() or is .Take(),
+        .Ref(_, _, allocation) then allocation is .HeapOwnedMove(),
+        _ then false,
+    };
+};
+
+/// The one allowed bare-self shape at a receiver slot: a Copy/Borrow read of
+/// the self local. `emit_direct_call_argument` passes that raw (+0) and the
+/// callee (a set member) does not release it.
+let borrowed_self_is_bare_receiver(value: MIRValue, self_local_id: UInt): Bool = {
+    return when value in {
+        .PlaceRead(place, ownership) then {
+            if not (ownership is .Copy() or is .Borrow()) then {
+                return false;
+            };
+            when place in {
+                .Local(local) then local.raw_value == self_local_id,
+                _ then false,
+            }
+        },
+        _ then false,
+    };
+};
+
+/// The `let x = self`-shaped binding: `emit_assign` turns a Copy read of the
+/// bare self local into a RETAINED copy owned by a call-local slot (which the
+/// slot's own cleanup releases), so it is balanced under the +0 handle. Any
+/// other value in an assignment is classified normally.
+let borrowed_self_is_bare_copy_binding(value: MIRValue, self_local_id: UInt): Bool = {
+    return when value in {
+        .PlaceRead(place, ownership) then {
+            if not (ownership is .Copy()) then {
+                return false;
+            };
+            when place in {
+                .Local(local) then local.raw_value == self_local_id,
+                _ then false,
+            }
+        },
+        _ then false,
+    };
+};
+
+let borrowed_self_walk_operand(w: BorrowedSelfWalk, operand: MIROperand): Void = {
+    when operand in {
+        .Local(local) then {
+            if w.mode is .SelfEscape() and local.raw_value == w.self_local_id then {
+                w.escaped = true;
+            };
+        },
+        .Function(symbol) then {
+            if w.mode is .GlobalUsage() then {
+                // A function symbol outside the callee slot is being taken as
+                // a value (closure box / bound method / function pointer).
+                // Such invocations keep the owned ABI, so the function can
+                // never adopt the borrowed convention.
+                w.unsafe_callees.insert(symbol.def_id.id, true);
+            };
+        },
+        .Constant(_) then {},
+    };
+};
+
+/// Walk a place's VALUE bases (Deref/PointerElement). Pure structure -- the
+/// root classification lives with the consuming value shape.
+let borrowed_self_walk_place(w: BorrowedSelfWalk, place: MIRPlace): Void = {
+    when place in {
+        .Local(_) or .Global(_) then {},
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then borrowed_self_walk_place(
+            w,
+            base,
+        ),
+        .Deref(base, _) or .PointerElement(base, _) then borrowed_self_walk_value(
+            w,
+            base,
+            false,
+        ),
+    };
+};
+
+let borrowed_self_walk_call(w: BorrowedSelfWalk, call: MIRCall): Void = {
+    let mutable callee_known = false;
+    when call.callee in {
+        .Function(symbol) then {
+            callee_known = true;
+            if w.mode is .GlobalUsage() then {
+                if call.arguments.count() == 0 then {
+                    // A self method invoked without its receiver slot: leave
+                    // it on the owned convention rather than reason about it.
+                    w.unsafe_callees.insert(symbol.def_id.id, true);
+                } else if call.argument_ownerships.count() != call.arguments.count() then {
+                    // The emit side keys every decision off the ownership
+                    // list; a misaligned list falls back to owned defaults.
+                    w.unsafe_callees.insert(symbol.def_id.id, true);
+                } else if call.argument_ownerships[UInt(0)] is .Move() or is .Take() then {
+                    // The self slot carries a CONSUMED value -- a chain
+                    // temporary like `create(1).transform().get_value()`'s
+                    // intermediates. The owned convention transfers the
+                    // temporary's +1 into the call and drops it at the callee
+                    // epilogue, and that timing is observable through a user
+                    // `Drop` (tests/compiler-cases/chain_call_drop.koral pins
+                    // it). Borrowing is only invisible when the receiver is a
+                    // place that still owns a count after the call, so a
+                    // method with even one consumed-receiver call site keeps
+                    // the owned convention at EVERY call site (the ABI is
+                    // uniform per function).
+                    w.unsafe_callees.insert(symbol.def_id.id, true);
+                } else if borrowed_self_arg0_consumable(call.arguments[UInt(0)]) then {
+                    w.unsafe_callees.insert(symbol.def_id.id, true);
+                };
+            };
+        },
+        _ then {
+            borrowed_self_walk_operand(w, call.callee);
+        },
+    };
+
+    let mutable start_index = UInt(0);
+    if w.mode is .SelfEscape() and callee_known and call.arguments.count() > UInt(0) then {
+        let arg0 = call.arguments[UInt(0)];
+        if borrowed_self_is_bare_receiver(arg0, w.self_local_id) then {
+            // Receiver-pass edge of the fixpoint (rule 1a): fine when the
+            // callee is itself a non-escaping-self candidate, an escape
+            // otherwise.
+            when call.callee in {
+                .Function(symbol) then {
+                    if w.candidates.get(symbol.def_id.id) is .Some(_) then {
+                        w.receiver_deps.insert(symbol.def_id.id, true);
+                    } else {
+                        w.escaped = true;
+                    };
+                },
+                _ then {},
+            };
+            start_index = UInt(1);
+        };
+    };
+    for pair in call.arguments.lazy().enumerate() then {
+        if pair.first < start_index then {
+            continue;
+        };
+        borrowed_self_walk_value(w, pair.second, false);
+    };
+};
+
+let borrowed_self_walk_value(
+    w: BorrowedSelfWalk,
+    value: MIRValue,
+    receiver_slot: Bool,
+): Void = {
+    when value in {
+        .Operand(operand) then borrowed_self_walk_operand(w, operand),
+        .PlaceRead(place, ownership) then {
+            if w.mode is .SelfEscape() then {
+                let root = borrowed_self_place_root_kind(place, w.self_local_id);
+                if root == UInt(2) then {
+                    // The bare handle itself. Only the receiver slot of a set
+                    // member call (checked in walk_call) may pass it on.
+                    if not (receiver_slot and (ownership is .Copy() or is .Borrow())) then {
+                        w.escaped = true;
+                    };
+                } else if root == UInt(1) then {
+                    if ownership is .Move() or is .Take() then {
+                        w.escaped = true;
+                    };
+                };
+            };
+            borrowed_self_walk_place(w, place);
+        },
+        .Binary(operation) then {
+            borrowed_self_walk_operand(w, operation.left);
+            borrowed_self_walk_operand(w, operation.right);
+        },
+        .Unary(operation) then borrowed_self_walk_operand(w, operation.operand),
+        .Call(call) then borrowed_self_walk_call(w, call),
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                borrowed_self_walk_value(w, field, false);
+            };
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                borrowed_self_walk_value(w, argument, false);
+            };
+        },
+        .EnumTag(tag) then borrowed_self_walk_value(w, tag.subject, false),
+        .TraitObjectConversion(conversion) then borrowed_self_walk_value(
+            w,
+            conversion.inner,
+            false,
+        ),
+        .TraitMethodCall(call) then {
+            // Dynamic dispatch: the concrete target is unknown here (the
+            // vtable wrapper pairs the refcount itself), so a bare self
+            // receiver escapes.
+            borrowed_self_walk_value(w, call.receiver, false);
+            for argument in call.arguments then {
+                borrowed_self_walk_value(w, argument, false);
+            };
+        },
+        .Ref(place, _, _) or .Pointer(place) then {
+            if w.mode is .SelfEscape() then {
+                if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                    // A reference to self may outlive the call (rule 5).
+                    w.escaped = true;
+                };
+            };
+            borrowed_self_walk_place(w, place);
+        },
+        .Cast(operand, _, _) then borrowed_self_walk_operand(w, operand),
+        .Intrinsic(node) then borrowed_self_walk_intrinsic(w, node),
+        .Lambda(lambda) then {
+            for pair in lambda.captures.lazy().enumerate() then {
+                let source = lambda.capture_sources[pair.first];
+                if w.mode is .SelfEscape() then {
+                    if borrowed_self_place_root_kind(source, w.self_local_id) == UInt(2) then {
+                        // Capturing the bare self handle: the closure env
+                        // outlives the call (rule 6). A captured FIELD value is
+                        // a plain copy and fine.
+                        w.escaped = true;
+                    };
+                };
+                borrowed_self_walk_place(w, source);
+            };
+            // The lambda body cannot see the enclosing self (only its
+            // captures), but it can box function values or call methods with
+            // unsafe shapes, so the usage scan descends into it.
+            if w.mode is .GlobalUsage() then {
+                borrowed_self_walk_function(w, lambda.function);
+            };
+        },
+    };
+};
+
+let borrowed_self_walk_intrinsic(w: BorrowedSelfWalk, node: MIRIntrinsic): Void = {
+    when node in {
+        .AllocMemory(count, _) or .DeallocMemory(count) then borrowed_self_walk_value(
+            w,
+            count,
+            false,
+        ),
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
+            borrowed_self_walk_value(w, dest, false);
+            borrowed_self_walk_value(w, source, false);
+            borrowed_self_walk_value(w, count, false);
+        },
+        .DowngradeRef(value, _) or .UpgradeRef(value, _) or .TraitObjectMatches(value, _, _, _, _)
+        or .TraitObjectDowncast(value, _) or .DeinitMemory(value) or .TakeMemory(value, _) then borrowed_self_walk_value(
+            w,
+            value,
+            false,
+        ),
+        .InitMemory(pointer, value) then {
+            borrowed_self_walk_value(w, pointer, false);
+            borrowed_self_walk_value(w, value, false);
+        },
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                borrowed_self_walk_value(w, element, false);
+            };
+        },
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            borrowed_self_walk_value(w, out_handle, false);
+            borrowed_self_walk_value(w, out_tid, false);
+            borrowed_self_walk_value(w, closure, false);
+            borrowed_self_walk_value(w, stack_size, false);
+        },
+        .NullPtr(_) then {},
+    };
+};
+
+let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): Void = {
+    when statement in {
+        .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
+        .Assign(place, value) then {
+            let mutable allowed_binding = false;
+            when place in {
+                .Local(local) then {
+                    if w.mode is .SelfEscape() then {
+                        if local.raw_value == w.self_local_id then {
+                            // Rebinding the borrowed self slot (rule 4).
+                            w.escaped = true;
+                        } else if borrowed_self_is_bare_copy_binding(value, w.self_local_id) then {
+                            allowed_binding = true;
+                        };
+                    };
+                },
+                _ then {},
+            };
+            borrowed_self_walk_place(w, place);
+            if not allowed_binding then {
+                borrowed_self_walk_value(w, value, false);
+            };
+        },
+        .CompoundAssign(assignment) then {
+            if w.mode is .SelfEscape() then {
+                when assignment.target in {
+                    .Local(local) then {
+                        if local.raw_value == w.self_local_id then {
+                            w.escaped = true;
+                        };
+                    },
+                    _ then {},
+                };
+            };
+            borrowed_self_walk_place(w, assignment.target);
+            borrowed_self_walk_value(w, assignment.value, false);
+        },
+        .Drop(place) then {
+            if w.mode is .SelfEscape() then {
+                if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                    // Dropping a self-rooted place has no +1 to release under
+                    // the borrowed convention (rule 3).
+                    w.escaped = true;
+                };
+            };
+            borrowed_self_walk_place(w, place);
+        },
+        .Retain(value) or .Release(value) then {
+            if w.mode is .SelfEscape() then {
+                when value in {
+                    .PlaceRead(place, _) then {
+                        if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                            w.escaped = true;
+                        };
+                    },
+                    _ then {},
+                };
+            };
+            borrowed_self_walk_value(w, value, false);
+        },
+        .Evaluate(value) then borrowed_self_walk_value(w, value, false),
+    };
+};
+
+let borrowed_self_walk_terminator(
+    w: BorrowedSelfWalk,
+    terminator: MIRTerminator,
+): Void = {
+    when terminator in {
+        .Goto(_) or .Unreachable() then {},
+        .Branch(condition, _, _) or .SwitchValue(condition, _, _) then borrowed_self_walk_operand(
+            w,
+            condition,
+        ),
+        .ReturnValue(operand) then when operand in {
+            .Some(op) then borrowed_self_walk_operand(w, op),
+            .None() then {},
+        },
+    };
+};
+
+let borrowed_self_walk_function(w: BorrowedSelfWalk, function: MIRFunction): Void = {
+    for block in function.blocks then {
+        for statement in block.statements then {
+            borrowed_self_walk_statement(w, statement);
+        };
+        borrowed_self_walk_terminator(w, block.terminator);
+    };
+};
+
+/// Compute the set of instantiated methods whose `self` runs the borrowed
+/// convention. Keyed by the method instance's DefId -- the same identity the
+/// call sites carry on `MIROperand.Function(symbol)` and the function
+/// emission carries on `MIRFunction.identifier`.
+///
+/// This is a fixpoint over the instantiated (monomorphized) method call
+/// graph: edges are the bare-self receiver passes of rule 1a, and the
+/// greatest fixed point keeps self-recursive readers eligible.
+let compute_borrowed_self_def_ids(program: MIRProgram): Set[UInt] = {
+    // ── Phase 0: global usage scan ─────────────────────────────────────────
+    // One walk over every function (and nested lambda body) collecting
+    // address-taken symbols and unsafe call shapes.
+    let global_walk = BorrowedSelfWalk(
+        BorrowedSelfWalkMode.GlobalUsage(),
+        UInt(0),
+        Dict[UInt, Bool].new(),
+        Dict[UInt, Bool].new(),
+        Dict[UInt, Bool].new(),
+        false,
+    );
+    for function in program.functions then {
+        borrowed_self_walk_function(global_walk, function);
+    };
+
+    // ── Phase 1: candidate collection + per-candidate escape scan ──────────
+    let mutable candidate_order = List[UInt].new();
+    let mutable candidate_info = Dict[UInt, BorrowedSelfCandidateInfo].new();
+    let mutable candidate_flags = Dict[UInt, Bool].new();
+    let mutable self_local_by_def = Dict[UInt, UInt].new();
+    for function in program.functions then {
+        if function.params.count() == 0 then {
+            continue;
+        };
+        if function.params[UInt(0)].name != "self" then {
+            continue;
+        };
+        if not borrowed_self_type_is_candidate(function.params[UInt(0)].param_type) then {
+            continue;
+        };
+        let def_id = function.identifier.def_id.id;
+        if global_walk.unsafe_callees.get(def_id) is .Some(_) then {
+            continue;
+        };
+        let mutable self_local = Option[UInt].None();
+        for local in function.locals then {
+            if local.storage is .Parameter() and local.name == "self" then {
+                self_local = Option[UInt].Some(local.id.raw_value);
+                break;
+            };
+        };
+        if self_local is .None() then {
+            continue;
+        };
+        let self_local_id = self_local or else UInt(0);
+        candidate_order.push(def_id);
+        candidate_flags.insert(def_id, true);
+        self_local_by_def.insert(def_id, self_local_id);
+        candidate_info.insert(
+            def_id,
+            BorrowedSelfCandidateInfo(true, Dict[UInt, Bool].new()),
+        );
+    };
+
+    for function in program.functions then {
+        let def_id = function.identifier.def_id.id;
+        when candidate_info.get(def_id) in {
+            .Some(info) then {
+                let self_local_id = self_local_by_def.get(def_id) or else UInt(0);
+                let walk = BorrowedSelfWalk(
+                    BorrowedSelfWalkMode.SelfEscape(),
+                    self_local_id,
+                    candidate_flags,
+                    global_walk.unsafe_callees,
+                    Dict[UInt, Bool].new(),
+                    false,
+                );
+                borrowed_self_walk_function(walk, function);
+                // AND across bodies: emission keys the convention on the
+                // DefId, so if two lowered bodies ever share one, the set may
+                // only contain it when EVERY body passes.
+                info.local_ok = info.local_ok and not walk.escaped;
+                for dep in walk.receiver_deps.iterator() then {
+                    info.receiver_deps.insert(dep.first, true);
+                };
+            },
+            .None() then {},
+        };
+    };
+
+    // ── Phase 2: greatest fixpoint over the receiver-pass edges ────────────
+    // Clone: managed collections alias on assignment, and the scan below
+    // demotes members in place.
+    let mutable alive = candidate_flags.clone();
+    let mutable changed = true;
+    while changed then {
+        changed = false;
+        for def_id in candidate_order then {
+            if alive.get(def_id) is .None() then {
+                continue;
+            };
+            let info = candidate_info.get(def_id).unwrap();
+            let mutable demote = not info.local_ok;
+            if not demote then {
+                for dep in info.receiver_deps.iterator() then {
+                    if alive.get(dep.first) is .None() then {
+                        demote = true;
+                        break;
+                    };
+                };
+            };
+            if demote then {
+                let _ = alive.remove(def_id);
+                changed = true;
+            };
+        };
+    };
+
+    let mutable result = Set[UInt].new();
+    for def_id in candidate_order then {
+        if alive.get(def_id) is .Some(_) then {
+            result.insert(def_id);
+        };
+    };
+    return result;
+};

@@ -14,9 +14,27 @@ let foreign __koral_timer_context_cancel(ctx: *UInt8): Void;
 let foreign __koral_timer_context_destroy(ctx: *UInt8): Void;
 let foreign __koral_timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32;
 
+/// Sleep for (secs, nanos) on a timer context, in bounded chunks.
+/// The runtime's Windows path keeps the timeout in a 32-bit DWORD of
+/// milliseconds, which wraps for durations above ~49.7 days; sleeping in
+/// chunks of at most a day keeps every sleep representable there. Cancellation
+/// still interrupts the current chunk. Returns 0 on full expiry, 1 on cancel.
+private let timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32 = {
+    let chunk_secs: Int64 = 86400;
+    let mutable rest = secs;
+    while rest > chunk_secs then {
+        let rc = __koral_timer_sleep(ctx, chunk_secs, Int64(0));
+        if rc != 0 then {
+            return rc;
+        };
+        rest = rest - chunk_secs;
+    };
+    return __koral_timer_sleep(ctx, rest, nanos);
+};
+
 /// One-shot countdown timer that blocks in wait() until its duration elapses.
 public type mutable Timer(
-    private ctx: *UInt8,
+    private mutable ctx: *UInt8,
     private mutable d_secs: Int64,
     private mutable d_nanos: Int64,
     private mutable fired: Bool,
@@ -46,17 +64,23 @@ given Timer {
     };
 
     /// Block for the timer's duration. Returns immediately if already fired or cancelled.
-    /// Marks the timer as fired on return.
+    /// Marks the timer as fired only when the full duration elapses; a wait()
+    /// cut short by cancel() leaves the timer unfired.
     public wait(self): Void = {
         if self.fired or self.cancelled then {
             return;
         };
-        __koral_timer_sleep(self.ctx, self.d_secs, self.d_nanos);
-        self.fired = true;
+        let rc = timer_sleep(self.ctx, self.d_secs, self.d_nanos);
+        if rc == 0 then {
+            self.fired = true;
+        };
     };
 
     /// Reset the timer: clears fired state and sets a new duration.
     /// The next wait() will block for the new duration.
+    /// Re-arms a cancelled timer: the runtime's cancel is one-shot, so the
+    /// timer context is rebuilt and the cancelled state is cleared. Do not
+    /// call reset while another thread is blocked in wait() on this timer.
     public reset(self, d: Duration): Void = {
         if d < Duration.zero() then {
             panic("Timer.reset: duration must not be negative");
@@ -64,6 +88,11 @@ given Timer {
         self.d_secs = d.secs;
         self.d_nanos = d.nanos;
         self.fired = false;
+        if self.cancelled then {
+            __koral_timer_context_destroy(self.ctx);
+            self.ctx = __koral_timer_context_create();
+            self.cancelled = false;
+        };
     };
 
     /// Cancel the timer. Any blocked wait() returns immediately.
@@ -78,7 +107,7 @@ given Timer {
 /// Periodic timer whose wait() blocks for one interval at a time.
 /// Each interval is measured from the previous wait() return, so drift accumulates instead of staying on a fixed schedule.
 public type mutable Ticker(
-    private ctx: *UInt8,
+    private mutable ctx: *UInt8,
     private mutable i_secs: Int64,
     private mutable i_nanos: Int64,
     private mutable cancelled: Bool,
@@ -111,16 +140,24 @@ given Ticker {
         if self.cancelled then {
             return;
         };
-        __koral_timer_sleep(self.ctx, self.i_secs, self.i_nanos);
+        timer_sleep(self.ctx, self.i_secs, self.i_nanos);
     };
 
     /// Change the interval. Takes effect on the next wait() call.
+    /// Re-arms a cancelled ticker: the runtime's cancel is one-shot, so the
+    /// timer context is rebuilt and the cancelled state is cleared. Do not
+    /// call reset while another thread is blocked in wait() on this ticker.
     public reset(self, interval: Duration): Void = {
         if interval <= Duration.zero() then {
             panic("Ticker.reset: interval must be positive");
         };
         self.i_secs = interval.secs;
         self.i_nanos = interval.nanos;
+        if self.cancelled then {
+            __koral_timer_context_destroy(self.ctx);
+            self.ctx = __koral_timer_context_create();
+            self.cancelled = false;
+        };
     };
 
     /// Cancel the ticker. Any blocked wait() returns immediately.

@@ -12,6 +12,7 @@ using "./codegen_indexes.koral";
 using "./codegen_expressions_literals.koral";
 using "./codegen_memory.koral";
 using "./codegen_types.koral";
+using "./codegen_borrowed_self.koral";
 using "./codegen_vtable.koral";
 using "./codegen_mir.koral";
 using "./codegen_reachability.koral";
@@ -104,6 +105,12 @@ public type mutable CodeGen(
     // （自举约 9.7 万个 DefId × Dict 查询 + 字符串比较），是 codegen/MIR 的
     // 热点。预热一次、按名 O(1)，返回顺序与原升序扫描一致。
     mutable def_ids_by_name: Dict[String, List[UInt]],
+
+    // 借用 self 约定（Swift guaranteed self / ARC 成对消除）：self 不逃逸的
+    // 实例方法集合（DefId 键）。调用点对 self 槽传 +0、被调方不释放 self，
+    // 每层调用省掉一对 retain/release。分析与配平规则见
+    // codegen_borrowed_self.koral。
+    mutable borrowed_self_def_ids: Set[UInt],
 );
 
 given CodeGen {
@@ -157,8 +164,11 @@ given CodeGen {
             Dict[String, String].new(),
             // def_ids_by_name
             Dict[String, List[UInt]].new(),
+            // borrowed_self_def_ids
+            Set[UInt].new(),
         );
         cg.build_def_id_indices();
+        cg.borrowed_self_def_ids = compute_borrowed_self_def_ids(program);
         return cg;
     };
 

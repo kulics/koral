@@ -1,0 +1,66 @@
+// std.text: signed parse accepts the type's own minimum (magnitude in UInt).
+// EXPECT: int_min_ok
+// EXPECT: int_max_ok
+// EXPECT: int_over_pos_ok
+// EXPECT: int_over_neg_ok
+// EXPECT: hex_min_ok
+// EXPECT: uint_max_ok
+// EXPECT: uint_over_ok
+// EXPECT: int8_min_ok
+
+using "std/text" { ... };
+
+let main(): Int = {
+    // Int.min_value() magnitude is 2^63 and must survive the sign
+    when Int.parse("-9223372036854775808") in {
+        .Ok(n) then if n == Int.min_value() then println("int_min_ok")
+        else println("FAIL int_min"),
+        .Error(e) then println("FAIL int_min: " + e.message()),
+    };
+
+    when Int.parse("9223372036854775807") in {
+        .Ok(n) then if n == Int.max_value() then println("int_max_ok")
+        else println("FAIL int_max"),
+        .Error(e) then println("FAIL int_max: " + e.message()),
+    };
+
+    // One past the positive limit still overflows
+    when Int.parse("9223372036854775808") in {
+        .Ok(n) then println("FAIL int_over_pos"),
+        .Error(e) then println("int_over_pos_ok"),
+    };
+
+    // One past the negative limit still overflows
+    when Int.parse("-9223372036854775809") in {
+        .Ok(n) then println("FAIL int_over_neg"),
+        .Error(e) then println("int_over_neg_ok"),
+    };
+
+    // Radix form of the minimum
+    when Int.parse_radix("-8000000000000000", 16) in {
+        .Ok(n) then if n == Int.min_value() then println("hex_min_ok")
+        else println("FAIL hex_min"),
+        .Error(e) then println("FAIL hex_min: " + e.message()),
+    };
+
+    // UInt keeps its own full range
+    when UInt.parse("18446744073709551615") in {
+        .Ok(n) then if n == UInt.max_value() then println("uint_max_ok")
+        else println("FAIL uint_max"),
+        .Error(e) then println("FAIL uint_max: " + e.message()),
+    };
+
+    when UInt.parse("18446744073709551616") in {
+        .Ok(n) then println("FAIL uint_over"),
+        .Error(e) then println("uint_over_ok"),
+    };
+
+    // Narrow signed widths delegate to the fixed Int parse
+    when Int8.parse("-128") in {
+        .Ok(n) then if Int(n) == (0 - 128) then println("int8_min_ok")
+        else println("FAIL int8_min"),
+        .Error(e) then println("FAIL int8_min: " + e.message()),
+    };
+
+    return 0;
+};

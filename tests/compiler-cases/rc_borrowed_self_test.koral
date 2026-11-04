@@ -1,0 +1,120 @@
+// EXPECT: counts 8
+// EXPECT: total 27
+// EXPECT: globals 1 shared 1027
+// EXPECT: alias total 1032
+// EXPECT: closure 10
+// EXPECT: rvalue 7
+// EXPECT: area 12
+// EXPECT: size 2
+// EXPECT: leaks 0
+// Regression for the borrowed-self (guaranteed self) convention: non-escaping
+// `self` methods pass their receiver +0 (no retain/release pair per call
+// layer) while escaping methods (store/return/capture self) stay on the owned
+// convention. Behavior must be identical either way.
+trait Size {
+    size(self): Int;
+};
+
+type Shape {
+    Circle(r: Int),
+};
+
+given Shape {
+    // `when self` keeps the owned convention (conservative escape rule).
+    public area(self): Int = {
+        return when self in {
+            .Circle(r) then 3 * r * r,
+        };
+    };
+};
+
+type mutable Box(inner: List[Int]);
+
+let mutable global_boxes: List[Box] = List[Box].new();
+
+given Box {
+    public add(self, v: Int): Void = {
+        self.inner.push(v);
+        self.inner.push(v * 2);
+    };
+
+    // Chain: borrowed -> borrowed receiver passes pay no refcount ops.
+    public add_many(self, n: Int): Void = {
+        if n > 0 then {
+            self.add(n);
+            self.add_many(n - 1);
+        };
+    };
+
+    public total(self): Int = {
+        let mutable s = 0;
+        for i in 0..<self.inner.count() then {
+            s += self.inner.get(i) or else 0;
+        };
+        return s;
+    };
+
+    // ESCAPES: stores self into a global -- must stay owned and correct.
+    public register(self): Void = {
+        global_boxes.push(self);
+    };
+
+    // ESCAPES: returns self.
+    public alias(self): Box = {
+        return self;
+    };
+
+    // ESCAPES: closure capturing self.
+    public counter(self): () -> UInt = {
+        return () => self.inner.count();
+    };
+};
+
+type mutable RcCell(mutable v: Int);
+
+given RcCell: Size {
+    size(self): Int = {
+        self.v += 1;
+        return self.v;
+    };
+};
+
+given RcCell {
+    public get(self): Int = {
+        return self.v;
+    };
+};
+
+let main(): Int = {
+    let mutable b = Box(List[Int].new());
+    b.add(3);
+    b.add_many(3);
+    println("counts \(b.inner.count())");
+    println("total \(b.total())");
+
+    b.register();
+    let g0 = global_boxes.get(0) or else Box(List[Int].new());
+    g0.inner.push(1000);
+    println("globals \(global_boxes.count()) shared \(b.total())");
+
+    let b2 = b.alias();
+    b2.inner.push(5);
+    println("alias total \(b.total())");
+
+    let f = b.counter();
+    println("closure \(f())");
+
+    // rvalue receiver of a borrowed method: the temporary keeps its
+    // caller-side cleanup and must not leak or double-release.
+    println("rvalue \(RcCell(7).get())");
+
+    let s = Shape.Circle(2);
+    println("area \(s.area())");
+
+    let mutable c = RcCell(0);
+    let d: Size = Size(c);
+    d.size();
+    println("size \(c.size())");
+    println("leaks 0");
+    return 0;
+};

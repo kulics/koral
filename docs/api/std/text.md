@@ -276,6 +276,8 @@ given UInt64: RadixParseable {
 given Float64: Parseable {
     /// Parse a floating-point number from `s`, trimming surrounding whitespace.
     /// Accepts `NaN`, `inf`, decimals, and exponents like `1e10`; errors on malformed input.
+    /// The value is correctly rounded by the C runtime; exponents outside the
+    /// `Float64` range come back as ±inf/0.0 instead of panicking.
     public parse(s: String): Result[Self];
 };
 

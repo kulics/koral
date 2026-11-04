@@ -1,0 +1,134 @@
+// EXPECT: parse_third_ok
+// EXPECT: parse_neg_zero_ok
+// EXPECT: parse_huge_exp_ok
+// EXPECT: parse_big_exp_ok
+// EXPECT: parse_tiny_exp_ok
+// EXPECT: parse_long_fraction_ok
+// EXPECT: err_e_ok
+// EXPECT: err_dot_ok
+// EXPECT: err_minus_ok
+// EXPECT: err_leading_zero_ok
+
+// Number parsing uses strtod on the validated literal: correctly rounded
+// values, sign-preserving zero, and out-of-range exponents saturate to
+// +/-inf or 0.0 instead of panicking or hanging in an exponent loop.
+
+using "std/json" { ... };
+
+let main(): Int = {
+    // Correct rounding: "0.3" parses to exactly the 0.3 double.
+    when JsonValue.parse("0.3") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n.to_bits() == 0.3.to_bits() then println("parse_third_ok")
+                    else println("FAIL parse_third");
+                },
+                _ then println("FAIL parse_third: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_third: " + e.message()),
+    };
+
+    // "-0.0" keeps its sign.
+    when JsonValue.parse("-0.0") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n.is_sign_negative() then println("parse_neg_zero_ok")
+                    else println("FAIL parse_neg_zero: sign lost");
+                },
+                _ then println("FAIL parse_neg_zero: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_neg_zero: " + e.message()),
+    };
+
+    // Absurdly long exponents used to overflow checked Int accumulation.
+    when JsonValue.parse("1e99999999999999999999") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n.is_inf() then println("parse_huge_exp_ok")
+                    else println("FAIL parse_huge_exp: not inf");
+                },
+                _ then println("FAIL parse_huge_exp: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_huge_exp: " + e.message()),
+    };
+
+    // Large exponents used to hang in an O(exp) multiply loop.
+    when JsonValue.parse("1e100000000000") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n.is_inf() then println("parse_big_exp_ok")
+                    else println("FAIL parse_big_exp: not inf");
+                },
+                _ then println("FAIL parse_big_exp: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_big_exp: " + e.message()),
+    };
+
+    when JsonValue.parse("1e-99999999999999999999") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n == 0.0 then println("parse_tiny_exp_ok")
+                    else println("FAIL parse_tiny_exp: not zero");
+                },
+                _ then println("FAIL parse_tiny_exp: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_tiny_exp: " + e.message()),
+    };
+
+    // Many fraction digits convert at full precision.
+    when JsonValue.parse("1.0000000000000002") in {
+        .Ok(v) then {
+            when v in {
+                .Number(n) then {
+                    if n.to_bits() == 1.0000000000000002.to_bits() then println(
+                        "parse_long_fraction_ok",
+                    ) else println("FAIL parse_long_fraction");
+                },
+                _ then println("FAIL parse_long_fraction: not Number"),
+            };
+        },
+        .Error(e) then println("FAIL parse_long_fraction: " + e.message()),
+    };
+
+    // The JSON number grammar is still validated.
+    when JsonValue.parse("1e") in {
+        .Ok(_) then println("FAIL err_e"),
+        .Error(e) then {
+            if e.message().contains("invalid number") then println("err_e_ok")
+            else println("FAIL err_e: " + e.message());
+        },
+    };
+
+    when JsonValue.parse("1.") in {
+        .Ok(_) then println("FAIL err_dot"),
+        .Error(e) then {
+            if e.message().contains("invalid number") then println("err_dot_ok")
+            else println("FAIL err_dot: " + e.message());
+        },
+    };
+
+    when JsonValue.parse("-") in {
+        .Ok(_) then println("FAIL err_minus"),
+        .Error(e) then {
+            if e.message().contains("invalid number") then println("err_minus_ok")
+            else println("FAIL err_minus: " + e.message());
+        },
+    };
+
+    when JsonValue.parse("01") in {
+        .Ok(_) then println("FAIL err_leading_zero"),
+        .Error(_) then println("err_leading_zero_ok"),
+    };
+
+    return 0;
+};

@@ -1,0 +1,40 @@
+// EXPECT: dst_wall_ok
+// EXPECT: dst_roundtrip_ok
+// EXPECT: midnight_ok
+// EXPECT: fixed_ok
+// from_parts resolves the UTC offset to a fixed point. A single probe reads
+// the local wall time as UTC and lands on the wrong side of a DST transition
+// for wall times within |offset| of it (03:30 EDT used to become 04:30).
+
+using "std/time" { ... };
+
+let main(): Int = {
+    let ny = TimeZone.from_name("America/New_York").unwrap();
+    // 2024-03-10 07:30 UTC is 03:30 EDT (-04:00), an hour after the
+    // 02:00 -> 03:00 spring-forward transition.
+    let dt = DateTime.parse("2024-03-10T07:30:00Z").unwrap().in_timezone(ny);
+    assert(dt.to_string() == "2024-03-10T03:30:00-04:00", "dst wall");
+    println("dst_wall_ok");
+
+    let rt = DateTime.from_parts(dt.date(), dt.time(), ny);
+    assert(rt.to_unix_seconds() == dt.to_unix_seconds(), "roundtrip instant");
+    assert(rt.to_string() == "2024-03-10T03:30:00-04:00", "roundtrip wall");
+    println("dst_roundtrip_ok");
+
+    let mid = DateTime.from_date_at_midnight(dt.date(), ny);
+    assert(mid.to_string() == "2024-03-10T00:00:00-05:00", "midnight wall");
+    assert(mid.to_unix_seconds() == Int64(1710046800), "midnight instant");
+    println("midnight_ok");
+
+    // Fixed offsets are constant and must stay exact.
+    let fixed = TimeZone.from_offset(28800s).unwrap();
+    let dtf = DateTime.from_parts(
+        Date.new(year = 2024, month = 1, day = 15).unwrap(),
+        ClockTime.new(hour = 10, minute = 30, second = 0).unwrap(),
+        fixed,
+    );
+    assert(dtf.to_string() == "2024-01-15T10:30:00+08:00", "fixed wall");
+    println("fixed_ok");
+
+    return 0;
+};

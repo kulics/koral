@@ -234,9 +234,12 @@ public let canonicalize_path[T: IntoPath](path: T): Result[Path] = {
 // ============================================================================
 
 /// Open a file and return a File handle (unbuffered, directly wraps fd).
+///
+/// The path is passed to the OS unchanged: userland normalization would make
+/// ".." resolve lexically instead of through symlinks the way POSIX does.
 public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File] = {
-    let normalized = path.into_path().normalize();
-    let s = normalized.to_string();
+    let opened = path.into_path();
+    let s = opened.to_string();
     let mutable open_mode: Int32 = 0;
     let mutable perm: UInt32 = 0;
     when mode in {
@@ -265,7 +268,7 @@ public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File] = {
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };
-    return Result[File].Ok(File(FileStorage(fd, normalized)));
+    return Result[File].Ok(File(FileStorage(fd, opened)));
 };
 
 /// Create a new file (fails if file already exists).
@@ -277,7 +280,7 @@ public let create_file[T: IntoPath](path: T): Result[File] = open_file(path, .Cr
 
 /// Query file/directory metadata information (follows symlinks).
 public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
-    let s = path.into_path().normalize().to_string();
+    let s = path.into_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
     let result = __koral_stat(s.data, &stat_buf);
     if result != 0 then {
@@ -303,7 +306,7 @@ public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
 
 /// Query symlink metadata (does NOT follow symlinks).
 public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
-    let s = path.into_path().normalize().to_string();
+    let s = path.into_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
     let result = __koral_lstat(s.data, &stat_buf);
     if result != 0 then {
@@ -333,7 +336,7 @@ public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
 
 /// Set file permissions
 public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void] = {
-    let s = path.into_path().normalize().to_string();
+    let s = path.into_path().to_string();
     let result = __koral_chmod(s.data, perm.mode());
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -342,10 +345,13 @@ public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void]
 };
 
 /// Create a hard link at `link` pointing to `to`
+///
+/// Both paths reach the OS unchanged; userland normalization would resolve
+/// ".." lexically instead of through symlinks the way POSIX does.
 public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
-    let norm_target = to.into_path().normalize().to_string();
-    let norm_link = link.into_path().normalize().to_string();
-    let result = __koral_link(norm_target.data, norm_link.data);
+    let target_s = to.into_path().to_string();
+    let link_s = link.into_path().to_string();
+    let result = __koral_link(target_s.data, link_s.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -353,10 +359,13 @@ public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Res
 };
 
 /// Create a symbolic link at `link` pointing to `to`
+///
+/// The target is stored verbatim (a relative target stays relative) and both
+/// paths reach the OS unchanged.
 public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
-    let norm_target = to.into_path().normalize().to_string();
-    let norm_link = link.into_path().normalize().to_string();
-    let result = __koral_symlink(norm_target.data, norm_link.data);
+    let target_s = to.into_path().to_string();
+    let link_s = link.into_path().to_string();
+    let result = __koral_symlink(target_s.data, link_s.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -364,21 +373,35 @@ public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Resul
 };
 
 /// Read the target path of a symbolic link
+///
+/// The target is returned verbatim. A readlink result equal to the buffer size
+/// means the target did not fit; the read is retried with a bigger buffer
+/// instead of returning a silently truncated path.
 public let read_symlink[T: IntoPath](path: T): Result[Path] = {
-    let s = path.into_path().normalize().to_string();
-    let buf = alloc_memory[UInt8](4096);
-    defer dealloc_memory(buf);
-    let result = __koral_readlink(s.data, buf, 4096);
-    if result < 0 then {
-        return Result[Path].Error(last_error_message());
+    let s = path.into_path().to_string();
+    let mutable buf_size: UInt = 4096;
+    while buf_size <= 1048576 then {
+        let buf = alloc_memory[UInt8](buf_size);
+        let result = __koral_readlink(s.data, buf, buf_size);
+        if result < 0 then {
+            dealloc_memory(buf);
+            return Result[Path].Error(last_error_message());
+        };
+        if UInt(result) < buf_size then {
+            let target = String.from_utf8_ptr_unchecked(buf, UInt(result));
+            dealloc_memory(buf);
+            return Result[Path].Ok(target.into_path());
+        };
+        // result == buf_size: the target was cut off; retry with more room.
+        dealloc_memory(buf);
+        buf_size = buf_size * 2;
     };
-    let target = String.from_utf8_ptr_unchecked(buf, UInt(result));
-    return Result[Path].Ok(target.into_path());
+    return Result[Path].Error("symlink target too long");
 };
 
 /// Truncate a file to the specified size
 public let truncate_file[T: IntoPath](path: T, size: UInt64): Result[Void] = {
-    let s = path.into_path().normalize().to_string();
+    let s = path.into_path().to_string();
     let result = __koral_truncate(s.data, Int64(size));
     if result != 0 then {
         return Result[Void].Error(last_error_message());

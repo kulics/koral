@@ -148,8 +148,19 @@ given Ipv4Addr: Parseable {
                 continue;
             };
             if b >= '0' and b <= '9' then {
-                current = current * 10 + UInt((b - '0'));
                 digit_count += 1;
+                // Reject inside the digit loop: a 4th digit or a value above
+                // 255 can never become a valid octet, and checking here keeps
+                // the accumulator below 1000 so it cannot wrap modulo 2^64
+                // before the range check ("18446744073709551616.1.2.3" must
+                // not parse as 0.1.2.3).
+                if digit_count > 3 then {
+                    return Result[Ipv4Addr].Error("invalid IPv4 address");
+                };
+                current = current * 10 + UInt((b - '0'));
+                if current > 255 then {
+                    return Result[Ipv4Addr].Error("invalid IPv4 address");
+                };
                 i += 1;
                 continue;
             };
@@ -433,6 +444,65 @@ given Ipv6Addr: Parseable {
             return Result[Ipv6Addr].Error("invalid IPv6 address");
         };
 
+        // RFC 4291 §2.2 / RFC 5952 §5: the final 32 bits may be written as an
+        // embedded dotted-quad IPv4 address ("::ffff:192.168.1.1"), the form
+        // inet_ntop produces on every platform. When the tail after the last
+        // ':' contains a dot, parse it via Ipv4Addr.parse and fold it into the
+        // final two 16-bit groups, then parse the rewritten text as IPv6.
+        let mutable last_colon = Option[UInt].None();
+        let mutable li: UInt = 0;
+        while li < effective_len then {
+            if s[li] == ':' then {
+                last_colon = Option[UInt].Some(li);
+            };
+            li += 1;
+        };
+        when last_colon in {
+            .Some(lc) then {
+                let tail_start = lc + 1;
+                let mutable tail_has_dot = false;
+                let mutable ti = tail_start;
+                while ti < effective_len then {
+                    if s[ti] == '.' then {
+                        tail_has_dot = true;
+                        break;
+                    };
+                    ti += 1;
+                };
+                if tail_has_dot then {
+                    let mutable tail = StringBuilder.new();
+                    let mutable tj = tail_start;
+                    while tj < effective_len then {
+                        tail.push_byte(s[tj]);
+                        tj += 1;
+                    };
+                    let v4 = when Ipv4Addr.parse(tail.to_string()) in {
+                        .Ok(addr) then addr,
+                        .Error(_) then {
+                            return Result[Ipv6Addr].Error("invalid IPv6 address");
+                        },
+                    };
+                    let octs = v4.octets();
+                    // Fold the four octets into the final two 16-bit groups.
+                    let g1 = UInt16(UInt(octs[0]) * 256 + UInt(octs[1]));
+                    let g2 = UInt16(UInt(octs[2]) * 256 + UInt(octs[3]));
+                    let rewritten = StringBuilder.new();
+                    let mutable ri: UInt = 0;
+                    while ri <= lc then {
+                        rewritten.push_byte(s[ri]);
+                        ri += 1;
+                    };
+                    rewritten.push_string(Ipv6Addr.hex_string(g1));
+                    rewritten.push_byte(':');
+                    rewritten.push_string(Ipv6Addr.hex_string(g2));
+                    // The rewritten text has no dots, so the recursion bottoms
+                    // out in the plain IPv6 path below.
+                    return Ipv6Addr.parse(rewritten.to_string());
+                };
+            },
+            .None() then {},
+        };
+
         let mutable double_colon_pos = Option[UInt].None();
         let mutable di: UInt = 0;
         while di < effective_len - 1 then {
@@ -501,7 +571,11 @@ given Ipv6Addr: Parseable {
                 };
 
                 let total = before.count() + after.count();
-                if total > 8 then {
+                // RFC 4291 §2.2: '::' stands for one or more groups of zeros,
+                // so it must compress at least one group. With 8 explicit
+                // groups a '::' would compress zero groups ("1:2:3:4:5:6:7:8::")
+                // and is rejected here as well as any longer form.
+                if total >= 8 then {
                     return Result[Ipv6Addr].Error("invalid IPv6 address");
                 };
 

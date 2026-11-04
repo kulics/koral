@@ -10,6 +10,10 @@ using "std" { ... };
 // All parse functions return Result — never panic on any input.
 // ============================================================================
 
+// Correctly-rounded decimal -> double (strtod); the argument must be a
+// NUL-terminated Koral String's .data.
+let foreign __koral_parse_float64(cstr: *UInt8): Float64;
+
 // ---------------------------------------------------------------------------
 // Helper functions
 // ---------------------------------------------------------------------------
@@ -28,6 +32,28 @@ private let digit_value(ch: UInt8, radix: UInt): UInt = if ch >= '0' and ch <= '
 )
 else if ch >= 'a' and ch <= 'z' then UInt((ch - 'a')) + 10
 else if ch >= 'A' and ch <= 'Z' then UInt((ch - 'A')) + 10 else panic("invalid digit");
+
+// Compare `s[start..]` against `word`, ignoring ASCII case.
+private let ascii_iequals_rest(s: String, start: UInt, word: String): Bool = {
+    let remaining = s.count() - start;
+    if remaining != word.count() then {
+        return false;
+    };
+    let mutable i: UInt = 0;
+    while i < remaining then {
+        let a = s[start + i];
+        let b = word[i];
+        if a != b then {
+            let al = if a >= 'A' and a <= 'Z' then a + 32 else a;
+            let bl = if b >= 'A' and b <= 'Z' then b + 32 else b;
+            if al != bl then {
+                return false;
+            };
+        };
+        i += 1;
+    };
+    return true;
+};
 
 // ---------------------------------------------------------------------------
 // given Int Parseable, Int RadixParseable
@@ -66,16 +92,21 @@ given Int: RadixParseable {
             i += 1;
         };
 
-        // Skip optional radix prefix
+        // Skip optional radix prefix; `prefix_end` marks the position just
+        // after a consumed prefix so a separator there is accepted.
+        let mutable prefix_end: UInt = UInt.max_value();
         if i + 1 < len then {
             let c0 = trimmed[i];
             let c1 = trimmed[i + 1];
             if c0 == '0' then {
                 if radix == 2 and (c1 == 'b' or c1 == 'B') then {
+                    prefix_end = i + 2;
                     i += 2;
                 } else if radix == 8 and (c1 == 'o' or c1 == 'O') then {
+                    prefix_end = i + 2;
                     i += 2;
                 } else if radix == 16 and (c1 == 'x' or c1 == 'X') then {
+                    prefix_end = i + 2;
                     i += 2;
                 };
             };
@@ -85,16 +116,28 @@ given Int: RadixParseable {
             return Result[Int].Error("no digits found");
         };
 
-        // Parse digits with overflow check
-        let base = Int(radix);
-        let mutable result: Int = 0;
+        // Parse digits, accumulating the magnitude in `UInt` so that the
+        // magnitude of `Int.min_value()` (2^63) is representable; the signed
+        // range check happens after the sign is known.
+        let base = radix;
+        let magnitude_limit = if is_negative then UInt(Int.max_value()) + 1 else UInt(
+            Int.max_value(),
+        );
+        let mutable result: UInt = 0;
         let mutable has_digit = false;
 
         while i < len then {
             let ch = trimmed[i];
 
             if ch == '_' then {
-                if not has_digit then {
+                // A separator must follow a digit or the radix prefix, and
+                // must precede a digit.
+                let prev_ok = (i > 0 and is_digit_for_radix(trimmed[i - 1], radix))
+                    or i == prefix_end;
+                if not prev_ok or i + 1 >= len or not is_digit_for_radix(
+                    trimmed[i + 1],
+                    radix,
+                ) then {
                     return Result[Int].Error("unexpected underscore");
                 };
                 i += 1;
@@ -105,9 +148,9 @@ given Int: RadixParseable {
                 return Result[Int].Error("invalid character");
             };
 
-            let d = Int(digit_value(ch, radix));
+            let d = digit_value(ch, radix);
 
-            if result > (Int.max_value() - d) / base then {
+            if result > (magnitude_limit - d) / base then {
                 return Result[Int].Error("overflow");
             };
 
@@ -121,10 +164,14 @@ given Int: RadixParseable {
         };
 
         if is_negative then {
-            result = 0 - result;
+            // 2^63 has no positive `Int` counterpart; map it straight to the
+            // minimum, otherwise negate the magnitude.
+            if result == UInt(Int.max_value()) + 1 then {
+                return Result[Int].Ok(Int.min_value());
+            };
+            return Result[Int].Ok(0 - Int(result));
         };
-
-        return Result[Int].Ok(result);
+        return Result[Int].Ok(Int(result));
     };
 };
 
@@ -274,16 +321,21 @@ given UInt: RadixParseable {
             i += 1;
         };
 
-        // Skip optional radix prefix
+        // Skip optional radix prefix; `prefix_end` marks the position just
+        // after a consumed prefix so a separator there is accepted.
+        let mutable prefix_end: UInt = UInt.max_value();
         if i + 1 < len then {
             let c0 = trimmed[i];
             let c1 = trimmed[i + 1];
             if c0 == '0' then {
                 if radix == 2 and (c1 == 'b' or c1 == 'B') then {
+                    prefix_end = i + 2;
                     i += 2;
                 } else if radix == 8 and (c1 == 'o' or c1 == 'O') then {
+                    prefix_end = i + 2;
                     i += 2;
                 } else if radix == 16 and (c1 == 'x' or c1 == 'X') then {
+                    prefix_end = i + 2;
                     i += 2;
                 };
             };
@@ -300,7 +352,14 @@ given UInt: RadixParseable {
         while i < len then {
             let ch = trimmed[i];
             if ch == '_' then {
-                if not has_digit then {
+                // A separator must follow a digit or the radix prefix, and
+                // must precede a digit.
+                let prev_ok = (i > 0 and is_digit_for_radix(trimmed[i - 1], radix))
+                    or i == prefix_end;
+                if not prev_ok or i + 1 >= len or not is_digit_for_radix(
+                    trimmed[i + 1],
+                    radix,
+                ) then {
                     return Result[UInt].Error("unexpected underscore");
                 };
                 i += 1;
@@ -435,50 +494,55 @@ given Float64: Parseable {
 
     /// Parse a floating-point number from `s`, trimming surrounding whitespace.
     /// Accepts `NaN`, `inf`, decimals, and exponents like `1e10`; errors on malformed input.
+    /// The value is correctly rounded by the C runtime; exponents outside the
+    /// `Float64` range come back as ±inf/0.0 instead of panicking.
     public parse(s: String): Result[Self] = {
         let trimmed = s.trim_ascii();
         if trimmed.is_empty() then {
             return Result[Float64].Error("empty string");
         };
 
-        // Special values
-        if trimmed.equals("NaN") or trimmed.equals("nan") then {
-            return Result[Float64].Ok(Float64.nan());
-        };
-        if trimmed.equals("Inf") or trimmed.equals("inf") or trimmed.equals("+Inf") then {
-            return Result[Float64].Ok(Float64.inf());
-        };
-        if trimmed.equals("-Inf") or trimmed.equals("-inf") then {
-            return Result[Float64].Ok(0.0 - Float64.inf());
-        };
-
-        let mutable i: UInt = 0;
         let len = trimmed.count();
 
-        // Sign
+        // Optional sign
         let is_negative = trimmed[0] == '-';
-        if is_negative or trimmed[0] == '+' then {
-            i += 1;
+        let has_sign = is_negative or trimmed[0] == '+';
+        let mutable i: UInt = 0;
+        if has_sign then {
+            i = 1;
         };
 
-        // Integer part
-        let mutable int_part: Float64 = 0.0;
+        // Special values: an optional sign followed by `inf`/`infinity`/`nan`
+        // in any case (Python float() semantics).
+        if ascii_iequals_rest(trimmed, i, "inf") or ascii_iequals_rest(
+            trimmed,
+            i,
+            "infinity",
+        ) then {
+            return Result[Float64].Ok(
+                if is_negative then 0.0 - Float64.inf() else Float64.inf(),
+            );
+        };
+        if ascii_iequals_rest(trimmed, i, "nan") then {
+            let nan_value = Float64.nan();
+            return Result[Float64].Ok(
+                if is_negative then Float64.from_bits(
+                    nan_value.to_bits() | (UInt64(1) << 63),
+                ) else nan_value,
+            );
+        };
+
+        // Syntax validation scan: digits, one dot, optional exponent digits.
         let mutable has_int = false;
         while i < len and trimmed[i] >= '0' and trimmed[i] <= '9' then {
-            int_part = int_part * 10.0 + Float64((trimmed[i] - '0'));
             has_int = true;
             i += 1;
         };
 
-        // Fractional part
-        let mutable frac_part: Float64 = 0.0;
         let mutable has_frac = false;
         if i < len and trimmed[i] == '.' then {
             i += 1;
-            let mutable scale: Float64 = 0.1;
             while i < len and trimmed[i] >= '0' and trimmed[i] <= '9' then {
-                frac_part = frac_part + Float64((trimmed[i] - '0')) * scale;
-                scale = scale * 0.1;
                 has_frac = true;
                 i += 1;
             };
@@ -488,35 +552,18 @@ given Float64: Parseable {
             return Result[Float64].Error("no digits found");
         };
 
-        let mutable result = int_part + frac_part;
-
-        // Exponent part
         if i < len and (trimmed[i] == 'e' or trimmed[i] == 'E') then {
             i += 1;
-            let exp_negative = i < len and trimmed[i] == '-';
             if i < len and (trimmed[i] == '+' or trimmed[i] == '-') then {
                 i += 1;
             };
-            let mutable exp: Int = 0;
             let mutable has_exp = false;
             while i < len and trimmed[i] >= '0' and trimmed[i] <= '9' then {
-                exp = exp * 10 + Int((trimmed[i] - '0'));
                 has_exp = true;
                 i += 1;
             };
             if not has_exp then {
                 return Result[Float64].Error("invalid exponent");
-            };
-            let mutable power: Float64 = 1.0;
-            let mutable e = exp;
-            while e > 0 then {
-                power = power * 10.0;
-                e -= 1;
-            };
-            if exp_negative then {
-                result = result / power;
-            } else {
-                result = result * power;
             };
         };
 
@@ -524,11 +571,10 @@ given Float64: Parseable {
             return Result[Float64].Error("trailing characters");
         };
 
-        if is_negative then {
-            result = 0.0 - result;
-        };
-
-        return Result[Float64].Ok(result);
+        // The scan accepted the whole literal, so `trimmed` is exactly a valid
+        // numeric literal (sign included); strtod supplies the correct rounding
+        // and preserves the sign of -0.0.
+        return Result[Float64].Ok(__koral_parse_float64(trimmed.data));
     };
 };
 

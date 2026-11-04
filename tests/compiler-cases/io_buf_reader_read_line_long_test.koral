@@ -1,0 +1,50 @@
+// EXPECT: All BufReader read_line tests passed
+
+using "std/io" { ... };
+
+let main(): Void = {
+    // Line 1: 5000 a's + newline (spans several internal fills).
+    // Line 2: exactly 4096 b's + newline (the old fixed-temp split point).
+    // Line 3: "ok" + newline.
+    // Tail:   "tail" with no trailing newline.
+    let mutable b: List[UInt8] = [];
+    for i in 0..<5000 then {
+        b.push(97);
+    };
+    b.push(10);
+    for i in 0..<4096 then {
+        b.push(98);
+    };
+    b.push(10);
+    b.push(111);
+    b.push(107);
+    b.push(10);
+    b.push(116);
+    b.push(97);
+    b.push(105);
+    b.push(108);
+
+    let bb = ByteBuffer.from_bytes(b);
+    let r = BufReader[ByteBuffer].new(bb);
+
+    let l1 = r.read_line().unwrap().unwrap();
+    assert(l1.count() == 5001, "5000-byte line comes back as one line");
+    assert(l1.starts_with("aaa"), "long line head intact");
+
+    let l2 = r.read_line().unwrap().unwrap();
+    assert(l2.count() == 4097, "4096-byte line comes back as one line");
+    assert(l2.starts_with("bbb"), "4096 line head intact");
+
+    let l3 = r.read_line().unwrap().unwrap();
+    assert(l3 == "ok\n", "short line keeps its newline");
+
+    let l4 = r.read_line().unwrap().unwrap();
+    assert(l4 == "tail", "unterminated tail is its own line");
+
+    when r.read_line().unwrap() in {
+        .Some(v) then assert(false, "end of input should be None"),
+        .None() then {},
+    };
+
+    println("All BufReader read_line tests passed");
+};

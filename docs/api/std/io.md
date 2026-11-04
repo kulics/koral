@@ -189,6 +189,8 @@ given ByteBuffer: Writer {
 /// Implements `Seeker`, moving the cursor within the buffer.
 given ByteBuffer: Seeker {
     /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
+    /// Out-of-range targets — including offsets that overflow `Int64` arithmetic — fail
+    /// with `Result.Error` and never panic.
     public seek(self, pos: SeekOrigin): Result[UInt64];
 };
 

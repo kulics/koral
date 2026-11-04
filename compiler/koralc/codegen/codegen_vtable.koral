@@ -972,9 +972,19 @@ given CodeGen {
             "static \(return_c_type) \(wrapper_name)(\(params_str)) {\n",
         );
 
-        let has_copy = when wrapper_self_type in {
+        let mutable has_copy = when wrapper_self_type in {
             .StructureType(_) or .EnumType(_) then true,
             _ then false,
+        };
+        // Borrowed-self safety net (see codegen_borrowed_self.koral): a
+        // borrowed method does not release its `self`, so the wrapper must
+        // hand it the raw handle and let the trailing `__koral_release_value`
+        // -- the counterpart of the trait call site's retain -- balance the
+        // count. The analysis already keeps vtable targets on the owned
+        // convention; this keeps the pairing correct even if a name-fallback
+        // resolution ever reaches a borrowed method.
+        if self.borrowed_self_def_ids.contains(actual_method_symbol.def_id.id) then {
+            has_copy = false;
         };
 
         if has_copy then {

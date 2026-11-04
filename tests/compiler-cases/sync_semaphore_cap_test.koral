@@ -1,0 +1,26 @@
+// The permit count never exceeds the initial count: release() beyond the cap
+// would let more threads through than `new(n)` promises, so it panics.
+// EXPECT-ERROR: Panic: Semaphore.release: all permits are already available
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    // Balanced acquire/release keeps working inside the cap.
+    let sem = Semaphore.new(2);
+    sem.acquire();
+    sem.acquire();
+    assert(not sem.try_acquire(), "0 permits available");
+    sem.release();
+    assert(sem.try_acquire(), "1 permit after release");
+    sem.release();
+    sem.release();
+    assert(sem.try_acquire(), "cap of 2 permits is reachable");
+    sem.release();
+
+    // One release too many: the cap of 1 is already fully available.
+    let tight = Semaphore.new(1);
+    tight.acquire();
+    tight.release();
+    tight.release();
+    println("should_not_print");
+};

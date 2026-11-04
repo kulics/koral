@@ -1,0 +1,51 @@
+// EXPECT: set_tombstone_churn_ok
+// EXPECT: set_tombstone_reinsert_ok
+
+// Tombstone reclamation (the Set mirror of Dict): alternating insert/remove
+// of distinct values used to saturate the bucket array with Deleted tags while
+// count() stayed <= 1 and the size-only rehash trigger never fired -- every
+// later probe degraded to a full-table scan permanently. After any churn the
+// table must self-heal and keep returning correct answers with a correct count.
+
+let main(): Int = {
+    let mutable s = Set[Int].new();
+
+    // Churn: each cycle inserts and removes a distinct value.
+    for i in 0..<10000 then {
+        s.insert(i);
+        assert(s.contains(i), "contains right after insert");
+        s.remove(i);
+        assert(not s.contains(i), "not contains after remove");
+        assert(s.count() == 0, "count stays 0 through churn");
+    };
+    println("set_tombstone_churn_ok");
+
+    // A following burst must behave like a fresh set: correct answers,
+    // correct count, and surviving the rehash-size probes of growth.
+    for i in 0..<1000 then {
+        s.insert(i);
+    };
+    assert(s.count() == 1000, "count after refill");
+    for i in 0..<1000 then {
+        assert(s.contains(i), "contains after refill");
+    };
+
+    // Remove a third (more tombstones), then re-verify.
+    for i in 0..<1000 then {
+        if i % 3 == 0 then {
+            s.remove(i);
+        };
+    };
+    let mutable expected = UInt(0);
+    for i in 0..<1000 then {
+        if i % 3 == 0 then {
+            assert(not s.contains(i), "removed stays absent");
+        } else {
+            assert(s.contains(i), "kept stays present");
+            expected = expected + 1;
+        };
+    };
+    assert(s.count() == expected, "count matches live entries");
+    println("set_tombstone_reinsert_ok");
+    return 0;
+};

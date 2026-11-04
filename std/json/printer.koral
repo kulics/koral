@@ -6,7 +6,7 @@ using "std" { ... };
 // on JsonValue. Also implements ToString trait for JsonValue.
 // ============================================================================
 
-private let to_string_compact_array(elements: List[JsonValue]): String = {
+private let to_string_compact_array(elements: List[JsonValue], depth: UInt): String = {
     let mutable result = StringBuilder.new();
     result.push_byte('[');
     let count = elements.count();
@@ -14,13 +14,16 @@ private let to_string_compact_array(elements: List[JsonValue]): String = {
         if i > 0 then {
             result.push_byte(',');
         };
-        result.push_string(elements[i].to_string());
+        result.push_string(to_string_compact_impl(elements[i], depth + 1));
     };
     result.push_byte(']');
     return result.to_string();
 };
 
-private let to_string_compact_object(entries: Dict[String, JsonValue]): String = {
+private let to_string_compact_object(
+    entries: Dict[String, JsonValue],
+    depth: UInt,
+): String = {
     let mutable result = StringBuilder.new();
     result.push_byte('{');
     let mutable first = true;
@@ -31,24 +34,31 @@ private let to_string_compact_object(entries: Dict[String, JsonValue]): String =
         first = false;
         result.push_string(escape_json_string(entry.first));
         result.push_byte(':');
-        result.push_string(entry.second.to_string());
+        result.push_string(to_string_compact_impl(entry.second, depth + 1));
     };
     result.push_byte('}');
     return result.to_string();
+};
+
+/// Compact rendering with a depth budget; values deeper than `max_json_depth`
+/// render as `null` instead of recursing without bound.
+private let to_string_compact_impl(value: JsonValue, depth: UInt): String = {
+    if depth > max_json_depth then {
+        return "null";
+    };
+    return when value in {
+        .Null() then "null",
+        .Bool(v) then if v then "true" else "false",
+        .Number(v) then format_json_number(v),
+        .String(v) then escape_json_string(v),
+        .Array(elements) then to_string_compact_array(elements, depth),
+        .Object(entries) then to_string_compact_object(entries, depth),
+    };
 };
 
 /// Implements `ToString`, formatting compact JSON.
 given JsonValue: ToString {
 
     /// Format as compact JSON with no whitespace.
-    public to_string(self): String = {
-        return when self in {
-            .Null() then "null",
-            .Bool(v) then if v then "true" else "false",
-            .Number(v) then format_json_number(v),
-            .String(v) then escape_json_string(v),
-            .Array(elements) then to_string_compact_array(elements),
-            .Object(entries) then to_string_compact_object(entries),
-        };
-    };
+    public to_string(self): String = to_string_compact_impl(self, 0);
 };

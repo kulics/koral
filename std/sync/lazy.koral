@@ -12,29 +12,42 @@ using "std" { ... };
 // the cached value.
 // ============================================================================
 
+let foreign __koral_thread_current_id(): UInt64;
+
 /// Thread-safe lazy value whose initializer runs at most once.
 public type mutable Lazy[T: Any](
     private state: AtomicInt,
     private mutex: Mutex,
     private func: () -> T,
     private mutable value: Option[T],
+    private mutable init_owner: UInt64,
+    private mutable initializing: Bool,
 );
 
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`.
     public new(f: () -> T): Lazy[T] =
-        Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None());
+        Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None(), UInt64(0), false);
 
     /// Return the value, running and caching the initializer on first use.
+    /// The initializer must not call `get()` on the same `Lazy`: the guard
+    /// mutex is non-recursive, so the re-entrant call would deadlock holding
+    /// it. That mistake panics with a diagnostic instead of hanging.
     public get(self): T = {
         if self.state.load() == 1 then {
             return self.value.unwrap();
         };
+        if self.initializing and self.init_owner == __koral_thread_current_id() then {
+            panic("Lazy.get: the initializer called get() on the same Lazy");
+        };
         self.mutex.lock();
         defer self.mutex.unlock();
         if self.state.load() == 0 then {
+            self.initializing = true;
+            self.init_owner = __koral_thread_current_id();
             let result = self.func();
+            self.initializing = false;
             self.value = Option[T].Some(result);
             self.state.store(1);
         };

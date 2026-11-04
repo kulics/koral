@@ -30,9 +30,21 @@ let foreign __koral_mkdtemp(template: *UInt8): *UInt8;
 // Helpers
 // ============================================================================
 
-/// Convert a dirent type code to FileType
-private let dir_entry_type(entry: *CDirEntry): FileType = {
+/// Whether `c` is an ASCII letter (Windows drive letters are letter-only).
+private let is_ascii_letter(c: UInt8): Bool = (c >= 65 and c <= 90) or (c >= 97 and c <= 122);
+
+/// Convert a dirent type code to FileType.
+/// `path` is the entry's full path: when the filesystem reports an unknown
+/// type (-1) the entry is classified with lstat instead of guessing, so real
+/// subdirectories are still walked on such filesystems.
+private let dir_entry_type(entry: *CDirEntry, path: Path): FileType = {
     let t = __koral_dirent_type(entry);
+    if t == Int32(0) - 1 then {
+        return when symlink_info(path) in {
+            .Ok(info) then info.file_type(),
+            .Error(_) then FileType.Other(),
+        };
+    };
     return when t in {
         0 then FileType.RegularFile(),
         1 then FileType.Directory(),
@@ -127,7 +139,7 @@ given DirIterator: Iterator[DirEntry] {
         };
 
         let full_path = self.storage.base.join(name);
-        let ft = dir_entry_type(entry);
+        let ft = dir_entry_type(entry, full_path);
         return Option[DirEntry].Some(DirEntry(name, full_path, ft));
     };
 };
@@ -177,6 +189,9 @@ public let create_dir[T: IntoPath](path: T): Result[Void] = {
 };
 
 /// Create directory recursively (creates all missing parent directories)
+///
+/// The final path counts as created only when it is a directory: an existing
+/// regular file (or other non-directory) at `path` is an error, not success.
 public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
     let mutable normalized = path.into_path().to_string().replace_all("\\", with = "/");
     if normalized.is_empty() then {
@@ -184,14 +199,15 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
     };
 
     // Keep root and drive-root forms intact while trimming trailing separators.
+    // A drive root is letter-only ("C:/"), matching Path.is_absolute.
     while normalized.ends_with("/") and normalized.count() > 1 and not (normalized.count(
-    ) == 3 and normalized[1] == ':' and normalized[2] == '/') then {
+    ) == 3 and is_ascii_letter(normalized[0]) and normalized[1] == ':' and normalized[2] == '/') then {
         normalized = normalized.substring(0..<(normalized.count() - 1));
     };
 
     let target = normalized.into_path();
     if path_exist(target) then {
-        return Result[Void].Ok({});
+        return dir_all_final_check(target);
     };
 
     let mutable current = StringBuilder.new();
@@ -201,10 +217,20 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
     if normalized.starts_with("//") then {
         current.push_string("//");
         i = 2;
+        if is_windows_host() then {
+            // The first UNC component names the server: it already exists and
+            // cannot be created, so carry it into `current` without ever
+            // mkdir-ing it.
+            let server_start = i;
+            while i < n and normalized[i] != '/' then {
+                i += 1;
+            };
+            current.push_string(normalized.substring(server_start..<i));
+        };
     } else if normalized.starts_with("/") then {
         current.push_byte('/');
         i = 1;
-    } else if n >= 2 and normalized[1] == ':' then {
+    } else if n >= 2 and is_ascii_letter(normalized[0]) and normalized[1] == ':' then {
         current.push_byte(normalized[0]);
         current.push_byte(':');
         i = 2;
@@ -240,7 +266,7 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
 
         // Skip mkdir on bare Windows drive prefixes like "C:".
         let current_text = current.to_string();
-        if current_text.count() == 2 and current_text[1] == ':' then {
+        if current_text.count() == 2 and is_ascii_letter(current_text[0]) and current_text[1] == ':' then {
             continue;
         };
 
@@ -255,7 +281,19 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
         };
     };
 
-    return Result[Void].Ok({});
+    return dir_all_final_check(target);
+};
+
+/// Final check shared by create_dir_all's early exit and its tail: an existing
+/// path only counts when it is a directory.
+private let dir_all_final_check(target: Path): Result[Void] = when file_info(target) in {
+    .Ok(info) then {
+        if info.is_dir() then {
+            return Result[Void].Ok({});
+        };
+        return Result[Void].Error("path exists and is not a directory");
+    },
+    .Error(e) then Result[Void].Error(e),
 };
 
 /// Remove empty directory
@@ -265,8 +303,19 @@ public let remove_dir[T: IntoPath](path: T): Result[Void] = {
 };
 
 /// Remove directory recursively (removes all contents first)
+///
+/// Symbolic links are never followed: when `path` itself is a symlink only the
+/// link is removed (its target is left untouched), and links found inside the
+/// tree are unlinked, not descended into.
 public let remove_dir_all[T: IntoPath](path: T): Result[Void] = {
     let p = path.into_path();
+    let root_info = symlink_info(p) or return;
+    if root_info.is_symlink() then {
+        return remove_file(p);
+    };
+    if not root_info.is_dir() then {
+        return Result[Void].Error("remove_dir_all: not a directory");
+    };
     let mutable dirs: List[Path] = [];
     let mutable entries = walk_dir(p) or return;
 

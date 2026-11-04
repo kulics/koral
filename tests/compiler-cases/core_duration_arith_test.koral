@@ -1,0 +1,50 @@
+// EXPECT: mul_neg_ok
+// EXPECT: mul_neg_eq_ok
+// EXPECT: div_neg_ok
+// EXPECT: div_neg_three_halves_ok
+// EXPECT: mul_pos_ok
+// EXPECT: div_pos_ok
+
+// Duration * Int and Duration / Int normalize their (secs, nanos) split after
+// truncating division: a negative total keeps nanos in [0, 1e9) instead of
+// leaving it negative (which broke the normalization invariant and made
+// equal durations compare unequal).
+
+let main(): Int = {
+    // 500ms * -1 = -1s + 500_000_000ns, not 0s - 500_000_000ns.
+    // as_seconds truncates toward zero (-0.5s -> 0); the nanos total pins the
+    // normalized (secs, nanos) split.
+    let x = 500_000_000ns * -1;
+    if x.as_seconds() == Int64(0) and x.as_nanoseconds() == Int64(-500_000_000) then println(
+        "mul_neg_ok",
+    ) else println("FAIL mul_neg: " + x.to_string());
+
+    // The unnormalized form used to compare unequal to its equal value.
+    let expected = 0s - 500_000_000ns;
+    if x == expected then println("mul_neg_eq_ok") else println("FAIL mul_neg_eq");
+
+    // -1s / 2 truncates toward zero, then normalizes to -1s + 500_000_000ns.
+    let y = (0s - 1s) / 2;
+    if y.as_seconds() == Int64(0) and y.as_nanoseconds() == Int64(-500_000_000) then println(
+        "div_neg_ok",
+    ) else println("FAIL div_neg: " + y.to_string());
+
+    // -3s / 2 = -1.5s (normalized to -2s + 500_000_000ns).
+    let z = (0s - 3s) / 2;
+    if z.as_seconds() == Int64(-1) and z.as_nanoseconds() == Int64(-1_500_000_000) then println(
+        "div_neg_three_halves_ok",
+    ) else println("FAIL div_neg_three_halves: " + z.to_string());
+
+    // Positive factors keep their previous behavior.
+    let p = 1_500_000_000ns * 2;
+    if p.as_seconds() == Int64(3) and p.as_nanoseconds() == Int64(3_000_000_000) then println(
+        "mul_pos_ok",
+    ) else println("FAIL mul_pos: " + p.to_string());
+
+    let q = 3s / 2;
+    if q.as_seconds() == Int64(1) and q.as_nanoseconds() == Int64(1_500_000_000) then println(
+        "div_pos_ok",
+    ) else println("FAIL div_pos: " + q.to_string());
+
+    return 0;
+};

@@ -1,0 +1,33 @@
+// EXPECT: shutdown_reports_errors_ok
+
+using "std/net" { ... };
+using "std/async" { ... };
+
+let foreign __koral_socket_close(fd: Int64): Int32;
+
+let main(): Void = {
+    // ENOTCONN ("socket is not connected") is normalized to success inside
+    // shutdown; that path is only reachable on sockets that were never
+    // connected, which the public API cannot construct. What is observable:
+    // the normalization is narrow — genuine failures are still reported as
+    // errors instead of being swallowed.
+    let listener = TcpListener.bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = run_task(
+        () => {
+            let pair = listener.accept().unwrap();
+            let _ = pair.first;
+        },
+    );
+    let client = TcpSocket.connect(addr.to_string()).unwrap();
+    server.wait();
+
+    // Close the fd behind the socket's back: shutdown now fails with EBADF.
+    let fd = client.fd();
+    let _ = __koral_socket_close(Int64(fd));
+    when client.shutdown(Shutdown.Both()) in {
+        .Ok(_) then assert(false, "shutdown on a closed fd must report the error"),
+        .Error(_) then {},
+    };
+    println("shutdown_reports_errors_ok");
+};

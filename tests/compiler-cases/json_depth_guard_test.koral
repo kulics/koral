@@ -1,0 +1,89 @@
+// EXPECT: deep_parse_error_ok
+// EXPECT: deep_parse_300_error_ok
+// EXPECT: parse_200_ok
+// EXPECT: deep_print_ok
+// EXPECT: deep_pretty_ok
+// EXPECT: deep_eq_ok
+// EXPECT: shallow_eq_ok
+
+// Nesting depth is capped: deeply nested input fails with a JsonError instead
+// of a stack overflow, and printing/comparing programmatically built deep
+// trees is depth-guarded too (values past the cap render as "null" and
+// compare unequal instead of crashing).
+
+using "std/json" { ... };
+
+let brackets(n: UInt, open: Bool): String = {
+    let mutable b = StringBuilder.new();
+    for _ in 0..<n then {
+        b.push_byte(if open then '[' else ']');
+    };
+    return b.to_string();
+};
+
+let build_deep(n: UInt): JsonValue = {
+    let mutable v = JsonValue.Null();
+    for _ in 0..<n then {
+        let inner: List[JsonValue] = [v];
+        v = JsonValue.Array(inner);
+    };
+    return v;
+};
+
+let main(): Int = {
+    // 50000 nested arrays: documented error, not a SIGSEGV.
+    when JsonValue.parse(brackets(50000, true) + brackets(50000, false)) in {
+        .Ok(_) then println("FAIL deep_parse: accepted"),
+        .Error(e) then {
+            if e.message().contains("maximum nesting depth exceeded") then println(
+                "deep_parse_error_ok",
+            ) else println("FAIL deep_parse: " + e.message());
+        },
+    };
+
+    // 300 nested arrays is past the cap too.
+    when JsonValue.parse(brackets(300, true) + brackets(300, false)) in {
+        .Ok(_) then println("FAIL deep_parse_300: accepted"),
+        .Error(e) then {
+            if e.message().contains("maximum nesting depth exceeded") then println(
+                "deep_parse_300_error_ok",
+            ) else println("FAIL deep_parse_300: " + e.message());
+        },
+    };
+
+    // 200 nested arrays still parses.
+    when JsonValue.parse(brackets(200, true) + brackets(200, false)) in {
+        .Ok(v) then {
+            if v.to_string().count() == 400 then println("parse_200_ok")
+            else println("FAIL parse_200: wrong length");
+        },
+        .Error(e) then println("FAIL parse_200: " + e.message()),
+    };
+
+    // A 3000-deep tree prints through the depth guard: containers past the
+    // cap render as "null", so the output is "[[" ... "null" ... "]]" with
+    // exactly max depth + 1 brackets on each side.
+    let deep = build_deep(3000);
+    let printed = deep.to_string();
+    let expected = brackets(257, true) + "null" + brackets(257, false);
+    if printed == expected then println("deep_print_ok")
+    else println("FAIL deep_print: len=" + printed.count().to_string());
+
+    // The pretty printer carries the same guard.
+    let pretty = deep.to_string_pretty();
+    if pretty.contains("null") and pretty.count() > 0 then println("deep_pretty_ok")
+    else println("FAIL deep_pretty");
+
+    // Comparison past the cap reports unequal instead of recursing forever.
+    let deep2 = build_deep(3000);
+    if deep != deep2 then println("deep_eq_ok") else println("FAIL deep_eq: crashed or equal");
+
+    // Shallow structural equality is unaffected.
+    let els1: List[JsonValue] = [JsonValue.Number(1.0)];
+    let els2: List[JsonValue] = [JsonValue.Number(1.0)];
+    let s1 = JsonValue.Array(els1);
+    let s2 = JsonValue.Array(els2);
+    if s1 == s2 then println("shallow_eq_ok") else println("FAIL shallow_eq");
+
+    return 0;
+};

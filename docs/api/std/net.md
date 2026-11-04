@@ -285,6 +285,8 @@ given TcpSocket {
     public peer_addr(self): Result[SocketAddr];
     /// Shutdown the connection.
     /// Shutdown.Read() = 0, Shutdown.Write() = 1, Shutdown.Both() = 2
+    /// Shutting down a socket that is not connected is not an error: ENOTCONN
+    /// (WSAENOTCONN on Windows) is reported as success on every platform.
     public shutdown(self, how: Shutdown): Result[Void];
     /// Set TCP_NODELAY option (disable Nagle's algorithm).
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
@@ -293,17 +295,20 @@ given TcpSocket {
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
     public nodelay(self): Result[Bool];
     /// Set read timeout. None clears the timeout.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void];
     /// Set write timeout. None clears the timeout.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void];
     /// Get read timeout. Returns None if no timeout is set.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
     public read_timeout(self): Result[Option[Duration]];
     /// Get write timeout. Returns None if no timeout is set.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
     public write_timeout(self): Result[Option[Duration]];
 };
 
@@ -337,6 +342,8 @@ given UdpSocket {
     /// Returns the number of bytes sent.
     public send_to[T: IntoSocketAddr](self, addr: T, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
     /// Receive a datagram and return the number of bytes read and the sender's address.
+    /// Returns Error when the target span is empty: no datagram is received and
+    /// reporting a fabricated sender would be wrong.
     public recv_from(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[Pair[UInt, SocketAddr]];
     /// Associate this socket with a remote socket address (connected mode).
     /// After calling connect, use send/recv instead of send_to/recv_from.
@@ -361,17 +368,20 @@ given UdpSocket {
     /// level=1 (SOL_SOCKET), optname=6 (SO_BROADCAST)
     public broadcast(self): Result[Bool];
     /// Set read timeout. None clears the timeout.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void];
     /// Set write timeout. None clears the timeout.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void];
     /// Get read timeout. Returns None if no timeout is set.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
     public read_timeout(self): Result[Option[Duration]];
     /// Get write timeout. Returns None if no timeout is set.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
     public write_timeout(self): Result[Option[Duration]];
 };
 ```

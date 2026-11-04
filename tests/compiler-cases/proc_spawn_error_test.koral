@@ -1,0 +1,49 @@
+// EXPECT: proc_exec_error_ok
+// EXPECT: proc_chdir_error_ok
+// EXPECT: proc_run_piped_stdin_error_ok
+
+// Spawn failures must surface as Result.Error from spawn/run, never as a fake
+// exit code 127, and run() must refuse Piped stdin instead of hanging forever.
+using "std/os" { ... };
+using "std/proc" { ... };
+
+let main(): Void = {
+    // ========================================================================
+    // Missing program is a spawn Error with and without a working directory.
+    // ========================================================================
+    let r1 = Command.new("koral_definitely_missing_program_xyz").run();
+    when r1 in {
+        .Ok(_) then panic("missing program must be a spawn error"),
+        .Error(_) then {},
+    };
+    let r2 = Command.new("koral_definitely_missing_program_xyz").set_current_dir(
+        "/tmp".into_path(),
+    ).run();
+    when r2 in {
+        .Ok(_) then panic("missing program with cwd must be a spawn error"),
+        .Error(_) then {},
+    };
+    println("proc_exec_error_ok");
+
+    // ========================================================================
+    // A failing chdir is a spawn Error, not a silent 127.
+    // ========================================================================
+    let r3 = Command.new("echo").arg("x").set_current_dir(
+        "/koral_definitely_missing_dir_xyz".into_path(),
+    ).run();
+    when r3 in {
+        .Ok(_) then panic("bad cwd must be a spawn error"),
+        .Error(_) then {},
+    };
+    println("proc_chdir_error_ok");
+
+    // ========================================================================
+    // run() with Piped stdin errors instead of blocking on an empty pipe.
+    // ========================================================================
+    let r4 = Command.new("cat").set_stdin(IoRedirect.Piped()).run();
+    when r4 in {
+        .Ok(_) then panic("run() with Piped stdin must error"),
+        .Error(_) then {},
+    };
+    println("proc_run_piped_stdin_error_ok");
+};

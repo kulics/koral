@@ -1,0 +1,81 @@
+// EXPECT: list sort managed tests passed
+// RC-path guard for the List sort implementation over managed elements:
+// `List[String]` sorts correctly through both entry points, aliased handles
+// survive the sort, equal-length keys keep their order under `sort_by`, and
+// the program exits cleanly (pair this run with `leaks --atExit`).
+
+let main(): Void = {
+    // === sort(): 200 strings with duplicates, merge path ===
+    let mutable xs = List[String].new();
+    let mutable state: Int64 = 3;
+    let mutable i = UInt(0);
+    while i < 200 then {
+        state = (state * Int64(1103515245) + Int64(12345)) % Int64(2147483648);
+        xs.push("s" + (state % Int64(30)).to_string());
+        i = i + 1;
+    };
+    // An aliased handle into the list: sorting moves slots around it and must
+    // not disturb its reference.
+    let mutable alias = xs[5];
+    let mutable alias_text = alias;
+    xs.sort();
+    let mutable ok = true;
+    let mutable k = UInt(1);
+    while k < 200 then {
+        if xs[k - 1] > xs[k] then {
+            ok = false;
+        };
+        k = k + 1;
+    };
+    assert(ok, "strings sorted");
+    assert(alias.count() > 0, "alias alive after sort");
+    assert(alias_text == alias, "alias still equal to itself");
+    assert(xs.count() == 200, "count preserved");
+
+    // Idempotency: sorting again leaves the same order.
+    let mutable before0 = xs[0];
+    let mutable before199 = xs[199];
+    xs.sort();
+    assert(xs[0] == before0 and xs[199] == before199, "sort idempotent");
+
+    // === sort_by(): keys are string lengths, tags are the strings ===
+    let mutable ys = List[String].new();
+    let mutable n = 0;
+    while n < 120 then {
+        ys.push("s" + n.to_string());
+        n = n + 1;
+    };
+    ys.sort_by((s) => s.count());
+    let mutable len_ok = true;
+    let mutable stable_ok = true;
+    let mutable m = UInt(1);
+    while m < 120 then {
+        if ys[m - 1].count() > ys[m].count() then {
+            len_ok = false;
+        };
+        if ys[m - 1].count() == ys[m].count() then {
+            // Equal-length "s" + decimal strings order lexicographically
+            // exactly as they did numerically at insertion time, so a stable
+            // sort_by keeps the lexicographic order within each group.
+            if ys[m - 1] >= ys[m] then {
+                stable_ok = false;
+            };
+        };
+        m = m + 1;
+    };
+    assert(len_ok, "lengths non-decreasing");
+    assert(stable_ok, "equal-length groups keep order");
+
+    // === sort(): under the cutoff, straight insertion path with strings ===
+    let mutable small = List[String].new();
+    small.push("pear");
+    small.push("apple");
+    small.push("orange");
+    small.push("apple");
+    small.push("banana");
+    small.sort();
+    assert(small[0] == "apple" and small[1] == "apple", "small sorted head");
+    assert(small[4] == "pear", "small sorted tail");
+
+    println("list sort managed tests passed");
+};

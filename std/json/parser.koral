@@ -281,7 +281,7 @@ given JsonParser {
 
     // --- Array parsing ---
 
-    parse_array(self): Result[JsonValue] = {
+    parse_array(self, depth: UInt): Result[JsonValue] = {
         // Expect opening '['
         if self.pos >= self.len or self.input[self.pos] != '[' then {
             return self.make_error("expected '['");
@@ -301,7 +301,7 @@ given JsonParser {
 
         while true then {
             // Parse element
-            let value = self.parse_value() or return;
+            let value = self.parse_value(depth + 1) or return;
             elements.push(value);
 
             self.skip_whitespace();
@@ -327,7 +327,7 @@ given JsonParser {
 
     // --- Object parsing ---
 
-    parse_object(self): Result[JsonValue] = {
+    parse_object(self, depth: UInt): Result[JsonValue] = {
         // Expect opening '{'
         if self.pos >= self.len or self.input[self.pos] != '{' then {
             return self.make_error("expected '{'");
@@ -363,7 +363,7 @@ given JsonParser {
             self.skip_whitespace();
 
             // Parse value
-            let value = self.parse_value() or return;
+            let value = self.parse_value(depth + 1) or return;
 
             // Insert key-value pair (duplicate keys: later value overwrites)
             entries.insert(key, value);
@@ -395,8 +395,7 @@ given JsonParser {
         let start = self.pos;
 
         // Optional leading minus
-        let is_negative = self.pos < self.len and self.input[self.pos] == '-';
-        if is_negative then {
+        if self.pos < self.len and self.input[self.pos] == '-' then {
             self.pos += 1;
         };
 
@@ -406,7 +405,6 @@ given JsonParser {
             return self.make_error("invalid number");
         };
 
-        let mutable int_part: Float64 = 0.0;
         if self.input[self.pos] == '0' then {
             // Leading zero: only '0' is allowed, no '01', '02', etc.
             self.pos += 1;
@@ -415,13 +413,11 @@ given JsonParser {
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[
                 self.pos
             ] <= '9' then {
-                int_part = int_part * 10.0 + Float64((self.input[self.pos] - '0'));
                 self.pos += 1;
             };
         };
 
         // Optional fractional part
-        let mutable frac_part: Float64 = 0.0;
         if self.pos < self.len and self.input[self.pos] == '.' then {
             self.pos += 1;
             // Must have at least one digit after '.'
@@ -431,22 +427,16 @@ given JsonParser {
                 self.pos = start;
                 return self.make_error("invalid number");
             };
-            let mutable scale: Float64 = 0.1;
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[
                 self.pos
             ] <= '9' then {
-                frac_part = frac_part + Float64((self.input[self.pos] - '0')) * scale;
-                scale = scale * 0.1;
                 self.pos += 1;
             };
         };
 
-        let mutable result = int_part + frac_part;
-
         // Optional exponent part
         if self.pos < self.len and (self.input[self.pos] == 'e' or self.input[self.pos] == 'E') then {
             self.pos += 1;
-            let exp_negative = self.pos < self.len and self.input[self.pos] == '-';
             if self.pos < self.len and (self.input[self.pos] == '+' or self.input[
                 self.pos
             ] == '-') then {
@@ -459,37 +449,30 @@ given JsonParser {
                 self.pos = start;
                 return self.make_error("invalid number");
             };
-            let mutable exp: Int = 0;
             while self.pos < self.len and self.input[self.pos] >= '0' and self.input[
                 self.pos
             ] <= '9' then {
-                exp = exp * 10 + Int((self.input[self.pos] - '0'));
                 self.pos += 1;
             };
-            let mutable power: Float64 = 1.0;
-            let mutable e = exp;
-            while e > 0 then {
-                power = power * 10.0;
-                e -= 1;
-            };
-            if exp_negative then {
-                result = result / power;
-            } else {
-                result = result * power;
-            };
         };
 
-        // Apply sign
-        if is_negative then {
-            result = 0.0 - result;
-        };
-
-        return .Ok(JsonValue.Number(result));
+        // The scan above validated the JSON number grammar; hand the literal
+        // to strtod for the value. That is correctly rounded (so "0.3" parses
+        // to exactly the 0.3 double and "-0.0" keeps its sign) and it clamps
+        // out-of-range exponents to +/-inf or 0.0 instead of accumulating them
+        // in checked integer arithmetic.
+        let literal = self.input.substring(start..<self.pos);
+        return .Ok(JsonValue.Number(__koral_parse_float64(literal.data)));
     };
 
     // --- Top-level value dispatch ---
 
-    parse_value(self): Result[JsonValue] = {
+    parse_value(self, depth: UInt): Result[JsonValue] = {
+        // `depth` counts enclosing arrays/objects; refuse to recurse past the
+        // documented cap instead of overflowing the call stack.
+        if depth > max_json_depth then {
+            return self.make_error("maximum nesting depth exceeded");
+        };
         self.skip_whitespace();
         when self.peek() in {
             .None() then {
@@ -509,10 +492,10 @@ given JsonParser {
                     return self.parse_string();
                 };
                 if b == '[' then {
-                    return self.parse_array();
+                    return self.parse_array(depth);
                 };
                 if b == '{' then {
-                    return self.parse_object();
+                    return self.parse_object(depth);
                 };
                 if b == '-' or (b >= '0' and b <= '9') then {
                     return self.parse_number();
@@ -536,7 +519,7 @@ given JsonValue: Parseable {
     /// Parse `s` as one JSON value, failing with a `JsonError` giving the message and position of the first problem.
     public parse(s: String): Result[Self] = {
         let mutable parser = JsonParser.new(s);
-        let value = parser.parse_value() or return;
+        let value = parser.parse_value(0) or return;
         parser.skip_whitespace();
         if parser.pos < parser.len then {
             return .Error(JsonError("trailing characters after JSON value", parser.pos));

@@ -1,0 +1,110 @@
+// EXPECT: list sort stability tests passed
+// Stability guard for the List sort implementation: elements with equal
+// keys keep their relative order across BOTH entry points (`sort` and
+// `sort_by`), on both sides of the insertion-sort cutoff (32) where the
+// short-run path and the merge path swap over.
+
+// Compares equal to its peers but stays distinguishable: `compare` sees only
+// `key`, so `tag` observes the sort's stability.
+type Tagged(public key: Int, public tag: Int);
+
+given Tagged: Eq {
+    equals(self, other: Tagged): Bool = self.key == other.key;
+};
+
+given Tagged: Ord {
+    compare(self, other: Tagged): Int =
+        if self.key < other.key then -1
+        else if self.key > other.key then 1 else 0;
+};
+
+let check_tagged_order(xs: List[Tagged]): Void = {
+    let count = xs.count();
+    let mutable i = UInt(1);
+    while i < count then {
+        assert(xs[i - 1].key <= xs[i].key, "tagged keys non-decreasing");
+        if xs[i - 1].key == xs[i].key then {
+            assert(xs[i - 1].tag < xs[i].tag, "tagged equal keys keep order");
+        };
+        i = i + 1;
+    };
+};
+
+let build_tagged(count: Int): List[Tagged] = {
+    let mutable xs = List[Tagged].new();
+    let mutable n = 0;
+    while n < count then {
+        xs.push(Tagged(n % 5, n));
+        n = n + 1;
+    };
+    return xs;
+};
+
+let check_pair_order(pairs: List[Pair[Int, Int]]): Void = {
+    let count = pairs.count();
+    let mutable i = UInt(1);
+    while i < count then {
+        assert(pairs[i - 1].first <= pairs[i].first, "pair keys non-decreasing");
+        if pairs[i - 1].first == pairs[i].first then {
+            assert(pairs[i - 1].second < pairs[i].second, "pair equal keys keep order");
+        };
+        i = i + 1;
+    };
+};
+
+let main(): Void = {
+    // === sort(): 100 distinguishable equals (key = n % 5), merge path ===
+    let mutable tagged = build_tagged(100);
+    tagged.sort();
+    check_tagged_order(tagged);
+    assert(tagged[0].tag == 0, "first equal keeps first tag");
+    assert(tagged[1].tag == 5, "first equal keeps second tag");
+    assert(tagged[99].tag == 99, "last keeps last tag");
+
+    // === sort(): under the cutoff, straight insertion path ===
+    let mutable small = build_tagged(10);
+    small.sort();
+    check_tagged_order(small);
+    assert(small[0].tag == 0 and small[1].tag == 5, "insertion path keeps order");
+
+    // === sort(): exactly at and just past the cutoff ===
+    let mutable at_cutoff = build_tagged(32);
+    at_cutoff.sort();
+    check_tagged_order(at_cutoff);
+    let mutable past_cutoff = build_tagged(33);
+    past_cutoff.sort();
+    check_tagged_order(past_cutoff);
+
+    // === sort_by(): Pair elements keyed on `first`, `second` is the tag ===
+    let mutable pairs = List[Pair[Int, Int]].new();
+    let mutable n = 0;
+    while n < 100 then {
+        pairs.push(Pair(n % 5, n));
+        n = n + 1;
+    };
+    pairs.sort_by((p) => p.first);
+    check_pair_order(pairs);
+    assert(pairs[0].second == 0, "by: first equal keeps first tag");
+    assert(pairs[1].second == 5, "by: first equal keeps second tag");
+
+    // === sort_by(): under and past the cutoff ===
+    let mutable small_pairs = List[Pair[Int, Int]].new();
+    let mutable m = 0;
+    while m < 10 then {
+        small_pairs.push(Pair(m % 3, m));
+        m = m + 1;
+    };
+    small_pairs.sort_by((p) => p.first);
+    check_pair_order(small_pairs);
+
+    let mutable edge_pairs = List[Pair[Int, Int]].new();
+    let mutable k = 0;
+    while k < 33 then {
+        edge_pairs.push(Pair(k % 7, k));
+        k = k + 1;
+    };
+    edge_pairs.sort_by((p) => p.first);
+    check_pair_order(edge_pairs);
+
+    println("list sort stability tests passed");
+};

@@ -12,20 +12,26 @@ using "std" { ... };
 // ============================================================================
 
 /// Counting semaphore that caps how many threads hold a permit at once.
+/// The cap is the initial permit count: `release` never makes more than that
+/// many permits available, so `new(1)` can never let two threads through.
 public type mutable Semaphore(
     private mutex: Mutex,
     private condvar: MutexCondvar,
     private mutable permits: UInt,
+    private capacity: UInt,
 );
 
 /// Creates the semaphore and takes and returns permits.
 given Semaphore {
 
     /// Create a semaphore with `permits` permits available.
+    /// The count also caps the semaphore: `release` never raises the available
+    /// permits above it. A semaphore created with 0 permits has no cap headroom
+    /// at all, so every `release` on it panics.
     public new(permits: UInt): Semaphore = {
         let mu = Mutex.new();
         let cv = mu.condvar();
-        return Semaphore(mu, cv, permits);
+        return Semaphore(mu, cv, permits, permits);
     };
 
     /// Take a permit, blocking until one is available.
@@ -50,9 +56,15 @@ given Semaphore {
     };
 
     /// Return a permit and wake one waiting thread.
+    /// Must pair with a successful `acquire`/`try_acquire`: when all permits
+    /// are already available this is a caller bug (it would widen the cap) and
+    /// panics instead of granting an extra permit.
     public release(self): Void = {
         self.mutex.lock();
         defer self.mutex.unlock();
+        if self.permits >= self.capacity then {
+            panic("Semaphore.release: all permits are already available (release must pair with acquire)");
+        };
         self.permits = self.permits + 1;
         self.condvar.notify();
     };

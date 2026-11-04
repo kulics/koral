@@ -1,0 +1,43 @@
+// EXPECT: All BufReader seek tests passed
+
+using "std/io" { ... };
+
+let main(): Void = {
+    // cap 4: the first read fills 4 bytes from the inner stream and serves 2,
+    // so 2 buffered bytes are unread and Current offsets must compensate.
+    let bb = ByteBuffer.from_string("abcdef");
+    let r = BufReader[ByteBuffer].with_capacity(UInt(4), bb);
+    let mutable out = make_bytes(2);
+    r.read(into = out, span = ...).unwrap();
+
+    // Compensating for the 2 unread bytes underflows Int64 for these offsets;
+    // the seek must fail with Result.Error, never panic.
+    when r.seek(SeekOrigin.Current(Int64.min_value())) in {
+        .Ok(_) then assert(false, "Current(Int64.min) should fail"),
+        .Error(_) then {},
+    };
+    when r.seek(SeekOrigin.Current(Int64.min_value() + 1)) in {
+        .Ok(_) then assert(false, "Current(Int64.min+1) should fail"),
+        .Error(_) then {},
+    };
+
+    // Failed seeks leave buffered state alone: logical position is still 2.
+    assert(
+        r.seek(SeekOrigin.Current(-2)).unwrap() == UInt64(0),
+        "Current(-2) compensates to inner position 0",
+    );
+    assert(
+        r.seek(SeekOrigin.Current(1)).unwrap() == UInt64(1),
+        "Current(1) after discard",
+    );
+    assert(
+        r.seek(SeekOrigin.End(-1)).unwrap() == UInt64(5),
+        "End(-1) from inner end",
+    );
+    assert(
+        r.seek(SeekOrigin.Start(0)).unwrap() == UInt64(0),
+        "Start(0)",
+    );
+
+    println("All BufReader seek tests passed");
+};

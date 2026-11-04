@@ -130,6 +130,10 @@ given Command {
     public spawn(self): Result[Process];
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
+    ///
+    /// Piped stdin is rejected up front: run() neither writes nor closes the
+    /// pipe, so the child would wait for input forever. Use spawn() together
+    /// with take_stdin_pipe() when the child should read a stdin feed.
     public run(self): Result[ExitStatus];
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.
     /// Forces stdout/stderr to Piped mode to capture output.

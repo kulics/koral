@@ -1,0 +1,37 @@
+// EXPECT: deque_empty_slice_ok
+// EXPECT: deque_churn_ok
+
+// The empty-Open-slice fix seen from the Deque consumer side: iterating an
+// empty Open slice (1<..<1, 2<..<3) of a list into a deque must add zero
+// elements. Plus a long push/pop churn pinning steady-state correctness.
+
+let main(): Int = {
+    let mutable l = List[Int].new();
+    for i in 0..<5 then {
+        l.push(i);
+    };
+
+    let mutable d = Deque[Int].new();
+    d.push_back(9);
+    for v in l.sublist(1<..<1) then {
+        d.push_back(v);
+    };
+    for v in l.sublist(2<..<3) then {
+        d.push_back(v);
+    };
+    assert(d.count() == 1, "empty Open slices add nothing");
+    assert(d.get(0).unwrap() == 9, "existing element untouched");
+    println("deque_empty_slice_ok");
+
+    // 10k push/pop churn: contents stay consistent throughout.
+    for i in 0..<10000 then {
+        d.push_back(i);
+        d.push_front(i);
+        assert(d.pop_back().unwrap() == i, "pop_back returns last pushed");
+        assert(d.pop_front().unwrap() == i, "pop_front returns first pushed");
+    };
+    assert(d.count() == 1, "count right after churn");
+    assert(d.get(0).unwrap() == 9, "value right after churn");
+    println("deque_churn_ok");
+    return 0;
+};

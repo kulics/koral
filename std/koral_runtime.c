@@ -251,11 +251,16 @@ void __koral_panic_overflow_shift(const char* loc) {
 }
 
 uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precision, int alt_form) {
-    static _Thread_local char out_buf[128];
-    static _Thread_local char fmt_buf[16];
+    // Grown on demand: a fixed-notation rendering of 1e308 needs ~320 integer
+    // digits, and the caller may request any precision. snprintf is correctly
+    // rounded for %f/%e/%g, which is the conversion contract this helper
+    // exists to provide. The buffer is thread-local scratch; the Koral side
+    // copies the result out immediately.
+    static _Thread_local char* out_buf = NULL;
+    static _Thread_local size_t out_cap = 0;
+    static _Thread_local char fmt_buf[32];
 
     if (precision < 0) precision = 0;
-    if (precision > 99) precision = 99;
 
     char tc = (char)type_char;
     if (tc != 'f' && tc != 'F' && tc != 'e' && tc != 'E' && tc != 'g' && tc != 'G') {
@@ -268,8 +273,27 @@ uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precis
         snprintf(fmt_buf, sizeof(fmt_buf), "%%.%d%c", (int)precision, tc);
     }
 
-    snprintf(out_buf, sizeof(out_buf), fmt_buf, value);
+    size_t need = (size_t)precision + 400;
+    if (need + 1 > out_cap) {
+        char* grown = (char*)realloc(out_buf, need + 1);
+        if (!grown) {
+            // Out of memory: keep the old buffer and let snprintf truncate
+            // rather than crash the formatter.
+            if (!out_buf) return (uint8_t*)"";
+        } else {
+            out_buf = grown;
+            out_cap = need + 1;
+        }
+    }
+    snprintf(out_buf, out_cap, fmt_buf, value);
     return (uint8_t*)out_buf;
+}
+
+// Correctly-rounded decimal -> double. The Koral side has already validated
+// the syntax; strtod supplies the rounding (Clinger's algorithm in libc) that
+// hand-rolled digit accumulation gets wrong. Strings are NUL-terminated.
+double __koral_parse_float64(const uint8_t* cstr) {
+    return strtod((const char*)cstr, NULL);
 }
 
 // Define Koral-side timespec layout (must match generated struct in C output)
@@ -399,11 +423,14 @@ int __koral_normalize_path(const char* path, char* buf, size_t size) {
     }
     buf[len] = '\0';
 
-    // Root prefix, kept verbatim: "C:", "C:/", "/" or "//" (UNC).
+    // Root prefix, kept verbatim: "C:/" or "/" / "//" (UNC). The drive form
+    // must match Path.is_absolute exactly -- an ASCII letter before ':' AND a
+    // separator after it -- otherwise "a:b/../x" normalizes as if "a:" were a
+    // drive root and comes out "a:/x" instead of "x".
+    int drive_letter = (buf[0] >= 'A' && buf[0] <= 'Z') || (buf[0] >= 'a' && buf[0] <= 'z');
     size_t root = 0;
-    if (len >= 2 && buf[1] == ':') {
-        root = 2;
-        if (len >= 3 && buf[2] == '/') root = 3;
+    if (len >= 3 && buf[1] == ':' && buf[2] == '/' && drive_letter) {
+        root = 3;
     } else if (len >= 1 && buf[0] == '/') {
         root = (len >= 2 && buf[1] == '/') ? 2 : 1;
     }
@@ -2303,9 +2330,12 @@ int32_t __koral_symlink(const uint8_t* src, const uint8_t* dst) {
 }
 
 int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
-    ssize_t len = readlink((const char*)path, (char*)buf, (size_t)buf_size - 1);
+    // Fill the whole buffer: a return of exactly buf_size is then the
+    // unambiguous "target truncated" signal. The NUL only fits when the
+    // target fit in the buffer.
+    ssize_t len = readlink((const char*)path, (char*)buf, (size_t)buf_size);
     if (len < 0) return -1;
-    buf[len] = '\0';
+    if ((uint64_t)len < buf_size) buf[len] = '\0';
     return (int32_t)len;
 }
 
@@ -2349,6 +2379,11 @@ int32_t __koral_dirent_type(void* entry) {
         case DT_REG:  return 0;
         case DT_DIR:  return 1;
         case DT_LNK:  return 2;
+#ifdef DT_UNKNOWN
+        // Filesystems without type reporting leave d_type unset; the caller
+        // must lstat the entry instead of trusting a guess.
+        case DT_UNKNOWN: return -1;
+#endif
         default:      return 3;
     }
 }
@@ -3072,16 +3107,38 @@ int32_t __koral_spawn(
     }
 
     // Build command line string as UTF-8 first, then widen it for
-    // CreateProcessW. Args and paths can hold non-ASCII text.
+    // CreateProcessW. Args and paths can hold non-ASCII text. Every arg is
+    // quoted, so CommandLineToArgvW rules apply: a run of N backslashes before
+    // a quote becomes 2N+1 backslashes plus the quote, and before the closing
+    // quote a run of N becomes 2N.
     char cmdline[32768];
     int pos = 0;
     for (int i = 0; i < argc && pos < 32700; i++) {
         if (i > 0) cmdline[pos++] = ' ';
         cmdline[pos++] = '"';
         const char* arg = (const char*)argv[i];
-        while (*arg && pos < 32700) {
-            if (*arg == '"') cmdline[pos++] = '\\';
-            cmdline[pos++] = *arg++;
+        int backslashes = 0;
+        for (const char* p = arg; *p && pos < 32700; p++) {
+            if (*p == '\\') {
+                backslashes++;
+                continue;
+            }
+            if (*p == '"') {
+                for (int k = 0; k < 2 * backslashes + 1 && pos < 32700; k++) {
+                    cmdline[pos++] = '\\';
+                }
+                backslashes = 0;
+                cmdline[pos++] = '"';
+                continue;
+            }
+            for (int k = 0; k < backslashes && pos < 32700; k++) {
+                cmdline[pos++] = '\\';
+            }
+            backslashes = 0;
+            cmdline[pos++] = *p;
+        }
+        for (int k = 0; k < 2 * backslashes && pos < 32700; k++) {
+            cmdline[pos++] = '\\';
         }
         cmdline[pos++] = '"';
     }
@@ -3106,9 +3163,10 @@ int32_t __koral_spawn(
 
     // Build the environment block as UTF-16, the form
     // CREATE_UNICODE_ENVIRONMENT declares. Each entry is `NAME=VALUE\0`, and
-    // the block ends with an extra `\0`.
+    // the block ends with an extra `\0`. envc < 0 means "inherit"; envc >= 0
+    // passes the child's COMPLETE environment (envc == 0 => empty env block).
     wchar_t* env_block = NULL;
-    if (envc > 0) {
+    if (envc >= 0) {
         size_t total = 1;  // trailing extra null
         for (int i = 0; i < envc; i++) {
             wchar_t* wentry = __koral_utf8_to_wide((const char*)envp[i]);
@@ -3222,6 +3280,82 @@ fail:
 
 #else  // POSIX
 
+// Resolve a bare program name through the PATH the child will see, exactly the
+// way execvp would, so an explicit environment block no longer disables PATH
+// search. `envp` is the child's complete environment, or NULL to inherit the
+// caller's. `cwd` (when set) is where relative PATH entries resolve against,
+// because the fork+exec child chdir()s before exec. Returns a malloc'd path
+// (with a '/' in it, so spawn never re-searches) or NULL with errno set.
+static char* __koral_resolve_program(const char* program, char* const* envp, const char* cwd) {
+    if (!program || !program[0]) {
+        errno = ENOENT;
+        return NULL;
+    }
+    if (strchr(program, '/')) {
+        return strdup(program);
+    }
+
+    const char* path_val = NULL;
+    if (envp) {
+        for (int i = 0; envp[i]; i++) {
+            if (strncmp(envp[i], "PATH=", 5) == 0) {
+                path_val = envp[i] + 5;
+                break;
+            }
+        }
+    } else {
+        path_val = getenv("PATH");
+    }
+    char default_path[256];
+    if (!path_val) {
+        // execvp with an unset PATH falls back to the system default.
+#if defined(_CS_PATH)
+        size_t n = confstr(_CS_PATH, default_path, sizeof(default_path));
+        if (n == 0 || n > sizeof(default_path)) {
+            strcpy(default_path, "/bin:/usr/bin");
+        }
+#else
+        strcpy(default_path, "/bin:/usr/bin");
+#endif
+        path_val = default_path;
+    }
+
+    char candidate[4096];
+    int saw_eacces = 0;
+    const char* p = path_val;
+    for (;;) {
+        const char* sep = strchr(p, ':');
+        int entry_len = sep ? (int)(sep - p) : (int)strlen(p);
+        int n;
+        if (entry_len == 0) {
+            // An empty PATH entry means the current directory (the child's,
+            // once cwd is applied).
+            n = (cwd && cwd[0])
+                ? snprintf(candidate, sizeof(candidate), "%s/%s", cwd, program)
+                : snprintf(candidate, sizeof(candidate), "%s", program);
+        } else if (p[0] == '/') {
+            n = snprintf(candidate, sizeof(candidate), "%.*s/%s", entry_len, p, program);
+        } else {
+            n = (cwd && cwd[0])
+                ? snprintf(candidate, sizeof(candidate), "%s/%.*s/%s", cwd, entry_len, p, program)
+                : snprintf(candidate, sizeof(candidate), "%.*s/%s", entry_len, p, program);
+        }
+        if (n > 0 && n < (int)sizeof(candidate)) {
+            struct stat st;
+            if (stat(candidate, &st) == 0) {
+                if (!S_ISDIR(st.st_mode) && access(candidate, X_OK) == 0) {
+                    return strdup(candidate);
+                }
+                saw_eacces = 1;
+            }
+        }
+        if (!sep) break;
+        p = sep + 1;
+    }
+    errno = saw_eacces ? EACCES : ENOENT;
+    return NULL;
+}
+
 int32_t __koral_spawn(
     const uint8_t* program,
     const uint8_t** argv, int32_t argc,
@@ -3277,9 +3411,11 @@ int32_t __koral_spawn(
     }
     child_argv[argc] = NULL;
 
-    // Build null-terminated envp array
+    // Build null-terminated envp array. envc < 0 means "inherit the caller's
+    // environment" (envp ignored); envc >= 0 means envp holds the child's
+    // COMPLETE environment, and envc == 0 means an explicitly empty one.
     char** child_envp = NULL;
-    if (envc > 0) {
+    if (envc >= 0) {
         child_envp = (char**)malloc((envc + 1) * sizeof(char*));
         if (!child_envp) { free(child_argv); goto fail; }
         for (int i = 0; i < envc; i++) {
@@ -3291,24 +3427,70 @@ int32_t __koral_spawn(
     // Check if cwd is set
     int use_cwd = (cwd && cwd[0]);
 
+    // Resolve bare program names through the child's PATH up front: this keeps
+    // exec semantics identical with and without an explicit environment.
+    char* resolved_program =
+        __koral_resolve_program((const char*)program, child_envp, use_cwd ? (const char*)cwd : NULL);
+    if (!resolved_program) {
+        free(child_argv);
+        if (child_envp) free(child_envp);
+        goto fail;
+    }
+
     // Use fork+exec if cwd is set (posix_spawn_file_actions_addchdir_np
     // is not portable), otherwise use posix_spawn
     pid_t child_pid;
     int spawn_err = 0;
 
     if (use_cwd) {
-        // fork+exec approach for cwd support
-        child_pid = fork();
-        if (child_pid < 0) {
+        // fork+exec approach for cwd support. A CLOEXEC error pipe carries the
+        // failing errno from chdir/exec back to the parent, so failures surface
+        // as a spawn error instead of a fake exit code 127.
+        int err_pipe[2] = {-1, -1};
+        if (pipe(err_pipe) < 0) {
             spawn_err = errno;
             free(child_argv);
             if (child_envp) free(child_envp);
+            free(resolved_program);
+            goto fail;
+        }
+        if (fcntl(err_pipe[1], F_SETFD, FD_CLOEXEC) < 0) {
+            spawn_err = errno;
+            close(err_pipe[0]);
+            close(err_pipe[1]);
+            free(child_argv);
+            if (child_envp) free(child_envp);
+            free(resolved_program);
+            goto fail;
+        }
+
+        child_pid = fork();
+        if (child_pid < 0) {
+            spawn_err = errno;
+            close(err_pipe[0]);
+            close(err_pipe[1]);
+            free(child_argv);
+            if (child_envp) free(child_envp);
+            free(resolved_program);
             goto fail;
         }
         if (child_pid == 0) {
             // Child process
-            if (setpgid(0, 0) < 0) _exit(127);
-            if (chdir((const char*)cwd) < 0) _exit(127);
+            int report_fd = err_pipe[1];
+            close(err_pipe[0]);
+            // Keep the report fd clear of the stdio descriptors the code below
+            // rewires, in case the parent came in with one of them closed.
+            if (report_fd >= 0 && report_fd <= STDERR_FILENO) {
+                int high = fcntl(report_fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+                if (high >= 0) {
+                    close(report_fd);
+                    report_fd = high;
+                }
+            }
+#define KORAL_SPAWN_CHILD_FAIL(errn) \
+    do { int e_ = (errn); (void)!write(report_fd, &e_, sizeof(e_)); _exit(127); } while (0)
+            if (setpgid(0, 0) < 0) KORAL_SPAWN_CHILD_FAIL(errno);
+            if (chdir((const char*)cwd) < 0) KORAL_SPAWN_CHILD_FAIL(errno);
 
             // Set up stdin
             if (stdin_mode == 1) {
@@ -3348,12 +3530,24 @@ int32_t __koral_spawn(
 
             if (null_fd >= 0) close(null_fd);
 
-            if (child_envp) {
-                execve((const char*)program, child_argv, child_envp);
-            } else {
-                execvp((const char*)program, child_argv);
-            }
-            _exit(127);
+            execve(resolved_program, child_argv, child_envp ? child_envp : environ);
+            KORAL_SPAWN_CHILD_FAIL(errno);
+#undef KORAL_SPAWN_CHILD_FAIL
+        }
+
+        // Parent: a child-side failure writes its errno before _exit; a clean
+        // exec closes the pipe end (CLOEXEC) and read() returns 0.
+        close(err_pipe[1]);
+        int child_err = 0;
+        ssize_t nread = read(err_pipe[0], &child_err, sizeof(child_err));
+        close(err_pipe[0]);
+        if (nread == (ssize_t)sizeof(child_err)) {
+            spawn_err = child_err;
+            waitpid(child_pid, NULL, 0);
+            free(child_argv);
+            if (child_envp) free(child_envp);
+            free(resolved_program);
+            goto fail;
         }
     } else {
         // posix_spawn approach (more efficient, no fork overhead)
@@ -3412,14 +3606,10 @@ int32_t __koral_spawn(
             posix_spawn_file_actions_addclose(&actions, null_fd);
         }
 
-        if (child_envp) {
-            spawn_err = posix_spawn(&child_pid, (const char*)program, &actions, &attr,
-                                    child_argv, child_envp);
-        } else {
-            extern char** environ;
-            spawn_err = posix_spawnp(&child_pid, (const char*)program, &actions, &attr,
-                                     child_argv, environ);
-        }
+        // resolved_program always contains a '/', so posix_spawn never
+        // re-searches PATH and the resolution above is the single search site.
+        spawn_err = posix_spawn(&child_pid, resolved_program, &actions, &attr,
+                                child_argv, child_envp ? child_envp : environ);
 
         posix_spawn_file_actions_destroy(&actions);
         posix_spawnattr_destroy(&attr);
@@ -3427,6 +3617,7 @@ int32_t __koral_spawn(
 
     free(child_argv);
     if (child_envp) free(child_envp);
+    free(resolved_program);
 
     if (spawn_err != 0) {
         errno = spawn_err;

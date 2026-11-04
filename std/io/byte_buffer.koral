@@ -130,33 +130,63 @@ given ByteBuffer: Writer {
 given ByteBuffer: Seeker {
 
     /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
+    /// Out-of-range targets — including offsets that overflow `Int64` arithmetic — fail
+    /// with `Result.Error` and never panic.
     public seek(self, pos: SeekOrigin): Result[UInt64] = {
-        let mutable target: Int64 = 0;
+        let len64 = UInt64(self.len);
+        let mutable target: UInt64 = 0;
         when pos in {
             .Start(offset) then {
-                target = Int64(offset);
+                target = offset;
             },
             .Current(offset) then {
-                target = Int64(self.cursor) + offset;
+                let base = UInt64(self.cursor);
+                if offset < 0 then {
+                    let mag = UInt64(-(offset + 1)) + 1;
+                    if mag > base then {
+                        return Result[UInt64].Error(
+                            IoError.Other("invalid seek to negative or out-of-range offset"),
+                        );
+                    };
+                    target = base - mag;
+                } else {
+                    let add = UInt64(offset);
+                    if add > len64 - base then {
+                        return Result[UInt64].Error(
+                            IoError.Other("invalid seek to negative or out-of-range offset"),
+                        );
+                    };
+                    target = base + add;
+                };
             },
             .End(offset) then {
-                target = Int64(self.len) + offset;
+                if offset < 0 then {
+                    let mag = UInt64(-(offset + 1)) + 1;
+                    if mag > len64 then {
+                        return Result[UInt64].Error(
+                            IoError.Other("invalid seek to negative or out-of-range offset"),
+                        );
+                    };
+                    target = len64 - mag;
+                } else {
+                    let add = UInt64(offset);
+                    if add > 0 then {
+                        return Result[UInt64].Error(
+                            IoError.Other("invalid seek to negative or out-of-range offset"),
+                        );
+                    };
+                    target = len64;
+                };
             },
         };
 
-        if target < 0 then {
+        if target > len64 then {
             return Result[UInt64].Error(
-                IoError.Other("invalid seek: negative position"),
-            );
-        };
-
-        if UInt64(target) > UInt64(self.len) then {
-            return Result[UInt64].Error(
-                IoError.Other("invalid seek: position out of bounds"),
+                IoError.Other("invalid seek to negative or out-of-range offset"),
             );
         };
 
         self.cursor = UInt(target);
-        return Result[UInt64].Ok(UInt64(self.cursor));
+        return Result[UInt64].Ok(target);
     };
 };

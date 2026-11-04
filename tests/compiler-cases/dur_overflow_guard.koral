@@ -1,0 +1,43 @@
+// EXPECT: overflow_error_ok
+// EXPECT: boundary_ok
+// The seconds-overflow guard must run before the checked add. The old order
+// computed `out_secs + extra_secs` first and panicked before the wrap check
+// could return Result.Error.
+
+let main(): Int = {
+    assert(
+        Duration.new(
+            seconds = Int64.max_value(),
+            nanoseconds = 1_000_000_000,
+        ).is_error(),
+        "max + 1s errors",
+    );
+    assert(
+        Duration.new(
+            seconds = Int64.max_value(),
+            nanoseconds = 2_000_000_000,
+        ).is_error(),
+        "max + 2s errors",
+    );
+    println("overflow_error_ok");
+
+    // Exact fit is still Ok.
+    let r3 = Duration.new(
+        seconds = Int64.max_value() - 1,
+        nanoseconds = 1_000_000_000,
+    );
+    assert(r3.is_error() == false, "max-1 + 1s ok");
+    assert(r3.unwrap().as_seconds() == Int64.max_value(), "boundary value");
+
+    let msg = when Duration.new(
+        seconds = Int64.max_value(),
+        nanoseconds = 1_000_000_000,
+    ) in {
+        .Error(e) then e.message(),
+        .Ok(_) then "unexpected",
+    };
+    assert(msg == "Duration.new: seconds overflow", "error message");
+    println("boundary_ok");
+
+    return 0;
+};

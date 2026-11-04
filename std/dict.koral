@@ -29,10 +29,13 @@ private let bucket_set_tag[K: Hash, V: Any](
 };
 
 /// A hash map from `Hash` keys to values; iteration order is unspecified.
+/// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
+/// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Dict[K: Hash, V: Any](
     mutable buckets: *mutable DictBucket[K, V],
     mutable size: UInt,
     mutable capacity: UInt,
+    mutable deleted: UInt,
 );
 
 /// `Drop` for `Dict[K, V]`: releases the bucket array.
@@ -64,7 +67,7 @@ given[K: Hash, V: Any] Dict[K, V] {
     /// 编译器里每个 `Scope` 都带一张 `Dict[String, Type]`，大量是空的或只有一两项，
     /// 为它们每次付 16 桶 alloc + 16 次清零不值得。
     public new(): Self = {
-        return Dict[K, V](null, 0, 0);
+        return Dict[K, V](null, 0, 0, 0);
     };
 
     /// Create an empty dict with its buckets allocated up front, sized for about
@@ -81,7 +84,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         for i in 0..<cap then {
             bucket_set_tag(buckets + i, UInt(0));
         };
-        return Dict[K, V](buckets, 0, cap);
+        return Dict[K, V](buckets, 0, cap, 0);
     };
 
     /// Return the number of entries in the dict.
@@ -132,8 +135,13 @@ given[K: Hash, V: Any] Dict[K, V] {
     private rehash(self): Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
-        // 空表首次分配；已有桶数组时翻倍。
-        let new_cap = if old_cap == UInt(0) then UInt(16) else old_cap * UInt(2);
+        // 新容量只由存活条目决定（tombstone 不带进新表）：
+        // 负载保持 ≤ 0.5（size * 2 < new_cap），空表首次分配 16 桶；
+        // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
+        let mutable new_cap = UInt(16);
+        while self.size * 2 >= new_cap then {
+            new_cap = new_cap * UInt(2);
+        };
         let new_buckets = alloc_memory[DictBucket[K, V]](new_cap);
         for i in 0..<new_cap then {
             bucket_set_tag(new_buckets + i, UInt(0));
@@ -141,6 +149,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         self.buckets = new_buckets;
         self.capacity = new_cap;
         self.size = 0;
+        self.deleted = 0;
         for i in 0..<old_cap then {
             let old_tag = (old_buckets + i).tag;
             if old_tag == UInt(1) then {
@@ -176,7 +185,10 @@ given[K: Hash, V: Any] Dict[K, V] {
 
     /// Store `value` under `key`, replacing any entry already stored there.
     public insert(self, key: K, value: V): Void = {
-        if self.size * 2 >= self.capacity then {
+        // 两个触发条件：存活负载满了要扩容；tombstone 过半要重建（缩回
+        // 合适容量并清掉陈旧槽），否则删插交替会把表填满 Deleted 标签，
+        // 每次查找退化成全表探测且永不再 rehash。
+        if self.size * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
             self.rehash();
         };
         when self.find_slot(key) in {
@@ -185,11 +197,16 @@ given[K: Hash, V: Any] Dict[K, V] {
             },
             .Some(idx) then {
                 let bucket_ptr = self.buckets + idx;
-                let was_occupied = bucket_ptr.tag == UInt(1);
+                let old_tag = bucket_ptr.tag;
+                let was_occupied = old_tag == UInt(1);
                 if was_occupied then {
                     deinit_memory(bucket_ptr);
                 };
                 init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
+                if old_tag == UInt(2) then {
+                    // 复用了一个 tombstone 槽：陈旧桶少一个。
+                    self.deleted = self.deleted - 1;
+                };
                 if not was_occupied then {
                     self.size = self.size + 1;
                 };
@@ -200,7 +217,7 @@ given[K: Hash, V: Any] Dict[K, V] {
     /// Store `value` under `key` only if the key is absent; return whether it
     /// was inserted.
     public try_insert(self, key: K, value: V): Bool = {
-        if self.size * 2 >= self.capacity then {
+        if self.size * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
             self.rehash();
         };
         when self.find_slot(key) in {
@@ -212,6 +229,10 @@ given[K: Hash, V: Any] Dict[K, V] {
                 if bucket_ptr.tag == UInt(1) then {
                     return false;
                 } else {
+                    if bucket_ptr.tag == UInt(2) then {
+                        // 复用了一个 tombstone 槽：陈旧桶少一个。
+                        self.deleted = self.deleted - 1;
+                    };
                     init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
                     self.size = self.size + 1;
                     return true;
@@ -288,6 +309,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                     deinit_memory(bucket_ptr);
                     bucket_set_tag(bucket_ptr, UInt(2));
                     self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
                     return Option[V].Some(v);
                 } else {
                     return Option[V].None();
@@ -309,6 +331,7 @@ given[K: Hash, V: Any] Dict[K, V] {
             bucket_set_tag(bucket_ptr, UInt(0));
         };
         self.size = 0;
+        self.deleted = 0;
     };
 
     /// Keep only the entries whose key and value satisfy `predicate`; O(n) time.
@@ -320,6 +343,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                     deinit_memory(bucket_ptr);
                     bucket_set_tag(bucket_ptr, UInt(2));
                     self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
                 };
             };
         };

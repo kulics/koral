@@ -174,13 +174,16 @@ given[T: Any] List[T] {
 
     /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
     public remove_at(self, index: UInt): Void = {
+        if index >= self.len then {
+            panic("List remove_at index out of bounds");
+        };
         let _ = self.take_at(index);
     };
 
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
     public take_at(self, index: UInt): T = {
         if index >= self.len then {
-            panic("List remove_at index out of bounds");
+            panic("List take_at index out of bounds");
         };
         let value = take_memory(self.source + index);
         // Shift elements to the left
@@ -329,13 +332,20 @@ given[T: Any] List[T] {
                 end = e + 1;
             },
             .Open(s, e) then {
-                if s >= e then {
+                if s > e then {
                     panic("List.slice_spec invalid range");
                 };
                 if s == UInt.max_value() or e > len then {
                     panic("List.slice_spec out of bounds");
                 };
-                start = s + 1;
+                // Open(s, s) names no elements: the empty slice at s, exactly
+                // like ClosedOpen(s, s). (start = s + 1 would push an empty
+                // spec past the end when s == len.)
+                if s == e then {
+                    start = s;
+                } else {
+                    start = s + 1;
+                };
                 end = e;
             },
             .From(s) then {
@@ -421,10 +431,19 @@ given[T: Any] List[T] {
     /// Sort in place by the `Ord` key `key` extracts from each element.
     /// Stable: elements with equal keys keep their relative order.
     public sort_by[K: Ord](self, key: (T) -> K): Void = {
-        if self.len <= 1 then {
+        let len = self.len;
+        if len <= 1 then {
             return;
         };
-        self.merge_sort_by_key(key, 0, self.len);
+        // Short lists are one straight insertion sort: no scratch buffer, no recursion.
+        if len <= 32 then {
+            self.insertion_sort_by_key(key, 0, len);
+            return;
+        };
+        // One scratch buffer for the whole sort, reused by every merge level.
+        let buf = alloc_memory[T](len);
+        self.merge_sort_by_key(key, buf, 0, len);
+        dealloc_memory(buf);
     };
 
     /// Binary search by the key `key` extracts; the list must already be sorted by that key.
@@ -630,61 +649,105 @@ given[T: Any] List[T]: Iterable[T, ListIterator[T]] {
 /// Stable merge-sort helpers backing `sort_by` on `List[T]`.
 given[T: Any] List[T] {
 
-    // Merge sort implementation with key function
-    private merge_sort_by_key[K: Ord](self, key: (T) -> K, start: UInt, end: UInt): Void = {
+    // Straight insertion sort over [start, end) for short runs (stable):
+    // elements slide right while the element before them is greater on the
+    // key, so equal keys never move past each other. Every slot move is a
+    // take/init pair -- the take leaves a vacancy that the init refills -- so
+    // the run is RC-neutral except for the key reads. The cursor is a raw
+    // pointer walk: pointer arithmetic is unchecked, so the hot loop pays no
+    // per-step overflow-guard calls.
+    private insertion_sort_by_key[K: Ord](self, key: (T) -> K, start: UInt, end: UInt): Void = {
+        if end <= start then {
+            return;
+        };
+        let source = self.source;
+        let startp = source + start;
+        let lastp = source + end;
+        let mutable ip = startp + 1;
+        while ip != lastp then {
+            let key_val = take_memory(ip);
+            let mutable hole = ip;
+            while hole != startp and key((hole - 1)[0]) > key(key_val) then {
+                let prev = hole - 1;
+                let moved = take_memory(prev);
+                init_memory(hole, moved);
+                hole = prev;
+            };
+            init_memory(hole, key_val);
+            ip = ip + 1;
+        };
+    };
+
+    // Recursive merge sort over [start, end). `buf` is one scratch buffer of
+    // `self.len` slots shared by every merge level; each merge vacates the
+    // slots it uses before returning, so the reuse is safe.
+    private merge_sort_by_key[K: Ord](self, key: (T) -> K, buf: *mutable T, start: UInt, end: UInt): Void = {
         let len = end - start;
-        if len <= 1 then {
+        if len <= 32 then {
+            self.insertion_sort_by_key(key, start, end);
             return;
         };
 
         let mid = start + len / 2;
-        self.merge_sort_by_key(key, start, mid);
-        self.merge_sort_by_key(key, mid, end);
-        self.merge_by_key(key, start, mid, end);
+        self.merge_sort_by_key(key, buf, start, mid);
+        self.merge_sort_by_key(key, buf, mid, end);
+        // Already in order: the left run's maximum key is <= the right run's
+        // minimum key, so the merge would copy every element onto itself.
+        let source = self.source;
+        if key(source[mid - 1]) <= key(source[mid]) then {
+            return;
+        };
+        self.merge_by_key(key, buf, start, mid, end);
     };
 
-    // Merge two sorted subarrays using key function
+    // Merge the sorted runs [start, mid) and [mid, end), preferring the left
+    // run on equal keys to stay stable. The left run moves wholesale into
+    // `buf`; both runs then merge back into the source by move. RC ledger for
+    // one merge: the bulk move is a bit move (no retain/release), and each
+    // merged element is one take_memory (slot vacated, never dropped) followed
+    // by one init_memory into a vacated slot. A dest slot is always vacant:
+    // slots [start, mid) were emptied by the bulk move, and slots in
+    // [mid, rp) were emptied by earlier right-run takes, while every write
+    // lands before rp. The left remainder drains through the same take/init
+    // pair; a right remainder is already in place. The cursors are raw
+    // pointer walks: pointer arithmetic is unchecked, so the hot loop pays no
+    // per-step overflow-guard calls.
     private merge_by_key[K: Ord](
         self,
         key: (T) -> K,
+        buf: *mutable T,
         start: UInt,
         mid: UInt,
         end: UInt,
     ): Void = {
-        let left_len = mid - start;
-        let mutable temp = List[T].with_capacity(left_len);
+        let source = self.source;
+        let left_end = buf + (mid - start);
+        move_memory(buf, source + start, mid - start);
 
-        // Copy left half to temp
-        for i in 0..<left_len then {
-            temp.push(self.source[start + i]);
-        };
+        let mutable lp = buf;
+        let mutable rp = source + mid;
+        let mutable dp = source + start;
+        let right_end = source + end;
 
-        let mutable left_idx: UInt = 0;
-        let mutable right_idx = mid;
-        let mutable dest_idx = start;
-
-        // Merge back
-        while left_idx < left_len and right_idx < end then {
-            let left_val = temp.source[left_idx];
-            let right_val = self.source[right_idx];
-
+        while lp != left_end and rp != right_end then {
             // Use <= to ensure stability (prefer left on equal)
-            if key(left_val) <= key(right_val) then {
-                self.source[dest_idx] = left_val;
-                left_idx += 1;
+            if key(lp[0]) <= key(rp[0]) then {
+                let moved = take_memory(lp);
+                init_memory(dp, moved);
+                lp = lp + 1;
             } else {
-                self.source[dest_idx] = right_val;
-                right_idx += 1;
+                let moved = take_memory(rp);
+                init_memory(dp, moved);
+                rp = rp + 1;
             };
-            dest_idx += 1;
+            dp = dp + 1;
         };
 
-        // Copy remaining left elements
-        while left_idx < left_len then {
-            let value = temp.source[left_idx];
-            self.source[dest_idx] = value;
-            left_idx += 1;
-            dest_idx += 1;
+        while lp != left_end then {
+            let moved = take_memory(lp);
+            init_memory(dp, moved);
+            lp = lp + 1;
+            dp = dp + 1;
         };
     };
 };
@@ -714,61 +777,113 @@ given[T: Ord] List[T] {
     /// Sort in place in ascending order using the `Ord` trait.
     /// Stable: equal elements keep their relative order.
     public sort(self): Void = {
-        if self.len <= 1 then {
+        let len = self.len;
+        if len <= 1 then {
             return;
         };
-        self.merge_sort_comparable(0, self.len);
+        // Short lists are one straight insertion sort: no scratch buffer, no recursion.
+        if len <= 32 then {
+            self.insertion_sort_comparable(0, len);
+            return;
+        };
+        // One scratch buffer for the whole sort, reused by every merge level.
+        let buf = alloc_memory[T](len);
+        self.merge_sort_comparable(buf, 0, len);
+        dealloc_memory(buf);
     };
 
-    // Merge sort implementation using Ord
-    private merge_sort_comparable(self, start: UInt, end: UInt): Void = {
+    // Straight insertion sort over [start, end) for short runs (stable):
+    // elements slide right while the element before them is greater, so equal
+    // elements never move past each other. Every slot move is a take/init pair
+    // -- the take leaves a vacancy that the init refills -- so the run is
+    // RC-neutral except for the element reads. The cursor is a raw pointer
+    // walk: pointer arithmetic is unchecked, so the hot loop pays no per-step
+    // overflow-guard calls.
+    private insertion_sort_comparable(self, start: UInt, end: UInt): Void = {
+        if end <= start then {
+            return;
+        };
+        let source = self.source;
+        let startp = source + start;
+        let lastp = source + end;
+        let mutable ip = startp + 1;
+        while ip != lastp then {
+            let key_val = take_memory(ip);
+            let mutable hole = ip;
+            while hole != startp and (hole - 1)[0] > key_val then {
+                let prev = hole - 1;
+                let moved = take_memory(prev);
+                init_memory(hole, moved);
+                hole = prev;
+            };
+            init_memory(hole, key_val);
+            ip = ip + 1;
+        };
+    };
+
+    // Recursive merge sort over [start, end). `buf` is one scratch buffer of
+    // `self.len` slots shared by every merge level; each merge vacates the
+    // slots it uses before returning, so the reuse is safe.
+    private merge_sort_comparable(self, buf: *mutable T, start: UInt, end: UInt): Void = {
         let len = end - start;
-        if len <= 1 then {
+        if len <= 32 then {
+            self.insertion_sort_comparable(start, end);
             return;
         };
 
         let mid = start + len / 2;
-        self.merge_sort_comparable(start, mid);
-        self.merge_sort_comparable(mid, end);
-        self.merge_comparable(start, mid, end);
+        self.merge_sort_comparable(buf, start, mid);
+        self.merge_sort_comparable(buf, mid, end);
+        // Already in order: the left run's maximum is <= the right run's
+        // minimum, so the merge would copy every element onto itself.
+        let source = self.source;
+        if source[mid - 1] <= source[mid] then {
+            return;
+        };
+        self.merge_comparable(buf, start, mid, end);
     };
 
-    // Merge two sorted subarrays using Ord
-    private merge_comparable(self, start: UInt, mid: UInt, end: UInt): Void = {
-        let left_len = mid - start;
-        let mutable temp = List[T].with_capacity(left_len);
+    // Merge the sorted runs [start, mid) and [mid, end), preferring the left
+    // run on equal elements to stay stable. The left run moves wholesale into
+    // `buf`; both runs then merge back into the source by move. RC ledger for
+    // one merge: the bulk move is a bit move (no retain/release), and each
+    // merged element is one take_memory (slot vacated, never dropped) followed
+    // by one init_memory into a vacated slot. A dest slot is always vacant:
+    // slots [start, mid) were emptied by the bulk move, and slots in
+    // [mid, rp) were emptied by earlier right-run takes, while every write
+    // lands before rp. The left remainder drains through the same take/init
+    // pair; a right remainder is already in place. The cursors are raw
+    // pointer walks: pointer arithmetic is unchecked, so the hot loop pays no
+    // per-step overflow-guard calls.
+    private merge_comparable(self, buf: *mutable T, start: UInt, mid: UInt, end: UInt): Void = {
+        let source = self.source;
+        let left_end = buf + (mid - start);
+        move_memory(buf, source + start, mid - start);
 
-        // Copy left half to temp
-        for i in 0..<left_len then {
-            temp.push(self.source[start + i]);
-        };
+        let mutable lp = buf;
+        let mutable rp = source + mid;
+        let mutable dp = source + start;
+        let right_end = source + end;
 
-        let mutable left_idx: UInt = 0;
-        let mutable right_idx = mid;
-        let mutable dest_idx = start;
-
-        // Merge back
-        while left_idx < left_len and right_idx < end then {
-            let left_val = temp.source[left_idx];
-            let right_val = self.source[right_idx];
-
+        while lp != left_end and rp != right_end then {
             // Use <= to ensure stability (prefer left on equal)
-            if left_val <= right_val then {
-                self.source[dest_idx] = left_val;
-                left_idx += 1;
+            if lp[0] <= rp[0] then {
+                let moved = take_memory(lp);
+                init_memory(dp, moved);
+                lp = lp + 1;
             } else {
-                self.source[dest_idx] = right_val;
-                right_idx += 1;
+                let moved = take_memory(rp);
+                init_memory(dp, moved);
+                rp = rp + 1;
             };
-            dest_idx += 1;
+            dp = dp + 1;
         };
 
-        // Copy remaining left elements
-        while left_idx < left_len then {
-            let value = temp.source[left_idx];
-            self.source[dest_idx] = value;
-            left_idx += 1;
-            dest_idx += 1;
+        while lp != left_end then {
+            let moved = take_memory(lp);
+            init_memory(dp, moved);
+            lp = lp + 1;
+            dp = dp + 1;
         };
     };
 };

@@ -222,27 +222,31 @@ given[W: Writer] BufWriter[W]: Writer {
         };
 
         let mutable start: UInt = 0;
+        let mutable outcome: Result[Void] = Result[Void].Ok({});
         while start < total then {
             when self.inner.write(from = self.buf, span = start..<total) in {
                 .Ok(n) then {
                     if n == 0 then {
-                        return Result[Void].Error(IoError.WriteZero());
+                        outcome = Result[Void].Error(IoError.WriteZero());
+                        break;
                     };
                     start += n;
                 },
                 .Error(e) then {
-                    if start > 0 then {
-                        let remain = self.buf.sublist(start..<total);
-                        self.buf.clear();
-                        self.buf.push_list(remain);
-                    };
-                    return Result[Void].Error(e);
+                    outcome = Result[Void].Error(e);
+                    break;
                 },
             };
         };
 
-        self.buf.clear();
-        return Result[Void].Ok({});
+        // Preserve the not-yet-written suffix on every exit path (including
+        // WriteZero), and empty the buffer once everything has been written.
+        if start > 0 then {
+            let remain = self.buf.sublist(start..<total);
+            self.buf.clear();
+            self.buf.push_list(remain);
+        };
+        return outcome;
     };
 };
 

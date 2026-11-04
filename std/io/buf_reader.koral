@@ -212,21 +212,32 @@ given[R: Reader] BufReader[R] {
 
     /// Read one line through its newline as a `String`, returning `None` at end of input and failing on invalid UTF-8.
     public read_line(self): Result[Option[String]] = {
+        let mutable acc: List[UInt8] = [];
         let mutable tmp = make_bytes(4096);
-        when self.read_until(UInt8(10), into = tmp, span = ...) in {
-            .Ok(n) then {
-                if n == 0 then {
-                    return Result[Option[String]].Ok(Option[String].None());
-                };
-                let p = tmp.borrow_ptr();
-                return when String.from_utf8_ptr(p, n) in {
-                    .Ok(line) then Result[Option[String]].Ok(Option[String].Some(line)),
-                    .Error(e) then Result[Option[String]].Error(e),
-                };
-            },
-            .Error(e) then {
-                return Result[Option[String]].Error(e);
-            },
+        let mutable done = false;
+        while not done then {
+            when self.read_until(UInt8(10), into = tmp, span = ...) in {
+                .Ok(n) then {
+                    if n == 0 then {
+                        done = true;
+                    } else {
+                        acc.push_list(tmp, span = 0..<n);
+                        if tmp[n - 1] == UInt8(10) then {
+                            done = true;
+                        };
+                    };
+                },
+                .Error(e) then {
+                    return Result[Option[String]].Error(e);
+                },
+            };
+        };
+        if acc.count() == 0 then {
+            return Result[Option[String]].Ok(Option[String].None());
+        };
+        return when String.from_utf8_ptr(acc.borrow_ptr(), acc.count()) in {
+            .Ok(line) then Result[Option[String]].Ok(Option[String].Some(line)),
+            .Error(e) then Result[Option[String]].Error(e),
         };
     };
 
@@ -298,7 +309,15 @@ given[R: Reader and Seeker] BufReader[R]: Seeker {
         let unread = self.end - self.start;
         let adjusted = when pos in {
             .Start(offset) then SeekOrigin.Start(offset),
-            .Current(offset) then SeekOrigin.Current(offset - Int64(unread)),
+            .Current(offset) then {
+                let compensation = Int64(unread);
+                if offset < Int64.min_value() + compensation then {
+                    return Result[UInt64].Error(
+                        IoError.Other("invalid seek to negative or out-of-range offset"),
+                    );
+                };
+                SeekOrigin.Current(offset - compensation)
+            },
             .End(offset) then SeekOrigin.End(offset),
         };
 

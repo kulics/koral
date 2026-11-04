@@ -102,10 +102,12 @@ public let log_gamma[T: FloatMath](x: T): T;
 /// The domain is x > 0 with a positive base different from 1.
 public let log[T: FloatingPoint](x: T, base: T =): T;
 
-/// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative.
+/// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative,
+/// wrapping at the minimum value when the type wraps.
 public let gcd[T: Integer](a: T, b: T): T;
 
-/// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero.
+/// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero,
+/// wrapping at the minimum value when the type wraps.
 public let lcm[T: Integer](a: T, b: T): T;
 
 /// Return the base-2 logarithm of |x| rounded down, panicking when x is zero.
@@ -231,9 +233,11 @@ public trait FloatMath: FloatingPoint {
 public trait Integer: Numeric and Div[Self] and Rem[Self] {
     /// Return self raised to the non-negative power exp, panicking on overflow unless the type wraps.
     pow(self, exp: UInt): Self;
-    /// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative.
+    /// Return the greatest common divisor of a and b, computed on their magnitudes and always non-negative,
+    /// wrapping at the minimum value when the type wraps.
     gcd(a: Self, b: Self): Self;
-    /// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero.
+    /// Return the least common multiple of a and b as a non-negative value, or zero when either argument is zero,
+    /// wrapping at the minimum value when the type wraps.
     lcm(a: Self, b: Self): Self;
     /// Return the base-2 logarithm of |x| rounded down, panicking when x is zero.
     ilog2(x: Self): UInt;

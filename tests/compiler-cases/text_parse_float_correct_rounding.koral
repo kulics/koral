@@ -1,0 +1,59 @@
+// std.text: Float64.parse is correctly rounded and never panics on exponents.
+// EXPECT: round_03_ok
+// EXPECT: round_314_ok
+// EXPECT: round_2675_ok
+// EXPECT: neg_zero_ok
+// EXPECT: exp_huge_pos_ok
+// EXPECT: exp_huge_neg_ok
+
+using "std/text" { ... };
+
+let main(): Int = {
+    // parse("0.3") must be bit-identical to the 0.3 literal
+    when Float64.parse("0.3") in {
+        .Ok(f) then if f.to_bits() == (0.3).to_bits() then println("round_03_ok")
+        else println("FAIL round_03"),
+        .Error(e) then println("FAIL round_03: " + e.message()),
+    };
+
+    when Float64.parse("3.14") in {
+        .Ok(f) then if f.to_bits() == (3.14).to_bits() then println("round_314_ok")
+        else println("FAIL round_314"),
+        .Error(e) then println("FAIL round_314: " + e.message()),
+    };
+
+    // 2.675 is not representable; parsing must still round to the nearest
+    // double, i.e. the same bits as the literal
+    when Float64.parse("2.675") in {
+        .Ok(f) then if f.to_bits() == (2.675).to_bits() then println("round_2675_ok")
+        else println("FAIL round_2675"),
+        .Error(e) then println("FAIL round_2675: " + e.message()),
+    };
+
+    // The sign of -0.0 must survive
+    when Float64.parse("-0.0") in {
+        .Ok(f) then if f.is_sign_negative() and f == 0.0 then println("neg_zero_ok")
+        else println("FAIL neg_zero"),
+        .Error(e) then println("FAIL neg_zero: " + e.message()),
+    };
+
+    // Exponent far above the range becomes +inf (Python contract, no panic)
+    when Float64.parse("1e400") in {
+        .Ok(f) then if f.is_inf() and not f.is_sign_negative() then println(
+            "exp_huge_pos_ok",
+        )
+        else println("FAIL exp_huge_pos"),
+        .Error(e) then println("FAIL exp_huge_pos: " + e.message()),
+    };
+
+    // Exponent far below the range becomes 0.0
+    when Float64.parse("-1e-400") in {
+        .Ok(f) then if f == 0.0 and f.is_sign_negative() then println(
+            "exp_huge_neg_ok",
+        )
+        else println("FAIL exp_huge_neg"),
+        .Error(e) then println("FAIL exp_huge_neg: " + e.message()),
+    };
+
+    return 0;
+};

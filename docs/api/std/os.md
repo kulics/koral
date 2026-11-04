@@ -15,12 +15,19 @@ Import the module with `using "std/os" { ... };`.
 public let create_dir[T: IntoPath](path: T): Result[Void];
 
 /// Create directory recursively (creates all missing parent directories)
+///
+/// The final path counts as created only when it is a directory: an existing
+/// regular file (or other non-directory) at `path` is an error, not success.
 public let create_dir_all[T: IntoPath](path: T): Result[Void];
 
 /// Remove empty directory
 public let remove_dir[T: IntoPath](path: T): Result[Void];
 
 /// Remove directory recursively (removes all contents first)
+///
+/// Symbolic links are never followed: when `path` itself is a symlink only the
+/// link is removed (its target is left untouched), and links found inside the
+/// tree are unlinked, not descended into.
 public let remove_dir_all[T: IntoPath](path: T): Result[Void];
 
 /// Open a directory iterator.
@@ -53,6 +60,10 @@ public let all_env(): List[Pair[String, String]];
 public let home_dir(): Option[Path];
 
 /// Get temp directory
+///
+/// When no temp environment variable is set (stripped environments such as
+/// `env -i`), the fallback is platform-specific: "/tmp" on POSIX and the
+/// Windows directory's Temp folder on Windows.
 public let temp_dir(): Path;
 
 /// Get current working directory
@@ -115,6 +126,9 @@ public let absolute_path[T: IntoPath](path: T): Result[Path];
 public let canonicalize_path[T: IntoPath](path: T): Result[Path];
 
 /// Open a file and return a File handle (unbuffered, directly wraps fd).
+///
+/// The path is passed to the OS unchanged: userland normalization would make
+/// ".." resolve lexically instead of through symlinks the way POSIX does.
 public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File];
 
 /// Create a new file (fails if file already exists).
@@ -130,12 +144,22 @@ public let symlink_info[T: IntoPath](path: T): Result[FileInfo];
 public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void];
 
 /// Create a hard link at `link` pointing to `to`
+///
+/// Both paths reach the OS unchanged; userland normalization would resolve
+/// ".." lexically instead of through symlinks the way POSIX does.
 public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
 
 /// Create a symbolic link at `link` pointing to `to`
+///
+/// The target is stored verbatim (a relative target stays relative) and both
+/// paths reach the OS unchanged.
 public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
 
 /// Read the target path of a symbolic link
+///
+/// The target is returned verbatim. A readlink result equal to the buffer size
+/// means the target did not fit; the read is retried with a bigger buffer
+/// instead of returning a silently truncated path.
 public let read_symlink[T: IntoPath](path: T): Result[Path];
 
 /// Truncate a file to the specified size
@@ -437,6 +461,9 @@ given Path {
     /// 判断路径是否以指定后缀结尾（按组件匹配）
     public ends_with(self, suffix: Path): Bool;
     /// 计算相对于 base 的相对路径
+    ///
+    /// 双方必须同为绝对或同为相对；绝对路径还必须共享同一个根
+    /// （POSIX 根、`C:/` 盘符根或 UNC 根），否则报错而不是给出错误的相对路径。
     public relative_to[T: IntoPath](self, base: T): Result[Path];
 };
 

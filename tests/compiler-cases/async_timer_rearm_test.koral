@@ -1,0 +1,58 @@
+// EXPECT: timer_rearm_ok
+// EXPECT: timer_fired_state_ok
+// EXPECT: ticker_rearm_ok
+
+using "std/async" { ... };
+using "std/time" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    // ========================================================================
+    // Timer: cancel() + reset() re-arms the timer; wait() blocks again
+    // ========================================================================
+    let t = Timer.new(80ms);
+    t.cancel();
+    t.reset(80ms);
+    let start = MonoTime.now();
+    t.wait();
+    let elapsed = start.elapsed().as_milliseconds();
+    assert(elapsed >= 40, "re-armed timer should block, elapsed " + elapsed.to_string());
+    println("timer_rearm_ok");
+
+    // fired is set only on real expiry: the second wait() returns immediately
+    let quick = MonoTime.now();
+    t.wait();
+    let quick_ms = quick.elapsed().as_milliseconds();
+    assert(quick_ms < 40, "fired wait should return at once, elapsed " + quick_ms.to_string());
+
+    // A wait() cut short by cancel() must not mark the timer fired: after
+    // reset() the timer blocks for the new duration again.
+    let t2 = Timer.new(5s);
+    let canceller = run_task(
+        () => {
+            sleep(30ms);
+            t2.cancel();
+        },
+    );
+    t2.wait();
+    canceller.wait();
+    t2.reset(80ms);
+    let start2 = MonoTime.now();
+    t2.wait();
+    let elapsed2 = start2.elapsed().as_milliseconds();
+    assert(elapsed2 >= 40, "reset after cancelled wait should block, elapsed " + elapsed2.to_string());
+    println("timer_fired_state_ok");
+
+    // ========================================================================
+    // Ticker: cancel() + reset() re-arms the ticker
+    // ========================================================================
+    let tk = Ticker.new(80ms);
+    tk.cancel();
+    tk.reset(80ms);
+    let start3 = MonoTime.now();
+    tk.wait();
+    let elapsed3 = start3.elapsed().as_milliseconds();
+    assert(elapsed3 >= 40, "re-armed ticker should block, elapsed " + elapsed3.to_string());
+    tk.cancel();
+    println("ticker_rearm_ok");
+};

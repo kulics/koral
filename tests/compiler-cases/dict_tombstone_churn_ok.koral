@@ -1,0 +1,53 @@
+// EXPECT: dict_tombstone_churn_ok
+// EXPECT: dict_tombstone_reinsert_ok
+
+// Tombstone reclamation: alternating insert/remove of distinct keys used to
+// saturate the bucket array with Deleted tags while count() stayed <= 1 and
+// the size-only rehash trigger never fired -- every later probe degraded to a
+// full-table scan permanently. After any churn the table must self-heal and
+// keep returning correct answers with a correct count.
+
+let main(): Int = {
+    let mutable m = Dict[Int, Int].new();
+
+    // Churn: each cycle inserts and removes a distinct key.
+    for i in 0..<10000 then {
+        m.insert(i, i * 2);
+        assert(m.get(i).is_some(), "get right after insert");
+        m.remove(i);
+        assert(m.get(i).is_none(), "get after remove");
+        assert(m.count() == 0, "count stays 0 through churn");
+    };
+    println("dict_tombstone_churn_ok");
+
+    // A following burst must behave like a fresh table: correct answers,
+    // correct count, and surviving the rehash-size probes of growth.
+    for i in 0..<1000 then {
+        m.insert(i, i + 1000);
+    };
+    assert(m.count() == 1000, "count after refill");
+    for i in 0..<1000 then {
+        assert(m.get(i).unwrap() == i + 1000, "value after refill");
+    };
+
+    // Mutate through mixed overwrite/removal (more tombstones), then re-verify.
+    for i in 0..<1000 then {
+        if i % 3 == 0 then {
+            m.remove(i);
+        } else {
+            m.insert(i, i + 5000);
+        };
+    };
+    let mutable expected = UInt(0);
+    for i in 0..<1000 then {
+        if i % 3 == 0 then {
+            assert(m.get(i).is_none(), "removed stays absent");
+        } else {
+            assert(m.get(i).unwrap() == i + 5000, "overwritten value");
+            expected = expected + 1;
+        };
+    };
+    assert(m.count() == expected, "count matches live entries");
+    println("dict_tombstone_reinsert_ok");
+    return 0;
+};

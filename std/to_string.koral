@@ -4,6 +4,16 @@
 // NOTE: This file is merged into core.koral.
 // ============================================================================
 
+// snprintf-based correctly-rounded float rendering from the C runtime
+// ('f'/'e'/'g', precision unbounded). Returns a thread-local NUL-terminated
+// buffer that the caller must copy out before the next call.
+let foreign __koral_format_float64(
+    value: Float64,
+    type_char: UInt8,
+    precision: Int,
+    alt_form: Bool,
+): *UInt8;
+
 /// Types that can render themselves as a `String`.
 public trait ToString {
     /// Return the display form of this value.
@@ -243,29 +253,11 @@ given Float32: ToString {
             return "Inf";
         };
 
-        let is_negative = (bits >> 31) == 1;
-        let mutable f = if is_negative then 0.0 - Float64(self) else Float64(self);
-
-        let int_part = Int(f);
-        let frac_part = f - Float64(int_part);
-
-        let mutable result = StringBuilder.new();
-        if is_negative then {
-            result.push_byte('-');
-        };
-
-        result.push_string(int_part.to_string());
-        result.push_byte('.');
-
-        let mutable frac = frac_part;
-        for _ in Int(0)..<Int(6) then {
-            frac = frac * 10.0;
-            let d = Int(frac);
-            result.push_byte(UInt8(d) + '0');
-            frac = frac - Float64(d);
-        };
-
-        return result.to_string();
+        // Six fractional digits, correctly rounded, with no integer
+        // conversion (which would overflow for |f| >= 2^63).
+        return String.from_cstring_unchecked(
+            __koral_format_float64(Float64(self), 'f', 6, false),
+        );
     };
 };
 
@@ -288,29 +280,9 @@ given Float64: ToString {
             return "Inf";
         };
 
-        let is_negative = (bits >> 63) == 1;
-        let mutable f = if is_negative then 0.0 - self else self;
-
-        let int_part = Int(f);
-        let frac_part = f - Float64(int_part);
-
-        let mutable result = StringBuilder.new();
-        if is_negative then {
-            result.push_byte('-');
-        };
-
-        result.push_string(int_part.to_string());
-        result.push_byte('.');
-
-        let mutable frac = frac_part;
-        for _ in Int(0)..<Int(6) then {
-            frac = frac * 10.0;
-            let d = Int(frac);
-            result.push_byte(UInt8(d) + '0');
-            frac = frac - Float64(d);
-        };
-
-        return result.to_string();
+        // Six fractional digits, correctly rounded, with no integer
+        // conversion (which would overflow for |f| >= 2^63).
+        return String.from_cstring_unchecked(__koral_format_float64(self, 'f', 6, false));
     };
 };
 
@@ -486,16 +458,19 @@ given Duration: ToString {
         };
 
         // >= 1 second: use h/m/s with fractional seconds for sub-second part
+        let mutable emitted_unit = false;
         if secs >= 3600 then {
             result.push_string((secs / 3600).to_string());
             result.push_string("h");
             secs = secs % 3600;
+            emitted_unit = true;
         };
 
         if secs >= 60 then {
             result.push_string((secs / 60).to_string());
             result.push_string("m");
             secs = secs % 60;
+            emitted_unit = true;
         };
 
         // Seconds with optional fractional part
@@ -522,8 +497,13 @@ given Duration: ToString {
             result.push_string(frac_trimmed);
             result.push_string("s");
         } else {
-            result.push_string(secs.to_string());
-            result.push_string("s");
+            // Whole seconds: a zero component is omitted once hours or
+            // minutes have been emitted ("1m", "1h", "1h1m"), but always
+            // shown when it is the only component ("45s").
+            if secs > 0 or not emitted_unit then {
+                result.push_string(secs.to_string());
+                result.push_string("s");
+            };
         };
 
         return result.to_string();

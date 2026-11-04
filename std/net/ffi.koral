@@ -1,7 +1,10 @@
 using "std" { ... };
+using "std/os" { is_windows_host };
 // ============================================================================
 // std.net - FFI Declarations (shared by tcp_listener, tcp_socket, udp_socket)
 // ============================================================================
+
+let foreign __koral_errno_ptr(): *Int32;
 
 /// Create a socket (returns fd or -1 on error)
 let foreign __koral_socket_create(domain: Int32, sock_type: Int32, protocol: Int32): Int64;
@@ -132,3 +135,182 @@ let foreign __koral_const_SOCK_STREAM(): Int32;
 
 /// SOCK_DGRAM socket type
 let foreign __koral_const_SOCK_DGRAM(): Int32;
+
+// ============================================================================
+// Socket error helpers
+// ============================================================================
+
+/// The numeric code of the last OS error (errno; on Windows the runtime copies
+/// the Winsock code there).
+let socket_error_code(): Int32 = *__koral_errno_ptr();
+
+/// True when `err` is ENOTCONN / WSAENOTCONN ("socket is not connected").
+/// 57 is ENOTCONN on BSD/macOS, 107 on Linux, 10057 is WSAENOTCONN on Windows.
+let is_not_connected_error(err: Int32): Bool =
+    err == Int32(57) or err == Int32(107) or err == Int32(10057);
+
+// ============================================================================
+// Socket timeout encoding (SO_RCVTIMEO / SO_SNDTIMEO)
+// ============================================================================
+// The option value encoding is platform-specific:
+//   - Windows: a 4-byte DWORD of milliseconds
+//   - POSIX: a struct timeval — 16 bytes (tv_sec 8 + tv_usec 8) on 64-bit,
+//     8 bytes (tv_sec 4 + tv_usec 4) on 32-bit
+// All fields are written little-endian.
+
+/// Write `value` as a little-endian UInt32 at buf[offset..offset+4].
+let write_u32_le(buf: *mutable UInt8, offset: UInt, value: Int64): Void = {
+    init_memory(buf + offset + 0, UInt8((value & 255)));
+    init_memory(buf + offset + 1, UInt8(((value >> 8) & 255)));
+    init_memory(buf + offset + 2, UInt8(((value >> 16) & 255)));
+    init_memory(buf + offset + 3, UInt8(((value >> 24) & 255)));
+};
+
+/// Read a little-endian UInt32 from buf[offset..offset+4] as a non-negative Int64.
+let read_u32_le(buf: *UInt8, offset: UInt): Int64 =
+    Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
+        Int64(UInt(buf[offset + 2])) << 16
+    ) + (Int64(UInt(buf[offset + 3])) << 24);
+
+/// Write `value` as a little-endian Int64 at buf[offset..offset+8].
+let write_i64_le(buf: *mutable UInt8, offset: UInt, value: Int64): Void = {
+    init_memory(buf + offset + 0, UInt8((value & 255)));
+    init_memory(buf + offset + 1, UInt8(((value >> 8) & 255)));
+    init_memory(buf + offset + 2, UInt8(((value >> 16) & 255)));
+    init_memory(buf + offset + 3, UInt8(((value >> 24) & 255)));
+    init_memory(buf + offset + 4, UInt8(((value >> 32) & 255)));
+    init_memory(buf + offset + 5, UInt8(((value >> 40) & 255)));
+    init_memory(buf + offset + 6, UInt8(((value >> 48) & 255)));
+    init_memory(buf + offset + 7, UInt8(((value >> 56) & 255)));
+};
+
+/// Read a little-endian Int64 from buf[offset..offset+8].
+let read_i64_le(buf: *UInt8, offset: UInt): Int64 =
+    Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
+        Int64(UInt(buf[offset + 2])) << 16
+    ) + (Int64(UInt(buf[offset + 3])) << 24) + (Int64(UInt(buf[offset + 4])) << 32) + (
+        Int64(UInt(buf[offset + 5])) << 40
+    ) + (Int64(UInt(buf[offset + 6])) << 48) + (Int64(UInt(buf[offset + 7])) << 56);
+
+/// The size of the platform's SO_RCVTIMEO / SO_SNDTIMEO value encoding.
+/// Windows always stores a 4-byte DWORD of milliseconds; elsewhere the socket
+/// is asked (the kernel reports the struct timeval size it uses: 8 on 32-bit,
+/// 16 on 64-bit).
+let timeout_option_len(fd: Int64): UInt32 = {
+    if is_windows_host() then {
+        return UInt32(4);
+    };
+    let probe = alloc_memory[UInt8](16);
+    defer dealloc_memory(probe);
+    let mutable opt_len: UInt32 = UInt32(16);
+    if __koral_socket_getsockopt(
+        fd,
+        __koral_const_SOL_SOCKET(),
+        __koral_const_SO_RCVTIMEO(),
+        probe,
+        &opt_len,
+    ) == 0 then {
+        return opt_len;
+    };
+    let mutable opt_len_8: UInt32 = UInt32(8);
+    if __koral_socket_getsockopt(
+        fd,
+        __koral_const_SOL_SOCKET(),
+        __koral_const_SO_RCVTIMEO(),
+        probe,
+        &opt_len_8,
+    ) == 0 then {
+        return UInt32(8);
+    };
+    return UInt32(16);
+};
+
+/// Write `timeout` into `buf` using the platform encoding of length `len`
+/// (4 = Windows DWORD milliseconds, 8/16 = POSIX struct timeval).
+/// None, a zero duration, or an unrecognized length leaves zeroes in the
+/// buffer, which every platform reads as "no timeout set".
+let encode_timeout_option(
+    timeout: Option[Duration],
+    buf: *mutable UInt8,
+    len: UInt32,
+): Void = {
+    let n = UInt(len);
+    let mutable bi: UInt = 0;
+    while bi < n then {
+        init_memory(buf + bi, UInt8(0));
+        bi += 1;
+    };
+    let duration = when timeout in {
+        .Some(d) then d,
+        .None() then Duration.zero(),
+    };
+    if duration <= Duration.zero() then {
+        return;
+    };
+    // Fold any denormalized nanos into whole seconds.
+    let secs = duration.secs + duration.nanos / 1000000000;
+    let nanos = duration.nanos % 1000000000;
+    if len == UInt32(4) then {
+        // Windows: DWORD of milliseconds. Round sub-millisecond durations up
+        // to 1ms (0 means "no timeout"), and clamp below the 0xffffffff
+        // sentinel instead of letting the multiply wrap.
+        let max_ms: Int64 = 4294967294;
+        if secs > Int64(4294967) then {
+            write_u32_le(buf, 0, max_ms);
+            return;
+        };
+        let mutable ms = secs * 1000 + nanos / 1000000;
+        if ms > max_ms then {
+            ms = max_ms;
+        };
+        if ms == 0 then {
+            ms = 1;
+        };
+        write_u32_le(buf, 0, ms);
+        return;
+    };
+    let usec = nanos / 1000;
+    if len == UInt32(8) then {
+        // 32-bit struct timeval: tv_sec and tv_usec are 4 bytes each.
+        write_u32_le(buf, 0, secs);
+        write_u32_le(buf, 4, usec);
+        return;
+    };
+    if len == UInt32(16) then {
+        // 64-bit struct timeval: tv_sec and tv_usec are 8 bytes each.
+        write_i64_le(buf, 0, secs);
+        write_i64_le(buf, 8, usec);
+    };
+};
+
+/// Read a platform timeout encoding of length `len` back into a Duration.
+/// Returns None when the stored value is zero (no timeout set).
+let decode_timeout_option(buf: *UInt8, len: UInt32): Option[Duration] = {
+    if len == UInt32(4) then {
+        // Windows: DWORD of milliseconds.
+        let ms = read_u32_le(buf, 0);
+        if ms == 0 then {
+            return Option[Duration].None();
+        };
+        return Option[Duration].Some(Duration(ms / 1000, (ms % 1000) * 1000000));
+    };
+    if len == UInt32(8) then {
+        // 32-bit struct timeval.
+        let secs = read_u32_le(buf, 0);
+        let usec = read_u32_le(buf, 4);
+        if secs == 0 and usec == 0 then {
+            return Option[Duration].None();
+        };
+        return Option[Duration].Some(Duration(secs, usec * 1000));
+    };
+    if len == UInt32(16) then {
+        // 64-bit struct timeval.
+        let secs = read_i64_le(buf, 0);
+        let usec = read_i64_le(buf, 8);
+        if secs == 0 and usec == 0 then {
+            return Option[Duration].None();
+        };
+        return Option[Duration].Some(Duration(secs, usec * 1000));
+    };
+    return Option[Duration].None();
+};

@@ -1,0 +1,71 @@
+// EXPECT: thread_self_join_error_ok
+// EXPECT: thread_join_retry_ok
+// EXPECT: thread_main_join_ok
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    // A failed join (self-join) must not consume the handle: wait() stays
+    // retryable instead of the failure being masked as "already waited", and
+    // the OS thread resources are still joined or detached afterwards.
+    let pending = List[Thread].new();
+    let done = AtomicInt.new(0);
+    let outcome = AtomicInt.new(0);
+    let th = run_task(
+        () => {
+            while pending.count() == 0 then {
+                yield_thread_now();
+            };
+            let self_thread = pending[0];
+            when self_thread.wait() in {
+                .Ok(_) then {
+                    outcome.store(1);
+                },
+                .Error(e) then {
+                    if e.message() == "failed to wait thread" then {
+                        outcome.store(2);
+                    } else {
+                        outcome.store(3);
+                    };
+                },
+            };
+            // The retry hits the join error again, not "thread already waited".
+            when self_thread.wait() in {
+                .Ok(_) then {
+                    outcome.store(10);
+                },
+                .Error(e) then {
+                    if e.message() == "failed to wait thread" then {
+                        outcome.store(4);
+                    } else {
+                        outcome.store(5);
+                    };
+                },
+            };
+            done.store(1);
+        },
+    );
+    pending.push(th);
+    while done.load() == 0 then {
+        yield_thread_now();
+    };
+    assert(outcome.load() == 4, "self-join failure is retryable, outcome " + outcome.load().to_string());
+    println("thread_self_join_error_ok");
+    println("thread_join_retry_ok");
+
+    // The main thread still gets a real join on the finished thread (the
+    // failed self-join did not mark the handle waited).
+    when th.wait() in {
+        .Ok(_) then {},
+        .Error(e) then assert(false, "main join should succeed, got " + e.message()),
+    };
+    when th.wait() in {
+        .Ok(_) then assert(false, "wait after successful wait should fail"),
+        .Error(e) then assert(
+            e.message() == "thread already waited",
+            "second wait should report already waited, got " + e.message(),
+        ),
+    };
+    println("thread_main_join_ok");
+};

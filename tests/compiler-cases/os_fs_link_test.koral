@@ -1,0 +1,88 @@
+// EXPECT: fs_symlink_relative_ok
+// EXPECT: fs_create_dir_all_file_error_ok
+// EXPECT: fs_remove_dir_all_symlink_ok
+// EXPECT: fs_read_symlink_ok
+// EXPECT: fs_walk_types_ok
+
+// Symlink-sensitive filesystem behavior: ".." resolves through symlinks at the
+// OS (not lexically), create_dir_all never reports success over a regular
+// file, remove_dir_all never follows a symlink root, read_symlink round-trips
+// verbatim, and walk_dir descends into real subdirectories.
+using "std/os" { ... };
+
+let main(): Void = {
+    let base = create_temp_dir("".into_path(), prefix = "os_fs_link_test_").unwrap();
+    let bs = base.to_string();
+
+    // ========================================================================
+    // "link/../target.txt" resolves through the symlink's target directory.
+    // Lexical normalization would look for base/target.txt instead of
+    // base/real/target.txt.
+    // ========================================================================
+    create_dir_all(base.join("real/sub")).unwrap();
+    write_text_file(base.join("real/target.txt"), content = "hello").unwrap();
+    create_symlink(base.join("link"), to = "real/sub").unwrap();
+    let f = open_file(bs + "/link/../target.txt", OpenMode.Read());
+    when f in {
+        .Ok(file) then {
+            let info = file.info().unwrap();
+            assert(info.file_size() == UInt64(5), "link/../target.txt stats the real file");
+        },
+        .Error(e) then panic("link/../target.txt must open: " + e.message()),
+    };
+    assert(file_info(bs + "/link/../target.txt").is_ok(), "file_info resolves through link");
+    println("fs_symlink_relative_ok");
+
+    // ========================================================================
+    // create_dir_all over an existing regular file is an error, and an
+    // existing directory still counts as success.
+    // ========================================================================
+    write_text_file(base.join("afile"), content = "x").unwrap();
+    assert(create_dir_all(base.join("afile")).is_error(), "create_dir_all over file");
+    assert(create_dir_all(base.join("afile/sub")).is_error(), "create_dir_all under file");
+    assert(create_dir_all(base.join("real")).is_ok(), "create_dir_all over dir");
+    println("fs_create_dir_all_file_error_ok");
+
+    // ========================================================================
+    // remove_dir_all on a symlink to a directory removes ONLY the link.
+    // ========================================================================
+    create_dir_all(base.join("victim/inner")).unwrap();
+    write_text_file(base.join("victim/inner/keep.txt"), content = "keep").unwrap();
+    create_symlink(base.join("victim_link"), to = "victim").unwrap();
+    assert(remove_dir_all(base.join("victim_link")).is_ok(), "remove_dir_all on link root");
+    assert(not path_exist(base.join("victim_link")), "link removed");
+    assert(path_exist(base.join("victim/inner/keep.txt")), "link target untouched");
+    println("fs_remove_dir_all_symlink_ok");
+
+    // ========================================================================
+    // read_symlink returns the stored target verbatim (relative stays relative).
+    // ========================================================================
+    create_symlink(base.join("victim/sym_t"), to = "inner/keep.txt").unwrap();
+    let target = read_symlink(base.join("victim/sym_t")).unwrap();
+    assert(target.to_string() == "inner/keep.txt", "read_symlink verbatim");
+    println("fs_read_symlink_ok");
+
+    // ========================================================================
+    // walk_dir classifies and descends real subdirectories.
+    // ========================================================================
+    let mutable it = walk_dir(base.join("victim")).unwrap();
+    let mutable saw_keep = false;
+    let mutable saw_inner_dir = false;
+    let mutable saw_sym = false;
+    while it.next() is .Some(entry) then {
+        if entry.name() == "keep.txt" and entry.is_file() then {
+            saw_keep = true;
+        };
+        if entry.name() == "inner" and entry.is_dir() then {
+            saw_inner_dir = true;
+        };
+        if entry.name() == "sym_t" and entry.is_symlink() then {
+            saw_sym = true;
+        };
+    };
+    assert(saw_keep and saw_inner_dir, "walk sees files and subdirectories");
+    assert(saw_sym, "walk classifies symlinks");
+    println("fs_walk_types_ok");
+
+    remove_dir_all(base).unwrap();
+};

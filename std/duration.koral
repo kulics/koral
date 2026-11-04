@@ -23,11 +23,10 @@ given Duration {
 
         if out_nanos >= 1_000_000_000 then {
             let extra_secs = out_nanos / 1_000_000_000;
-            let new_secs = out_secs + extra_secs;
-            if extra_secs > 0 and new_secs < out_secs then {
+            if extra_secs > 0 and out_secs > Int64.max_value() - extra_secs then {
                 return Result[Duration].Error("Duration.new: seconds overflow");
             };
-            out_secs = new_secs;
+            out_secs = out_secs + extra_secs;
             out_nanos = out_nanos % 1_000_000_000;
         };
 
@@ -45,14 +44,15 @@ given Duration {
     /// 转换为毫秒总数
     public as_milliseconds(self): Int64 = self.secs * 1_000 + self.nanos / 1_000_000;
 
-    /// 转换为秒数（截断）
-    public as_seconds(self): Int64 = self.secs;
+    /// 转换为秒数（向零截断）
+    public as_seconds(self): Int64 = if self.secs < 0 and self.nanos > 0 then self.secs + 1
+    else self.secs;
 
-    /// 转换为分钟数（截断）
-    public as_minutes(self): Int64 = self.secs / 60;
+    /// 转换为分钟数（向零截断）
+    public as_minutes(self): Int64 = self.as_seconds() / 60;
 
-    /// 转换为小时数（截断）
-    public as_hours(self): Int64 = self.secs / 3600;
+    /// 转换为小时数（向零截断）
+    public as_hours(self): Int64 = self.as_seconds() / 3600;
 
     /// 比率（Duration / Duration -> Float64）
     public ratio(self, other: Duration): Float64 = {

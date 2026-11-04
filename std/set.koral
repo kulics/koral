@@ -14,10 +14,13 @@ type SetBucket[T: Hash] {
 };
 
 /// A hash set of `Hash` values; iteration order is unspecified.
+/// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
+/// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Set[T: Hash](
     mutable buckets: *mutable SetBucket[T],
     mutable size: UInt,
     mutable capacity: UInt,
+    mutable deleted: UInt,
 );
 
 /// `Drop` for `Set[T]`: releases the bucket array.
@@ -42,7 +45,7 @@ given[T: Hash] Set[T] {
 
     /// 空集合不分配桶数组，首次 insert（走 rehash）时再分配。
     public new(): Self = {
-        return Set[T](null, 0, 0);
+        return Set[T](null, 0, 0, 0);
     };
 
     /// Create an empty set with its buckets allocated up front, sized for about
@@ -60,7 +63,7 @@ given[T: Hash] Set[T] {
             let empty_bucket = SetBucket[T].Empty();
             init_memory(buckets + i, empty_bucket);
         };
-        return Set[T](buckets, 0, cap);
+        return Set[T](buckets, 0, cap, 0);
     };
 
     /// Return the number of elements in the set.
@@ -114,8 +117,13 @@ given[T: Hash] Set[T] {
     private rehash(self): Void = {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
-        // 空集合首次分配；已有桶数组时翻倍。
-        let new_cap = if old_cap == UInt(0) then UInt(16) else old_cap * UInt(2);
+        // 新容量只由存活条目决定（tombstone 不带进新表）：
+        // 负载保持 ≤ 0.5（size * 2 < new_cap），空集合首次分配 16 桶；
+        // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
+        let mutable new_cap = UInt(16);
+        while self.size * 2 >= new_cap then {
+            new_cap = new_cap * UInt(2);
+        };
         let new_buckets = alloc_memory[SetBucket[T]](new_cap);
         for i in 0..<new_cap then {
             let empty_bucket = SetBucket[T].Empty();
@@ -124,6 +132,9 @@ given[T: Hash] Set[T] {
         self.buckets = new_buckets;
         self.capacity = new_cap;
         self.size = 0;
+        // 陈旧桶不带入新表；先清零再回插，回插走 public insert 的
+        // 触发检查也不会递归 rehash（新容量 > 2 * 存活数）。
+        self.deleted = 0;
         for i in 0..<old_cap then {
             let bucket = take_memory(old_buckets + i);
             when bucket in {
@@ -143,7 +154,10 @@ given[T: Hash] Set[T] {
 
     /// Add `value` only if it is absent; return whether it was added.
     public try_insert(self, value: T): Bool = {
-        if self.size * 2 >= self.capacity then {
+        // 两个触发条件：存活负载满了要扩容；tombstone 过半要重建（缩回
+        // 合适容量并清掉陈旧槽），否则删插交替会把表填满 Deleted 标签，
+        // 每次查找退化成全表探测且永不再 rehash。
+        if self.size * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
             self.rehash();
         };
         when self.find_slot(value) in {
@@ -156,9 +170,16 @@ given[T: Hash] Set[T] {
                     .Occupied(_) then {
                         return false;
                     },
-                    .Empty() or .Deleted() then {
+                    .Empty() then {
                         self.buckets[idx] = SetBucket[T].Occupied(value);
                         self.size = self.size + 1;
+                        return true;
+                    },
+                    .Deleted() then {
+                        self.buckets[idx] = SetBucket[T].Occupied(value);
+                        self.size = self.size + 1;
+                        // 复用了一个 tombstone 槽：陈旧桶少一个。
+                        self.deleted = self.deleted - 1;
                         return true;
                     },
                 };
@@ -206,6 +227,7 @@ given[T: Hash] Set[T] {
                     .Occupied(_) then {
                         self.buckets[idx] = SetBucket[T].Deleted();
                         self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
                         return true;
                     },
                     _ then false,
@@ -236,6 +258,7 @@ given[T: Hash] Set[T] {
             self.buckets[i] = SetBucket[T].Empty();
         };
         self.size = 0;
+        self.deleted = 0;
     };
 
     /// Keep only the elements that satisfy `predicate`; O(n) time.
@@ -247,6 +270,7 @@ given[T: Hash] Set[T] {
                     if not predicate(v) then {
                         self.buckets[i] = SetBucket[T].Deleted();
                         self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
                     };
                 },
                 _ then {},

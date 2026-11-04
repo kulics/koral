@@ -1,0 +1,74 @@
+// EXPECT: udp_timeout_encoding_ok
+// EXPECT: udp_empty_recv_from_ok
+
+using "std/net" { ... };
+using "std/time" { ... };
+
+let main(): Void = {
+    // ========================================================================
+    // Timeout set/get round-trip through the platform encoding
+    // (DWORD milliseconds on Windows, struct timeval elsewhere)
+    // ========================================================================
+    let sock = UdpSocket.bind("127.0.0.1:0").unwrap();
+
+    sock.set_read_timeout(Option[Duration].Some(2s)).unwrap();
+    when sock.read_timeout().unwrap() in {
+        .Some(d) then assert(d.as_seconds() == Int64(2), "read timeout 2s"),
+        .None() then assert(false, "read timeout should be Some"),
+    };
+
+    sock.set_write_timeout(Option[Duration].Some(3s)).unwrap();
+    when sock.write_timeout().unwrap() in {
+        .Some(d) then assert(d.as_seconds() == Int64(3), "write timeout 3s"),
+        .None() then assert(false, "write timeout should be Some"),
+    };
+
+    // Sub-second durations pin the millisecond/microsecond fields of the
+    // encoding (a seconds-vs-milliseconds confusion shows up here).
+    sock.set_read_timeout(Option[Duration].Some(1500ms)).unwrap();
+    when sock.read_timeout().unwrap() in {
+        .Some(d) then assert(d.as_milliseconds() == Int64(1500), "read timeout 1500ms"),
+        .None() then assert(false, "read timeout should be Some"),
+    };
+    sock.set_read_timeout(Option[Duration].Some(250ms)).unwrap();
+    when sock.read_timeout().unwrap() in {
+        .Some(d) then assert(d.as_milliseconds() == Int64(250), "read timeout 250ms"),
+        .None() then assert(false, "read timeout should be Some"),
+    };
+
+    // None clears the timeout
+    sock.set_read_timeout(Option[Duration].None()).unwrap();
+    when sock.read_timeout().unwrap() in {
+        .Some(_) then assert(false, "cleared read timeout should be None"),
+        .None() then {},
+    };
+    sock.set_write_timeout(Option[Duration].None()).unwrap();
+    when sock.write_timeout().unwrap() in {
+        .Some(_) then assert(false, "cleared write timeout should be None"),
+        .None() then {},
+    };
+    println("udp_timeout_encoding_ok");
+
+    // ========================================================================
+    // recv_from with an empty span is a caller error, not a fabricated
+    // 0.0.0.0:0 sender
+    // ========================================================================
+    let empty = make_bytes(0);
+    when sock.recv_from(into = empty, span = ...) in {
+        .Ok(_) then assert(false, "empty span should be an error"),
+        .Error(e) then assert(
+            e.message() == "recv_from: buffer span is empty",
+            "empty span error text",
+        ),
+    };
+
+    let big = make_bytes(8);
+    when sock.recv_from(into = big, span = 3..<3) in {
+        .Ok(_) then assert(false, "empty sub-span should be an error"),
+        .Error(e) then assert(
+            e.message() == "recv_from: buffer span is empty",
+            "empty sub-span error text",
+        ),
+    };
+    println("udp_empty_recv_from_ok");
+};

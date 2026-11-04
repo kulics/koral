@@ -651,6 +651,24 @@ private let build_mir_function_emit_plan(
     let mutable non_owning_local_ids = compute_non_owning_mir_locals(function);
     let mutable tracked_init_locals = Dict[UInt, Bool].new();
 
+    // Borrowed-self convention (Swift's "guaranteed self" / ARC pair elision):
+    // the analysis (codegen_borrowed_self.koral) proved this method's `self`
+    // non-escaping, every call site passes the handle +0, so this function
+    // must NOT release it. Marking the self local non-owning does exactly that
+    // -- no tracked init flag, hence no epilogue/root drop -- and the existing
+    // non-owning machinery keeps the ledger balanced on every consuming use:
+    // `should_copy_returned_operand` copies non-owning locals on return and
+    // `emit_place_read` forces a retained copy for a Move read of a place with
+    // no init flag, so nothing can consume the borrowed +0 handle directly.
+    if codegen.borrowed_self_def_ids.contains(function.identifier.def_id.id) and function.params.count() > 0 and function.params[UInt(0)].name == "self" then {
+        for local in function.locals then {
+            if local.storage is .Parameter() and local.name == "self" then {
+                non_owning_local_ids.insert(local.id.raw_value, true);
+                break;
+            };
+        };
+    };
+
     for local in function.locals then {
         let name = when local.storage in {
             .Parameter() or .Capture() then when local.symbol in {
@@ -1611,7 +1629,50 @@ given MIRFunctionCodeEmitter {
         );
     };
 
-    emit_call(self, call: MIRCall): MIRValueEmission = {
+    /// Borrowed-self convention (Swift's "guaranteed self" / ARC pair elision):
+    /// when the callee's `self` was proven non-escaping (see
+    /// codegen_borrowed_self.koral), the receiver handle is passed +0 -- the
+    /// caller must NOT retain it and the callee will NOT release it.
+    /// `MIROwnershipUse.Borrow()` is exactly the +0 shape
+    /// `emit_direct_call_argument` already implements: a place read passes the
+    /// raw handle and a temporary receiver keeps its caller-side cleanup (so
+    /// `f().push(x)` still drops the temporary after the call). Only argument
+    /// 0 -- the self slot -- is touched; every other argument keeps its
+    /// lowered ownership, and a callee outside the set keeps the owned
+    /// convention (the analysis only admits methods whose every call site can
+    /// adopt this pass).
+    apply_borrowed_self_receiver_convention(self, call: MIRCall): MIRCall = {
+        if call.arguments.count() == 0 then {
+            return call;
+        };
+        when call.callee in {
+            .Function(symbol) then {
+                if not self.codegen.borrowed_self_def_ids.contains(symbol.def_id.id) then {
+                    return call;
+                };
+            },
+            _ then {
+                return call;
+            },
+        };
+        if call.argument_ownerships.count() != call.arguments.count() then {
+            return call;
+        };
+        if call.argument_ownerships[UInt(0)] is .Borrow() then {
+            return call;
+        };
+        let mutable ownerships = List[MIROwnershipUse].new();
+        ownerships.push(MIROwnershipUse.Borrow());
+        let mutable i = UInt(1);
+        while i < call.argument_ownerships.count() then {
+            ownerships.push(call.argument_ownerships[i]);
+            i += UInt(1);
+        };
+        return MIRCall(call.callee, call.arguments, ownerships, call.result_type);
+    };
+
+    emit_call(self, call_arg: MIRCall): MIRValueEmission = {
+        let call = self.apply_borrowed_self_receiver_convention(call_arg);
         let has_ownerships = call.argument_ownerships.count() == call.arguments.count();
         when call.callee in {
             .Function(symbol) then {

@@ -1,0 +1,86 @@
+// EXPECT: proc_env_path_search_ok
+// EXPECT: proc_env_edit_model_ok
+// EXPECT: proc_spawn_loop_ok
+
+// Env actions must not disable PATH search (a bare program name keeps
+// working), and the documented edit model must hold: Set overrides in place,
+// Remove drops one name, Clear drops everything, last Set wins.
+using "std/os" { ... };
+using "std/proc" { ... };
+
+let main(): Void = {
+    // ========================================================================
+    // Bare program name + env actions: PATH search still applies.
+    // ========================================================================
+    let r1 = Command.new("sh").arg("-c").arg("echo hi").set_env("X", "1").run_output();
+    when r1 in {
+        .Ok(o) then {
+            assert(o.is_success(), "path search exit");
+            assert(o.stdout.trim_ascii() == "hi", "path search stdout");
+        },
+        .Error(e) then panic("path search spawn failed: " + e.message()),
+    };
+    println("proc_env_path_search_ok");
+
+    // ========================================================================
+    // Edit model: set/remove/clear/last-wins against the inherited environment.
+    // ========================================================================
+    // Set keeps the inherited variables (HOME must survive).
+    let r2 = Command.new("sh").arg("-c").arg("echo $KORAL_PVAR:$HOME").set_env(
+        "KORAL_PVAR",
+        "v",
+    ).run_output();
+    when r2 in {
+        .Ok(o) then {
+            let s = o.stdout.trim_ascii();
+            assert(s.starts_with("v:"), "set_env applies");
+            assert(s.count() > 2, "set_env keeps inherited env");
+        },
+        .Error(e) then panic("set_env spawn failed: " + e.message()),
+    };
+
+    // Remove drops exactly one name.
+    let r3 = Command.new("sh").arg("-c").arg("echo [$KORAL_PVAR]:$HOME").remove_env(
+        "KORAL_PVAR",
+    ).run_output();
+    when r3 in {
+        .Ok(o) then {
+            let s = o.stdout.trim_ascii();
+            assert(s.starts_with("[]:"), "remove_env drops the name");
+            assert(s.count() > 3, "remove_env keeps inherited env");
+        },
+        .Error(e) then panic("remove_env spawn failed: " + e.message()),
+    };
+
+    // Clear empties the inherited environment.
+    let r4 = Command.new("sh").arg("-c").arg("echo [$HOME]").clear_env().run_output();
+    when r4 in {
+        .Ok(o) then assert(o.stdout.trim_ascii() == "[]", "clear_env empties the env"),
+        .Error(e) then panic("clear_env spawn failed: " + e.message()),
+    };
+
+    // Last Set on one name wins.
+    let r5 = Command.new("sh").arg("-c").arg("echo $KORAL_PVAR").set_env(
+        "KORAL_PVAR",
+        "first",
+    ).set_env("KORAL_PVAR", "second").run_output();
+    when r5 in {
+        .Ok(o) then assert(o.stdout.trim_ascii() == "second", "last set_env wins"),
+        .Error(e) then panic("set_env order spawn failed: " + e.message()),
+    };
+    println("proc_env_edit_model_ok");
+
+    // ========================================================================
+    // Repeated spawns with env actions stay healthy (argv/env scratch freed).
+    // ========================================================================
+    let mutable i = 0;
+    while i < 30 then {
+        let rr = Command.new("sh").arg("-c").arg("echo x").set_env("KORAL_LOOP", "1").run_output();
+        when rr in {
+            .Ok(o) then assert(o.stdout.trim_ascii() == "x", "loop spawn output"),
+            .Error(e) then panic("loop spawn failed: " + e.message()),
+        };
+        i += 1;
+    };
+    println("proc_spawn_loop_ok");
+};

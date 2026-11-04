@@ -1,0 +1,56 @@
+// EXPECT: All ByteBuffer seek tests passed
+
+using "std/io" { ... };
+
+let expect_error(name: String, r: Result[UInt64]): Void = {
+    when r in {
+        .Ok(_) then assert(false, name + " should fail"),
+        .Error(_) then {},
+    };
+};
+
+let expect_pos(name: String, r: Result[UInt64], want: UInt64): Void = {
+    assert(r.unwrap() == want, name + " wrong position");
+};
+
+let main(): Void = {
+    let bb = ByteBuffer.from_string("abc");
+
+    // Extreme-but-legal offsets must fail with Result.Error, never panic:
+    // no checked cast or checked add may see these values.
+    expect_error(
+        "Start(UInt64.max)",
+        bb.seek(SeekOrigin.Start(UInt64.max_value())),
+    );
+    expect_error(
+        "Current(Int64.max)",
+        bb.seek(SeekOrigin.Current(Int64.max_value())),
+    );
+    expect_error(
+        "Current(Int64.min)",
+        bb.seek(SeekOrigin.Current(Int64.min_value())),
+    );
+    expect_error(
+        "End(Int64.max)",
+        bb.seek(SeekOrigin.End(Int64.max_value())),
+    );
+    expect_error(
+        "End(Int64.min)",
+        bb.seek(SeekOrigin.End(Int64.min_value())),
+    );
+
+    // Ordinary out-of-range targets keep failing the same way.
+    expect_error("Start(4)", bb.seek(SeekOrigin.Start(4)));
+    expect_error("End(1)", bb.seek(SeekOrigin.End(1)));
+    expect_error("Current(-1)", bb.seek(SeekOrigin.Current(-1)));
+
+    // Failed seeks leave the cursor where it was; ordinary seeks land exactly.
+    expect_pos("Start(1)", bb.seek(SeekOrigin.Start(1)), UInt64(1));
+    expect_pos("Current(-1)", bb.seek(SeekOrigin.Current(-1)), UInt64(0));
+    expect_pos("End(-1)", bb.seek(SeekOrigin.End(-1)), UInt64(2));
+    expect_pos("End(0)", bb.seek(SeekOrigin.End(0)), UInt64(3));
+    expect_pos("Start(3)", bb.seek(SeekOrigin.Start(3)), UInt64(3));
+    expect_pos("Current(-3)", bb.seek(SeekOrigin.Current(-3)), UInt64(0));
+
+    println("All ByteBuffer seek tests passed");
+};

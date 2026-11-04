@@ -70,6 +70,9 @@ given Thread: Drop {};
 given Thread {
     /// Block until the thread finishes.
     /// Returns Error if already waited or detached.
+    /// A failed join (e.g. a thread waiting on itself) leaves the handle open:
+    /// the call stays retryable and Drop still detaches instead of leaking the
+    /// OS thread resources.
     public wait(self): Result[Void];
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
     public detach(self): Void;
@@ -87,10 +90,14 @@ given Timer {
     /// Create a timer with the given delay.
     public new(d: Duration): Timer;
     /// Block for the timer's duration. Returns immediately if already fired or cancelled.
-    /// Marks the timer as fired on return.
+    /// Marks the timer as fired only when the full duration elapses; a wait()
+    /// cut short by cancel() leaves the timer unfired.
     public wait(self): Void;
     /// Reset the timer: clears fired state and sets a new duration.
     /// The next wait() will block for the new duration.
+    /// Re-arms a cancelled timer: the runtime's cancel is one-shot, so the
+    /// timer context is rebuilt and the cancelled state is cleared. Do not
+    /// call reset while another thread is blocked in wait() on this timer.
     public reset(self, d: Duration): Void;
     /// Cancel the timer. Any blocked wait() returns immediately.
     public cancel(self): Void;
@@ -106,6 +113,9 @@ given Ticker {
     /// Block until the next tick. Returns immediately if cancelled.
     public wait(self): Void;
     /// Change the interval. Takes effect on the next wait() call.
+    /// Re-arms a cancelled ticker: the runtime's cancel is one-shot, so the
+    /// timer context is rebuilt and the cancelled state is cleared. Do not
+    /// call reset while another thread is blocked in wait() on this ticker.
     public reset(self, interval: Duration): Void;
     /// Cancel the ticker. Any blocked wait() returns immediately.
     public cancel(self): Void;

@@ -6,13 +6,18 @@ using "std" { ... };
 // Access via: using "std/proc" { ... };
 // ============================================================================
 
-using "std/os" { Path, IntoPath };
+using "std/os" { Path, IntoPath, all_env };
 
 // ============================================================================
 // FFI Declarations
 // ============================================================================
 
 /// Create a child process via Unix(posix_spawn ) / CreateProcess (Windows).
+///
+/// `envc < 0` means the child inherits the current environment (`envp` is
+/// ignored); `envc >= 0` means `envp` carries the child's COMPLETE environment
+/// (an `envc` of 0 is an explicitly empty environment). A bare `program` name
+/// is resolved through the child's PATH either way.
 let foreign __koral_spawn(
     program: *UInt8,
     argv: **UInt8,
@@ -67,15 +72,48 @@ private let argv_to_ptrs(argv: List[String]): **UInt8 = {
     return ptrs;
 };
 
-/// Build environment variable strings from env actions.
-/// Set => "KEY=VALUE", Remove => "KEY" (no =), Clear => "" (empty string).
+/// Extract the name part of a "KEY=VALUE" environment entry.
+private let env_entry_name(entry: String): String = when entry.find("=") in {
+    .Some(idx) then entry.substring(0..<idx),
+    .None() then entry,
+};
+
+/// Drop every entry named `name` from `entries`, in place.
+private let env_entries_remove(entries: List[String], name: String): Void = {
+    let mutable i: UInt = 0;
+    while i < entries.count() then {
+        if env_entry_name(entries[i]) == name then {
+            entries.remove_at(i);
+        } else {
+            i += 1;
+        };
+    };
+};
+
+/// Build the child's complete environment by applying the env actions to a
+/// copy of the current environment:
+///   Set    — set or override the named variable (last Set wins)
+///   Remove — omit the named variable
+///   Clear  — empty the inherited environment (later actions build on the
+///            empty base)
+/// Returns the merged "KEY=VALUE" block to pass as the whole child environment.
 private let build_env_strings(actions: List[EnvAction]): List[String] = {
     let mutable result: List[String] = [];
+    for pair in all_env() then {
+        result.push("\(pair.first)=\(pair.second)");
+    };
     for action in actions then {
         when action in {
-            .Set(name, value) then result.push("\(name)=\(value)"),
-            .Remove(name) then result.push(name),
-            .Clear() then result.push(""),
+            .Set(name, value) then {
+                env_entries_remove(result, name);
+                result.push("\(name)=\(value)");
+            },
+            .Remove(name) then {
+                env_entries_remove(result, name);
+            },
+            .Clear() then {
+                result.clear();
+            },
         };
     };
     return result;
@@ -217,8 +255,13 @@ given Command {
         let stdout_mode = stdio_to_int(self.storage.stdout_cfg);
         let stderr_mode = stdio_to_int(self.storage.stderr_cfg);
 
-        // Build environment variable string list ("KEY=VALUE" format)
-        let env_strs = build_env_strings(self.storage.env_actions);
+        // Build the child environment: no actions means "inherit"; otherwise
+        // the actions merge into a copy of the current environment and the
+        // merged block is the child's complete environment.
+        let has_env_actions = not self.storage.env_actions.is_empty();
+        let env_strs = if has_env_actions then build_env_strings(self.storage.env_actions) else List[String].new();
+        // envc < 0 tells the runtime "inherit"; >= 0 is the complete block.
+        let envc = if has_env_actions then Int32(env_strs.count()) else Int32(0) - 1;
         let stdin_fd = stdio_to_fd(self.storage.stdin_cfg);
         let stdout_fd = stdio_to_fd(self.storage.stdout_cfg);
         let stderr_fd = stdio_to_fd(self.storage.stderr_cfg);
@@ -229,14 +272,19 @@ given Command {
             .None() then String.new(),
         };
 
+        // Pointer arrays are spawn-time scratch. The strings they borrow live
+        // in argv/env_strs and stay alive until after the call returns.
+        let argv_ptrs = argv_to_ptrs(argv);
+        let env_ptrs = env_strs_to_ptrs(env_strs);
+
         // Call FFI to create child process
         let mutable proc = KoralProcess(0, -1, -1, -1);
         let result = __koral_spawn(
             self.storage.program.borrow_ptr(),
-            argv_to_ptrs(argv),
+            argv_ptrs,
             Int32(argv.count()),
-            env_strs_to_ptrs(env_strs),
-            Int32(env_strs.count()),
+            env_ptrs,
+            envc,
             cwd.borrow_ptr(),
             stdin_mode,
             stdout_mode,
@@ -246,6 +294,12 @@ given Command {
             stderr_fd,
             &proc,
         );
+
+        // Free the per-spawn pointer arrays on every path out of here.
+        dealloc_memory(argv_ptrs);
+        if env_ptrs != null then {
+            dealloc_memory(env_ptrs);
+        };
 
         if result != 0 then {
             return .Error(last_error_message());
@@ -267,9 +321,20 @@ given Command {
 
     /// Synchronously execute the command and wait for completion.
     /// Returns only the exit status (does not capture output).
-    public run(self): Result[ExitStatus] = when self.spawn() in {
-        .Ok(child) then child.wait(),
-        .Error(e) then Result[ExitStatus].Error(e),
+    ///
+    /// Piped stdin is rejected up front: run() neither writes nor closes the
+    /// pipe, so the child would wait for input forever. Use spawn() together
+    /// with take_stdin_pipe() when the child should read a stdin feed.
+    public run(self): Result[ExitStatus] = {
+        if self.storage.stdin_cfg is .Piped() then {
+            return Result[ExitStatus].Error(
+                "run() does not support Piped stdin; use spawn() and take_stdin_pipe()",
+            );
+        };
+        return when self.spawn() in {
+            .Ok(child) then child.wait(),
+            .Error(e) then Result[ExitStatus].Error(e),
+        };
     };
 
     /// Synchronously execute the command, capture stdout/stderr, and wait for completion.

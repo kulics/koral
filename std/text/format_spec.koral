@@ -10,9 +10,12 @@ using "std" { ... };
 
 // Internal format spec parsed result (module-internal type).
 type mutable FormatSpec(
-    mutable fill: UInt8,
+    mutable fill: Rune,
     mutable align: UInt8,
     mutable sign: UInt8,
+    mutable fill_explicit: Bool,
+    mutable align_explicit: Bool,
+    mutable sign_explicit: Bool,
     mutable alt_form: Bool,
     mutable zero_pad: Bool,
     mutable width: UInt,
@@ -24,7 +27,20 @@ type mutable FormatSpec(
 // Parse a format spec string into a FormatSpec.
 // Invalid format strings (extra characters after type) will panic.
 let parse_format_spec(spec: String): FormatSpec = {
-    let mutable result = FormatSpec(' ', '>', '-', false, false, 0, 0, -1, 0);
+    let mutable result = FormatSpec(
+        Rune.from_uint32_unchecked(32),
+        '>',
+        '-',
+        false,
+        false,
+        false,
+        false,
+        false,
+        0,
+        0,
+        -1,
+        0,
+    );
     let len = spec.count();
     if len == 0 then {
         return result;
@@ -32,19 +48,25 @@ let parse_format_spec(spec: String): FormatSpec = {
 
     let mutable i: UInt = 0;
 
-    // Parse [[fill]align]
-    if len >= 2 and is_align_char(spec[i + 1]) then {
-        result.fill = spec[i];
-        result.align = spec[i + 1];
-        i += 2;
-    } else if len >= 1 and is_align_char(spec[i]) then {
+    // Parse [[fill]align]: the fill is one whole rune (possibly multi-byte),
+    // taken only when an align character follows it.
+    let fill_bytes = utf8_sequence_len(spec[i]);
+    if fill_bytes + 1 <= len and is_align_char(spec[i + fill_bytes]) then {
+        result.fill = spec.to_runes()[0];
+        result.fill_explicit = true;
+        result.align = spec[i + fill_bytes];
+        result.align_explicit = true;
+        i = i + fill_bytes + 1;
+    } else if is_align_char(spec[i]) then {
         result.align = spec[i];
+        result.align_explicit = true;
         i += 1;
     };
 
     // Parse [sign]
     if i < len and (spec[i] == '+' or spec[i] == '-' or spec[i] == ' ') then {
         result.sign = spec[i];
+        result.sign_explicit = true;
         i += 1;
     };
 
@@ -102,3 +124,8 @@ let parse_format_spec(spec: String): FormatSpec = {
 };
 
 let is_align_char(ch: UInt8): Bool = ch == '<' or ch == '>' or ch == '^' or ch == '=';
+
+// Byte length of the UTF-8 sequence a lead byte starts; stray continuation or
+// invalid lead bytes count as one byte so parsing stays in step with decoding.
+private let utf8_sequence_len(lead: UInt8): UInt = if lead < 128 then 1
+else if lead < 192 then 1 else if lead < 224 then 2 else if lead < 240 then 3 else 4;

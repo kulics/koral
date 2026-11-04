@@ -80,7 +80,9 @@ type foreign CFile {};
 
 let foreign fwrite(buf: *UInt8, size: UInt, count: UInt, file: *CFile): UInt;
 let foreign fflush(file: *CFile): Void;
-let foreign fgetc(file: *CFile): Int;
+// libc's fgetc returns a 32-bit `int` (0..255, or EOF = -1); declaring the
+// result `Int32` keeps the sign when the call crosses the FFI boundary.
+let foreign fgetc(file: *CFile): Int32;
 let foreign __koral_stdin(): *CFile;
 let foreign __koral_stdout(): *CFile;
 let foreign __koral_stderr(): *CFile;
@@ -174,14 +176,19 @@ public let eprintln[T: ToString](value: T): Void = {
 };
 
 /// Read one line from standard input without its line ending, returning `None`
-/// at end of input; an empty line yields an empty string.
+/// at end of input; an empty line yields an empty string. The line ending is
+/// `\n` or `\r\n` (a single trailing `\r` is dropped); any other `\r` is
+/// content and kept.
 public let scanln(): Option[String] = {
     let mutable result = StringBuilder.new();
 
     while true then {
         let ch = fgetc(__koral_stdin());
 
-        if ch is < 0 then {
+        // End of file: fgetc returns -1, which depending on how the FFI
+        // boundary widens the 32-bit result can also surface as 0xFFFFFFFF.
+        // Real byte values are always 0..255.
+        if ch < 0 or ch > 255 then {
             if result.is_empty() then {
                 return Option[String].None();
             };
@@ -192,10 +199,13 @@ public let scanln(): Option[String] = {
             break;
         };
 
-        if ch != 13 then {
-            result.push_byte(UInt8(ch));
-        };
+        result.push_byte(UInt8(ch));
     };
 
-    return Option[String].Some(result.to_string());
+    let line = result.to_string();
+    let len = line.count();
+    if len > 0 and line[len - 1] == '\r' then {
+        return Option[String].Some(line.substring(0..<(len - 1)));
+    };
+    return Option[String].Some(line);
 };

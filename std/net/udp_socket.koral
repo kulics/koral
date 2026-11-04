@@ -13,15 +13,15 @@ using "std" { ... };
 /// UDP socket type.
 /// Holds a socket file descriptor. Automatically closed on drop.
 /// Supports both connectionless (send_to/recv_from) and connected (send/recv) modes.
-public type mutable UdpSocket(private fd: Int64);
+public type mutable UdpSocket(private sock_fd: Int64);
 
 /// Drop conformance: closes the socket when the handle is dropped.
 given UdpSocket: Drop {
 
     /// Automatically close the socket when UdpSocket is dropped.
     drop(self): Void = {
-        if self.fd >= 0 then {
-            __koral_socket_close(self.fd);
+        if self.sock_fd >= 0 then {
+            __koral_socket_close(self.sock_fd);
         };
     };
 };
@@ -33,7 +33,7 @@ given UdpSocket: Drop {
 given UdpSocket {
 
     /// Returns the underlying OS socket file descriptor.
-    public fd(self): Int = Int(self.fd);
+    public fd(self): Int = Int(self.sock_fd);
 
     /// Bind to a socket address.
     /// Flow: create socket (SOCK_DGRAM) → bind
@@ -98,7 +98,7 @@ given UdpSocket {
         let addr_len = UInt32(addr_bytes.count());
         let data_ptr = from.borrow_ptr() + start;
         let n = __koral_socket_sendto(
-            self.fd,
+            self.sock_fd,
             data_ptr,
             UInt64(spec.len()),
             Int32(0),
@@ -112,6 +112,8 @@ given UdpSocket {
     };
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
+    /// Returns Error when the target span is empty: no datagram is received and
+    /// reporting a fabricated sender would be wrong.
     // `span` defaults to the whole buffer, like `UdpSocket.recv`.
     public recv_from(
         self,
@@ -122,11 +124,8 @@ given UdpSocket {
         let start = spec.start();
         let end = spec.end();
         if end <= start then {
-            return Result[Pair[UInt, SocketAddr]].Ok(
-                Pair[UInt, SocketAddr](
-                    0,
-                    SocketAddr.from_ipv4(Ipv4Addr.unspecified(), UInt16(0)),
-                ),
+            return Result[Pair[UInt, SocketAddr]].Error(
+                "recv_from: buffer span is empty",
             );
         };
 
@@ -139,7 +138,7 @@ given UdpSocket {
 
         let data_ptr = into.borrow_mut_ptr() + start;
         let n = __koral_socket_recvfrom(
-            self.fd,
+            self.sock_fd,
             data_ptr,
             UInt64(spec.len()),
             Int32(0),
@@ -184,7 +183,7 @@ given UdpSocket {
         };
         let addr_bytes = addr.to_sockaddr_bytes();
         let addr_len = UInt32(addr_bytes.count());
-        let result = __koral_socket_connect(self.fd, addr_bytes.borrow_ptr(), addr_len);
+        let result = __koral_socket_connect(self.sock_fd, addr_bytes.borrow_ptr(), addr_len);
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -203,7 +202,7 @@ given UdpSocket {
             return Result[UInt].Ok(0);
         };
         let data_ptr = from.borrow_ptr() + start;
-        let n = __koral_socket_send(self.fd, data_ptr, UInt64(spec.len()), Int32(0));
+        let n = __koral_socket_send(self.sock_fd, data_ptr, UInt64(spec.len()), Int32(0));
         if n < 0 then {
             return Result[UInt].Error(last_error_message());
         };
@@ -222,7 +221,7 @@ given UdpSocket {
             return Result[UInt].Ok(0);
         };
         let data_ptr = into.borrow_mut_ptr() + start;
-        let n = __koral_socket_recv(self.fd, data_ptr, UInt64(spec.len()), Int32(0));
+        let n = __koral_socket_recv(self.sock_fd, data_ptr, UInt64(spec.len()), Int32(0));
         if n < 0 then {
             return Result[UInt].Error(last_error_message());
         };
@@ -242,7 +241,7 @@ given UdpSocket {
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let result = __koral_socket_getsockname(self.fd, addr_buf, &addr_len);
+        let result = __koral_socket_getsockname(self.sock_fd, addr_buf, &addr_len);
         if result != 0 then {
             return Result[SocketAddr].Error(last_error_message());
         };
@@ -266,7 +265,7 @@ given UdpSocket {
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let result = __koral_socket_getpeername(self.fd, addr_buf, &addr_len);
+        let result = __koral_socket_getpeername(self.sock_fd, addr_buf, &addr_len);
         if result != 0 then {
             return Result[SocketAddr].Error(last_error_message());
         };
@@ -295,7 +294,7 @@ given UdpSocket {
         init_memory(opt_buf + 2, UInt8(0));
         init_memory(opt_buf + 3, UInt8(0));
         let result = __koral_socket_setsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_BROADCAST(),
             opt_buf,
@@ -318,7 +317,7 @@ given UdpSocket {
         init_memory(opt_buf + 3, UInt8(0));
         let mutable opt_len: UInt32 = UInt32(4);
         let result = __koral_socket_getsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_BROADCAST(),
             opt_buf,
@@ -336,28 +335,20 @@ given UdpSocket {
     // ========================================================================
 
     /// Set read timeout. None clears the timeout.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
-    /// struct timeval: tv_sec (8 bytes, Int64) + tv_usec (8 bytes, Int64) = 16 bytes
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void] = {
+        let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
-        when timeout in {
-            .None() then {
-                // Zero timeval clears the timeout
-                for i in UInt(0)..<UInt(16) then {
-                    init_memory(tv_buf + i, UInt8(0));
-                };
-            },
-            .Some(duration) then {
-                UdpSocket.duration_to_timeval(duration, tv_buf);
-            },
-        };
+        encode_timeout_option(timeout, tv_buf, opt_len);
         let result = __koral_socket_setsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_RCVTIMEO(),
             tv_buf,
-            UInt32(16),
+            opt_len,
         );
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -366,26 +357,20 @@ given UdpSocket {
     };
 
     /// Set write timeout. None clears the timeout.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
+    /// The value encoding is platform-specific: a DWORD of milliseconds on
+    /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void] = {
+        let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
-        when timeout in {
-            .None() then {
-                for i in UInt(0)..<UInt(16) then {
-                    init_memory(tv_buf + i, UInt8(0));
-                };
-            },
-            .Some(duration) then {
-                UdpSocket.duration_to_timeval(duration, tv_buf);
-            },
-        };
+        encode_timeout_option(timeout, tv_buf, opt_len);
         let result = __koral_socket_setsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_SNDTIMEO(),
             tv_buf,
-            UInt32(16),
+            opt_len,
         );
         if result != 0 then {
             return Result[Void].Error(last_error_message());
@@ -394,105 +379,48 @@ given UdpSocket {
     };
 
     /// Get read timeout. Returns None if no timeout is set.
-    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20 (Linux)
+    /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
     public read_timeout(self): Result[Option[Duration]] = {
+        let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len: UInt32 = UInt32(16);
+        let mutable len = opt_len;
         let result = __koral_socket_getsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_RCVTIMEO(),
             tv_buf,
-            &opt_len,
+            &len,
         );
         if result != 0 then {
             return Result[Option[Duration]].Error(last_error_message());
         };
-        let duration_opt = UdpSocket.timeval_to_duration(tv_buf);
-        return Result[Option[Duration]].Ok(duration_opt);
+        return Result[Option[Duration]].Ok(decode_timeout_option(tv_buf, len));
     };
 
     /// Get write timeout. Returns None if no timeout is set.
-    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21 (Linux)
+    /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
     public write_timeout(self): Result[Option[Duration]] = {
+        let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
         for i in UInt(0)..<UInt(16) then {
             init_memory(tv_buf + i, UInt8(0));
         };
-        let mutable opt_len: UInt32 = UInt32(16);
+        let mutable len = opt_len;
         let result = __koral_socket_getsockopt(
-            self.fd,
+            self.sock_fd,
             __koral_const_SOL_SOCKET(),
             __koral_const_SO_SNDTIMEO(),
             tv_buf,
-            &opt_len,
+            &len,
         );
         if result != 0 then {
             return Result[Option[Duration]].Error(last_error_message());
         };
-        let duration_opt = UdpSocket.timeval_to_duration(tv_buf);
-        return Result[Option[Duration]].Ok(duration_opt);
-    };
-
-    // ========================================================================
-    // Private helpers for timeval conversion
-    // ========================================================================
-
-    /// Convert a Duration to a struct timeval (16 bytes) in a raw buffer.
-    /// timeval layout: tv_sec (Int64, 8 bytes LE) + tv_usec (Int64, 8 bytes LE)
-    private duration_to_timeval(duration: Duration, buf: *mutable UInt8): Void = {
-        let secs = duration.secs;
-        let usec = duration.nanos / 1000;
-
-        // Write tv_sec as little-endian Int64 (bytes 0..7)
-        init_memory(buf + 0, UInt8((secs & 255)));
-        init_memory(buf + 1, UInt8(((secs >> 8) & 255)));
-        init_memory(buf + 2, UInt8(((secs >> 16) & 255)));
-        init_memory(buf + 3, UInt8(((secs >> 24) & 255)));
-        init_memory(buf + 4, UInt8(((secs >> 32) & 255)));
-        init_memory(buf + 5, UInt8(((secs >> 40) & 255)));
-        init_memory(buf + 6, UInt8(((secs >> 48) & 255)));
-        init_memory(buf + 7, UInt8(((secs >> 56) & 255)));
-
-        // Write tv_usec as little-endian Int64 (bytes 8..15)
-        init_memory(buf + 8, UInt8((usec & 255)));
-        init_memory(buf + 9, UInt8(((usec >> 8) & 255)));
-        init_memory(buf + 10, UInt8(((usec >> 16) & 255)));
-        init_memory(buf + 11, UInt8(((usec >> 24) & 255)));
-        init_memory(buf + 12, UInt8(((usec >> 32) & 255)));
-        init_memory(buf + 13, UInt8(((usec >> 40) & 255)));
-        init_memory(buf + 14, UInt8(((usec >> 48) & 255)));
-        init_memory(buf + 15, UInt8(((usec >> 56) & 255)));
-    };
-
-    /// Convert a struct timeval (16 bytes) from a raw buffer to a [Duration]Option.
-    /// Returns None if both tv_sec and tv_usec are zero (no timeout set).
-    private timeval_to_duration(buf: *UInt8): Option[Duration] = {
-        // Read tv_sec as little-endian Int64 (bytes 0..7)
-        let secs = (Int64(UInt(buf[0])) + (Int64(UInt(buf[1])) << 8) + (Int64(
-            UInt(buf[2]),
-        ) << 16) + (Int64(UInt(buf[3])) << 24) + (Int64(UInt(buf[4])) << 32) + (Int64(
-            UInt(buf[5]),
-        ) << 40) + (Int64(UInt(buf[6])) << 48) + (Int64(UInt(buf[7])) << 56));
-
-        // Read tv_usec as little-endian Int64 (bytes 8..15)
-        let usec = (Int64(UInt(buf[8])) + (Int64(UInt(buf[9])) << 8) + (Int64(
-            UInt(buf[10]),
-        ) << 16) + (Int64(UInt(buf[11])) << 24) + (Int64(UInt(buf[12])) << 32) + (Int64(
-            UInt(buf[13]),
-        ) << 40) + (Int64(UInt(buf[14])) << 48) + (Int64(UInt(buf[15])) << 56));
-
-        // Zero timeval means no timeout
-        if secs == 0 and usec == 0 then {
-            return Option[Duration].None();
-        };
-
-        let nanos = usec * 1000;
-        return Option[Duration].Some(Duration(secs, nanos));
+        return Result[Option[Duration]].Ok(decode_timeout_option(tv_buf, len));
     };
 };

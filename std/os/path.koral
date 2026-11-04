@@ -242,6 +242,9 @@ given Path {
     };
 
     /// 计算相对于 base 的相对路径
+    ///
+    /// 双方必须同为绝对或同为相对；绝对路径还必须共享同一个根
+    /// （POSIX 根、`C:/` 盘符根或 UNC 根），否则报错而不是给出错误的相对路径。
     public relative_to[T: IntoPath](self, base: T): Result[Path] = {
         let b = base.into_path();
         if self._path.is_empty() then {
@@ -253,6 +256,19 @@ given Path {
 
         let norm_self = self.normalize();
         let norm_base = b.normalize();
+
+        let self_abs = norm_self.is_absolute();
+        let base_abs = norm_base.is_absolute();
+        if self_abs != base_abs then {
+            return Result[Path].Error("cannot relativize an absolute path against a relative path");
+        };
+        if self_abs then {
+            let self_root = path_root_marker(norm_self._path);
+            let base_root = path_root_marker(norm_base._path);
+            if self_root != base_root then {
+                return Result[Path].Error("cannot relativize across different path roots");
+            };
+        };
 
         if norm_self._path == norm_base._path then {
             return Result[Path].Ok(Path("."));
@@ -322,17 +338,55 @@ public let path_list_separator(): String = {
 // Helper
 // ============================================================================
 
-/// Split a normalized path (using "/" separator) into a list of components.
+/// Split a path (using "/" separator) into a list of components.
 /// Filters out empty parts from consecutive separators.
+///
+/// Absolute paths keep their root as the first component ("/" "/", "C:/", "//"),
+/// so component-wise matching can never blur the absolute/relative distinction:
+/// `Path("a").starts_with(Path("/"))` is false and `Path("/a/b").starts_with(
+/// Path("a/b"))` is false.
 private let split_path_components(path: String): List[String] = {
     let mutable parts: List[String] = [];
     let normalized = path.replace_all("\\", with = "/");
-    for part in normalized.split("/") then {
-        if not part.is_empty() then {
-            parts.push(part);
+    let root = path_root_marker(normalized);
+    if root.is_empty() then {
+        for part in normalized.split("/") then {
+            if not part.is_empty() then {
+                parts.push(part);
+            };
+        };
+    } else {
+        parts.push(root);
+        let root_len = root.count();
+        let rest = normalized.substring(root_len...);
+        for part in rest.split("/") then {
+            if not part.is_empty() then {
+                parts.push(part);
+            };
         };
     };
     return parts;
+};
+
+/// Root marker of an already `/`-normalized path: "/" for a POSIX root, "//"
+/// for a UNC-style double-slash root, "X:/" for a Windows drive root, and ""
+/// when the path is relative. The marker doubles as the first component of
+/// split_path_components and as the root identity in relative_to.
+private let path_root_marker(normalized: String): String = {
+    if normalized.starts_with("//") then {
+        return "//";
+    };
+    if normalized.starts_with("/") then {
+        return "/";
+    };
+    if normalized.count() >= 3 then {
+        let c0 = normalized[0];
+        let is_letter = (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
+        if is_letter and normalized[1] == ':' and normalized[2] == '/' then {
+            return normalized.substring(0..<3);
+        };
+    };
+    return "";
 };
 
 private let is_all_separators(path: String): Bool = {
@@ -351,9 +405,14 @@ private let is_all_separators(path: String): Bool = {
 /// Whether `path` is exactly a drive root like `C:/` (already `/`-normalized).
 ///
 /// Its trailing separator is part of the root and must survive trimming --
-/// `C:` is a drive-relative path, not a directory root.
+/// `C:` is a drive-relative path, not a directory root. The prefix must be an
+/// ASCII letter, matching is_absolute: "a:b" is not a drive form.
 private let is_drive_root(path: String): Bool = {
-    return path.count() == 3 and path[1] == ':' and path[2] == '/';
+    if path.count() != 3 or path[1] != ':' or path[2] != '/' then {
+        return false;
+    };
+    let c0 = path[0];
+    return (c0 >= 65 and c0 <= 90) or (c0 >= 97 and c0 <= 122);
 };
 
 /// Eq conformance comparing the underlying path text.

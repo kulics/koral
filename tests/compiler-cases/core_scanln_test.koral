@@ -1,0 +1,95 @@
+// EXPECT: scanln_embedded_cr_ok
+// EXPECT: scanln_crlf_ok
+// EXPECT: scanln_eof_cr_ok
+
+// scanln drops only the single '\r' of a trailing CRLF (or of a bare CR at
+// EOF); an embedded CR is content. The child mode reads piped stdin; the
+// parent mode spawns this same binary with a piped stdin and feeds it the
+// probe bytes.
+
+using "std/os" { ... };
+using "std/proc" { ... };
+using "std/io" { ... };
+
+let child_main(): Int = {
+    // "a\rb\n" -> "a\rb": the embedded CR is content.
+    when scanln() in {
+        .Some(s) then {
+            assert(s == "a\rb", "embedded CR kept, got " + s.count().to_string() + " bytes");
+        },
+        .None() then assert(false, "line 1 missing"),
+    };
+    println("scanln_embedded_cr_ok");
+
+    // "c\r\n" -> "c": the CR of a CRLF line ending is dropped.
+    when scanln() in {
+        .Some(s) then {
+            assert(s == "c", "CRLF stripped");
+        },
+        .None() then assert(false, "line 2 missing"),
+    };
+    println("scanln_crlf_ok");
+
+    // "d\r" at end of input -> "d": the bare trailing CR is dropped.
+    when scanln() in {
+        .Some(s) then {
+            assert(s == "d", "EOF CR stripped");
+        },
+        .None() then assert(false, "line 3 missing"),
+    };
+    println("scanln_eof_cr_ok");
+
+    // And then the input is exhausted.
+    when scanln() in {
+        .Some(s) then assert(false, "unexpected line 4"),
+        .None() then {},
+    };
+    return 0;
+};
+
+let main(): Int = {
+    let argv = args();
+    if argv.count() > 1 then {
+        return child_main();
+    };
+
+    let self_path = argv[0];
+    let spawn_result = Command.new(self_path).arg("--scanln-child").set_stdin(
+        IoRedirect.Piped(),
+    ).set_stdout(IoRedirect.Piped()).spawn();
+    when spawn_result in {
+        .Ok(mutable proc) then {
+            when proc.take_stdin_pipe() in {
+                .Some(stdin_pipe) then {
+                    let buf = "a\rb\nc\r\nd\r".to_bytes();
+                    let _ = stdin_pipe.write(from = buf, span = ...);
+                    // stdin_pipe drops here, closing the pipe and sending EOF.
+                },
+                .None() then assert(false, "no stdin pipe"),
+            };
+            when proc.wait_output() in {
+                .Ok(output) then {
+                    assert(output.is_success(), "child exit success");
+                    assert(
+                        output.stdout.contains("scanln_embedded_cr_ok"),
+                        "child ran: " + output.stdout,
+                    );
+                    assert(
+                        output.stdout.contains("scanln_crlf_ok"),
+                        "child CRLF case: " + output.stdout,
+                    );
+                    assert(
+                        output.stdout.contains("scanln_eof_cr_ok"),
+                        "child EOF case: " + output.stdout,
+                    );
+                    println("scanln_embedded_cr_ok");
+                    println("scanln_crlf_ok");
+                    println("scanln_eof_cr_ok");
+                },
+                .Error(e) then assert(false, "wait_output: " + e.message()),
+            };
+        },
+        .Error(e) then assert(false, "spawn: " + e.message()),
+    };
+    return 0;
+};

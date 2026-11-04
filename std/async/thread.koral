@@ -37,6 +37,9 @@ given Thread {
 
     /// Block until the thread finishes.
     /// Returns Error if already waited or detached.
+    /// A failed join (e.g. a thread waiting on itself) leaves the handle open:
+    /// the call stays retryable and Drop still detaches instead of leaking the
+    /// OS thread resources.
     public wait(self): Result[Void] = {
         if self.waited then {
             return Result[Void].Error("thread already waited");
@@ -45,10 +48,10 @@ given Thread {
             return Result[Void].Error("thread already detached");
         };
         let result = __koral_thread_join(self.handle);
-        self.waited = true;
         if result != 0 then {
             return Result[Void].Error("failed to wait thread");
         };
+        self.waited = true;
         return Result[Void].Ok({});
     };
 

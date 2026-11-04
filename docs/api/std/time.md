@@ -97,20 +97,21 @@ given ClockTime: Ord {
 
 /// ToString conformance formatting as ISO 8601 time.
 given ClockTime: ToString {
-    /// Formats as ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
+    /// Formats as ISO 8601 time string: "HH:MM:SS[.fraction, trailing zeros trimmed]".
     public to_string(self): String;
 };
 
 /// Parseable conformance accepting ISO 8601 time strings.
 given ClockTime: Parseable {
-    /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.nnnnnnnnn".
+    /// Parses an ISO 8601 time string: "HH:MM:SS" or "HH:MM:SS.fraction".
     public parse(s: String): Result[ClockTime];
 };
 
 /// Constructors from year, month, and day components.
 given Date {
     /// Creates a Date from year, month, day components.
-    /// Returns Error if any field is out of range.
+    /// Returns Error if any field is out of range; the year must be 0000-9999,
+    /// the range the "YYYY-MM-DD" text format can represent.
     public new(year: Int =, month: Int =, day: Int =): Result[Date];
     /// Returns the Unix epoch date (1970-01-01).
     public epoch(): Date;
@@ -218,7 +219,7 @@ given DateTime {
     public date(self): Date;
     /// Returns the time-of-day part as a ClockTime value.
     public time(self): ClockTime;
-    /// Returns the day of week (0=Monday .. 6=Sunday, ISO 8601).
+    /// Returns the day of week (1=Monday .. 7=Sunday, ISO 8601).
     public weekday(self): Int;
 };
 
@@ -274,7 +275,8 @@ given DateTime: ToString {
     /// Formats as ISO 8601 string.
     /// UTC: "2024-01-15T10:30:00Z"
     /// Fixed offset: "2024-01-15T10:30:00+08:00"
-    /// With nanos: "2024-01-15T10:30:00.123456789Z"
+    /// With nanos: "2024-01-15T10:30:00.123Z" ("HH:MM:SS[.fraction, trailing zeros trimmed]").
+    /// An offset with a seconds component renders ":SS" after the minutes.
     public to_string(self): String;
 };
 
@@ -282,7 +284,7 @@ given DateTime: ToString {
 given DateTime: Parseable {
     /// Parses an ISO 8601 string into a DateTime.
     /// Supports: "2024-01-15T10:30:00Z", "2024-01-15T10:30:00+08:00",
-    ///           "2024-01-15T10:30:00.123456789Z"
+    ///           "2024-01-15T10:30:00.123456789Z", "2024-01-15T10:30:00+08:00:00"
     /// Returns Error with a description if the string does not match.
     public parse(s: String): Result[DateTime];
 };
