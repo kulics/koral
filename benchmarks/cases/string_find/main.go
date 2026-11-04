@@ -9,6 +9,7 @@ import (
 func main() {
 	start := time.Now()
 	var b strings.Builder
+	b.Grow(8_000_000)
 	for i := 0; i < 1_000_000; i++ {
 		b.WriteString("abcdefgh")
 	}

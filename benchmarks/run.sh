@@ -13,10 +13,12 @@ RUNS="${RUNS:-3}"
 for case_dir in "$ROOT"/cases/*/; do
   name="$(basename "$case_dir")"
   echo "== build $name"
-  "$KORALC" build "$case_dir/main.koral" -o "$BUILD/koral-$name" >/dev/null 2>&1 || echo "  koral FAILED"
+  # Every language is built at its -O2 tier: koralc --release is clang -O2,
+  # go build always optimizes, swiftc -O, rustc -C opt-level=2.
+  "$KORALC" build "$case_dir/main.koral" --release -o "$BUILD/koral-$name" >/dev/null 2>&1 || echo "  koral FAILED"
   (cd "$case_dir" && go build -o "$BUILD/go-$name" main.go) 2>/dev/null || echo "  go FAILED"
   swiftc -O "$case_dir/main.swift" -o "$BUILD/swift-$name" 2>/dev/null || echo "  swift FAILED"
-  rustc -O "$case_dir/main.rs" -o "$BUILD/rust-$name" 2>/dev/null || echo "  rust FAILED"
+  rustc -C opt-level=2 "$case_dir/main.rs" -o "$BUILD/rust-$name" 2>/dev/null || echo "  rust FAILED"
 done
 
 # best-of-$RUNS nanoseconds for one binary; prints "<checksum> <ns>"

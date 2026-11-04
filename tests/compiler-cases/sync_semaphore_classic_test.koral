@@ -1,0 +1,28 @@
+// EXPECT: semaphore_classic_ok
+// Classic counting semaphore (Dijkstra P/V): release is unconditional and
+// accumulates permits past the initial count — it never panics.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    // Balanced acquire/release keeps working.
+    let sem = Semaphore.new(2);
+    sem.acquire();
+    sem.acquire();
+    assert(not sem.try_acquire(), "0 permits available");
+    sem.release();
+    assert(sem.try_acquire(), "1 permit after release");
+
+    // Releases may outnumber acquires: the count is not capped. Three extra
+    // releases on top of the initial permit accumulate four permits.
+    let loose = Semaphore.new(1);
+    loose.release();
+    loose.release();
+    loose.release();
+    assert(loose.try_acquire(), "accumulated permit 1");
+    assert(loose.try_acquire(), "accumulated permit 2");
+    assert(loose.try_acquire(), "accumulated permit 3");
+    assert(loose.try_acquire(), "initial permit");
+    assert(not loose.try_acquire(), "exactly 4 permits were available");
+    println("semaphore_classic_ok");
+};

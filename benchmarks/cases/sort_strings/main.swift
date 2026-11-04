@@ -11,4 +11,18 @@ for _ in 0..<n {
 }
 xs.sort()
 let ns = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
-print("RESULT \(xs.count) \(ns)")
+
+// Verify the result really is sorted, then checksum the strings' bytes in order
+// (precondition, not assert: assert is compiled out under -O).
+var checksum = 0
+var prev = ""
+for v in xs {
+    precondition(v >= prev, "sort_strings: output must be sorted")
+    var g = 0
+    for b in v.utf8 {
+        g = (g * 131 + Int(b)) % 2147483648
+    }
+    checksum = (checksum * 131 + g) % 2147483648
+    prev = v
+}
+print("RESULT \(checksum) \(ns)")

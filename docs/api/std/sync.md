@@ -14,7 +14,8 @@ Import the module with `using "std/sync" { ... };`.
 /// 类型安全的消息传递通道工厂。
 /// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
 /// 通道是有界的：队列达到 `capacity` 时 send() 阻塞。
-/// capacity 必须大于 0：容量为 0 的通道会让每个发送方永远阻塞，因此直接 panic。
+/// capacity 为 0 时是无缓冲的会合通道（rendezvous）：send() 阻塞到某个
+/// 接收方取走该消息才返回，用于严格的交接与同步场景。
 public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChannel[T]];
 ```
 
@@ -53,9 +54,10 @@ public type mutable Mutex;
 /// Condition variable bound to a `Mutex` for waiting on shared-state changes.
 public type mutable MutexCondvar;
 
-/// Counting semaphore that caps how many threads hold a permit at once.
-/// The cap is the initial permit count: `release` never makes more than that
-/// many permits available, so `new(1)` can never let two threads through.
+/// Classic counting semaphore: `acquire` decrements the permit count (blocking
+/// at zero) and `release` increments it unconditionally, exactly as in the
+/// Dijkstra P/V discipline. The count is not capped, so releases may outnumber
+/// acquires — that is a legitimate way to pre-load wake-ups for later waits.
 public type mutable Semaphore;
 
 /// Reader-writer lock with exclusive `lock` and shared `lock_shared` modes.
@@ -146,6 +148,7 @@ given[T: Any] RecvChannel[T]: Drop {};
 /// Sends values, blocking for space or returning without blocking.
 given[T: Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
+    /// 容量为 0 的会合通道上，send 阻塞到某个接收方取走该消息才返回。
     public send(self, value: T): Result[Void];
     /// 非阻塞发送
     public try_send(self, value: T): Result[Bool];
@@ -223,18 +226,14 @@ given MutexCondvar {
 /// Creates the semaphore and takes and returns permits.
 given Semaphore {
     /// Create a semaphore with `permits` permits available.
-    /// The count also caps the semaphore: `release` never raises the available
-    /// permits above it. A semaphore created with 0 permits has no cap headroom
-    /// at all, so every `release` on it panics.
     public new(permits: UInt): Semaphore;
     /// Take a permit, blocking until one is available.
     public acquire(self): Void;
     /// Take a permit only if one is immediately available.
     public try_acquire(self): Bool;
     /// Return a permit and wake one waiting thread.
-    /// Must pair with a successful `acquire`/`try_acquire`: when all permits
-    /// are already available this is a caller bug (it would widen the cap) and
-    /// panics instead of granting an extra permit.
+    /// Unconditional: the permit count grows even past what `acquire` has taken,
+    /// so `release` never fails and never panics.
     public release(self): Void;
 };
 

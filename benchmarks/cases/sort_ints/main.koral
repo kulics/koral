@@ -4,7 +4,7 @@ using "std/time" { MonoTime };
 let main(): Int = {
     let n = UInt(1_000_000);
     let start = MonoTime.now();
-    let mutable xs = List[Int].new();
+    let mutable xs = List[Int].with_capacity(n);
     let mutable state: Int64 = 42;
     let mutable i = UInt(0);
     while i < n then {
@@ -14,6 +14,19 @@ let main(): Int = {
     };
     xs.sort();
     let elapsed = start.elapsed().as_nanoseconds();
-    println("RESULT \(xs.count()) \(elapsed)");
+
+    // Verify the result really is sorted, then checksum it in order so a
+    // wrong or partial sort changes the RESULT line.
+    let mutable checksum = 0;
+    let mutable prev = 0;
+    i = UInt(0);
+    while i < n then {
+        let v = xs.get(i) or else 0;
+        assert(v >= prev, "sort_ints: output must be sorted");
+        checksum = (checksum * 131 + v) % 2147483648;
+        prev = v;
+        i += UInt(1);
+    };
+    println("RESULT \(checksum) \(elapsed)");
     return 0;
 };

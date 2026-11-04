@@ -16,5 +16,17 @@ func main() {
 		xs = append(xs, int(state%2147483647))
 	}
 	sort.Ints(xs)
-	fmt.Printf("RESULT %d %d\n", len(xs), time.Since(start).Nanoseconds())
+	elapsed := time.Since(start).Nanoseconds()
+
+	// Verify the result really is sorted, then checksum it in order.
+	checksum := 0
+	prev := 0
+	for _, v := range xs {
+		if v < prev {
+			panic("sort_ints: output must be sorted")
+		}
+		checksum = (checksum*131 + v) % 2147483648
+		prev = v
+	}
+	fmt.Printf("RESULT %d %d\n", checksum, elapsed)
 }

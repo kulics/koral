@@ -11,4 +11,14 @@ for _ in 0..<n {
 }
 xs.sort()
 let ns = DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds
-print("RESULT \(xs.count) \(ns)")
+
+// Verify the result really is sorted, then checksum it in order
+// (precondition, not assert: assert is compiled out under -O).
+var checksum = 0
+var prev = 0
+for v in xs {
+    precondition(v >= prev, "sort_ints: output must be sorted")
+    checksum = (checksum * 131 + v) % 2147483648
+    prev = v
+}
+print("RESULT \(checksum) \(ns)")

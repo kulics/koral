@@ -7,6 +7,9 @@ using "std" { ... };
 // ============================================================================
 // Design: Pure Koral implementation using Mutex + MutexCondvar + List.
 // Bounded channel only — forces users to think about capacity (backpressure).
+// Capacity 0 is the unbuffered rendezvous channel: a send completes only once
+// a receiver has taken its value (per-sender tickets keep the hand-off exact
+// under multiple producers).
 // Multi-producer multi-consumer: both endpoints share one `type mutable`
 // ChannelStorage, and each endpoint's Drop marks its side closed.
 // ============================================================================
@@ -19,9 +22,12 @@ using "std" { ... };
 private type mutable ChannelStorage[T: Any](
     mutex: Mutex,
     not_empty: MutexCondvar, // notify consumer: new message available
-    not_full: MutexCondvar, // notify producer: space available
+    not_full: MutexCondvar, // notify producer: space available (or hand-off done)
     mutable queue: List[T], // message queue
-    capacity: UInt, // buffer size
+    capacity: UInt, // buffer size; 0 = rendezvous
+    mutable sent: UInt, // values ever pushed (ticket counter)
+    mutable received: UInt, // values ever taken
+    mutable waiting_receivers: UInt, // receivers parked on not_empty
     mutable sender_closed: Bool, // all SendChannels have been dropped
     mutable receiver_closed: Bool, // all RecvChannels have been dropped
 );
@@ -57,16 +63,35 @@ given[T: Any] RecvChannel[T]: Drop {
 /// Sends values, blocking for space or returning without blocking.
 given[T: Any] SendChannel[T] {
     /// 发送消息（阻塞，直到有空间或通道关闭）
+    /// 容量为 0 的会合通道上，send 阻塞到某个接收方取走该消息才返回。
     public send(self, value: T): Result[Void] = {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
+        if channel.capacity == UInt(0) then {
+            // Rendezvous: push first, then wait until a receiver has taken
+            // exactly this value (the ticket is its FIFO position).
+            let ticket = channel.sent;
+            channel.sent = channel.sent + UInt(1);
+            channel.queue.push(value);
+            channel.not_empty.notify();
+            while channel.received <= ticket and not channel.receiver_closed then {
+                channel.not_full.wait();
+            };
+            if channel.received <= ticket then {
+                // Closed before the hand-off: the value stays queued and is
+                // freed with the channel storage.
+                return Result[Void].Error("channel closed");
+            };
+            return Result[Void].Ok({});
+        };
         while channel.queue.count() >= channel.capacity and not channel.receiver_closed then {
             channel.not_full.wait();
         };
         if channel.receiver_closed then {
             return Result[Void].Error("channel closed");
         };
+        channel.sent = channel.sent + UInt(1);
         channel.queue.push(value);
         channel.not_empty.notify();
         return Result[Void].Ok({});
@@ -80,9 +105,21 @@ given[T: Any] SendChannel[T] {
         if channel.receiver_closed then {
             return Result[Bool].Error("channel closed");
         };
+        if channel.capacity == UInt(0) then {
+            // Rendezvous hand-off is only immediate when a parked receiver is
+            // still unmatched by in-flight values.
+            if channel.waiting_receivers <= channel.sent - channel.received then {
+                return Result[Bool].Ok(false);
+            };
+            channel.sent = channel.sent + UInt(1);
+            channel.queue.push(value);
+            channel.not_empty.notify();
+            return Result[Bool].Ok(true);
+        };
         if channel.queue.count() >= channel.capacity then {
             return Result[Bool].Ok(false);
         };
+        channel.sent = channel.sent + UInt(1);
         channel.queue.push(value);
         channel.not_empty.notify();
         return Result[Bool].Ok(true);
@@ -97,11 +134,20 @@ given[T: Any] RecvChannel[T] {
         channel.mutex.lock();
         defer channel.mutex.unlock();
         while channel.queue.is_empty() and not channel.sender_closed then {
+            channel.waiting_receivers = channel.waiting_receivers + UInt(1);
             channel.not_empty.wait();
+            channel.waiting_receivers = channel.waiting_receivers - UInt(1);
         };
         if not channel.queue.is_empty() then {
             let value = channel.queue.take_at(0);
-            channel.not_full.notify();
+            channel.received = channel.received + UInt(1);
+            if channel.capacity == UInt(0) then {
+                // Wake every parked sender: the satisfied ticket is not
+                // necessarily the one an arbitrary single wake-up would pick.
+                channel.not_full.notify_all();
+            } else {
+                channel.not_full.notify();
+            };
             return Result[T].Ok(value);
         };
         return Result[T].Error("channel closed");
@@ -114,7 +160,12 @@ given[T: Any] RecvChannel[T] {
         defer channel.mutex.unlock();
         if not channel.queue.is_empty() then {
             let value = channel.queue.take_at(0);
-            channel.not_full.notify();
+            channel.received = channel.received + UInt(1);
+            if channel.capacity == UInt(0) then {
+                channel.not_full.notify_all();
+            } else {
+                channel.not_full.notify();
+            };
             return Result[Option[T]].Ok(Option[T].Some(value));
         };
         if channel.sender_closed then {
@@ -131,11 +182,9 @@ given[T: Any] RecvChannel[T] {
 /// 类型安全的消息传递通道工厂。
 /// 返回 (SendChannel, RecvChannel) 对，避免统一 Channel 类型带来的误用。
 /// 通道是有界的：队列达到 `capacity` 时 send() 阻塞。
-/// capacity 必须大于 0：容量为 0 的通道会让每个发送方永远阻塞，因此直接 panic。
+/// capacity 为 0 时是无缓冲的会合通道（rendezvous）：send() 阻塞到某个
+/// 接收方取走该消息才返回，用于严格的交接与同步场景。
 public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChannel[T]] = {
-    if capacity == 0 then {
-        panic("make_channel: capacity must be greater than zero");
-    };
     let mu = Mutex.new();
     let not_empty = mu.condvar();
     let not_full = mu.condvar();
@@ -145,6 +194,9 @@ public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChanne
         not_full,
         List[T].new(),
         capacity,
+        UInt(0),
+        UInt(0),
+        UInt(0),
         false,
         false,
     );

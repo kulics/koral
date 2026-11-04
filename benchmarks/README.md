@@ -37,7 +37,19 @@ Notes on fairness: arithmetic in every case fits signed 64-bit so no language
 hits its overflow policy differently (Koral and Swift trap, Go and Rust wrap);
 the LCG is reduced modulo 2^31 each step for the same reason. Each language
 uses its standard library's idiomatic container and sort implementations —
-that is the comparison being asked about.
+that is the comparison being asked about. Specifically:
+
+- **Optimization level**: every binary is built at its -O2 tier —
+  `koralc --release` (clang -O2), `go build` (always on), `swiftc -O`,
+  `rustc -C opt-level=2`.
+- **Capacity init**: every container is pre-sized to its final element count
+  up front (`with_capacity` / `reserveCapacity` / `make(..., n)` /
+  `Vec::with_capacity`), so no language pays growth-rehash costs the others
+  don't. `string_build` is the one case that deliberately starts from a
+  16-byte seed in all four — the append-growth policy is what it measures.
+- **Sort verification**: the sort cases assert the output really is sorted
+  and fold an order-sensitive checksum of the result into the RESULT line,
+  so a wrong or partial sort is visible in the cross-language checksum check.
 
 ## Results
 
@@ -45,21 +57,31 @@ that is the comparison being asked about.
 
 | case | koral | go | swift | rust | koral vs best |
 |---|---|---|---|---|---|
-| set_membership | 6.67 | 25.06 | 15.70 | 9.47 | **1.00x** |
-| loop_pipeline | 1.66 | 1.97 | 1.63 | 1.54 | 1.08x |
-| string_find | 17.13 | 13.85 | 260.33 | 10.24 | 1.67x |
-| fib_recursive | 0.65 | 0.48 | 0.51 | 0.40 | 1.64x |
-| string_build | 13.75 | 5.03 | 11.17 | 7.88 | 2.74x |
-| struct_iter | 21.15 | 7.17 | 8.00 | 10.83 | 2.95x |
-| dict_lookup | 152.69 | 62.06 | 50.61 | 62.51 | 3.02x |
-| sort_strings | 51.50 | 26.09 | 34.95 | 15.48 | 3.33x |
-| list_sum | 14.93 | 4.12 | 5.56 | 4.17 | 3.62x |
-| sort_ints | 47.78 | 53.19 | 76.20 | 12.71 | 3.76x |
+| loop_pipeline | 1.33 | 1.73 | 1.24 | 1.34 | **1.07x** |
+| set_membership | 12.14 | 23.68 | 16.09 | 10.44 | 1.16x |
+| fib_recursive | 0.45 | 0.44 | 0.39 | 0.35 | 1.29x |
+| string_find | 14.17 | 13.22 | 269.68 | 10.32 | 1.37x |
+| struct_iter | 15.13 | 7.79 | 7.88 | 10.83 | 1.94x |
+| string_build | 12.91 | 5.15 | 11.76 | 7.61 | 2.51x |
+| dict_lookup | 169.31 | 93.93 | 62.69 | 77.57 | 2.70x |
+| sort_ints | 36.51 | 54.55 | 76.83 | 13.22 | 2.76x |
+| list_sum | 11.95 | 4.38 | 5.71 | 4.15 | 2.88x |
+| sort_strings | 50.37 | 27.62 | 35.66 | 16.09 | 3.13x |
 
 Raw compute (loop_pipeline, fib_recursive) is at parity with Go/Swift/Rust;
-`set_membership` is the fastest of the four languages on this machine; Koral
-also beats Swift on string_find by 15x. `sort_ints` beats Go and Swift (Rust's
-unstable in-place sort remains ~4x faster than any stable merge sort).
+Koral beats Go and Swift on `sort_ints` and beats Swift on `string_find` by
+19x. Rust is the pace-setter on the sort cases: its default `sort()` is a
+*stable* sort (driftsort), like Koral's and Swift's — Go's `sort.Ints` is a
+pattern-defeating quicksort without a stability guarantee, which is
+unobservable on scalar keys. The remaining gap is sort implementation
+engineering, not a stability shortcut.
+
+`set_membership` measures 1.5M hash-table operations on sequential Int keys —
+the identity hash's best case — so it shows the price of the Dict/Set hash
+mixing: every hash runs through a splitmix64 finalizer so patterned keys
+(multiples of the table size, aligned pointers) can't collapse a bucket, and
+that costs a few ns per operation. The immunity is worth more than the
+benchmark win; the pre-mixing table was 6.67ms here.
 
 History: before the 2026-11-04 optimization pass the same cases ran at
 list_sum 72ms (17x), struct_iter 76ms (9.6x), sort_ints 167ms (9.3x),

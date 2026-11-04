@@ -1,0 +1,39 @@
+// EXPECT: chan_rendezvous_try_send_ok
+// EXPECT: chan_rendezvous_handoff_ok
+// A zero-capacity channel is the unbuffered rendezvous channel: try_send
+// declines while no receiver is waiting, and a blocking send completes only
+// once a receiver has taken its value.
+
+using "std/sync" { ... };
+using "std/async" { ... };
+
+let main(): Void = {
+    let ch = make_channel[Int](0);
+    let sender = ch.first;
+    let receiver = ch.second;
+
+    // No receiver is waiting, so an immediate hand-off is impossible.
+    when sender.try_send(1) in {
+        .Ok(accepted) then {
+            assert(not accepted, "try_send must decline with no receiver waiting");
+        },
+        .Error(_) then assert(false, "try_send should not error"),
+    };
+    println("chan_rendezvous_try_send_ok");
+
+    // Blocking rendezvous: each send returns only after the worker has taken
+    // the value, so the two values arrive in send order.
+    let seen = AtomicInt.new(0);
+    let worker = run_task(
+        () => {
+            let a = receiver.recv().unwrap();
+            let b = receiver.recv().unwrap();
+            let _ = seen.fetch_add(a * 10 + b);
+        },
+    );
+    sender.send(40).unwrap();
+    sender.send(2).unwrap();
+    worker.wait();
+    assert(seen.load() == 402, "worker received 40 then 2");
+    println("chan_rendezvous_handoff_ok");
+};

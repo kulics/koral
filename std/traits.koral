@@ -28,6 +28,23 @@ given Hash {
     };
 };
 
+// Table-level hash mixing (splitmix64 finalizer): folds the high bits of a
+// hash into the low bits so power-of-two bucket masks (`h & (cap - 1)`) can't
+// be fed patterned low bits — sequential Int keys or aligned pointers would
+// otherwise pile into a few buckets and degrade probing to O(n).
+// The two splitmix64 multipliers are assembled from 32-bit halves so no
+// integer literal exceeds Int64, which is the widest literal the lexer takes.
+let hash_mix(h: UInt): UInt = {
+    let k1 = (UInt(3210233709) << 32) | UInt(484763065); // 0xBF58476D1CE4E5B9
+    let k2 = (UInt(2496678331) << 32) | UInt(321982955); // 0x94D049BB133111EB
+    let mutable x = h;
+    x = x ^ (x >> 30);
+    x = UInt(WrappingUInt(x) * WrappingUInt(k1));
+    x = x ^ (x >> 27);
+    x = UInt(WrappingUInt(x) * WrappingUInt(k2));
+    return x ^ (x >> 31);
+};
+
 /// A failure that can describe itself as text.
 public trait Error {
     /// Return a human-readable description of the failure.
