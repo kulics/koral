@@ -4321,15 +4321,41 @@ extension TypeChecker {
       return .call(callee: callee, arguments: Array(typedArguments.dropFirst()), type: returns)
     }
 
-    // Concrete type: a direct call to `Type`'s implementation of `Trait.method`.
-    return .staticMethodCall(
-      baseType: selfType,
+    // Concrete type, STATIC trait method: a direct call to `Type`'s
+    // implementation.
+    if !hasSelf {
+      return .staticMethodCall(
+        baseType: selfType,
+        methodName: methodName,
+        typeArgs: [],
+        methodTypeArgs: resolvedMethodTypeArgs ?? [],
+        arguments: typedArguments,
+        type: returns
+      )
+    }
+
+    // Concrete type, INSTANCE method: call the QUALIFIED trait's method. The
+    // receiver is the first explicit argument, and the trait identity travels
+    // in the placeholder -- a name lookup would hand the call to the type's
+    // own inherent method of the same name, which is exactly what the
+    // qualification exists to bypass. Monomorphization resolves the
+    // placeholder by identity (witness first, then the trait's tool
+    // instantiation), so dispatch stays static.
+    guard let receiver = typedArguments.first else {
+      throw SemanticError(.generic(
+        "Qualified method '\(methodName)' on type '\(selfType)' requires a receiver argument"
+      ), span: currentSpan)
+    }
+    let callee: TypedExpressionNode = .traitMethodPlaceholder(
+      traitName: traitName,
+      traitDefId: resolvedTraitDefId,
+      traitMethodDefId: traitMethodDefId(traitDefId: resolvedTraitDefId, methodName: methodName) ?? .invalid,
       methodName: methodName,
-      typeArgs: [],
+      base: receiver,
       methodTypeArgs: resolvedMethodTypeArgs ?? [],
-      arguments: typedArguments,
-      type: returns
+      type: declared.functionType
     )
+    return .call(callee: callee, arguments: Array(typedArguments.dropFirst()), type: returns)
   }
 
   

@@ -1165,6 +1165,29 @@ public class TypeChecker {
       traitRef: canonicalTraitRef(traitName: traitName, traitTypeArgs: traitTypeArgs)
     )
   }
+
+  /// The origin of an earlier `given` occupying the same (self type, trait
+  /// DECLARATION) as `key`, whatever type arguments the trait carries.
+  ///
+  /// A type conforms to a trait once -- the trait rule a non-generic duplicate
+  /// `given` already gets ("Conflicting conformance ... already declared at
+  /// line N"). `given Vec: Add[Int]` and `given Vec: Add[Vec]` collide exactly
+  /// like two `given Point: T` do. The EARLIEST prior declaration is the one
+  /// named, so the report never depends on set iteration order.
+  func conformanceOwnerClash(in set: Set<ConformanceKey>, matching key: ConformanceKey) -> SourceSpan? {
+    var best: SourceSpan? = nil
+    for prior in set where prior.selfType == key.selfType && prior.traitDefId == key.traitDefId {
+      guard let origin = conformanceDeclOrigins[prior] else { continue }
+      if let current = best {
+        if (origin.line, origin.column) < (current.line, current.column) {
+          best = origin
+        }
+      } else {
+        best = origin
+      }
+    }
+    return best
+  }
   
   // MARK: - Pass Architecture Support
   

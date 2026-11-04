@@ -832,7 +832,17 @@ extension TypeChecker {
     sourceModulePath: [String],
     sourceFile: String
   ) throws {
-    if currentScope.lookup(name, sourceFile: sourceFile) != nil {
+    // Whether this spelling is already taken FOR THIS FILE: bound by an
+    // earlier `using` here, or declared by the module this file belongs to.
+    // The module question is asked of the module the import edge names --
+    // never of the ambient `currentModulePath`, which this whole walk leaves
+    // at the last declaration it saw and is wrong for every other file. And
+    // never of the bare name index: that entry is last-wins across modules
+    // and is not a binding any file can see (§27.1).
+    if currentScope.importedBinding(name, sourceFile: sourceFile) != nil {
+      return
+    }
+    if currentScope.lookupDeclared(inModule: sourceModulePath, name: name) != nil {
       return
     }
 
@@ -2117,14 +2127,12 @@ extension TypeChecker {
         traitName: traitName,
         traitTypeArgs: traitArgTypes
       )
-      if declaredConformances.contains(key) {
-        let origin = conformanceDeclOrigins[key]
-        let originSuffix: String
-        if let origin {
-          originSuffix = " already declared at line \(origin.start.line)"
-        } else {
-          originSuffix = " already declared"
-        }
+      // One conformance per (self type, trait DECLARATION): a second `given`
+      // conflicts whatever type arguments the trait carries, so `given Vec:
+      // Add[Int]` and `given Vec: Add[Vec]` collide exactly like two
+      // `given Point: T` do.
+      if let origin = conformanceOwnerClash(in: declaredConformances, matching: key) {
+        let originSuffix = " already declared at line \(origin.line)"
         throw SemanticError(.generic(
           "Conflicting conformance: 'given \(selfType) \(traitName)'\(originSuffix)"
         ), span: span)
@@ -3939,14 +3947,11 @@ extension TypeChecker {
         span: span
       )
 
-      if explicitConformances.contains(conformanceKey) {
-        let origin = conformanceDeclOrigins[conformanceKey]
-        let originSuffix: String
-        if let origin {
-          originSuffix = " already declared at line \(origin.start.line)"
-        } else {
-          originSuffix = " already declared"
-        }
+      // One conformance per (self type, trait DECLARATION) -- the same rule the
+      // signature pass enforces above, kept here for declarations that arrive
+      // with their type arguments resolved differently per pass.
+      if let origin = conformanceOwnerClash(in: explicitConformances, matching: conformanceKey) {
+        let originSuffix = " already declared at line \(origin.line)"
         throw SemanticError(.generic(
           "Conflicting conformance: 'given \(selfType) \(traitName)'\(originSuffix)"
         ), span: span)

@@ -214,7 +214,9 @@ given TypeChecker {
 
     /// 定长数组下标的元素位点：`*((*T*)&base + i)`。包装 struct 的首成员就是
     /// 裸 C 数组，所以包装值的地址就是数据指针；这里借指针算术降级，得到的
-    /// unsafe-deref 就是数组存储里的一个位点。（与 `*T` 同款，下标不查边界。）
+    /// unsafe-deref 就是数组存储里的一个位点。裸指针（`*T`）保持不查边界，
+    /// 那是逃生通道；定长数组的数字下标查边界，见
+    /// `wrap_fixed_array_index_with_bounds_check`。
     build_fixed_array_element_place(
         self,
         base: TypedExpr,
@@ -225,6 +227,15 @@ given TypeChecker {
             .FixedArrayType(_, inner) then inner,
             _ then Type.Unknown(),
         };
+        let length: UInt = when base_type in {
+            .FixedArrayType(len, _) then len,
+            _ then UInt(0),
+        };
+        let checked_index = self.wrap_fixed_array_index_with_bounds_check(
+            index,
+            length,
+            index.span,
+        );
         let ptr_of_base = make_typed_expr(
             TypedExprKind.PtrExpr(base),
             Type.MutablePointerType(base_type),
@@ -234,10 +245,101 @@ given TypeChecker {
             Type.MutablePointerType(element),
         );
         let offset_expr = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(data_ptr, ArithmeticOperator.Add(), index),
+            TypedExprKind.ArithmeticExpr(data_ptr, ArithmeticOperator.Add(), checked_index),
             Type.MutablePointerType(element),
         );
         return make_typed_expr(TypedExprKind.UnsafeDerefExpr(offset_expr), element);
+    };
+
+    /// A fixed array indexes into the array's own storage, so a numeric
+    /// subscript is bounds-checked before the pointer walk: `a[i]` evaluates
+    /// the index once, panics when it is not `< N`, and hands the checked
+    /// value to the element place. Reads, writes and compound writes all pass
+    /// through the place, so the check covers every form.
+    ///
+    /// The desugar is `block { let tmp = index; if tmp >= N then panic(...); tmp }`
+    /// -- ordinary typed code, with the panic call typed the way user code's
+    /// is, so no phase below sema knows the check exists.
+    wrap_fixed_array_index_with_bounds_check(
+        self,
+        index: TypedExpr,
+        length: UInt,
+        span: SourceSpan,
+    ): TypedExpr = {
+        if self.is_unresolved_expr_type(index.expr_type) or index.expr_type is .NeverType() then {
+            return index;
+        };
+        // The check panics through the ordinary `panic`. `--no-std` has no
+        // such function: there the subscript stays the unchecked walk it was.
+        let panic_name_found = when self.storage.current_scope.lookup("panic") in {
+            .Some(_) then true,
+            .None() then false,
+        };
+        if not panic_name_found then {
+            return index;
+        };
+        let panic_expr = Expr.Call(
+            Expr.Identifier("panic", span),
+            [Expr.StringLiteral("Fixed array index out of bounds: length \(length)", span)],
+            span,
+        );
+        let panic_call = self.check_expr_scoped_ref(
+            panic_expr,
+            Option[Type].None(),
+            self.storage.current_scope,
+        );
+        let tmp_symbol = self.make_assignment_temp_symbol(
+            "arr_idx",
+            index.expr_type,
+            VariableKind.Value(),
+        );
+        let condition = make_typed_expr_at(
+            TypedExprKind.ComparisonExpr(
+                make_typed_expr_at(
+                    TypedExprKind.Variable(tmp_symbol),
+                    index.expr_type,
+                    span,
+                ),
+                ComparisonOperator.GreaterEqual(),
+                make_typed_expr_at(
+                    TypedExprKind.IntegerLiteral(length.to_string()),
+                    index.expr_type,
+                    span,
+                ),
+            ),
+            Type.BoolType(),
+            span,
+        );
+        let guard_stmt = TypedStatement.IfStmt(
+            condition,
+            make_typed_expr_at(
+                TypedExprKind.Block(
+                    [TypedStatement.ExprStmt(panic_call, span)],
+                    Option[TypedExpr].None(),
+                ),
+                Type.NeverType(),
+                span,
+            ),
+            Option[TypedExpr].None(),
+            span,
+        );
+        return make_typed_expr_at(
+            TypedExprKind.Block(
+                [
+                    TypedStatement.LetStmt(tmp_symbol, index, span),
+                    guard_stmt,
+                ],
+                Option[TypedExpr].Some(
+                    make_typed_expr_at(
+                        TypedExprKind.Variable(tmp_symbol),
+                        index.expr_type,
+                        span,
+                    ),
+                ),
+            ),
+            index.expr_type,
+            span,
+        );
     };
 
     /// Type arguments of an applied nominal, whichever spelling it is in.

@@ -2758,8 +2758,6 @@ given[T: Any, R: Iterator[T]] LazyView[T, R]: Iterable[T, R] {
 
 /// Lazy adapters and terminals on `LazyView[T, R]`; adapters are only evaluated when a terminal runs.
 given[T: Any, R: Iterator[T]] LazyView[T, R] {
-    /// The pipeline itself: `lazy()` is the identity on a `LazyView`, so `x.lazy().lazy()` never nests.
-    public lazy(self): LazyView[T, R];
     /// Keep only the elements for which `fn` returns true.
     public filter(self, fn: (T) -> Bool): LazyView[T, FilterIterator[T, R]];
     /// Apply `fn` to each element as it passes through the pipeline.

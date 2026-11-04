@@ -512,6 +512,19 @@ given MIRFunctionBuilder {
             };
         };
         let lowered_value = self.lower_value(value);
+        // The same binding can be lowered twice in one function: a place
+        // whose index expression carries it is computed for both the read
+        // and the write of a compound assignment. Declare it once; every
+        // pass re-assigns. (Two declarations of one C name is invalid C.)
+        when self.local_by_def_id.get(symbol.def_id.id) in {
+            .Some(existing_id) then {
+                self.append_statement(
+                    MIRStatement.Assign(MIRPlace.Local(existing_id), lowered_value),
+                );
+                return;
+            },
+            .None() then {},
+        };
         let mutable lowered_value_type = self.type_of_value(lowered_value);
         // Defensive guard: if a substituted symbol type drifts from the
         // lowered MIR value type, prefer the lowered value type so local

@@ -130,6 +130,14 @@ public class UnifiedScope {
     privateNames["\(name)@\(sourceFile)"] = defId
   }
 
+  /// The binding an earlier `using` in this FILE gave `name`, if any. Unlike
+  /// `lookup` this never consults the ambient module or the cross-module bare
+  /// name index -- it answers exactly "did this file already import this
+  /// spelling", which is the question import registration must ask.
+  public func importedBinding(_ name: String, sourceFile: String) -> DefId? {
+    privateNames["\(name)@\(sourceFile)"]
+  }
+
   public func defineGenericParameter(_ name: String, defId: DefId) {
     genericParameters[name] = defId
   }

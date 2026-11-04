@@ -1362,16 +1362,68 @@ extension TypeChecker {
     index: TypedExpressionNode,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
-    guard case .fixedArray(_, let element) = builtinSubscriptBaseType(base.type) else {
+    guard case .fixedArray(let size, let element) = builtinSubscriptBaseType(base.type) else {
       throw SemanticError(.generic("Fixed array subscript requires a fixed array base"), span: span)
     }
+    let checkedIndex = try wrapFixedArrayIndexWithBoundsCheck(index: index, length: size, span: span)
     let ptrOfBase: TypedExpressionNode = .ptrExpression(
       expression: base, type: .mutablePointer(element: builtinSubscriptBaseType(base.type)))
     let dataPtr = TypedExpressionNode.castExpression(
       expression: ptrOfBase, type: .mutablePointer(element: element), span: span)
     let offsetExpr: TypedExpressionNode = .arithmeticExpression(
-      left: dataPtr, op: .plus, right: index, type: .mutablePointer(element: element), span: span)
+      left: dataPtr, op: .plus, right: checkedIndex, type: .mutablePointer(element: element), span: span)
     return .unsafeDerefExpression(expression: offsetExpr, type: element)
+  }
+
+  /// A fixed array indexes into the array's own storage, so a numeric
+  /// subscript is bounds-checked before the pointer walk: `a[i]` evaluates the
+  /// index once, panics when it is not `< N`, and hands the checked value to
+  /// the element place. Reads, writes and compound writes all pass through the
+  /// place, so the check covers every form.
+  ///
+  /// The desugar is `block { let tmp = index; if tmp >= N then panic(...); tmp }`.
+  /// It is ordinary typed code -- the panic call is typed the way user code's
+  /// is -- so no phase below sema knows the check exists. Raw pointers stay
+  /// unchecked on purpose (`*T` walking is the unsafe escape hatch).
+  private func wrapFixedArrayIndexWithBoundsCheck(
+    index: TypedExpressionNode,
+    length: UInt64,
+    span: SourceSpan
+  ) throws -> TypedExpressionNode {
+    // A failed or diverging index has no value to check; it has its own
+    // diagnostic and must not cascade here.
+    if index.type == .error || index.type == .never {
+      return index
+    }
+    // The check panics through the ordinary `panic`. `--no-std` has no such
+    // function: there the subscript stays the unchecked pointer walk it was.
+    guard currentScope.lookupWithInfo("panic", sourceFile: currentSourceFile) != nil else {
+      return index
+    }
+    let panicCall = try inferCallExpression(
+      callee: .identifier("panic", span: span),
+      arguments: [
+        CallArg(expression: .stringLiteral(
+          "Fixed array index out of bounds: length \(length)", span: span))
+      ])
+    let tmpSymbol = nextSynthSymbol(prefix: "arr_idx", type: index.type)
+    let condition = TypedExpressionNode.comparisonExpression(
+      left: .variable(identifier: tmpSymbol),
+      op: .greaterEqual,
+      right: .integerLiteral(value: String(length), type: index.type),
+      type: .bool)
+    let guardStatement = TypedStatementNode.ifStatement(
+      condition: condition,
+      thenBranch: .blockExpression(
+        statements: [.expression(panicCall)], tailExpression: nil, type: .never),
+      elseBranch: nil)
+    return .blockExpression(
+      statements: [
+        .variableDeclaration(identifier: tmpSymbol, value: index, mutable: false),
+        guardStatement,
+      ],
+      tailExpression: .variable(identifier: tmpSymbol),
+      type: index.type)
   }
 
   func buildBuiltinSubscriptHelperCall(

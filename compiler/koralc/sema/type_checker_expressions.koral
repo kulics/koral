@@ -430,14 +430,20 @@ given TypeChecker {
         let raw_file_sym_opt = if local_sym_opt is .Some(_) then Option[Symbol].None()
         else self.lookup_current_file_symbol(name);
         let file_sym_opt = raw_file_sym_opt;
-        let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) then Option[Symbol].None(
-        ) else self.lookup_shared_symbol(name);
-        let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or global_sym_opt is .Some(_) then Option[Symbol].None(
+        // An import of this spelling resolves BEFORE the cross-module bare
+        // name index: that index is last-wins across modules and is not a
+        // binding any file can see. This is the order the type side's
+        // `imported_type_entry` has always used; the value side answering
+        // from the bare slot first is what made a second same-named module's
+        // declaration swallow a name this file had imported.
+        let alias_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) then Option[Symbol].None(
         ) else self.resolve_imported_alias_symbol(name);
+        let global_sym_opt = if local_sym_opt is .Some(_) or file_sym_opt is .Some(_) or alias_sym_opt is .Some(_) then Option[Symbol].None(
+        ) else self.lookup_shared_symbol(name);
         let mutable sym = if local_sym_opt is .Some(s) then s
         else if file_sym_opt is .Some(s) then s
-        else if global_sym_opt is .Some(s) then s
         else if alias_sym_opt is .Some(s) then s
+        else if global_sym_opt is .Some(s) then s
         else {
             let fallback_type_opt = self.storage.global_scope.lookup_type(name);
             let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name);

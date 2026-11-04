@@ -1199,6 +1199,9 @@ given TypeChecker {
     /// (self type, trait) pair is `Conflicting conformance: 'given X T' already
     /// declared at line N`, N being the first declaration's line -- the same
     /// text Swift prints from `declaredConformances`/`explicitConformances`.
+    /// The pair is the trait's DECLARATION: a second `given` conflicts whatever
+    /// type arguments the trait carries, so `given Vec Add[Int]` and
+    /// `given Vec Add[Vec]` collide exactly like two `given Point T` do.
     ///
     /// Returns false after reporting. The same declaration arrives here once
     /// per pass and must not conflict with itself, so identity is the stored
@@ -1212,26 +1215,46 @@ given TypeChecker {
         trait_name: String,
         span: SourceSpan,
     ): Bool = {
-        when self.storage.conformance_decl_origins.get(key) in {
-            .Some(previous) then {
-                if self.spans_equal(previous, span) then {
-                    return true;
-                };
-                let mutable msg = StringBuilder.new();
-                msg.push_string("Conflicting conformance: 'given ");
-                msg.push_string(display);
-                msg.push_byte(' ');
-                msg.push_string(trait_name);
-                msg.push_string("' already declared at line ");
-                msg.push_string(previous.start.line.to_string());
-                self.push_diagnostic(msg.to_string(), span);
-                return false;
-            },
-            .None() then {
-                self.storage.conformance_decl_origins.insert(key, span);
-                return true;
-            },
+        let mutable clashes = List[SourceSpan].new();
+        let mutable own = false;
+        for pair in self.storage.conformance_decl_origins then {
+            let prior = pair.first;
+            if not (prior.target_type == key.target_type and prior.trait_def_id == key.trait_def_id) then {
+                continue;
+            };
+            if self.spans_equal(pair.second, span) then {
+                own = true;
+                continue;
+            };
+            clashes.push(pair.second);
         };
+        if clashes.is_empty() then {
+            if not own then {
+                self.storage.conformance_decl_origins.insert(key, span);
+            };
+            return true;
+        };
+        // The EARLIEST prior declaration is the one named, so the report never
+        // depends on iteration order.
+        let mutable earliest = clashes[0];
+        for other in clashes then {
+            if other.start.line < earliest.start.line then {
+                earliest = other;
+            } else {
+                if other.start.line == earliest.start.line and other.start.column < earliest.start.column then {
+                    earliest = other;
+                };
+            };
+        };
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Conflicting conformance: 'given ");
+        msg.push_string(display);
+        msg.push_byte(' ');
+        msg.push_string(trait_name);
+        msg.push_string("' already declared at line ");
+        msg.push_string(earliest.start.line.to_string());
+        self.push_diagnostic(msg.to_string(), span);
+        return false;
     };
 
     is_implicitly_satisfied_trait_requirement(

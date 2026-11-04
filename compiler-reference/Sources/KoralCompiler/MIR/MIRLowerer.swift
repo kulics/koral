@@ -1121,18 +1121,30 @@ private final class MIRFunctionBuilder {
     switch statement {
     case .variableDeclaration(let symbol, let value, let mutable):
       let initialValue = lowerValue(value)
-      let local = makeLocal(
-        name: context.getName(symbol.defId) ?? "local_\(symbol.defId.id)",
-        type: symbol.type,
-        storage: .local,
-        symbol: symbol
-      )
-      localByDefId[symbol.defId.id] = local.id
-      append(.declare(local.id))
-      if symbol.type != .void && symbol.type != .never {
-        append(.assign(.local(local.id), initialValue))
+      // The same binding can be lowered twice in one function: a place whose
+      // index expression carries it is computed for both the read and the
+      // write of a compound assignment. Declare it once; every pass re-assigns.
+      // (Two declarations of one C name is invalid C.)
+      if let existingLocal = localByDefId[symbol.defId.id] {
+        if symbol.type != .void && symbol.type != .never {
+          append(.assign(.local(existingLocal), initialValue))
+        } else {
+          append(.evaluate(initialValue))
+        }
       } else {
-        append(.evaluate(initialValue))
+        let local = makeLocal(
+          name: context.getName(symbol.defId) ?? "local_\(symbol.defId.id)",
+          type: symbol.type,
+          storage: .local,
+          symbol: symbol
+        )
+        localByDefId[symbol.defId.id] = local.id
+        append(.declare(local.id))
+        if symbol.type != .void && symbol.type != .never {
+          append(.assign(.local(local.id), initialValue))
+        } else {
+          append(.evaluate(initialValue))
+        }
       }
     case .tupleVariableDeclaration(let tupleSymbol, let tupleValue, let bindings):
       lowerTupleVariableDeclaration(

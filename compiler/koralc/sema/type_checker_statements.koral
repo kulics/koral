@@ -222,7 +222,27 @@ given TypeChecker {
         };
         if not self.typed_expr_has_observable_statement_effect(typed_expr) then {
             self.push_diagnostic_at_span("Expression statement has no effect", span);
+            return;
         };
+        // A silently dropped `Result` is a lost error -- the whole point of
+        // the type is that someone handles the failure. A statement must use
+        // the result or discard it on purpose (`let _ = expr;`). Other values
+        // may be dropped silently: value-returning helpers used for effect
+        // (`advance()` handing back the consumed rune) are ordinary Koral.
+        if self.requires_explicit_statement_discard(typed_expr.expr_type) then {
+            let mutable msg = StringBuilder.new();
+            msg.push_string("Expression statement value of type '");
+            msg.push_string(self.display_type_name(typed_expr.expr_type));
+            msg.push_string("' must be used or explicitly discarded; write 'let _ = ...' to drop it");
+            self.push_diagnostic_at_span(msg.to_string(), span);
+        };
+    };
+
+    /// Whether a statement of this value type must say how it is dropped.
+    /// Exactly std's `Result`, matched by DECLARATION identity: a user type
+    /// also called `Result` is a different type and is not implicated.
+    requires_explicit_statement_discard(self, t: Type): Bool = {
+        return self.is_std_flow_enum(t, "Result");
     };
 
     check_statement_body_expr(self, expr: Expr, scope: Scope): TypedExpr = {
@@ -2015,6 +2035,18 @@ given TypeChecker {
         let local_sym_opt = scope.lookup(name);
         if local_sym_opt is .Some(_) then {
             return local_sym_opt;
+        };
+        // The read path's order: the module's own declaration, then this
+        // file's imports, and only then the cross-module bare name index --
+        // that index is last-wins across modules and is not a binding any
+        // file can see.
+        let file_sym_opt = self.lookup_current_file_symbol(name);
+        if file_sym_opt is .Some(_) then {
+            return file_sym_opt;
+        };
+        let alias_sym_opt = self.resolve_imported_alias_symbol(name);
+        if alias_sym_opt is .Some(_) then {
+            return alias_sym_opt;
         };
         return self.lookup_shared_symbol(name);
     };

@@ -642,6 +642,7 @@ In Koral, `{}` represents a block expression.
 Block rules:
 
 - A block contains zero or more statements.
+- A `Result` may not be dropped silently: a statement holding one must use it or discard it on purpose — `let _ = expr;` says "drop this". A silently dropped `Result` is a lost error, and this is what keeps that from happening. Other statement values drop silently as usual (`Void`, `Never`, and effectful helpers that hand back an observation their callers ignore).
 - A block may end with a final expression that does not use a trailing semicolon.
 - If a block has a final expression, the block's type and value are the type and value of that expression.
 - If a block has no final expression, or the last expression ends with a semicolon, the block's type is `Void`.
@@ -2167,7 +2168,7 @@ Iteration splits into two roles:
 
 A lazy pipeline is entered through `lazy()` and never leaves: it returns a
 `LazyView`, and each adapter returns another `LazyView`, so a chain is written
-once and never repeats `lazy()`. Nothing lazy is spelled on the container
+once. Nothing lazy is spelled on the container
 itself — `dict.take(key)`, `string.find(pat)`, `list.first()` and friends keep
 the container's own meaning, and names like `map`, `filter`, `to_list` and
 `collect` on a container are left free for a future eager API.
@@ -2183,12 +2184,13 @@ view.count();        // 3 -- the pipeline was never spent
 list.count();        // the container's own O(1) count
 ```
 
-`lazy()` is a door, not a wrapper: `list.lazy().lazy()` is `list.lazy()`, not a
-nesting. A `LazyView` is a value — nothing in it mutates — so binding one to a
+`lazy()` is a door, not a wrapper: it is written once, on the container, and a
+`LazyView` has no `lazy()` to repeat — the chain it hands back is already
+lazy. A `LazyView` is a value — nothing in it mutates — so binding one to a
 name and using it twice agrees with itself.
 
-Its signature is `LazyView[T, R]`: the element type and the cursor type
-`lazy()` will hand out. It holds a cursor factory rather than a source, so the
+Its signature is `LazyView[T, R]`: the element type and the cursor type the
+pipeline will hand out. It holds a cursor factory rather than a source, so the
 chain does not pick up a type parameter per stage and no per-stage view type
 exists. The cursor that comes out is an ordinary monomorphized `Iterator`, so
 `next` on it is a direct call.
@@ -2481,6 +2483,7 @@ Tool methods are available in:
 
 #### Override and Conflict Rules
 
+- A type may have one `given` implementation of a trait, whatever type arguments the trait carries: `given Vec: Add[Int]` and `given Vec: Add[Vec]` conflict, exactly like a duplicate `given Point: T`.
 - Tool methods are non-override by default.
 - Inherent type methods win over trait tool methods.
 - If the same method signature appears from multiple trait tool sources, Koral does not choose implicitly. You must disambiguate explicitly with a fully qualified call: `Type(TraitName).method(value, ...)`.
@@ -3269,7 +3272,9 @@ permission for the rest of it. `&mutable` / `&mutable expr` forms a
 
 `[N]T` is a C-layout fixed array of N elements of `T`: mutable value semantics
 (copies on assignment and passing; the same write matrix as above applies to
-`a[i] = v`). `T` must cross the FFI boundary — a built-in scalar, a `*` /
+`a[i] = v`). A numeric subscript is bounds-checked: the index is evaluated
+once and an out-of-range one panics instead of reading neighbouring memory.
+`T` must cross the FFI boundary — a built-in scalar, a `*` /
 `*mutable` pointer, another `type foreign` or `type foreign`'s array-friendly
 forms.
 

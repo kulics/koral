@@ -148,7 +148,26 @@ extension TypeChecker {
     }
     if !typedExpressionHasObservableStatementEffect(typedExpr) {
       try handleError("Expression statement has no effect", at: span)
+      return
     }
+    // A silently dropped `Result` is a lost error -- the whole point of the
+    // type is that someone handles the failure. A statement must use the
+    // result or discard it on purpose (`let _ = expr;`). Other values may be
+    // dropped silently: value-returning helpers used for effect (`advance()`
+    // handing back the consumed rune) are ordinary Koral, and forcing every
+    // such call to say `let _ =` would say nothing.
+    if requiresExplicitStatementDiscard(typedExpr.type) {
+      try handleError(
+        "Expression statement value of type '\(typedExpr.type.description)' must be used or explicitly discarded; write 'let _ = ...' to drop it",
+        at: span)
+    }
+  }
+
+  /// Whether a statement of this value type must say how it is dropped.
+  /// Exactly std's `Result`, matched by DECLARATION identity: a user type
+  /// also called `Result` is a different type and is not implicated.
+  func requiresExplicitStatementDiscard(_ type: Type) -> Bool {
+    stdResultInner(type) != nil
   }
 
   func inferCheckedStatementBodyExpression(_ expr: ExpressionNode) throws -> TypedExpressionNode {

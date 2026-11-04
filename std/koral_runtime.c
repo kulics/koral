@@ -3167,7 +3167,11 @@ int32_t __koral_spawn(
     // passes the child's COMPLETE environment (envc == 0 => empty env block).
     wchar_t* env_block = NULL;
     if (envc >= 0) {
-        size_t total = 1;  // trailing extra null
+        // The block is a run of `NAME=VALUE\0` strings plus the block
+        // terminator. An EMPTY environment is one empty string plus that
+        // terminator -- two null characters; a single null makes
+        // CreateProcessW reject the block outright.
+        size_t total = (envc == 0) ? 2 : 1;  // trailing extra null(s)
         for (int i = 0; i < envc; i++) {
             wchar_t* wentry = __koral_utf8_to_wide((const char*)envp[i]);
             if (!wentry) {
@@ -3203,6 +3207,9 @@ int32_t __koral_spawn(
             free(wentry);
         }
         *p = L'\0';
+        if (envc == 0) {
+            p[1] = L'\0';
+        }
     }
 
     STARTUPINFOW si;
@@ -3230,8 +3237,13 @@ int32_t __koral_spawn(
     else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
     memset(&pi, 0, sizeof(pi));
+    // lpApplicationName stays NULL on purpose: the module name is the first
+    // token of the command line, and only THAT spelling is searched against
+    // the application directory, the system directories and PATH (and gets
+    // `.exe` appended). Passing the bare name as lpApplicationName skips the
+    // PATH search entirely, so `Command.new("sh")` could never work.
     BOOL ok = CreateProcessW(
-        wprogram, wcmdline, NULL, NULL, TRUE,
+        NULL, wcmdline, NULL, NULL, TRUE,
         env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
         env_block, wwork_dir, &si, &pi
     );
@@ -3906,9 +3918,19 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
 }
 
 int32_t __koral_thread_join(uint8_t* handle) {
+    // A thread waiting on itself would block forever: pthread_join reports
+    // EDEADLK, but Windows has no equivalent, so ask the question first.
+    // The handle stays open on failure so the join is retryable -- the same
+    // contract the POSIX side has (it never closes the handle either).
+    if (GetThreadId((HANDLE)handle) == GetCurrentThreadId()) {
+        return -1;
+    }
     DWORD result = WaitForSingleObject((HANDLE)handle, INFINITE);
+    if (result != WAIT_OBJECT_0) {
+        return -1;
+    }
     CloseHandle((HANDLE)handle);
-    return (result == WAIT_OBJECT_0) ? 0 : -1;
+    return 0;
 }
 
 void __koral_thread_detach(uint8_t* handle) {

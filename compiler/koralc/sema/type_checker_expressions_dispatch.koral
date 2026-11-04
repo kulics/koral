@@ -1359,6 +1359,32 @@ given TypeChecker {
                     ),
                     .None() then false,
                 } else false;
+                // An enum-case construction plans its arguments exactly like
+                // the explicit `Type.Case(...)` spelling: labels are matched,
+                // omitted named parameters fill from their declared defaults,
+                // and a missing one is one diagnostic. Without this step a
+                // defaulted `.Case()` reached codegen with fewer arguments
+                // than payload fields.
+                if implicit_member_is_enum_case then {
+                    when expected in {
+                        .Some(expected_type) then {
+                            let param_specs = self.get_enum_case_param_specs(
+                                expected_type,
+                                member_name,
+                            );
+                            args_copy = self.normalize_constructor_call_args(
+                                args_copy,
+                                param_specs,
+                                param_types,
+                                ".\(member_name)",
+                                expr_span(expr),
+                            ) or else {
+                                return self.empty_typed_block(Type.Unknown());
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
                 let typed_args = self.check_implicit_member_args(
                     args_copy,
                     param_types,
@@ -2665,6 +2691,52 @@ given TypeChecker {
             },
             .QualifiedMethodCall(base, trait_type_node, method_name, args, span) then {
                 let trait_name = self.type_node_name(trait_type_node);
+                // The TYPE-qualified form writes the instance receiver as its
+                // first argument: `Type(Trait).method(receiver, ...)` is
+                // `receiver(Trait).method(...)` in disguise, and must dispatch
+                // to the QUALIFIED trait's method. Routing it through the
+                // ordinary `Type.method(...)` lookup hands the call to an
+                // inherent method owning the name -- exactly what the
+                // qualification exists to bypass.
+                let type_form_base_type_opt = when base in {
+                    .Identifier(base_name, _) then self.try_resolve_named_type_in_scope_without_diag(
+                        base_name,
+                        scope,
+                    ),
+                    .GenericInstantiation(base_name, _, _) then self.try_resolve_named_type_in_scope_without_diag(
+                        base_name,
+                        scope,
+                    ),
+                    _ then Option[Type].None(),
+                };
+                when type_form_base_type_opt in {
+                    .Some(base_type) then {
+                        if (not args.is_empty()) and self.qualified_method_has_receiver(
+                            self.trait_def_id_of(trait_name) or else def_id_invalid(),
+                            method_name,
+                            base_type,
+                        ) then {
+                            let mutable rest_args = List[Expr].new();
+                            for pair in args.lazy().enumerate() then {
+                                if pair.first > UInt(0) then {
+                                    rest_args.push(pair.second);
+                                };
+                            };
+                            return self.check_expr_scoped_ref(
+                                Expr.QualifiedMethodCall(
+                                    args[UInt(0)],
+                                    trait_type_node,
+                                    method_name,
+                                    rest_args,
+                                    span,
+                                ),
+                                expected,
+                                scope,
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
                 // Swift `inferQualifiedMethodCallExpression` (TypeCheckerExpressions.swift:
                 // 3337-3426) splits strictly on the receiver type: a generic-parameter
                 // receiver dispatches through the trait vtable; a CONCRETE receiver is a
@@ -2803,6 +2875,50 @@ given TypeChecker {
             },
             .QualifiedGenericMethodCall(base, trait_type_node, method_type_args, method_name, args, span) then {
                 let trait_name = self.type_node_name(trait_type_node);
+                // Same rewrite as `QualifiedMethodCall`: for an instance
+                // method the TYPE form's first argument IS the receiver, and
+                // the call must reach the qualified trait's method rather than
+                // the inherent one owning the name.
+                let generic_form_base_type_opt = when base in {
+                    .Identifier(base_name, _) then self.try_resolve_named_type_in_scope_without_diag(
+                        base_name,
+                        scope,
+                    ),
+                    .GenericInstantiation(base_name, _, _) then self.try_resolve_named_type_in_scope_without_diag(
+                        base_name,
+                        scope,
+                    ),
+                    _ then Option[Type].None(),
+                };
+                when generic_form_base_type_opt in {
+                    .Some(base_type) then {
+                        if (not args.is_empty()) and self.qualified_method_has_receiver(
+                            self.trait_def_id_of(trait_name) or else def_id_invalid(),
+                            method_name,
+                            base_type,
+                        ) then {
+                            let mutable rest_args = List[Expr].new();
+                            for pair in args.lazy().enumerate() then {
+                                if pair.first > UInt(0) then {
+                                    rest_args.push(pair.second);
+                                };
+                            };
+                            return self.check_expr_scoped_ref(
+                                Expr.QualifiedGenericMethodCall(
+                                    args[UInt(0)],
+                                    trait_type_node,
+                                    method_type_args,
+                                    method_name,
+                                    rest_args,
+                                    span,
+                                ),
+                                expected,
+                                scope,
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
                 // Same split as `QualifiedMethodCall`: a concrete type is a direct call to
                 // `Type`'s implementation (Swift `inferQualifiedMethodCallExpression` with
                 // `methodTypeArgs`), and the base is a TYPE — evaluating it as an expression

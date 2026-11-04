@@ -118,9 +118,14 @@ given TypeChecker {
                     return Option[TypedExpr].None();
                 };
 
+                // Imports before the cross-module bare name index -- the same
+                // order as the ordinary identifier path.
                 let fn_lookup = when self.lookup_current_file_symbol(base) in {
                     .Some(sym) then Option[Symbol].Some(sym),
-                    .None() then self.lookup_shared_symbol(base),
+                    .None() then when self.resolve_imported_alias_symbol(base) in {
+                        .Some(sym) then Option[Symbol].Some(sym),
+                        .None() then self.lookup_shared_symbol(base),
+                    },
                 };
                 when fn_lookup in {
                     .Some(sym) then Option[TypedExpr].Some(
@@ -1098,6 +1103,36 @@ given TypeChecker {
             ),
             .None() then List[FunctionParamSpec].new(),
         };
+    };
+
+    /// Whether the trait's method takes a receiver (`self` first). The
+    /// qualified TYPE form `Type(Trait).method(receiver, ...)` writes the
+    /// receiver as its first argument; it is the receiver form in disguise
+    /// exactly when this is true, and the two must dispatch the same way.
+    ///
+    /// The answer comes from the same receiver-aware lookup the call itself
+    /// dispatches through (`resolve_trait_method_self_type`): it finds
+    /// requirement witnesses and trait tool methods alike, which the trait
+    /// registry's flattened declaration list alone does not.
+    qualified_method_has_receiver(
+        self,
+        trait_def_id: DefId,
+        method_name: String,
+        receiver_type: Type,
+    ): Bool = {
+        // The trait-side lookups name requirement declarations and trait
+        // signatures; a trait TOOL method instead reaches the receiver's own
+        // method table -- the same fallback `resolve_qualified_method_return_type`
+        // ends on. Decide on the signature's receiver, whichever lookup found
+        // the method.
+        if self.resolve_trait_method_self_type(
+            trait_def_id,
+            method_name,
+            receiver_type,
+        ) is .Some(_) then {
+            return true;
+        };
+        return self.resolve_method_self_type(receiver_type, method_name) is .Some(_);
     };
 
     resolve_qualified_method_param_specs(
