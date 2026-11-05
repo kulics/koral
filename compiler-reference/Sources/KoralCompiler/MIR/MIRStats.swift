@@ -209,7 +209,8 @@ private final class MIRStatsCounter {
          .takeMemory(let ptr, _):
       count(ptr)
     case .copyMemory(let dest, let source, let count),
-         .moveMemory(let dest, let source, let count):
+         .moveMemory(let dest, let source, let count),
+         .compareMemory(let dest, let source, let count):
       self.count(dest)
       self.count(source)
       self.count(count)

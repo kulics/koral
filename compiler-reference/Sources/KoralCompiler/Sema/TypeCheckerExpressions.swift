@@ -5616,6 +5616,17 @@ extension TypeChecker {
         let c = try inferTypedExpression(arguments[2])
         return .intrinsicCall(.moveMemory(dest: d, source: s, count: c))
       }
+      if base == "compare_memory" {
+        _ = try args.map { try resolveTypeNode($0) }
+        guard arguments.count == 3 else {
+          throw SemanticError.invalidArgumentCount(
+            function: base, expected: 3, got: arguments.count)
+        }
+        let a = try inferTypedExpression(arguments[0])
+        let b = try inferTypedExpression(arguments[1])
+        let c = try inferTypedExpression(arguments[2])
+        return .intrinsicCall(.compareMemory(a: a, b: b, count: c))
+      }
 
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
       
@@ -5883,6 +5894,11 @@ extension TypeChecker {
       return .intrinsicCall(
         .moveMemory(
           dest: typedArguments[0], source: typedArguments[1], count: typedArguments[2]))
+    }
+    if templateName == "compare_memory" {
+      return .intrinsicCall(
+        .compareMemory(
+          a: typedArguments[0], b: typedArguments[1], count: typedArguments[2]))
     }
     if templateName == "downgrade" {
       // downgrade takes a managed value T (must satisfy 'mutable' constraint) and produces ?T

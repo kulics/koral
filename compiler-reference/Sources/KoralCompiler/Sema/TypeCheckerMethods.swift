@@ -1690,6 +1690,15 @@ extension TypeChecker {
       // So `callee` will be a `TypedExpressionNode`? No, `callee` in `checkIntrinsicCall` is `ExpressionNode` (identifier).
       return nil  // handled in generic inst for now or handled after resolution?
 
+    case "compare_memory":
+      guard arguments.count == 3 else {
+        throw SemanticError.invalidArgumentCount(function: name, expected: 3, got: arguments.count)
+      }
+      let a = try inferTypedExpression(arguments[0])
+      let b = try inferTypedExpression(arguments[1])
+      let count = try inferTypedExpression(arguments[2])
+      return .intrinsicCall(.compareMemory(a: a, b: b, count: count))
+
     case "alloc_string":
       guard arguments.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)

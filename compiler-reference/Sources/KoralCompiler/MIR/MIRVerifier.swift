@@ -328,7 +328,8 @@ final class MIRVerifier {
          .takeMemory(let ptr, _):
       try verifyValue(ptr, in: function, localIDs: Set(function.locals.map(\.id)))
     case .copyMemory(let dest, let source, let count),
-         .moveMemory(let dest, let source, let count):
+         .moveMemory(let dest, let source, let count),
+         .compareMemory(let dest, let source, let count):
       let localIDs = Set(function.locals.map(\.id))
       try verifyValue(dest, in: function, localIDs: localIDs)
       try verifyValue(source, in: function, localIDs: localIDs)

@@ -355,6 +355,7 @@ public indirect enum TypedIntrinsic {
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
   case moveMemory(
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
+  case compareMemory(a: TypedExpressionNode, b: TypedExpressionNode, count: TypedExpressionNode)
 
   // Weak Reference Operations
   case downgradeRef(val: TypedExpressionNode, resultType: Type)
@@ -378,6 +379,7 @@ public indirect enum TypedIntrinsic {
     case .deallocMemory: return .void
     case .copyMemory: return .void
     case .moveMemory: return .void
+    case .compareMemory: return .int
     case .downgradeRef(_, let resultType): return resultType
     case .upgradeRef(_, let resultType): return resultType
     case .initMemory: return .void

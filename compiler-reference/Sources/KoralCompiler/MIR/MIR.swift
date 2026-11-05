@@ -339,6 +339,7 @@ indirect enum MIRIntrinsic {
   case deallocMemory(ptr: MIRValue)
   case copyMemory(dest: MIRValue, source: MIRValue, count: MIRValue)
   case moveMemory(dest: MIRValue, source: MIRValue, count: MIRValue)
+  case compareMemory(a: MIRValue, b: MIRValue, count: MIRValue)
   case downgradeRef(value: MIRValue, resultType: Type)
   case upgradeRef(value: MIRValue, resultType: Type)
   case traitObjectMatches(value: MIRValue, traitName: String, traitDefId: DefId, traitTypeArguments: [Type], concreteType: Type)

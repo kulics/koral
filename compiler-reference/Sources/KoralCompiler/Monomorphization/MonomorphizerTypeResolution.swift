@@ -1811,6 +1811,12 @@ extension Monomorphizer {
         case .deallocMemory(let ptr):
             return .deallocMemory(ptr: resolveTypesInExpression(ptr))
             
+        case .compareMemory(let a, let b, let count):
+            return .compareMemory(
+                a: resolveTypesInExpression(a),
+                b: resolveTypesInExpression(b),
+                count: resolveTypesInExpression(count)
+            )
         case .copyMemory(let dest, let source, let count):
             return .copyMemory(
                 dest: resolveTypesInExpression(dest),

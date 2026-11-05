@@ -163,6 +163,8 @@ struct MIRTypeResolver {
          .takeMemory(_, let resultType),
          .nullPtr(let resultType):
       return resultType
+    case .compareMemory:
+      return .int
     case .traitObjectMatches:
       return .bool
     case .traitObjectDowncast(_, let resultType):

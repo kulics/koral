@@ -194,7 +194,8 @@ final class MIRFunctionCodeEmitter {
            .traitObjectDowncast(let ptr, _):
         walkValue(ptr)
       case .copyMemory(let dest, let source, let count),
-           .moveMemory(let dest, let source, let count):
+           .moveMemory(let dest, let source, let count),
+           .compareMemory(let dest, let source, let count):
         walkValue(dest)
         walkValue(source)
         walkValue(count)
@@ -2168,6 +2169,25 @@ final class MIRFunctionCodeEmitter {
 
     case .moveMemory(let dest, let source, let count):
       return emitMemoryTransfer(functionName: "memmove", dest: dest, source: source, count: count)
+
+    case .compareMemory(let a, let b, let count):
+      let aEmission = emitValue(a, sourceMode: true)
+      let bEmission = emitValue(b, sourceMode: true)
+      let countEmission = emitValue(count, sourceMode: true)
+      let elementType: Type
+      switch resolver.type(of: a) ?? .void {
+      case .pointer(let element), .mutablePointer(let element):
+        elementType = element
+      default:
+        fatalError("compare_memory expects pointer operands")
+      }
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(.int))
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression) = (intptr_t)__koral_memcmp((uint8_t*)(\(aEmission.expression)), (uint8_t*)(\(bEmission.expression)), (uintptr_t)(\(countEmission.expression)) * sizeof(\(codeGen.cTypeName(elementType))));\n")
+      emitCleanups(aEmission.cleanups)
+      emitCleanups(bEmission.cleanups)
+      emitCleanups(countEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: [])
 
     case .downgradeRef(let value, let resultType):
       let valueEmission = emitValue(value, sourceMode: true)

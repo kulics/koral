@@ -193,7 +193,8 @@ extension CodeGen {
     case .deallocMemory(let ptr):
       collectValueRefs(ptr, &out)
     case .copyMemory(let dest, let source, let count),
-         .moveMemory(let dest, let source, let count):
+         .moveMemory(let dest, let source, let count),
+         .compareMemory(let dest, let source, let count):
       collectValueRefs(dest, &out)
       collectValueRefs(source, &out)
       collectValueRefs(count, &out)

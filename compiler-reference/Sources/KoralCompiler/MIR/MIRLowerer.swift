@@ -4326,6 +4326,8 @@ private final class MIRFunctionBuilder {
       return .deallocMemory(ptr: lowerValue(ptr))
     case .copyMemory(let dest, let source, let count):
       return .copyMemory(dest: lowerValue(dest), source: lowerValue(source), count: lowerValue(count))
+    case .compareMemory(let a, let b, let count):
+      return .compareMemory(a: lowerValue(a), b: lowerValue(b), count: lowerValue(count))
     case .moveMemory(let dest, let source, let count):
       return .moveMemory(dest: lowerValue(dest), source: lowerValue(source), count: lowerValue(count))
     case .downgradeRef(let value, let resultType):

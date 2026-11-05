@@ -290,7 +290,8 @@ private let mir_walk_intrinsic_uses(
             block,
             active_scopes,
         ),
-        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count) then {
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)
+        or .CompareMemory(dest, source, count) then {
             mir_walk_value_uses(
                 shared_use_scope_by_local,
                 first_use_block_by_local,
@@ -3409,6 +3410,7 @@ given MIRFunctionCodeEmitter {
                 source,
                 count,
             ),
+            .CompareMemory(a, b, count) then self.emit_memory_compare(a, b, count),
             .DowngradeRef(value, result_type) then self.emit_downgrade_ref(
                 value,
                 result_type,
@@ -4117,6 +4119,7 @@ given MIRFunctionCodeEmitter {
         return when node in {
             .AllocMemory(_, result_type) or .AllocString(_, result_type)
             or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
+            .CompareMemory(_, _, _) then Type.IntType(),
             .TraitObjectMatches(_, _, _, _, _) then Type.BoolType(),
             .TraitObjectDowncast(_, result_type) or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .FixedArrayLiteral(result_type, _) then result_type,
@@ -4408,6 +4411,39 @@ given MIRFunctionCodeEmitter {
         self.emit_cleanup(s.cleanup);
         self.emit_cleanup(c.cleanup);
         return MIRValueEmission("", Option[MIRValueCleanup].None());
+    };
+
+    /// `compare_memory` 的发射：批量无符号字节比较。`__koral_memcmp` 是
+    /// koral_runtime 的 libc memcmp 垫片（直接声明 memcmp 会与 libc 原型在
+    /// 同一翻译单元里冲突）；count 按元素计数，乘元素宽度折成字节数。
+    emit_memory_compare(
+        self,
+        a: MIRValue,
+        b: MIRValue,
+        count: MIRValue,
+    ): MIRValueEmission = {
+        let pa = self.emit_value_source(a);
+        let pb = self.emit_value_source(b);
+        let c = self.emit_value_source(count);
+        let mutable element_type = self.pointer_element_type(self.type_of_value(a));
+        let result = self.codegen.next_temp_with_decl(
+            self.codegen.c_type_name(Type.IntType()),
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(result);
+        self.codegen.buffer.push_string(" = (intptr_t)__koral_memcmp((uint8_t*)(");
+        self.codegen.buffer.push_string(pa.expression);
+        self.codegen.buffer.push_string("), (uint8_t*)(");
+        self.codegen.buffer.push_string(pb.expression);
+        self.codegen.buffer.push_string("), (uintptr_t)(");
+        self.codegen.buffer.push_string(c.expression);
+        self.codegen.buffer.push_string(") * sizeof(");
+        self.codegen.buffer.push_string(self.codegen.c_type_name(element_type));
+        self.codegen.buffer.push_string("));\n");
+        self.emit_cleanup(pa.cleanup);
+        self.emit_cleanup(pb.cleanup);
+        self.emit_cleanup(c.cleanup);
+        return MIRValueEmission(result, Option[MIRValueCleanup].None());
     };
 
     emit_runtime_unary_ref(

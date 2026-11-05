@@ -1020,6 +1020,12 @@ extension Monomorphizer {
         case .deallocMemory(let ptr):
             return .deallocMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))
             
+        case .compareMemory(let a, let b, let count):
+            return .compareMemory(
+                a: substituteTypesInExpression(a, substitution: substitution),
+                b: substituteTypesInExpression(b, substitution: substitution),
+                count: substituteTypesInExpression(count, substitution: substitution)
+            )
         case .copyMemory(let dest, let source, let count):
             return .copyMemory(
                 dest: substituteTypesInExpression(dest, substitution: substitution),

@@ -4,12 +4,6 @@
 // NOTE: This file is merged into core.koral, so primitives, traits, and option are already available.
 // ============================================================================
 
-// Byte comparison: word-at-a-time with early exit (a libc memcmp shim in
-// koral_runtime -- not `memcmp` itself: the generated prototype would clash
-// with the libc declaration), the same unsigned-byte order the old per-byte
-// loops produced.
-let foreign __koral_memcmp(a: *UInt8, b: *UInt8, n: UInt): Int32;
-
 // ============================================================================
 // String Storage and Type Definition
 // ============================================================================
@@ -22,10 +16,11 @@ public type String(protected data: *mutable UInt8, protected len: UInt);
 /// are not yet written (only byte `[len]` is set to 0). The bytes live in the
 /// same heap block as the object -- one allocation -- and `data` points at
 /// them; the RC release frees the whole block, so `Drop` has nothing to free.
-/// The caller must fill every byte before reading. This is plumbing for the
-/// constructors below and the compiler's interpolation lowering; the runtime
-/// side is `__koral_string_alloc` (see std/koral_runtime.h for the ABI note).
-public let intrinsic alloc_string(len: UInt): String;
+/// The caller must fill every byte before reading. Internal plumbing for the
+/// constructors below and the compiler's interpolation lowering -- not a user
+/// API; the runtime side is `__koral_string_alloc` (see std/koral_runtime.h
+/// for the ABI note).
+let intrinsic alloc_string(len: UInt): String;
 
 /// Mutable builder for incremental string construction without relying on String alias mutation.
 public type mutable StringBuilder(
@@ -121,31 +116,6 @@ given StringBuilder {
         self.ensure_capacity(self.len + 2);
         init_memory(self.data + self.len, value);
         self.len = self.len + 1;
-        self.data[self.len] = 0;
-    };
-
-    /// Append the decimal representation of `value` directly into the builder
-    /// -- no temporary String, unlike `push_string(value.to_string())`.
-    public push_uint(self, value: UInt): Void = {
-        if value == 0 then {
-            self.push_byte('0');
-            return;
-        };
-        let mutable n = value;
-        let mutable digits = UInt(0);
-        let mutable m = n;
-        while m > 0 then {
-            digits += 1;
-            m = m / 10;
-        };
-        self.ensure_capacity(self.len + digits + 1);
-        let mutable pos = self.len + digits;
-        while n > 0 then {
-            pos -= 1;
-            init_memory(self.data + pos, UInt8((n % 10)) + '0');
-            n = n / 10;
-        };
-        self.len = self.len + digits;
         self.data[self.len] = 0;
     };
 
@@ -906,9 +876,7 @@ given String: Eq {
         if self.len != other.len then {
             return false;
         };
-        // memcmp compares as unsigned bytes -- the same order the old
-        // byte loop did -- but word-at-a-time and early-exiting in libc.
-        return __koral_memcmp(self.data, other.data, self.len) == 0;
+        return compare_memory(self.borrow_ptr(), other.borrow_ptr(), self.len) == 0;
     };
 };
 
@@ -918,9 +886,7 @@ given String: Ord {
     /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
     public compare(self, other: String): Int = {
         let min = if self.len < other.len then self.len else other.len;
-        // memcmp compares as unsigned bytes -- the same order the old byte
-        // loop did -- but word-at-a-time and early-exiting in libc.
-        let c = __koral_memcmp(self.data, other.data, min);
+        let c = compare_memory(self.borrow_ptr(), other.borrow_ptr(), min);
         if c < 0 then {
             return 0 - 1;
         };

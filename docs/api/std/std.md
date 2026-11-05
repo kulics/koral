@@ -33,6 +33,14 @@ public let intrinsic copy_memory[T: Any](dest: *mutable T, source: *T, count: UI
 /// Moves `count` elements from `source` to `dest`. Regions may overlap.
 public let intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
+/// Compares `count` elements byte-wise at `a` and `b` in unsigned byte order --
+/// the read-side counterpart of `copy_memory` / `move_memory`. The result is
+/// negative, zero, or positive as the first differing byte sorts `a` before,
+/// equal to, or after `b`; the magnitude is unspecified. For element types
+/// holding managed handles the comparison sees handle bits, not pointed-to
+/// data.
+public let intrinsic compare_memory[T: Any](a: *T, b: *T, count: UInt): Int;
+
 /// Initializes the memory at `p` with `value`, taking ownership of the value.
 public let intrinsic init_memory[T: Any](p: *mutable T, value: T): Void;
 
@@ -47,15 +55,6 @@ public let intrinsic take_memory[T: Any](p: *mutable T): T;
 /// Returns 0 on success, non-zero on failure.
 /// The closure is passed by value to the C runtime which invokes and releases it.
 public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: () -> Void, stack_size: UInt64): Int32;
-
-/// Intrinsic: allocate a single-block String of byte length `len` whose bytes
-/// are not yet written (only byte `[len]` is set to 0). The bytes live in the
-/// same heap block as the object -- one allocation -- and `data` points at
-/// them; the RC release frees the whole block, so `Drop` has nothing to free.
-/// The caller must fill every byte before reading. This is plumbing for the
-/// constructors below and the compiler's interpolation lowering; the runtime
-/// side is `__koral_string_alloc` (see std/koral_runtime.h for the ABI note).
-public let intrinsic alloc_string(len: UInt): String;
 
 /// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;
@@ -3510,9 +3509,6 @@ given StringBuilder {
     /// Append one raw byte to the builder.
     /// The caller must keep the accumulated bytes valid UTF-8.
     public push_byte(self, value: UInt8): Void;
-    /// Append the decimal representation of `value` directly into the builder
-    /// -- no temporary String, unlike `push_string(value.to_string())`.
-    public push_uint(self, value: UInt): Void;
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     public push_string(self, other: String, span: Range[UInt] = ...): Void;
