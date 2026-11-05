@@ -53,24 +53,24 @@ that is the comparison being asked about. Specifically:
 
 ## Results
 
-2026-11-04, this machine (Apple arm64), best of 5 runs, ms:
+2026-11-05, this machine (Apple arm64), best of 5 runs, ms:
 
 | case | koral | go | swift | rust | koral vs best |
 |---|---|---|---|---|---|
-| loop_pipeline | 1.33 | 1.73 | 1.24 | 1.34 | **1.07x** |
-| set_membership | 12.14 | 23.68 | 16.09 | 10.44 | 1.16x |
-| fib_recursive | 0.45 | 0.44 | 0.39 | 0.35 | 1.29x |
-| string_find | 14.17 | 13.22 | 269.68 | 10.32 | 1.37x |
-| struct_iter | 15.13 | 7.79 | 7.88 | 10.83 | 1.94x |
-| string_build | 12.91 | 5.15 | 11.76 | 7.61 | 2.51x |
-| dict_lookup | 169.31 | 93.93 | 62.69 | 77.57 | 2.70x |
-| sort_ints | 36.51 | 54.55 | 76.83 | 13.22 | 2.76x |
-| list_sum | 11.95 | 4.38 | 5.71 | 4.15 | 2.88x |
-| sort_strings | 50.37 | 27.62 | 35.66 | 16.09 | 3.13x |
+| loop_pipeline | 1.23 | 1.89 | 1.39 | 1.32 | **1.00x** |
+| set_membership | 11.46 | 25.31 | 15.30 | 9.85 | 1.16x |
+| fib_recursive | 0.50 | 0.46 | 0.43 | 0.38 | 1.33x |
+| string_find | 14.13 | 12.80 | 259.66 | 9.97 | 1.42x |
+| struct_iter | 14.11 | 7.37 | 7.57 | 10.28 | 1.91x |
+| string_build | 12.69 | 4.97 | 11.15 | 7.23 | 2.55x |
+| sort_ints | 34.99 | 54.03 | 74.96 | 12.52 | 2.80x |
+| list_sum | 11.31 | 4.07 | 5.41 | 3.97 | 2.85x |
+| sort_strings | 45.01 | 25.70 | 34.36 | 15.35 | 2.93x |
+| dict_lookup | 171.45 | 76.52 | 57.34 | 75.55 | 2.99x |
 
-Raw compute (loop_pipeline, fib_recursive) is at parity with Go/Swift/Rust;
-Koral beats Go and Swift on `sort_ints` and beats Swift on `string_find` by
-19x. Rust is the pace-setter on the sort cases: its default `sort()` is a
+Raw compute (loop_pipeline, fib_recursive) is at parity with Go/Swift/Rust —
+`loop_pipeline` is the fastest of the four here; Koral beats Go and Swift on
+`sort_ints` and beats Swift on `string_find` by 18x. Rust is the pace-setter on the sort cases: its default `sort()` is a
 *stable* sort (driftsort), like Koral's and Swift's — Go's `sort.Ints` is a
 pattern-defeating quicksort without a stability guarantee, which is
 unobservable on scalar keys. The remaining gap is sort implementation
@@ -98,5 +98,8 @@ set_membership 21ms (2.1x). Two changes closed most of the gap:
 
 Remaining gaps are documented follow-ups: dict_lookup (String-key hashing and
 per-lookup temporaries), string_build (allocation-bound: to_string malloc plus
-defaulted-argument glue), and extending the borrowed convention to non-receiver
-parameters.
+defaulted-argument glue), extending the borrowed convention to non-receiver
+parameters, and container growth calls on the push hot path — a growth helper
+inlined into `push` fattens it past the inliner threshold, so the loop pays a
+call per element (phase-split measurement: list_sum push ≈ 11ms, read ≈ 1.4ms
+and already vectorized; split the cold growth path out to recover it).
