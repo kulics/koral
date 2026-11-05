@@ -579,6 +579,8 @@ public class CodeGen {
     buffer = """
       #include <stdatomic.h>
       #include <stdint.h>
+      #include <stdlib.h>
+      #include <string.h>
       #include "koral_runtime.h"
 
       """
@@ -941,8 +943,14 @@ public class CodeGen {
       if case .foreignType(let identifier) = $0 { return identifier }
       return nil
     }
+    // C-library builtins (`exit`, `abort`) keep the header's prototype --
+    // emitting our own would conflict with it. Mirrors koralc's
+    // `stdlib_functions` skip list in `scan_program_codegen_inputs`.
+    let stdlibFunctions: Set<String> = ["exit", "abort"]
     let foreignFunctions: [(Symbol, [Symbol])] = globals.compactMap {
       if case .foreignFunction(let identifier, let params) = $0 {
+        let name = context.getName(identifier.defId) ?? ""
+        if stdlibFunctions.contains(name) { return nil }
         return (identifier, params)
       }
       return nil
@@ -976,9 +984,18 @@ public class CodeGen {
     buffer += Self.dropThunkMarker
 
     if !foreignFunctions.isEmpty {
+      // A foreign declaration may name a C-library builtin (`fwrite`); its
+      // Koral-shaped prototype is ABI-correct but not the header's spelling,
+      // so clang's builtin-redeclaration diagnostics are silenced around this
+      // block only -- everywhere else the generated C compiles with full
+      // warnings on.
+      buffer += "#pragma clang diagnostic push\n"
+      buffer += "#pragma clang diagnostic ignored \"-Wbuiltin-requires-header\"\n"
+      buffer += "#pragma clang diagnostic ignored \"-Wincompatible-library-redeclaration\"\n"
       for (identifier, params) in foreignFunctions {
         generateForeignFunctionDeclaration(identifier, params)
       }
+      buffer += "#pragma clang diagnostic pop\n"
       buffer += "\n"
     }
     profileCodegenPhase("foreign-declarations", start: foreignDeclStart)

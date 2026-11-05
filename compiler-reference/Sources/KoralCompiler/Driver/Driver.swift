@@ -812,7 +812,10 @@ public class Driver {
 
     clangArgs.append("-o")
     clangArgs.append(exeURL.path)
-    clangArgs.append("-Wno-everything")
+    // The generated C compiles with full warnings on: real codegen mistakes
+    // must not hide behind a blanket silence. The one known-benign artifact
+    // (foreign declarations of C-library builtins) is silenced at its own
+    // emission site with a scoped pragma.
     clangArgs.append(contentsOf: optimizeArgs)
 
     let linkedLibraries = Array(NSOrderedSet(array: extraLinkedLibraries)) as? [String] ?? extraLinkedLibraries

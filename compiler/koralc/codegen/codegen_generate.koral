@@ -593,6 +593,18 @@ given CodeGen {
             return;
         };
 
+        // A foreign declaration may name a C-library builtin (`fwrite`); its
+        // Koral-shaped prototype is ABI-correct but not the header's spelling,
+        // so clang's builtin-redeclaration diagnostics are silenced around
+        // this block only -- everywhere else the generated C compiles with
+        // full warnings on.
+        self.buffer.push_string("#pragma clang diagnostic push\n");
+        self.buffer.push_string(
+            "#pragma clang diagnostic ignored \"-Wbuiltin-requires-header\"\n",
+        );
+        self.buffer.push_string(
+            "#pragma clang diagnostic ignored \"-Wincompatible-library-redeclaration\"\n",
+        );
         for function in foreign_declarations.functions then {
             if self.type_is_never(function.return_type) then {
                 self.buffer.push_string("_Noreturn ");
@@ -603,6 +615,7 @@ given CodeGen {
                 "extern \(return_c_type) \(function.name)(\(params_str));\n",
             );
         };
+        self.buffer.push_string("#pragma clang diagnostic pop\n");
         self.buffer.push_string("\n");
     };
 

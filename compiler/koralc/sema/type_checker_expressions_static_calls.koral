@@ -737,6 +737,7 @@ given TypeChecker {
         call_args: List[Expr],
         typed_args: List[TypedExpr],
         expected_types: List[Type],
+        blame_span: SourceSpan,
     ): Void = {
         for pair in typed_args.lazy().enumerate() then {
             let typed_arg = pair.second;
@@ -759,7 +760,7 @@ given TypeChecker {
                                 expected_t,
                                 typed_arg.expr_type,
                             ),
-                            self.typed_expr_span(typed_arg),
+                            blame_span,
                         );
                     };
                 },
@@ -1330,6 +1331,7 @@ given TypeChecker {
                     call_args,
                     typed_args,
                     static_param_types,
+                    type_name_span,
                 );
                 return self.lower_enum_constructor_expr(
                     enum_type,
@@ -2595,15 +2597,31 @@ given TypeChecker {
             _ then {},
         };
         // Literal optimization: fold integer/float literals to the target type.
+        // A float literal folds only into a FLOAT target: re-typing it as the
+        // integer target would bypass the checked conversion entirely -- C's
+        // implicit truncation hides it in range and is undefined behavior out
+        // of range (`Int(1e30)` must panic, not wrap). Integer targets take
+        // the ordinary checked-conversion path below.
         let raw_typed_inner = when arg in {
             .IntegerLiteral(value, lit_span) then {
                 let _ = self.check_integer_literal_range(value, target_type, lit_span);
-                make_typed_expr(TypedExprKind.IntegerLiteral(value), target_type)
+                make_typed_expr_at(
+                    TypedExprKind.IntegerLiteral(value),
+                    target_type,
+                    lit_span,
+                )
             },
-            .FloatLiteral(value, _) then make_typed_expr(
-                TypedExprKind.FloatLiteral(value),
-                target_type,
-            ),
+            .FloatLiteral(value, lit_span) then {
+                if self.is_float_type(target_type) then {
+                    make_typed_expr_at(
+                        TypedExprKind.FloatLiteral(value),
+                        target_type,
+                        lit_span,
+                    )
+                } else {
+                    self.check_expr_scoped_ref(arg, .Some(target_type), scope)
+                }
+            },
             .RuneLiteral(value, rune_span) then {
                 let outer_span = self.enter_current_span(rune_span);
                 let lowered = self.lower_rune_literal_for_cast(value, target_type);
@@ -3034,6 +3052,7 @@ given TypeChecker {
                                             call_args,
                                             typed_args,
                                             concrete_field_types,
+                                            expr_span(callee),
                                         );
                                         return self.lower_enum_constructor_expr(
                                             construction_type,

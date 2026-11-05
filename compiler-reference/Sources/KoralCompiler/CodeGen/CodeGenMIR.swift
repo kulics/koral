@@ -1427,7 +1427,7 @@ final class MIRFunctionCodeEmitter {
     case .constant(let constant):
       switch constant {
       case .integer(let value, _):
-        return MIRValueEmission(expression: value, cleanups: [])
+        return MIRValueEmission(expression: integerConstantLiteral(value), cleanups: [])
       case .float(let value, let type):
         return MIRValueEmission(expression: floatConstantLiteral(value, type: type), cleanups: [])
       case .boolean(let value):
@@ -2755,7 +2755,7 @@ final class MIRFunctionCodeEmitter {
     case .constant(let constant):
       switch constant {
       case .integer(let value, _):
-        return value
+        return integerConstantLiteral(value)
       case .float(let value, let type):
         return floatConstantLiteral(value, type: type)
       case .boolean(let value):
@@ -2915,7 +2915,7 @@ final class MIRFunctionCodeEmitter {
   private func switchCaseExpression(_ constant: MIRConstant) -> String {
     switch constant {
     case .integer(let value, _):
-      return value
+      return integerConstantLiteral(value)
     case .boolean(let value):
       return value ? "1" : "0"
     case .float, .string, .void:
@@ -2978,4 +2978,17 @@ extension CodeGen {
 
     return functionCode
   }
+}
+
+/// An integer constant's spelling is the source literal. C reads a decimal
+/// literal too large for `long long` as implicitly unsigned and warns; values
+/// at or above 2^63 carry an explicit `ULL` suffix instead. Non-decimal
+/// spellings size themselves in C and stay as written.
+private func integerConstantLiteral(_ value: String) -> String {
+  if value.hasPrefix("-") { return value }
+  let lower = value.lowercased()
+  if lower.hasPrefix("0x") || lower.hasPrefix("0b") || lower.hasPrefix("0o") { return value }
+  let overSigned =
+    value.count > 19 || (value.count == 19 && value >= "9223372036854775808")
+  return overSigned ? value + "ULL" : value
 }

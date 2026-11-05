@@ -63,6 +63,26 @@ given CodeGen {
         return cleaned;
     };
 
+    /// An integer constant's spelling is the source literal. C reads a decimal
+    /// literal too large for `long long` as implicitly unsigned and warns;
+    /// values at or above 2^63 carry an explicit `ULL` suffix instead.
+    /// Non-decimal spellings size themselves in C and stay as written.
+    integer_constant_literal(self, value: String): String = {
+        let cleaned = self.sanitize_c_numeric_literal(value);
+        if cleaned.starts_with("-") then {
+            return cleaned;
+        };
+        let is_decimal = not cleaned.starts_with("0x") and not cleaned.starts_with("0X")
+            and not cleaned.starts_with("0b") and not cleaned.starts_with("0B")
+            and not cleaned.starts_with("0o") and not cleaned.starts_with("0O");
+        if not is_decimal then {
+            return cleaned;
+        };
+        let over_signed = cleaned.count() > UInt(19)
+            or (cleaned.count() == UInt(19) and cleaned.compare("9223372036854775808") >= 0);
+        return if over_signed then cleaned + "ULL" else cleaned;
+    };
+
     arithmetic_op_to_c(self, op: ArithmeticOperator): String = {
         return when op in {
             .Add() then "+",
