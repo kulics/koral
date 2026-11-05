@@ -1,0 +1,44 @@
+// EXPECT: build cond ok
+// `#if` selects a declaration branch per build target (cffi-design.md §D):
+// the condition mini-grammar (`os` / `arch`, `and` / `or` / `not`, parens),
+// nested constructs, and the unselected branch never reaching sema.
+
+using "std/os" { host_os_name, host_arch_name };
+
+#if os("windows") then {
+    let platform_tag(): String = "windows";
+} else {
+    #if os("macos") then {
+        let platform_tag(): String = "macos";
+    } else {
+        let platform_tag(): String = "other";
+    };
+};
+
+// A tautology over every operator of the mini-grammar: always selects the
+// then-branch, whatever the host is.
+#if (os("windows") or not os("windows")) and (arch("x86_64") or not arch("x86_64")) then {
+    let cond_shape(): String = "reachable";
+} else {
+    let cond_shape(): String = "unreachable";
+};
+
+// Never selected on any host: it must PARSE, but it must never reach sema —
+// the call below names nothing that exists.
+#if os("windows") and os("macos") then {
+    let poisoned(): Int = no_such_function_here();
+} else {
+    let poisoned(): Int = 42;
+};
+
+let main(): Int = {
+    let host = host_os_name();
+    let expected = if host == "windows" then "windows"
+        else if host == "macos" then "macos"
+        else "other";
+    assert(platform_tag() == expected, "selected branch matches the host os");
+    assert(cond_shape() == "reachable", "the mini-grammar evaluates on this host");
+    assert(poisoned() == 42, "the unselected branch never reaches sema");
+    println("build cond ok");
+    return 0;
+};

@@ -437,6 +437,8 @@ given CstParser {
         .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
         // A function type opens with its parameter list: `(T1, T2) -> R`.
         .LParen() then true,
+        // A foreign function type opens with the keyword: `foreign (T) -> R`.
+        .KwForeign() then true,
         .Ident(name) then {
             // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf): leading
             // underscores are allowed, the first letter is not.
@@ -678,7 +680,42 @@ given CstParser {
     };
 
     private is_code_item(item: CstItem): Bool = when item in {
-        .Decl(_) or .Stmt(_) or .DeclPreSemi(_, _) or .StmtPreSemi(_, _) then true,
+        .Decl(_) or .Stmt(_) or .DeclPreSemi(_, _) or .StmtPreSemi(_, _) or .IfBuild(
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+            _,
+        ) then true,
+        _ then false,
+    };
+
+    /// Whether an item (recursively) contains a `using` declaration. The
+    /// using-position rule classifies a whole `#if` by this (cffi-design.md
+    /// §D — an item that can contribute a using sits in the using region).
+    private item_contains_using(item: CstItem): Bool = when item in {
+        .Decl(decl) or .DeclPreSemi(_, decl) then decl is .Using(_),
+        .IfBuild(_, _, _, _, _, then_items, _, _, _, else_items, _, _) then {
+            let mutable found = false;
+            for inner in then_items then {
+                if CstParser.item_contains_using(inner) then {
+                    found = true;
+                };
+            };
+            for inner in else_items then {
+                if CstParser.item_contains_using(inner) then {
+                    found = true;
+                };
+            };
+            found
+        },
         _ then false,
     };
 
@@ -695,6 +732,7 @@ given CstParser {
             .Using(_) then true,
             _ then false,
         },
+        .IfBuild(_, _, _, _, _, _, _, _, _, _, _, _) then CstParser.item_contains_using(item),
         _ then false,
     };
 
@@ -704,6 +742,7 @@ given CstParser {
             _ then true,
         },
         .Stmt(_) or .StmtPreSemi(_, _) then true,
+        .IfBuild(_, _, _, _, _, _, _, _, _, _, _, _) then not CstParser.item_contains_using(item),
         _ then false,
     };
 
@@ -727,6 +766,7 @@ given CstParser {
         self,
         lp: Token,
         arrow_required: Bool,
+        foreign_kw: Option[Token],
     ): Result[CstType] = {
         let mutable args = List[CstTypeArg].new();
         while not self.check(.RParen()) and not self.is_eof() then {
@@ -748,10 +788,20 @@ given CstParser {
             );
         };
         let return_type = self.parse_type_node() or return;
-        return .Ok(.Function(lp, args, rp, return_type));
+        return .Ok(when foreign_kw in {
+            .Some(fk) then .ForeignFunction(fk, lp, args, rp, return_type),
+            .None() then .Function(lp, args, rp, return_type),
+        });
     };
 
     private parse_type_node(self): Result[CstType] = {
+        // `foreign (A) -> R` -- the bare C function pointer type
+        // (grammar.bnf <foreign-function-type>).
+        if self.check(.KwForeign()) then {
+            let fk = self.eat();
+            let lp = self.expect(.LParen(), "'('") or return;
+            return self.parse_function_type_tail(lp, true, .Some(fk));
+        };
         if self.check(.Star()) then {
             let kw = self.eat();
             let mutable mut_kw = Option[Token].None();
@@ -791,7 +841,7 @@ given CstParser {
         if self.check(.LParen()) then {
             if self.paren_closes_before_arrow_at(self.pos) then {
                 let lp = self.eat();
-                return self.parse_function_type_tail(lp, true);
+                return self.parse_function_type_tail(lp, true, .None());
             };
             let lp = self.eat();
             if self.check(.RParen()) or self.check(.Comma()) then {
@@ -2132,6 +2182,7 @@ given CstParser {
         .Paren(lp, inner, rp) then .Paren(lp, self.type_as_expr(inner), rp),
         .ConstraintKeyword(kw) then .Ident(kw),
         .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
+        .ForeignFunction(_, _, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
     };
 
     private parse_paren_or_lambda(self): Result[CstExpr] = {
@@ -2949,6 +3000,11 @@ given CstParser {
     };
 
     private parse_top_item(self): Result[CstItem] = {
+        // `#if … then { … } else { … };` build-conditional declaration
+        // (cffi-design.md §D).
+        if self.check(.Hash()) then {
+            return self.parse_if_build_item();
+        };
         // Using declaration. Its `;` is collected inside the declaration's own
         // token list, and the compiler does not require one at all -- so it
         // does not go through `finish_decl_item`. Matching the compiler here
@@ -2996,6 +3052,143 @@ given CstParser {
         };
         // Statement
         return self.parse_stmt();
+    };
+
+    // ========================================================================
+    // Build-conditional declarations: `#if … then { … } else { … };`
+    // (cffi-design.md §D)
+    // ========================================================================
+
+    /// The whole construct; the current token is `#`.
+    private parse_if_build_item(self): Result[CstItem] = {
+        let hash = self.expect(.Hash(), "'#'") or return;
+        let if_kw = self.expect(.KwIf(), "'if'") or return;
+        let cond = self.parse_build_cond() or return;
+        let then_kw = self.expect(.KwThen(), "'then'") or return;
+        let lbrace = self.expect(.LBrace(), "'{'") or return;
+        let then_items = self.parse_if_build_body() or return;
+        let rbrace = self.expect(.RBrace(), "'}'") or return;
+        let mutable else_kw = Option[Token].None();
+        let mutable else_lbrace = Option[Token].None();
+        let mutable else_items = List[CstItem].new();
+        let mutable else_rbrace = Option[Token].None();
+        if self.check(.KwElse()) then {
+            else_kw = .Some(self.eat());
+            else_lbrace = .Some(self.expect(.LBrace(), "'{'") or return);
+            else_items = self.parse_if_build_body() or return;
+            else_rbrace = .Some(self.expect(.RBrace(), "'}'") or return);
+        };
+        let semi = self.expect(.Semi(), "';'") or return;
+        return .Ok(
+            .IfBuild(
+                hash,
+                if_kw,
+                cond,
+                then_kw,
+                lbrace,
+                then_items,
+                rbrace,
+                else_kw,
+                else_lbrace,
+                else_items,
+                else_rbrace,
+                semi,
+            ),
+        );
+    };
+
+    /// A branch block's items: declarations and nested `#if`s with the file's
+    /// comment / blank-line handling, up to the closing `}` (not consumed).
+    private parse_if_build_body(self): Result[List[CstItem]] = {
+        let mutable items = List[CstItem].new();
+        let mutable seen_non_using = false;
+        while not self.check(.RBrace()) and not self.is_eof() then {
+            let nl_count = self.count_newlines();
+            if nl_count >= 2 then {
+                self.skip_newlines();
+                items.push(CstItem.BlankLine());
+                continue;
+            };
+            self.skip_newlines();
+            if self.check(.RBrace()) or self.is_eof() then {
+                break;
+            };
+            if self.check(.Semi()) then {
+                self.eat();
+                continue;
+            };
+            if self.peek() is .LineComment(_) or is .BlockComment(_) then {
+                let c = self.eat();
+                let prev_is_code = self.last_item_is_code(items);
+                if nl_count == 0 and prev_is_code then {
+                    items.push(CstItem.TrailingComment(c));
+                } else {
+                    items.push(CstItem.Comment(c));
+                };
+                continue;
+            };
+            let before = self.pos;
+            let item = self.parse_top_item() or return;
+            if CstParser.item_is_using_decl(item) then {
+                if seen_non_using then {
+                    return .Error(
+                        "Parse error: using declarations must appear before other top-level declarations",
+                    );
+                };
+            } else if CstParser.item_is_non_using_top_level_code(item) then {
+                seen_non_using = true;
+            };
+            items.push(item);
+            if self.pos == before then {
+                return .Error("Parse error: parser made no progress");
+            };
+        };
+        return .Ok(items);
+    };
+
+    /// The condition mini-grammar, structural (cffi-design.md §D):
+    /// `<cond-or> ::= <cond-and> ("or" <cond-and>)*` and friends.
+    private parse_build_cond(self): Result[CstBuildCond] = {
+        let mutable left = self.parse_build_cond_and() or return;
+        while self.check(.KwOr()) then {
+            let kw = self.eat();
+            let right = self.parse_build_cond_and() or return;
+            left = .Or(left, kw, right);
+        };
+        return .Ok(left);
+    };
+
+    private parse_build_cond_and(self): Result[CstBuildCond] = {
+        let mutable left = self.parse_build_cond_not() or return;
+        while self.check(.KwAnd()) then {
+            let kw = self.eat();
+            let right = self.parse_build_cond_not() or return;
+            left = .And(left, kw, right);
+        };
+        return .Ok(left);
+    };
+
+    private parse_build_cond_not(self): Result[CstBuildCond] = {
+        if self.check(.KwNot()) then {
+            let kw = self.eat();
+            let inner = self.parse_build_cond_not() or return;
+            return .Ok(.Not(kw, inner));
+        };
+        return self.parse_build_cond_atom();
+    };
+
+    private parse_build_cond_atom(self): Result[CstBuildCond] = {
+        if self.check(.LParen()) then {
+            let lparen = self.eat();
+            let inner = self.parse_build_cond() or return;
+            let rparen = self.expect(.RParen(), "')'") or return;
+            return .Ok(.Paren(lparen, inner, rparen));
+        };
+        let head = self.eat();
+        let lparen = self.expect(.LParen(), "'('") or return;
+        let value = self.expect(.StrLit(""), "string condition value") or return;
+        let rparen = self.expect(.RParen(), "')'") or return;
+        return .Ok(.Pred(head, lparen, value, rparen));
     };
 
     // ========================================================================
@@ -3338,17 +3531,33 @@ given CstParser {
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let mods = self.eat_kind_modifiers();
+        // C 名槽位：`let foreign "CreateFileA" name(…)`——外来词汇是字符串，紧跟
+        // `foreign`（docs/design/cffi-design.md §C）。
+        let mutable has_foreign = false;
+        for m in mods then {
+            when m in {
+                .KwForeign() then {
+                    has_foreign = true;
+                },
+                _ then {},
+            };
+        };
+        let mutable cname = Option[Token].None();
+        if has_foreign and self.check(.StrLit("")) then {
+            cname = .Some(self.eat());
+        };
         let mutable mut_kw = Option[Token].None();
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        return self.finish_func_or_var(vis, mods, .Some(let_kw), mut_kw, false);
+        return self.finish_func_or_var(vis, mods, cname, .Some(let_kw), mut_kw, false);
     };
 
     private finish_func_or_var(
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         let_kw: Option[Token],
         mut_kw: Option[Token],
         in_member_context: Bool,
@@ -3384,7 +3593,7 @@ given CstParser {
             let eq = self.eat();
             let body = self.parse_expr_node() or return;
             return .Ok(
-                .Func(vis, mods, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret, eq, body),
+                .Func(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret, eq, body),
             );
         };
 
@@ -3394,14 +3603,14 @@ given CstParser {
         // variable would drop the parameter list on the floor.
         if mods.count() > 0 then {
             return .Ok(
-                .ForeignDecl(vis, mods, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
+                .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
             );
         };
 
         if in_member_context then {
             if lp is .Some(_) then {
                 return .Ok(
-                    .ForeignDecl(vis, mods, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
+                    .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
                 );
             };
             return .Error(self.expected_error("member signature"));
@@ -3862,6 +4071,6 @@ given CstParser {
         let vis = self.eat_vis();
         // Generic params and name are handled by finish_func_or_var. Members
         // carry no `foreign` / `intrinsic` qualifiers.
-        return self.finish_func_or_var(vis, List[Token].new(), .None(), .None(), true);
+        return self.finish_func_or_var(vis, List[Token].new(), .None(), .None(), .None(), true);
     };
 };

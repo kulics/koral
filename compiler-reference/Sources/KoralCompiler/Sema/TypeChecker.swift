@@ -1287,7 +1287,12 @@ public class TypeChecker {
       return false
     case .opaque:
       return true
-    case .structure, .`enum`, .reference, .mutableReference, .function, .genericParameter:
+    case .structure(let defId):
+      // std's `Rune` is the one nominal type in the set (same admission as
+      // satisfiesForeignConstraint): scalar representation, nominal only to
+      // carry methods. Guide §6 promises it on every boundary.
+      return context.isStdNominal(defId, context.stdRuneDefId)
+    case .`enum`, .reference, .mutableReference, .function, .genericParameter:
       return false
     case .fixedArray:
       // A bare C array parameter decays to a pointer; passing one by value

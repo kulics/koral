@@ -195,6 +195,24 @@ let main(): Void = println("Hello, world!");
 5. 同一个 `{}` 内不能重复定义同名标识符。
 6. 不同 `{}` 内可以定义同名标识符，语言优先使用当前作用域中定义的标识符。
 
+### 条件编译声明
+
+`#if` 在编译期按构建目标（os 与 arch）选择声明。它住在声明域：分支里是全局声明（可嵌套 `#if`），不是语句或表达式。
+
+```koral
+#if os("windows") then {
+    let foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
+} else {
+    let foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
+};
+```
+
+- 条件是一个封闭的小文法，不是表达式：`os("...")` 与 `arch("...")` 原子，用 `and`、`or`、`not` 与括号组合。值来自封闭集——`os` ∈ `windows` / `linux` / `macos`，`arch` ∈ `x86_64` / `aarch64`。未知谓词头或未知值报错并列出集合。
+- 分支一律是块，整条以 `;` 收尾。没有 `#endif`。
+- 未选中的分支仍必须能解析，但它的名字不进解析、类型不进检查。
+- 同名声明必须在同一条 `#if … else …` 的两分支树上两两分道（一侧一条）。能共存的两条即重复声明；无条件声明与条件声明同名即冲突。检查是纯语法的：不存在「某个构建目标上才炸」的漂移错误。
+- `using` 可以出现在分支块内（条件导入）。含 `using` 的 `#if` 整条归入文件的 using 区——与顶层同一条「导入在前」规则。
+
 ### 值与字面量
 
 完成大部分工作只需要少数几种基本类型。
@@ -3047,12 +3065,38 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 > （`mutable` 描述绑定）：`let foreign mutable errno: Int32;`。
 
 声明外部 C 函数。foreign 函数只使用位置参数；不支持命名参数（`=` 标记）。
+**体的存在性定方向**：无体是引用（extern 链接），有体是定义——C ABI 导出函数。
 
 ```koral
-let foreign sin(x: Float64): Float64;
-let foreign exit(code: Int): Never;
-let foreign abort(): Never;
+let foreign sin(x: Float64): Float64;                    // 引用：链接 C 的 sin
+let foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // 引用 + C 名
+let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
+    return x + Int32(1);
+};
 ```
+
+- **C 名槽位**：字符串写在 `foreign` 之后、Koral 名之前，是这条声明**在 C 世界的名字**。
+  标识符只属于 Koral 名字空间；外来词汇（C 符号名、宏名）是字符串。不写即 Koral 名逐字。
+  Koral 名保持值命名法，撞 C 关键字也无妨——名字不同，各叫各的。
+- 有体（导出）的签名限制与无体**完全相同**：封闭集合、位置参数、无泛型。
+  它在 Koral 侧可直接调用，名字作值的类型是 `foreign (A) -> R`——可作为回调传给 C。
+- 可见性（`public` / `internal` / …）只管 Koral 侧名字；**C 符号恒导出**（C 没有模块可见性）。
+- panic 跨导出边界不展开栈：打印 + `abort()`。
+
+#### Foreign 变量
+
+体/初值的存在性 + `mutable` 定形态：
+
+```koral
+let foreign mutable errno: Int32;            // 引用：extern 可变量
+let foreign stdin: CFile;                    // 引用：extern 只读量（const）
+let foreign mutable counter: Int32 = 0;      // 定义：C 变量（静态初始化器）
+let foreign "AF_INET6" af_inet6: Int32 = 10; // 宏常量：值绑定，无存储、无符号
+```
+
+- 初值只收**常量字面量**（可带负号 / `null`）——C 的静态初始化器必须是常量表达式。
+- 有初值 + 无 `mutable` 是 **C 宏常量**的值绑定：值从 C 头文件复制，不产生 C 实体
+  （宏无链接符号）；C 名槽位记宏名，仅作对应标注。
 
 #### 边界类型
 
@@ -3123,7 +3167,7 @@ let main(): Int = {
 ```
 
 - 非空字面量恰好 N 个元素；`[]` 是全零缓冲。
-- `a[i]` 不查边界（与 `*T` 同款 C 下标）；`[N]T` 不能过 FFI 函数边界
+- `a[i]` 读写都做越界检查（`*T` 的下标才是不查边界的 C 下标）；`[N]T` 不能过 FFI 函数边界
   （`let foreign` 的参数/返回写 `*T`——那才是 C 数组参数的真身）。
 
 #### Foreign 函数类型

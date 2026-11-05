@@ -104,13 +104,13 @@ public class CodeGen {
     self.mirProgram = mirProgram
     self.context = context
     self.foreignFunctionDefIds = Set(mirProgram.globals.compactMap { node in
-      if case .foreignFunction(let identifier, _) = node {
+      if case .foreignFunction(let identifier, _, _) = node {
         return identifier.defId.id
       }
       return nil
     })
     self.foreignGlobalVarDefIds = Set(mirProgram.globals.compactMap { node in
-      if case .foreignGlobalVariable(let identifier, _) = node {
+      if case .foreignGlobalVariable(let identifier, _, _) = node {
         return identifier.defId.id
       }
       return nil
@@ -192,6 +192,12 @@ public class CodeGen {
     return foreignGlobalVarDefIds.contains(defIdKey(defId))
   }
 
+  /// Whether `defId` names a `let foreign` symbol (mirrors koralc's
+  /// `is_foreign_function_def_id`), readable across file extensions.
+  func isForeignFunctionDefId(_ defId: DefId) -> Bool {
+    return foreignFunctionDefIds.contains(defId.id)
+  }
+
   func qualifiedName(for symbol: Symbol) -> String {
     if foreignFunctionDefIds.contains(symbol.defId.id) {
       let name = context.getName(symbol.defId) ?? "<unknown>"
@@ -268,10 +274,10 @@ public class CodeGen {
           register(defId: defId, access: context.getAccess(defId) ?? .internal)
           foreignDefIds.insert(defIdKey(defId))
         }
-      case .foreignFunction(let identifier, _):
+      case .foreignFunction(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .internal)
         foreignDefIds.insert(defIdKey(identifier.defId))
-      case .foreignGlobalVariable(let identifier, _):
+      case .foreignGlobalVariable(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .internal)
         foreignDefIds.insert(defIdKey(identifier.defId))
       case .structDeclaration(let identifier, _):
@@ -449,13 +455,44 @@ public class CodeGen {
         if callParametersByDefId[defIdKey(identifier.defId)] == nil {
           recordCallable(identifier, parameters: parameters)
         }
-      case .foreignFunction(let identifier, let parameters):
+      case .foreignFunction(let identifier, let parameters, _):
         recordCallable(identifier, parameters: parameters)
       case .globalVariable(_, let initializerFunction, _):
         recordCallable(initializerFunction, parameters: [])
       default:
         continue
       }
+    }
+  }
+
+  /// foreign 变量的静态初始化器文本。初值限常量字面量（cffi-design.md §B）：
+  /// C 的静态初始化器必须是常量表达式。Float32 带 `f` 后缀。负号在类型检查里
+  /// 展开成 `0 - x`（TypeCheckerExpressions 的 unaryMinus），这里折回。
+  func foreignStaticInitializerText(_ expr: TypedExpressionNode) -> String {
+    switch expr {
+    case .integerLiteral(let value, _):
+      return value
+    case .floatLiteral(let value, let type):
+      if type != .float32 { return value }
+      if value.contains(".") || value.contains("e") || value.contains("E") {
+        return value + "f"
+      }
+      return value + ".0f"
+    case .booleanLiteral(let value, _):
+      return value ? "1" : "0"
+    case .castExpression(let inner, _, _):
+      return foreignStaticInitializerText(inner)
+    case .intrinsicCall(let node):
+      if case .nullPtr = node { return "NULL" }
+      return "0"
+    case .arithmeticExpression(_, let op, let right, _, _):
+      if op == .minus { return "-" + foreignStaticInitializerText(right) }
+      return "0"
+    case .wrappingArithmeticExpression(_, let op, let right, _, _):
+      if op == .minus { return "-" + foreignStaticInitializerText(right) }
+      return "0"
+    default:
+      return "0"
     }
   }
 
@@ -948,16 +985,18 @@ public class CodeGen {
     // `stdlib_functions` skip list in `scan_program_codegen_inputs`.
     let stdlibFunctions: Set<String> = ["exit", "abort"]
     let foreignFunctions: [(Symbol, [Symbol])] = globals.compactMap {
-      if case .foreignFunction(let identifier, let params) = $0 {
+      // 导出定义（有体）自带定义体，不发 extern 原型（cffi-design.md §B）。
+      if case .foreignFunction(let identifier, let params, let isDefinition) = $0 {
+        if isDefinition { return nil }
         let name = context.getName(identifier.defId) ?? ""
         if stdlibFunctions.contains(name) { return nil }
         return (identifier, params)
       }
       return nil
     }
-    let foreignGlobals: [(Symbol, Bool)] = globals.compactMap {
-      if case .foreignGlobalVariable(let identifier, let mutable) = $0 {
-        return (identifier, mutable)
+    let foreignGlobals: [(Symbol, Bool, TypedExpressionNode?)] = globals.compactMap {
+      if case .foreignGlobalVariable(let identifier, let mutable, let initializer) = $0 {
+        return (identifier, mutable, initializer)
       }
       return nil
     }
@@ -1009,10 +1048,13 @@ public class CodeGen {
 
     let globalVarStart = DispatchTime.now()
     if !foreignGlobals.isEmpty {
-      for (identifier, mutable) in foreignGlobals {
+      for (identifier, mutable, initializer) in foreignGlobals {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
-        if mutable {
+        if let initializer {
+          // 有初值 = C 变量定义（静态初始化器，cffi-design.md §B）。
+          buffer += "\(cType) \(cName) = \(foreignStaticInitializerText(initializer));\n"
+        } else if mutable {
           buffer += "extern \(cType) \(cName);\n"
         } else {
           buffer += "extern const \(cType) \(cName);\n"
@@ -1135,7 +1177,9 @@ public class CodeGen {
   }
 
   private func generateForeignFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
-    let cName = context.getName(identifier.defId) ?? "<unknown>"
+    // The prototype's name must be the one CALLS use: the declared C name
+    // (cffi-design.md §C) or the Koral name verbatim.
+    let cName = qualifiedName(for: identifier)
     let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
 
@@ -1404,6 +1448,156 @@ public class CodeGen {
       out += "typedef struct { \(cTypeName(def.element)) data[\(def.size)]; } \(def.name);\n"
     }
     return out
+  }
+
+  /// `koral_exports.h`: this module's C ABI surface for `c_sources` to call
+  /// back through (cffi-design.md §E) -- prototypes of body-bearing
+  /// `let foreign` functions under their C names, `extern` declarations of
+  /// exported globals, and the type declarations those signatures need.
+  /// Nominal types appear as forward declarations only: `type foreign` is
+  /// opaque on the C side by design, and a shim that needs a by-value layout
+  /// completes the struct in its own translation unit (same tag, same
+  /// members = compatible, C11 6.2.7).
+  public func generateExportsHeader() -> String {
+    var typedefForms: [String] = []
+    var forwardForms: [String] = []
+    var arrayNames: [String] = []
+    var fnPtrNames: [String] = []
+    var seen = Set<String>()
+
+    func collectTypeDecls(_ type: Type) {
+      switch type {
+      case .opaque:
+        let spelling = cTypeName(type)
+        if spelling.hasPrefix("struct ") {
+          let name = String(spelling.dropFirst("struct ".count))
+          if seen.insert(name).inserted {
+            forwardForms.append(name)
+          }
+        } else if seen.insert(spelling).inserted {
+          typedefForms.append(spelling)
+        }
+      case .structure:
+        let spelling = cTypeName(type)
+        if spelling.hasPrefix("struct ") {
+          let name = String(spelling.dropFirst("struct ".count))
+          if seen.insert(name).inserted {
+            forwardForms.append(name)
+          }
+        }
+      case .fixedArray(_, let element):
+        let name = cTypeName(type)
+        if seen.insert(name).inserted {
+          arrayNames.append(name)
+        }
+        collectTypeDecls(element)
+      case .pointer(let element), .mutablePointer(let element):
+        collectTypeDecls(element)
+      case .foreignFunction(let parameters, let returns):
+        let name = cTypeName(type)
+        if seen.insert(name).inserted {
+          fnPtrNames.append(name)
+        }
+        for parameter in parameters {
+          collectTypeDecls(parameter.type)
+        }
+        collectTypeDecls(returns)
+      default:
+        break
+      }
+    }
+
+    func functionReturns(_ type: Type) -> Type {
+      switch type {
+      case .function(_, let returns), .foreignFunction(_, let returns):
+        return returns
+      default:
+        return .void
+      }
+    }
+
+    var exportFunctions: [(name: String, params: [Symbol], returns: Type)] = []
+    var exportGlobals: [(name: String, type: Type)] = []
+    for global in mirProgram.globals {
+      switch global {
+      case .foreignFunction(let identifier, let parameters, let isDefinition):
+        // Only an export (body-bearing) belongs in the header; extern
+        // references are imports -- the C side already owns their declarations.
+        guard isDefinition else { break }
+        let name = qualifiedName(for: identifier)
+        let returns = functionReturns(identifier.type)
+        exportFunctions.append((name: name, params: parameters, returns: returns))
+        for parameter in parameters {
+          collectTypeDecls(parameter.type)
+        }
+        collectTypeDecls(returns)
+      case .foreignGlobalVariable(let identifier, _, let initializer):
+        // An initializer makes it a C variable DEFINITION here -- an export.
+        // Macro constants never reach MIR as foreign globals (they degrade to
+        // ordinary globals), and initializer-less declarations are imports.
+        guard initializer != nil else { break }
+        // The name the DEFINITION uses: `cIdentifier` carries the declared C
+        // name for foreign globals (qualifiedName is for callables).
+        exportGlobals.append((name: cIdentifier(for: identifier), type: identifier.type))
+        collectTypeDecls(identifier.type)
+      default:
+        break
+      }
+    }
+
+    var header = ""
+    header += "#ifndef KORAL_EXPORTS_H\n"
+    header += "#define KORAL_EXPORTS_H\n\n"
+    header += "// Generated by the Koral compiler -- the C ABI surface of this\n"
+    header += "// module for `c_sources` to call back through (cffi-design.md §E).\n"
+    header += "// Do not edit.\n\n"
+    header += "#include <stdint.h>\n\n"
+    for name in typedefForms {
+      header += "typedef struct \(name) \(name);\n"
+    }
+    if !typedefForms.isEmpty {
+      header += "\n"
+    }
+    for name in forwardForms {
+      header += "struct \(name);\n"
+    }
+    if !forwardForms.isEmpty {
+      header += "\n"
+    }
+    var wroteTypedefs = false
+    for def in TypeHandlerRegistry.shared.usedFixedArrayTypedefs
+    where arrayNames.contains(def.name) {
+      header += "typedef struct { \(cTypeName(def.element)) data[\(def.size)]; } \(def.name);\n"
+      wroteTypedefs = true
+    }
+    for def in TypeHandlerRegistry.shared.usedForeignFunctionTypedefs
+    where fnPtrNames.contains(def.name) {
+      let paramStr = def.params.map { cTypeName($0.type) }.joined(separator: ", ")
+      header += "typedef \(cTypeName(def.returns)) (*\(def.name))(\(paramStr));\n"
+      wroteTypedefs = true
+    }
+    if wroteTypedefs {
+      header += "\n"
+    }
+    if !exportFunctions.isEmpty {
+      header += "// Exported Koral functions (C ABI).\n"
+      for function in exportFunctions {
+        let paramList = function.params.isEmpty
+          ? "void"
+          : function.params.map { cTypeName($0.type) }.joined(separator: ", ")
+        header += "\(cTypeName(function.returns)) \(function.name)(\(paramList));\n"
+      }
+      header += "\n"
+    }
+    if !exportGlobals.isEmpty {
+      header += "// Exported Koral globals.\n"
+      for global in exportGlobals {
+        header += "extern \(cTypeName(global.type)) \(global.name);\n"
+      }
+      header += "\n"
+    }
+    header += "#endif\n"
+    return header
   }
 
   func nominalTypeCName(_ type: Type) -> String {

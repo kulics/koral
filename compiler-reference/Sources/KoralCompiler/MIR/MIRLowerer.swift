@@ -26,14 +26,40 @@ final class MIRLowerer {
 
     for node in program.globalNodes {
       switch node {
-      case .foreignFunction(let identifier, let parameters):
-        globals.append(.foreignFunction(identifier: identifier, parameters: parameters))
+      case .foreignFunction(let identifier, let parameters, let body):
+        globals.append(.foreignFunction(identifier: identifier, parameters: parameters, isDefinition: body != nil))
+        if let body, shouldLowerFunction(identifier: identifier) {
+          let kind = MIRFunctionKind.global
+          let loweredParameters = canonicalDropParameters(
+            identifier: identifier,
+            parameters: parameters,
+            traitConformance: nil
+          )
+          functions.append(
+            lowerFunction(
+              identifier: identifier,
+              parameters: loweredParameters,
+              body: body,
+              kind: kind
+            )
+          )
+        }
       case .foreignType(let identifier):
         globals.append(.foreignType(identifier: identifier))
       case .foreignStruct(let identifier, let fields):
         globals.append(.foreignStruct(identifier: identifier, fields: fields))
-      case .foreignGlobalVariable(let identifier, let mutable):
-        globals.append(.foreignGlobalVariable(identifier: identifier, mutable: mutable))
+      case .foreignGlobalVariable(let identifier, let mutable, let initializer):
+        // 宏常量（有初值 + 非 mutable）没有 C 实体：降级为普通全局量
+        // （docs/design/cffi-design.md §B）。
+        if let initializer, !mutable {
+          let lowered = lowerGlobalInitializer(identifier: identifier, value: initializer)
+          globals.append(
+            .globalVariable(identifier: identifier, initializerFunction: lowered.identifier, kind: .Value))
+          functions.append(lowered)
+        } else {
+          globals.append(
+            .foreignGlobalVariable(identifier: identifier, mutable: mutable, initializer: initializer))
+        }
       case .globalVariable(let identifier, let value, let kind):
         let initializer = lowerGlobalInitializer(identifier: identifier, value: value)
         globals.append(.globalVariable(identifier: identifier, initializerFunction: initializer.identifier, kind: kind))

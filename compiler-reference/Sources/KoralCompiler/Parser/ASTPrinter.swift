@@ -86,7 +86,7 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, _, _):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, _, _):
       print("\(indent)ForeignFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
       print("\(indent)  Name: \(name)")
@@ -112,7 +112,7 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  Field \(field.name): \(field.type)")
           }
         }
-    case .foreignLetDeclaration(let name, let type, let mutable, let access, _, _):
+    case .foreignLetDeclaration(let name, let type, let mutable, _, _, let access, _, _):
         let mutLabel = mutable ? "mutable " : ""
         print("\(indent)ForeignLetDeclaration \(mutLabel)\(name)")
         print("\(indent)  Access: \(access)")

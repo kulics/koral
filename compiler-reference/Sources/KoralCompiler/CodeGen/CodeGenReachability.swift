@@ -44,7 +44,11 @@ extension CodeGen {
         }
         isRoot = isDrop
       case .global:
+        // A body-bearing `let foreign` is a C ABI export: the C side calls it
+        // through koral_exports.h, invisible to the Koral call graph
+        // (cffi-design.md §B). Always a root.
         isRoot = declName == "main" || Self.isDropGlueName(declName)
+          || isForeignFunctionDefId(function.identifier.defId)
       }
       if isRoot {
         noteFunction(function.identifier, &keep, &worklist)

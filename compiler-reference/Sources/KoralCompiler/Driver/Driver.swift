@@ -259,7 +259,11 @@ public class Driver {
     sourceManager.loadFile(name: fileName, content: source)
     
     let lexer = Lexer(input: source, start: SourceLocation(line: 1, column: 1, fileName: fileName))
-    let parser = Parser(lexer: lexer)
+    let parser = Parser(
+      lexer: lexer,
+      targetOS: BuildTarget.osAtom,
+      targetArch: BuildTarget.archAtom
+    )
     do {
       let ast = try parser.parse()
       guard case .program(let nodes) = ast else {
@@ -408,13 +412,50 @@ public class Driver {
     return (unit, resolver)
   }
 
+  /// The host os atom for `platform` overlay lookup: the same closed
+  /// vocabulary as `#if os("...")` (cffi-design.md §D/§E), resolved once per
+  /// process. Mirrors std/os `host_os_name()`.
+  private var hostOSAtom: String {
+    #if os(Windows)
+    return "windows"
+    #elseif os(Linux)
+    return "linux"
+    #elseif os(macOS)
+    return "macos"
+    #else
+    return ""
+    #endif
+  }
+
   /// `links` follow the code (§5.4): a module that needs `-lm` says so, and
-  /// anything that imports that module inherits the requirement.
+  /// anything that imports that module inherits the requirement. Each module's
+  /// `platform.<os>` overlay adds to its own list (cffi-design.md §E).
   private func linkedLibraries(in unit: CompilationUnit) -> [String] {
     var result: [String] = []
     for name in unit.loadOrder {
       guard let spec = unit.loadedModules[name]?.spec else { continue }
-      result.append(contentsOf: spec.links)
+      result.append(
+        contentsOf: effectiveLinksForOS(spec.links, platform: spec.platform, osAtom: hostOSAtom)
+      )
+    }
+    return result
+  }
+
+  /// `c_sources` follow the same graph as `links` (§E): declared per module,
+  /// inherited by importers, and each `.c` is compiled once however many
+  /// modules name it.
+  private func cSources(in unit: CompilationUnit) -> [String] {
+    var result: [String] = []
+    var seen = Set<String>()
+    for name in unit.loadOrder {
+      guard let spec = unit.loadedModules[name]?.spec else { continue }
+      for source in effectiveCSourcesForOS(
+        spec.cSources,
+        platform: spec.platform,
+        osAtom: hostOSAtom
+      ) where seen.insert(source).inserted {
+        result.append(source)
+      }
     }
     return result
   }
@@ -587,6 +628,7 @@ public class Driver {
       nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
       importGraph: unit.importGraph,
       extraLinkedLibraries: linkedLibraries(in: unit),
+      extraCSources: cSources(in: unit),
       moduleSymbolKeys: moduleSymbolKeys(in: unit)
     )
   }
@@ -661,6 +703,7 @@ public class Driver {
       nodeSourceInfoList: parts.stdNodeSourceInfoList + parts.userNodeSourceInfoList,
       importGraph: unit.importGraph,
       extraLinkedLibraries: linkedLibraries(in: unit),
+      extraCSources: cSources(in: unit),
       moduleSymbolKeys: moduleSymbolKeys(in: unit)
     )
   }
@@ -676,6 +719,7 @@ public class Driver {
     nodeSourceInfoList: [GlobalNodeSourceInfo],
     importGraph: ImportGraph,
     extraLinkedLibraries: [String],
+    extraCSources: [String],
     moduleSymbolKeys: [String: String] = [:]
   ) throws {
     let fileManager = FileManager.default
@@ -779,6 +823,16 @@ public class Driver {
       temporaryCFileURL = tempFileURL
     }
     try cSource.write(to: cFileURL, atomically: true, encoding: .utf8)
+    // The exports header renders from the same CodeGen state as the C, so
+    // every type spelling in its prototypes matches by construction. It lives
+    // in the output directory -- the `c_sources` include path -- even in build
+    // mode where the generated C itself is temporary (cffi-design.md §E).
+    let exportsHeaderURL = outputDirectory.appendingPathComponent("koral_exports.h")
+    try codeGen.generateExportsHeader().write(
+      to: exportsHeaderURL,
+      atomically: true,
+      encoding: .utf8
+    )
 
     defer {
       if let temporaryCFileURL {
@@ -798,7 +852,6 @@ public class Driver {
     let exeURL = outputDirectory.appendingPathComponent(baseName)
     #endif
 
-    var clangArgs = [cFileURL.path]
     // The generated C includes koral_runtime.h and needs koral_runtime.c at
     // link time. A missing std is a hard error here -- proceeding without it
     // produces an unreadable clang failure instead of a diagnosis.
@@ -817,40 +870,25 @@ public class Driver {
         userInfo: [NSLocalizedDescriptionKey: "Standard library runtime not found: \(runtimeURL.path)"]
       )
     }
-    clangArgs.append(runtimeURL.path)
-    clangArgs.append(contentsOf: ["-I", stdPath])
-
-    clangArgs.append("-o")
-    clangArgs.append(exeURL.path)
-    // The generated C compiles with full warnings on: real codegen mistakes
-    // must not hide behind a blanket silence. The one known-benign artifact
-    // (foreign declarations of C-library builtins) is silenced at its own
-    // emission site with a scoped pragma.
-    clangArgs.append(contentsOf: optimizeArgs)
-
-    let linkedLibraries = Array(NSOrderedSet(array: extraLinkedLibraries)) as? [String] ?? extraLinkedLibraries
-    for lib in linkedLibraries {
-      if lib == "c" { continue }
-      clangArgs.append("-l\(lib)")
+    // The runtime's own link requirements travel with its manifest: std's
+    // main-module `platform` overlay (cffi-design.md §E). Read here rather
+    // than from the program graph because the runtime links even under
+    // `--no-std` -- it is the ABI base, not a package feature.
+    let stdManifest = try loadPackageManifest(
+      at: URL(fileURLWithPath: stdPath).appendingPathComponent("koral.json").path
+    )
+    guard let stdMainModule = stdManifest.modules["."] else {
+      throw NSError(
+        domain: "Driver",
+        code: 1,
+        userInfo: [NSLocalizedDescriptionKey: "Standard library manifest declares no main module ('.')"]
+      )
     }
-
-    #if os(Windows)
-    if !linkedLibraries.contains("bcrypt") {
-      clangArgs.append("-lbcrypt")
-    }
-    if !linkedLibraries.contains("ws2_32") {
-      clangArgs.append("-lws2_32")
-    }
-    if !linkedLibraries.contains("psapi") {
-      clangArgs.append("-lpsapi")
-    }
-    #endif
-
-    #if os(macOS)
-    if let sdkPath = getSDKPath() {
-      clangArgs.append(contentsOf: ["-isysroot", sdkPath])
-    }
-    #endif
+    let runtimeLinks = effectiveLinksForOS(
+      stdMainModule.links,
+      platform: stdMainModule.platform,
+      osAtom: hostOSAtom
+    )
 
     debugPhase("\(phasePrefix): clang")
     let clangStart = DispatchTime.now()
@@ -868,6 +906,70 @@ public class Driver {
     #else
     let clangPath = findExecutable("clang") ?? "/usr/bin/clang"
     #endif
+
+    // Units: the generated C first, then the runtime, then the c_sources.
+    // Each is compiled on its own, then all objects link together
+    // (cffi-design.md §E -- the same C pipeline for every native unit).
+    var units: [(source: URL, stem: String)] = [
+      (source: cFileURL, stem: baseName),
+      (source: runtimeURL, stem: "koral_runtime"),
+    ]
+    for source in extraCSources {
+      let sourceURL = URL(fileURLWithPath: source)
+      units.append(
+        (source: sourceURL, stem: sourceURL.deletingPathExtension().lastPathComponent)
+      )
+    }
+    var objectFiles: [URL] = []
+    var objectStems: [String: Int] = [:]
+    for unit in units {
+      let count = objectStems[unit.stem, default: 0]
+      objectStems[unit.stem] = count + 1
+      let uniqueStem = count == 0 ? unit.stem : "\(unit.stem)_\(count)"
+      let objectURL = outputDirectory.appendingPathComponent(uniqueStem + ".o")
+      var compileArgs = [
+        "-c", unit.source.path,
+        "-o", objectURL.path,
+        "-I", stdPath,
+        "-I", outputDirectory.path,
+      ]
+      // The generated C compiles with full warnings on: real codegen mistakes
+      // must not hide behind a blanket silence. The one known-benign artifact
+      // (foreign declarations of C-library builtins) is silenced at its own
+      // emission site with a scoped pragma.
+      compileArgs.append(contentsOf: optimizeArgs)
+      #if os(macOS)
+      if let sdkPath = getSDKPath() {
+        compileArgs.append(contentsOf: ["-isysroot", sdkPath])
+      }
+      #endif
+      let compileResult = try runSubprocess(executable: clangPath, args: compileArgs)
+      if compileResult != 0 {
+        profilePhase("\(phasePrefix): total", start: totalStart)
+        throw NSError(
+          domain: "Driver",
+          code: 1,
+          userInfo: [NSLocalizedDescriptionKey: "clang compilation failed"]
+        )
+      }
+      objectFiles.append(objectURL)
+    }
+
+    var clangArgs = objectFiles.map { $0.path }
+    clangArgs.append("-o")
+    clangArgs.append(exeURL.path)
+    clangArgs.append(contentsOf: optimizeArgs)
+    var seenLibs = Set<String>()
+    for lib in extraLinkedLibraries + runtimeLinks where lib != "c" && seenLibs.insert(lib).inserted {
+      clangArgs.append("-l\(lib)")
+    }
+
+    #if os(macOS)
+    if let sdkPath = getSDKPath() {
+      clangArgs.append(contentsOf: ["-isysroot", sdkPath])
+    }
+    #endif
+
     let clangResult = try runSubprocess(executable: clangPath, args: clangArgs)
     profilePhase("\(phasePrefix): clang", start: clangStart)
     if clangResult != 0 {

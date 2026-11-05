@@ -528,6 +528,33 @@ char __koral_path_separator(void) {
 #endif
 }
 
+// The host os atom ('w'indows / 'l'inux / 'm'acos, 0 otherwise) -- the same
+// closed vocabulary the `#if os("...")` conditions and the manifest `platform`
+// overlays use (cffi-design.md §D/§E). One vocabulary, one resolver.
+uint8_t __koral_host_os(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    return 'w';
+#elif defined(__APPLE__)
+    return 'm';
+#elif defined(__linux__)
+    return 'l';
+#else
+    return 0;
+#endif
+}
+
+// The host arch atom ('x'86_64 / 'a'arch64, 0 otherwise) -- what
+// `#if arch("...")` conditions select against (cffi-design.md §D).
+uint8_t __koral_host_arch(void) {
+#if defined(__x86_64__) || defined(_M_X64)
+    return 'x';
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    return 'a';
+#else
+    return 0;
+#endif
+}
+
 char __koral_path_list_separator(void) {
 #ifdef _WIN32
     return ';';

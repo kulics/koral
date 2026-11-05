@@ -240,7 +240,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span, _):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, let span, _):
             try resolveFunctionSignature(
                 name: name,
                 typeParameters: [],
@@ -637,7 +637,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignFunctionDeclaration(let name, _, _, let access, _, _):
+        case .foreignFunctionDeclaration(let name, _, _, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .function,
@@ -677,7 +677,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignLetDeclaration(let name, _, _, let access, _, _):
+        case .foreignLetDeclaration(let name, _, _, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .variable,

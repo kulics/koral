@@ -426,7 +426,7 @@ given TypeChecker {
                     ),
                 );
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, span, _) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, _, _, span, _) then {
                 // Foreign globals are annotated by definition; settle the type
                 // here so a reference never needs the force.
                 let t = self.resolve_type(type_name);
@@ -915,7 +915,7 @@ given TypeChecker {
                     ),
                 )
             },
-            .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
+            .ForeignFunctionDecl(access, name, params, return_type, body, _, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let typed_params = self.check_params(params);
                 // Seed-parity signature gates: an opaque handle cannot cross
@@ -986,11 +986,46 @@ given TypeChecker {
                 // A `let foreign` function IS a bare C function pointer: its value type
                 // is `foreign (..) -> ..`, not a Koral closure.
                 let fn_type = Type.ForeignFunctionType(types_to_param_entries(param_refs), resolved_ret);
+                // 有体 = C ABI 导出定义（cffi-design.md §B）：按普通函数查体——
+                // 返回上下文 + 函数作用域，签名限制一条不松。
+                let typed_body = when body in {
+                    .Some(body_expr) then {
+                        let prev_function_return_context = self.clone_function_return_context();
+                        let prev_in_loop = self.storage.in_loop;
+                        let prev_in_defer = self.storage.in_defer;
+                        self.storage.in_loop = false;
+                        self.storage.in_defer = false;
+                        self.storage.function_return_context.inferred_return_type = Option[Type].None(
+                        );
+                        self.storage.function_return_context.is_inferring = false;
+                        self.storage.function_return_context.expected_return_type = Option[Type].Some(
+                            resolved_ret,
+                        );
+                        let mutable fn_scope = self.make_fn_scope(typed_params);
+                        let raw_typed_body = self.check_expr_scoped_ref(
+                            body_expr,
+                            .Some(resolved_ret),
+                            fn_scope,
+                        );
+                        let adapted = self.adapt_expr_to_expected_type_at(
+                            raw_typed_body,
+                            Option[Type].Some(resolved_ret),
+                            Option[SourceSpan].Some(span),
+                        );
+                        self.validate_body_return_type(adapted, resolved_ret);
+                        self.storage.function_return_context = prev_function_return_context;
+                        self.storage.in_loop = prev_in_loop;
+                        self.storage.in_defer = prev_in_defer;
+                        Option[TypedExpr].Some(adapted)
+                    },
+                    .None() then Option[TypedExpr].None(),
+                };
                 TypedDecl.ForeignFunctionDecl(
                     access,
                     name,
                     typed_params,
                     resolved_ret,
+                    typed_body,
                     span,
                     self.make_top_level_symbol(
                         name,
@@ -1002,7 +1037,7 @@ given TypeChecker {
                     ),
                 )
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, initializer, _, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
                 if self.opaque_by_value_type(resolved) is .Some(opaque_t) then {
                     self.push_diagnostic(
@@ -1032,6 +1067,25 @@ given TypeChecker {
                         type_node_span(type_name),
                     );
                 };
+                // 初值的存在性 + `mutable` 定形态（cffi-design.md §B）：无初值 =
+                // extern 引用；有初值 + `mutable` = C 变量定义；有初值 + 无
+                // `mutable` = C 宏常量的值绑定。初值限常量字面量，这里只查类型。
+                let typed_init = when initializer in {
+                    .Some(init_expr) then {
+                        let checked = self.check_expr_global_ref(
+                            init_expr,
+                            Option[Type].Some(resolved),
+                        );
+                        Option[TypedExpr].Some(
+                            self.adapt_expr_to_expected_type_at(
+                                checked,
+                                Option[Type].Some(resolved),
+                                Option[SourceSpan].Some(span),
+                            ),
+                        )
+                    },
+                    .None() then Option[TypedExpr].None(),
+                };
                 let variable_kind = if is_mutable then VariableKind.MutableValue()
                 else VariableKind.Value();
                 TypedDecl.ForeignLetDecl(
@@ -1039,6 +1093,7 @@ given TypeChecker {
                     name,
                     is_mutable,
                     resolved,
+                    typed_init,
                     span,
                     self.make_top_level_symbol(
                         name,

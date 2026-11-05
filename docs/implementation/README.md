@@ -31,6 +31,7 @@
 | [`identity-matching-tracking.md`](identity-matching-tracking.md) | 身份匹配（DefId）模型、演进、硬性约束与被否方案 |
 | [`samples-capability.md`](samples-capability.md) | 样本验证的分界判据、语言缺口、被否掉的下沉 |
 | [`flow-operator-forms-implementation.md`](flow-operator-forms-implementation.md) | 流程算子形态与折叠的落地、载荷作用域、被否的实现写法 |
+| [`cffi-design-implementation.md`](cffi-design-implementation.md) | CFFI 落地：P1 foreign 引用/定义、C 名槽位、宏常量；P2 `c_sources`/`platform`、导出头、C 管线；P3 `#if` 条件编译 |
 
 写法：
 

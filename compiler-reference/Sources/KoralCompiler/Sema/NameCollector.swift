@@ -215,7 +215,7 @@ public class NameCollector: CompilerPass {
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, let access, let span, let nameSpan):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, let cname, let access, let span, let nameSpan):
             try collectFunctionDeclaration(
                 name: name,
                 typeParameters: [],
@@ -224,7 +224,8 @@ public class NameCollector: CompilerPass {
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
-                isStdLib: isStdLib
+                isStdLib: isStdLib,
+                cname: cname
             )
             
         case .globalVariableDeclaration(let name, _, _, _, let access, let span, let nameSpan):
@@ -271,13 +272,14 @@ public class NameCollector: CompilerPass {
                 isStdLib: isStdLib
             )
 
-        case .foreignLetDeclaration(let name, _, _, let access, let span, let nameSpan):
+        case .foreignLetDeclaration(let name, _, _, _, let cname, let access, let span, let nameSpan):
             try collectVariableDeclaration(
                 name: name,
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
-                isStdLib: isStdLib
+                isStdLib: isStdLib,
+                cname: cname
             )
             
         case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span, let nameSpan):
@@ -525,7 +527,8 @@ public class NameCollector: CompilerPass {
         returnType: TypeNode,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
-        isStdLib: Bool
+        isStdLib: Bool,
+        cname: String? = nil
     ) throws {
         // 确定定义类型
         let defKind: DefKind
@@ -534,7 +537,7 @@ public class NameCollector: CompilerPass {
         } else {
             defKind = .function
         }
-        
+
         // 分配 DefId
         let defId = defIdMap.allocate(
             modulePath: currentModulePath,
@@ -545,6 +548,9 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+        if let cname {
+            defIdMap.setCname(defId, cname)
+        }
 
         // 收集函数信息
         let isPrivate = (access == .private)
@@ -573,10 +579,11 @@ public class NameCollector: CompilerPass {
         name: String,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
-        isStdLib: Bool
+        isStdLib: Bool,
+        cname: String? = nil
     ) throws {
         // 分配 DefId
-        _ = defIdMap.allocate(
+        let defId = defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
             kind: .variable,
@@ -585,6 +592,9 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+        if let cname {
+            defIdMap.setCname(defId, cname)
+        }
     }
     
     // MARK: - Given 声明收集

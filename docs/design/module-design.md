@@ -371,7 +371,7 @@ resolve(spec):
 | --- | --- | --- |
 | `package` | **本包的源码名**——自引用前缀，也是消费方的默认源码名 | ✓ |
 | `version` | 版本 | ✓ |
-| `modules` | **对外命名表**：包内名 → { entry, links }（见 5.2） | — |
+| `modules` | **对外命名表**：包内名 → { entry, links, c_sources, platform }（见 5.2） | — |
 | `dependencies` | **源码名 → { source, version }** | — |
 | `exclude` | **不是包源码的路径**（夹具、生成输入）——只给 `koral lint` 看，编译器不读 | — |
 
@@ -397,9 +397,14 @@ resolve(spec):
 | 字段 | 含义 |
 | --- | --- |
 | `entry` | 模块入口文件，**相对包根**（`conn/conn.koral`）；同模块的其余文件用模块合并并入 |
-| `links` | 传递给链接器的库名（如 `["m", "pthread"]`），沿用现状，本次不变 |
+| `links` | 传递给链接器的库名（如 `["m", "pthread"]`） |
+| `c_sources` | 与生成 C 一起编译链接的 `.c` 文件，**相对包根**；沿模块图传递、同文件只编译一次 |
+| `platform` | 按 os 的增量覆盖层：`{"windows": { links?, c_sources? }, ...}`，键是 os 原子（`windows` / `linux` / `macos`，与 `#if os("...")` 同一套词） |
 
 **没有 `requires`**：模块图从 `using` 派生（§5.4）。
+
+> `c_sources` / `platform` 的动机、C 管线与导出头（`koral_exports.h`）见
+> [`cffi-design.md`](cffi-design.md) §E；`links` 语义不变。
 
 #### 5.2 `modules` 是对外命名表，不是模块清单
 

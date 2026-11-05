@@ -25,6 +25,7 @@ public type CstType {
     // `(T1, T2) -> R`: the arrow is printed as part of the shape, so the node
     // keeps the delimiters that carry comments and spacing.
     Function(lparen: Token, args: List[CstTypeArg], rparen: Token, return_type: CstType),
+    ForeignFunction(foreign_kw: Token, lparen: Token, args: List[CstTypeArg], rparen: Token, return_type: CstType),
     // `(T)` -- grouping of exactly one type. The parens are LOAD-BEARING:
     // `let p (*Int)` must round-trip WITH them, so the node keeps the
     // delimiters the way `CstExpr.Paren` does. A doubled nesting collapses to
@@ -367,8 +368,8 @@ public type CstStructField(
 
 public type CstDecl {
     Using(tokens: List[Token]),
-    Func(vis: Option[Token], modifiers: List[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType], eq: Token, body: CstExpr),
-    ForeignDecl(vis: Option[Token], modifiers: List[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType]),
+    Func(vis: Option[Token], modifiers: List[Token], cname: Option[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType], eq: Token, body: CstExpr),
+    ForeignDecl(vis: Option[Token], modifiers: List[Token], cname: Option[Token], let_kw: Option[Token], mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Option[Token], lparen: Option[Token], params: List[CstParam], rparen: Option[Token], return_type: Option[CstType]),
     Type(vis: Option[Token], modifiers: List[Token], kw: Token, mut_kw: Option[Token], generic_params: Option[CstGenericParams], name: Token, body: CstTypeBody),
     Trait(vis: Option[Token], kw: Token, generic_params: Option[CstGenericParams], name: Token, super_traits: List[CstType], lbrace: Token, members: List[CstItem], rbrace: Token),
     Given(vis: Option[Token], modifiers: List[Token], kw: Token, generic_params: Option[CstGenericParams], target: CstType, as_kw: Option[Token], trait_type: Option[CstType], lbrace: Token, members: List[CstItem], rbrace: Token),
@@ -396,9 +397,36 @@ public type CstItem {
     // after them; a line comment pushes it to the next line.
     DeclPreSemi(comments: List[Token], decl: CstDecl),
     StmtPreSemi(comments: List[Token], stmt: CstStmt),
+    // `#if … then { … } else { … };` (cffi-design.md §D). Branch contents are
+    // full item lists -- declarations, comments, nested `#if` -- so the
+    // printer round-trips them exactly like a file's items.
+    IfBuild(
+        hash: Token,
+        if_kw: Token,
+        cond: CstBuildCond,
+        then_kw: Token,
+        lbrace: Token,
+        then_items: List[CstItem],
+        rbrace: Token,
+        else_kw: Option[Token],
+        else_lbrace: Option[Token],
+        else_items: List[CstItem],
+        else_rbrace: Option[Token],
+        semi: Token,
+    ),
     Comment(token: Token),
     TrailingComment(token: Token),
     BlankLine(),
+};
+
+/// A `#if` condition as written (cffi-design.md §D): the mini-grammar kept
+/// structural so the printer can lay it out.
+public type CstBuildCond {
+    Pred(head: Token, lparen: Token, value: Token, rparen: Token),
+    And(left: CstBuildCond, kw: Token, right: CstBuildCond),
+    Or(left: CstBuildCond, kw: Token, right: CstBuildCond),
+    Not(kw: Token, inner: CstBuildCond),
+    Paren(lparen: Token, inner: CstBuildCond, rparen: Token),
 };
 
 public type CstFile(public items: List[CstItem]);

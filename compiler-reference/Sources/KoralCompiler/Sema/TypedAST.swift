@@ -139,10 +139,13 @@ public struct TypedTraitConformance {
 }
 
 public indirect enum TypedGlobalNode {
-  case foreignFunction(identifier: Symbol, parameters: [Symbol])
+  /// `body != nil` is a C ABI export definition (`docs/design/cffi-design.md` §B).
+  case foreignFunction(identifier: Symbol, parameters: [Symbol], body: TypedExpressionNode?)
   case foreignType(identifier: Symbol)
   case foreignStruct(identifier: Symbol, fields: [(name: String, type: Type)])
-  case foreignGlobalVariable(identifier: Symbol, mutable: Bool)
+  /// `initializer != nil && !mutable` is a C macro constant (no C entity);
+  /// `initializer != nil && mutable` is a C variable definition.
+  case foreignGlobalVariable(identifier: Symbol, mutable: Bool, initializer: TypedExpressionNode?)
   case globalVariable(identifier: Symbol, value: TypedExpressionNode, kind: VariableKind)
   case globalFunction(
     identifier: Symbol,

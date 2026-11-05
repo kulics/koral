@@ -1,0 +1,30 @@
+// EXPECT: c sources ok
+// `c_sources` build integration (cffi-design.md §E): C files declared in the
+// manifest compile and link beside the generated C, and the generated
+// koral_exports.h gives them the module's C ABI surface -- exported functions
+// under their C names, exported globals as externs.
+
+let foreign c_multiply(a: Int32, b: Int32): Int32;
+let foreign c_add(a: Int32, b: Int32): Int32;
+let foreign c_call_export(x: Int32): Int32;
+let foreign c_read_flag(): Int32;
+
+let foreign "koral_double" double_it(x: Int32): Int32 = {
+    return x * Int32(2);
+};
+
+let foreign "koral_flag" mutable koral_flag: Int32 = 7;
+
+let main(): Int = {
+    assert(c_multiply(Int32(3), Int32(4)) == Int32(12), "top-level c_sources link");
+    assert(c_add(Int32(1), Int32(2)) == Int32(3), "platform overlay c_sources link");
+    assert(
+        c_call_export(Int32(5)) == Int32(11),
+        "C calls the export by its C name through koral_exports.h",
+    );
+    assert(c_read_flag() == Int32(7), "exported global visible from C");
+    koral_flag = Int32(9);
+    assert(c_read_flag() == Int32(9), "the exported global is the same object");
+    println("c sources ok");
+    return 0;
+};

@@ -51,6 +51,7 @@ public enum Token: CustomStringConvertible {
   case letKeyword  // 'let' keyword
   case mutableKeyword  // .mutable. keyword
   case semicolon  // Semicolon ';'
+  case hash  // '#' — compile-time marker of build-conditional declarations (cffi-design.md §D)
   case leftParen  // Left parenthesis '('
   case rightParen  // Right parenthesis ')'
   case comma  // Comma ','
@@ -151,7 +152,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.letKeyword, .letKeyword), (.mutableKeyword, .mutableKeyword):
       return true
-    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.ellipsis, .ellipsis), (.arrow, .arrow), (.fatArrow, .fatArrow):
+    case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.ellipsis, .ellipsis), (.arrow, .arrow), (.fatArrow, .fatArrow), (.hash, .hash):
       return true
     case (.leftParen, .leftParen), (.rightParen, .rightParen):
       return true
@@ -256,6 +257,8 @@ public enum Token: CustomStringConvertible {
       return "mutable"
     case .semicolon:
       return ";"
+    case .hash:
+      return "#"
     case .leftParen:
       return "("
     case .rightParen:
@@ -1555,6 +1558,8 @@ public class Lexer {
       return .less
     case ";":
       return .semicolon
+    case "#":
+      return .hash
     case "(":
       return .leftParen
     case ")":

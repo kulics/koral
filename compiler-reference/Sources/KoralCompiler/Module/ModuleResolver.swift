@@ -535,7 +535,14 @@ public class ModuleResolver {
           throw PackageManifestError.message("Failed to read file: \(file)")
         }
         let lexer = Lexer(input: source, start: SourceLocation(line: 1, column: 1, fileName: file))
-        let parser = Parser(lexer: lexer)
+        // The build target decides `#if` branch selection (cffi-design.md §D).
+        // Target == host today; when cross-compilation arrives the atoms flow
+        // from the invocation instead.
+        let parser = Parser(
+            lexer: lexer,
+            targetOS: BuildTarget.osAtom,
+            targetArch: BuildTarget.archAtom
+        )
 
         let ast: ASTNode
         do {
@@ -821,6 +828,8 @@ public class ModuleResolver {
             subpath: rel,
             entryFile: entryAbs,
             links: [],
+            cSources: [],
+            platform: [:],
             packageIdentity: owner.identity,
             packageKind: owner.kind,
             owner: owner

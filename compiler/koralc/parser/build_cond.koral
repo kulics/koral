@@ -1,0 +1,400 @@
+// build_cond.koral — `#if` build-conditional declarations (cffi-design.md §D)
+//
+// The construct is parsed into a private tree, checked with the partition
+// rule, then SELECTED against the build target and spliced into the
+// declaration list. The public AST never sees a conditional node: the
+// unselected branch must parse (it is checked for syntax like any other code)
+// but never reaches name collection or sema.
+
+/// A `#if` condition — the mini-grammar of `os("...")` / `arch("...")` atoms
+/// combined with `and` / `or` / `not`. Not an expression: nothing here enters
+/// name resolution.
+type BuildCond {
+    OsEquals(value: String),
+    ArchEquals(value: String),
+    And(left: BuildCond, right: BuildCond),
+    Or(left: BuildCond, right: BuildCond),
+    Not(inner: BuildCond),
+};
+
+/// One `#if` construct as parsed. `token_id` is the position of its `#` — the
+/// identity of the construct across the file, since the partition rule asks
+/// whether two declarations sit on opposite sides of the SAME `#if`.
+type IfBuildNode(
+    token_id: String,
+    cond: BuildCond,
+    then_items: List[BuildCondItem],
+    else_items: List[BuildCondItem],
+);
+
+/// File / block items as parsed, before selection.
+type BuildCondItem {
+    DeclItem(decl: Decl),
+    IfBuildItem(node: IfBuildNode),
+};
+
+/// One declaration's position in the `#if` forest: every enclosing construct
+/// and which side of it the declaration sits on.
+type BuildCondPlacement(name: String, span: SourceSpan, chain: List[Pair[String, Bool]]);
+
+/// Whether an item (recursively) contains a `using` declaration. The
+/// using-position rule classifies a whole `#if` by this: an item that can
+/// contribute a using must sit in the file's using region (§D, 未决 5 first
+/// cut — the check stays pure syntax, so no build target can flip it).
+let build_item_contains_using(item: BuildCondItem): Bool = {
+    return when item in {
+        .DeclItem(decl) then decl is .UsingDecl(_, _, _, _),
+        .IfBuildItem(node) then {
+            let mutable found = false;
+            for inner in node.then_items then {
+                if build_item_contains_using(inner) then {
+                    found = true;
+                };
+            };
+            for inner in node.else_items then {
+                if build_item_contains_using(inner) then {
+                    found = true;
+                };
+            };
+            found
+        },
+    };
+};
+
+/// Collect every named declaration's placement, deepest items included.
+let collect_build_cond_placements(
+    items: List[BuildCondItem],
+    chain: List[Pair[String, Bool]],
+    out: List[BuildCondPlacement],
+): Void = {
+    for item in items then {
+        when item in {
+            .DeclItem(decl) then {
+                when decl_name(decl) in {
+                    .Some(name) then {
+                        out.push(BuildCondPlacement(name, decl_name_span(decl), chain));
+                    },
+                    .None() then {},
+                };
+            },
+            .IfBuildItem(node) then {
+                let mutable then_chain = List[Pair[String, Bool]].new();
+                for entry in chain then {
+                    then_chain.push(entry);
+                };
+                then_chain.push(Pair[String, Bool](node.token_id, true));
+                collect_build_cond_placements(node.then_items, then_chain, out);
+                let mutable else_chain = List[Pair[String, Bool]].new();
+                for entry in chain then {
+                    else_chain.push(entry);
+                };
+                else_chain.push(Pair[String, Bool](node.token_id, false));
+                collect_build_cond_placements(node.else_items, else_chain, out);
+            },
+        };
+    };
+};
+
+/// Whether two placements sit on opposite sides of the same `#if` somewhere —
+/// "两两分道" (§D). Two unconditional declarations are not this check's
+/// business (sema's duplicate rules own those).
+let build_cond_placements_partitioned(a: BuildCondPlacement, b: BuildCondPlacement): Bool = {
+    for ea in a.chain then {
+        for eb in b.chain then {
+            if ea.first == eb.first and ea.second != eb.second then {
+                return true;
+            };
+        };
+    };
+    return false;
+};
+
+let build_cond_eval(cond: BuildCond, os_atom: String, arch_atom: String): Bool = {
+    return when cond in {
+        .OsEquals(value) then value == os_atom,
+        .ArchEquals(value) then value == arch_atom,
+        .And(left, right) then {
+            build_cond_eval(left, os_atom, arch_atom) and build_cond_eval(
+                right,
+                os_atom,
+                arch_atom,
+            )
+        },
+        .Or(left, right) then {
+            build_cond_eval(left, os_atom, arch_atom) or build_cond_eval(
+                right,
+                os_atom,
+                arch_atom,
+            )
+        },
+        .Not(inner) then not build_cond_eval(inner, os_atom, arch_atom),
+    };
+};
+
+given Parser {
+    /// Select the target's branch of every `#if`, recursively, and splice the
+    /// surviving declarations in source order.
+    select_build_decls(self, items: List[BuildCondItem]): List[Decl] = {
+        let mutable out = List[Decl].new();
+        self.collect_selected_build_decls(items, out);
+        return out;
+    };
+
+    collect_selected_build_decls(self, items: List[BuildCondItem], out: List[Decl]): Void = {
+        for item in items then {
+            when item in {
+                .DeclItem(decl) then {
+                    out.push(decl);
+                },
+                .IfBuildItem(node) then {
+                    if build_cond_eval(node.cond, self.target_os, self.target_arch) then {
+                        self.collect_selected_build_decls(node.then_items, out);
+                    } else {
+                        self.collect_selected_build_decls(node.else_items, out);
+                    };
+                },
+            };
+        };
+    };
+
+    /// The partition rule (§D): same-name declarations must be pairwise
+    /// separated by the branches of one `#if … else …`, and an unconditional
+    /// declaration may never share a name with a conditional one. Pure syntax
+    /// — every branch counts, selected or not, so no build target can turn a
+    /// passing check red.
+    check_build_cond_partitions(self, items: List[BuildCondItem]): Result[Void] = {
+        let placements = List[BuildCondPlacement].new();
+        collect_build_cond_placements(items, List[Pair[String, Bool]].new(), placements);
+        for i in 0..<placements.count() then {
+            for j in (i + 1)..<placements.count() then {
+                let a = placements[i];
+                let b = placements[j];
+                if a.name != b.name then {
+                    continue;
+                };
+                if a.chain.is_empty() and b.chain.is_empty() then {
+                    // Two unconditional duplicates: sema reports these with
+                    // its own wording, on its own terms.
+                    continue;
+                };
+                if not build_cond_placements_partitioned(a, b) then {
+                    return .Error(
+                        self.parser_error_at_span(
+                            "duplicate declaration '\(a.name)': same-name declarations must be partitioned across the branches of one '#if … else …'",
+                            b.span,
+                        ),
+                    );
+                };
+            };
+        };
+        return .Ok({});
+    };
+
+    /// Parse one `#if … then { … } else { … };` item. The current token is `#`.
+    parse_if_build_item(self): Result[IfBuildNode] = {
+        let hash_token = self.current();
+        let token_id = self.token_position_text(hash_token);
+        self.advance();
+        if not (self.current().kind is .KwIf()) then {
+            return .Error(self.parser_error_at_current("expected 'if' after '#'"));
+        };
+        self.advance();
+        let cond = self.parse_build_cond() or return;
+        if not (self.current().kind is .KwThen()) then {
+            return .Error(
+                self.parser_error_at_current("expected 'then' in '#if' build condition"),
+            );
+        };
+        self.advance();
+        let then_items = self.parse_build_cond_block() or return;
+        let mutable else_items = List[BuildCondItem].new();
+        if self.current().kind is .KwElse() then {
+            self.advance();
+            if not (self.current().kind is .LBrace()) then {
+                return .Error(
+                    self.parser_error_at_current("expected '{' to open '#else' branch block"),
+                );
+            };
+            else_items = self.parse_build_cond_block() or return;
+        };
+        if not (self.current().kind is .Semicolon()) then {
+            return .Error(self.parser_error_at_current("expected ';' after '#if' declaration"));
+        };
+        self.advance();
+        return .Ok(IfBuildNode(token_id, cond, then_items, else_items));
+    };
+
+    /// A branch block: `{ <global-decl | #if>* }`.
+    parse_build_cond_block(self): Result[List[BuildCondItem]] = {
+        if not (self.current().kind is .LBrace()) then {
+            return .Error(
+                self.parser_error_at_current("expected '{' to open '#if' branch block"),
+            );
+        };
+        self.advance();
+        return self.parse_build_item_list(true);
+    };
+
+    /// The item loop shared by the file and branch blocks: declarations and
+    /// `#if` items in source order, with the using-position rule applied the
+    /// same way at every level (§D — "受『using 在文件顶部』的同一约束").
+    /// `in_block` ends at `}`; the file ends at end of input.
+    parse_build_item_list(self, in_block: Bool): Result[List[BuildCondItem]] = {
+        let mutable items = List[BuildCondItem].new();
+        let mutable has_non_using_item = false;
+        while true then {
+            if self.current().kind is .Semicolon() then {
+                self.advance();
+                continue;
+            };
+            if in_block then {
+                if self.current().kind is .RBrace() then {
+                    self.advance();
+                    return .Ok(items);
+                };
+                if self.is_eof() then {
+                    return .Error(
+                        self.parser_error_at_current("expected '}' to close '#if' branch block"),
+                    );
+                };
+            } else {
+                if self.is_eof() then {
+                    return .Ok(items);
+                };
+            };
+            let item_start = self.current();
+            if item_start.kind is .Hash() then {
+                let node = self.parse_if_build_item() or return;
+                if build_item_contains_using(.IfBuildItem(node)) then {
+                    if has_non_using_item then {
+                        return .Error(
+                            self.parser_error_at(
+                                "Using declarations must appear before other declarations",
+                                item_start,
+                            ),
+                        );
+                    };
+                } else {
+                    has_non_using_item = true;
+                };
+                items.push(BuildCondItem.IfBuildItem(node));
+            } else {
+                let decl = self.parse_top_level_decl() or return;
+                let is_using = when decl in {
+                    .UsingDecl(_, _, _, _) then true,
+                    _ then false,
+                };
+                if is_using then {
+                    if has_non_using_item then {
+                        return .Error(
+                            self.parser_error_at(
+                                "Using declarations must appear before other declarations",
+                                item_start,
+                            ),
+                        );
+                    };
+                } else {
+                    has_non_using_item = true;
+                };
+                items.push(BuildCondItem.DeclItem(decl));
+            };
+        };
+        return .Ok(items);
+    };
+
+    /// The condition mini-grammar (§D) — an operator layer over atoms:
+    /// `<cond-or> ::= <cond-and> ("or" <cond-and>)*` and friends down to
+    /// `<pred-head> "(" <pred-value> ")"` and parenthesized groups.
+    parse_build_cond(self): Result[BuildCond] = {
+        let mutable left = self.parse_build_cond_and() or return;
+        while self.current().kind is .KwOr() then {
+            self.advance();
+            let right = self.parse_build_cond_and() or return;
+            left = BuildCond.Or(left, right);
+        };
+        return .Ok(left);
+    };
+
+    parse_build_cond_and(self): Result[BuildCond] = {
+        let mutable left = self.parse_build_cond_not() or return;
+        while self.current().kind is .KwAnd() then {
+            self.advance();
+            let right = self.parse_build_cond_not() or return;
+            left = BuildCond.And(left, right);
+        };
+        return .Ok(left);
+    };
+
+    parse_build_cond_not(self): Result[BuildCond] = {
+        if self.current().kind is .KwNot() then {
+            self.advance();
+            let inner = self.parse_build_cond_not() or return;
+            return .Ok(BuildCond.Not(inner));
+        };
+        return self.parse_build_cond_atom();
+    };
+
+    parse_build_cond_atom(self): Result[BuildCond] = {
+        if self.current().kind is .LParen() then {
+            self.advance();
+            let inner = self.parse_build_cond() or return;
+            if not (self.current().kind is .RParen()) then {
+                return .Error(self.parser_error_at_current("expected ')' after build condition"));
+            };
+            self.advance();
+            return .Ok(inner);
+        };
+        let head_token = self.current();
+        let head = when head_token.kind in {
+            .Identifier(name) then name,
+            _ then "",
+        };
+        if not (head == "os" or head == "arch") then {
+            return .Error(
+                self.parser_error_at(
+                    "unknown build condition predicate '\(head)'; expected 'os' or 'arch'",
+                    head_token,
+                ),
+            );
+        };
+        self.advance();
+        if not (self.current().kind is .LParen()) then {
+            return .Error(self.parser_error_at_current("expected '(' after '\(head)'"));
+        };
+        self.advance();
+        let value_token = self.current();
+        let value = when value_token.kind in {
+            .StringLiteral(text) then Option[String].Some(text),
+            _ then Option[String].None(),
+        } or else {
+            return .Error(
+                self.parser_error_at("expected string condition value", value_token),
+            );
+        };
+        self.advance();
+        if not (self.current().kind is .RParen()) then {
+            return .Error(self.parser_error_at_current("expected ')' after condition value"));
+        };
+        self.advance();
+        if head == "os" then {
+            if not is_os_condition_atom(value) then {
+                return .Error(
+                    self.parser_error_at(
+                        "unknown os condition value '\(value)'; expected one of windows, linux, macos",
+                        value_token,
+                    ),
+                );
+            };
+            return .Ok(BuildCond.OsEquals(value));
+        };
+        if not is_arch_condition_atom(value) then {
+            return .Error(
+                self.parser_error_at(
+                    "unknown arch condition value '\(value)'; expected one of x86_64, aarch64",
+                    value_token,
+                ),
+            );
+        };
+        return .Ok(BuildCond.ArchEquals(value));
+    };
+};

@@ -703,8 +703,8 @@ given TypeChecker {
             .LetDecl(_, name, _, _, _, _, _) then "let \(name)",
             .FunctionDecl(_, name, _, _, _, _, _, _) then "fn \(name)",
             .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then "fn intrinsic \(name)",
-            .ForeignFunctionDecl(_, name, _, _, _, _) then "fn foreign \(name)",
-            .ForeignLetDecl(_, name, _, _, _, _) then "let foreign \(name)",
+            .ForeignFunctionDecl(_, name, _, _, _, _, _, _) then "fn foreign \(name)",
+            .ForeignLetDecl(_, name, _, _, _, _, _, _) then "let foreign \(name)",
             .TypeStructDecl(_, name, _, _, _, _, _) then "struct \(name)",
             .TypeEnumDecl(_, name, _, _, _, _) then "enum \(name)",
             .TypeAliasDecl(_, name, _, _, _) then "type \(name)",
@@ -1425,8 +1425,8 @@ given TypeChecker {
     decl_span(self, decl: Decl): SourceSpan = {
         return when decl in {
             .LetDecl(_, _, _, _, _, span, _) or .FunctionDecl(_, _, _, _, _, _, span, _)
-            or .IntrinsicFunctionDecl(_, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, span, _)
-            or .ForeignLetDecl(_, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, span, _)
+            or .IntrinsicFunctionDecl(_, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, _, _, span, _)
+            or .ForeignLetDecl(_, _, _, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, span, _)
             or .TypeEnumDecl(_, _, _, _, span, _) or .TypeAliasDecl(_, _, _, span, _)
             or .IntrinsicTypeDecl(_, _, _, span, _) or .ForeignTypeDecl(_, _, _, span, _)
             or .UsingDecl(_, _, _, span) or .TraitDecl(_, _, _, _, _, span, _) or .GivenDecl(_, _, _, span)
@@ -1559,6 +1559,10 @@ given TypeChecker {
             or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type() or .WrappingUInt32Type()
             or .WrappingUInt64Type() or .Float32Type() or .Float64Type() or .BoolType() or .VoidType()
             or .NeverType() or .OpaqueType(_) then true,
+            // std's `Rune` is the one nominal type in the set (same admission as
+            // `satisfies_foreign_constraint`): scalar representation, nominal
+            // only to carry methods. Guide §6 promises it on every boundary.
+            .StructureType(def_id) then is_std_rune_def_id(self.context(), def_id),
             // A raw pointer crosses only as far as what it POINTS AT does:
             // `*Bad` hands a Koral-managed pointee to C just as much as `Bad`
             // would. `*Void` is C's `void*` and stays legal.
@@ -2179,12 +2183,13 @@ given TypeChecker {
                     id,
                 )
             },
-            .ForeignFunctionDecl(access, name, _, _, span, id) then {
+            .ForeignFunctionDecl(access, name, _, _, body, span, id) then {
                 TypedDecl.ForeignFunctionDecl(
                     access,
                     name,
                     List[TypedParam].new(),
                     Type.Unknown(),
+                    body,
                     span,
                     id,
                 )
@@ -3541,7 +3546,7 @@ given TypeChecker {
                     );
                 };
             },
-            .ForeignFunctionDecl(access, name, params, return_type, span, name_span) then {
+            .ForeignFunctionDecl(access, name, params, return_type, _, _, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let mutable param_types = List[Type].new();
                 for p in params then {
@@ -4119,7 +4124,7 @@ given TypeChecker {
                     is_mutable,
                 );
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, span, name_span) then {
+            .ForeignLetDecl(access, name, is_mutable, type_name, _, _, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
                 let variable_kind = if is_mutable then VariableKind.MutableValue()
                 else VariableKind.Value();

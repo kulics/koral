@@ -124,6 +124,14 @@ extension Parser {
       let isIntrinsic = quals.isIntrinsic
       let isForeign = quals.isForeign
 
+      // C 名槽位：`let foreign "CreateFileA" create_file(…)`。外来词汇是字符串，
+      // 紧跟 `foreign`（docs/design/cffi-design.md §C）；不写即 Koral 名逐字。
+      var cname: String? = nil
+      if isForeign, case .string(let text) = currentToken {
+        cname = text
+        try match(.string(text))
+      }
+
       // Check for mutable keyword first
       var mutable = false
       if currentToken === .mutableKeyword {
@@ -154,7 +162,7 @@ extension Parser {
           if currentToken === .leftParen && !parenOpensTypeAnnotation() {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
           }
-          return try foreignLetDeclaration(name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignLetDeclaration(name: name, mutable: true, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
         }
         if currentToken === .leftParen && !parenOpensTypeAnnotation() {
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
@@ -172,7 +180,7 @@ extension Parser {
           throw ParserError.invalidFunctionName(span: nameSpan, name: name)
         }
         if isForeign {
-          return try foreignFunctionDeclaration(name: name, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignFunctionDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
         }
         return try globalFunctionDeclaration(
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
@@ -182,7 +190,7 @@ extension Parser {
           throw ParserError.invalidVariableName(span: nameSpan, name: name)
         }
         if isForeign {
-          return try foreignLetDeclaration(name: name, mutable: false, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignLetDeclaration(name: name, mutable: false, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
         }
         if isIntrinsic {
           throw ParserError.unexpectedToken(
@@ -1050,7 +1058,7 @@ extension Parser {
   // MARK: - Foreign Declarations
 
   private func foreignFunctionDeclaration(
-    name: String, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
@@ -1093,14 +1101,20 @@ extension Parser {
     try match(.colon)
     let returnType = try parseType()
 
+    // 体的存在性定方向：无体是引用（extern），有体是 C ABI 导出定义
+    // （docs/design/cffi-design.md §B）。
+    var body: ExpressionNode? = nil
     if currentToken === .equal {
-      throw ParserError.foreignFunctionNoBody(span: currentSpan)
+      try match(.equal)
+      body = try expression()
     }
 
     return .foreignFunctionDeclaration(
       name: name,
       parameters: parameters,
       returnType: returnType,
+      body: body,
+      cname: cname,
       access: access,
       span: span,
       nameSpan: nameSpan
@@ -1147,21 +1161,56 @@ extension Parser {
   }
 
   private func foreignLetDeclaration(
-    name: String, mutable: Bool, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, mutable: Bool, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     guard currentToken === .colon else {
       throw ParserError.rejectedConstruct(span: currentSpan, message: "foreign let declaration requires explicit type")
     }
     try match(.colon)
     let type = try parseType()
+    // 初值的存在性 + `mutable` 定形态（docs/design/cffi-design.md §B）：无初值是
+    // extern 引用；有初值 + `mutable` 是 C 变量定义；有初值 + 无 `mutable` 是
+    // C 宏常量的值绑定（无存储、无符号）。
+    var initializer: ExpressionNode? = nil
+    if currentToken === .equal {
+      try match(.equal)
+      let valueStart = currentSpan
+      let value = try expression()
+      if !isForeignConstantInitializer(value) {
+        throw ParserError.rejectedConstruct(
+          span: valueStart,
+          message: "foreign variable initializer must be a constant literal (C static initializers are constant expressions)")
+      }
+      initializer = value
+    }
     return .foreignLetDeclaration(
       name: name,
       type: type,
       mutable: mutable,
+      initializer: initializer,
+      cname: cname,
       access: access,
       span: span,
       nameSpan: nameSpan
     )
+  }
+
+  /// foreign 变量的初值只收常量字面量（可带负号 / null）：C 的静态初始化器必须是
+  /// 常量表达式（docs/design/cffi-design.md §B）。
+  private func isForeignConstantInitializer(_ expr: ExpressionNode) -> Bool {
+    switch expr {
+    case .integerLiteral, .floatLiteral, .runeLiteral, .booleanLiteral, .nullLiteral:
+      return true
+    case .unaryMinusExpression(let inner, _):
+      switch inner {
+      case .integerLiteral, .floatLiteral:
+        return true
+      default:
+        return false
+      }
+    default:
+      return false
+    }
   }
 
   // MARK: - Struct Declaration

@@ -195,6 +195,24 @@ Identifiers are names given to variables, functions, types, etc. The naming rule
 5. Within the same `{}`, identifiers with the same name cannot be defined repeatedly.
 6. In different `{}`, identifiers with the same name can be defined, and the language will prioritize the identifier defined in the current scope.
 
+### Build-Conditional Declarations
+
+`#if` selects declarations per build target — os and arch — at compile time. It lives in the declaration domain: branches hold global declarations (including nested `#if`), never statements or expressions.
+
+```koral
+#if os("windows") then {
+    let foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
+} else {
+    let foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
+};
+```
+
+- The condition is a small closed grammar, not an expression: `os("...")` and `arch("...")` atoms combined with `and`, `or`, `not`, and parentheses. Values come from closed sets — `os` ∈ `windows` / `linux` / `macos`, `arch` ∈ `x86_64` / `aarch64`. An unknown predicate or value is an error that names the set.
+- Branches are always blocks, and the whole construct ends with `;`. There is no `#endif`.
+- The unselected branch still has to parse, but its names are never resolved and its types never checked.
+- Same-name declarations must be partitioned across the branches of one `#if … else …` — one per side. Two declarations that can coexist are a duplicate declaration; an unconditional declaration may never share a name with a conditional one. The check is pure syntax: no build target turns a passing file red.
+- `using` may appear inside a branch block (conditional imports). A `#if` that contains a `using` belongs to the file's using region — the same "imports first" rule as at top level.
+
 ### Values and Literals
 
 We only need a few simple basic types to carry out most of the work.
@@ -3188,12 +3206,47 @@ The compiler adds linker flags from the resolved manifest graph. `libc` is impli
 #### Foreign Functions
 
 Declare external C functions. Foreign functions use positional parameters only; named parameters (the `=` marker) are not supported.
+**Body presence decides the direction**: no body is a reference (extern
+linkage); a body is a definition — a C ABI export.
 
 ```koral
-let foreign sin(x: Float64): Float64;
-let foreign exit(code: Int): Never;
-let foreign abort(): Never;
+let foreign sin(x: Float64): Float64;                    // reference: links C's sin
+let foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // reference + C name
+let foreign add_one(x: Int32): Int32 = {                 // definition: exported to C
+    return x + Int32(1);
+};
 ```
+
+- **The C-name slot**: a string written right after `foreign`, before the Koral
+  name — it is this declaration's **name in the C world**. Identifiers belong to
+  the Koral namespace only; foreign vocabulary (C symbol names, macro names) is
+  spelled as strings. Omitted, the C name is the Koral name verbatim. The Koral
+  name keeps value naming and may collide with a C keyword harmlessly — the
+  two names differ, each side calls its own.
+- An exported (body-bearing) function's signature restrictions are **exactly**
+  the reference ones: closed set, positional parameters, no generics. It is
+  callable from Koral like any function, and as a value its type is
+  `foreign (A) -> R` — it can be passed to C as a callback.
+- Visibility (`public` / `internal` / …) governs the Koral-side name only; the
+  **C symbol is always exported** (C has no module visibility).
+- A panic never unwinds across an export boundary: it prints and `abort()`s.
+
+#### Foreign Variables
+
+The value's presence and `mutable` pick the form:
+
+```koral
+let foreign mutable errno: Int32;            // reference: extern mutable variable
+let foreign stdin: CFile;                    // reference: extern read-only (const)
+let foreign mutable counter: Int32 = 0;      // definition: C variable (static init)
+let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
+```
+
+- An initializer must be a **constant literal** (optionally negated / `null`) —
+  C static initializers are constant expressions.
+- A value with no `mutable` is a **C macro constant** binding: the value is
+  copied from the C header, and no C entity is produced (a macro has no link
+  symbol); the C-name slot records the macro's name as a correspondence label.
 
 #### Boundary Types
 
@@ -3291,7 +3344,8 @@ let main(): Int = {
 ```
 
 - Non-empty literals carry exactly N elements; `[]` is the all-zero buffer.
-- `a[i]` is unchecked C indexing (as with `*T`); `[N]T` cannot cross a
+- `a[i]` is bounds-checked on reads and writes (only `*T` indexing is
+  unchecked C indexing); `[N]T` cannot cross a
   function boundary at the FFI (`let foreign` params/returns take `*T` —
   that is what a C array parameter really is).
 
