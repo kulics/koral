@@ -62,25 +62,31 @@ given[T: Any] Deque[T] {
 
     private ensure_capacity(self, min_capacity: UInt): Void = {
         if min_capacity > self.cap then {
-            let mutable new_cap = self.cap * 2;
-            if new_cap < min_capacity then {
-                new_cap = min_capacity;
-            };
-            let old_source = self.source;
-            let old_len = self.len;
-            let old_cap = self.cap;
-            let old_head = self.head;
-            let new_source = alloc_memory[T](new_cap);
-            for i in 0..<old_len then {
-                let old_index = (old_head + i) % old_cap;
-                let moved = take_memory(old_source + old_index);
-                init_memory(new_source + i, moved);
-            };
-            dealloc_memory(old_source);
-            self.source = new_source;
-            self.cap = new_cap;
-            self.head = 0;
+            self.grow_to(min_capacity);
         };
+    };
+
+    /// The growth body behind `ensure_capacity`, kept out of line on purpose --
+    /// same shape and reason as `List.grow_to` (see std/list.koral).
+    private grow_to(self, min_capacity: UInt): Void = {
+        let mutable new_cap = self.cap * 2;
+        if new_cap < min_capacity then {
+            new_cap = min_capacity;
+        };
+        let old_source = self.source;
+        let old_len = self.len;
+        let old_cap = self.cap;
+        let old_head = self.head;
+        let new_source = alloc_memory[T](new_cap);
+        for i in 0..<old_len then {
+            let old_index = (old_head + i) % old_cap;
+            let moved = take_memory(old_source + old_index);
+            init_memory(new_source + i, moved);
+        };
+        dealloc_memory(old_source);
+        self.source = new_source;
+        self.cap = new_cap;
+        self.head = 0;
     };
 
     /// Append `value` at the back end (amortized O(1)), without consuming the caller's value.
