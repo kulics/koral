@@ -1160,7 +1160,10 @@ given TypeChecker {
                             type_args,
                         ))'",
                     };
-                    self.push_diagnostic_at_span(
+                    // Fatal: the reference compiler's static-call shape
+                    // (`Type.member(...)`) throws this miss outside its
+                    // per-call catch.
+                    self.push_fatal_diagnostic(
                         when face_hint in {
                             .Some(hint) then "\(base_message). \(hint)",
                             .None() then base_message,
@@ -1558,7 +1561,9 @@ given TypeChecker {
                     method_name,
                 );
                 let message = "Member '\(method_name)' not found in type '\(type_node_spelling(type_node))'";
-                self.push_diagnostic_at_span(
+                // Fatal: the reference compiler's static-call shape throws
+                // this miss outside its per-call catch.
+                self.push_fatal_diagnostic(
                     when face_hint in {
                         .Some(hint) then "\(message). \(hint)",
                         .None() then message,
@@ -3096,7 +3101,11 @@ given TypeChecker {
                                                     .EnumType(_) or .GenericEnum(_, _) then true,
                                                     _ then false,
                                                 };
-                                                self.push_diagnostic_at_span(
+                                                // Fatal: the reference
+                                                // compiler throws from its
+                                                // static-call path (outside
+                                                // the per-call catch).
+                                                self.push_fatal_diagnostic(
                                                     when enum_noun in {
                                                         true then "Enum case '\(member_name)' not found in type '\(base_name)'",
                                                         false then "Member '\(member_name)' not found in type '\(base_name)'",
@@ -5175,22 +5184,45 @@ given TypeChecker {
             },
         };
         let result = structured_call_opt or else if typed_callee.expr_type is not .FunctionType(...) and typed_callee.expr_type is not .ForeignFunctionType(_, _) then {
-                when callee in {
-                    .MemberPath(base_expr, path, _) then if not path.is_empty() then self.missing_member_call_expr(
-                        typed_callee,
-                        typed_args,
-                        base_expr,
-                        path[path.count() - 1],
-                        scope,
+                if self.function_like_type(typed_callee.expr_type) is .Some(_) then {
+                    // A function behind a reference still calls.
+                    make_typed_expr(
+                        TypedExprKind.Call(typed_callee, typed_args),
+                        ret_type,
                     )
-                    else make_typed_expr(
+                } else if self.is_unresolved_expr_type(typed_callee.expr_type) then {
+                    // The member was never found: its complaint is already
+                    // pushed; this stands in as the failed call.
+                    when callee in {
+                        .MemberPath(base_expr, path, _) then if not path.is_empty() then self.missing_member_call_expr(
+                            typed_callee,
+                            typed_args,
+                            base_expr,
+                            path[path.count() - 1],
+                            scope,
+                        )
+                        else make_typed_expr(
+                            TypedExprKind.Call(typed_callee, typed_args),
+                            ret_type,
+                        ),
+                        _ then make_typed_expr(
+                            TypedExprKind.Call(typed_callee, typed_args),
+                            ret_type,
+                        ),
+                    }
+                } else {
+                    // A resolved value that cannot be called -- an Int, a
+                    // struct, an unconstrained type parameter. The reference
+                    // compiler blames the value (`Value of type 'Int' is not
+                    // callable`) and abandons the declaration.
+                    self.push_fatal_diagnostic(
+                        "Value of type '\(self.display_type_name(typed_callee.expr_type))' is not callable",
+                        self.typed_expr_span(typed_callee),
+                    );
+                    make_typed_expr(
                         TypedExprKind.Call(typed_callee, typed_args),
-                        ret_type,
-                    ),
-                    _ then make_typed_expr(
-                        TypedExprKind.Call(typed_callee, typed_args),
-                        ret_type,
-                    ),
+                        Type.Unknown(),
+                    )
                 }
             } else make_typed_expr(
                 TypedExprKind.Call(typed_callee, typed_args),

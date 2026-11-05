@@ -5143,7 +5143,16 @@ extension TypeChecker {
     // this call does not excuse it.
     var typedCallee: TypedExpressionNode
     do {
-      typedCallee = try inferTypedExpression(callee)
+      // Call position resolves a METHOD of that name before a field of the
+      // same name (the same order koralc's `check_call_callee_expr_ref`
+      // resolves it in); a callable field stays the fallback. Value position
+      // keeps field-first -- see `inferMemberPathExpression(preferMethods:)`.
+      if case .memberPath(let calleeBase, let calleePath, _) = callee {
+        typedCallee = try inferMemberPathExpression(
+          baseExpr: calleeBase, path: calleePath, preferMethods: true)
+      } else {
+        typedCallee = try inferTypedExpression(callee)
+      }
     } catch let error as SemanticError {
       try handleError(error)
       return failedExpression()
@@ -6440,7 +6449,13 @@ extension TypeChecker {
 extension TypeChecker {
   
   /// Infers the type of a member path expression (e.g., obj.field or Type.method)
-  func inferMemberPathExpression(baseExpr: ExpressionNode, path: [String]) throws -> TypedExpressionNode {
+  /// Resolve `base.path`. `preferMethods` is the CALL-position rule: the last
+  /// path step names a method before a field of the same name (a callable
+  /// field is still the fallback), matching koralc's call-callee resolution
+  /// order. Value position passes false: there a field shadows a method.
+  func inferMemberPathExpression(
+    baseExpr: ExpressionNode, path: [String], preferMethods: Bool = false
+  ) throws -> TypedExpressionNode {
     if isModulePrefixedMemberPath(baseExpr: baseExpr, path: path) {
       throw SemanticError(
         .generic("Module-prefixed access is not supported; import the symbol explicitly with using \"package/subpath\" { Symbol }"),
@@ -6570,6 +6585,25 @@ extension TypeChecker {
         if case .mutablePointer(let inner) = currentType { return (inner, true) }
         return (currentType, false)
       }()
+
+      // Call position: the method of that name wins the LAST step. The field
+      // lookup below is then the fallback (a callable field is still a call),
+      // and an inaccessible method says so rather than falling through to the
+      // field -- the same decision koralc's call-callee resolution makes.
+      if preferMethods, isLast {
+        if isPointerAccess,
+          let pointerMethodResult = try inferMethodOnType(
+            typeToLookup: currentType, memberName: memberName,
+            typedBase: typedBase, typedPath: typedPath) {
+          return pointerMethodResult
+        }
+        if !isPointerAccess,
+          let methodResult = try inferMethodOnType(
+            typeToLookup: typeToLookup, memberName: memberName,
+            typedBase: typedBase, typedPath: typedPath) {
+          return methodResult
+        }
+      }
 
       // Check if it is a structure to access members
       var foundMember = false

@@ -121,6 +121,11 @@ public struct SemanticError: Error, CustomStringConvertible, Sendable {
         case .undefinedVariable(let name):
             return "Undefined variable: \(name)"
         case .invalidOperation(let op, let type1, let type2):
+            // A call has one value to blame: the empty `type2` the call sites
+            // pass used to render mid-clause ("... between types Int and ").
+            if op == "call" && type2.isEmpty {
+                return "Value of type '\(type1)' is not callable"
+            }
             return "Invalid operation \(op) between types \(type1) and \(type2)"
         case .invalidNode:
             return "Invalid AST node"

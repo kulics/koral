@@ -2529,214 +2529,6 @@ int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
     return written > 0 ? written : -1;
 }
 
-// --- race-safe recursive tree removal -------------------------------------
-//
-// `remove_dir_all`'s contract: deletion may never escape the tree, even
-// while another process renames directories or swaps them for symlinks
-// mid-walk. The walk is therefore handle-relative and no-follow, and every
-// child is identity-checked against the directory listing before it is
-// touched. Root policy (a link root removes only the link; a missing path is
-// an error) lives in std/os; what this adds is that the policy survives
-// races. Returns 0 on success, -2 when the root is not a directory (it
-// changed shape after std/os looked), -1 on any other failure.
-
-#if defined(_WIN32) || defined(_WIN64)
-
-/// Mark `h` for deletion with POSIX semantics: the name goes away at once
-/// and the storage follows when the last handle closes. Plain
-/// FileDispositionInfo keeps the entry visible until then, which leaves the
-/// parent "not empty" whenever anything in the tree is still open -- exactly
-/// the case the contract promises to handle (unlink-while-open).
-static int koral_win_delete_on_close(HANDLE h) {
-    struct {
-        DWORD Flags;
-    } dex;
-    dex.Flags = 0x1 /* DELETE */ | 0x2 /* POSIX_SEMANTICS */;
-    if (SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */,
-                                   &dex, sizeof(dex))) {
-        return 0;
-    }
-    FILE_DISPOSITION_INFO di;
-    di.DeleteFile = TRUE;
-    if (SetFileInformationByHandle(h, FileDispositionInfo, &di, sizeof(di))) return 0;
-    return (GetLastError() == ERROR_FILE_NOT_FOUND) ? 0 : -1;
-}
-
-/// Open `wpath` for deletion and descent. FILE_LIST_DIRECTORY is what
-/// directory enumeration needs and a plain file refuses that right, so the
-/// file case falls back to the narrower access.
-static HANDLE koral_win_open_for_remove(const wchar_t* wpath) {
-    HANDLE h = CreateFileW(
-        wpath, DELETE | SYNCHRONIZE | FILE_LIST_DIRECTORY,
-        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-        NULL, OPEN_EXISTING,
-        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-    if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_ACCESS_DENIED) {
-        h = CreateFileW(
-            wpath, DELETE | SYNCHRONIZE,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            NULL, OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
-    }
-    return h;
-}
-
-static int koral_win_remove_tree(HANDLE dir, const wchar_t* dir_path, int budget) {
-    if (budget <= 0) return -1;
-    unsigned char buf[65536];
-    BOOL ok = GetFileInformationByHandleEx(
-        dir, (FILE_INFO_BY_HANDLE_CLASS)10 /* FileIdBothDirectoryInfo */,
-        buf, sizeof(buf));
-    while (ok) {
-        FILE_ID_BOTH_DIR_INFO* info = (FILE_ID_BOTH_DIR_INFO*)buf;
-        for (;;) {
-            int name_wchars = (int)(info->FileNameLength / sizeof(WCHAR));
-            int is_dot = (name_wchars == 1 && info->FileName[0] == L'.');
-            int is_dotdot = (name_wchars == 2 && info->FileName[0] == L'.'
-                             && info->FileName[1] == L'.');
-            if (!is_dot && !is_dotdot) {
-                size_t dl = wcslen(dir_path);
-                wchar_t* child_path = (wchar_t*)malloc((dl + 1 + (size_t)name_wchars + 1) * sizeof(wchar_t));
-                if (!child_path) return -1;
-                memcpy(child_path, dir_path, dl * sizeof(wchar_t));
-                child_path[dl] = L'\\';
-                memcpy(child_path + dl + 1, info->FileName, (size_t)name_wchars * sizeof(WCHAR));
-                child_path[dl + 1 + name_wchars] = L'\0';
-
-                int rc = 0;
-                HANDLE child = koral_win_open_for_remove(child_path);
-                if (child == INVALID_HANDLE_VALUE) {
-                    DWORD e = GetLastError();
-                    if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) rc = -1;
-                } else {
-                    BY_HANDLE_FILE_INFORMATION bh;
-                    ULONGLONG listed_id = (ULONGLONG)info->FileId.QuadPart;
-                    if (!GetFileInformationByHandle(child, &bh)) {
-                        rc = -1;
-                    } else if ((((ULONGLONG)bh.nFileIndexHigh << 32) | bh.nFileIndexLow) != listed_id) {
-                        // The entry was swapped under us. Refuse to touch it:
-                        // a wrong object must never be deleted.
-                        rc = -1;
-                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-                        // A link is deleted as a link, never descended.
-                        if (koral_win_delete_on_close(child) != 0) rc = -1;
-                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                        rc = koral_win_remove_tree(child, child_path, budget - 1);
-                        if (rc == 0 && koral_win_delete_on_close(child) != 0) rc = -1;
-                    } else {
-                        if (koral_win_delete_on_close(child) != 0) rc = -1;
-                    }
-                    CloseHandle(child);
-                }
-                free(child_path);
-                if (rc != 0) return -1;
-            }
-            if (info->NextEntryOffset == 0) break;
-            info = (FILE_ID_BOTH_DIR_INFO*)((char*)info + info->NextEntryOffset);
-        }
-        ok = GetFileInformationByHandleEx(
-            dir, (FILE_INFO_BY_HANDLE_CLASS)10, buf, sizeof(buf));
-    }
-    return (GetLastError() == ERROR_NO_MORE_FILES) ? 0 : -1;
-}
-
-int32_t __koral_remove_dir_all(const uint8_t* path) {
-    wchar_t* wpath = __koral_win_widen_path((const char*)path);
-    if (!wpath) return -1;
-    HANDLE root = koral_win_open_for_remove(wpath);
-    if (root == INVALID_HANDLE_VALUE) {
-        free(wpath);
-        return -1;
-    }
-    int rc = -1;
-    BY_HANDLE_FILE_INFORMATION bh;
-    if (GetFileInformationByHandle(root, &bh)) {
-        if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
-            // The root turned into a link after std/os looked: the contract
-            // removes only the link.
-            rc = koral_win_delete_on_close(root);
-        } else if (!(bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            rc = -2;
-        } else {
-            rc = koral_win_remove_tree(root, wpath, 1024);
-            if (rc == 0 && koral_win_delete_on_close(root) != 0) rc = -1;
-        }
-    }
-    CloseHandle(root);
-    free(wpath);
-    return rc;
-}
-
-#else
-
-static int koral_remove_tree_at(int dirfd, int budget) {
-    if (budget <= 0) {
-        errno = ELOOP;
-        return -1;
-    }
-    int scanfd = dup(dirfd);
-    if (scanfd < 0) return -1;
-    DIR* d = fdopendir(scanfd);
-    if (!d) {
-        close(scanfd);
-        return -1;
-    }
-    struct dirent* e;
-    while ((e = readdir(d)) != NULL) {
-        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-        // O_NOFOLLOW refuses symlinks and O_DIRECTORY refuses files, so a
-        // link or plain file falls through to unlink-as-itself below; a real
-        // directory is descended through the fd we already hold.
-        int child = openat(dirfd, e->d_name,
-                           O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-        if (child >= 0) {
-            int rc = koral_remove_tree_at(child, budget - 1);
-            close(child);
-            if (rc != 0) {
-                closedir(d);
-                return -1;
-            }
-            if (unlinkat(dirfd, e->d_name, AT_REMOVEDIR) != 0 && errno != ENOENT) {
-                closedir(d);
-                return -1;
-            }
-        } else {
-            if (unlinkat(dirfd, e->d_name, 0) != 0 && errno != ENOENT) {
-                closedir(d);
-                return -1;
-            }
-        }
-    }
-    closedir(d);
-    return 0;
-}
-
-int32_t __koral_remove_dir_all(const uint8_t* path) {
-    const char* p = (const char*)path;
-    int root = open(p, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-    if (root < 0) {
-        // The root changed shape after std/os looked: a symlink is removed as
-        // a link (the contract's root rule), a plain file is "not a
-        // directory", and anything else is an error.
-        struct stat st;
-        if (lstat(p, &st) != 0) return -1;
-        if (S_ISLNK(st.st_mode)) {
-            return unlink(p) == 0 ? 0 : -1;
-        }
-        return S_ISDIR(st.st_mode) ? -1 : -2;
-    }
-    int rc = koral_remove_tree_at(root, 1024);
-    close(root);
-    if (rc != 0) return -1;
-    // Remove the root itself by name. rmdir never follows a link, so a root
-    // swapped to a symlink fails here instead of deleting its target; a root
-    // already gone by someone else's hand is the goal met.
-    if (rmdir(p) != 0 && errno != ENOENT) return -1;
-    return 0;
-}
-
-#endif
-
 int32_t __koral_truncate(const uint8_t* path, int64_t size) {
     wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
@@ -3134,6 +2926,215 @@ uint8_t* __koral_mkdtemp(uint8_t* tmpl) {
 }
 
 #endif
+
+// --- race-safe recursive tree removal -------------------------------------
+//
+// `remove_dir_all`'s contract: deletion may never escape the tree, even
+// while another process renames directories or swaps them for symlinks
+// mid-walk. The walk is therefore handle-relative and no-follow, and every
+// child is identity-checked against the directory listing before it is
+// touched. Root policy (a link root removes only the link; a missing path is
+// an error) lives in std/os; what this adds is that the policy survives
+// races. Returns 0 on success, -2 when the root is not a directory (it
+// changed shape after std/os looked), -1 on any other failure.
+
+#if defined(_WIN32) || defined(_WIN64)
+
+/// Mark `h` for deletion with POSIX semantics: the name goes away at once
+/// and the storage follows when the last handle closes. Plain
+/// FileDispositionInfo keeps the entry visible until then, which leaves the
+/// parent "not empty" whenever anything in the tree is still open -- exactly
+/// the case the contract promises to handle (unlink-while-open).
+static int koral_win_delete_on_close(HANDLE h) {
+    struct {
+        DWORD Flags;
+    } dex;
+    dex.Flags = 0x1 /* DELETE */ | 0x2 /* POSIX_SEMANTICS */;
+    if (SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */,
+                                   &dex, sizeof(dex))) {
+        return 0;
+    }
+    FILE_DISPOSITION_INFO di;
+    di.DeleteFile = TRUE;
+    if (SetFileInformationByHandle(h, FileDispositionInfo, &di, sizeof(di))) return 0;
+    return (GetLastError() == ERROR_FILE_NOT_FOUND) ? 0 : -1;
+}
+
+/// Open `wpath` for deletion and descent. FILE_LIST_DIRECTORY is what
+/// directory enumeration needs and a plain file refuses that right, so the
+/// file case falls back to the narrower access.
+static HANDLE koral_win_open_for_remove(const wchar_t* wpath) {
+    HANDLE h = CreateFileW(
+        wpath, DELETE | SYNCHRONIZE | FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_ACCESS_DENIED) {
+        h = CreateFileW(
+            wpath, DELETE | SYNCHRONIZE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    }
+    return h;
+}
+
+static int koral_win_remove_tree(HANDLE dir, const wchar_t* dir_path, int budget) {
+    if (budget <= 0) return -1;
+    unsigned char buf[65536];
+    BOOL ok = GetFileInformationByHandleEx(
+        dir, (FILE_INFO_BY_HANDLE_CLASS)10 /* FileIdBothDirectoryInfo */,
+        buf, sizeof(buf));
+    while (ok) {
+        FILE_ID_BOTH_DIR_INFO* info = (FILE_ID_BOTH_DIR_INFO*)buf;
+        for (;;) {
+            int name_wchars = (int)(info->FileNameLength / sizeof(WCHAR));
+            int is_dot = (name_wchars == 1 && info->FileName[0] == L'.');
+            int is_dotdot = (name_wchars == 2 && info->FileName[0] == L'.'
+                             && info->FileName[1] == L'.');
+            if (!is_dot && !is_dotdot) {
+                size_t dl = wcslen(dir_path);
+                wchar_t* child_path = (wchar_t*)malloc((dl + 1 + (size_t)name_wchars + 1) * sizeof(wchar_t));
+                if (!child_path) return -1;
+                memcpy(child_path, dir_path, dl * sizeof(wchar_t));
+                child_path[dl] = L'\\';
+                memcpy(child_path + dl + 1, info->FileName, (size_t)name_wchars * sizeof(WCHAR));
+                child_path[dl + 1 + name_wchars] = L'\0';
+
+                int rc = 0;
+                HANDLE child = koral_win_open_for_remove(child_path);
+                if (child == INVALID_HANDLE_VALUE) {
+                    DWORD e = GetLastError();
+                    if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) rc = -1;
+                } else {
+                    BY_HANDLE_FILE_INFORMATION bh;
+                    ULONGLONG listed_id = (ULONGLONG)info->FileId.QuadPart;
+                    if (!GetFileInformationByHandle(child, &bh)) {
+                        rc = -1;
+                    } else if ((((ULONGLONG)bh.nFileIndexHigh << 32) | bh.nFileIndexLow) != listed_id) {
+                        // The entry was swapped under us. Refuse to touch it:
+                        // a wrong object must never be deleted.
+                        rc = -1;
+                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                        // A link is deleted as a link, never descended.
+                        if (koral_win_delete_on_close(child) != 0) rc = -1;
+                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                        rc = koral_win_remove_tree(child, child_path, budget - 1);
+                        if (rc == 0 && koral_win_delete_on_close(child) != 0) rc = -1;
+                    } else {
+                        if (koral_win_delete_on_close(child) != 0) rc = -1;
+                    }
+                    CloseHandle(child);
+                }
+                free(child_path);
+                if (rc != 0) return -1;
+            }
+            if (info->NextEntryOffset == 0) break;
+            info = (FILE_ID_BOTH_DIR_INFO*)((char*)info + info->NextEntryOffset);
+        }
+        ok = GetFileInformationByHandleEx(
+            dir, (FILE_INFO_BY_HANDLE_CLASS)10, buf, sizeof(buf));
+    }
+    return (GetLastError() == ERROR_NO_MORE_FILES) ? 0 : -1;
+}
+
+int32_t __koral_remove_dir_all(const uint8_t* path) {
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
+    if (!wpath) return -1;
+    HANDLE root = koral_win_open_for_remove(wpath);
+    if (root == INVALID_HANDLE_VALUE) {
+        free(wpath);
+        return -1;
+    }
+    int rc = -1;
+    BY_HANDLE_FILE_INFORMATION bh;
+    if (GetFileInformationByHandle(root, &bh)) {
+        if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            // The root turned into a link after std/os looked: the contract
+            // removes only the link.
+            rc = koral_win_delete_on_close(root);
+        } else if (!(bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            rc = -2;
+        } else {
+            rc = koral_win_remove_tree(root, wpath, 1024);
+            if (rc == 0 && koral_win_delete_on_close(root) != 0) rc = -1;
+        }
+    }
+    CloseHandle(root);
+    free(wpath);
+    return rc;
+}
+
+#else
+
+static int koral_remove_tree_at(int dirfd, int budget) {
+    if (budget <= 0) {
+        errno = ELOOP;
+        return -1;
+    }
+    int scanfd = dup(dirfd);
+    if (scanfd < 0) return -1;
+    DIR* d = fdopendir(scanfd);
+    if (!d) {
+        close(scanfd);
+        return -1;
+    }
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        // O_NOFOLLOW refuses symlinks and O_DIRECTORY refuses files, so a
+        // link or plain file falls through to unlink-as-itself below; a real
+        // directory is descended through the fd we already hold.
+        int child = openat(dirfd, e->d_name,
+                           O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (child >= 0) {
+            int rc = koral_remove_tree_at(child, budget - 1);
+            close(child);
+            if (rc != 0) {
+                closedir(d);
+                return -1;
+            }
+            if (unlinkat(dirfd, e->d_name, AT_REMOVEDIR) != 0 && errno != ENOENT) {
+                closedir(d);
+                return -1;
+            }
+        } else {
+            if (unlinkat(dirfd, e->d_name, 0) != 0 && errno != ENOENT) {
+                closedir(d);
+                return -1;
+            }
+        }
+    }
+    closedir(d);
+    return 0;
+}
+
+int32_t __koral_remove_dir_all(const uint8_t* path) {
+    const char* p = (const char*)path;
+    int root = open(p, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (root < 0) {
+        // The root changed shape after std/os looked: a symlink is removed as
+        // a link (the contract's root rule), a plain file is "not a
+        // directory", and anything else is an error.
+        struct stat st;
+        if (lstat(p, &st) != 0) return -1;
+        if (S_ISLNK(st.st_mode)) {
+            return unlink(p) == 0 ? 0 : -1;
+        }
+        return S_ISDIR(st.st_mode) ? -1 : -2;
+    }
+    int rc = koral_remove_tree_at(root, 1024);
+    close(root);
+    if (rc != 0) return -1;
+    // Remove the root itself by name. rmdir never follows a link, so a root
+    // swapped to a symlink fails here instead of deleting its target; a root
+    // already gone by someone else's hand is the goal met.
+    if (rmdir(p) != 0 && errno != ENOENT) return -1;
+    return 0;
+}
+
+#endif
+
 
 
 // ============================================================================

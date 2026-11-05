@@ -1064,9 +1064,38 @@ given TypeChecker {
         // inside its per-call catch: a member-not-found found here is recorded
         // and the call continues, while the same complaint in value position is
         // fatal. See `push_member_not_found_diagnostic`.
-        self.storage.call_callee_check_depth += UInt(1);
+        //
+        // Except for a TYPE receiver: the parser gives `Type.member(...)` its
+        // own static-call shape whose member miss throws OUTSIDE that catch, so
+        // a type-receiver miss is fatal even in call position.
+        let mutable callee_is_type_member = false;
+        when callee in {
+            .MemberPath(_, _, _) then {
+                when self.split_member_path_call_callee(callee) in {
+                    .Some(parts) then {
+                        when parts.first in {
+                            .Identifier(base_name, _) then {
+                                callee_is_type_member = self.is_upper_first_char(base_name)
+                                    and self.try_resolve_named_type_in_scope_without_diag(
+                                        base_name,
+                                        scope,
+                                    ) is .Some(_);
+                            },
+                            _ then {},
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+        if not callee_is_type_member then {
+            self.storage.call_callee_check_depth += UInt(1);
+        };
         defer {
-            self.storage.call_callee_check_depth -= UInt(1);
+            if not callee_is_type_member then {
+                self.storage.call_callee_check_depth -= UInt(1);
+            };
         };
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(
