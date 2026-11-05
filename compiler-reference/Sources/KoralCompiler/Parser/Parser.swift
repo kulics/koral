@@ -19,9 +19,16 @@ public class Parser {
 
   nonisolated(unsafe) public static var allImplDeclaredParameterDefaults: Set<String> = []
 
-  public init(lexer: Lexer) {
+  /// The build target's condition atoms (cffi-design.md §D) — what `#if`
+  /// branches are selected against. `""` matches no condition.
+  var targetOS: String
+  var targetArch: String
+
+  public init(lexer: Lexer, targetOS: String = "", targetArch: String = "") {
     self.lexer = lexer
     self.currentToken = .bof
+    self.targetOS = targetOS
+    self.targetArch = targetArch
   }
   
   /// Get the current token's source span
@@ -61,27 +68,13 @@ public class Parser {
 
   // Parse program
   public func parse() throws -> ASTNode {
-    var globalNodes: [GlobalNode] = []
-    var seenNonUsing = false
-    
     self.currentToken = try self.lexer.getNextToken()
-    while currentToken !== .eof {
-      if isUsingDeclaration() {
-        if seenNonUsing {
-          throw ParserError.usingAfterDeclaration(span: currentSpan)
-        }
-        let usingDecl = try parseUsingDeclaration()
-        globalNodes.append(.usingDeclaration(usingDecl))
-        try requireSemicolon()
-      } else {
-        seenNonUsing = true
-        let statement = try parseGlobalDeclaration()
-        globalNodes.append(statement)
-
-        try requireSemicolon()
-      }
-    }
-    return .program(globalNodes: globalNodes)
+    // `#if` items parse into their own tree; the partition rule sees every
+    // branch, then the build target selects one side of each construct
+    // (cffi-design.md §D). The public AST only ever sees the survivors.
+    let items = try parseBuildItemList(inBlock: false)
+    try checkBuildCondPartitions(items)
+    return .program(globalNodes: selectBuildDecls(items))
   }
   
   // MARK: - Statement Parsing

@@ -91,6 +91,47 @@ public struct PackageModuleConfig {
   /// Entry file, absolute. Relative to the package root as declared.
   public let entryPath: String
   public let links: [String]
+  /// Package-root-relative `.c` files, resolved to absolute paths at load
+  /// (cffi-design.md §E).
+  public let cSources: [String]
+  /// Per-os overlay (`cffi-design.md` §E), keyed by os atoms from the closed
+  /// set `{"windows", "linux", "macos"}`.
+  public let platform: [String: PackagePlatformOverlay]
+}
+
+/// One `platform.<os>` overlay entry (cffi-design.md §E): incremental additions
+/// on top of the module's own `links` / `c_sources`.
+public struct PackagePlatformOverlay {
+  public let links: [String]
+  public let cSources: [String]
+}
+
+/// The module's links for a build targeting `osAtom`: the module's own `links`
+/// plus the `platform.<osAtom>` overlay's (§E).
+public func effectiveLinksForOS(
+  _ links: [String],
+  platform: [String: PackagePlatformOverlay],
+  osAtom: String
+) -> [String] {
+  var out = links
+  if let overlay = platform[osAtom] {
+    out.append(contentsOf: overlay.links)
+  }
+  return out
+}
+
+/// The module's C sources for a build targeting `osAtom`, same overlay rule
+/// as `effectiveLinksForOS`.
+public func effectiveCSourcesForOS(
+  _ cSources: [String],
+  platform: [String: PackagePlatformOverlay],
+  osAtom: String
+) -> [String] {
+  var out = cSources
+  if let overlay = platform[osAtom] {
+    out.append(contentsOf: overlay.cSources)
+  }
+  return out
 }
 
 public struct PackageManifest {
@@ -324,6 +365,8 @@ public struct ResolvedModuleSpec {
   public let subpath: String
   public let entryFile: String
   public let links: [String]
+  public let cSources: [String]
+  public let platform: [String: PackagePlatformOverlay]
   public let packageIdentity: String
   public let packageKind: ResolvedPackageKind
   /// The package that owns this module. Resolution of this module's own
@@ -357,6 +400,8 @@ public func makeResolvedModuleSpec(
     subpath: config.subpath,
     entryFile: config.entryPath,
     links: config.links,
+    cSources: config.cSources,
+    platform: config.platform,
     packageIdentity: owner.identity,
     packageKind: owner.kind,
     owner: owner
@@ -500,7 +545,7 @@ public func loadPackageManifest(at manifestPath: String) throws -> PackageManife
   // `name` / `entry` / `requires` / `module_aliases` are gone (§5.1). Their
   // absence is the point, so a manifest that still carries one is told so
   // instead of being silently half-read.
-  for obsolete in ["name", "entry", "requires", "module_aliases", "links"] where object[obsolete] != nil {
+  for obsolete in ["name", "entry", "requires", "module_aliases", "links", "c_sources", "platform"] where object[obsolete] != nil {
     throw PackageManifestError.invalidField(
       path: obsolete,
       message: obsoleteFieldHint(obsolete)
@@ -613,11 +658,28 @@ public func loadPackageManifest(at manifestPath: String) throws -> PackageManife
       )
     }
     let links = try optionalStringArray(moduleConfigObject["links"], path: "modules.\(moduleName).links")
+    var cSources: [String] = []
+    for relative in try optionalStringArray(moduleConfigObject["c_sources"], path: "modules.\(moduleName).c_sources") {
+      cSources.append(
+        try resolveManifestCSource(
+          packageRoot: packageRoot,
+          relative: relative,
+          fieldPath: "modules.\(moduleName).c_sources"
+        )
+      )
+    }
+    let platform = try loadPlatformOverlays(
+      moduleConfigObject["platform"],
+      fieldPath: "modules.\(moduleName).platform",
+      packageRoot: packageRoot
+    )
     modules[moduleName] = PackageModuleConfig(
       key: moduleName,
       subpath: subpath,
       entryPath: absoluteEntry,
-      links: links
+      links: links,
+      cSources: cSources,
+      platform: platform
     )
   }
 
@@ -635,6 +697,101 @@ public func loadPackageManifest(at manifestPath: String) throws -> PackageManife
   )
 }
 
+/// The os atoms of the condition vocabulary (cffi-design.md §D/§E): what
+/// `#if os("...")` accepts and what `modules.<key>.platform` keys must be.
+/// One home so the two can never drift.
+public func isOSConditionAtom(_ name: String) -> Bool {
+  return name == "windows" || name == "linux" || name == "macos"
+}
+
+/// The arch atoms of the condition vocabulary (cffi-design.md §D): what
+/// `#if arch("...")` accepts.
+public func isArchConditionAtom(_ name: String) -> Bool {
+  return name == "x86_64" || name == "aarch64"
+}
+
+/// Resolve a `c_sources` entry -- a `.c` file named relative to the package
+/// root -- to an absolute path. Containment is the same rule as
+/// `modules.<key>.entry` (§7.16), checked before existence.
+private func resolveManifestCSource(
+  packageRoot: String,
+  relative: String,
+  fieldPath: String
+) throws -> String {
+  let resolved = URL(fileURLWithPath: packageRoot)
+    .appendingPathComponent(relative)
+    .standardized
+    .path
+  let rootPath = URL(fileURLWithPath: packageRoot).standardized.path
+  guard resolved == rootPath || resolved.hasPrefix(rootPath + "/") else {
+    throw PackageManifestError.invalidField(
+      path: fieldPath,
+      message: "c source '\(relative)' is outside the package root"
+    )
+  }
+  guard relative.hasSuffix(".c") else {
+    throw PackageManifestError.invalidField(
+      path: fieldPath,
+      message: "c source '\(relative)' must be a .c file"
+    )
+  }
+  guard FileManager.default.fileExists(atPath: resolved) else {
+    throw PackageManifestError.invalidField(
+      path: fieldPath,
+      message: "c source '\(relative)' does not exist"
+    )
+  }
+  return resolved
+}
+
+/// Parse one `platform` overlay object: keys are os atoms from the closed set,
+/// values are `{ links?, c_sources? }` incremental overlays (§E). Every key is
+/// validated on every host -- a malformed entry for another platform is still
+/// an error, so manifests do not validate differently per machine.
+private func loadPlatformOverlays(
+  _ value: Any?,
+  fieldPath: String,
+  packageRoot: String
+) throws -> [String: PackagePlatformOverlay] {
+  guard let value = value else { return [:] }
+  let object = try expectObject(value, path: fieldPath)
+  var out: [String: PackagePlatformOverlay] = [:]
+  for (osAtom, rawOverlay) in object {
+    guard isOSConditionAtom(osAtom) else {
+      throw PackageManifestError.invalidField(
+        path: fieldPath,
+        message: "unknown platform key '\(osAtom)'; expected one of windows, linux, macos"
+      )
+    }
+    let overlayObject = try expectObject(rawOverlay, path: "\(fieldPath).\(osAtom)")
+    for field in overlayObject.keys where field != "links" && field != "c_sources" {
+      throw PackageManifestError.invalidField(
+        path: "\(fieldPath).\(osAtom).\(field)",
+        message: "unsupported; a platform overlay only takes 'links' and 'c_sources'"
+      )
+    }
+    let links = try optionalStringArray(
+      overlayObject["links"],
+      path: "\(fieldPath).\(osAtom).links"
+    )
+    var cSources: [String] = []
+    for relative in try optionalStringArray(
+      overlayObject["c_sources"],
+      path: "\(fieldPath).\(osAtom).c_sources"
+    ) {
+      cSources.append(
+        try resolveManifestCSource(
+          packageRoot: packageRoot,
+          relative: relative,
+          fieldPath: "\(fieldPath).\(osAtom).c_sources"
+        )
+      )
+    }
+    out[osAtom] = PackagePlatformOverlay(links: links, cSources: cSources)
+  }
+  return out
+}
+
 private func obsoleteFieldHint(_ field: String) -> String {
   switch field {
   case "name":
@@ -647,6 +804,10 @@ private func obsoleteFieldHint(_ field: String) -> String {
     return "removed; renaming a dependency is its 'dependencies' key (§5.3)"
   case "links":
     return "moved onto the module that needs it ('modules.<key>.links')"
+  case "c_sources":
+    return "moved onto the module that needs it ('modules.<key>.c_sources')"
+  case "platform":
+    return "moved onto the module that needs it ('modules.<key>.platform')"
   default:
     return "unsupported"
   }

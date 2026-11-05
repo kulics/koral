@@ -12,11 +12,30 @@ private type ParseDeclFlags(
     invalid_access_message: Option[String],
 );
 
+/// foreign 变量的初值只收常量字面量（可带负号 / null）：C 的静态初始化器必须是
+/// 常量表达式（`docs/design/cffi-design.md` §B）。
+private let is_foreign_constant_initializer(expr: Expr): Bool = when expr in {
+    .IntegerLiteral(_, _) or .FloatLiteral(_, _) or .RuneLiteral(_, _)
+    or .BoolLiteral(_, _) or .NullLiteral(_) then true,
+    .Unary(op, inner, _) then (when op in {
+        .Negate() then true,
+        _ then false,
+    }) and (when inner in {
+        .IntegerLiteral(_, _) or .FloatLiteral(_, _) then true,
+        _ then false,
+    }),
+    _ then false,
+};
+
 public type mutable Parser(
     tokens: List[Token],
     file_path: String,
     mutable index: UInt,
     mutable pending_statements: List[Statement],
+    // The build target's condition atoms (cffi-design.md §D) — what `#if`
+    // branches are selected against. `""` matches no condition.
+    target_os: String,
+    target_arch: String,
 );
 
 given Parser {
@@ -252,11 +271,16 @@ given Parser {
     };
 
     public new(tokens: List[Token]): Parser = {
-        return Parser(tokens, "", 0, List[Statement].new());
+        return Parser(tokens, "", 0, List[Statement].new(), "", "");
     };
 
-    public new_in_file(tokens: List[Token], file_path: String): Parser = {
-        return Parser(tokens, file_path, 0, List[Statement].new());
+    public new_in_file(
+        tokens: List[Token],
+        file_path: String,
+        target_os: String,
+        target_arch: String,
+    ): Parser = {
+        return Parser(tokens, file_path, 0, List[Statement].new(), target_os, target_arch);
     };
 
     current(self): Token = {
@@ -758,27 +782,9 @@ given Parser {
         base: Decl,
     ): Result[Decl] = {
         if is_foreign then {
+            // `let foreign` 的函数/变量形态在 `parse_let_decl` 里直接构造
+            // （ForeignFunctionDecl / ForeignLetDecl）；这里只收类型声明。
             return when base in {
-                .FunctionDecl(_, name, _, params, return_type, _, span, name_span) then .Ok(
-                    Decl.ForeignFunctionDecl(
-                        access,
-                        name,
-                        params,
-                        return_type,
-                        span,
-                        name_span,
-                    ),
-                ),
-                .LetDecl(_, name, is_mutable, type_name, _, span, name_span) then when type_name in {
-                    .Some(tn) then Result[Decl].Ok(
-                        Decl.ForeignLetDecl(access, name, is_mutable, tn, span, name_span),
-                    ),
-                    .None() then Result[Decl].Error(
-                        self.parser_error_at_current(
-                            "foreign let declaration requires explicit type",
-                        ),
-                    ),
-                },
                 .TypeStructDecl(_, name, _, _, fields, span, name_span) then .Ok(
                     Decl.ForeignTypeDecl(
                         access,
@@ -1866,6 +1872,19 @@ given Parser {
         let decl_is_foreign = decl_qualifiers.is_foreign;
         let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
 
+        // C 名槽位：`let foreign "CreateFileA" create_file(…)`。外来词汇是字符串，
+        // 紧跟 `foreign`（`docs/design/cffi-design.md` §C）；不写即 Koral 名逐字。
+        let mutable cname = Option[String].None();
+        if decl_is_foreign then {
+            when self.current().kind in {
+                .StringLiteral(text) then {
+                    cname = .Some(text);
+                    self.advance();
+                },
+                _ then {},
+            };
+        };
+
         let mutable is_mut = false;
         if self.current().kind is .KwMut() then {
             is_mut = true;
@@ -1932,15 +1951,8 @@ given Parser {
             };
             let mutable return_type = self.parse_type() or return;
 
-            if decl_is_foreign or decl_is_intrinsic then {
+            if decl_is_intrinsic then {
                 if self.current().kind is .Assign() then {
-                    if decl_is_foreign then {
-                        return .Error(
-                            self.parser_error_at_current(
-                                "foreign function cannot have a body",
-                            ),
-                        );
-                    };
                     return .Error(
                         self.parser_error_at_current(
                             "intrinsic function declaration should not have body",
@@ -1960,6 +1972,31 @@ given Parser {
                     self.token_span(name_token),
                 );
                 return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
+            };
+
+            if decl_is_foreign then {
+                // 体的存在性定方向：无体是引用（extern），有体是 C ABI 导出定义
+                // （`docs/design/cffi-design.md` §B）。
+                let mutable foreign_body = Option[Expr].None();
+                if self.current().kind is .Assign() then {
+                    self.advance();
+                    let body = self.parse_expression_checked("foreign function body") or return;
+                    foreign_body = .Some(body);
+                };
+                let _ = self.require_semicolon() or return;
+                let span = self.span_from_start(start);
+                return .Ok(
+                    Decl.ForeignFunctionDecl(
+                        access,
+                        name,
+                        params,
+                        return_type,
+                        foreign_body,
+                        cname,
+                        span,
+                        self.token_span(name_token),
+                    ),
+                );
             };
 
             if self.current().kind is .Eof() then {
@@ -2010,18 +2047,40 @@ given Parser {
                 );
             };
             let mutable foreign_type = self.parse_type() or return;
+            // 初值的存在性 + `mutable` 定形态（`docs/design/cffi-design.md` §B）：
+            // 无初值是 extern 引用；有初值 + `mutable` 是 C 变量定义；
+            // 有初值 + 无 `mutable` 是 C 宏常量的值绑定（无存储、无符号）。
+            let mutable foreign_init = Option[Expr].None();
+            if self.current().kind is .Assign() then {
+                self.advance();
+                let value_start = self.current();
+                let value = self.parse_expression_checked(
+                    "foreign variable initializer",
+                ) or return;
+                if not is_foreign_constant_initializer(value) then {
+                    return .Error(
+                        self.parser_error_at(
+                            "foreign variable initializer must be a constant literal (C static initializers are constant expressions)",
+                            value_start,
+                        ),
+                    );
+                };
+                foreign_init = .Some(value);
+            };
             let _ = self.require_semicolon() or return;
             let span = self.span_from_start(start);
-            let base = Decl.LetDecl(
-                access,
-                name,
-                is_mut,
-                .Some(foreign_type),
-                Expr.Identifier("<foreign-init>", span),
-                span,
-                self.token_span(name_token),
+            return .Ok(
+                Decl.ForeignLetDecl(
+                    access,
+                    name,
+                    is_mut,
+                    foreign_type,
+                    foreign_init,
+                    cname,
+                    span,
+                    self.token_span(name_token),
+                ),
             );
-            return self.wrap_decl(access, decl_is_foreign, decl_is_intrinsic, base);
         };
 
         let mutable type_name = Option[TypeNode].None();

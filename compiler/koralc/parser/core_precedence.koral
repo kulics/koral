@@ -1613,42 +1613,12 @@ given Parser {
     };
 
     public parse_program(self): Result[Program] = {
-        let mutable declarations = List[Decl].new();
-        let mutable has_non_using_decl = false;
-
-        while not self.is_eof() then {
-            if self.current().kind is .Semicolon() then {
-                self.advance();
-                continue;
-            };
-            if self.is_eof() then {
-                break;
-            };
-            let decl_start = self.current();
-            let decl = self.parse_top_level_decl() or return;
-            // Check that using declarations appear before other declarations.
-            let is_using = when decl in {
-                .UsingDecl(_, _, _, _) then true,
-                _ then false,
-            };
-            if is_using then {
-                if has_non_using_decl then {
-                    // Blame the `using` keyword, not whatever token happens to
-                    // follow the declaration -- that is the line to move.
-                    return .Error(
-                        self.parser_error_at(
-                            "Using declarations must appear before other declarations",
-                            decl_start,
-                        ),
-                    );
-                };
-            } else {
-                has_non_using_decl = true;
-            };
-            declarations.push(decl);
-        };
-
-        return .Ok(Program(declarations));
+        // `#if` items parse into their own tree; the partition rule sees every
+        // branch, then the build target selects one side of each construct
+        // (cffi-design.md §D). The public AST only ever sees the survivors.
+        let items = self.parse_build_item_list(false) or return;
+        self.check_build_cond_partitions(items) or return;
+        return .Ok(Program(self.select_build_decls(items)));
     };
 };
 
@@ -1718,7 +1688,12 @@ given Parser {
             token_list.push(token_ref);
         };
 
-        let mutable nested = Parser.new_in_file(token_list, self.file_path);
+        let mutable nested = Parser.new_in_file(
+            token_list,
+            self.file_path,
+            self.target_os,
+            self.target_arch,
+        );
         // Propagate: the nested failure already has a span and a message of its
         // own (see the note in parse_given_member).
         let expr = nested.parse_expression() or return;
@@ -1779,6 +1754,7 @@ let token_text(token: Token): String = {
         .KwNull() then "null",
         .KwUnsafe() then "unsafe",
         .KwWhere() then "where",
+        .Hash() then "#",
         .Plus() then "+",
         .Minus() then "-",
         .Star() then "*",
@@ -1849,8 +1825,13 @@ public let parse(tokens: List[Token]): Result[Program] = {
     return parser.parse_program();
 };
 
-public let parse_in_file(tokens: List[Token], file_path: String): Result[Program] = {
-    let mutable parser = Parser.new_in_file(tokens, file_path);
+public let parse_in_file(
+    tokens: List[Token],
+    file_path: String,
+    target_os: String,
+    target_arch: String,
+): Result[Program] = {
+    let mutable parser = Parser.new_in_file(tokens, file_path, target_os, target_arch);
     // Pass the failure through untouched. It already carries its own stage and
     // span; re-wrapping it as a fresh `Parser` diagnostic with `unknown_span()`
     // threw the span away and flattened the message.

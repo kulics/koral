@@ -592,8 +592,8 @@ public type mutable Monomorphizer(mutable storage: MonomorphizerStorage);
 private let is_non_generic_decl(decl: TypedDecl): Bool = {
     return when decl in {
         .UsingDecl(_, _, _) then false,
-        .ForeignFunctionDecl(_, _, _, _, _, _) or .ForeignTypeDecl(_, _, _, _, _)
-        or .ForeignLetDecl(_, _, _, _, _, _) or .LetDecl(_, _, _, _, _, _, _)
+        .ForeignFunctionDecl(_, _, _, _, _, _, _) or .ForeignTypeDecl(_, _, _, _, _)
+        or .ForeignLetDecl(_, _, _, _, _, _, _) or .LetDecl(_, _, _, _, _, _, _)
         or .FunctionDecl(_, _, _, _, _, _, _) or .TypeStructDecl(_, _, _, _, _)
         or .TypeEnumDecl(_, _, _, _, _) then true,
         .GivenDecl(target_type, members, _) or .GivenTraitDecl(target_type, _, _, members, _, _)
@@ -673,8 +673,8 @@ private let mono_decl_kind_name(decl: TypedDecl): String = {
         .FunctionDecl(_, _, _, _, _, _, _) then "function",
         .GenericFunctionDecl(_, _, _) then "generic-function",
         .IntrinsicFunctionDecl(_, _, _, _, _, _) then "intrinsic-function",
-        .ForeignFunctionDecl(_, _, _, _, _, _) then "foreign-function",
-        .ForeignLetDecl(_, _, _, _, _, _) then "foreign-let",
+        .ForeignFunctionDecl(_, _, _, _, _, _, _) then "foreign-function",
+        .ForeignLetDecl(_, _, _, _, _, _, _) then "foreign-let",
         .TypeStructDecl(_, _, _, _, _) then "struct",
         .TypeEnumDecl(_, _, _, _, _) then "enum",
         .GenericTypeStructDecl(_, _, _) then "generic-struct",
@@ -742,8 +742,8 @@ private let mono_decl_dedup_key(mono: Monomorphizer, decl: TypedDecl): Option[St
 let decl_def_id(decl: TypedDecl): Option[DefId] = {
     return when decl in {
         .FunctionDecl(_, _, _, _, _, _, id) or .IntrinsicFunctionDecl(_, _, _, _, _, id)
-        or .ForeignFunctionDecl(_, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
-        or .ForeignLetDecl(_, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
+        or .ForeignFunctionDecl(_, _, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
+        or .ForeignLetDecl(_, _, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
         or .TypeEnumDecl(_, _, _, _, id) or .ForeignTypeDecl(_, _, _, _, id) then Option[DefId].Some(id.def_id),
         _ then Option[DefId].None(),
     };
@@ -2199,8 +2199,8 @@ given Monomorphizer {
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
                 .FunctionDecl(_, _, _, _, _, _, id) or .IntrinsicFunctionDecl(_, _, _, _, _, id)
-                or .ForeignFunctionDecl(_, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
-                or .ForeignLetDecl(_, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
+                or .ForeignFunctionDecl(_, _, _, _, _, _, id) or .LetDecl(_, _, _, _, _, _, id)
+                or .ForeignLetDecl(_, _, _, _, _, _, id) or .TypeStructDecl(_, _, _, _, id)
                 or .TypeEnumDecl(_, _, _, _, id) or .ForeignTypeDecl(_, _, _, _, id) then {
                     materialized.insert(id.def_id.id);
                 },
@@ -2466,9 +2466,16 @@ given Monomorphizer {
     private collect_codegen_foreign_def_ids(self, foreign_def_ids: Set[UInt]): Void = {
         for node_ref in self.storage.generated_nodes then {
             when node_ref in {
-                .ForeignFunctionDecl(_, _, _, _, _, id) or .ForeignLetDecl(_, _, _, _, _, id)
+                .ForeignFunctionDecl(_, _, _, _, _, _, id)
                 or .ForeignTypeDecl(_, _, _, _, id) then {
                     foreign_def_ids.insert(id.def_id.id);
+                },
+                // 宏常量（有初值 + 非 mutable）没有 C 实体，不是 foreign 符号
+                // （cffi-design.md §B）。
+                .ForeignLetDecl(_, _, is_mutable, _, initializer, _, id) then {
+                    if not (initializer is .Some(_) and not is_mutable) then {
+                        foreign_def_ids.insert(id.def_id.id);
+                    };
                 },
                 _ then {},
             };
@@ -2495,11 +2502,23 @@ given Monomorphizer {
                         ),
                     );
                 },
-                .ForeignFunctionDecl(_, name, _, _, _, fn_id) then {
-                    c_identifier_by_def_id.insert(fn_id.def_id.id, name);
+                .ForeignFunctionDecl(_, name, _, _, _, _, fn_id) then {
+                    let c_name = self.storage.context.get_cname(fn_id.def_id) or else name;
+                    c_identifier_by_def_id.insert(fn_id.def_id.id, c_name);
                 },
-                .ForeignLetDecl(_, name, _, _, _, var_id) then {
-                    c_identifier_by_def_id.insert(var_id.def_id.id, name);
+                .ForeignLetDecl(_, name, is_mutable, _, initializer, _, var_id) then {
+                    // 宏常量没有 C 实体，走普通 mangling 名；其余 foreign 变量
+                    // 用 C 名逐字（declared cname 优先）。
+                    let c_name = if initializer is .Some(_) and not is_mutable then {
+                        self.codegen_emitted_identifier_for_def(
+                            var_id.def_id,
+                            name,
+                            Set[UInt].new(),
+                        )
+                    } else {
+                        self.storage.context.get_cname(var_id.def_id) or else name
+                    };
+                    c_identifier_by_def_id.insert(var_id.def_id.id, c_name);
                 },
                 .ForeignTypeDecl(_, name, _, _, type_id) then {
                     c_identifier_by_def_id.insert(type_id.def_id.id, name);
@@ -2612,7 +2631,7 @@ private let print_mono_node(node: TypedDecl, context: CompilerContext): Void = {
                 "  fn intrinsic \(name)(...): \(mono_type_name(return_type, context))",
             );
         },
-        .ForeignFunctionDecl(access, name, params, return_type, span, _) then {
+        .ForeignFunctionDecl(access, name, params, return_type, _, span, _) then {
             println(
                 "  fn foreign \(name)(...): \(mono_type_name(return_type, context))",
             );

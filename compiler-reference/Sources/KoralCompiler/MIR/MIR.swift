@@ -52,10 +52,12 @@ struct MIRProgram {
 }
 
 enum MIRGlobal {
-  case foreignFunction(identifier: Symbol, parameters: [Symbol])
+  /// `isDefinition` marks a C ABI export (body-bearing `let foreign`).
+  case foreignFunction(identifier: Symbol, parameters: [Symbol], isDefinition: Bool)
   case foreignType(identifier: Symbol)
   case foreignStruct(identifier: Symbol, fields: [(name: String, type: Type)])
-  case foreignGlobalVariable(identifier: Symbol, mutable: Bool)
+  /// `initializer` is a C static initializer (constant literal) when present.
+  case foreignGlobalVariable(identifier: Symbol, mutable: Bool, initializer: TypedExpressionNode?)
   case globalVariable(identifier: Symbol, initializerFunction: Symbol, kind: VariableKind)
   case structDeclaration(identifier: Symbol, parameters: [Symbol])
   case enumDeclaration(identifier: Symbol, cases: [EnumCase])

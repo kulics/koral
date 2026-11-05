@@ -288,6 +288,23 @@ given Printer {
             self.write_space();
             self.print_type(return_type);
         },
+        .ForeignFunction(fk, lp, args, rp, return_type) then {
+            self.write_token(fk);
+            self.write_space();
+            self.write_token(lp);
+            for i in 0..<args.count() then {
+                let arg = args[i];
+                self.print_type(arg.inner);
+                if arg.comma is .Some(c) then {
+                    self.print_sep(c);
+                };
+            };
+            self.write_token(rp);
+            self.write_space();
+            self.write("->");
+            self.write_space();
+            self.print_type(return_type);
+        },
         .Ptr(inner, kw) or .Weakref(inner, kw) then {
             self.write_token(kw);
             self.print_type(inner);
@@ -993,6 +1010,57 @@ given Printer {
         self.print_block_items_multiline(items, tail_expr, tail_comments, rb);
     };
 
+    /// A `#if` branch block's items, one per line inside the braces. The
+    /// closing `}` is written by the caller (empty block prints `{}`).
+    private print_if_build_items(self, items: List[CstItem]): Void = {
+        if items.count() == 0 then {
+            return;
+        };
+        self.write_newline();
+        self.indent += 1;
+        for pair in items.lazy().enumerate() then {
+            if pair.second is .BlankLine() then {
+                self.write_newline();
+                continue;
+            };
+            self.print_item(pair.second);
+            if not self.next_is_trailing_comment(items, pair.first) then {
+                if not self.at_line_start then {
+                    self.write_newline();
+                };
+            };
+        };
+        self.indent -= 1;
+    };
+
+    /// The condition mini-grammar: `os("windows")`, `a and not b`, parens —
+    /// no spaces inside atoms or parens, spaces around the operators.
+    private print_build_cond(self, cond: CstBuildCond): Void = when cond in {
+        .Pred(head, lparen, value, rparen) then {
+            self.write_token(head);
+            self.write_token(lparen);
+            self.write_token(value);
+            self.write_token(rparen);
+        },
+        .And(left, kw, right) or .Or(left, kw, right) then {
+            self.print_build_cond(left);
+            self.write_space();
+            self.write_token(kw);
+            self.write_space();
+            self.print_build_cond(right);
+        },
+        .Not(kw, inner) then {
+            self.write_token(kw);
+            self.write_space();
+            self.print_build_cond(inner);
+        },
+        .Paren(lparen, inner, rparen) then {
+            self.write_token(lparen);
+            self.print_build_cond(inner);
+            self.write_token(rparen);
+        },
+    };
+
     private print_block_items_multiline(
         self,
         items: List[CstItem],
@@ -1312,6 +1380,51 @@ given Printer {
             self.print_pre_semi_comments(comments);
             self.write(";");
         },
+        .IfBuild(
+            hash,
+            if_kw,
+            cond,
+            then_kw,
+            lbrace,
+            then_items,
+            rbrace,
+            else_kw,
+            else_lbrace,
+            else_items,
+            else_rbrace,
+            semi,
+        ) then {
+            // `#if cond then {` / `} else {` / `} else {` … `};` — the
+            // branch blocks lay out like any other item body.
+            self.write_token(hash);
+            self.write_token(if_kw);
+            self.write_space();
+            self.print_build_cond(cond);
+            self.write_space();
+            self.write_token(then_kw);
+            self.write_space();
+            self.write_token(lbrace);
+            self.print_if_build_items(then_items);
+            self.write_token(rbrace);
+            when else_kw in {
+                .Some(ekw) then {
+                    self.write_space();
+                    self.write_token(ekw);
+                    self.write_space();
+                    when else_lbrace in {
+                        .Some(elb) then self.write_token(elb),
+                        .None() then {},
+                    };
+                    self.print_if_build_items(else_items);
+                    when else_rbrace in {
+                        .Some(erb) then self.write_token(erb),
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
+            self.write_token(semi);
+        },
         .Comment(t) then self.write_token(t),
         .TrailingComment(t) then {
             if not self.at_line_start then {
@@ -1330,9 +1443,10 @@ given Printer {
         .Using(tokens) then {
             self.print_token_sequence(tokens);
         },
-        .Func(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then self.print_func_decl(
+        .Func(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then self.print_func_decl(
             vis,
             mods,
+            cname,
             let_kw,
             mut_kw,
             gp,
@@ -1344,9 +1458,10 @@ given Printer {
             eq,
             body,
         ),
-        .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret) then self.print_foreign_decl(
+        .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret) then self.print_foreign_decl(
             vis,
             mods,
+            cname,
             let_kw,
             mut_kw,
             gp,
@@ -1503,6 +1618,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         let_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -1519,6 +1635,7 @@ given Printer {
                 let head_len = self.estimate_head_length(
                     vis,
                     mods,
+                    cname,
                     let_kw,
                     mut_kw,
                     gp,
@@ -1543,6 +1660,11 @@ given Printer {
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
         for mod in mods then {
             self.write_token(mod);
+            self.write_space();
+        };
+        // C 名槽位紧跟 `foreign`（cffi-design.md §C）。
+        if cname is .Some(c) then {
+            self.write_token(c);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -1593,6 +1715,7 @@ given Printer {
         let head_len = self.estimate_head_length(
             vis,
             mods,
+            cname,
             let_kw,
             mut_kw,
             gp,
@@ -1624,6 +1747,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         let_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -1638,6 +1762,7 @@ given Printer {
                 let head_len = self.estimate_head_length(
                     vis,
                     mods,
+                    cname,
                     let_kw,
                     mut_kw,
                     gp,
@@ -1662,6 +1787,11 @@ given Printer {
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
         for mod in mods then {
             self.write_token(mod);
+            self.write_space();
+        };
+        // C 名槽位紧跟 `foreign`（cffi-design.md §C）。
+        if cname is .Some(c) then {
+            self.write_token(c);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -2100,6 +2230,14 @@ given Printer {
                         self.write_newline();
                     };
                 },
+                // A `#if` cannot appear in a case list grammatically; print
+                // it as itself if one ever reaches here.
+                .IfBuild(_, _, _, _, _, _, _, _, _, _, _, _) then {
+                    self.print_item(cases[i]);
+                    if not self.at_line_start then {
+                        self.write_newline();
+                    };
+                },
             };
             i += 1;
         };
@@ -2388,6 +2526,18 @@ given Printer {
             len += self.estimate_type_length(return_type);
             len
         },
+        .ForeignFunction(_, _, args, _, return_type) then {
+            // `foreign (...) -> `: the above plus `foreign `.
+            let mutable len = UInt(14);
+            for i in 0..<args.count() then {
+                if i > 0 then {
+                    len += 2;
+                };
+                len += self.estimate_type_length(args[i].inner);
+            };
+            len += self.estimate_type_length(return_type);
+            len
+        },
         .Ptr(inner, _) then self.estimate_type_length(inner) + 7,
         .Weakref(inner, _) then self.estimate_type_length(inner) + 2,
     };
@@ -2396,6 +2546,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         let_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -2411,6 +2562,9 @@ given Printer {
         };
         for mod in mods then {
             len += mod.to_string().count() + 1;
+        };
+        if cname is .Some(c) then {
+            len += c.to_string().count() + 1;
         };
         if let_kw is .Some(k) then {
             len += k.to_string().count() + 1;
@@ -2589,12 +2743,12 @@ given Printer {
     /// Spelled by this same printer, so a signature in generated docs is the
     /// syntax the formatter would write for it.
     public print_signature(self, d: CstDecl): Void = when d in {
-        .Func(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret, _, _) then {
+        .Func(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret, _, _) then {
             if not Printer.is_public(vis) then {};
-            self.print_decl_head(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret);
+            self.print_decl_head(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret);
         },
-        .ForeignDecl(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret) then {
-            self.print_decl_head(vis, mods, let_kw, mut_kw, gp, name, lp, params, rp, ret);
+        .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret) then {
+            self.print_decl_head(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret);
         },
         .Var(vis, let_kw, mut_kw, name, var_type) then {
             if vis is .Some(v) then {
@@ -2726,6 +2880,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         let_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -2746,6 +2901,11 @@ given Printer {
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
         for mod in mods then {
             self.write_token(mod);
+            self.write_space();
+        };
+        // C 名槽位紧跟 `foreign`（cffi-design.md §C）。
+        if cname is .Some(c) then {
+            self.write_token(c);
             self.write_space();
         };
         if mut_kw is .Some(k) then {
@@ -2904,7 +3064,7 @@ given Printer {
     /// the `foreign` / `intrinsic` qualifiers sit after the declaration keyword
     /// and never carry visibility.
     public decl_visibility(d: CstDecl): Option[Token] = when d in {
-        .Func(v, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _)
+        .Func(v, _, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _, _)
         or .Type(v, _, _, _, _, _, _) or .Given(v, _, _, _, _, _, _, _, _, _) or .Var(v, _, _, _, _)
         or .Trait(v, _, _, _, _, _, _, _) or .TraitMethod(v, _, _, _, _, _, _) then v,
         .Using(_) then Option[Token].None(),
@@ -2981,10 +3141,10 @@ private let validate_type_body(body: CstTypeBody): Result[Void] = when body in {
 };
 
 private let validate_decl(decl: CstDecl): Result[Void] = when decl in {
-    .Func(_, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
+    .Func(_, _, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
     .Type(_, _, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, members, _) or .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
-    .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok(
+    .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok(
         {},
     ),
 };
@@ -3004,6 +3164,10 @@ private let validate_stmt(stmt: CstStmt): Result[Void] = when stmt in {
 private let validate_item(item: CstItem): Result[Void] = when item in {
     .Decl(decl) or .DeclPreSemi(_, decl) then validate_decl(decl),
     .Stmt(stmt) or .StmtPreSemi(_, stmt) then validate_stmt(stmt),
+    .IfBuild(_, _, _, _, _, then_items, _, _, _, else_items, _, _) then {
+        validate_item_list(then_items) or return;
+        return validate_item_list(else_items);
+    },
     .Comment(_) or .TrailingComment(_) or .BlankLine() then .Ok({}),
 };
 

@@ -38,12 +38,14 @@ docs/
     traits-and-givens.md             trait / given / trait object
     name-resolution.md               名字解析与身份
     std-api-design.md                标准库 API 设计约定
+    cffi-design.md                   CFFI（外部互操作与构建集成）
   implementation/              实现说明文档
     README.md                          章程 vs 记录
     developer-guide.md                    活的章程
     module-design-implementation.md       记录
     flow-operator-forms-implementation.md 记录
     identity-matching-tracking.md         记录
+    cffi-design-implementation.md         记录
     bootstrap-productization.md           章程
     samples-capability.md                 记录
 ```

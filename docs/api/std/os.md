@@ -193,6 +193,17 @@ public let path_separator(): String;
 /// splitting both come out wrong.
 public let is_windows_host(): Bool;
 
+/// The host os as a condition atom: `"windows"`, `"linux"` or `"macos"` -- the
+/// same closed vocabulary `#if os("...")` conditions and manifest `platform`
+/// overlays use (cffi-design.md §D/§E). `""` on anything else: the atom set is
+/// closed, so an unknown host simply matches no condition.
+public let host_os_name(): String;
+
+/// The host arch as a condition atom: `"x86_64"` or `"aarch64"` -- the same
+/// closed vocabulary `#if arch("...")` uses (cffi-design.md §D). `""` on
+/// anything else: the atom set is closed.
+public let host_arch_name(): String;
+
 /// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator(): String;
 ```

@@ -487,13 +487,14 @@ extension Monomorphizer {
                 (name: field.name, type: resolveParameterizedType(field.type))
             }
             return .foreignStruct(identifier: newIdentifier, fields: newFields)
-        case .foreignGlobalVariable(let identifier, let mutable):
+        case .foreignGlobalVariable(let identifier, let mutable, let initializer):
             let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
             )
-            return .foreignGlobalVariable(identifier: newIdentifier, mutable: mutable)
-        case .foreignFunction(let identifier, let parameters):
+            // foreign 声明不可泛型：初值是常量字面量，原样穿过。
+            return .foreignGlobalVariable(identifier: newIdentifier, mutable: mutable, initializer: initializer)
+        case .foreignFunction(let identifier, let parameters, let body):
             let newIdentifier = copySymbolPreservingDefId(
                 identifier,
                 newType: resolveParameterizedType(identifier.type)
@@ -501,7 +502,8 @@ extension Monomorphizer {
             let newParams = parameters.map { param in
                 copySymbolPreservingDefId(param, newType: resolveParameterizedType(param.type))
             }
-            return .foreignFunction(identifier: newIdentifier, parameters: newParams)
+            // foreign 声明不可泛型：体原样穿过。
+            return .foreignFunction(identifier: newIdentifier, parameters: newParams, body: body)
         case .globalStructDeclaration(let identifier, let parameters):
             let newIdentifier = copySymbolWithNewDefId(
                 identifier,

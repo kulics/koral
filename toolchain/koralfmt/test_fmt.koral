@@ -1329,6 +1329,34 @@ let main(): Void = {
         "Unexpected token: foreign",
     );
 
+    // CFFI 声明形态（cffi-design.md §B/§C）：C 名槽位紧跟 `foreign`；体/初值的
+    // 存在性定方向（引用/定义）；宏常量是带值的非 mutable foreign 变量。
+    t.test(
+        "foreign c-name alias",
+        "let foreign \"abs\" my_abs(x: Int32): Int32;\n",
+        "let foreign \"abs\" my_abs(x: Int32): Int32;\n",
+    );
+    t.test(
+        "foreign export definition",
+        "let foreign add_one(x: Int32): Int32 = {\n    return x + Int32(1);\n};\n",
+        "let foreign add_one(x: Int32): Int32 = {\n    return x + Int32(1);\n};\n",
+    );
+    t.test(
+        "foreign export with c-name",
+        "let foreign \"MyCallback\" my_cb(f: foreign (Int32) -> Int32): Void = {\n    f(Int32(1));\n};\n",
+        "let foreign \"MyCallback\" my_cb(f: foreign (Int32) -> Int32): Void = {\n    f(Int32(1));\n};\n",
+    );
+    t.test(
+        "foreign macro constant",
+        "let foreign \"AF_INET6\" af_inet6: Int32 = -7;\n",
+        "let foreign \"AF_INET6\" af_inet6: Int32 = -7;\n",
+    );
+    t.test(
+        "foreign exported global",
+        "let foreign mutable counter: Int32 = 0;\n",
+        "let foreign mutable counter: Int32 = 0;\n",
+    );
+
     // `mutable` on a trait method parameter (grammar.bnf <func-param>). It was
     // accepted for free functions and rejected inside a trait body.
     t.test(
@@ -1551,6 +1579,29 @@ let main(): Void = {
         "Self as type annotation allowed",
         "let main() : Void={\nlet x: Self=y;\n};\n",
         "let main(): Void = {\n    let x: Self = y;\n};\n",
+    );
+
+    // === Build-conditional declarations: `#if … then { … } else { … };` ===
+    // (cffi-design.md §D)
+    t.test(
+        "if build with else",
+        "#if os(\"windows\") then {\nlet x: Int=1;\n} else {\nlet x: Int=2;\n};\n",
+        "#if os(\"windows\") then {\n    let x: Int = 1;\n} else {\n    let x: Int = 2;\n};\n",
+    );
+    t.test(
+        "if build without else and nested",
+        "# if not os(\"windows\") and (arch(\"x86_64\") or arch(\"aarch64\")) then {\n# if os(\"macos\") then {\nlet y=1;\n};\n};\n",
+        "#if not os(\"windows\") and (arch(\"x86_64\") or arch(\"aarch64\")) then {\n    #if os(\"macos\") then {\n        let y = 1;\n    };\n};\n",
+    );
+    t.test(
+        "if build empty else",
+        "#if os(\"linux\") then {\nlet z: Int=1;\n} else {};\n",
+        "#if os(\"linux\") then {\n    let z: Int = 1;\n} else {};\n",
+    );
+    t.test(
+        "if build with function and using-free members",
+        "#if arch(\"aarch64\") then {\nlet f(x: Int32): Int32={\nreturn x;\n};\n} else {\nlet f(x: Int32): Int32=x;\n};\n",
+        "#if arch(\"aarch64\") then {\n    let f(x: Int32): Int32 = {\n        return x;\n    };\n} else {\n    let f(x: Int32): Int32 = x;\n};\n",
     );
 
     t.summary();

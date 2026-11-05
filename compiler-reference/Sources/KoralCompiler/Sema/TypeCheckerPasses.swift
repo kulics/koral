@@ -978,7 +978,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignFunctionDeclaration(let name, _, _, _, _, _):
+    case .foreignFunctionDeclaration(let name, _, _, _, _, _, _, _):
       if let defId = defIdMap.lookup(
           modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile),
          let funcType = defIdMap.getSymbolType(defId) {
@@ -1101,7 +1101,7 @@ extension TypeChecker {
         return (name, symbol, nil)
       }
       return nil
-    case .foreignLetDeclaration(let name, _, _, _, _, _):
+    case .foreignLetDeclaration(let name, _, _, _, _, _, _, _):
       // Same module-keyed resolution as the variable case above.
       let moduleScoped = defIdMap.lookup(
           modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
@@ -2633,7 +2633,7 @@ extension TypeChecker {
       }
       // Generic functions are fully checked in pass 3
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, let access, let span, let nameSpan):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, _, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
@@ -3187,7 +3187,7 @@ extension TypeChecker {
       }
       return .foreignType(identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access))
 
-    case .foreignLetDeclaration(let name, let typeNode, let mutable, let access, let span, let nameSpan):
+    case .foreignLetDeclaration(let name, let typeNode, let mutable, let initializer, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueValueType(type, span: span)
@@ -3216,13 +3216,27 @@ extension TypeChecker {
         currentScope.defineWithModulePath(name, type, mutable: mutable, modulePath: currentModulePath, access: access)
       }
 
+      // 初值的存在性 + `mutable` 定形态（docs/design/cffi-design.md §B）：无初值 =
+      // extern 引用；有初值 + `mutable` = C 变量定义；有初值 + 无 `mutable` =
+      // C 宏常量的值绑定。初值限常量字面量（parser 保证），这里只查类型。
+      var typedInit: TypedExpressionNode? = nil
+      if let initializer {
+        let checked = try coerceLiteral(
+          inferTypedExpression(initializer, expectedType: type), to: type)
+        if checked.type != .never && checked.type != .error && type != .error && checked.type != type {
+          throw SemanticError.typeMismatch(
+            expected: type.description, got: checked.type.description)
+        }
+        typedInit = checked
+      }
+
       let symbol = makeGlobalSymbol(
         name: name,
         type: type,
         kind: .variable(mutable ? .MutableValue : .Value),
         access: access
       )
-      return .foreignGlobalVariable(identifier: symbol, mutable: mutable)
+      return .foreignGlobalVariable(identifier: symbol, mutable: mutable, initializer: typedInit)
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
@@ -3384,7 +3398,7 @@ extension TypeChecker {
       )
 
     case .foreignFunctionDeclaration(
-      let name, let parameters, let returnTypeNode, let access, let span, let nameSpan):
+      let name, let parameters, let returnTypeNode, let bodyNode, _, let access, let span, let nameSpan):
       self.currentSpan = span
 
       let returnType = try resolveTypeNode(returnTypeNode)
@@ -3424,7 +3438,12 @@ extension TypeChecker {
       )
 
       let symbol = makeGlobalSymbol(name: name, type: functionType, kind: .function, access: access)
-      return .foreignFunction(identifier: symbol, parameters: params)
+      // 有体 = C ABI 导出定义（docs/design/cffi-design.md §B）：按普通函数查体。
+      var typedBody: TypedExpressionNode? = nil
+      if let bodyNode {
+        typedBody = try checkFunctionBody(params, returnType, bodyNode).0
+      }
+      return .foreignFunction(identifier: symbol, parameters: params, body: typedBody)
 
     case .intrinsicFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let access, let span, let nameSpan):

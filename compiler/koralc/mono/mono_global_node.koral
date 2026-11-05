@@ -174,7 +174,7 @@ public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): T
             )
         },
         // ForeignFunctionDecl: resolve param types and return type.
-        .ForeignFunctionDecl(access, name, params, return_type, span, id) then {
+        .ForeignFunctionDecl(access, name, params, return_type, body, span, id) then {
             let source_params = resolve_global_node_source_params(mono, id.def_id, params);
             let mutable resolved_params = List[TypedParam].new();
             for p in source_params then {
@@ -196,11 +196,34 @@ public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): T
                 mono,
                 resolve_global_node_source_return_type(mono, id.def_id, return_type),
             );
+            // 有体 = 导出定义：体的解析与 FunctionDecl 同一条路——解析后存进
+            // concrete registry，TypedDecl 里留占位（body 经 registry 走）。
+            let resolved_body = when body in {
+                .Some(source_body) then {
+                    let concrete = when mono.storage.context.take_concrete_function_body(
+                        id.def_id,
+                    ) in {
+                        .Some(existing_body) then existing_body,
+                        .None() then source_body,
+                    };
+                    mono.storage.expression_resolve_steps = UInt(0);
+                    mono.storage.expression_resolve_limited = false;
+                    let resolved = resolve_types_in_expression(mono, concrete);
+                    let mutable context = mono.storage.context;
+                    context.set_concrete_function_body(id.def_id, resolved);
+                    mono.storage.resolved_function_body_ids.insert(id.def_id.id);
+                    Option[TypedExpr].Some(
+                        make_zero_integer_literal_expr(resolved_return),
+                    )
+                },
+                .None() then Option[TypedExpr].None(),
+            };
             TypedDecl.ForeignFunctionDecl(
                 access,
                 name,
                 resolved_params,
                 resolved_return,
+                resolved_body,
                 span,
                 id,
             )
@@ -619,10 +642,24 @@ public let resolve_types_in_global_node(mono: Monomorphizer, node: TypedDecl): T
                 id,
             )
         },
-        // ForeignLetDecl: resolve decl type.
-        .ForeignLetDecl(access, name, is_mutable, decl_type, span, id) then {
+        // ForeignLetDecl: resolve decl type and any initializer (constant literal).
+        .ForeignLetDecl(access, name, is_mutable, decl_type, initializer, span, id) then {
             let mutable resolved_type = resolve_parameterized_type(mono, decl_type);
-            TypedDecl.ForeignLetDecl(access, name, is_mutable, resolved_type, span, id)
+            let resolved_initializer = when initializer in {
+                .Some(source_init) then Option[TypedExpr].Some(
+                    resolve_types_in_expression(mono, source_init),
+                ),
+                .None() then Option[TypedExpr].None(),
+            };
+            TypedDecl.ForeignLetDecl(
+                access,
+                name,
+                is_mutable,
+                resolved_type,
+                resolved_initializer,
+                span,
+                id,
+            )
         },
         // TypeAliasDecl: resolve target type.
         .TypeAliasDecl(access, name, target, span) then {

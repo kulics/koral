@@ -207,6 +207,8 @@ public indirect enum GlobalNode {
     name: String,
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
+    body: ExpressionNode?,
+    cname: String?,
     access: AccessModifier,
     span: SourceSpan,
     nameSpan: SourceSpan
@@ -247,6 +249,8 @@ public indirect enum GlobalNode {
     name: String,
     type: TypeNode,
     mutable: Bool,
+    initializer: ExpressionNode?,
+    cname: String?,
     access: AccessModifier,
     span: SourceSpan,
     nameSpan: SourceSpan
@@ -295,7 +299,7 @@ extension GlobalNode {
       return span
     case .intrinsicFunctionDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .foreignFunctionDeclaration(_, _, _, _, let span, _):
+    case .foreignFunctionDeclaration(_, _, _, _, _, _, let span, _):
       return span
     case .globalStructDeclaration(_, _, _, _, _, let span, _):
       return span
@@ -305,7 +309,7 @@ extension GlobalNode {
       return span
     case .foreignTypeDeclaration(_, _, _, let span, _):
       return span
-    case .foreignLetDeclaration(_, _, _, _, let span, _):
+    case .foreignLetDeclaration(_, _, _, _, _, _, let span, _):
       return span
     case .traitDeclaration(_, _, _, _, _, let span, _):
       return span
@@ -333,7 +337,7 @@ extension GlobalNode {
       return nameSpan
     case .intrinsicFunctionDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignFunctionDeclaration(_, _, _, _, _, let nameSpan):
+    case .foreignFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .globalStructDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
@@ -343,7 +347,7 @@ extension GlobalNode {
       return nameSpan
     case .foreignTypeDeclaration(_, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignLetDeclaration(_, _, _, _, _, let nameSpan):
+    case .foreignLetDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .traitDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan

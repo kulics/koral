@@ -1,7 +1,7 @@
 #ifndef KORAL_RUNTIME_H
 #define KORAL_RUNTIME_H
 
-#define KORAL_RUNTIME_ABI_VERSION 6
+#define KORAL_RUNTIME_ABI_VERSION 7
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -82,6 +82,11 @@ struct __koral_Control {
     ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
 
 void __koral_set_args(int32_t argc, uint8_t** argv);
+// Host os atom: 'w'indows / 'l'inux / 'm'acos, 0 otherwise. The one resolver
+// behind the os strings of `#if` conditions and manifest `platform` overlays.
+uint8_t __koral_host_os(void);
+// Host arch atom: 'x'86_64 / 'a'arch64, 0 otherwise.
+uint8_t __koral_host_arch(void);
 void __koral_panic_numeric_conversion_overflow(const char* loc);
 void __koral_panic_division_by_zero(const char* loc);
 void __koral_panic_remainder_by_zero(const char* loc);

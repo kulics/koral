@@ -279,15 +279,43 @@ given MIRLowerer {
 
         for node_ref in self.program.global_nodes then {
             when node_ref in {
-                .ForeignFunctionDecl(_, _, params, return_type, _, identifier) then {
+                .ForeignFunctionDecl(_, _, params, return_type, body, _, identifier) then {
                     collected_globals.push(
-                        MIRGlobal.ForeignFunction(identifier, params, return_type),
+                        MIRGlobal.ForeignFunction(
+                            identifier,
+                            params,
+                            return_type,
+                            when body in {
+                                .Some(_) then true,
+                                .None() then false,
+                            },
+                        ),
                     );
                 },
-                .ForeignLetDecl(_, _, is_mutable, decl_type, _, identifier) then {
-                    collected_globals.push(
-                        MIRGlobal.ForeignGlobalVariable(identifier, is_mutable, decl_type),
-                    );
+                .ForeignLetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
+                    // 宏常量（有初值 + 非 mutable）没有 C 实体：降级为普通全局量
+                    // （accessor + 初始化函数），与 LetDecl 同一条路。
+                    // 其余 foreign 变量是 C 直读的布局对象（cffi-design.md §B）。
+                    if (initializer is .Some(_)) and (not is_mutable) then {
+                        let init_function = self.make_global_initializer_symbol(identifier);
+                        global_var_entries.push(
+                            MIRGlobal.GlobalVariable(
+                                identifier,
+                                init_function,
+                                is_mutable,
+                                decl_type,
+                            ),
+                        );
+                    } else {
+                        collected_globals.push(
+                            MIRGlobal.ForeignGlobalVariable(
+                                identifier,
+                                is_mutable,
+                                decl_type,
+                                initializer,
+                            ),
+                        );
+                    };
                 },
                 .ForeignTypeDecl(_, _, fields, _, identifier) then {
                     when fields in {
@@ -511,6 +539,48 @@ given MIRLowerer {
                         source_initializer,
                     ),
                 );
+            },
+            .ForeignFunctionDecl(_, _, params, return_type, body, _, identifier) then {
+                // 有体 = 导出定义：体照普通函数降（cffi-design.md §B）。
+                when body in {
+                    .Some(body_expr) then {
+                        if self.should_lower_function(identifier) then {
+                            let mutable context = self.context;
+                            let source_body = when context.take_concrete_function_body(
+                                identifier.def_id,
+                            ) in {
+                                .Some(existing_body) then existing_body,
+                                .None() then body_expr,
+                            };
+                            self.pending_work_items.push(
+                                MIRFunctionWorkItem(
+                                    identifier,
+                                    params,
+                                    return_type,
+                                    MIRFunctionKind.Global(),
+                                    source_body,
+                                ),
+                            );
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            .ForeignLetDecl(_, _, is_mutable, decl_type, initializer, _, identifier) then {
+                // 宏常量（有初值 + 非 mutable）按普通全局量初始化；foreign 变量的
+                // 初值是 C 静态初始化器，不进初始化函数。
+                if (initializer is .Some(init_expr)) and (not is_mutable) then {
+                    let init_function = self.make_global_initializer_symbol(identifier);
+                    self.pending_work_items.push(
+                        MIRFunctionWorkItem(
+                            init_function,
+                            List[TypedParam].new(),
+                            identifier.symbol_type,
+                            MIRFunctionKind.Global(),
+                            init_expr,
+                        ),
+                    );
+                };
             },
             .FunctionDecl(_, _, params, return_type, body, _, identifier) then {
                 if self.should_lower_function(identifier) then {

@@ -3,7 +3,7 @@
 
 <program> ::= <using-decl>* <global-decl>*
 
-// using 必须出现在其他全局声明之前
+// using 必须出现在其他全局声明之前（含 `using` 的 `#if` 整条归入 using 区）
 
 <using-decl> ::= "using" <string-literal> <import-list>? ";"
 
@@ -61,6 +61,32 @@
                | <access-modifier>* <type-decl>
                | <access-modifier>* <trait-decl>
                | <given-decl>
+               | <build-cond-decl>
+
+// ============================================================================
+// Build-Conditional Declarations（docs/design/cffi-design.md §D）
+// ============================================================================
+
+<build-cond-decl> ::= "#" "if" <build-cond> "then" <decl-block> ("else" <decl-block>)? ";"
+// 分支一律是块（单声明也包一层）；整条以 `;` 收尾，没有 `#endif` 配对物。
+// 未选中分支不进名字解析与类型检查，但语法必须合法。
+// 同名声明必须在同一条 `#if … else …` 的两分支树上两两分道，否则报重复声明；
+// 无条件声明与条件声明同名即冲突。检查是纯语法的，与构建目标无关。
+// `using` 允许在分支块内（条件导入），受「using 在文件顶部」的同一约束：
+// 含 `using` 的 `#if` 整条归入 using 区。
+
+<decl-block> ::= "{" <global-decl>* "}"
+
+<build-cond> ::= <cond-or>
+<cond-or>    ::= <cond-and> ("or" <cond-and>)*
+<cond-and>   ::= <cond-not> ("and" <cond-not>)*
+<cond-not>   ::= "not" <cond-not> | <cond-atom>
+<cond-atom>  ::= <pred-head> "(" <pred-value> ")" | "(" <build-cond> ")"
+<pred-head>  ::= "os" | "arch"
+<pred-value> ::= <string-literal>
+// 值是字符串字面量，按谓词头的封闭集校验：
+// os ∈ {"windows","linux","macos"}、arch ∈ {"x86_64","aarch64"}。
+// 未知谓词头 / 未知值 → 报错并列出封闭集。
 
 <access-modifier> ::= "private"
                     | "internal"
@@ -76,7 +102,9 @@
 // 声明的定义在哪里：在 C，或在编译器里。两者互斥，也不能重复。
 // 它们排在 `mutable` 之前，因为 `mutable` 描述的是绑定：
 // `let foreign mutable errno: Int32;`。
-// `foreign` / `intrinsic` 声明没有函数体；`given` 只接受 `intrinsic`。
+// `intrinsic` 声明没有函数体；`given` 只接受 `intrinsic`。
+// `foreign` 的体/初值的存在性定方向：无体/无值是引用（extern），
+// 有体/有值是定义（C ABI 导出；见 <let-decl> 与 docs/design/cffi-design.md §B）。
 
 // ============================================================================
 // Let Declarations (Variables and Functions)
@@ -85,23 +113,32 @@
 <let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"
              | "let" "mutable"? <identifier> (":" <type-annotation>)? "=" <expression> ";"
              | "let" "intrinsic" <identifier> <generic-params>? <function-signature> ";"        // body-less intrinsic function
-             | "let" "foreign" <identifier> <positional-signature> ";"                          // body-less foreign function
-             | "let" "foreign" "mutable"? <identifier> ":" <type-annotation> ";"                // body-less variable
+             | "let" "foreign" <c-name>? <identifier> <positional-signature> ("=" <expression>)? ";"   // foreign function
+             | "let" "foreign" <c-name>? "mutable"? <identifier> ":" <type-annotation> ("=" <foreign-constant-init>)? ";"  // foreign variable
+<c-name> ::= <string-literal>
+// C 名槽位（docs/design/cffi-design.md §C）：这条声明在 C 世界的名字，紧跟
+// `foreign`、Koral 名之前。函数/全局量 = 链接名；宏常量（有值 + 无 `mutable`）
+// = 宏名（对应标注，无实体）。不写即 Koral 名逐字。外来词汇是字符串，不进标识符。
+<foreign-constant-init> ::= [ "-" ] (<integer-literal> | <float-literal>) | <rune-literal> | <bool-literal> | "null"
+// foreign 变量的初值只收常量字面量（可带负号 / null）：C 的静态初始化器必须是
+// 常量表达式（docs/design/cffi-design.md §B）。
 // 说明：出现 mutable 时必须是变量声明（不可接函数参数列表）。
-// 带 <decl-qualifier> 的形式没有函数体；不带的必须有。
+// 带 `intrinsic` 的形式没有函数体；`foreign` 的体/初值可选（存在性定方向）；
+// 不带限定词的必须有体。
 // Global `let` bindings initialize in declaration order: a later binding may
 // read an earlier one and see its final value (`let a = 1; let b = a + 1;`
 // gives `b == 2`).
 // intrinsic 函数支持泛型与命名参数（含默认值），只允许出现在标准库里；
 // foreign 函数不支持泛型、不支持命名参数（parse 报 "Named parameters are
-// not supported in foreign declarations"），也不支持函数体。
+// not supported in foreign declarations"）；体可选——无体是 extern 引用，
+// 有体是 C ABI 导出定义（docs/design/cffi-design.md §B）。
 <positional-signature> ::= "(" <positional-param-list>? ")" ":" <type-annotation>
 <positional-param-list> ::= <positional-param> ("," <positional-param>)* ","?
 <positional-param> ::= "mutable"? <identifier> ":" <type-annotation>
 // 说明：
 // 1) foreign 变量声明必须有类型（支持 mutable），且类型整个在 `foreign` 封闭
 //    集合里（可按值收 `type foreign` / `[N]T`——全局量是 C 直接读的布局对象）
-// 2) foreign 函数不允许函数体，不支持泛型
+// 2) foreign 函数体可选（无体=引用，有体=导出定义），不支持泛型
 // 3) foreign 函数不支持命名参数，所有参数必须是位置参数（不带 `=`）
 // 4) foreign 函数参数/返回只收：标量、`*T` / `*mutable T`（pointee 也要在集合
 //    内，`*Void` 即 C 的 `void*`）、`*` 后的 `type foreign`、组件同规则的

@@ -20,7 +20,15 @@ private type PreparedCompilation(
     display_name: String,
     artifact_base_name: String,
     linked_libraries: List[String],
+    c_sources: List[String],
     default_output_dir: Path,
+);
+
+/// Everything the C pipeline works from after emission.
+private type EmitCOutput(
+    output_path: Path,
+    c_sources: List[String],
+    linked_libraries: List[String],
 );
 
 private let phase_trace_enabled(): Bool = {
@@ -404,6 +412,7 @@ private let make_prepared_compilation(
     display_name: String,
     artifact_base_name: String,
     linked_libraries: List[String],
+    c_sources: List[String],
     default_output_dir: Path,
     root_module_path: String,
     module_symbol_keys: Dict[String, String],
@@ -453,6 +462,7 @@ private let make_prepared_compilation(
         display_name,
         artifact_base_name,
         linked_libraries,
+        c_sources,
         default_output_dir,
     );
 };
@@ -491,12 +501,34 @@ private let load_target_unit(
 };
 
 /// `links` follow the code (§5.4): a module that needs `-lm` says so, and
-/// anything that imports that module inherits the requirement.
-private let linked_libraries_of(resolver: ModuleResolver): List[String] = {
+/// anything that imports that module inherits the requirement. Each module's
+/// `platform.<os_atom>` overlay adds to its own list (cffi-design.md §E).
+private let linked_libraries_of(resolver: ModuleResolver, os_atom: String): List[String] = {
     let mutable out = List[String].new();
     for spec in resolver.loaded_module_specs() then {
-        for link in spec.links then {
+        for link in effective_links_for_os(spec.links, spec.platform, os_atom) then {
             out.push(link);
+        };
+    };
+    return out;
+};
+
+/// `c_sources` follow the same graph as `links` (§E): declared per module,
+/// inherited by importers, and each `.c` is compiled once however many
+/// modules name it.
+private let c_sources_of(resolver: ModuleResolver, os_atom: String): List[String] = {
+    let mutable out = List[String].new();
+    let mutable seen = Set[String].new();
+    for spec in resolver.loaded_module_specs() then {
+        for source in effective_c_sources_for_os(
+            spec.c_sources,
+            spec.platform,
+            os_atom,
+        ) then {
+            if not seen.contains(source) then {
+                seen.insert(source);
+                out.push(source);
+            };
         };
     };
     return out;
@@ -624,7 +656,9 @@ private let prepare_package_compilation(
     // it. `koral lint` owns it (§7).
 
     let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path_sorted());
-    let linked_libraries = linked_libraries_of(resolver);
+    let os_atom = host_os_name();
+    let linked_libraries = linked_libraries_of(resolver, os_atom);
+    let c_sources = c_sources_of(resolver, os_atom);
     let default_output_dir = package_config_path.into_path().dir_name();
 
     return Result[PreparedCompilation].Ok(
@@ -635,6 +669,7 @@ private let prepare_package_compilation(
             target_full_name,
             sanitize_module_artifact_name(target_full_name),
             linked_libraries,
+            c_sources,
             default_output_dir,
             target_spec.path_segments.join_to_string("."),
             unit.module_symbol_keys(),
@@ -702,6 +737,7 @@ private let prepare_single_file_compilation(
     resolver.resolve_single_file(root_module, unit) or return;
 
     let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path());
+    let os_atom = host_os_name();
     let default_output_dir = absolute_entry.into_path().dir_name();
     return Result[PreparedCompilation].Ok(
         make_prepared_compilation(
@@ -710,7 +746,8 @@ private let prepare_single_file_compilation(
             unit.import_graph(),
             entry_file_path,
             sanitize_module_artifact_name(stem),
-            linked_libraries_of(resolver),
+            linked_libraries_of(resolver, os_atom),
+            c_sources_of(resolver, os_atom),
             default_output_dir,
             root_module.path_string(),
             unit.module_symbol_keys(),
@@ -812,24 +849,72 @@ private let find_clang(): String = {
     return "clang";
 };
 
-// Invoke clang to compile a .c file to an executable.
-// Uses Inherit stdio (no pipe) to avoid buffer deadlock, mirroring Swift runSubprocess.
+// The link requirements of the built-in `koral_runtime.c`, declared where the
+// runtime lives: the std manifest's main-module `platform` overlay
+// (cffi-design.md §E). Read here rather than from the program graph because
+// the runtime links even under `--no-std` -- it is the ABI base, not a package
+// feature.
+private let runtime_link_libraries(std_path: String, os_atom: String): Result[List[String]] = {
+    let manifest_path = std_path.into_path().join("koral.json").to_string();
+    let manifest = load_package_manifest(manifest_path) or else as e in {
+        return Result[List[String]].Error(e);
+    };
+    let config = manifest.modules.get(".") or else {
+        return Result[List[String]].Error(
+            "Error: standard library manifest declares no main module ('.')",
+        );
+    };
+    return Result[List[String]].Ok(
+        effective_links_for_os(config.links, config.platform, os_atom),
+    );
+};
+
+// Compile one C unit to an object file. Uses Inherit stdio (no pipe) to avoid
+// buffer deadlock, mirroring Swift runSubprocess.
+private let compile_c_unit(
+    clang: String,
+    source: String,
+    obj_file: String,
+    std_path: String,
+    include_dir: String,
+    optimize_args: List[String],
+): Bool = {
+    let mutable args = List[String].new();
+    args.push("-c");
+    args.push(source);
+    args.push("-o");
+    args.push(obj_file);
+    args.push("-I");
+    args.push(std_path);
+    args.push("-I");
+    args.push(include_dir);
+    for opt in optimize_args then {
+        args.push(opt);
+    };
+    let status = Command.new(clang).args(args).set_stdout(IoRedirect.Inherit()).set_stderr(
+        IoRedirect.Inherit(),
+    ).run() or else as e in {
+        eprintln("clang: failed to run: \(e.message())");
+        return false;
+    };
+    return status.is_success();
+};
+
+// Invoke clang to build an executable from the generated C, the built-in
+// runtime, and the package `c_sources`: each unit is compiled on its own, then
+// all objects link together (cffi-design.md §E -- the same C pipeline for
+// every native unit, the runtime being the first passenger).
+// Uses Inherit stdio (no pipe) to avoid buffer deadlock.
 // Returns true on success.
 private let run_clang(
     c_file: String,
     exe_file: String,
+    c_sources: List[String],
     linked_libraries: List[String],
     optimize_args: List[String],
 ): Bool = {
     let clang = find_clang();
 
-    let mutable clang_args = List[String].new();
-    clang_args.push(c_file);
-
-    // The generated C compiles with full warnings on: real codegen mistakes
-    // must not hide behind a blanket silence. The one known-benign artifact
-    // (foreign declarations of C-library builtins) is silenced at its own
-    // emission site with a scoped pragma.
     // The generated C includes koral_runtime.h and needs koral_runtime.c at
     // link time, so a missing std is a hard error -- not a silently degraded
     // command line that surfaces later as an unreadable clang failure.
@@ -843,10 +928,55 @@ private let run_clang(
         eprintln("Error: standard library runtime not found: \(runtime_c)");
         return false;
     };
-    clang_args.push(runtime_c);
-    clang_args.push("-I");
-    clang_args.push(std_path);
 
+    let os_atom = host_os_name();
+    let runtime_links = runtime_link_libraries(std_path, os_atom) or else as e in {
+        eprintln(e.message());
+        return false;
+    };
+
+    // Units: the generated C first, then the runtime, then the c_sources.
+    let out_dir = c_file.into_path().dir_name().to_string();
+    let mutable units = List[String].new();
+    units.push(c_file);
+    units.push(runtime_c);
+    for source in c_sources then {
+        units.push(source);
+    };
+
+    // The generated C compiles with full warnings on: real codegen mistakes
+    // must not hide behind a blanket silence. The one known-benign artifact
+    // (foreign declarations of C-library builtins) is silenced at its own
+    // emission site with a scoped pragma.
+    let mutable obj_files = List[String].new();
+    let mutable obj_stems = Dict[String, UInt].new();
+    for source in units then {
+        let source_path = source.into_path();
+        let base = source_path.base_name();
+        let ext = source_path.ext_name();
+        let stem = if ext.is_empty() then base
+        else base.substring(.Until(base.count() - ext.count()));
+        let count = obj_stems.get(stem) or else 0;
+        obj_stems.insert(stem, count + 1);
+        let unique_stem = if count == 0 then stem else "\(stem)_\(count)";
+        let obj_file = out_dir.into_path().join(unique_stem + ".o").to_string();
+        if not compile_c_unit(
+            clang,
+            source,
+            obj_file,
+            std_path,
+            out_dir,
+            optimize_args,
+        ) then {
+            return false;
+        };
+        obj_files.push(obj_file);
+    };
+
+    let mutable clang_args = List[String].new();
+    for obj_file in obj_files then {
+        clang_args.push(obj_file);
+    };
     clang_args.push("-o");
     clang_args.push(exe_file);
     for opt in optimize_args then {
@@ -861,29 +991,12 @@ private let run_clang(
         seen_libs.insert(lib);
         clang_args.push("-l\(lib)");
     };
-
-    // Windows: link bcrypt and ws2_32 (needed by koral_runtime)
-    if is_windows_host() then {
-        if not seen_libs.contains("bcrypt") then {
-            clang_args.push("-lbcrypt");
+    for lib in runtime_links then {
+        if lib == "c" or seen_libs.contains(lib) then {
+            continue;
         };
-        if not seen_libs.contains("ws2_32") then {
-            clang_args.push("-lws2_32");
-        };
-        if not seen_libs.contains("psapi") then {
-            clang_args.push("-lpsapi");
-        };
-    } else {
-        // POSIX: the runtime's own float intrinsics (sqrt/pow/floor/ceil)
-        // live in libm and its threads in libpthread. macOS folds both into
-        // libSystem -- which is why the gap only ever showed on Linux as
-        // `undefined reference to 'ceil'`.
-        if not seen_libs.contains("m") then {
-            clang_args.push("-lm");
-        };
-        if not seen_libs.contains("pthread") then {
-            clang_args.push("-lpthread");
-        };
+        seen_libs.insert(lib);
+        clang_args.push("-l\(lib)");
     };
 
     // Use Inherit stdio so clang output goes directly to terminal (no pipe deadlock)
@@ -1065,6 +1178,7 @@ private let lower_mir_after_typecheck(
 type EmitCGenerationInput(
     output_path: Path,
     linked_libraries: List[String],
+    c_sources: List[String],
     mir_program: MIRProgram,
     context: CompilerContext,
 );
@@ -1072,6 +1186,7 @@ type EmitCGenerationInput(
 type PreparedEmitTypecheck(
     output_path: Path,
     linked_libraries: List[String],
+    c_sources: List[String],
     display_name: String,
     result: BodyCheckerOutput,
 );
@@ -1092,11 +1207,18 @@ private let prepare_emit_c_typecheck(
     );
     let display_name = prepared.display_name;
     let linked_libraries = prepared.linked_libraries;
+    let c_sources = prepared.c_sources;
     trace_phase(phase_prefix + ": type check");
     let result = type_check_resolved_graph(prepared.graph, display_name);
 
     return Option[PreparedEmitTypecheck].Some(
-        PreparedEmitTypecheck(output_path, linked_libraries, display_name, result),
+        PreparedEmitTypecheck(
+            output_path,
+            linked_libraries,
+            c_sources,
+            display_name,
+            result,
+        ),
     );
 };
 
@@ -1110,6 +1232,7 @@ private let prepare_emit_c_generation_input(
 
     let output_path = checked.output_path;
     let linked_libraries = checked.linked_libraries;
+    let c_sources = checked.c_sources;
     let display_name = checked.display_name;
     let mutable result = checked.result;
 
@@ -1145,7 +1268,13 @@ private let prepare_emit_c_generation_input(
         return Option[EmitCGenerationInput].None();
     };
     return Option[EmitCGenerationInput].Some(
-        EmitCGenerationInput(output_path, linked_libraries, mir_program, lowered.context),
+        EmitCGenerationInput(
+            output_path,
+            linked_libraries,
+            c_sources,
+            mir_program,
+            lowered.context,
+        ),
     );
 };
 
@@ -1153,7 +1282,7 @@ private let generate_c_from_mir(
     mir_program: MIRProgram,
     context: CompilerContext,
     phase_prefix: String,
-): String = {
+): Pair[String, String] = {
     let mutable concrete_mir_program = mir_program;
 
     let mutable cg = CodeGen.new(concrete_mir_program, context);
@@ -1163,35 +1292,47 @@ private let generate_c_from_mir(
     cg.finalize_program_into_buffer();
 
     let generated_c = cg.into_generated_string();
+    // The exports header renders from the same CodeGen state as the C, so
+    // every type spelling in its prototypes matches by construction.
+    let exports_header = cg.generate_exports_header();
     let _ = phase_prefix;
-    return generated_c;
+    return Pair[String, String](generated_c, exports_header);
 };
 
 private let emit_c(
     options: InvocationOptions,
     phase_prefix: String,
-): Option[Pair[Path, List[String]]] = {
+): Option[EmitCOutput] = {
     let generation_input = prepare_emit_c_generation_input(options, phase_prefix) or else {
-        return Option[Pair[Path, List[String]]].None();
+        return Option[EmitCOutput].None();
     };
 
     trace_phase(phase_prefix + ": codegen");
-    let generated_c = generate_c_from_mir(
+    let generated = generate_c_from_mir(
         generation_input.mir_program,
         generation_input.context,
         phase_prefix,
     );
 
-    write_text_file(generation_input.output_path, content = generated_c) or else as e in {
+    write_text_file(generation_input.output_path, content = generated.first) or else as e in {
         eprintln(
             "failed to write output file: \(generation_input.output_path.to_string()): \(e.message())",
         );
-        return Option[Pair[Path, List[String]]].None();
+        return Option[EmitCOutput].None();
     };
 
-    return Option[Pair[Path, List[String]]].Some(
-        Pair[Path, List[String]](
+    let exports_path = generation_input.output_path.dir_name().join("koral_exports.h");
+    write_text_file(exports_path, content = generated.second) or else as e in {
+        eprintln(
+            "failed to write exports header: \(exports_path.to_string()): \(e.message())",
+        );
+        return Option[EmitCOutput].None();
+    };
+
+    return Option[EmitCOutput].Some(
+        EmitCOutput(
             generation_input.output_path,
+            generation_input.c_sources,
             generation_input.linked_libraries,
         ),
     );
@@ -1208,8 +1349,7 @@ private let run_build(options: InvocationOptions): Int = {
     let output = emit_c(options, "build") or else {
         return 1;
     };
-    let output_path = output.first;
-    let linked_libraries = output.second;
+    let output_path = output.output_path;
 
     let is_windows = is_windows_host();
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
@@ -1217,7 +1357,8 @@ private let run_build(options: InvocationOptions): Int = {
     if not run_clang(
         output_path.to_string(),
         exe_path.to_string(),
-        linked_libraries,
+        output.c_sources,
+        output.linked_libraries,
         options.optimize_args,
     ) then {
         eprintln("clang compilation failed");
@@ -1232,8 +1373,7 @@ private let run_run(options: InvocationOptions): Int = {
     let output = emit_c(options, "run") or else {
         return 1;
     };
-    let output_path = output.first;
-    let linked_libraries = output.second;
+    let output_path = output.output_path;
 
     let is_windows = is_windows_host();
     let exe_path = output_path.with_ext_name(if is_windows then ".exe" else "");
@@ -1241,7 +1381,8 @@ private let run_run(options: InvocationOptions): Int = {
     if not run_clang(
         output_path.to_string(),
         exe_path.to_string(),
-        linked_libraries,
+        output.c_sources,
+        output.linked_libraries,
         options.optimize_args,
     ) then {
         eprintln("clang compilation failed");

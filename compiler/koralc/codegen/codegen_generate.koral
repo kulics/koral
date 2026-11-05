@@ -38,6 +38,18 @@ private let trace_codegen_step(message: String): Void = {
 
 type ForeignFunctionPrototype(name: String, params: List[TypedParam], return_type: Type);
 
+/// The declarations `koral_exports.h` needs around its prototypes (see
+/// `generate_exports_header`): typedef-form names for opaque foreign types,
+/// forward-declared struct tags, and the wrapper typedef names referenced by
+/// export signatures. `seen` dedups across signatures.
+type ExportHeaderDecls(
+    typedef_forms: List[String],
+    forward_forms: List[String],
+    array_names: List[String],
+    fnptr_names: List[String],
+    seen: Set[String],
+);
+
 type ForeignDeclarations(
     empty_types: List[String],
     functions: List[ForeignFunctionPrototype],
@@ -84,7 +96,7 @@ given CodeGen {
 
         for global in self.program.globals then {
             when global in {
-                .ForeignFunction(identifier, params, return_type) then {
+                .ForeignFunction(identifier, params, return_type, _) then {
                     if self.type_contains_generic(identifier.symbol_type) or self.type_contains_generic(
                         return_type,
                     ) or self.params_contain_generic(params) then {
@@ -95,7 +107,7 @@ given CodeGen {
                         );
                     };
                 },
-                .ForeignGlobalVariable(identifier, _, decl_type) then {
+                .ForeignGlobalVariable(identifier, _, decl_type, _) then {
                     if self.type_contains_generic(decl_type) then {
                         panic(
                             internal_compiler_error(
@@ -447,21 +459,24 @@ given CodeGen {
                         empty_types.push(self.c_identifier_for_symbol(identifier));
                     };
                 },
-                .ForeignFunction(identifier, params, return_type) then {
-                    let name = self.c_identifier_for_symbol(identifier);
-                    let mutable is_stdlib = false;
-                    for sf in stdlib_functions then {
-                        if sf == name then {
-                            is_stdlib = true;
+                .ForeignFunction(identifier, params, return_type, is_definition) then {
+                    // 导出定义（有体）自带定义体，不发 extern 原型。
+                    if not is_definition then {
+                        let name = self.c_identifier_for_symbol(identifier);
+                        let mutable is_stdlib = false;
+                        for sf in stdlib_functions then {
+                            if sf == name then {
+                                is_stdlib = true;
+                            };
+                        };
+                        if not is_stdlib then {
+                            foreign_functions.push(
+                                ForeignFunctionPrototype(name, params, return_type),
+                            );
                         };
                     };
-                    if not is_stdlib then {
-                        foreign_functions.push(
-                            ForeignFunctionPrototype(name, params, return_type),
-                        );
-                    };
                 },
-                .ForeignGlobalVariable(_, _, _) then {},
+                .ForeignGlobalVariable(_, _, _, _) then {},
                 .Function(identifier, _, return_type, kind) then {
                     when kind in {
                         .Global() then {
@@ -483,6 +498,188 @@ given CodeGen {
         };
 
         return ForeignDeclarations(empty_types, foreign_functions);
+    };
+
+    // ── generate_exports_header ───────────────────────────────────────────────
+
+    /// `koral_exports.h`: this module's C ABI surface for `c_sources` to call
+    /// back through (cffi-design.md §E) -- prototypes of body-bearing
+    /// `let foreign` functions under their C names, `extern` declarations of
+    /// exported globals, and the type declarations those signatures need.
+    /// Nominal types appear as forward declarations only: `type foreign` is
+    /// opaque on the C side by design, and a shim that needs a by-value layout
+    /// completes the struct in its own translation unit (same tag, same
+    /// members = compatible, C11 6.2.7).
+    public generate_exports_header(self): String = {
+        let out = ExportHeaderDecls(
+            List[String].new(),
+            List[String].new(),
+            List[String].new(),
+            List[String].new(),
+            Set[String].new(),
+        );
+        let mutable export_functions = List[ForeignFunctionPrototype].new();
+        let mutable export_globals = List[Pair[String, Type]].new();
+        for global in self.program.globals then {
+            when global in {
+                .ForeignFunction(identifier, params, return_type, is_definition) then {
+                    // Only an export (body-bearing) belongs in the header;
+                    // extern references are imports -- the C side already
+                    // owns their declarations.
+                    if is_definition then {
+                        let name = self.c_identifier_for_symbol(identifier);
+                        export_functions.push(
+                            ForeignFunctionPrototype(name, params, return_type),
+                        );
+                        for p in params then {
+                            self.collect_export_type_decls(p.param_type, out);
+                        };
+                        self.collect_export_type_decls(return_type, out);
+                    };
+                },
+                .ForeignGlobalVariable(identifier, _, decl_type, initializer) then {
+                    // An initializer makes it a C variable DEFINITION here --
+    // an export. Macro constants never reach MIR as foreign globals
+                    // (they degrade to ordinary globals), and initializer-less
+                    // declarations are imports.
+                    if initializer is .Some(_) then {
+                        export_globals.push(
+                            Pair[String, Type](
+                                self.c_identifier_for_symbol(identifier),
+                                decl_type,
+                            ),
+                        );
+                        self.collect_export_type_decls(decl_type, out);
+                    };
+                },
+                _ then {},
+            };
+        };
+
+        let mutable header = StringBuilder.new();
+        header.push_string("#ifndef KORAL_EXPORTS_H\n");
+        header.push_string("#define KORAL_EXPORTS_H\n\n");
+        header.push_string(
+            "// Generated by the Koral compiler -- the C ABI surface of this\n// module for `c_sources` to call back through (cffi-design.md §E).\n// Do not edit.\n\n",
+        );
+        header.push_string("#include <stdint.h>\n\n");
+        for name in out.typedef_forms then {
+            header.push_string("typedef struct \(name) \(name);\n");
+        };
+        if not out.typedef_forms.is_empty() then {
+            header.push_string("\n");
+        };
+        for name in out.forward_forms then {
+            header.push_string("struct \(name);\n");
+        };
+        if not out.forward_forms.is_empty() then {
+            header.push_string("\n");
+        };
+        for text in fixed_array_typedef_texts then {
+            let mutable needed = false;
+            for name in out.array_names then {
+                if text.contains("\(name);") then {
+                    needed = true;
+                };
+            };
+            if needed then {
+                header.push_string(text);
+                header.push_string("\n");
+            };
+        };
+        for text in foreign_function_typedef_texts then {
+            let mutable needed = false;
+            for name in out.fnptr_names then {
+                if text.contains("(*\(name))") then {
+                    needed = true;
+                };
+            };
+            if needed then {
+                header.push_string(text);
+                header.push_string("\n");
+            };
+        };
+        if not out.array_names.is_empty() or not out.fnptr_names.is_empty() then {
+            header.push_string("\n");
+        };
+        if not export_functions.is_empty() then {
+            header.push_string("// Exported Koral functions (C ABI).\n");
+            for fn in export_functions then {
+                header.push_string(self.c_type_name(fn.return_type));
+                header.push_string(" \(fn.name)(");
+                header.push_string(self.build_param_type_list(fn.params));
+                header.push_string(");\n");
+            };
+            header.push_string("\n");
+        };
+        if not export_globals.is_empty() then {
+            header.push_string("// Exported Koral globals.\n");
+            for var in export_globals then {
+                header.push_string("extern ");
+                header.push_string(self.c_type_name(var.second));
+                header.push_string(" \(var.first);\n");
+            };
+            header.push_string("\n");
+        };
+        header.push_string("#endif\n");
+        return header.to_string();
+    };
+
+    /// Walk an export signature's types, recording the declarations the header
+    /// needs for its spellings: opaque foreign types as typedefs, nominal
+    /// struct tags (foreign structs, `Rune`) as forward declarations, and the
+    /// array / function-pointer wrapper typedefs as their registration names.
+    collect_export_type_decls(self, t: Type, out: ExportHeaderDecls): Void = {
+        when t in {
+            .OpaqueType(_) then {
+                let spelling = self.c_type_name(t);
+                if spelling.starts_with("struct ") then {
+                    let name = spelling.substring(7..<spelling.count());
+                    if not out.seen.contains(name) then {
+                        out.seen.insert(name);
+                        out.forward_forms.push(name);
+                    };
+                } else {
+                    if not out.seen.contains(spelling) then {
+                        out.seen.insert(spelling);
+                        out.typedef_forms.push(spelling);
+                    };
+                };
+            },
+            .StructureType(_) then {
+                let spelling = self.c_type_name(t);
+                if spelling.starts_with("struct ") then {
+                    let name = spelling.substring(7..<spelling.count());
+                    if not out.seen.contains(name) then {
+                        out.seen.insert(name);
+                        out.forward_forms.push(name);
+                    };
+                };
+            },
+            .FixedArrayType(len, inner) then {
+                let name = self.fixed_array_type_name(len, inner);
+                if not out.seen.contains(name) then {
+                    out.seen.insert(name);
+                    out.array_names.push(name);
+                };
+                self.collect_export_type_decls(inner, out);
+            },
+            .PointerType(inner) or .MutablePointerType(inner) then {
+                self.collect_export_type_decls(inner, out);
+            },
+            .ForeignFunctionType(params, return_type) then {
+                let name = self.foreign_function_type_name(params, return_type);
+                if not out.seen.contains(name) then {
+                    out.seen.insert(name);
+                    out.fnptr_names.push(name);
+                };
+                for p in params then {
+                    self.collect_export_type_decls(p.param_type, out);
+                };
+                self.collect_export_type_decls(return_type, out);
+            },
+            _ then {},
+        };
     };
 
     // ── emit_includes ─────────────────────────────────────────────────────────
@@ -658,16 +855,57 @@ given CodeGen {
 
     // ── emit_mir_global_variables ────────────────────────────────────────────
 
+    /// foreign 变量的静态初始化器文本。初值限常量字面量（cffi-design.md §B）：
+    /// C 的静态初始化器必须是常量表达式。Float32 带 `f` 后缀（同
+    /// `float_constant_literal` 的理由）。
+    foreign_static_initializer_text(self, init: TypedExpr): String = {
+        return when init.expr_kind in {
+            .IntegerLiteral(value) then self.integer_constant_literal(value),
+            .FloatLiteral(value) then {
+                let base = self.sanitize_c_numeric_literal(value);
+                if init.expr_type is not .Float32Type() then {
+                    base
+                } else {
+                    if base.contains(".") or base.contains("e") or base.contains("E") then {
+                        base + "f"
+                    } else {
+                        base + ".0f"
+                    }
+                }
+            },
+            .BoolLiteral(value) then if value then "1" else "0",
+            .Unary(op, inner) then (when op in {
+                .Negate() then "-" + self.foreign_static_initializer_text(inner),
+                _ then "0",
+            }),
+            .CastExpr(_, inner) then self.foreign_static_initializer_text(inner),
+            .IntrinsicCall(inner) then (when inner in {
+                .NullPtr(_) then "NULL",
+                _ then "0",
+            }),
+            _ then "0",
+        };
+    };
+
     emit_mir_global_variables(self): Void = {
         for global in self.program.globals then {
             when global in {
-                .ForeignGlobalVariable(identifier, is_mutable, decl_type) then {
+                .ForeignGlobalVariable(identifier, is_mutable, decl_type, initializer) then {
                     let mutable c_type = self.c_type_name(decl_type);
-                    let name = self.context.symbol_name(identifier);
-                    if is_mutable then {
-                        self.buffer.push_string("extern \(c_type) \(name);\n");
-                    } else {
-                        self.buffer.push_string("extern const \(c_type) \(name);\n");
+                    let name = self.c_identifier_for_symbol(identifier);
+                    when initializer in {
+                        .Some(init) then {
+                            // 有初值 = C 变量定义（静态初始化器）。
+                            let text = self.foreign_static_initializer_text(init);
+                            self.buffer.push_string("\(c_type) \(name) = \(text);\n");
+                        },
+                        .None() then {
+                            if is_mutable then {
+                                self.buffer.push_string("extern \(c_type) \(name);\n");
+                            } else {
+                                self.buffer.push_string("extern const \(c_type) \(name);\n");
+                            };
+                        },
                     };
                 },
                 .GlobalVariable(identifier, _, _, decl_type) then {

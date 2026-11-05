@@ -55,12 +55,66 @@ public type PackageDependencyConfig(key: String, source: String, version: String
 /// A module as the manifest declares it. `key` is the package-internal name --
 /// `"."` for the main module, otherwise the subpath. A consumer spells the FULL
 /// name, `package[/subpath]`; the manifest only ever describes the inside (§5.2).
+/// `c_sources` holds package-root-relative `.c` files already resolved to
+/// absolute paths at load; `platform` is the per-os overlay (cffi-design.md §E).
 public type PackageModuleConfig(
     key: String,
     subpath: String,
     entry_path: String,
     links: List[String],
+    c_sources: List[String],
+    platform: Dict[String, PackagePlatformOverlay],
 );
+
+/// One `platform.<os>` overlay entry (cffi-design.md §E): incremental additions
+/// on top of the module's own `links` / `c_sources`. Keys of the enclosing map
+/// are os atoms from the closed set `{"windows", "linux", "macos"}` -- the same
+/// vocabulary as `#if os("...")`.
+public type PackagePlatformOverlay(links: List[String], c_sources: List[String]);
+
+/// The module's links for a build targeting `os_atom`: the module's own `links`
+/// plus the `platform.<os_atom>` overlay's (§E: 增量叠加).
+public let effective_links_for_os(
+    links: List[String],
+    platform: Dict[String, PackagePlatformOverlay],
+    os_atom: String,
+): List[String] = {
+    let mutable out = List[String].new();
+    for link in links then {
+        out.push(link);
+    };
+    when platform.get(os_atom) in {
+        .Some(overlay) then {
+            for link in overlay.links then {
+                out.push(link);
+            };
+        },
+        .None() then {},
+    };
+    return out;
+};
+
+/// The module's C sources for a build targeting `os_atom`, same overlay rule
+/// as `effective_links_for_os`.
+public let effective_c_sources_for_os(
+    c_sources: List[String],
+    platform: Dict[String, PackagePlatformOverlay],
+    os_atom: String,
+): List[String] = {
+    let mutable out = List[String].new();
+    for source in c_sources then {
+        out.push(source);
+    };
+    when platform.get(os_atom) in {
+        .Some(overlay) then {
+            for source in overlay.c_sources then {
+                out.push(source);
+            };
+        },
+        .None() then {},
+    };
+    return out;
+};
 
 /// Four fields (§5.1): `package`, `version`, `modules`, `dependencies`.
 /// No `name` (same thing as `package`), no top-level `entry` (the default build
@@ -349,6 +403,8 @@ public type ResolvedModuleSpec(
     subpath: String,
     entry_file: String,
     links: List[String],
+    c_sources: List[String],
+    platform: Dict[String, PackagePlatformOverlay],
     package_identity: String,
     package_kind: ResolvedPackageKind,
     owner: LoadedPackage,
@@ -466,6 +522,8 @@ public let make_resolved_module_spec(
         config.subpath,
         config.entry_path,
         config.links,
+        config.c_sources,
+        config.platform,
         owner.identity,
         owner.kind,
         owner,
@@ -505,6 +563,8 @@ private let obsolete_field_hint(field: String): String = when field in {
     "git" then "removed; the fetch location is 'source' (§5.3)",
     "hash" then "removed; hashes live in koral.lock, one place (§11.2)",
     "links" then "moved onto the module that needs it ('modules.<key>.links')",
+    "c_sources" then "moved onto the module that needs it ('modules.<key>.c_sources')",
+    "platform" then "moved onto the module that needs it ('modules.<key>.platform')",
     _ then "unsupported",
 };
 
@@ -540,6 +600,148 @@ private let expect_manifest_string(json: JsonValue, path: String): Result[String
         );
     };
     return Result[String].Ok(text);
+};
+
+/// The os atoms of the condition vocabulary (cffi-design.md §D/§E): what
+/// `#if os("...")` accepts and what `modules.<key>.platform` keys must be.
+/// One home so the two can never drift.
+public let is_os_condition_atom(name: String): Bool =
+    name == "windows" or name == "linux" or name == "macos";
+
+/// The arch atoms of the condition vocabulary (cffi-design.md §D): what
+/// `#if arch("...")` accepts.
+public let is_arch_condition_atom(name: String): Bool =
+    name == "x86_64" or name == "aarch64";
+
+/// Resolve a `c_sources` entry -- a `.c` file named relative to the package
+/// root -- to an absolute path. Containment is the same rule as
+/// `modules.<key>.entry` (§7.16), checked before existence: a path outside the
+/// package is the problem whether or not something happens to sit there. `..`
+/// is resolved here because `join` keeps it, and a string prefix test cannot
+/// see the climb.
+private let resolve_manifest_c_source(
+    package_root: String,
+    relative: String,
+    field_path: String,
+): Result[String] = {
+    let mutable target = package_root.into_path();
+    for segment in relative.split("/") then {
+        if segment == "." or segment.is_empty() then {
+            continue;
+        };
+        if segment == ".." then {
+            target = target.dir_name();
+        } else {
+            target = target.join(segment);
+        };
+    };
+    let resolved = target.normalize();
+    let root_path = package_root.into_path().normalize();
+    if not (resolved == root_path or resolved.starts_with(root_path)) then {
+        return Result[String].Error(
+            manifest_error_text(
+                .InvalidField(
+                    field_path,
+                    "c source '\(relative)' is outside the package root",
+                ),
+            ),
+        );
+    };
+    if not relative.ends_with(".c") then {
+        return Result[String].Error(
+            manifest_error_text(
+                .InvalidField(field_path, "c source '\(relative)' must be a .c file"),
+            ),
+        );
+    };
+    if not path_exist(resolved) then {
+        return Result[String].Error(
+            manifest_error_text(
+                .InvalidField(field_path, "c source '\(relative)' does not exist"),
+            ),
+        );
+    };
+    return Result[String].Ok(resolved.to_string());
+};
+
+/// Parse one `platform` overlay object: keys are os atoms from the closed set,
+/// values are `{ links?, c_sources? }` incremental overlays (§E). Every key is
+/// validated on every host -- a malformed entry for another platform is still
+/// an error, so manifests do not validate differently per machine.
+private let load_platform_overlays(
+    value: JsonValue,
+    field_path: String,
+    package_root: String,
+): Result[Dict[String, PackagePlatformOverlay]] = {
+    let platform_obj = value.as_object() or else {
+        return Result[Dict[String, PackagePlatformOverlay]].Error(
+            manifest_error_text(.InvalidField(field_path, "expected object")),
+        );
+    };
+    let mutable out = Dict[String, PackagePlatformOverlay].new();
+    for entry in platform_obj then {
+        let os_atom = entry.first;
+        if not is_os_condition_atom(os_atom) then {
+            return Result[Dict[String, PackagePlatformOverlay]].Error(
+                manifest_error_text(
+                    .InvalidField(
+                        field_path,
+                        "unknown platform key '\(os_atom)'; expected one of windows, linux, macos",
+                    ),
+                ),
+            );
+        };
+        let overlay_json = entry.second;
+        let overlay_obj = overlay_json.as_object() or else {
+            return Result[Dict[String, PackagePlatformOverlay]].Error(
+                manifest_error_text(
+                    .InvalidField("\(field_path).\(os_atom)", "expected object"),
+                ),
+            );
+        };
+        for field in overlay_obj then {
+            if field.first != "links" and field.first != "c_sources" then {
+                return Result[Dict[String, PackagePlatformOverlay]].Error(
+                    manifest_error_text(
+                        .InvalidField(
+                            "\(field_path).\(os_atom).\(field.first)",
+                            "unsupported; a platform overlay only takes 'links' and 'c_sources'",
+                        ),
+                    ),
+                );
+            };
+        };
+        let mutable overlay_links = List[String].new();
+        when overlay_json.get_field("links") in {
+            .Some(links_value) then {
+                overlay_links = load_manifest_string_array(
+                    links_value,
+                    "\(field_path).\(os_atom).links",
+                ) or return;
+            },
+            .None() then {},
+        };
+        let mutable overlay_sources = List[String].new();
+        when overlay_json.get_field("c_sources") in {
+            .Some(sources_value) then {
+                let rel_list = load_manifest_string_array(
+                    sources_value,
+                    "\(field_path).\(os_atom).c_sources",
+                ) or return;
+                for rel in rel_list then {
+                    let abs = resolve_manifest_c_source(
+                        package_root,
+                        rel,
+                        "\(field_path).\(os_atom).c_sources",
+                    ) or return;
+                    overlay_sources.push(abs);
+                };
+            },
+            .None() then {},
+        };
+        out.insert(os_atom, PackagePlatformOverlay(overlay_links, overlay_sources));
+    };
+    return Result[Dict[String, PackagePlatformOverlay]].Ok(out);
 };
 
 private let load_manifest_string_array(
@@ -596,6 +798,8 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
     top_fields.push("requires");
     top_fields.push("module_aliases");
     top_fields.push("links");
+    top_fields.push("c_sources");
+    top_fields.push("platform");
     reject_obsolete_fields(json, "", top_fields) or return;
 
     let package_root = absolute_manifest_path.into_path().dir_name().to_string();
@@ -835,9 +1039,42 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
             ) or return,
             .None() then List[String].new(),
         };
+        let mutable module_c_sources = List[String].new();
+        when module_json.get_field("c_sources") in {
+            .Some(value_ref) then {
+                let rel_list = load_manifest_string_array(
+                    value_ref,
+                    "modules.\(module_name).c_sources",
+                ) or return;
+                for rel in rel_list then {
+                    let abs = resolve_manifest_c_source(
+                        package_root,
+                        rel,
+                        "modules.\(module_name).c_sources",
+                    ) or return;
+                    module_c_sources.push(abs);
+                };
+            },
+            .None() then {},
+        };
+        let module_platform = when module_json.get_field("platform") in {
+            .Some(value_ref) then load_platform_overlays(
+                value_ref,
+                "modules.\(module_name).platform",
+                package_root,
+            ) or return,
+            .None() then Dict[String, PackagePlatformOverlay].new(),
+        };
         modules.insert(
             module_name,
-            PackageModuleConfig(module_name, subpath, entry_abs, module_links),
+            PackageModuleConfig(
+                module_name,
+                subpath,
+                entry_abs,
+                module_links,
+                module_c_sources,
+                module_platform,
+            ),
         );
     };
 
