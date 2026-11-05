@@ -1,4 +1,4 @@
-// codegen_borrowed_self.koral - borrowed-self (guaranteed self) analysis
+// codegen_borrowed_self.koral - borrowed-parameter (guaranteed) analysis
 //
 // Swift's "guaranteed self" / ARC retain-release pair elision: a method whose
 // `self` never escapes can receive its receiver handle +0 (unretained struct
@@ -11,7 +11,8 @@
 // counting is an implementation detail. The compiler may use ARC and hidden
 // storage internally." (docs/guide/document.md)
 //
-// The convention is adopted PER METHOD and must hold at EVERY entry point:
+// The convention is adopted PER (function instance, parameter) SLOT and must
+// hold at EVERY entry point (`self` is simply parameter 0):
 //   - call sites: `MIRFunctionCodeEmitter.apply_borrowed_self_receiver_convention`
 //     rewrites the self slot (argument 0) of direct calls to `Borrow()`, which
 //     `emit_direct_call_argument` already lowers as a +0 pass.
@@ -86,23 +87,35 @@ type BorrowedSelfWalkMode {
     SelfEscape(),
 };
 
-/// Mutable state threaded through one body walk.
+/// Mutable state threaded through one body walk. The walk is parameterized by
+/// one ROOT PARAMETER (the `self` of the original use is param 0): a bare
+/// handle flow out of that parameter is what decides the convention.
 type mutable BorrowedSelfWalk(
     mode: BorrowedSelfWalkMode,
-    self_local_id: UInt,
-    // Every phase-1 candidate, keyed by DefId. A bare-self receiver passed to
-    // a candidate records a fixpoint edge; one passed to anybody else escapes.
-    candidates: Dict[UInt, Bool],
+    root_local_id: UInt,
+    root_param_index: UInt,
+    // Every phase-1 candidate, keyed by borrowed_slot_key. A bare-root
+    // parameter passed to a candidate's matching slot records a fixpoint edge;
+    // one passed to anybody else escapes.
+    candidates: Dict[String, Bool],
     unsafe_callees: Dict[UInt, Bool],
-    receiver_deps: Dict[UInt, Bool],
+    unsafe_slots: Dict[String, Bool],
+    receiver_deps: Dict[String, Bool],
     mutable escaped: Bool,
 );
 
-/// Fixpoint node for one candidate method.
+/// Fixpoint node for one candidate parameter.
 type mutable BorrowedSelfCandidateInfo(
     mutable local_ok: Bool,
-    receiver_deps: Dict[UInt, Bool],
+    receiver_deps: Dict[String, Bool],
 );
+
+/// Candidate/edge key for one (function instance, parameter index) slot. The
+/// pair is the ABI unit: the borrowed convention is uniform per slot, not per
+/// function -- `f(a, b)` may borrow `a` while owning `b`.
+let borrowed_slot_key(def_id: UInt, index: UInt): String = {
+    return "\(def_id)|\(index)";
+};
 
 /// The self parameter's shape: a managed nominal handle (List/String/...
 /// style `struct { void* ptr; }` values with copy/drop glue). Reference,
@@ -122,13 +135,13 @@ let borrowed_self_type_is_candidate(t: Type): Bool = {
 /// walked separately; codegen's `root_local_of_place` treats them the same way
 /// (a Move read through them is already forced to a retained copy, so their
 /// behavior cannot change under the borrowed convention).
-let borrowed_self_place_root_kind(place: MIRPlace, self_local_id: UInt): UInt = {
+let borrowed_self_place_root_kind(place: MIRPlace, root_local_id: UInt): UInt = {
     let mutable current = place;
     let mutable via_projection = false;
     while true then {
         when current in {
             .Local(local) then {
-                if local.raw_value == self_local_id then {
+                if local.raw_value == root_local_id then {
                     return if via_projection then UInt(1) else UInt(2);
                 };
                 return UInt(0);
@@ -160,14 +173,14 @@ let borrowed_self_arg0_consumable(value: MIRValue): Bool = {
 /// The one allowed bare-self shape at a receiver slot: a Copy/Borrow read of
 /// the self local. `emit_direct_call_argument` passes that raw (+0) and the
 /// callee (a set member) does not release it.
-let borrowed_self_is_bare_receiver(value: MIRValue, self_local_id: UInt): Bool = {
+let borrowed_self_is_bare_receiver(value: MIRValue, root_local_id: UInt): Bool = {
     return when value in {
         .PlaceRead(place, ownership) then {
             if not (ownership is .Copy() or is .Borrow()) then {
                 return false;
             };
             when place in {
-                .Local(local) then local.raw_value == self_local_id,
+                .Local(local) then local.raw_value == root_local_id,
                 _ then false,
             }
         },
@@ -179,14 +192,14 @@ let borrowed_self_is_bare_receiver(value: MIRValue, self_local_id: UInt): Bool =
 /// bare self local into a RETAINED copy owned by a call-local slot (which the
 /// slot's own cleanup releases), so it is balanced under the +0 handle. Any
 /// other value in an assignment is classified normally.
-let borrowed_self_is_bare_copy_binding(value: MIRValue, self_local_id: UInt): Bool = {
+let borrowed_self_is_bare_copy_binding(value: MIRValue, root_local_id: UInt): Bool = {
     return when value in {
         .PlaceRead(place, ownership) then {
             if not (ownership is .Copy()) then {
                 return false;
             };
             when place in {
-                .Local(local) then local.raw_value == self_local_id,
+                .Local(local) then local.raw_value == root_local_id,
                 _ then false,
             }
         },
@@ -197,7 +210,7 @@ let borrowed_self_is_bare_copy_binding(value: MIRValue, self_local_id: UInt): Bo
 let borrowed_self_walk_operand(w: BorrowedSelfWalk, operand: MIROperand): Void = {
     when operand in {
         .Local(local) then {
-            if w.mode is .SelfEscape() and local.raw_value == w.self_local_id then {
+            if w.mode is .SelfEscape() and local.raw_value == w.root_local_id then {
                 w.escaped = true;
             };
         },
@@ -238,28 +251,40 @@ let borrowed_self_walk_call(w: BorrowedSelfWalk, call: MIRCall): Void = {
             callee_known = true;
             if w.mode is .GlobalUsage() then {
                 if call.arguments.count() == 0 then {
-                    // A self method invoked without its receiver slot: leave
-                    // it on the owned convention rather than reason about it.
+                    // A parameterized function invoked without its slots:
+                    // leave it on the owned convention rather than reason
+                    // about it.
                     w.unsafe_callees.insert(symbol.def_id.id, true);
                 } else if call.argument_ownerships.count() != call.arguments.count() then {
                     // The emit side keys every decision off the ownership
                     // list; a misaligned list falls back to owned defaults.
                     w.unsafe_callees.insert(symbol.def_id.id, true);
-                } else if call.argument_ownerships[UInt(0)] is .Move() or is .Take() then {
-                    // The self slot carries a CONSUMED value -- a chain
-                    // temporary like `create(1).transform().get_value()`'s
-                    // intermediates. The owned convention transfers the
-                    // temporary's +1 into the call and drops it at the callee
-                    // epilogue, and that timing is observable through a user
-                    // `Drop` (tests/compiler-cases/chain_call_drop.koral pins
-                    // it). Borrowing is only invisible when the receiver is a
-                    // place that still owns a count after the call, so a
-                    // method with even one consumed-receiver call site keeps
-                    // the owned convention at EVERY call site (the ABI is
-                    // uniform per function).
-                    w.unsafe_callees.insert(symbol.def_id.id, true);
-                } else if borrowed_self_arg0_consumable(call.arguments[UInt(0)]) then {
-                    w.unsafe_callees.insert(symbol.def_id.id, true);
+                } else {
+                    for pair in call.arguments.lazy().enumerate() then {
+                        if call.argument_ownerships[pair.first] is .Move() or is .Take() then {
+                            // The slot carries a CONSUMED value -- a chain
+                            // temporary like `create(1).transform().get_value()`'s
+                            // intermediates. The owned convention transfers the
+                            // temporary's +1 into the call and drops it at the
+                            // callee epilogue, and that timing is observable
+                            // through a user `Drop`
+                            // (tests/compiler-cases/chain_call_drop.koral pins
+                            // it). Borrowing is only invisible when the slot
+                            // receives a place that still owns a count after
+                            // the call, so a slot with even one consumed call
+                            // site keeps the owned convention at EVERY call
+                            // site (the ABI is uniform per slot).
+                            w.unsafe_slots.insert(
+                                borrowed_slot_key(symbol.def_id.id, pair.first),
+                                true,
+                            );
+                        } else if borrowed_self_arg0_consumable(pair.second) then {
+                            w.unsafe_slots.insert(
+                                borrowed_slot_key(symbol.def_id.id, pair.first),
+                                true,
+                            );
+                        };
+                    };
                 };
             };
         },
@@ -268,31 +293,31 @@ let borrowed_self_walk_call(w: BorrowedSelfWalk, call: MIRCall): Void = {
         },
     };
 
-    let mutable start_index = UInt(0);
-    if w.mode is .SelfEscape() and callee_known and call.arguments.count() > UInt(0) then {
-        let arg0 = call.arguments[UInt(0)];
-        if borrowed_self_is_bare_receiver(arg0, w.self_local_id) then {
-            // Receiver-pass edge of the fixpoint (rule 1a): fine when the
-            // callee is itself a non-escaping-self candidate, an escape
-            // otherwise.
+    for pair in call.arguments.lazy().enumerate() then {
+        let mutable bare_root_allowed = false;
+        if w.mode is .SelfEscape() and callee_known and borrowed_self_is_bare_receiver(
+            pair.second,
+            w.root_local_id,
+        ) then {
+            // Bare-root pass edge of the fixpoint (rule 1a): fine when the
+            // callee's matching parameter is itself a non-escaping candidate,
+            // an escape otherwise.
             when call.callee in {
                 .Function(symbol) then {
-                    if w.candidates.get(symbol.def_id.id) is .Some(_) then {
-                        w.receiver_deps.insert(symbol.def_id.id, true);
+                    let slot_key = borrowed_slot_key(symbol.def_id.id, pair.first);
+                    if w.candidates.get(slot_key) is .Some(_) then {
+                        w.receiver_deps.insert(slot_key, true);
+                        bare_root_allowed = true;
                     } else {
                         w.escaped = true;
                     };
                 },
-                _ then {},
+                _ then {
+                    w.escaped = true;
+                },
             };
-            start_index = UInt(1);
         };
-    };
-    for pair in call.arguments.lazy().enumerate() then {
-        if pair.first < start_index then {
-            continue;
-        };
-        borrowed_self_walk_value(w, pair.second, false);
+        borrowed_self_walk_value(w, pair.second, bare_root_allowed);
     };
 };
 
@@ -305,7 +330,7 @@ let borrowed_self_walk_value(
         .Operand(operand) then borrowed_self_walk_operand(w, operand),
         .PlaceRead(place, ownership) then {
             if w.mode is .SelfEscape() then {
-                let root = borrowed_self_place_root_kind(place, w.self_local_id);
+                let root = borrowed_self_place_root_kind(place, w.root_local_id);
                 if root == UInt(2) then {
                     // The bare handle itself. Only the receiver slot of a set
                     // member call (checked in walk_call) may pass it on.
@@ -353,7 +378,7 @@ let borrowed_self_walk_value(
         },
         .Ref(place, _, _) or .Pointer(place) then {
             if w.mode is .SelfEscape() then {
-                if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                if borrowed_self_place_root_kind(place, w.root_local_id) != UInt(0) then {
                     // A reference to self may outlive the call (rule 5).
                     w.escaped = true;
                 };
@@ -366,7 +391,7 @@ let borrowed_self_walk_value(
             for pair in lambda.captures.lazy().enumerate() then {
                 let source = lambda.capture_sources[pair.first];
                 if w.mode is .SelfEscape() then {
-                    if borrowed_self_place_root_kind(source, w.self_local_id) == UInt(2) then {
+                    if borrowed_self_place_root_kind(source, w.root_local_id) == UInt(2) then {
                         // Capturing the bare self handle: the closure env
                         // outlives the call (rule 6). A captured FIELD value is
                         // a plain copy and fine.
@@ -430,10 +455,10 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
             when place in {
                 .Local(local) then {
                     if w.mode is .SelfEscape() then {
-                        if local.raw_value == w.self_local_id then {
+                        if local.raw_value == w.root_local_id then {
                             // Rebinding the borrowed self slot (rule 4).
                             w.escaped = true;
-                        } else if borrowed_self_is_bare_copy_binding(value, w.self_local_id) then {
+                        } else if borrowed_self_is_bare_copy_binding(value, w.root_local_id) then {
                             allowed_binding = true;
                         };
                     };
@@ -449,7 +474,7 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
             if w.mode is .SelfEscape() then {
                 when assignment.target in {
                     .Local(local) then {
-                        if local.raw_value == w.self_local_id then {
+                        if local.raw_value == w.root_local_id then {
                             w.escaped = true;
                         };
                     },
@@ -461,7 +486,7 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
         },
         .Drop(place) then {
             if w.mode is .SelfEscape() then {
-                if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                if borrowed_self_place_root_kind(place, w.root_local_id) != UInt(0) then {
                     // Dropping a self-rooted place has no +1 to release under
                     // the borrowed convention (rule 3).
                     w.escaped = true;
@@ -473,7 +498,7 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
             if w.mode is .SelfEscape() then {
                 when value in {
                     .PlaceRead(place, _) then {
-                        if borrowed_self_place_root_kind(place, w.self_local_id) != UInt(0) then {
+                        if borrowed_self_place_root_kind(place, w.root_local_id) != UInt(0) then {
                             w.escaped = true;
                         };
                     },
@@ -512,24 +537,28 @@ let borrowed_self_walk_function(w: BorrowedSelfWalk, function: MIRFunction): Voi
     };
 };
 
-/// Compute the set of instantiated methods whose `self` runs the borrowed
-/// convention. Keyed by the method instance's DefId -- the same identity the
-/// call sites carry on `MIROperand.Function(symbol)` and the function
-/// emission carries on `MIRFunction.identifier`.
+/// Compute the set of (function instance, parameter) slots that run the
+/// borrowed convention. Keys are `borrowed_slot_key(def_id, index)` -- the
+/// ABI unit is the slot: `f(a, b)` may borrow `a` while owning `b`. `self` is
+/// simply parameter 0 of the original use. The identity matches what call
+/// sites carry on `MIROperand.Function(symbol)` and what function emission
+/// carries on `MIRFunction.identifier`.
 ///
-/// This is a fixpoint over the instantiated (monomorphized) method call
-/// graph: edges are the bare-self receiver passes of rule 1a, and the
-/// greatest fixed point keeps self-recursive readers eligible.
-let compute_borrowed_self_def_ids(program: MIRProgram): Set[UInt] = {
+/// This is a fixpoint over the instantiated (monomorphized) call graph:
+/// edges are the bare-root passes of rule 1a, and the greatest fixed point
+/// keeps self-recursive and mutually recursive readers eligible.
+let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
     // ── Phase 0: global usage scan ─────────────────────────────────────────
     // One walk over every function (and nested lambda body) collecting
     // address-taken symbols and unsafe call shapes.
     let global_walk = BorrowedSelfWalk(
         BorrowedSelfWalkMode.GlobalUsage(),
         UInt(0),
+        UInt(0),
+        Dict[String, Bool].new(),
         Dict[UInt, Bool].new(),
-        Dict[UInt, Bool].new(),
-        Dict[UInt, Bool].new(),
+        Dict[String, Bool].new(),
+        Dict[String, Bool].new(),
         false,
     );
     for function in program.functions then {
@@ -537,82 +566,103 @@ let compute_borrowed_self_def_ids(program: MIRProgram): Set[UInt] = {
     };
 
     // ── Phase 1: candidate collection + per-candidate escape scan ──────────
-    let mutable candidate_order = List[UInt].new();
-    let mutable candidate_info = Dict[UInt, BorrowedSelfCandidateInfo].new();
-    let mutable candidate_flags = Dict[UInt, Bool].new();
-    let mutable self_local_by_def = Dict[UInt, UInt].new();
+    let mutable candidate_order = List[String].new();
+    let mutable candidate_info = Dict[String, BorrowedSelfCandidateInfo].new();
+    let mutable candidate_flags = Dict[String, Bool].new();
+    let mutable root_local_by_key = Dict[String, UInt].new();
     for function in program.functions then {
-        if function.params.count() == 0 then {
-            continue;
-        };
-        if function.params[UInt(0)].name != "self" then {
-            continue;
-        };
-        if not borrowed_self_type_is_candidate(function.params[UInt(0)].param_type) then {
-            continue;
-        };
         let def_id = function.identifier.def_id.id;
         if global_walk.unsafe_callees.get(def_id) is .Some(_) then {
             continue;
         };
-        let mutable self_local = Option[UInt].None();
-        for local in function.locals then {
-            if local.storage is .Parameter() and local.name == "self" then {
-                self_local = Option[UInt].Some(local.id.raw_value);
-                break;
+        for pair in function.params.lazy().enumerate() then {
+            let index = pair.first;
+            let param = pair.second;
+            if not borrowed_self_type_is_candidate(param.param_type) then {
+                continue;
             };
+            if index > UInt(0) then {
+                let is_trait_impl = when function.kind in {
+                    .Given(_, _, _, trait_def_id) then trait_def_id is .Some(_),
+                    _ then false,
+                };
+                if is_trait_impl then {
+                    // Trait-impl methods keep the owned convention on
+                    // non-receiver parameters: the vtable wrapper forwards
+                    // extra arguments ownership-first (the method releases
+                    // them), so a borrowed slot would need a per-slot release
+                    // net in the wrapper. The receiver slot keeps its existing
+                    // net (see codegen_vtable.koral).
+                    continue;
+                };
+            };
+            let slot_key = borrowed_slot_key(def_id, index);
+            if global_walk.unsafe_slots.get(slot_key) is .Some(_) then {
+                continue;
+            };
+            let mutable param_local = Option[UInt].None();
+            for local in function.locals then {
+                if local.storage is .Parameter() and local.name == param.name then {
+                    param_local = Option[UInt].Some(local.id.raw_value);
+                    break;
+                };
+            };
+            if param_local is .None() then {
+                continue;
+            };
+            candidate_order.push(slot_key);
+            candidate_flags.insert(slot_key, true);
+            root_local_by_key.insert(slot_key, param_local or else UInt(0));
+            candidate_info.insert(
+                slot_key,
+                BorrowedSelfCandidateInfo(true, Dict[String, Bool].new()),
+            );
         };
-        if self_local is .None() then {
-            continue;
-        };
-        let self_local_id = self_local or else UInt(0);
-        candidate_order.push(def_id);
-        candidate_flags.insert(def_id, true);
-        self_local_by_def.insert(def_id, self_local_id);
-        candidate_info.insert(
-            def_id,
-            BorrowedSelfCandidateInfo(true, Dict[UInt, Bool].new()),
-        );
     };
 
     for function in program.functions then {
         let def_id = function.identifier.def_id.id;
-        when candidate_info.get(def_id) in {
-            .Some(info) then {
-                let self_local_id = self_local_by_def.get(def_id) or else UInt(0);
-                let walk = BorrowedSelfWalk(
-                    BorrowedSelfWalkMode.SelfEscape(),
-                    self_local_id,
-                    candidate_flags,
-                    global_walk.unsafe_callees,
-                    Dict[UInt, Bool].new(),
-                    false,
-                );
-                borrowed_self_walk_function(walk, function);
-                // AND across bodies: emission keys the convention on the
-                // DefId, so if two lowered bodies ever share one, the set may
-                // only contain it when EVERY body passes.
-                info.local_ok = info.local_ok and not walk.escaped;
-                for dep in walk.receiver_deps.iterator() then {
-                    info.receiver_deps.insert(dep.first, true);
-                };
-            },
-            .None() then {},
+        for pair in function.params.lazy().enumerate() then {
+            let slot_key = borrowed_slot_key(def_id, pair.first);
+            when candidate_info.get(slot_key) in {
+                .Some(info) then {
+                    let root_local_id = root_local_by_key.get(slot_key) or else UInt(0);
+                    let walk = BorrowedSelfWalk(
+                        BorrowedSelfWalkMode.SelfEscape(),
+                        root_local_id,
+                        pair.first,
+                        candidate_flags,
+                        global_walk.unsafe_callees,
+                        global_walk.unsafe_slots,
+                        Dict[String, Bool].new(),
+                        false,
+                    );
+                    borrowed_self_walk_function(walk, function);
+                    // AND across bodies: emission keys the convention on the
+                    // slot, so if two lowered bodies ever share one, the slot
+                    // may only be borrowed when EVERY body passes.
+                    info.local_ok = info.local_ok and not walk.escaped;
+                    for dep in walk.receiver_deps.iterator() then {
+                        info.receiver_deps.insert(dep.first, true);
+                    };
+                },
+                .None() then {},
+            };
         };
     };
 
-    // ── Phase 2: greatest fixpoint over the receiver-pass edges ────────────
+    // ── Phase 2: greatest fixpoint over the bare-root pass edges ───────────
     // Clone: managed collections alias on assignment, and the scan below
     // demotes members in place.
     let mutable alive = candidate_flags.clone();
     let mutable changed = true;
     while changed then {
         changed = false;
-        for def_id in candidate_order then {
-            if alive.get(def_id) is .None() then {
+        for slot_key in candidate_order then {
+            if alive.get(slot_key) is .None() then {
                 continue;
             };
-            let info = candidate_info.get(def_id).unwrap();
+            let info = candidate_info.get(slot_key).unwrap();
             let mutable demote = not info.local_ok;
             if not demote then {
                 for dep in info.receiver_deps.iterator() then {
@@ -623,16 +673,16 @@ let compute_borrowed_self_def_ids(program: MIRProgram): Set[UInt] = {
                 };
             };
             if demote then {
-                let _ = alive.remove(def_id);
+                let _ = alive.remove(slot_key);
                 changed = true;
             };
         };
     };
 
-    let mutable result = Set[UInt].new();
-    for def_id in candidate_order then {
-        if alive.get(def_id) is .Some(_) then {
-            result.insert(def_id);
+    let mutable result = Dict[String, Bool].new();
+    for slot_key in candidate_order then {
+        if alive.get(slot_key) is .Some(_) then {
+            result.insert(slot_key, true);
         };
     };
     return result;

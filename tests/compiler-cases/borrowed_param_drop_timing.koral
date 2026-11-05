@@ -1,0 +1,38 @@
+// Pins that the borrowed-parameter convention is invisible in drop timing.
+// `observe`'s parameter never escapes, so call sites pass the handle +0 and
+// the callee releases nothing -- but observable destruction must still follow
+// the ownership ledger: the caller's handle dies at its own scope exit. If
+// the callee ever released the +0 handle, "Drop Box 7" would print before
+// "observe again 7" and the in-order expectations would fail.
+// EXPECT: observe 7
+// EXPECT: observe again 7
+// EXPECT: Drop Box 7
+// EXPECT: All borrowed param drop timing tests passed
+
+type Box(value: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        print("Drop Box ");
+        println(self.value);
+    };
+};
+
+/// Observational: the parameter never escapes, so the call sites borrow it.
+let observe(b: Box): Int = b.value;
+
+/// Forwards the parameter to another observational call (a fixpoint edge);
+/// both slots stay borrowable and neither releases the handle.
+let observe_twice(b: Box): Int = observe(b);
+
+let test(): Void = {
+    let b = Box(7);
+    println("observe \(observe(b))");
+    println("observe again \(observe_twice(b))");
+};
+
+let main(): Int = {
+    test();
+    println("All borrowed param drop timing tests passed");
+    return 0;
+};

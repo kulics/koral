@@ -106,11 +106,11 @@ public type mutable CodeGen(
     // 热点。预热一次、按名 O(1)，返回顺序与原升序扫描一致。
     mutable def_ids_by_name: Dict[String, List[UInt]],
 
-    // 借用 self 约定（Swift guaranteed self / ARC 成对消除）：self 不逃逸的
-    // 实例方法集合（DefId 键）。调用点对 self 槽传 +0、被调方不释放 self，
-    // 每层调用省掉一对 retain/release。分析与配平规则见
-    // codegen_borrowed_self.koral。
-    mutable borrowed_self_def_ids: Set[UInt],
+    // 借用参数约定（Swift guaranteed / ARC 成对消除）：参数不逃逸的
+    // （函数实例, 参数序号）槽位集合（borrowed_slot_key 键）。调用点对该槽
+    // 传 +0、被调方不释放该参数，每层调用省掉一对 retain/release。`self` 即
+    // 参数 0。分析与配平规则见 codegen_borrowed_self.koral。
+    mutable borrowed_param_slots: Dict[String, Bool],
 );
 
 given CodeGen {
@@ -164,11 +164,11 @@ given CodeGen {
             Dict[String, String].new(),
             // def_ids_by_name
             Dict[String, List[UInt]].new(),
-            // borrowed_self_def_ids
-            Set[UInt].new(),
+            // borrowed_param_slots
+            Dict[String, Bool].new(),
         );
         cg.build_def_id_indices();
-        cg.borrowed_self_def_ids = compute_borrowed_self_def_ids(program);
+        cg.borrowed_param_slots = compute_borrowed_param_slots(program);
         return cg;
     };
 

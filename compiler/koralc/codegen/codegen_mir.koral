@@ -667,11 +667,17 @@ private let build_mir_function_emit_plan(
     // `should_copy_returned_operand` copies non-owning locals on return and
     // `emit_place_read` forces a retained copy for a Move read of a place with
     // no init flag, so nothing can consume the borrowed +0 handle directly.
-    if codegen.borrowed_self_def_ids.contains(function.identifier.def_id.id) and function.params.count() > 0 and function.params[UInt(0)].name == "self" then {
-        for local in function.locals then {
-            if local.storage is .Parameter() and local.name == "self" then {
-                non_owning_local_ids.insert(local.id.raw_value, true);
-                break;
+    // Borrowed-convention parameters (see codegen_borrowed_self.koral): the
+    // caller passes the handle +0, so the parameter owns nothing and must not
+    // release at exit.
+    for pair in function.params.lazy().enumerate() then {
+        let slot_key = borrowed_slot_key(function.identifier.def_id.id, pair.first);
+        if codegen.borrowed_param_slots.get(slot_key) is .Some(_) then {
+            for local in function.locals then {
+                if local.storage is .Parameter() and local.name == pair.second.name then {
+                    non_owning_local_ids.insert(local.id.raw_value, true);
+                    break;
+                };
             };
         };
     };
@@ -1653,11 +1659,10 @@ given MIRFunctionCodeEmitter {
         if call.arguments.count() == 0 then {
             return call;
         };
+        let mutable callee_def_id = UInt(0);
         when call.callee in {
             .Function(symbol) then {
-                if not self.codegen.borrowed_self_def_ids.contains(symbol.def_id.id) then {
-                    return call;
-                };
+                callee_def_id = symbol.def_id.id;
             },
             _ then {
                 return call;
@@ -1666,15 +1671,21 @@ given MIRFunctionCodeEmitter {
         if call.argument_ownerships.count() != call.arguments.count() then {
             return call;
         };
-        if call.argument_ownerships[UInt(0)] is .Borrow() then {
-            return call;
-        };
+        let mutable changed = false;
         let mutable ownerships = List[MIROwnershipUse].new();
-        ownerships.push(MIROwnershipUse.Borrow());
-        let mutable i = UInt(1);
-        while i < call.argument_ownerships.count() then {
-            ownerships.push(call.argument_ownerships[i]);
-            i += UInt(1);
+        for pair in call.argument_ownerships.lazy().enumerate() then {
+            let slot_key = borrowed_slot_key(callee_def_id, pair.first);
+            if not (pair.second is .Borrow()) and self.codegen.borrowed_param_slots.get(
+                slot_key,
+            ) is .Some(_) then {
+                ownerships.push(MIROwnershipUse.Borrow());
+                changed = true;
+            } else {
+                ownerships.push(pair.second);
+            };
+        };
+        if not changed then {
+            return call;
         };
         return MIRCall(call.callee, call.arguments, ownerships, call.result_type);
     };
