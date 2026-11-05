@@ -24,6 +24,7 @@ let foreign __koral_dirent_type(entry: *CDirEntry): Int32;
 // Directory manipulation
 let foreign __koral_mkdir(path: *UInt8, mode: UInt32): Int32;
 let foreign __koral_rmdir(path: *UInt8): Int32;
+let foreign __koral_remove_dir_all(path: *UInt8): Int32;
 let foreign __koral_mkdtemp(template: *UInt8): *UInt8;
 
 // ============================================================================
@@ -302,41 +303,52 @@ public let remove_dir[T: IntoPath](path: T): Result[Void] = {
     return if __koral_rmdir(s.data) == 0 then .Ok({}) else .Error(last_error_message());
 };
 
-/// Remove directory recursively (removes all contents first)
+/// Remove directory recursively (removes all contents first).
 ///
-/// Symbolic links are never followed: when `path` itself is a symlink only the
-/// link is removed (its target is left untouched), and links found inside the
-/// tree are unlinked, not descended into.
+/// The contract:
+/// - Symbolic links are never followed. When `path` itself is a symlink only
+///   the link is removed (its target is left untouched); links found inside
+///   the tree are unlinked, not descended into.
+/// - Deletion cannot escape the tree. The walk is handle-relative and
+///   no-follow, and every child is identity-checked against the directory
+///   listing before it is touched, so a rename or symlink swap during the
+///   walk cannot move removal outside `path`.
+/// - A root that is not a directory is an error; removing a single file is
+///   `remove_file`'s job.
+/// - A path that does not exist is an error. Callers who want idempotent
+///   "ensure gone" say so explicitly (`let _ = remove_dir_all(p);`).
+/// - Trailing separators are not significant: `x/` is `x`. Unlike `rm`, a
+///   trailing slash is not "the link's target" -- there is no such special
+///   case.
 public let remove_dir_all[T: IntoPath](path: T): Result[Void] = {
-    let p = path.into_path();
-    let root_info = symlink_info(p) or return;
+    let mutable s = path.into_path().to_string();
+    // Trailing separators are not significant; never trim a root away
+    // (`/`, `C:\`) and never down to empty.
+    let mutable trimming = true;
+    while trimming then {
+        trimming = false;
+        if s.count() > UInt(1) and (s.ends_with("/") or s.ends_with("\\")) then {
+            let t = s.trim_suffix("/").trim_suffix("\\");
+            if t.count() > UInt(0) and not (t.count() == UInt(2) and t.ends_with(":")) then {
+                s = t;
+                trimming = true;
+            };
+        };
+    };
+    let root_info = symlink_info(s.into_path()) or return;
     if root_info.is_symlink() then {
-        return remove_file(p);
+        return remove_file(s.into_path());
     };
     if not root_info.is_dir() then {
         return Result[Void].Error("remove_dir_all: not a directory");
     };
-    let mutable dirs: List[Path] = [];
-    let mutable entries = walk_dir(p) or return;
-
-    while entries.next() is .Some(entry) then {
-        let full_path = entry.path();
-        if entry.is_dir() then {
-            dirs.push(full_path);
-        } else {
-            if __koral_remove(full_path.to_string().data) != 0 then {
-                return Result[Void].Error(last_error_message());
-            };
-        };
-    };
-
-    while dirs.pop() is .Some(dir_path) then {
-        if __koral_rmdir(dir_path.to_string().data) != 0 then {
-            return Result[Void].Error(last_error_message());
-        };
-    };
-
-    return remove_dir(p);
+    // The tree walk lives in the runtime: handle-relative, no-follow, and
+    // identity-checked per child, so races cannot move deletion out of the
+    // tree. `-2` is the root changing shape after the checks above.
+    let rc = __koral_remove_dir_all(s.data);
+    return if rc == 0 then Result[Void].Ok({})
+    else if rc == -2 then Result[Void].Error("remove_dir_all: not a directory")
+    else Result[Void].Error(last_error_message());
 };
 
 /// Open a directory iterator.

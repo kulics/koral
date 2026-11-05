@@ -23,11 +23,23 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void];
 /// Remove empty directory
 public let remove_dir[T: IntoPath](path: T): Result[Void];
 
-/// Remove directory recursively (removes all contents first)
+/// Remove directory recursively (removes all contents first).
 ///
-/// Symbolic links are never followed: when `path` itself is a symlink only the
-/// link is removed (its target is left untouched), and links found inside the
-/// tree are unlinked, not descended into.
+/// The contract:
+/// - Symbolic links are never followed. When `path` itself is a symlink only
+///   the link is removed (its target is left untouched); links found inside
+///   the tree are unlinked, not descended into.
+/// - Deletion cannot escape the tree. The walk is handle-relative and
+///   no-follow, and every child is identity-checked against the directory
+///   listing before it is touched, so a rename or symlink swap during the
+///   walk cannot move removal outside `path`.
+/// - A root that is not a directory is an error; removing a single file is
+///   `remove_file`'s job.
+/// - A path that does not exist is an error. Callers who want idempotent
+///   "ensure gone" say so explicitly (`let _ = remove_dir_all(p);`).
+/// - Trailing separators are not significant: `x/` is `x`. Unlike `rm`, a
+///   trailing slash is not "the link's target" -- there is no such special
+///   case.
 public let remove_dir_all[T: IntoPath](path: T): Result[Void];
 
 /// Open a directory iterator.

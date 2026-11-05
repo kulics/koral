@@ -1399,7 +1399,15 @@ given TypeChecker {
                     typed_args,
                     expected,
                 );
-                if lowered.expr_type is .Unknown() then {
+                if lowered.expr_type is .Unknown() and not self.storage.diagnostics.has_error_at(
+                    self.storage.file_path,
+                    expr_span(expr),
+                ) then {
+                    // Resolution failed and nothing has said so yet. The same
+                    // decision tree the seed walks: an enum-expected name that
+                    // is not type-shaped is a case-name complaint; anything
+                    // else is simply not a member. Without this an unresolved
+                    // implicit member coerced to a silent zero value.
                     when expected in {
                         .Some(expected_type) then when expected_type in {
                             .EnumType(_) or .GenericEnum(...) then {
@@ -1408,9 +1416,19 @@ given TypeChecker {
                                         "Enum case name '\(member_name)' must start with an uppercase letter",
                                         expr_span(expr),
                                     );
+                                } else {
+                                    self.push_diagnostic(
+                                        "Member '\(member_name)' not found on type '\(self.display_type_name(expected_type))'",
+                                        expr_span(expr),
+                                    );
                                 };
                             },
-                            _ then {},
+                            _ then {
+                                self.push_diagnostic(
+                                    "Member '\(member_name)' not found on type '\(self.display_type_name(expected_type))'",
+                                    expr_span(expr),
+                                );
+                            },
                         },
                         .None() then {},
                     };

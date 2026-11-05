@@ -1100,10 +1100,87 @@ static int tzif_find_file(const char* name, char* path_buf, size_t path_buf_size
 
 #endif // !_WIN32
 
+#if defined(_WIN32) || defined(_WIN64)
+
+// Windows named-timezone support rides the ICU that ships with Windows 10
+// (icu.dll), loaded dynamically -- no SDK header, no import library, and a
+// machine without it degrades to "unknown timezone" exactly like the
+// zoneinfo-less state it replaces. ucal_open takes an IANA id, ucal_setMillis
+// positions the calendar at a UTC instant, and ucal_get reports the zone and
+// DST offsets that apply there (both in milliseconds).
+typedef void* KoralUCalendar;
+typedef int32_t KoralUError;
+typedef KoralUCalendar (__cdecl *KoralUCalOpenFn)(const wchar_t*, int32_t, const char*, int, KoralUError*);
+typedef void (__cdecl *KoralUCalCloseFn)(KoralUCalendar);
+typedef void (__cdecl *KoralUCalSetMillisFn)(KoralUCalendar, double, KoralUError*);
+typedef int32_t (__cdecl *KoralUCalGetFn)(KoralUCalendar, int, KoralUError*);
+typedef int32_t (__cdecl *KoralUCalGetTzIdFn)(KoralUCalendar, wchar_t*, int32_t, KoralUError*);
+
+typedef struct {
+    KoralUCalOpenFn open;
+    KoralUCalCloseFn close;
+    KoralUCalSetMillisFn set_millis;
+    KoralUCalGetFn get;
+    KoralUCalGetTzIdFn get_tzid;
+    int attempted;
+    int available;
+} KoralIcuApi;
+
+static KoralIcuApi g_koral_icu;
+
+#define KORAL_UCAL_ZONE_OFFSET 15
+#define KORAL_UCAL_DST_OFFSET 16
+
+static int koral_icu_load(void) {
+    if (g_koral_icu.attempted) return g_koral_icu.available;
+    g_koral_icu.attempted = 1;
+    HMODULE m = LoadLibraryW(L"icu.dll");
+    if (!m) return 0;
+    g_koral_icu.open = (KoralUCalOpenFn)(void*)GetProcAddress(m, "ucal_open");
+    g_koral_icu.close = (KoralUCalCloseFn)(void*)GetProcAddress(m, "ucal_close");
+    g_koral_icu.set_millis = (KoralUCalSetMillisFn)(void*)GetProcAddress(m, "ucal_setMillis");
+    g_koral_icu.get = (KoralUCalGetFn)(void*)GetProcAddress(m, "ucal_get");
+    g_koral_icu.get_tzid = (KoralUCalGetTzIdFn)(void*)GetProcAddress(m, "ucal_getTimeZoneID");
+    g_koral_icu.available = g_koral_icu.open && g_koral_icu.close
+        && g_koral_icu.set_millis && g_koral_icu.get && g_koral_icu.get_tzid;
+    return g_koral_icu.available;
+}
+
+/// Open `name` as an IANA zone, or NULL when the name does not resolve.
+/// ucal_open FALLS BACK to the default zone for an unknown ID without
+/// reporting an error, so the calendar's own ID is what proves the name.
+static KoralUCalendar koral_icu_open_zone(const char* name) {
+    if (!koral_icu_load()) return NULL;
+    wchar_t* wname = __koral_utf8_to_wide(name);
+    if (!wname) return NULL;
+    KoralUError st = 0;
+    KoralUCalendar cal = g_koral_icu.open(wname, -1, NULL, 0 /* UCAL_DEFAULT */, &st);
+    if (st != 0 || !cal) {
+        free(wname);
+        if (cal) g_koral_icu.close(cal);
+        return NULL;
+    }
+    wchar_t id[128];
+    KoralUError st2 = 0;
+    int32_t len = g_koral_icu.get_tzid(cal, id, 128, &st2);
+    int ok = (st2 == 0 && len == (int32_t)wcslen(wname) && wcsncmp(id, wname, (size_t)len) == 0);
+    free(wname);
+    if (!ok) {
+        g_koral_icu.close(cal);
+        return NULL;
+    }
+    return cal;
+}
+
+#endif // _WIN32 named timezone helpers
+
 int32_t __koral_timezone_name_exists(const char* name) {
 #if defined(_WIN32) || defined(_WIN64)
-    (void)name;
-    return 0;
+    if (!name || name[0] == '\0') return 0;
+    KoralUCalendar cal = koral_icu_open_zone(name);
+    if (!cal) return 0;
+    g_koral_icu.close(cal);
+    return 1;
 #else
     if (!name || name[0] == '\0') return 0;
     char path[512];
@@ -1113,10 +1190,22 @@ int32_t __koral_timezone_name_exists(const char* name) {
 
 void __koral_timezone_offset_at(const char* name, int64_t unix_secs, int32_t* out_offset_secs) {
 #if defined(_WIN32) || defined(_WIN64)
-    (void)name;
-    (void)unix_secs;
-    // Windows: only support local timezone via GetTimeZoneInformation
-    __koral_local_timezone_offset(out_offset_secs);
+    if (!name || name[0] == '\0') {
+        // Empty name means the local timezone.
+        __koral_local_timezone_offset(out_offset_secs);
+        return;
+    }
+    KoralUCalendar cal = koral_icu_open_zone(name);
+    if (!cal) {
+        *out_offset_secs = 0;
+        return;
+    }
+    KoralUError st = 0;
+    g_koral_icu.set_millis(cal, (double)unix_secs * 1000.0, &st);
+    int32_t zone_off = g_koral_icu.get(cal, KORAL_UCAL_ZONE_OFFSET, &st);
+    int32_t dst_off = g_koral_icu.get(cal, KORAL_UCAL_DST_OFFSET, &st);
+    g_koral_icu.close(cal);
+    *out_offset_secs = (st == 0) ? (zone_off + dst_off) / 1000 : 0;
 #else
     *out_offset_secs = 0;
 
@@ -2023,8 +2112,303 @@ static void __koral_fill_stat_result(struct _stat64* st, KoralStatResult* out) {
     out->created_nanos = 0;
 }
 
+// --- POSIX-style path walking for the Windows file APIs -------------------
+//
+// The Win32 path layer flattens `..` against the WRITTEN path before anything
+// opens -- and so does the NT namespace underneath it -- so `link/../target`
+// misses the symlink's target directory instead of walking out through it.
+// The walk below resolves `.` and `..` the POSIX way (and follows symlinks
+// for every component that has a successor) before the path is handed on.
+// Only paths that actually carry a `..` component pay for it.
+//
+// A symlink TARGET is a name stored verbatim in the link and never goes
+// through here; and the FINAL component of a path is left for the OS to
+// resolve, so removing a symlink root removes the link, never its target.
+
+/// Read a reparse point's stored target into `out` (wide, NUL-terminated).
+/// Returns the length in WCHARs, or -1. The PrintName is the spelling the
+/// writer saw; a relative link may leave it empty, in which case the
+/// substitute name is the link text.
+static int koral_win_readlink_w(const wchar_t* wpath, wchar_t* out, int out_cap) {
+    HANDLE h = CreateFileW(wpath, GENERIC_READ,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, OPEN_EXISTING,
+                           FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    unsigned char raw[16384 + 64];
+    DWORD returned = 0;
+    if (!DeviceIoControl(h, FSCTL_GET_REPARSE_POINT, NULL, 0, raw, sizeof(raw), &returned, NULL)) {
+        CloseHandle(h);
+        return -1;
+    }
+    CloseHandle(h);
+    if (returned < 16) return -1;
+    DWORD tag = *(DWORD*)raw;
+    USHORT sub_off = *(USHORT*)(raw + 8);
+    USHORT sub_len = *(USHORT*)(raw + 10);
+    USHORT print_off = *(USHORT*)(raw + 12);
+    USHORT print_len = *(USHORT*)(raw + 14);
+    if (tag != IO_REPARSE_TAG_SYMLINK && tag != IO_REPARSE_TAG_MOUNT_POINT) return -1;
+    unsigned char* names_base = raw + 8 + (tag == IO_REPARSE_TAG_SYMLINK ? 12 : 8);
+    const WCHAR* name = NULL;
+    int name_wchars = 0;
+    if (print_len > 0) {
+        name = (const WCHAR*)(names_base + print_off);
+        name_wchars = print_len / sizeof(WCHAR);
+    } else if (sub_len > 0) {
+        name = (const WCHAR*)(names_base + sub_off);
+        name_wchars = sub_len / sizeof(WCHAR);
+    } else {
+        return -1;
+    }
+    if (name_wchars >= out_cap) return -1;
+    memcpy(out, name, name_wchars * sizeof(WCHAR));
+    out[name_wchars] = L'\0';
+    for (wchar_t* q = out; *q; q++) {
+        if (*q == L'\\') *q = L'/';
+    }
+    return name_wchars;
+}
+
+/// The root of an absolute path: `X:\`, `\\server\share\`, or the `\\?\`
+/// spellings of those. Returns its length in WCHARs, or 0 when unrecognised.
+static size_t koral_win_path_root_len(const wchar_t* abs) {
+    const wchar_t* p = abs;
+    if (p[0] == L'\\' && p[1] == L'\\' && p[2] == L'?' && p[3] == L'\\') {
+        if (p[4] == L'U' && p[5] == L'N' && p[6] == L'C' && p[7] == L'\\') p += 8;
+        else p += 4;
+    }
+    if (p[0] && p[1] == L':') {
+        return (size_t)(p - abs) + 3;
+    }
+    if (p[0] == L'\\' && p[1] == L'\\') {
+        const wchar_t* q = p + 2;
+        while (*q && *q != L'\\') q++;
+        if (*q) q++;
+        while (*q && *q != L'\\') q++;
+        if (*q) q++;
+        return (size_t)(q - abs);
+    }
+    return 0;
+}
+
+static wchar_t* koral_win_wcsdup(const wchar_t* s) {
+    size_t n = wcslen(s);
+    wchar_t* out = (wchar_t*)malloc((n + 1) * sizeof(wchar_t));
+    if (out) memcpy(out, s, (n + 1) * sizeof(wchar_t));
+    return out;
+}
+
+/// Join `root` and the component stack back into one path.
+static wchar_t* koral_win_join_path(const wchar_t* root, wchar_t** comps, size_t n) {
+    size_t total = wcslen(root) + 1;
+    for (size_t i = 0; i < n; i++) total += wcslen(comps[i]) + 1;
+    wchar_t* out = (wchar_t*)malloc(total * sizeof(wchar_t));
+    if (!out) return NULL;
+    size_t len = wcslen(root);
+    memcpy(out, root, len * sizeof(wchar_t));
+    for (size_t i = 0; i < n; i++) {
+        if (len > 0 && out[len - 1] != L'\\') out[len++] = L'\\';
+        size_t cl = wcslen(comps[i]);
+        memcpy(out + len, comps[i], (cl + 1) * sizeof(wchar_t));
+        len += cl;
+    }
+    return out;
+}
+
+static wchar_t* koral_win_resolve_dots_budget(const wchar_t* abs, int budget);
+
+static wchar_t* koral_win_resolve_dots_budget(const wchar_t* abs, int budget) {
+    size_t root_len = koral_win_path_root_len(abs);
+    if (root_len == 0) return koral_win_wcsdup(abs);
+
+    wchar_t* root = (wchar_t*)malloc((root_len + 1) * sizeof(wchar_t));
+    if (!root) return koral_win_wcsdup(abs);
+    memcpy(root, abs, root_len * sizeof(wchar_t));
+    root[root_len] = L'\0';
+
+    // The stack owns every component it holds; `..` frees the top.
+    size_t cap = wcslen(abs) + 2;
+    wchar_t** stack = (wchar_t**)malloc(cap * sizeof(wchar_t*));
+    if (!stack) { free(root); return koral_win_wcsdup(abs); }
+    size_t st = 0;
+
+    const wchar_t* c = abs + root_len;
+    while (*c) {
+        while (*c == L'\\') c++;
+        if (!*c) break;
+        const wchar_t* s = c;
+        while (*c && *c != L'\\') c++;
+        size_t clen = (size_t)(c - s);
+        if (clen == 1 && s[0] == L'.') continue;
+        wchar_t* comp = (wchar_t*)malloc((clen + 1) * sizeof(wchar_t));
+        if (!comp) break;
+        memcpy(comp, s, clen * sizeof(wchar_t));
+        comp[clen] = L'\0';
+
+        if (clen == 2 && comp[0] == L'.' && comp[1] == L'.') {
+            if (st > 0) free(stack[--st]);
+            free(comp);
+            continue;
+        }
+
+        // Follow a symlink for every component that has a successor: `..`
+        // after one must move to the parent of the link's TARGET.
+        int has_successor = (*c != L'\0');
+        if (has_successor && budget > 0) {
+            stack[st] = comp;  // temporarily, to build the candidate
+            wchar_t* candidate = koral_win_join_path(root, stack, st + 1);
+            wchar_t target[2048];
+            int is_link = candidate && koral_win_readlink_w(candidate, target, 2048) > 0;
+            wchar_t* resolved = NULL;
+            if (is_link) {
+                {
+                    // (kept as a bare block: the body below was the success
+                    // arm of the readlink test, which `is_link` now carries)
+                    for (wchar_t* q = target; *q; q++) {
+                        if (*q == L'/') *q = L'\\';
+                    }
+                    wchar_t* abs_target = NULL;
+                    if ((target[0] && target[1] == L':')
+                        || (target[0] == L'\\' && target[1] == L'\\')) {
+                        abs_target = koral_win_wcsdup(target);
+                    } else {
+                        wchar_t* dir = koral_win_join_path(root, stack, st);
+                        size_t dl = dir ? wcslen(dir) : 0;
+                        size_t tl = wcslen(target);
+                        abs_target = (wchar_t*)malloc((dl + 1 + tl + 1) * sizeof(wchar_t));
+                        if (abs_target && dir) {
+                            memcpy(abs_target, dir, dl * sizeof(wchar_t));
+                            abs_target[dl] = L'\\';
+                            memcpy(abs_target + dl + 1, target, (tl + 1) * sizeof(wchar_t));
+                        } else if (abs_target) {
+                            abs_target[0] = L'\0';
+                        }
+                        free(dir);
+                    }
+                    if (abs_target) {
+                        resolved = koral_win_resolve_dots_budget(abs_target, budget - 1);
+                        free(abs_target);
+                    }
+                }
+            }
+            free(candidate);
+            if (resolved) {
+                // Splice the resolved location in place of the link: the
+                // stack and root become the resolved path's own.
+                size_t rroot = koral_win_path_root_len(resolved);
+                for (size_t i = 0; i <= st; i++) free(stack[i]);  // includes comp
+                st = 0;
+                free(root);
+                root = (wchar_t*)malloc((rroot + 1) * sizeof(wchar_t));
+                if (root) {
+                    memcpy(root, resolved, rroot * sizeof(wchar_t));
+                    root[rroot] = L'\0';
+                } else {
+                    root = koral_win_wcsdup(L"");
+                }
+                const wchar_t* rc = resolved + rroot;
+                while (*rc && st < cap) {
+                    while (*rc == L'\\') rc++;
+                    if (!*rc) break;
+                    const wchar_t* rs = rc;
+                    while (*rc && *rc != L'\\') rc++;
+                    size_t rl = (size_t)(rc - rs);
+                    wchar_t* rp = (wchar_t*)malloc((rl + 1) * sizeof(wchar_t));
+                    if (!rp) break;
+                    memcpy(rp, rs, rl * sizeof(wchar_t));
+                    rp[rl] = L'\0';
+                    stack[st++] = rp;
+                }
+                free(resolved);
+                continue;
+            }
+        }
+        stack[st++] = comp;
+    }
+
+    wchar_t* out = koral_win_join_path(root, stack, st);
+    for (size_t i = 0; i < st; i++) free(stack[i]);
+    free(stack);
+    free(root);
+    return out ? out : koral_win_wcsdup(abs);
+}
+
+static wchar_t* koral_win_resolve_dots(const wchar_t* abs) {
+    return koral_win_resolve_dots_budget(abs, 40);
+}
+
+/// Route a filesystem path through the `\\?\` namespace UNNORMALIZED, with
+/// `.`/`..` resolved POSIX-style first by the walk above. Forward slashes
+/// become backslashes (the prefix takes them literally) and a relative path
+/// is anchored at the current directory.
+static wchar_t* __koral_win_widen_path(const char* path) {
+    if (!path) return NULL;
+    wchar_t* wpath = __koral_utf8_to_wide(path);
+    if (!wpath) return NULL;
+    for (wchar_t* p = wpath; *p; p++) {
+        if (*p == L'/') *p = L'\\';
+    }
+    if (wpath[0] == L'\\' && wpath[1] == L'\\' && wpath[2] == L'?' && wpath[3] == L'\\') {
+        return wpath;  // already namespaced
+    }
+    int rooted = (wpath[0] == L'\\' && wpath[1] == L'\\');
+    int drive_abs = (wpath[1] == L':' && (wpath[2] == L'\\' || wpath[2] == L'\0'));
+    wchar_t* joined = wpath;
+    if (!(rooted || drive_abs)) {
+        DWORD need = GetCurrentDirectoryW(0, NULL);
+        if (need == 0) { free(wpath); return NULL; }
+        wchar_t* cwd = (wchar_t*)malloc(need * sizeof(wchar_t));
+        if (!cwd) { free(wpath); return NULL; }
+        DWORD got = GetCurrentDirectoryW(need, cwd);
+        if (got == 0 || got >= need) { free(cwd); free(wpath); return NULL; }
+        size_t cl = wcslen(cwd), wl = wcslen(wpath);
+        joined = (wchar_t*)malloc((cl + 1 + wl + 1) * sizeof(wchar_t));
+        if (!joined) { free(cwd); free(wpath); return NULL; }
+        memcpy(joined, cwd, cl * sizeof(wchar_t));
+        joined[cl] = L'\\';
+        memcpy(joined + cl + 1, wpath, (wl + 1) * sizeof(wchar_t));
+        free(cwd);
+        free(wpath);
+    }
+    // `..` needs the POSIX walk; a path without it passes straight through.
+    {
+        int has_dots = 0;
+        const wchar_t* q = joined;
+        while (*q) {
+            while (*q == L'\\') q++;
+            const wchar_t* cs = q;
+            while (*q && *q != L'\\') q++;
+            if ((size_t)(q - cs) == 2 && cs[0] == L'.' && cs[1] == L'.') {
+                has_dots = 1;
+                break;
+            }
+        }
+        if (has_dots) {
+            wchar_t* resolved = koral_win_resolve_dots(joined);
+            if (resolved) {
+                free(joined);
+                joined = resolved;
+            }
+        }
+    }
+    const wchar_t* prefix = L"\\\\?\\";
+    size_t skip = 0;
+    if (joined[0] == L'\\' && joined[1] == L'\\') {
+        prefix = L"\\\\?\\UNC\\";  // network: \\server\share -> \\?\UNC\server\share
+        skip = 2;
+    }
+    size_t pl = wcslen(prefix), il = wcslen(joined);
+    wchar_t* out = (wchar_t*)malloc((pl + il - skip + 1) * sizeof(wchar_t));
+    if (!out) { free(joined); return NULL; }
+    memcpy(out, prefix, pl * sizeof(wchar_t));
+    memcpy(out + pl, joined + skip, (il - skip + 1) * sizeof(wchar_t));
+    free(joined);
+    return out;
+}
+
 int32_t __koral_stat(const uint8_t* path, KoralStatResult* out) {
-    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
     struct _stat64 st;
     int rc = _wstat64(wpath, &st);
@@ -2047,7 +2431,7 @@ int32_t __koral_fstat(int32_t fd, KoralStatResult* out) {
 }
 
 int32_t __koral_chmod(const uint8_t* path, uint32_t mode) {
-    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
     int rc = _wchmod(wpath, (int)(mode & 0777));
     free(wpath);
@@ -2055,8 +2439,8 @@ int32_t __koral_chmod(const uint8_t* path, uint32_t mode) {
 }
 
 int32_t __koral_link(const uint8_t* src, const uint8_t* dst) {
-    wchar_t* wsrc = __koral_utf8_to_wide((const char*)src);
-    wchar_t* wdst = __koral_utf8_to_wide((const char*)dst);
+    wchar_t* wsrc = __koral_win_widen_path((const char*)src);
+    wchar_t* wdst = __koral_win_widen_path((const char*)dst);
     if (!wsrc || !wdst) {
         free(wsrc);
         free(wdst);
@@ -2069,31 +2453,292 @@ int32_t __koral_link(const uint8_t* src, const uint8_t* dst) {
 }
 
 int32_t __koral_symlink(const uint8_t* src, const uint8_t* dst) {
+    // The TARGET is stored verbatim in the link -- never widened. Only the
+    // link's own location goes through path routing.
     wchar_t* wsrc = __koral_utf8_to_wide((const char*)src);
-    wchar_t* wdst = __koral_utf8_to_wide((const char*)dst);
+    wchar_t* wdst = __koral_win_widen_path((const char*)dst);
     if (!wsrc || !wdst) {
         free(wsrc);
         free(wdst);
         return -1;
     }
+    // Windows cannot resolve a relative reparse target containing '/': the
+    // target is stored with backslash separators, and __koral_readlink
+    // converts them back to Koral's forward-slash spelling on the way out.
+    for (wchar_t* q = wsrc; *q; q++) {
+        if (*q == L'/') *q = L'\\';
+    }
     DWORD flags = 0;
-    DWORD attrs = GetFileAttributesW(wsrc);
+    // A non-absolute target is stored RELATIVE to the link's own directory,
+    // exactly like POSIX symlink(2) -- which needs SYMLINK_FLAG_RELATIVE
+    // (0x1); without it Windows resolves the target against the process CWD
+    // and bakes that absolute path into the link. The directory probe below
+    // therefore resolves a relative target against the link's directory too.
+    int target_is_abs = (wsrc[0] && wsrc[1] == L':')
+        || (wsrc[0] == L'\\' && wsrc[1] == L'\\');
+    if (!target_is_abs) flags |= 0x1;
+    wchar_t probe_buf[4096];
+    const wchar_t* probe = wsrc;
+    {
+        size_t dl = 0;
+        size_t tl = wcslen(wsrc);
+        if (!target_is_abs) {
+            dl = wcslen(wdst);
+            while (dl > 0 && wdst[dl - 1] != L'\\') dl--;
+        }
+        if (dl + tl + 1 < 4096) {
+            memcpy(probe_buf, wdst, dl * sizeof(wchar_t));
+            memcpy(probe_buf + dl, wsrc, (tl + 1) * sizeof(wchar_t));
+            for (wchar_t* q = probe_buf + dl; *q; q++) {
+                if (*q == L'/') *q = L'\\';
+            }
+            probe = probe_buf;
+        }
+    }
+    DWORD attrs = GetFileAttributesW(probe);
     if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY))
-        flags = SYMBOLIC_LINK_FLAG_DIRECTORY;
-    int rc = CreateSymbolicLinkW(wdst, wsrc, flags) ? 0 : -1;
+        flags = SYMBOLIC_LINK_FLAG_DIRECTORY | (flags & 0x1);
+    // ALLOW_UNPRIVILEGED_CREATE (0x2) lets Developer Mode machines create
+    // symlinks without elevation. Older systems reject the flag outright, so
+    // retry without it before giving up.
+    DWORD rc = CreateSymbolicLinkW(wdst, wsrc, flags | 0x2) ? 0 : (DWORD)-1;
+    if (rc != 0) {
+        rc = CreateSymbolicLinkW(wdst, wsrc, flags) ? 0 : (DWORD)-1;
+    }
     free(wsrc);
     free(wdst);
     return rc;
 }
 
 int32_t __koral_readlink(const uint8_t* path, uint8_t* buf, uint64_t buf_size) {
-    (void)path; (void)buf; (void)buf_size;
-    errno = ENOSYS;
-    return -1;
+    // The core reads the reparse target; a result equal to buf_size means it
+    // did not fit and the caller retries with more room.
+    wchar_t wtarget[2048];
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
+    if (!wpath) return -1;
+    int wlen = koral_win_readlink_w(wpath, wtarget, 2048);
+    free(wpath);
+    if (wlen < 0) return -1;
+    int needed = WideCharToMultiByte(CP_UTF8, 0, wtarget, wlen, NULL, 0, NULL, NULL);
+    if (needed <= 0) return -1;
+    if ((uint64_t)needed > buf_size) {
+        WideCharToMultiByte(CP_UTF8, 0, wtarget, wlen, (char*)buf, (int)buf_size, NULL, NULL);
+        return (int32_t)buf_size;
+    }
+    int written = WideCharToMultiByte(CP_UTF8, 0, wtarget, wlen, (char*)buf, (int)buf_size, NULL, NULL);
+    return written > 0 ? written : -1;
 }
 
+// --- race-safe recursive tree removal -------------------------------------
+//
+// `remove_dir_all`'s contract: deletion may never escape the tree, even
+// while another process renames directories or swaps them for symlinks
+// mid-walk. The walk is therefore handle-relative and no-follow, and every
+// child is identity-checked against the directory listing before it is
+// touched. Root policy (a link root removes only the link; a missing path is
+// an error) lives in std/os; what this adds is that the policy survives
+// races. Returns 0 on success, -2 when the root is not a directory (it
+// changed shape after std/os looked), -1 on any other failure.
+
+#if defined(_WIN32) || defined(_WIN64)
+
+/// Mark `h` for deletion with POSIX semantics: the name goes away at once
+/// and the storage follows when the last handle closes. Plain
+/// FileDispositionInfo keeps the entry visible until then, which leaves the
+/// parent "not empty" whenever anything in the tree is still open -- exactly
+/// the case the contract promises to handle (unlink-while-open).
+static int koral_win_delete_on_close(HANDLE h) {
+    struct {
+        DWORD Flags;
+    } dex;
+    dex.Flags = 0x1 /* DELETE */ | 0x2 /* POSIX_SEMANTICS */;
+    if (SetFileInformationByHandle(h, (FILE_INFO_BY_HANDLE_CLASS)21 /* FileDispositionInfoEx */,
+                                   &dex, sizeof(dex))) {
+        return 0;
+    }
+    FILE_DISPOSITION_INFO di;
+    di.DeleteFile = TRUE;
+    if (SetFileInformationByHandle(h, FileDispositionInfo, &di, sizeof(di))) return 0;
+    return (GetLastError() == ERROR_FILE_NOT_FOUND) ? 0 : -1;
+}
+
+/// Open `wpath` for deletion and descent. FILE_LIST_DIRECTORY is what
+/// directory enumeration needs and a plain file refuses that right, so the
+/// file case falls back to the narrower access.
+static HANDLE koral_win_open_for_remove(const wchar_t* wpath) {
+    HANDLE h = CreateFileW(
+        wpath, DELETE | SYNCHRONIZE | FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL, OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    if (h == INVALID_HANDLE_VALUE && GetLastError() == ERROR_ACCESS_DENIED) {
+        h = CreateFileW(
+            wpath, DELETE | SYNCHRONIZE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL, OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, NULL);
+    }
+    return h;
+}
+
+static int koral_win_remove_tree(HANDLE dir, const wchar_t* dir_path, int budget) {
+    if (budget <= 0) return -1;
+    unsigned char buf[65536];
+    BOOL ok = GetFileInformationByHandleEx(
+        dir, (FILE_INFO_BY_HANDLE_CLASS)10 /* FileIdBothDirectoryInfo */,
+        buf, sizeof(buf));
+    while (ok) {
+        FILE_ID_BOTH_DIR_INFO* info = (FILE_ID_BOTH_DIR_INFO*)buf;
+        for (;;) {
+            int name_wchars = (int)(info->FileNameLength / sizeof(WCHAR));
+            int is_dot = (name_wchars == 1 && info->FileName[0] == L'.');
+            int is_dotdot = (name_wchars == 2 && info->FileName[0] == L'.'
+                             && info->FileName[1] == L'.');
+            if (!is_dot && !is_dotdot) {
+                size_t dl = wcslen(dir_path);
+                wchar_t* child_path = (wchar_t*)malloc((dl + 1 + (size_t)name_wchars + 1) * sizeof(wchar_t));
+                if (!child_path) return -1;
+                memcpy(child_path, dir_path, dl * sizeof(wchar_t));
+                child_path[dl] = L'\\';
+                memcpy(child_path + dl + 1, info->FileName, (size_t)name_wchars * sizeof(WCHAR));
+                child_path[dl + 1 + name_wchars] = L'\0';
+
+                int rc = 0;
+                HANDLE child = koral_win_open_for_remove(child_path);
+                if (child == INVALID_HANDLE_VALUE) {
+                    DWORD e = GetLastError();
+                    if (e != ERROR_FILE_NOT_FOUND && e != ERROR_PATH_NOT_FOUND) rc = -1;
+                } else {
+                    BY_HANDLE_FILE_INFORMATION bh;
+                    ULONGLONG listed_id = (ULONGLONG)info->FileId.QuadPart;
+                    if (!GetFileInformationByHandle(child, &bh)) {
+                        rc = -1;
+                    } else if ((((ULONGLONG)bh.nFileIndexHigh << 32) | bh.nFileIndexLow) != listed_id) {
+                        // The entry was swapped under us. Refuse to touch it:
+                        // a wrong object must never be deleted.
+                        rc = -1;
+                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+                        // A link is deleted as a link, never descended.
+                        if (koral_win_delete_on_close(child) != 0) rc = -1;
+                    } else if (bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                        rc = koral_win_remove_tree(child, child_path, budget - 1);
+                        if (rc == 0 && koral_win_delete_on_close(child) != 0) rc = -1;
+                    } else {
+                        if (koral_win_delete_on_close(child) != 0) rc = -1;
+                    }
+                    CloseHandle(child);
+                }
+                free(child_path);
+                if (rc != 0) return -1;
+            }
+            if (info->NextEntryOffset == 0) break;
+            info = (FILE_ID_BOTH_DIR_INFO*)((char*)info + info->NextEntryOffset);
+        }
+        ok = GetFileInformationByHandleEx(
+            dir, (FILE_INFO_BY_HANDLE_CLASS)10, buf, sizeof(buf));
+    }
+    return (GetLastError() == ERROR_NO_MORE_FILES) ? 0 : -1;
+}
+
+int32_t __koral_remove_dir_all(const uint8_t* path) {
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
+    if (!wpath) return -1;
+    HANDLE root = koral_win_open_for_remove(wpath);
+    if (root == INVALID_HANDLE_VALUE) {
+        free(wpath);
+        return -1;
+    }
+    int rc = -1;
+    BY_HANDLE_FILE_INFORMATION bh;
+    if (GetFileInformationByHandle(root, &bh)) {
+        if (bh.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) {
+            // The root turned into a link after std/os looked: the contract
+            // removes only the link.
+            rc = koral_win_delete_on_close(root);
+        } else if (!(bh.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            rc = -2;
+        } else {
+            rc = koral_win_remove_tree(root, wpath, 1024);
+            if (rc == 0 && koral_win_delete_on_close(root) != 0) rc = -1;
+        }
+    }
+    CloseHandle(root);
+    free(wpath);
+    return rc;
+}
+
+#else
+
+static int koral_remove_tree_at(int dirfd, int budget) {
+    if (budget <= 0) {
+        errno = ELOOP;
+        return -1;
+    }
+    int scanfd = dup(dirfd);
+    if (scanfd < 0) return -1;
+    DIR* d = fdopendir(scanfd);
+    if (!d) {
+        close(scanfd);
+        return -1;
+    }
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        // O_NOFOLLOW refuses symlinks and O_DIRECTORY refuses files, so a
+        // link or plain file falls through to unlink-as-itself below; a real
+        // directory is descended through the fd we already hold.
+        int child = openat(dirfd, e->d_name,
+                           O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (child >= 0) {
+            int rc = koral_remove_tree_at(child, budget - 1);
+            close(child);
+            if (rc != 0) {
+                closedir(d);
+                return -1;
+            }
+            if (unlinkat(dirfd, e->d_name, AT_REMOVEDIR) != 0 && errno != ENOENT) {
+                closedir(d);
+                return -1;
+            }
+        } else {
+            if (unlinkat(dirfd, e->d_name, 0) != 0 && errno != ENOENT) {
+                closedir(d);
+                return -1;
+            }
+        }
+    }
+    closedir(d);
+    return 0;
+}
+
+int32_t __koral_remove_dir_all(const uint8_t* path) {
+    const char* p = (const char*)path;
+    int root = open(p, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (root < 0) {
+        // The root changed shape after std/os looked: a symlink is removed as
+        // a link (the contract's root rule), a plain file is "not a
+        // directory", and anything else is an error.
+        struct stat st;
+        if (lstat(p, &st) != 0) return -1;
+        if (S_ISLNK(st.st_mode)) {
+            return unlink(p) == 0 ? 0 : -1;
+        }
+        return S_ISDIR(st.st_mode) ? -1 : -2;
+    }
+    int rc = koral_remove_tree_at(root, 1024);
+    close(root);
+    if (rc != 0) return -1;
+    // Remove the root itself by name. rmdir never follows a link, so a root
+    // swapped to a symlink fails here instead of deleting its target; a root
+    // already gone by someone else's hand is the goal met.
+    if (rmdir(p) != 0 && errno != ENOENT) return -1;
+    return 0;
+}
+
+#endif
+
 int32_t __koral_truncate(const uint8_t* path, int64_t size) {
-    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
     HANDLE h = CreateFileW(wpath, GENERIC_WRITE, 0, NULL,
                            OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -2207,22 +2852,34 @@ int32_t __koral_current_exe(uint8_t* buf, uint64_t size) {
 }
 
 int32_t __koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
-    int flags;
-    int mode = _S_IREAD | _S_IWRITE;  // Windows only supports _S_IREAD/_S_IWRITE
+    (void)perm;
+    DWORD access = 0;
+    DWORD creation = 0;
+    int oflags = _O_BINARY;
     switch (open_mode) {
-        case 0: flags = _O_RDONLY | _O_BINARY; break;                                              // Read
-        case 1: flags = _O_WRONLY | _O_CREAT | _O_TRUNC | _O_BINARY; break;                        // Write
-        case 2: flags = _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY; break;                         // Create
-        case 3: flags = _O_WRONLY | _O_CREAT | _O_APPEND | _O_BINARY; break;                       // Append
-        case 4: flags = _O_RDWR | _O_BINARY; break;                                                // ReadWrite
+        case 0: access = GENERIC_READ; creation = OPEN_EXISTING; oflags |= _O_RDONLY; break;      // Read
+        case 1: access = GENERIC_WRITE; creation = CREATE_ALWAYS; oflags |= _O_WRONLY; break;     // Write
+        case 2: access = GENERIC_WRITE; creation = CREATE_NEW; oflags |= _O_WRONLY; break;        // Create
+        case 3: access = GENERIC_WRITE; creation = OPEN_ALWAYS; oflags |= _O_WRONLY | _O_APPEND; break;  // Append
+        case 4: access = GENERIC_READ | GENERIC_WRITE; creation = OPEN_EXISTING; oflags |= _O_RDWR; break;  // ReadWrite
         default: return -1;
     }
-    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
-    int fd;
-    int rc = _wsopen_s(&fd, wpath, flags, _SH_DENYNO, mode);
+    // FILE_SHARE_DELETE is what gives unlink-while-open its POSIX meaning: a
+    // removal may proceed against a file this process still holds open, and
+    // the delete lands when the last handle closes. The CRT's opens share
+    // only read/write and turn every such removal into a sharing violation.
+    HANDLE h = CreateFileW(wpath, access,
+                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                           NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
     free(wpath);
-    if (rc != 0) return -1;
+    if (h == INVALID_HANDLE_VALUE) return -1;
+    int fd = _open_osfhandle((intptr_t)h, oflags);
+    if (fd < 0) {
+        CloseHandle(h);
+        return -1;
+    }
     return (int32_t)fd;
 }
 
@@ -2251,7 +2908,7 @@ int32_t __koral_close(int32_t fd) {
 }
 
 int32_t __koral_chdir(const uint8_t* path) {
-    wchar_t* wpath = __koral_utf8_to_wide((const char*)path);
+    wchar_t* wpath = __koral_win_widen_path((const char*)path);
     if (!wpath) return -1;
     int rc = _wchdir(wpath);
     free(wpath);

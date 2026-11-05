@@ -46,12 +46,15 @@ let main(): Void = {
     // ========================================================================
     // Command with working directory
     // ========================================================================
-    let cwd_result = Command.new("pwd").set_current_dir("/tmp".into_path()).run_output();
+    // The directory is one this process creates, not a POSIX constant: `/tmp`
+    // is not a Windows path, and the marker in the name survives both the
+    // native and the msys spelling of the path.
+    let cwd_dir = create_temp_dir("".into_path(), prefix = "cmd_cwd_marker_").unwrap();
+    let cwd_result = Command.new("pwd").set_current_dir(cwd_dir).run_output();
     when cwd_result in {
         .Ok(output) then {
             assert(output.is_success(), "builder cwd success");
-            // /tmp might resolve to /private/tmp on macOS
-            assert(output.stdout.contains("tmp"), "builder cwd stdout");
+            assert(output.stdout.contains("cmd_cwd_marker"), "builder cwd stdout");
         },
         .Error(e) then {
             println("builder_cwd_FAIL: \(e.message())");
