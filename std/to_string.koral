@@ -52,25 +52,27 @@ given Int: ToString {
         let mutable n: UInt = if is_negative then UInt(0 - (self + 1)) + 1
         else UInt(self);
 
-        let buf = alloc_memory[UInt8](21);
-        let mutable pos: UInt = 20;
-        init_memory(buf + pos, 0);
+        // Count digits first so the string allocates once (alloc_string) and
+        // the digits land directly in its in-block bytes -- no scratch buffer,
+        // no second allocation.
+        let mutable digits = UInt(0);
+        let mutable m = n;
+        while m > 0 then {
+            digits += 1;
+            m = m / 10;
+        };
+        let len = digits + (if is_negative then UInt(1) else UInt(0));
+        let s = alloc_string(len);
+        let mutable pos = len;
         while n > 0 then {
             pos -= 1;
-            init_memory(buf + pos, UInt8(n % 10) + 48);
+            init_memory(s.data + pos, UInt8(n % 10) + '0');
             n = n / 10;
         };
-
         if is_negative then {
-            pos -= 1;
-            init_memory(buf + pos, '-');
+            init_memory(s.data, '-');
         };
-
-        let len = 20 - pos;
-        if pos > 0 then {
-            move_memory(buf, buf + pos, len + 1);
-        };
-        return String(buf, len);
+        return s;
     };
 };
 
@@ -112,20 +114,23 @@ given UInt: ToString {
         };
 
         let mutable n = self;
-        let buf = alloc_memory[UInt8](21);
-        let mutable pos: UInt = 20;
-        init_memory(buf + pos, 0);
+        // Count digits first so the string allocates once (alloc_string) and
+        // the digits land directly in its in-block bytes -- no scratch buffer,
+        // no second allocation.
+        let mutable digits = UInt(0);
+        let mutable m = n;
+        while m > 0 then {
+            digits += 1;
+            m = m / 10;
+        };
+        let s = alloc_string(digits);
+        let mutable pos = digits;
         while n > 0 then {
             pos -= 1;
-            init_memory(buf + pos, UInt8((n % 10)) + '0');
+            init_memory(s.data + pos, UInt8((n % 10)) + '0');
             n = n / 10;
         };
-
-        let len = 20 - pos;
-        if pos > 0 then {
-            move_memory(buf, buf + pos, len + 1);
-        };
-        return String(buf, len);
+        return s;
     };
 };
 
