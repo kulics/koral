@@ -12,6 +12,15 @@
 /// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
 public type String(protected data: *mutable UInt8, protected len: UInt);
 
+/// Intrinsic: allocate a single-block String of byte length `len` whose bytes
+/// are not yet written (only byte `[len]` is set to 0). The bytes live in the
+/// same heap block as the object -- one allocation -- and `data` points at
+/// them; the RC release frees the whole block, so `Drop` has nothing to free.
+/// The caller must fill every byte before reading. This is plumbing for the
+/// constructors below and the compiler's interpolation lowering; the runtime
+/// side is `__koral_string_alloc` (see std/koral_runtime.h for the ABI note).
+public let intrinsic alloc_string(len: UInt): String;
+
 /// Mutable builder for incremental string construction without relying on String alias mutation.
 public type mutable StringBuilder(
     mutable data: *mutable UInt8,
@@ -39,13 +48,15 @@ public type mutable StringLinesIterator(source: String, mutable index: UInt);
 /// Iterator over the raw UTF-8 bytes of a string.
 public type mutable StringBytesIterator(source: String, mutable index: UInt);
 
-/// `Drop` for `String`: frees the string's UTF-8 buffer.
+/// `Drop` for `String`: nothing to free. The bytes live in the same heap block
+/// as the object (`alloc_string`, see above), and the RC release frees the
+/// whole block after the destructor runs. `Drop` is kept to pin the managed
+/// layout -- a bare `type String` would be an unboxed {data, len} whose copies
+/// double-free the shared buffer.
 given String: Drop {
-
-    /// Release the buffer owned by the string.
-    public drop(self): Void = {
-        dealloc_memory(self.data);
-    };
+    /// Nothing to free here: the bytes live in the object's own heap block,
+    /// which the RC release frees whole. See the note above.
+    public drop(self): Void = {};
 };
 
 /// `Drop` for `StringBuilder`: frees the builder's buffer.
@@ -176,18 +187,9 @@ given String {
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String = {
-        let data = alloc_memory[UInt8](len + 1);
-        copy_memory(data, bytes, len);
-        init_memory(data + len, 0);
-        return String(data, len);
-    };
-
-    // Unsafe constructor for low-level builders: takes ownership of an allocated UTF-8 buffer.
-    protected from_owned_utf8_ptr_unchecked(
-        bytes: *mutable UInt8,
-        len: UInt,
-    ): String = {
-        return String(bytes, len);
+        let s = alloc_string(len);
+        copy_memory(s.data, bytes, len);
+        return s;
     };
 
     // Validate UTF-8 byte sequence (strict)
@@ -307,11 +309,7 @@ given String {
     };
 
     /// Create an empty string.
-    public new(): String = {
-        let data = alloc_memory[UInt8](1);
-        init_memory(data, 0);
-        return String(data, 0);
-    };
+    public new(): String = alloc_string(UInt(0));
 
     // Using comparison patterns for ASCII space check
     private is_ascii_space(b: UInt8): Bool = {
@@ -348,6 +346,11 @@ given String {
     public is_empty(self): Bool = self.len == 0;
     /// Borrow the internal null-terminated bytes; valid while the string lives.
     public borrow_ptr(self): *UInt8 = self.data;
+
+    /// The writable byte tail of a just-`alloc_string`-ed value. Only std's
+    /// constructors and the compiler's interpolation lowering fill through it
+    /// -- writing into a published string breaks the immutability contract.
+    protected mutable_bytes(self): *mutable UInt8 = self.data;
 
     /// Return the UTF-8 bytes as a new list.
     public to_bytes(self): List[UInt8] = {
@@ -427,10 +430,9 @@ given String {
         if start + len > self.len then {
             panic("substring out of bounds");
         };
-        let data = alloc_memory[UInt8](len + 1);
-        copy_memory(data, self.data + start, len);
-        init_memory(data + len, 0);
-        return String(data, len);
+        let s = alloc_string(len);
+        copy_memory(s.data, self.data + start, len);
+        return s;
     };
 
     private is_utf8_continuation_byte(b: UInt8): Bool = (b & 192) == 128;
@@ -611,45 +613,42 @@ given String {
 
     /// Return a copy with ASCII letters lowercased; other bytes are unchanged.
     public to_ascii_lowercase(self): String = {
-        let data = alloc_memory[UInt8](self.len + 1);
+        let s = alloc_string(self.len);
         for i in 0..<self.len then {
-            init_memory(data + i, String.to_lower_byte(self.data[i]));
+            init_memory(s.data + i, String.to_lower_byte(self.data[i]));
         };
-        init_memory(data + self.len, 0);
-        return String(data, self.len);
+        return s;
     };
 
     /// Return a copy with ASCII letters uppercased; other bytes are unchanged.
     public to_ascii_uppercase(self): String = {
-        let data = alloc_memory[UInt8](self.len + 1);
+        let s = alloc_string(self.len);
         for i in 0..<self.len then {
-            init_memory(data + i, String.to_upper_byte(self.data[i]));
+            init_memory(s.data + i, String.to_upper_byte(self.data[i]));
         };
-        init_memory(data + self.len, 0);
-        return String(data, self.len);
+        return s;
     };
 
     /// Return a copy with each ASCII word titlecased: its first letter upper,
     /// the rest lower.
     public to_ascii_titlecase(self): String = {
-        let data = alloc_memory[UInt8](self.len + 1);
+        let s = alloc_string(self.len);
         let mutable in_word = false;
         for i in 0..<self.len then {
             let b = self.data[i];
             if String.is_ascii_space(b) then {
                 in_word = false;
-                init_memory(data + i, b);
+                init_memory(s.data + i, b);
             } else {
                 if not in_word then {
                     in_word = true;
-                    init_memory(data + i, String.to_upper_byte(b));
+                    init_memory(s.data + i, String.to_upper_byte(b));
                 } else {
-                    init_memory(data + i, String.to_lower_byte(b));
+                    init_memory(s.data + i, String.to_lower_byte(b));
                 };
             };
         };
-        init_memory(data + self.len, 0);
-        return String(data, self.len);
+        return s;
     };
 
     /// Search from byte index `start` for the first occurrence of `pat`, returning
@@ -693,14 +692,13 @@ given String {
             return String.new();
         };
         let total = self.len * times;
-        let data = alloc_memory[UInt8](total + 1);
+        let s = alloc_string(total);
         let mutable offset: UInt = 0;
         for _ in 0..<times then {
-            copy_memory(data + offset, self.data, self.len);
+            copy_memory(s.data + offset, self.data, self.len);
             offset += self.len;
         };
-        init_memory(data + total, 0);
-        return String(data, total);
+        return s;
     };
 
     /// Replace only the first `n` occurrences of `pat` with `with`.

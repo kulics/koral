@@ -569,6 +569,13 @@ given MIRVerifier {
                 };
                 Result[Void].Ok({})
             },
+            .AllocString(len, result_type) then {
+                let _ = self.verify_value(function, len, local_ids, local_types) or return;
+                if self.program.context.contains_generic_parameter(result_type) then {
+                    return self.fail(function, "intrinsic has unresolved generic type");
+                };
+                Result[Void].Ok({})
+            },
             .DeallocMemory(pointer) then self.verify_value(
                 function,
                 pointer,
@@ -1089,7 +1096,8 @@ given MIRVerifier {
             ),
             .Cast(_, target_type, _) then target_type,
             .Intrinsic(node) then when node in {
-                .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
+                .AllocMemory(_, result_type) or .AllocString(_, result_type)
+                or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type)
                 or .TakeMemory(_, result_type) or .NullPtr(result_type)
                 or .TraitObjectDowncast(_, result_type) then result_type,
                 _ then Type.Unknown(),

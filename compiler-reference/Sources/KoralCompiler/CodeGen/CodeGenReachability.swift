@@ -188,7 +188,7 @@ extension CodeGen {
 
   private func collectIntrinsicRefs(_ node: MIRIntrinsic, _ out: inout [String]) {
     switch node {
-    case .allocMemory(let count, _):
+    case .allocMemory(let count, _), .allocString(let count, _):
       collectValueRefs(count, &out)
     case .deallocMemory(let ptr):
       collectValueRefs(ptr, &out)

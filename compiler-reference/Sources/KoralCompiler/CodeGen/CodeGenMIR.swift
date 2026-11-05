@@ -183,7 +183,7 @@ final class MIRFunctionCodeEmitter {
 
     func walkIntrinsic(_ intrinsic: MIRIntrinsic) {
       switch intrinsic {
-      case .allocMemory(let count, _):
+      case .allocMemory(let count, _), .allocString(let count, _):
         walkValue(count)
       case .deallocMemory(let ptr),
            .deinitMemory(let ptr),
@@ -2145,6 +2145,15 @@ final class MIRFunctionCodeEmitter {
       codeGen.addIndent()
       codeGen.appendToBuffer("\(expression) = malloc(\(countEmission.expression) * sizeof(\(codeGen.cTypeName(elementType))));\n")
       emitCleanups(countEmission.cleanups)
+      return MIRValueEmission(expression: expression, cleanups: [])
+
+    case .allocString(let len, let resultType):
+      sawAllocMemory = true
+      let lenEmission = emitValue(len, sourceMode: true)
+      let expression = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resultType))
+      codeGen.addIndent()
+      codeGen.appendToBuffer("\(expression).ptr = __koral_string_alloc(\(lenEmission.expression));\n")
+      emitCleanups(lenEmission.cleanups)
       return MIRValueEmission(expression: expression, cleanups: [])
 
     case .deallocMemory(let ptr):

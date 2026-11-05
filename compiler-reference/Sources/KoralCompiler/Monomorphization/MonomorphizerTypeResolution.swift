@@ -1802,6 +1802,11 @@ extension Monomorphizer {
                 count: resolveTypesInExpression(count),
                 resultType: resolveParameterizedType(resultType)
             )
+        case .allocString(let len, let resultType):
+            return .allocString(
+                len: resolveTypesInExpression(len),
+                resultType: resolveParameterizedType(resultType)
+            )
             
         case .deallocMemory(let ptr):
             return .deallocMemory(ptr: resolveTypesInExpression(ptr))

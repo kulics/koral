@@ -335,6 +335,7 @@ struct MIRLambda {
 
 indirect enum MIRIntrinsic {
   case allocMemory(count: MIRValue, resultType: Type)
+  case allocString(len: MIRValue, resultType: Type)
   case deallocMemory(ptr: MIRValue)
   case copyMemory(dest: MIRValue, source: MIRValue, count: MIRValue)
   case moveMemory(dest: MIRValue, source: MIRValue, count: MIRValue)

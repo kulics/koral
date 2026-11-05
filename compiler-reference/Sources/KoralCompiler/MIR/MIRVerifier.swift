@@ -319,7 +319,8 @@ final class MIRVerifier {
 
   private func verifyIntrinsic(_ intrinsic: MIRIntrinsic, in function: MIRFunction) throws {
     switch intrinsic {
-    case .allocMemory(let count, let resultType):
+    case .allocMemory(let count, let resultType),
+         .allocString(let count, let resultType):
       try verifyValue(count, in: function, localIDs: Set(function.locals.map(\.id)))
       try verifyConcrete(resultType, in: function, description: "intrinsic has unresolved generic type")
     case .deallocMemory(let ptr),

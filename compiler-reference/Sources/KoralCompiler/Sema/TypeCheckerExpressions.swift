@@ -9271,6 +9271,10 @@ extension TypeChecker {
     guard let borrowPtrMethod = try lookupDeclaredMethod(on: stringType, name: "borrow_ptr") else {
       throw SemanticError(.generic("Missing method 'borrow_ptr' for type 'String'"), span: span)
     }
+    guard let mutableBytesMethod = try lookupDeclaredMethod(on: stringType, name: "mutable_bytes")
+    else {
+      throw SemanticError(.generic("Missing method 'mutable_bytes' for type 'String'"), span: span)
+    }
 
     var statements: [TypedStatementNode] = []
     var partSymbols: [Symbol] = []
@@ -9321,20 +9325,25 @@ extension TypeChecker {
     )
 
     let totalVar = TypedExpressionNode.variable(identifier: totalSymbol)
-    let oneUInt = TypedExpressionNode.integerLiteral(value: "1", type: uintType)
-    let capExpr = TypedExpressionNode.arithmeticExpression(
-      left: totalVar,
-      op: .plus,
-      right: oneUInt,
-      type: uintType,
-      span: .unknown
+    // Single-block String: object and bytes in one allocation, parts written
+    // straight into the in-block tail (isomorphic to koralc's
+    // lower_interpolated_string).
+    let strAlloc = TypedExpressionNode.intrinsicCall(
+      .allocString(len: totalVar, resultType: stringType)
     )
-    let dataAlloc = TypedExpressionNode.intrinsicCall(
-      .allocMemory(count: capExpr, resultType: mutBytePtrType)
+    let strSymbol = nextInterpSymbol("str", type: stringType)
+    statements.append(
+      .variableDeclaration(identifier: strSymbol, value: strAlloc, mutable: false)
+    )
+    let strVar = TypedExpressionNode.variable(identifier: strSymbol)
+    let dataExpr = try buildConcreteMethodCall(
+      base: strVar,
+      method: mutableBytesMethod,
+      arguments: []
     )
     let dataSymbol = nextInterpSymbol("data", type: mutBytePtrType)
     statements.append(
-      .variableDeclaration(identifier: dataSymbol, value: dataAlloc, mutable: false)
+      .variableDeclaration(identifier: dataSymbol, value: dataExpr, mutable: false)
     )
 
     let zeroUInt = TypedExpressionNode.integerLiteral(value: "0", type: uintType)
@@ -9392,34 +9401,9 @@ extension TypeChecker {
       )
     }
 
-    let finalData = TypedExpressionNode.variable(identifier: dataSymbol)
-    let finalTotal = TypedExpressionNode.variable(identifier: totalSymbol)
-    let endPtrExpr = TypedExpressionNode.arithmeticExpression(
-      left: finalData,
-      op: .plus,
-      right: finalTotal,
-      type: mutBytePtrType,
-      span: .unknown
-    )
-    let zeroByte = TypedExpressionNode.integerLiteral(value: "0", type: .uint8)
-    let initExpr = TypedExpressionNode.intrinsicCall(
-      .initMemory(ptr: endPtrExpr, val: zeroByte)
-    )
-    statements.append(.expression(initExpr))
-
-    let builtString = TypedExpressionNode.staticMethodCall(
-      baseType: stringType,
-      methodName: "from_owned_utf8_ptr_unchecked",
-      typeArgs: [],
-      methodTypeArgs: [],
-      arguments: [
-        TypedExpressionNode.variable(identifier: dataSymbol),
-        TypedExpressionNode.variable(identifier: totalSymbol),
-      ],
-      type: stringType
-    )
-
-    return .blockExpression(statements: statements, tailExpression: builtString, type: stringType)
+    // alloc_string already zeroes byte [len]; no terminator store needed.
+    let strResult = TypedExpressionNode.variable(identifier: strSymbol)
+    return .blockExpression(statements: statements, tailExpression: strResult, type: stringType)
   }
 
   private func convertInterpolatedPartToString(

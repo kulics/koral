@@ -4320,6 +4320,8 @@ private final class MIRFunctionBuilder {
     switch intrinsic {
     case .allocMemory(let count, let resultType):
       return .allocMemory(count: lowerValue(count), resultType: resultType)
+    case .allocString(let len, let resultType):
+      return .allocString(len: lowerValue(len), resultType: resultType)
     case .deallocMemory(let ptr):
       return .deallocMemory(ptr: lowerValue(ptr))
     case .copyMemory(let dest, let source, let count):

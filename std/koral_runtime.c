@@ -40,6 +40,22 @@ uint8_t** __koral_argv(void) {
     return __koral_argv_storage;
 }
 
+// 单块 String 分配（见 koral_runtime.h 的声明注释）。计数初始化与 codegen 的
+// 受管构造一致（strong=1 / weak=1，含隐式 weak）。
+void* __koral_string_alloc(uintptr_t len) {
+    struct __koral_Control* control = (struct __koral_Control*)malloc(
+        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + len + 1);
+    control->strong_count = 1;
+    control->weak_count = 1;
+    struct __koral_StringPayload* payload =
+        (struct __koral_StringPayload*)__koral_payload_of(control);
+    uint8_t* tail = (uint8_t*)payload + sizeof(struct __koral_StringPayload);
+    tail[len] = 0;
+    payload->data = tail;
+    payload->len = len;
+    return payload;
+}
+
 // 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。
 // dtor 由释放调用点单态化后传进来，头里不再存析构函数。
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {

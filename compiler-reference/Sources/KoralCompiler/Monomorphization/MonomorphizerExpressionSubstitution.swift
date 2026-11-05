@@ -1011,6 +1011,11 @@ extension Monomorphizer {
                 count: substituteTypesInExpression(count, substitution: substitution),
                 resultType: substituteType(resultType, substitution: substitution)
             )
+        case .allocString(let len, let resultType):
+            return .allocString(
+                len: substituteTypesInExpression(len, substitution: substitution),
+                resultType: substituteType(resultType, substitution: substitution)
+            )
             
         case .deallocMemory(let ptr):
             return .deallocMemory(ptr: substituteTypesInExpression(ptr, substitution: substitution))

@@ -202,7 +202,7 @@ private final class MIRStatsCounter {
 
   private func count(_ intrinsic: MIRIntrinsic) {
     switch intrinsic {
-    case .allocMemory(let count, _):
+    case .allocMemory(let count, _), .allocString(let count, _):
       self.count(count)
     case .deallocMemory(let ptr),
          .deinitMemory(let ptr),

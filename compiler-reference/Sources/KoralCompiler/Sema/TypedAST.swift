@@ -349,6 +349,7 @@ public enum TypedInterpolatedPart {
 public indirect enum TypedIntrinsic {
   // Memory Management
   case allocMemory(count: TypedExpressionNode, resultType: Type)
+  case allocString(len: TypedExpressionNode, resultType: Type)
   case deallocMemory(ptr: TypedExpressionNode)
   case copyMemory(
     dest: TypedExpressionNode, source: TypedExpressionNode, count: TypedExpressionNode)
@@ -373,7 +374,7 @@ public indirect enum TypedIntrinsic {
 
   public var type: Type {
     switch self {
-    case .allocMemory(_, let resultType): return resultType
+    case .allocMemory(_, let resultType), .allocString(_, let resultType): return resultType
     case .deallocMemory: return .void
     case .copyMemory: return .void
     case .moveMemory: return .void

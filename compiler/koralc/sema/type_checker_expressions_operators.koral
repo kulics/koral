@@ -1622,7 +1622,7 @@ given TypeChecker {
                             reported_ids,
                         );
                     },
-                    .AllocMemory(count_expr, _) then {
+                    .AllocMemory(count_expr, _) or .AllocString(count_expr, _) then {
                         self.validate_lambda_captures_in_expr(
                             count_expr,
                             local_names,
@@ -2835,15 +2835,29 @@ given TypeChecker {
             TypedExprKind.Variable(total_symbol),
             total_symbol.symbol_type,
         );
-        let one_uint = make_typed_expr(TypedExprKind.IntegerLiteral("1"), uint_type);
-        let cap_expr = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(total_var, ArithmeticOperator.Add(), one_uint),
-            uint_type,
-        );
+        // 单块 String：对象与字节一次分配，部件直接写进块内字节尾部。
+        // 旧路径是 staging 缓冲 + 收养构造（两次分配）。
         let alloc_expr = make_typed_expr(
             TypedExprKind.IntrinsicCall(
-                TypedIntrinsic.AllocMemory(cap_expr, mut_byte_ptr_type),
+                TypedIntrinsic.AllocString(total_var, string_type),
             ),
+            string_type,
+        );
+        let str_symbol = self.make_expr_temp_symbol(
+            "__interp_str",
+            string_type,
+            VariableKind.Value(),
+        );
+        block_statements.push(
+            TypedStatement.LetStmt(str_symbol, alloc_expr, unknown_span()),
+        );
+        let str_var = make_typed_expr(
+            TypedExprKind.Variable(str_symbol),
+            str_symbol.symbol_type,
+        );
+        let data_expr = self.build_unary_method_call(
+            str_var,
+            "mutable_bytes",
             mut_byte_ptr_type,
         );
         let data_symbol = self.make_expr_temp_symbol(
@@ -2852,7 +2866,7 @@ given TypeChecker {
             VariableKind.Value(),
         );
         block_statements.push(
-            TypedStatement.LetStmt(data_symbol, alloc_expr, unknown_span()),
+            TypedStatement.LetStmt(data_symbol, data_expr, unknown_span()),
         );
         let zero_uint = make_typed_expr(TypedExprKind.IntegerLiteral("0"), uint_type);
         let offset_symbol = self.make_expr_temp_symbol(
@@ -2928,68 +2942,13 @@ given TypeChecker {
             );
         };
 
-        let data_var = make_typed_expr(
-            TypedExprKind.Variable(data_symbol),
-            data_symbol.symbol_type,
-        );
-        let end_total_var = make_typed_expr(
-            TypedExprKind.Variable(total_symbol),
-            total_symbol.symbol_type,
-        );
-        let end_ptr_expr = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(
-                data_var,
-                ArithmeticOperator.Add(),
-                end_total_var,
-            ),
-            mut_byte_ptr_type,
-        );
-        let zero_byte = make_typed_expr(
-            TypedExprKind.IntegerLiteral("0"),
-            Type.UInt8Type(),
-        );
-        let init_expr = make_typed_expr(
-            TypedExprKind.IntrinsicCall(
-                TypedIntrinsic.InitMemory(end_ptr_expr, zero_byte),
-            ),
-            Type.VoidType(),
-        );
-        block_statements.push(TypedStatement.ExprStmt(init_expr, unknown_span()));
-
-        let final_data = make_typed_expr(
-            TypedExprKind.Variable(data_symbol),
-            data_symbol.symbol_type,
-        );
-        let final_total = make_typed_expr(
-            TypedExprKind.Variable(total_symbol),
-            total_symbol.symbol_type,
-        );
-        let final_cap = make_typed_expr(
-            TypedExprKind.ArithmeticExpr(
-                make_typed_expr(
-                    TypedExprKind.Variable(total_symbol),
-                    total_symbol.symbol_type,
-                ),
-                ArithmeticOperator.Add(),
-                make_typed_expr(TypedExprKind.IntegerLiteral("1"), uint_type),
-            ),
-            uint_type,
-        );
-        let mutable build_args = List[TypedExpr].new();
-        build_args.push(final_data);
-        build_args.push(final_total);
-        // staging 缓冲的所有权直接移交给 String（与种子实现一致）。
-        // 走拷贝构造会多一次 alloc+memcpy，而且 staging 块永远没人释放——
-        // 每个插值字符串泄漏一块。owned 构造零拷贝接管，由 String 的
-        // drop 释放，恰好一配一。
-        let built_string = self.lower_static_method_call_expr(
-            string_type,
-            "from_owned_utf8_ptr_unchecked",
-            build_args,
-            string_type,
+        // alloc_string 已置好 [len] 处的 0，无需再写终止字节。
+        let str_result = make_typed_expr(
+            TypedExprKind.Variable(str_symbol),
+            str_symbol.symbol_type,
         );
         return make_typed_expr(
-            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(built_string)),
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(str_result)),
             string_type,
         );
     };

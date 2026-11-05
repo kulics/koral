@@ -270,7 +270,7 @@ private let mir_walk_intrinsic_uses(
     active_scopes: List[MIRScopeID],
 ): Void = {
     when intrinsic_node in {
-        .AllocMemory(count, _) then mir_walk_value_uses(
+        .AllocMemory(count, _) or .AllocString(count, _) then mir_walk_value_uses(
             shared_use_scope_by_local,
             first_use_block_by_local,
             multiple_use_blocks_by_local,
@@ -3356,6 +3356,20 @@ given MIRFunctionCodeEmitter {
                 self.emit_cleanup(count_emission.cleanup);
                 MIRValueEmission(expression, Option[MIRValueCleanup].None())
             },
+            .AllocString(len, result_type) then {
+                self.saw_alloc_memory = true;
+                let len_emission = self.emit_value_source(len);
+                let expression = self.codegen.next_temp_with_decl(
+                    self.codegen.c_type_name(result_type),
+                );
+                self.codegen.add_indent();
+                self.codegen.buffer.push_string(expression);
+                self.codegen.buffer.push_string(".ptr = __koral_string_alloc(");
+                self.codegen.buffer.push_string(len_emission.expression);
+                self.codegen.buffer.push_string(");\n");
+                self.emit_cleanup(len_emission.cleanup);
+                MIRValueEmission(expression, Option[MIRValueCleanup].None())
+            },
             .DeallocMemory(pointer) then {
                 let p = self.emit_value_source(pointer);
                 self.codegen.add_indent();
@@ -4083,7 +4097,8 @@ given MIRFunctionCodeEmitter {
 
     type_of_intrinsic(self, node: MIRIntrinsic): Type = {
         return when node in {
-            .AllocMemory(_, result_type) or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
+            .AllocMemory(_, result_type) or .AllocString(_, result_type)
+            or .DowngradeRef(_, result_type) or .UpgradeRef(_, result_type) then result_type,
             .TraitObjectMatches(_, _, _, _, _) then Type.BoolType(),
             .TraitObjectDowncast(_, result_type) or .TakeMemory(_, result_type) or .NullPtr(result_type) then result_type,
             .FixedArrayLiteral(result_type, _) then result_type,
