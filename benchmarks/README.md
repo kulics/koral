@@ -53,24 +53,25 @@ that is the comparison being asked about. Specifically:
 
 ## Results
 
-2026-11-05, this machine (Apple arm64), best of 5 runs, ms:
+2026-11-06, this machine (Apple arm64), best of 5 runs, ms:
 
 | case | koral | go | swift | rust | koral vs best |
 |---|---|---|---|---|---|
-| loop_pipeline | 1.23 | 1.89 | 1.39 | 1.32 | **1.00x** |
-| set_membership | 11.46 | 25.31 | 15.30 | 9.85 | 1.16x |
-| fib_recursive | 0.50 | 0.46 | 0.43 | 0.38 | 1.33x |
-| string_find | 14.13 | 12.80 | 259.66 | 9.97 | 1.42x |
-| struct_iter | 14.11 | 7.37 | 7.57 | 10.28 | 1.91x |
-| string_build | 12.69 | 4.97 | 11.15 | 7.23 | 2.55x |
-| sort_ints | 34.99 | 54.03 | 74.96 | 12.52 | 2.80x |
-| list_sum | 11.31 | 4.07 | 5.41 | 3.97 | 2.85x |
-| sort_strings | 45.01 | 25.70 | 34.36 | 15.35 | 2.93x |
-| dict_lookup | 171.45 | 76.52 | 57.34 | 75.55 | 2.99x |
+| loop_pipeline | 1.52 | 1.96 | 1.60 | 1.63 | **1.00x** |
+| set_membership | 11.00 | 26.12 | 16.17 | 10.57 | 1.04x |
+| fib_recursive | 0.54 | 0.49 | 0.56 | 0.48 | 1.13x |
+| string_find | 12.26 | 13.33 | 271.08 | 10.01 | 1.23x |
+| struct_iter | 13.75 | 8.57 | 8.87 | 11.31 | 1.60x |
+| list_sum | 7.58 | 4.41 | 5.78 | 4.43 | 1.72x |
+| string_build | 9.20 | 5.00 | 11.72 | 7.85 | 1.84x |
+| dict_lookup | 119.07 | 72.63 | 60.89 | 73.33 | 1.96x |
+| sort_strings | 35.42 | 26.88 | 36.40 | 16.13 | 2.20x |
+| sort_ints | 34.67 | 56.55 | 79.93 | 13.27 | 2.61x |
 
 Raw compute (loop_pipeline, fib_recursive) is at parity with Go/Swift/Rust —
 `loop_pipeline` is the fastest of the four here; Koral beats Go and Swift on
-`sort_ints` and beats Swift on `string_find` by 18x. Rust is the pace-setter on the sort cases: its default `sort()` is a
+`sort_ints` and beats Swift on `string_find` by 22x and on `sort_strings`.
+Seven of ten cases are within 2x of the cross-language best. Rust is the pace-setter on the sort cases: its default `sort()` is a
 *stable* sort (driftsort), like Koral's and Swift's — Go's `sort.Ints` is a
 pattern-defeating quicksort without a stability guarantee, which is
 unobservable on scalar keys. The remaining gap is sort implementation
@@ -96,10 +97,33 @@ set_membership 21ms (2.1x). Two changes closed most of the gap:
    element transfers (no RC traffic), insertion-sort runs, pointer-walk hot
    loops (`std/list.koral`).
 
-Remaining gaps are documented follow-ups: dict_lookup (String-key hashing and
-per-lookup temporaries), string_build (allocation-bound: to_string malloc plus
-defaulted-argument glue), extending the borrowed convention to non-receiver
-parameters, and container growth calls on the push hot path — a growth helper
-inlined into `push` fattens it past the inliner threshold, so the loop pays a
-call per element (phase-split measurement: list_sum push ≈ 11ms, read ≈ 1.4ms
-and already vectorized; split the cold growth path out to recover it).
+A second campaign (2026-11-05/06) brought every case to within 2x of the best
+except the sort pair:
+
+3. **KORAL_NOINLINE on alloc-containing functions (compiler)**: growth helpers
+   inlined into `push` fattened it past the C inliner's threshold, so every
+   element paid a call (list_sum's push phase 11.4ms -> 5.7ms).
+4. **Single-block String** (`alloc_string` intrinsic): the bytes moved into
+   the object block — one allocation per string instead of two — and the
+   interpolation lowering lost its staging buffer and adopt path.
+5. **Direct integer formatting**: `Int`/`UInt.to_string` counts digits and
+   fills the in-block tail (key construction 86 -> 54.6ns).
+6. **Borrowed parameters (compiler)**: the +0 convention generalizes from
+   `self` to any non-escaping managed parameter slot (inherent methods and
+   free functions; trait-impl slots keep the owned convention).
+7. **memcmp string compare/equals** (sort_strings 41 -> 36ms).
+
+Remaining gaps and their causes:
+
+- `dict_lookup` (1.96x): key construction dominates — two short strings per
+  operation at 54.6ns each, where Swift's inline-buffer strings cost nearly
+  nothing. Hashing and probing are close. An SSO-shaped short string would
+  close most of the gap; single-block allocation was chosen over SSO.
+- `sort_ints` / `sort_strings` (2.61x / 2.20x): Rust's driftsort edge is SIMD
+  merge networks plus adaptive run fusion. A C study found the scalar merge
+  loop at its ceiling (all branch shapes within 5%; clang already cmovs), and
+  a ping-pong buffer rework measured neutral — the removable half was bulk
+  memcpy, not the per-element step. Matching driftsort is algorithm
+  engineering beyond std-level code; Koral stays ahead of Go and Swift here.
+- `struct_iter` / `list_sum` (1.60x / 1.72x): checked arithmetic and handle
+  indirection in per-element loops. The call-side RC traffic is gone.
