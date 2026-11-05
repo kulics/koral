@@ -13,8 +13,10 @@
 // 11ms vs 2ms）。保持不内联，容量检查留在内联后的调用方热路径上。
 #ifdef _MSC_VER
 #define KORAL_NOINLINE __declspec(noinline)
+#define KORAL_COLD
 #else
 #define KORAL_NOINLINE __attribute__((noinline))
+#define KORAL_COLD __attribute__((cold))
 #endif
 
 #ifdef __cplusplus
@@ -106,9 +108,9 @@ struct __koral_StringPayload {
 void* __koral_string_alloc(uintptr_t len);
 
 void __koral_set_args(int32_t argc, uint8_t** argv);
-void __koral_panic_numeric_conversion_overflow(const char* loc);
-void __koral_panic_division_by_zero(const char* loc);
-void __koral_panic_remainder_by_zero(const char* loc);
+KORAL_COLD void __koral_panic_numeric_conversion_overflow(const char* loc);
+KORAL_COLD void __koral_panic_division_by_zero(const char* loc);
+KORAL_COLD void __koral_panic_remainder_by_zero(const char* loc);
 
 // Global-initializer support (accessor + state model): the generated accessor
 // of a global serializes its slow path through a recursive lock, tracks the
@@ -217,13 +219,13 @@ void __koral_closure_retain(struct __koral_Closure closure);
 void __koral_closure_release(struct __koral_Closure closure);
 void __koral_closure_drop(void* raw_closure);
 
-void __koral_panic_overflow_add(const char* loc);
-void __koral_panic_overflow_sub(const char* loc);
-void __koral_panic_overflow_mul(const char* loc);
-void __koral_panic_overflow_div(const char* loc);
-void __koral_panic_overflow_mod(const char* loc);
-void __koral_panic_overflow_neg(const char* loc);
-void __koral_panic_overflow_shift(const char* loc);
+KORAL_COLD void __koral_panic_overflow_add(const char* loc);
+KORAL_COLD void __koral_panic_overflow_sub(const char* loc);
+KORAL_COLD void __koral_panic_overflow_mul(const char* loc);
+KORAL_COLD void __koral_panic_overflow_div(const char* loc);
+KORAL_COLD void __koral_panic_overflow_mod(const char* loc);
+KORAL_COLD void __koral_panic_overflow_neg(const char* loc);
+KORAL_COLD void __koral_panic_overflow_shift(const char* loc);
 uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precision, int alt_form);
 
 #ifdef __cplusplus

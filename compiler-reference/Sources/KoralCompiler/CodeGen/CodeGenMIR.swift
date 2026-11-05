@@ -2699,7 +2699,10 @@ final class MIRFunctionCodeEmitter {
     // Two guards are needed inside the width-changing case, because the round
     // trip alone is blind across signedness: `(int)(unsigned)(-1) == -1`, so a
     // value the target cannot hold can come back unchanged.
-    if (isSignedInt(sourceType) || isUnsignedInt(sourceType)) && (isSignedInt(targetType) || isUnsignedInt(targetType)) {
+    // One shared C type makes the width test compile-time false and every
+    // check inside it dead; skip the emission and let the pure-cast tail
+    // below return the same value (same behavior, less noise for clang).
+    if (isSignedInt(sourceType) || isUnsignedInt(sourceType)) && (isSignedInt(targetType) || isUnsignedInt(targetType)) && codeGen.cTypeName(sourceType) != codeGen.cTypeName(targetType) {
       let sourceCType = codeGen.cTypeName(sourceType)
       let sourceValue = codeGen.nextTempWithInit(cType: sourceCType, initExpr: expression)
       let converted = codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(sourceValue)")
