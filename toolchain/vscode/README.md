@@ -26,7 +26,7 @@
 
 ## 打包与安装（VSIX）
 
-打包工具 `@vscode/vsce` 要求 Node.js 22 或更高版本（仅打包时需要，扩展本身不依赖 Node）。
+打包工具 `@vscode/vsce` 要求 Node.js 22 或更高版本，由脚本经 `npx` 按需拉取（钉定版本）——无需 `npm install`，扩展本身不依赖 Node，清单与锁文件里不驻留任何依赖。
 
 1. 在项目根目录执行：`npm run package`
 2. 生成文件：`koral-language-support-<version>.vsix`
