@@ -3361,6 +3361,22 @@ extension TypeChecker {
 
       let (typedBody, _) = try checkFunctionBody(params, returnType, body)
 
+      // The entry point's signature (mirrors koralc's entry check, non-generic
+      // functions only): the generated C `main` calls this, so it takes no
+      // parameters and returns Int (the process exit code) or Void. Recoverable
+      // -- the body's own diagnostics come first and the declaration check
+      // continues.
+      if name == "main" {
+        if !params.isEmpty {
+          try handleError(SemanticError(
+            .generic("entry function 'main' must not take parameters"), span: span))
+        }
+        if returnType != .int && returnType != .void {
+          try handleError(SemanticError(
+            .generic("entry function 'main' must return Int or Void"), span: span))
+        }
+      }
+
       return .globalFunction(
         identifier: makeGlobalSymbol(name: name, type: functionType, kind: .function, access: access),
         parameters: params,

@@ -82,7 +82,9 @@ given TypeChecker {
             member,
         );
         let message = "Member '\(member)' not found in type '\(self.context().type_display_name(lookup_type))'";
-        self.push_diagnostic(
+        // Fatal in value position, recoverable in call-callee position: see
+        // `push_member_not_found_diagnostic`.
+        self.push_member_not_found_diagnostic(
             when face_hint in {
                 .Some(hint) then "\(message). \(hint)",
                 .None() then message,
@@ -956,7 +958,9 @@ given TypeChecker {
                         };
                         inaccessible_method_member = inaccessible_method;
                         if not inaccessible_method then {
-                            self.push_diagnostic(
+                            // Fatal in value position, recoverable in call-callee position:
+                            // see `push_member_not_found_diagnostic`.
+                            self.push_member_not_found_diagnostic(
                                 "Member '\(member)' not found in type '\(self.context().type_display_name(typed_base.expr_type))'",
                                 expr_span(base),
                             );
@@ -1010,7 +1014,10 @@ given TypeChecker {
                                 };
                                 inaccessible_method_member = inaccessible_method;
                                 if not inaccessible_method then {
-                                    self.push_diagnostic(
+                                    // Fatal in value position, recoverable in
+                                    // call-callee position: see
+                                    // `push_member_not_found_diagnostic`.
+                                    self.push_member_not_found_diagnostic(
                                         "Member '\(member)' not found in type '\(self.context().type_display_name(Type.GenericStruct(tplDefId, args)))'",
                                         expr_span(base),
                                     );
@@ -1053,6 +1060,14 @@ given TypeChecker {
     };
 
     check_call_callee_expr_ref(self, callee: Expr, scope: Scope): TypedExpr = {
+        // This function IS the reference compiler's `inferTypedExpression(callee)`
+        // inside its per-call catch: a member-not-found found here is recorded
+        // and the call continues, while the same complaint in value position is
+        // fatal. See `push_member_not_found_diagnostic`.
+        self.storage.call_callee_check_depth += UInt(1);
+        defer {
+            self.storage.call_callee_check_depth -= UInt(1);
+        };
         return when callee in {
             .Identifier(name, span) then self.check_identifier_expr_at(
                 name,

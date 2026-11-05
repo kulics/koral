@@ -1273,15 +1273,22 @@ given TypeChecker {
         else statements.count() - 1;
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
-        let mutable explicit_terminator = Option[String].None();
         for pair in statements.lazy().enumerate() then {
             let stmt_index = pair.first;
             let stmt = pair.second;
-            if explicit_terminator is .Some(name) then {
-                self.push_statement_diagnostic(
-                    stmt,
+            if control_flow_terminator is .Some(name) then {
+                // Any terminator -- `return`/`break`/`continue`, a diverging
+                // expression statement, a branch pair that cannot fall through
+                // -- makes the rest of the block unreachable, and the reference
+                // compiler THROWS here (Swift blockExpression): one diagnostic,
+                // the tail is never typed, and the rest of the declaration is
+                // abandoned. Report fatally and stop walking this block; the
+                // abandon gate silences whatever enclosing scopes still check.
+                self.push_fatal_diagnostic(
                     "unreachable statement after \(name)",
+                    self.statement_span(stmt),
                 );
+                break;
             };
             let mutable ts_opt = Option[TypedStatement].None();
             if suppress_trailing_effect and stmt_index == trailing_index then {
@@ -1305,9 +1312,6 @@ given TypeChecker {
             when self.statement_terminator_name(ts) in {
                 .Some(name) then {
                     control_flow_terminator = Option[String].Some(name);
-                    if not (name == "control flow terminator") then {
-                        explicit_terminator = Option[String].Some(name);
-                    };
                 },
                 .None() then {},
             };
@@ -1317,42 +1321,45 @@ given TypeChecker {
         when tail_expression in {
             .Some(tail) then {
                 if control_flow_terminator is .Some(name) then {
-                    self.push_diagnostic_at_span(
+                    // Fatal, like the statement case: the reference compiler's
+                    // throw happens before the tail is ever typed.
+                    self.push_fatal_diagnostic(
                         "unreachable expression after \(name)",
                         expr_span(tail),
                     );
+                } else {
+                    let raw_tail = self.check_expr_scoped_ref(tail, expected, scope);
+                    // The tail is the block's value: it passes through the same
+                    // expected-type adaptation as a `let` initializer or a call
+                    // argument, so an implicit upcast written as `{ make() }` is
+                    // the same conversion as `let x: T = make();`.
+                    let typed = self.adapt_expr_to_expected_type_at(
+                        raw_tail,
+                        expected,
+                        Option[SourceSpan].Some(expr_span(tail)),
+                    );
+                    // The tail is the block's value, so it has to fit whatever the
+                    // block is being checked against. Blame the block, not just the
+                    // tail: the shape `{ ... value }` as a whole is what does not
+                    // fit its context.
+                    when expected in {
+                        .Some(expected_t) then {
+                            if not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(
+                                expected_t,
+                            ) and typed.expr_type is not .NeverType() and not self.is_unresolved_expr_type(
+                                typed.expr_type,
+                            ) and not self.same_expr_type(typed.expr_type, expected_t) then {
+                                self.push_diagnostic_at_span(
+                                    "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed.expr_type))",
+                                    block_span,
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
+                    typed_tail = Option[TypedExpr].Some(typed);
+                    block_type = typed.expr_type;
                 };
-                let raw_tail = self.check_expr_scoped_ref(tail, expected, scope);
-                // The tail is the block's value: it passes through the same
-                // expected-type adaptation as a `let` initializer or a call
-                // argument, so an implicit upcast written as `{ make() }` is
-                // the same conversion as `let x: T = make();`.
-                let typed = self.adapt_expr_to_expected_type_at(
-                    raw_tail,
-                    expected,
-                    Option[SourceSpan].Some(expr_span(tail)),
-                );
-                // The tail is the block's value, so it has to fit whatever the
-                // block is being checked against. Blame the block, not just the
-                // tail: the shape `{ ... value }` as a whole is what does not
-                // fit its context.
-                when expected in {
-                    .Some(expected_t) then {
-                        if not self.contains_generic_parameter(expected_t) and not self.is_unresolved_expr_type(
-                            expected_t,
-                        ) and typed.expr_type is not .NeverType() and not self.is_unresolved_expr_type(
-                            typed.expr_type,
-                        ) and not self.same_expr_type(typed.expr_type, expected_t) then {
-                            self.push_diagnostic_at_span(
-                                "Type mismatch: expected \(self.display_type_name(expected_t)), got \(self.display_type_name(typed.expr_type))",
-                                block_span,
-                            );
-                        };
-                    },
-                    .None() then {},
-                };
-                typed_tail = Option[TypedExpr].Some(typed);
-                block_type = typed.expr_type;
             },
             .None() then {
                 if control_flow_terminator is .Some(_) then {
@@ -1421,7 +1428,10 @@ given TypeChecker {
             .LetStmt(name, is_mutable, type_annotation, value, span) then {
                 // 重复定义检查：只查当前层
                 if name != "_" and scope.lookup_local(name) is .Some(_) then {
-                    self.push_diagnostic_at_span("Duplicate definition: \(name)", span);
+                    // Fatal: the reference compiler throws here
+                    // (duplicateDefinition), abandoning the rest of the
+                    // declaration.
+                    self.push_fatal_diagnostic("Duplicate definition: \(name)", span);
                 };
                 let val_expected = when type_annotation in {
                     .Some(ta) then Option[Type].Some(

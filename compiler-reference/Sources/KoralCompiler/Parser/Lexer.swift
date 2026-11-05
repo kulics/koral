@@ -737,14 +737,16 @@ public class Lexer {
     
     // Check for type suffix (reuse extracted method)
     try checkAndRejectTypeSuffix(isFloat: false)
-    
-    // Convert to decimal string
-    guard let value = Int(digits, radix: base) else {
-      throw LexerError.invalidInteger(span: tokenSpan,
-        "Invalid \(prefix) literal: \(prefix)\(digits)")
+
+    // Normalize to decimal text when the value fits UInt64; keep the source
+    // spelling past that. Both compilers' lexers share this rule (koralc's
+    // scanner normalizes the same way), so sema sees the same string for a
+    // `0x`/`0b`/`0o` literal as for the decimal spelling of its value -- and
+    // the same raw string when no 64-bit form exists.
+    if let value = UInt64(digits, radix: base) {
+      return .integer(String(value))
     }
-    
-    return .integer(String(value))
+    return .integer(prefix + digits)
   }
 
   // Read a number, handling both integers and floats

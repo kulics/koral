@@ -54,9 +54,11 @@ private type PatternSpace {
 
 // Simple integer string parser for exhaustiveness checking. The magnitude
 // accumulates in UInt and the sign is applied at the end, so every Int value
-// parses -- Int.min included -- and a value past the Int domain comes back
-// None and contributes no coverage (the reference compiler's `Int64(value)`
-// reads nil there).
+// parses -- Int.min included. The domain is exactly Swift's `Int64(String)`:
+// a plain signed decimal numeral within Int, and None for anything else --
+// a value past the domain, an empty digit run, or any non-digit character
+// (the reference compiler reads nil there; a skipped digit would silently
+// misparse prefixed spellings) -- so no coverage is contributed.
 let parse_int_str(s: String): Option[Int] = {
     if s.is_empty() then {
         return Option[Int].None();
@@ -70,6 +72,9 @@ let parse_int_str(s: String): Option[Int] = {
         i = 1;
     } else if first == '+' then {
         i = 1;
+    };
+    if i >= s.count() then {
+        return Option[Int].None();
     };
     while i < s.count() then {
         let ch = s[i];
@@ -95,12 +100,13 @@ let parse_int_str(s: String): Option[Int] = {
         } else if ch == '9' then {
             digit = 9;
         };
-        if digit >= 0 then {
-            if magnitude > (UInt(18446744073709551615) - UInt(digit)) / UInt(10) then {
-                return Option[Int].None();
-            };
-            magnitude = magnitude * UInt(10) + UInt(digit);
+        if digit < 0 then {
+            return Option[Int].None();
         };
+        if magnitude > (UInt(18446744073709551615) - UInt(digit)) / UInt(10) then {
+            return Option[Int].None();
+        };
+        magnitude = magnitude * UInt(10) + UInt(digit);
         i += 1;
     };
     if negative then {

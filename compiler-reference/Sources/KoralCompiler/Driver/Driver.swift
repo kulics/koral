@@ -239,7 +239,17 @@ public class Driver {
       writeStderr("\(error)")
       exit(1)
     } catch {
-      writeStderr("Error: \(error)")
+      // The driver's own failures (a subprocess like clang) print their
+      // message alone -- the bare `clang compilation failed` shape the
+      // bootstrap compiler uses -- not an NSError dump with its domain and
+      // user-info dictionary. Everything else keeps its `Error: <description>`
+      // framing (PackageManifestError et al. render through `description`).
+      let nsError = error as NSError
+      if nsError.domain == "Driver" {
+        writeStderr(nsError.localizedDescription)
+      } else {
+        writeStderr("Error: \(error)")
+      }
       exit(1)
     }
   }
@@ -865,7 +875,7 @@ public class Driver {
       throw NSError(
         domain: "Driver",
         code: 1,
-        userInfo: [NSLocalizedDescriptionKey: "Clang compilation failed"]
+        userInfo: [NSLocalizedDescriptionKey: "clang compilation failed"]
       )
     }
 

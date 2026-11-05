@@ -121,6 +121,21 @@ type mutable TypeCheckerStorage(
     /// at ITS span -- the seed blames the whole `when`, not the pattern -- so
     /// the lowering itself stays silent and cannot race the caller's anchor.
     mutable pattern_case_miss: Option[PatternCaseMiss],
+    /// Armed by a FATAL diagnostic -- the mirror of Swift's `throw
+    /// SemanticError`, which `BodyChecker.checkDeclarationEntry` catches per
+    /// declaration: the rest of the declaration is abandoned. The walk keeps
+    /// running (Koral has no exceptions), so the gate at `push_diagnostic`
+    /// drops whatever it would still report. Cleared at each top-level
+    /// declaration, never by nested `check_decl` (a forced global initializer
+    /// aborts its forcer too in Swift -- the throw re-propagates).
+    mutable fatal_diagnostic_fired: Bool,
+    /// Nesting depth of CALL-CALLEE checking. The reference compiler catches
+    /// a callee-resolution failure at the call (`handleError` records it and
+    /// the call stands in with a failed expression), so the very SAME throw
+    /// that is fatal in value position (`let a = p.nope;`) is recoverable in
+    /// call position (`p.nope()` plus more diagnostics afterwards). The
+    /// member-not-found pushes consult this to pick the channel.
+    mutable call_callee_check_depth: UInt,
 );
 
 /// A dot-form pattern that names nothing the subject can be: a case-miss, or
@@ -331,6 +346,8 @@ given TypeChecker {
             Dict[UInt, GlobalInitEntry].new(),
             List[UInt].new(),
             Option[PatternCaseMiss].None(),
+            false,
+            UInt(0),
         );
         return TypeChecker(s);
     };
@@ -461,6 +478,13 @@ given TypeChecker {
     };
 
     push_diagnostic(self, message: String, span: SourceSpan): Void = {
+        // A fatal diagnostic already fired this declaration: Swift's throw
+        // abandoned the rest of the check (BodyChecker catches per
+        // declaration), so anything the walk would still report is a cascade
+        // the reference compiler never prints.
+        if self.storage.fatal_diagnostic_fired then {
+            return;
+        };
         // A message that arrives without a location is a problem at whatever
         // construct the walker is inside -- see `current_span`. A message that
         // arrives with one keeps it: the call site knows better than the cursor
@@ -1431,8 +1455,26 @@ given TypeChecker {
         self.storage.current_span = outer;
     };
 
-    push_statement_diagnostic(self, stmt: Statement, message: String): Void = {
-        self.push_diagnostic_at_span(message, self.statement_span(stmt));
+    /// A fatal diagnostic: report it, then arm the abandon gate. Mirrors
+    /// Swift's `throw SemanticError` out of the checker -- the error surfaces
+    /// at the declaration boundary and nothing after it in the declaration
+    /// does. Call this INSTEAD of `push_diagnostic_at_span` at the sites where
+    /// the reference compiler throws.
+    push_fatal_diagnostic(self, message: String, span: SourceSpan): Void = {
+        self.push_diagnostic_at_span(message, span);
+        self.storage.fatal_diagnostic_fired = true;
+    };
+
+    /// The member-not-found complaint. Fatal in value position -- the
+    /// reference compiler's throw reaches the declaration boundary -- but
+    /// recoverable while resolving a CALL's callee, where its callee catch
+    /// records the error and the call stands in with a failed expression.
+    push_member_not_found_diagnostic(self, message: String, span: SourceSpan): Void = {
+        if self.storage.call_callee_check_depth > UInt(0) then {
+            self.push_diagnostic_at_span(message, span);
+        } else {
+            self.push_fatal_diagnostic(message, span);
+        };
     };
 
     trait_def_id_by_name(self, trait_name: String): DefId = {
@@ -2228,6 +2270,10 @@ given TypeChecker {
         for decl in program.declarations then {
             when decl in {
                 _ then {
+                    // Fresh declaration boundary: the abandon gate re-arms per
+                    // declaration, exactly where Swift's per-declaration catch
+                    // starts a clean slate.
+                    self.storage.fatal_diagnostic_fired = false;
                     let td = self.check_decl(decl, retain_checked_template_bodies);
                     let finalized_decl = self.finalize_checked_decl_constraints(
                         if retain_checked_template_bodies then Option[TypedDecl].Some(
@@ -2357,6 +2403,10 @@ given TypeChecker {
             self.storage.module_path = pair.second;
             self.install_name_resolution_context();
             self.storage.package_id = pair.first.package_id;
+            // Fresh declaration boundary: the abandon gate re-arms per
+            // declaration, exactly where Swift's per-declaration catch starts a
+            // clean slate.
+            self.storage.fatal_diagnostic_fired = false;
             let decl_start_def_id = self.context().next_def_id();
             if debug_progress then {
                 println(

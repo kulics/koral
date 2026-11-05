@@ -355,7 +355,7 @@ given Lexer {
                             );
                         };
                         self.add(
-                            TokenKind.IntegerLiteral(text.to_string()),
+                            TokenKind.IntegerLiteral(Lexer.normalize_literal_text(text.to_string())),
                             start_line,
                             start_col,
                         );
@@ -413,7 +413,7 @@ given Lexer {
                             );
                         };
                         self.add(
-                            TokenKind.IntegerLiteral(text.to_string()),
+                            TokenKind.IntegerLiteral(Lexer.normalize_literal_text(text.to_string())),
                             start_line,
                             start_col,
                         );
@@ -469,7 +469,7 @@ given Lexer {
                             );
                         };
                         self.add(
-                            TokenKind.IntegerLiteral(text.to_string()),
+                            TokenKind.IntegerLiteral(Lexer.normalize_literal_text(text.to_string())),
                             start_line,
                             start_col,
                         );
@@ -633,19 +633,23 @@ given Lexer {
         };
 
         if is_float then {
-            self.add(TokenKind.FloatLiteral(text.to_string()), start_line, start_col);
+            self.add(
+                TokenKind.FloatLiteral(Lexer.normalize_literal_text(text.to_string())),
+                start_line,
+                start_col,
+            );
         } else {
             when self.read_duration_suffix_if_present() in {
                 .Some(unit) then {
                     self.add(
-                        TokenKind.DurationLiteral(text.to_string(), unit),
+                        TokenKind.DurationLiteral(Lexer.normalize_literal_text(text.to_string()), unit),
                         start_line,
                         start_col,
                     );
                 },
                 .None() then {
                     self.add(
-                        TokenKind.IntegerLiteral(text.to_string()),
+                        TokenKind.IntegerLiteral(Lexer.normalize_literal_text(text.to_string())),
                         start_line,
                         start_col,
                     );
@@ -657,6 +661,35 @@ given Lexer {
 
     private is_hex_digit(ch: Rune): Bool = {
         return (ch >= '0' and ch <= '9') or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
+    };
+
+    /// A literal's token text is its source spelling minus digit separators --
+    /// the reference compiler's lexer drops `_` while scanning -- with a
+    /// prefixed integer additionally normalized to its decimal value when one
+    /// fits in UInt64 and kept as written past that. Both compilers therefore
+    /// hand sema the same string for the same value, so pattern descriptions,
+    /// duplicate detection and codegen agree across spellings.
+    private normalize_literal_text(raw: String): String = {
+        let cleaned = raw.replace_all("_", with = "");
+        if cleaned.starts_with("0x") or cleaned.starts_with("0X")
+            or cleaned.starts_with("0b") or cleaned.starts_with("0B")
+            or cleaned.starts_with("0o") or cleaned.starts_with("0O") then {
+            let radix: UInt64 = if cleaned.starts_with("0x") or cleaned.starts_with("0X") then UInt64(16)
+            else if cleaned.starts_with("0b") or cleaned.starts_with("0B") then UInt64(2)
+            else UInt64(8);
+            let digits = cleaned.substring(2...);
+            let mutable magnitude = UInt64(0);
+            let u64_max = UInt64(0xFFFFFFFFFFFFFFFF);
+            for ch in digits.to_runes() then {
+                let d = UInt64(Lexer.hex_digit_value(ch));
+                if d >= radix or magnitude > (u64_max - d) / radix then {
+                    return cleaned;
+                };
+                magnitude = magnitude * radix + d;
+            };
+            return magnitude.to_string();
+        };
+        return cleaned;
     };
 
     // 将单个 hex 字符转为数值 (0-15)

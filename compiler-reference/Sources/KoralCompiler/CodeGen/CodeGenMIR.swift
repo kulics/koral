@@ -2088,7 +2088,20 @@ final class MIRFunctionCodeEmitter {
     let sourceType = resolver.type(of: operand) ?? targetType
 
     if isOwnershipPreservingCast(sourceType: sourceType, targetType: targetType) {
-      return sourceEmission
+      // Same ownership semantics: the retyping is a view change with no
+      // copy/drop churn, so the source's cleanups pass through untouched. But
+      // the two sides can still be spelled differently in C (`*mutable T as
+      // *mutable U`), and a bare assignment across spellings is a C type
+      // error, not a cast -- retype explicitly, mirroring koralc's cast
+      // emission. Spelling-identical views (the struct-handle pairs) keep the
+      // bare expression.
+      let targetCType = codeGen.cTypeName(targetType)
+      if codeGen.cTypeName(sourceType) == targetCType {
+        return sourceEmission
+      }
+      return MIRValueEmission(
+        expression: "(\(targetCType))\(sourceEmission.expression)",
+        cleanups: sourceEmission.cleanups)
     }
 
     let expression = emitScalarOrPointerCast(expression: sourceEmission.expression, sourceType: sourceType, targetType: targetType, span: span)
@@ -2486,13 +2499,11 @@ final class MIRFunctionCodeEmitter {
     switch place {
     case .local(let local):
       let name = localName(for: local)
-      let type = resolver.type(of: place) ?? .void
       return MIRPlaceAccess(path: name, cleanups: [])
     case .global(let defId):
       let name = codeGen.cIdentifierByDefId[codeGen.defIdKey(defId)]
         ?? codeGen.context.getCIdentifier(defId)
         ?? sanitizeCIdentifier(codeGen.context.getName(defId) ?? "global_\(defId.id)")
-      let type = resolver.type(of: place) ?? .void
       if codeGen.isForeignGlobalVar(defId) {
         // A foreign global is a bare extern (no initializer of ours to run).
         return MIRPlaceAccess(path: name, cleanups: [])
