@@ -3510,6 +3510,9 @@ given StringBuilder {
     /// Append one raw byte to the builder.
     /// The caller must keep the accumulated bytes valid UTF-8.
     public push_byte(self, value: UInt8): Void;
+    /// Append the decimal representation of `value` directly into the builder
+    /// -- no temporary String, unlike `push_string(value.to_string())`.
+    public push_uint(self, value: UInt): Void;
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     public push_string(self, other: String, span: Range[UInt] = ...): Void;
