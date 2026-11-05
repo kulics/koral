@@ -7,6 +7,16 @@
 #include <stdint.h>
 #include <limits.h>
 
+// 含 alloc_memory 的函数（缓冲增长、创建辅助）由 codegen 发这个属性：
+// 内联进调用方后，冷路径（增长/创建）会把调用方撑过 C 内联器的阈值——热
+// 循环里的 push 之类就再也内联不进去，每个元素付一次调用（实测 5M push
+// 11ms vs 2ms）。保持不内联，容量检查留在内联后的调用方热路径上。
+#ifdef _MSC_VER
+#define KORAL_NOINLINE __declspec(noinline)
+#else
+#define KORAL_NOINLINE __attribute__((noinline))
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif

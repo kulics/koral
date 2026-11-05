@@ -20,6 +20,10 @@ type MIRFunctionEmitPlan(
     lifetime_plan: MIRLocalLifetimePlan,
 );
 
+/// 一个 MIR 函数发射出的 C 函数体，以及该函数体是否含 alloc_memory。
+/// `allocates` 决定函数定义是否带 KORAL_NOINLINE（见 koral_runtime.h）。
+type MIRFunctionBodyText(body: String, allocates: Bool);
+
 private let is_borrowed_reference_like_type(t: Type): Bool = {
     return when t.indirection_info() in {
         .Some(info) then info.family is .ManagedReference() or is .WeakReference(),
@@ -640,6 +644,9 @@ type mutable MIRFunctionCodeEmitter(
     mutable current_owner_callable_name_cache_prefix: Option[String],
     mutable callable_name_cache: Dict[UInt, String],
     mutable consumed_locals: Dict[UInt, Bool],
+    // 本函数体是否发射过 alloc_memory（含增长/创建辅助）。为 true 时函数
+    // 定义带 KORAL_NOINLINE —— 见 koral_runtime.h 该宏处的注释。
+    mutable saw_alloc_memory: Bool,
 );
 
 private let build_mir_function_emit_plan(
@@ -724,6 +731,7 @@ given MIRFunctionCodeEmitter {
             },
             Dict[UInt, String].new(),
             Dict[UInt, Bool].new(),
+            false,
         );
     };
 
@@ -3332,6 +3340,7 @@ given MIRFunctionCodeEmitter {
     emit_intrinsic(self, node: MIRIntrinsic): MIRValueEmission = {
         return when node in {
             .AllocMemory(count, result_type) then {
+                self.saw_alloc_memory = true;
                 let count_emission = self.emit_value_source(count);
                 let mutable element_type = self.pointer_element_type(result_type);
                 let expression = self.codegen.next_temp_with_decl(
@@ -3744,9 +3753,11 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer = saved_buffer;
         self.codegen.indent = saved_indent;
 
+        let header_prefix = if body_emitter.saw_alloc_memory then "static KORAL_NOINLINE "
+        else "static ";
         self.nested_definitions.push_string(inner_nested);
         self.nested_definitions.push_string(
-            "static \(return_c_type) \(name)(\(param_str)) {\n",
+            "\(header_prefix)\(return_c_type) \(name)(\(param_str)) {\n",
         );
         self.nested_definitions.push_string(body_text);
         self.nested_definitions.push_string("}\n");
@@ -3827,9 +3838,11 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer = saved_buffer;
         self.codegen.indent = saved_indent;
 
+        let header_prefix = if body_emitter.saw_alloc_memory then "static KORAL_NOINLINE "
+        else "static ";
         self.nested_definitions.push_string(inner_nested);
         self.nested_definitions.push_string(
-            "static \(return_c_type) \(name)(\(param_str)) {\n",
+            "\(header_prefix)\(return_c_type) \(name)(\(param_str)) {\n",
         );
         self.nested_definitions.push_string(
             "    struct \(env_struct_name)* __captured = (struct \(env_struct_name)*)__env;\n",
@@ -4925,7 +4938,7 @@ given CodeGen {
         };
     };
 
-    public emit_mir_function_body(self, function: MIRFunction): String = {
+    public emit_mir_function_body(self, function: MIRFunction): MIRFunctionBodyText = {
         let saved_indent = self.indent;
         self.indent = StringBuilder.new();
         self.indent.push_string(" ");
@@ -4940,7 +4953,7 @@ given CodeGen {
             self.nested_function_definitions.push_string(nested);
         };
         self.indent = saved_indent;
-        return body_text;
+        return MIRFunctionBodyText(body_text, emitter.saw_alloc_memory);
     };
 
     public emit_mir_global_function(self, function: MIRFunction): Void = {
@@ -4974,7 +4987,8 @@ given CodeGen {
             let return_c_type = self.c_type_name(concrete_return_type);
             let params_str = self.build_param_list(function.params);
             // Generate the function body and collect nested definitions
-            let body_text = self.emit_mir_function_body(function);
+            let body_emission = self.emit_mir_function_body(function);
+            let body_text = body_emission.body;
 
             // Emit nested definitions (lambda functions, env structs) before the function
             if not self.nested_function_definitions.is_empty() then {
@@ -4982,6 +4996,9 @@ given CodeGen {
                 self.nested_function_definitions = StringBuilder.new();
             };
 
+            if body_emission.allocates then {
+                self.buffer.push_string("KORAL_NOINLINE ");
+            };
             self.buffer.push_string(return_c_type);
             self.buffer.push_string(" ");
             self.buffer.push_string(c_name);

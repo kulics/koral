@@ -92,6 +92,11 @@ fileprivate struct MIRFunctionEmitPlan {
 fileprivate struct MIRFunctionRenderResult {
   let definitions: String
   let body: String
+  // Whether the body emitted an alloc_memory. Functions that allocate are
+  // emitted KORAL_NOINLINE (see std/koral_runtime.h): inlined into a hot loop
+  // they drag growth code over the C inliner threshold and every iteration
+  // then pays a call. Mirrors koralc's `saw_alloc_memory`.
+  let allocates: Bool
 }
 
 final class MIRFunctionCodeEmitter {
@@ -109,6 +114,7 @@ final class MIRFunctionCodeEmitter {
   private var nestedTypeDefinitions = ""
   private var nestedFunctionDefinitions = ""
   private var consumedLocalIDs = Set<MIRLocalID>()
+  private(set) var sawAllocMemory = false
 
   var generatedDefinitions: String {
     nestedTypeDefinitions + nestedFunctionDefinitions
@@ -1275,7 +1281,8 @@ final class MIRFunctionCodeEmitter {
     codeGen.recordMIRFunctionRender()
     let result = MIRFunctionRenderResult(
       definitions: emitter.generatedDefinitions,
-      body: codeGen.buffer
+      body: codeGen.buffer,
+      allocates: emitter.sawAllocMemory
     )
 
     codeGen.buffer = savedBuffer
@@ -1297,10 +1304,11 @@ final class MIRFunctionCodeEmitter {
     let paramsStr = params.isEmpty ? "void" : params.joined(separator: ", ")
     let nested = renderMIRFunctionBody(mirFunction)
 
+    let noinline = nested.allocates ? "KORAL_NOINLINE " : ""
     nestedFunctionDefinitions += [
       nested.definitions,
-      "\nstatic \(returnCType) \(name)(\(paramsStr));\n",
-      "static \(returnCType) \(name)(\(paramsStr)) {\n",
+      "\nstatic \(noinline)\(returnCType) \(name)(\(paramsStr));\n",
+      "static \(noinline)\(returnCType) \(name)(\(paramsStr)) {\n",
       nested.body,
       "}\n"
     ].joined()
@@ -1328,10 +1336,11 @@ final class MIRFunctionCodeEmitter {
     let nested = renderMIRFunctionBody(mirFunction, localNameOverridesByDefId: localNameOverridesByDefId)
 
     let paramsSignature = params.joined(separator: ", ")
+    let noinline = nested.allocates ? "KORAL_NOINLINE " : ""
     nestedFunctionDefinitions += [
       nested.definitions,
-      "\nstatic \(returnCType) \(name)(\(paramsSignature));\n",
-      "static \(returnCType) \(name)(\(paramsSignature)) {\n",
+      "\nstatic \(noinline)\(returnCType) \(name)(\(paramsSignature));\n",
+      "static \(noinline)\(returnCType) \(name)(\(paramsSignature)) {\n",
       "  struct \(envStructName)* __captured = (struct \(envStructName)*)__env;\n",
       nested.body,
       "}\n"
@@ -2123,6 +2132,7 @@ final class MIRFunctionCodeEmitter {
   private func emitIntrinsic(_ intrinsic: MIRIntrinsic) -> MIRValueEmission {
     switch intrinsic {
     case .allocMemory(let count, let resultType):
+      sawAllocMemory = true
       let countEmission = emitValue(count, sourceMode: true)
       let elementType: Type
       switch resultType {
@@ -2952,7 +2962,11 @@ extension CodeGen {
     )
     let emitter = MIRFunctionCodeEmitter(codeGen: self, function: mirFunction, plan: plan)
     emitter.emitBody()
-    let result = MIRFunctionRenderResult(definitions: emitter.generatedDefinitions, body: buffer)
+    let result = MIRFunctionRenderResult(
+      definitions: emitter.generatedDefinitions,
+      body: buffer,
+      allocates: emitter.sawAllocMemory
+    )
 
     buffer = savedBuffer
     indent = savedIndent
@@ -2979,9 +2993,10 @@ extension CodeGen {
     let savedBuffer = buffer
     buffer = ""
     let rendered = renderMIRFunctionBody(mirFunction)
+    let noinline = rendered.allocates ? "KORAL_NOINLINE " : ""
     let functionCode = [
       rendered.definitions,
-      "\(returnType) \(cName)(\(paramList)) {\n",
+      "\(noinline)\(returnType) \(cName)(\(paramList)) {\n",
       rendered.body,
       "}\n"
     ].joined()
