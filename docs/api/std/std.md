@@ -48,6 +48,15 @@ public let intrinsic take_memory[T: Any](p: *mutable T): T;
 /// The closure is passed by value to the C runtime which invokes and releases it.
 public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: () -> Void, stack_size: UInt64): Int32;
 
+/// Intrinsic: allocate a single-block String of byte length `len` whose bytes
+/// are not yet written (only byte `[len]` is set to 0). The bytes live in the
+/// same heap block as the object -- one allocation -- and `data` points at
+/// them; the RC release frees the whole block, so `Drop` has nothing to free.
+/// The caller must fill every byte before reading. This is plumbing for the
+/// constructors below and the compiler's interpolation lowering; the runtime
+/// side is `__koral_string_alloc` (see std/koral_runtime.h for the ABI note).
+public let intrinsic alloc_string(len: UInt): String;
+
 /// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;
 
@@ -3471,9 +3480,14 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
     public next(self): Option[T];
 };
 
-/// `Drop` for `String`: frees the string's UTF-8 buffer.
+/// `Drop` for `String`: nothing to free. The bytes live in the same heap block
+/// as the object (`alloc_string`, see above), and the RC release frees the
+/// whole block after the destructor runs. `Drop` is kept to pin the managed
+/// layout -- a bare `type String` would be an unboxed {data, len} whose copies
+/// double-free the shared buffer.
 given String: Drop {
-    /// Release the buffer owned by the string.
+    /// Nothing to free here: the bytes live in the object's own heap block,
+    /// which the RC release frees whole. See the note above.
     public drop(self): Void;
 };
 

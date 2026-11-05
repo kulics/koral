@@ -165,7 +165,7 @@ static const struct {
 | `__koral_Control` | **8 B** |
 | 托管句柄 / `Ref` | **8 B** |
 | `__koral_TraitRef` | **16 B** |
-| `String` 堆块 | **24 B** |
+| `String` 堆块 | **24 B + len + 1**（单块：`alloc_string` 把字节尾随在 payload 之后，一次分配；旧形是 24 B 对象块 + 独立字节缓冲两次分配） |
 | `List` 堆块 | **32 B** |
 | `Option[String]` | **8 B**（niche） |
 | `Option[Int]` | **16 B**（无 niche，保留 tag） |
