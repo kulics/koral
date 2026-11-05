@@ -850,7 +850,12 @@ given Parser {
         return self.parse_expression_checked("when arm body");
     };
 
+    // The reference compiler names the EXPECTED TOKEN, not the construct in
+    // progress: `Unexpected token: X, expected: 'then'`. These helpers mirror
+    // that shape (their `context` parameter is kept for call-site readability
+    // but does not appear in the message).
     expect_kw_then(self, context: String): Result[Token] = {
+        let _ = context;
         let t = self.current();
         when t.kind in {
             .KwThen() then {
@@ -858,12 +863,13 @@ given Parser {
                 return .Ok(t);
             },
             _ then {
-                return .Error(self.parser_error_at("Expected 'then' in \(context)", t));
+                return .Error(self.unexpected_token_error_at(token_kind_description(t), "'then'", t));
             },
         };
     };
 
     expect_kw_in(self, context: String): Result[Token] = {
+        let _ = context;
         let t = self.current();
         when t.kind in {
             .KwIn() then {
@@ -871,12 +877,13 @@ given Parser {
                 return .Ok(t);
             },
             _ then {
-                return .Error(self.parser_error_at("Expected 'in' in \(context)", t));
+                return .Error(self.unexpected_token_error_at(token_kind_description(t), "'in'", t));
             },
         };
     };
 
     expect_lbrace(self, context: String): Result[Token] = {
+        let _ = context;
         let t = self.current();
         when t.kind in {
             .LBrace() then {
@@ -884,9 +891,7 @@ given Parser {
                 return .Ok(t);
             },
             _ then {
-                return .Error(
-                    self.parser_error_at("Expected '{' to start \(context)", t),
-                );
+                return .Error(self.unexpected_token_error_at(token_kind_description(t), "'{'", t));
             },
         };
     };
@@ -1049,12 +1054,12 @@ given Parser {
             },
             .KwThen() then {
                 if not stop_on_in then {
-                    return .Error(self.parser_error("Expected pattern before 'then'"));
+                    return .Error(self.parser_error("Unexpected token: \(token_kind_description(self.current()))"));
                 };
             },
             .KwIn() then {
                 if stop_on_in then {
-                    return .Error(self.parser_error("Expected pattern before 'in'"));
+                    return .Error(self.parser_error("Unexpected token: \(token_kind_description(self.current()))"));
                 };
             },
             _ then {},
@@ -1487,7 +1492,7 @@ given Parser {
                 return .Ok(pattern);
             },
             _ then {
-                return .Error(self.parser_error("Expected 'then' after pattern"));
+                return .Error(self.unexpected_token_error_at(token_kind_description(self.current()), "'then'", self.current()));
             },
         };
     };
@@ -1503,7 +1508,7 @@ given Parser {
                 return .Ok(pattern);
             },
             _ then {
-                return .Error(self.parser_error("Expected ';' or 'then' after pattern"));
+                return .Error(self.unexpected_token_error_at(token_kind_description(self.current()), "'then'", self.current()));
             },
         };
     };
@@ -1515,7 +1520,7 @@ given Parser {
                 return .Ok(pattern);
             },
             _ then {
-                return .Error(self.parser_error("Expected 'in' after pattern"));
+                return .Error(self.unexpected_token_error_at(token_kind_description(self.current()), "'in'", self.current()));
             },
         };
     };
@@ -1566,7 +1571,7 @@ given Parser {
                     self.advance();
                 },
                 _ then {
-                    return .Error(self.parser_error("Expected ']' after dict literal"));
+                    return .Error(self.unexpected_token_error_at(token_kind_description(self.current()), "']'", self.current()));
                 },
             };
             return .Ok(Expr.DictLiteral(entries, self.span_from_start(start)));
@@ -1590,7 +1595,7 @@ given Parser {
             },
             _ then {
                 return .Error(
-                    self.parser_error("Expected ']' after collection literal"),
+                    self.unexpected_token_error_at(token_kind_description(self.current()), "']'", self.current()),
                 );
             },
         };
@@ -1832,7 +1837,7 @@ given Parser {
                 self.advance();
             },
             _ then {
-                return .Error(self.parser_error("Expected ')' after call arguments"));
+                return .Error(self.unexpected_token_error_at(token_kind_description(self.current()), "')'", self.current()));
             },
         };
         when base in {
@@ -1938,7 +1943,7 @@ given Parser {
             },
             _ then {
                 return .Error(
-                    self.parser_error("Expected ']' after subscript argument"),
+                    self.unexpected_token_error_at(token_kind_description(self.current()), "']'", self.current()),
                 );
             },
         };
