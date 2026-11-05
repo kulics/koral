@@ -4,6 +4,12 @@
 // NOTE: This file is merged into core.koral, so primitives, traits, and option are already available.
 // ============================================================================
 
+// Byte comparison: word-at-a-time with early exit (a libc memcmp shim in
+// koral_runtime -- not `memcmp` itself: the generated prototype would clash
+// with the libc declaration), the same unsigned-byte order the old per-byte
+// loops produced.
+let foreign __koral_memcmp(a: *UInt8, b: *UInt8, n: UInt): Int32;
+
 // ============================================================================
 // String Storage and Type Definition
 // ============================================================================
@@ -900,12 +906,9 @@ given String: Eq {
         if self.len != other.len then {
             return false;
         };
-        for i in 0..<self.len then {
-            if self.data[i] != other.data[i] then {
-                return false;
-            };
-        };
-        return true;
+        // memcmp compares as unsigned bytes -- the same order the old
+        // byte loop did -- but word-at-a-time and early-exiting in libc.
+        return __koral_memcmp(self.data, other.data, self.len) == 0;
     };
 };
 
@@ -915,15 +918,14 @@ given String: Ord {
     /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
     public compare(self, other: String): Int = {
         let min = if self.len < other.len then self.len else other.len;
-        for i in 0..<min then {
-            let a = self.data[i];
-            let b = other.data[i];
-            if a < b then {
-                return 0 - 1;
-            };
-            if a > b then {
-                return 1;
-            };
+        // memcmp compares as unsigned bytes -- the same order the old byte
+        // loop did -- but word-at-a-time and early-exiting in libc.
+        let c = __koral_memcmp(self.data, other.data, min);
+        if c < 0 then {
+            return 0 - 1;
+        };
+        if c > 0 then {
+            return 1;
         };
         return if self.len < other.len then 0 - 1
         else if self.len > other.len then 1 else 0;

@@ -107,6 +107,11 @@ struct __koral_StringPayload {
 // 一致。alloc_string intrinsic 的运行时侧。
 void* __koral_string_alloc(uintptr_t len);
 
+// memcmp 垫片：签名必须与 codegen 按 `let foreign` 声明生成的原型逐字一致
+// （uint8_t* 而不是 const void*），否则同一翻译单元里两份声明冲突。
+// 结果同 memcmp：首个差异字节的无符号序；0 表示前 n 字节相等。
+int32_t __koral_memcmp(uint8_t* a, uint8_t* b, uintptr_t n);
+
 void __koral_set_args(int32_t argc, uint8_t** argv);
 KORAL_COLD void __koral_panic_numeric_conversion_overflow(const char* loc);
 KORAL_COLD void __koral_panic_division_by_zero(const char* loc);

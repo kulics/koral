@@ -56,6 +56,10 @@ void* __koral_string_alloc(uintptr_t len) {
     return payload;
 }
 
+int32_t __koral_memcmp(uint8_t* a, uint8_t* b, uintptr_t n) {
+    return (int32_t)memcmp(a, b, (size_t)n);
+}
+
 // 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。
 // dtor 由释放调用点单态化后传进来，头里不再存析构函数。
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
