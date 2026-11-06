@@ -978,7 +978,12 @@ given TypeChecker {
                 effective_type_name,
             ) in {
                 .Some(enum_template) then enum_template.type_parameters.count(),
-                .None() then UInt(0),
+                .None() then when self.generic_alias_template_for_name(
+                    effective_type_name,
+                ) in {
+                    .Some(alias_template) then alias_template.type_parameters.count(),
+                    .None() then UInt(0),
+                },
             },
         };
         let mutable receiver_type_args = List[Type].new();
@@ -1014,13 +1019,46 @@ given TypeChecker {
             );
         };
 
+        // A generic type alias receiver: `OrdList[Int].new()` is exactly
+        // `List[Int].new()`. Expand and continue on the target type; the
+        // target's own template bounds are checked here the same way the
+        // struct/enum spellings check theirs.
+        let mutable alias_expanded = Option[Type].None();
+        when self.try_expand_generic_alias_name(
+            effective_type_name,
+            receiver_type_args,
+            type_name_span,
+            true,
+        ) in {
+            .Some(expanded) then {
+                when expanded in {
+                    .GenericStruct(tpl_def_id, tpl_args) or .GenericEnum(
+                        tpl_def_id,
+                        tpl_args,
+                    ) then {
+                        self.validate_template_bounds(
+                            tpl_def_id,
+                            tpl_args,
+                            type_name_span,
+                            true,
+                        );
+                    },
+                    _ then {},
+                };
+                alias_expanded = Option[Type].Some(expanded);
+            },
+            .None() then {},
+        };
         let raw_declared_receiver_type = self.resolve_static_declared_receiver_type(
             effective_type_name,
             receiver_type_args,
         );
-        let declared_receiver_type = when raw_declared_receiver_type in {
-            .Unknown() then scoped_receiver_type_opt or else raw_declared_receiver_type,
-            _ then raw_declared_receiver_type,
+        let declared_receiver_type = when alias_expanded in {
+            .Some(expanded) then expanded,
+            .None() then when raw_declared_receiver_type in {
+                .Unknown() then scoped_receiver_type_opt or else raw_declared_receiver_type,
+                _ then raw_declared_receiver_type,
+            },
         };
         let enum_type_opt = when self.try_resolve_named_type_in_scope_without_diag(
             effective_type_name,

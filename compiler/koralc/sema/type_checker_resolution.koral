@@ -54,6 +54,19 @@ given TypeChecker {
         let canonical = self.canonicalize_alias_type(base_type);
         return when canonical in {
             .StructureType(def_id) then {
+                if self.storage.generic_templates.alias_by_def_id(def_id) is .Some(
+                    alias_template,
+                ) then {
+                    if not self.ensure_generic_template_visible(base, def_id, span) then {
+                        return Type.Unknown();
+                    };
+                    return self.expand_generic_alias(
+                        alias_template,
+                        resolved_args,
+                        span,
+                        false,
+                    );
+                };
                 if not self.ensure_generic_template_visible(base, def_id, span) then {
                     return Type.Unknown();
                 };
@@ -80,6 +93,56 @@ given TypeChecker {
         };
     };
 
+    /// Instantiate a generic type alias: `OrdList[Int]` for
+    /// `type OrdList[T: Ord] = List[T]`. Arity and bounds are checked here, and
+    /// the target resolves with the parameter bindings. Re-entering an alias
+    /// that is already mid-expansion is the mutual-recursion case; a direct
+    /// self-reference never reaches here because the declaration's spelling
+    /// check rejects it first.
+    expand_generic_alias(
+        self,
+        template: GenericAliasTemplate,
+        resolved_args: List[Type],
+        span: SourceSpan,
+        check_conformance: Bool,
+    ): Type = {
+        let expected = template.type_parameters.count();
+        if expected != resolved_args.count() then {
+            let expected_note = if expected == UInt(1) then "1 type argument"
+            else "\(expected) type arguments";
+            let got_note = if resolved_args.count() == UInt(1) then "1"
+            else "\(resolved_args.count())";
+            self.push_diagnostic(
+                "Type alias '\(template.name)' expects \(expected_note), got \(got_note)",
+                span,
+            );
+            return Type.Unknown();
+        };
+        self.validate_type_param_bounds(
+            template.type_parameters,
+            resolved_args,
+            span,
+            check_conformance,
+        );
+        let key = template.def_id.id;
+        if self.storage.generic_templates.alias_expansion_in_progress.contains(key) then {
+            self.push_diagnostic("Circular type alias: \(template.name)", span);
+            return Type.Unknown();
+        };
+        let mutable bindings = Dict[String, Type].new();
+        for pair in template.type_parameters.lazy().zip[
+            Type,
+            ListIterator[Type],
+            List[Type],
+        ](resolved_args) then {
+            bindings.insert(pair.first.name, pair.second);
+        };
+        self.storage.generic_templates.alias_expansion_in_progress.insert(key);
+        let expanded = self.resolve_type_with_bindings(template.target, bindings);
+        self.storage.generic_templates.alias_expansion_in_progress.remove(key);
+        return expanded;
+    };
+
     /// Check the template's declared bounds against the arguments being written.
     ///
     /// `check_conformance` is the difference between a TYPE NODE and a CALL
@@ -103,45 +166,135 @@ given TypeChecker {
             type_params = Option[List[TypeParameterDecl]].Some(tmpl.type_parameters);
         };
         if type_params is .Some(params) then {
-            if params.count() != resolved_args.count() then {
-                return;
-            };
-            for pair in params.lazy().zip[
-                Type,
-                ListIterator[Type],
-                List[Type],
-            ](resolved_args) then {
-                let param = pair.first;
-                let bound_type = pair.second;
-                // An argument that still mentions a generic parameter cannot be
-                // judged here: `ZipIterator[T, U, R, R2]` inside `LazyView`'s own
-                // body is not yet a concrete type, and its conformance is settled
-                // when the template is instantiated for real.
-                let arg_is_concrete = not self.contains_generic_parameter(bound_type) and not self.is_unresolved_expr_type(
-                    bound_type,
-                );
-                if check_conformance and arg_is_concrete then {
-                    for constraint in param.constraints then {
-                        if not self.enforce_bound_requirement(
-                            bound_type,
-                            constraint,
-                            param.name,
-                            Dict[String, Type].new(),
-                            span,
-                        ) then {
-                            return;
-                        };
+            self.validate_type_param_bounds(params, resolved_args, span, check_conformance);
+        };
+    };
+
+    /// Expand `base_type` when it is a generic type alias, else `None`. Used by
+    /// the expression paths that see `Base[Args]` as a value namespace.
+    try_expand_generic_alias_ref(
+        self,
+        base_type: Type,
+        resolved_args: List[Type],
+        span: SourceSpan,
+        check_conformance: Bool,
+    ): Option[Type] = {
+        let canonical = self.canonicalize_alias_type(base_type);
+        return when canonical in {
+            .StructureType(def_id) then when self.storage.generic_templates.alias_by_def_id(
+                def_id,
+            ) in {
+                .Some(template) then Option[Type].Some(
+                    self.expand_generic_alias(
+                        template,
+                        resolved_args,
+                        span,
+                        check_conformance,
+                    ),
+                ),
+                .None() then Option[Type].None(),
+            },
+            _ then Option[Type].None(),
+        };
+    };
+
+    /// The generic type alias template a name resolves to, if any.
+    generic_alias_template_for_name(self, base: String): Option[GenericAliasTemplate] = {
+        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+            base,
+        ) in {
+            .Some(t) then Option[Type].Some(t),
+            .None() then when self.lookup_current_file_type_symbol(base) in {
+                .Some(t) then Option[Type].Some(t),
+                .None() then self.storage.global_scope.lookup_type(base),
+            },
+        };
+        return when base_type_opt in {
+            .Some(base_type) then when self.canonicalize_alias_type(base_type) in {
+                .StructureType(def_id) then self.storage.generic_templates.alias_by_def_id(
+                    def_id,
+                ),
+                _ then Option[GenericAliasTemplate].None(),
+            },
+            .None() then Option[GenericAliasTemplate].None(),
+        };
+    };
+
+    /// Name-based entry to `try_expand_generic_alias_ref`, for expression paths
+    /// that still hold the base spelling.
+    try_expand_generic_alias_name(
+        self,
+        base: String,
+        resolved_args: List[Type],
+        span: SourceSpan,
+        check_conformance: Bool,
+    ): Option[Type] = {
+        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+            base,
+        ) in {
+            .Some(t) then Option[Type].Some(t),
+            .None() then when self.lookup_current_file_type_symbol(base) in {
+                .Some(t) then Option[Type].Some(t),
+                .None() then self.storage.global_scope.lookup_type(base),
+            },
+        };
+        return when base_type_opt in {
+            .Some(base_type) then self.try_expand_generic_alias_ref(
+                base_type,
+                resolved_args,
+                span,
+                check_conformance,
+            ),
+            .None() then Option[Type].None(),
+        };
+    };
+
+    /// The bounds loop shared by struct/enum templates and generic type aliases.
+    validate_type_param_bounds(
+        self,
+        params: List[TypeParameterDecl],
+        resolved_args: List[Type],
+        span: SourceSpan,
+        check_conformance: Bool,
+    ): Void = {
+        if params.count() != resolved_args.count() then {
+            return;
+        };
+        for pair in params.lazy().zip[
+            Type,
+            ListIterator[Type],
+            List[Type],
+        ](resolved_args) then {
+            let param = pair.first;
+            let bound_type = pair.second;
+            // An argument that still mentions a generic parameter cannot be
+            // judged here: `ZipIterator[T, U, R, R2]` inside `LazyView`'s own
+            // body is not yet a concrete type, and its conformance is settled
+            // when the template is instantiated for real.
+            let arg_is_concrete = not self.contains_generic_parameter(bound_type) and not self.is_unresolved_expr_type(
+                bound_type,
+            );
+            if check_conformance and arg_is_concrete then {
+                for constraint in param.constraints then {
+                    if not self.enforce_bound_requirement(
+                        bound_type,
+                        constraint,
+                        param.name,
+                        Dict[String, Type].new(),
+                        span,
+                    ) then {
+                        return;
                     };
-                } else {
-                    for constraint in param.constraints then {
-                        when constraint in {
-                            .Trait(_, trait_name, _) then {
-                                if not self.validate_trait_name(trait_name) then {
-                                    return;
-                                };
-                            },
-                            _ then {},
-                        };
+                };
+            } else {
+                for constraint in param.constraints then {
+                    when constraint in {
+                        .Trait(_, trait_name, _) then {
+                            if not self.validate_trait_name(trait_name) then {
+                                return;
+                            };
+                        },
+                        _ then {},
                     };
                 };
             };
@@ -591,6 +744,12 @@ given TypeChecker {
         scope: Scope,
         span: SourceSpan,
     ): Type = {
+        // A generic alias without its type arguments names no type -- the same
+        // objection a bare generic struct name gets from the seed.
+        if self.generic_alias_template_for_name(name) is .Some(_) then {
+            self.push_diagnostic("Undefined type: \(name)", span);
+            return Type.Unknown();
+        };
         if self.try_resolve_named_type_in_scope_without_diag(name, scope) is .Some(t) then {
             let canonical = self.canonicalize_alias_type(t);
             self.check_type_visibility(canonical, name, scope, span);
@@ -1124,6 +1283,12 @@ given TypeChecker {
                 return self.canonicalize_alias_type(t);
             },
             .None() then {},
+        };
+        // A generic alias without its type arguments names no type -- the same
+        // objection a bare generic struct name gets from the seed.
+        if self.generic_alias_template_for_name(name) is .Some(_) then {
+            self.push_diagnostic("Undefined type: \(name)", span);
+            return Type.Unknown();
         };
         if self.lookup_current_file_type_symbol(name) is .Some(local_trait) then {
             if local_trait is .TraitObject(...) then {

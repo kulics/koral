@@ -3103,6 +3103,26 @@ given TypeChecker {
                 for ta in type_args then {
                     resolved_args.push(self.resolve_type_in_scope(ta, scope));
                 };
+                // A generic alias expands first; standing alone it is still a
+                // type used as a value, and the message names the expansion.
+                when self.try_expand_generic_alias_name(
+                    base,
+                    resolved_args,
+                    inst_span,
+                    true,
+                ) in {
+                    .Some(expanded) then {
+                        self.push_expr_diagnostic(
+                            expr,
+                            "Type '\(self.display_type_name(expanded))' cannot be used as an expression: types have no value",
+                        );
+                        return make_typed_expr(
+                            TypedExprKind.GenericInstantiation(expanded, resolved_args),
+                            Type.Unknown(),
+                        );
+                    },
+                    .None() then {},
+                };
                 // A generic instantiation standing alone is a type used as a
                 // value: `let x = List[Foo];`. Types have no value -- the same
                 // objection the bare spelling gets -- and the message names

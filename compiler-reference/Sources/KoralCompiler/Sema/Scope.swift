@@ -874,6 +874,15 @@ public class UnifiedScope {
     return GenericStructTemplate(defId: defId, typeParameters: info.typeParameters, parameters: info.parameters, isMutable: info.isMutable)
   }
 
+  /// Resolve a generic type alias template from a source spelling. See
+  /// `lookupGenericStructTemplate(_:)`.
+  public func lookupGenericAliasTemplate(_ name: String) -> DefIdMap.GenericAliasTemplateInfo? {
+    if let map = defIdMap, let info = map.lookupGenericAliasTemplateInfo(name) {
+      return info
+    }
+    return parent?.lookupGenericAliasTemplate(name)
+  }
+
   /// The generic struct template with this DECLARATION identity.
   ///
   /// Unlike `lookupGenericStructTemplate(_:)` no name is read: the caller has

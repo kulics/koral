@@ -2662,6 +2662,7 @@ extension TypeChecker {
       // type standing in for a value and keeps its own objection.
       if currentScope.lookupGenericStructTemplate(base) != nil
         || currentScope.lookupGenericEnumTemplate(base) != nil
+        || currentScope.lookupGenericAliasTemplate(base) != nil
         || visibleTraitInfo(base) != nil {
         let resolvedType = try resolveTypeNode(.generic(base: base, args: typeArgs, span: span))
         throw SemanticError(.generic(
@@ -4502,10 +4503,44 @@ extension TypeChecker {
 
     // Check if callee is a static method call on a generic type (e.g., [Int]List.new())
     if case .memberPath(let baseExpr, let path, _) = callee,
-       case .genericInstantiation(let baseName, let args, _) = baseExpr,
+       case .genericInstantiation(let baseName, let args, let instSpan) = baseExpr,
        path.count == 1 {
       let memberName = path[0]
       let resolvedArgs = try args.map { try resolveTypeNode($0) }
+
+      // A generic type alias is transparent: `OrdList[Int].new()` is exactly
+      // `List[Int].new()`. Validate the instantiation, then rewrite to the
+      // target spelling and dispatch there so every downstream shape matches.
+      if let aliasTemplate = currentScope.lookupGenericAliasTemplate(baseName) {
+        _ = try expandGenericAlias(
+          aliasTemplate,
+          args: resolvedArgs,
+          span: instSpan,
+          checkConformance: true
+        )
+        if case .generic(let targetBase, let targetArgs, _) = aliasTemplate.targetType {
+          var nodeSubstitution: [String: TypeNode] = [:]
+          for (i, param) in aliasTemplate.typeParameters.enumerated() where i < args.count {
+            nodeSubstitution[param.name] = args[i]
+          }
+          let rewrittenArgs = targetArgs.map { substituteTypeNodeParams($0, nodeSubstitution) }
+          let rewrittenBase = ExpressionNode.genericInstantiation(
+            base: targetBase,
+            args: rewrittenArgs,
+            span: instSpan
+          )
+          let rewrittenCallee = ExpressionNode.memberPath(
+            base: rewrittenBase,
+            path: path,
+            span: instSpan
+          )
+          return try inferCallExpression(
+            callee: rewrittenCallee,
+            arguments: callArgs,
+            expectedType: expectedType
+          )
+        }
+      }
       
       // Check if it's a generic struct with a static method
       if let template = currentScope.lookupGenericStructTemplate(baseName) {
@@ -7294,6 +7329,32 @@ extension TypeChecker {
     }
 
     let resolvedTypeArgs = try typeArgs.map { try resolveTypeNode($0) }
+
+    // A generic type alias is transparent: `OrdList[Int].new()` is exactly
+    // `List[Int].new()`. Validate the instantiation, rewrite to the target
+    // spelling, and dispatch there so every downstream shape matches.
+    if let aliasTemplate = currentScope.lookupGenericAliasTemplate(typeName) {
+      _ = try expandGenericAlias(
+        aliasTemplate,
+        args: resolvedTypeArgs,
+        span: currentSpan,
+        checkConformance: true
+      )
+      if case .generic(let targetBase, let targetArgs, _) = aliasTemplate.targetType {
+        var nodeSubstitution: [String: TypeNode] = [:]
+        for (i, param) in aliasTemplate.typeParameters.enumerated() where i < typeArgs.count {
+          nodeSubstitution[param.name] = typeArgs[i]
+        }
+        let rewrittenArgs = targetArgs.map { substituteTypeNodeParams($0, nodeSubstitution) }
+        return try inferStaticMethodCallExpression(
+          typeName: targetBase,
+          typeArgs: rewrittenArgs,
+          methodName: methodName,
+          callArgs: callArgs,
+          expectedType: expectedType
+        )
+      }
+    }
 
     if let rawType = currentScope.lookupType(typeName, sourceFile: currentSourceFile) {
       let canonicalType = canonicalizedTypeForStaticMemberLookup(rawType)

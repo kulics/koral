@@ -259,13 +259,11 @@ extension Parser {
         if isForeign {
           throw ParserError.unexpectedToken(span: currentSpan, got: "Foreign type alias is not supported")
         }
-        if !typeParams.isEmpty {
-          throw ParserError.unexpectedToken(span: currentSpan, got: "Generic type aliases are not supported")
-        }
         try match(.equal)
         let targetType = try parseType()
         return .typeAliasDeclaration(
           name: name,
+          typeParams: typeParams,
           targetType: targetType,
           access: access,
           span: startSpan,

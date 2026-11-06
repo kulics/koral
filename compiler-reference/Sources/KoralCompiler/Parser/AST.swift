@@ -281,6 +281,7 @@ public indirect enum GlobalNode {
     methods: [IntrinsicMethodDeclaration], span: SourceSpan)
   case typeAliasDeclaration(
     name: String,
+    typeParams: [TypeParameterDecl] = [],
     targetType: TypeNode,
     access: AccessModifier,
     span: SourceSpan,
@@ -319,7 +320,7 @@ extension GlobalNode {
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
       return span
-    case .typeAliasDeclaration(_, _, _, let span, _):
+    case .typeAliasDeclaration(_, _, _, _, let span, _):
       return span
     }
   }
@@ -357,7 +358,7 @@ extension GlobalNode {
       return span
     case .intrinsicGivenDeclaration(_, _, _, let span):
       return span
-    case .typeAliasDeclaration(_, _, _, let span, _):
+    case .typeAliasDeclaration(_, _, _, _, let span, _):
       return span
     }
   }

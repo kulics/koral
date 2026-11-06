@@ -1209,11 +1209,46 @@ given TypeChecker {
                     TypedDecl.TypeEnumDecl(access, name, typed_cases, span, type_sym)
                 } else TypedDecl.GenericTypeEnumDecl(access, name, span)
             },
-            .TypeAliasDecl(access, name, target, span, name_span) then {
+            .TypeAliasDecl(access, name, type_params, target, span, name_span) then {
                 let self_referential_target = when target in {
                     .Identifier(target_name, span) then target_name == name,
                     .Generic(base, _, span) then base == name,
                     _ then false,
+                };
+                if not type_params.is_empty() then {
+                    // A generic alias has no single target to bind its name to:
+                    // the name keeps the placeholder structure type the name
+                    // collector bound, and the template expands the raw target
+                    // per instantiation.
+                    if self_referential_target then {
+                        self.push_diagnostic(
+                            "Undefined type: \(name)",
+                            type_node_span(target),
+                        );
+                        return TypedDecl.TypeAliasDecl(
+                            access,
+                            name,
+                            Type.Unknown(),
+                            span,
+                        );
+                    };
+                    let def_id = self.lookup_current_file_def_id(name) or else def_id_invalid(
+                    );
+                    let alias_template = GenericAliasTemplate(
+                        def_id,
+                        name,
+                        self.to_template_type_params(type_params),
+                        self.copy_type_node(target),
+                    );
+                    self.storage.generic_templates.alias_templates_by_def_id.insert(
+                        def_id.id,
+                        alias_template,
+                    );
+                    let resolved_target = self.resolve_type_with_bindings(
+                        target,
+                        self.generic_type_param_bindings(type_params),
+                    );
+                    return TypedDecl.TypeAliasDecl(access, name, resolved_target, span);
                 };
                 let mutable resolved_target = self.resolve_type(target);
                 if self_referential_target then {

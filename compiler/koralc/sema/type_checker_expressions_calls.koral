@@ -54,6 +54,49 @@ given TypeChecker {
             },
         };
         if base_type_opt is .Some(base_type) then {
+            when self.try_expand_generic_alias_ref(
+                base_type,
+                resolved_args,
+                inst_span,
+                true,
+            ) in {
+                .Some(expanded) then {
+                    // A generic alias is transparent: `OrdList[Int].new()` is
+                    // exactly `List[Int].new()`. Rebuild the instantiation from
+                    // the expansion so every downstream shape matches the
+                    // target spelling.
+                    when expanded in {
+                        .GenericStruct(tpl_def_id, tpl_args) or .GenericEnum(
+                            tpl_def_id,
+                            tpl_args,
+                        ) then {
+                            self.validate_template_bounds(
+                                tpl_def_id,
+                                tpl_args,
+                                inst_span,
+                                true,
+                            );
+                            let nominal = if expanded is .GenericEnum(_, _) then Type.EnumType(
+                                tpl_def_id,
+                            ) else Type.StructureType(tpl_def_id);
+                            return make_typed_expr(
+                                TypedExprKind.GenericInstantiation(nominal, tpl_args),
+                                expanded,
+                            );
+                        },
+                        _ then {
+                            return make_typed_expr(
+                                TypedExprKind.GenericInstantiation(
+                                    expanded,
+                                    resolved_args,
+                                ),
+                                expanded,
+                            );
+                        },
+                    };
+                },
+                .None() then {},
+            };
             let is_enum = base_type is .EnumType(_);
             let mutable type_refs_u = List[Type].new();
             let mutable type_refs_s = List[Type].new();
