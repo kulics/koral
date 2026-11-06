@@ -582,6 +582,8 @@ Rules:
 
 `List`, `Set`, `Dict` and `Deque` are `type mutable` shared objects: they do not use copy-on-write. Mutating a container is visible through every handle, and an independent copy must be made explicitly with `clone()`.
 
+Iteration order over a `Dict` or `Set` is **unspecified**: it follows the table layout, which is seeded per process (the hash-flooding defence), so it can differ between runs. Code that needs a stable order sorts the keys itself. `List` and `Deque` iterate in storage order.
+
 ### Variables and Bindings
 
 Koral's variables use binding semantics, equivalent to binding a variable name and a value together. For safety reasons, variables are immutable by default, but we also provide mutable variables.

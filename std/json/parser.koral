@@ -12,6 +12,41 @@ using "std/text" { Parseable };
 // ============================================================================
 // Internal Parser State
 // ============================================================================
+/// Parse a JSON integer token (the grammar scan already validated its
+/// shape) into the exact case its magnitude fits -- `Int` up to 2^63-1,
+/// `UInt` up to 2^64-1 -- or `None` past both, where the caller falls back
+/// to `Float64`. Decimal digits accumulate exactly; the 20-digit ceiling
+/// is settled by a lexicographic compare against the `UInt` maximum before
+/// any arithmetic runs (same length strings of digits order numerically).
+private let parse_json_integer_literal(literal: String): Option[JsonValue] = {
+    let negative = literal.count() > UInt(0) and literal[UInt(0)] == '-';
+    let digit_text = if negative then literal.substring(1...) else literal;
+    let digit_count = digit_text.count();
+    if digit_count > UInt(20) then {
+        return Option[JsonValue].None();
+    };
+    if digit_count == UInt(20) and digit_text.compare("18446744073709551615") > 0 then {
+        return Option[JsonValue].None();
+    };
+    let digits = digit_text.to_bytes();
+    let mutable magnitude = UInt(0);
+    for j in 0..<digits.count() then {
+        magnitude = magnitude * UInt(10) + UInt(digits[j] - '0');
+    };
+    if negative then {
+        // Below 2^63 the negation fits `Int`; the single value -2^63 fits
+        // neither half of the split and falls back to `Float64`.
+        if magnitude <= UInt(9223372036854775807) then {
+            return Option[JsonValue].Some(JsonValue.Int(0 - Int(magnitude)));
+        };
+        return Option[JsonValue].None();
+    };
+    if magnitude <= UInt(9223372036854775807) then {
+        return Option[JsonValue].Some(JsonValue.Int(Int(magnitude)));
+    };
+    return Option[JsonValue].Some(JsonValue.UInt(magnitude));
+};
+
 type mutable JsonParser(input: String, mutable pos: UInt, len: UInt);
 
 // ============================================================================
@@ -393,6 +428,7 @@ given JsonParser {
 
     parse_number(self): Result[JsonValue] = {
         let start = self.pos;
+        let mutable is_integer = true;
 
         // Optional leading minus
         if self.pos < self.len and self.input[self.pos] == '-' then {
@@ -419,6 +455,7 @@ given JsonParser {
 
         // Optional fractional part
         if self.pos < self.len and self.input[self.pos] == '.' then {
+            is_integer = false;
             self.pos += 1;
             // Must have at least one digit after '.'
             if self.pos >= self.len or self.input[self.pos] < '0' or self.input[
@@ -436,6 +473,7 @@ given JsonParser {
 
         // Optional exponent part
         if self.pos < self.len and (self.input[self.pos] == 'e' or self.input[self.pos] == 'E') then {
+            is_integer = false;
             self.pos += 1;
             if self.pos < self.len and (self.input[self.pos] == '+' or self.input[
                 self.pos
@@ -456,12 +494,21 @@ given JsonParser {
             };
         };
 
-        // The scan above validated the JSON number grammar; hand the literal
-        // to strtod for the value. That is correctly rounded (so "0.3" parses
-        // to exactly the 0.3 double and "-0.0" keeps its sign) and it clamps
-        // out-of-range exponents to +/-inf or 0.0 instead of accumulating them
-        // in checked integer arithmetic.
+        // The scan above validated the JSON number grammar. An integer
+        // token is stored exactly -- a Float64 rounds everything past 2^53,
+        // and JSON integers carry IDs that must survive a round trip --
+        // falling back to `Float64` only past `UInt`. Everything else goes
+        // to strtod: that is correctly rounded (so "0.3" parses to exactly
+        // the 0.3 double and "-0.0" keeps its sign) and it clamps
+        // out-of-range exponents to +/-inf or 0.0 instead of accumulating
+        // them in checked integer arithmetic.
         let literal = self.input.substring(start..<self.pos);
+        if is_integer then {
+            when parse_json_integer_literal(literal) in {
+                .Some(value) then return .Ok(value),
+                .None() then {},
+            };
+        };
         return .Ok(JsonValue.Number(__koral_parse_float64(literal.data)));
     };
 

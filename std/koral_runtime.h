@@ -130,6 +130,10 @@ KORAL_COLD void __koral_panic_remainder_by_zero(const char* loc);
 static inline uint8_t __koral_global_state_ready(uint8_t* state) {
     return __atomic_load_n(state, __ATOMIC_ACQUIRE) == 2;
 }
+
+// The per-process hash seed: KORAL_HASH_SEED pins it, otherwise the runtime
+// draws one from the platform entropy source once.
+uintptr_t __koral_hash_seed(void);
 void __koral_global_state_finish(uint8_t* state);
 void __koral_global_init_lock(void);
 void __koral_global_init_unlock(void);

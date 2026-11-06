@@ -5930,6 +5930,33 @@ void __koral_global_state_finish(uint8_t* state) {
     __atomic_store_n(state, 2, __ATOMIC_RELEASE);
 }
 
+// The per-process hash seed. KORAL_HASH_SEED pins it (reproducible runs);
+// otherwise the runtime draws one from the platform entropy source, once.
+// Unseeded table hashing is invertible end to end: crafted keys map to
+// chosen buckets and a table walk becomes a denial of service.
+uintptr_t __koral_hash_seed(void) {
+    static uintptr_t seed = 0;
+    uintptr_t s = __atomic_load_n(&seed, __ATOMIC_ACQUIRE);
+    if (s != 0) return s;
+    uintptr_t v = 0;
+    const char* pinned = getenv("KORAL_HASH_SEED");
+    if (pinned && pinned[0]) {
+        for (const char* p = pinned; *p; p++) {
+            if (*p >= '0' && *p <= '9') {
+                v = v * 10 + (uintptr_t)(*p - '0');
+            }
+        }
+    } else {
+        __koral_random_fill((uint8_t*)&v, (int32_t)sizeof(v));
+    }
+    if (v == 0) v = (uintptr_t)0x9E3779B97F4A7C15ull;
+    uintptr_t expected = 0;
+    if (__atomic_compare_exchange_n(&seed, &expected, v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        return v;
+    }
+    return expected;
+}
+
 #if defined(_WIN32) || defined(_WIN64)
 
 static CRITICAL_SECTION __koral_global_init_mutex;

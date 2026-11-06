@@ -33,7 +33,12 @@ let foreign __koral_parse_float64(cstr: *UInt8): Float64;
 public type JsonValue {
     Null(),
     Bool(value: Bool),
+    /// A non-integer number. Integers that fit `Int`/`UInt` are stored
+    /// exactly in those cases instead: a `Float64` rounds everything past
+    /// 2^53, and JSON integers carry IDs that must survive a round trip.
     Number(value: Float64),
+    Int(value: Int),
+    UInt(value: UInt),
     String(value: String),
     Array(elements: List[JsonValue]),
     Object(entries: Dict[String, JsonValue]),
@@ -210,6 +215,8 @@ private let to_string_pretty_impl(value: JsonValue, level: UInt): String = {
         .Null() then "null",
         .Bool(v) then if v then "true" else "false",
         .Number(v) then format_json_number(v),
+        .Int(v) then v.to_string(),
+        .UInt(v) then v.to_string(),
         .String(v) then escape_json_string(v),
         .Array(elements) then to_string_pretty_array(elements, level),
         .Object(entries) then to_string_pretty_object(entries, level),
@@ -230,8 +237,8 @@ given JsonValue {
     /// Check whether this is a `Bool`.
     public is_bool(self): Bool = self is .Bool(_);
 
-    /// Check whether this is a `Number`.
-    public is_number(self): Bool = self is .Number(_);
+    /// Check whether this is a number (integer or not).
+    public is_number(self): Bool = self is .Number(_) or self is .Int(_) or self is .UInt(_);
 
     /// Check whether this is a `String`.
     public is_string(self): Bool = self is .String(_);
@@ -250,10 +257,26 @@ given JsonValue {
         _ then Option[Bool].None(),
     };
 
-    /// Return the `Number` payload, or `None` when this is not a `Number`.
+    /// Return the numeric payload as `Float64`, or `None` when this is not
+    /// a number. An integer payload converts (and can round past 2^53 --
+    /// read the `Int`/`UInt` cases for the exact value).
     public as_number(self): Option[Float64] = when self in {
         .Number(v) then Option[Float64].Some(v),
+        .Int(v) then Option[Float64].Some(Float64(v)),
+        .UInt(v) then Option[Float64].Some(Float64(v)),
         _ then Option[Float64].None(),
+    };
+
+    /// Return the exact `Int` payload, or `None` when this is not an `Int`.
+    public as_int(self): Option[Int] = when self in {
+        .Int(v) then Option[Int].Some(v),
+        _ then Option[Int].None(),
+    };
+
+    /// Return the exact `UInt` payload, or `None` when this is not a `UInt`.
+    public as_uint(self): Option[UInt] = when self in {
+        .UInt(v) then Option[UInt].Some(v),
+        _ then Option[UInt].None(),
     };
 
     /// Return the `String` payload, or `None` when this is not a `String`.
@@ -313,6 +336,14 @@ private let equals_impl(left: JsonValue, right: JsonValue, depth: UInt): Bool = 
         },
         .Number(a) then when right in {
             .Number(b) then a == b,
+            _ then false,
+        },
+        .Int(a) then when right in {
+            .Int(b) then a == b,
+            _ then false,
+        },
+        .UInt(a) then when right in {
+            .UInt(b) then a == b,
             _ then false,
         },
         .String(a) then when right in {

@@ -23,7 +23,7 @@ private type mutable ChannelStorage[T: Any](
     mutex: Mutex,
     not_empty: MutexCondvar, // notify consumer: new message available
     not_full: MutexCondvar, // notify producer: space available (or hand-off done)
-    mutable queue: List[T], // message queue
+    mutable queue: Deque[T], // message queue
     capacity: UInt, // buffer size; 0 = rendezvous
     mutable sent: UInt, // values ever pushed (ticket counter)
     mutable received: UInt, // values ever taken
@@ -73,7 +73,7 @@ given[T: Any] SendChannel[T] {
             // exactly this value (the ticket is its FIFO position).
             let ticket = channel.sent;
             channel.sent = channel.sent + UInt(1);
-            channel.queue.push(value);
+            channel.queue.push_back(value);
             channel.not_empty.notify();
             while channel.received <= ticket and not channel.receiver_closed then {
                 channel.not_full.wait();
@@ -92,7 +92,7 @@ given[T: Any] SendChannel[T] {
             return Result[Void].Error("channel closed");
         };
         channel.sent = channel.sent + UInt(1);
-        channel.queue.push(value);
+        channel.queue.push_back(value);
         channel.not_empty.notify();
         return Result[Void].Ok({});
     };
@@ -112,7 +112,7 @@ given[T: Any] SendChannel[T] {
                 return Result[Bool].Ok(false);
             };
             channel.sent = channel.sent + UInt(1);
-            channel.queue.push(value);
+            channel.queue.push_back(value);
             channel.not_empty.notify();
             return Result[Bool].Ok(true);
         };
@@ -120,7 +120,7 @@ given[T: Any] SendChannel[T] {
             return Result[Bool].Ok(false);
         };
         channel.sent = channel.sent + UInt(1);
-        channel.queue.push(value);
+        channel.queue.push_back(value);
         channel.not_empty.notify();
         return Result[Bool].Ok(true);
     };
@@ -133,13 +133,16 @@ given[T: Any] RecvChannel[T] {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
-        while channel.queue.is_empty() and not channel.sender_closed then {
+        // A Deque keeps the take O(1): the queue is drained one message per
+        // recv, and a List's front removal shifts the rest every time.
+        let mutable value_opt = channel.queue.pop_front();
+        while value_opt is .None() and not channel.sender_closed then {
             channel.waiting_receivers = channel.waiting_receivers + UInt(1);
             channel.not_empty.wait();
             channel.waiting_receivers = channel.waiting_receivers - UInt(1);
+            value_opt = channel.queue.pop_front();
         };
-        if not channel.queue.is_empty() then {
-            let value = channel.queue.take_at(0);
+        if value_opt is .Some(value) then {
             channel.received = channel.received + UInt(1);
             if channel.capacity == UInt(0) then {
                 // Wake every parked sender: the satisfied ticket is not
@@ -158,8 +161,8 @@ given[T: Any] RecvChannel[T] {
         let channel = self.channel;
         channel.mutex.lock();
         defer channel.mutex.unlock();
-        if not channel.queue.is_empty() then {
-            let value = channel.queue.take_at(0);
+        let value_opt = channel.queue.pop_front();
+        if value_opt is .Some(value) then {
             channel.received = channel.received + UInt(1);
             if channel.capacity == UInt(0) then {
                 channel.not_full.notify_all();
@@ -192,7 +195,7 @@ public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChanne
         mu,
         not_empty,
         not_full,
-        List[T].new(),
+        Deque[T].new(),
         capacity,
         UInt(0),
         UInt(0),
