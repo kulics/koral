@@ -395,7 +395,9 @@ given MonomorphizedProgram {
         return self.generic_templates.lookup_trait_by_def_id(def_id);
     };
 
-    /// `logical_name` 为名的 concrete callable，顺序与全表扫描一致。
+    /// `logical_name` 为名的 concrete callable，按声明 id 排序——表的哈希
+    /// 序不得决定查找命中谁、也不得决定 fixpoint 发现实例的先后（逐进程的
+    /// 表种子会把两者都变成随机量）。
     public callables_named(
         self,
         name: String,
@@ -413,8 +415,11 @@ given MonomorphizedProgram {
             self.callables_by_name = rebuilt;
             self.callables_by_name_count = self.concrete_callables_by_def_id.count();
         };
-        return self.callables_by_name.get(name) or else List[Pair[DefId, ConcreteCallableInfo]].new(
-        );
+        let bucket = self.callables_by_name.get(name) or else List[
+            Pair[DefId, ConcreteCallableInfo],
+        ].new();
+        bucket.sort_by((entry) => entry.first.id);
+        return bucket;
     };
 
     public merge_generated_node(self, node: TypedDecl): Void = {

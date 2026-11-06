@@ -821,7 +821,14 @@ given CodeGen {
     emit_mir_function_declarations(self): Void = {
         let mutable emitted = Set[String].new();
         // Emit from actual function implementations first (correct types).
-        for function_ref in self.program.functions then {
+        // Emission order follows the sorted C names, never a hash-ordered
+        // walk: the table seed is per process and must not shuffle the file.
+        let mutable ordered = List[MIRFunction].new();
+        for f in self.program.functions then {
+            ordered.push(f);
+        };
+        ordered.sort_by((f) => self.c_identifier_for_symbol(f.identifier));
+        for function_ref in ordered then {
             self.emit_declared_function_declaration(
                 function_ref.identifier,
                 function_ref.params,
@@ -829,7 +836,10 @@ given CodeGen {
                 emitted,
             );
         };
-        // Emit remaining declarations from globals (initializers, given methods).
+        // Emit remaining declarations from globals (initializers, given
+        // methods). The methods of a `given` reach the codegen in
+        // monomorphization order, which follows hash-ordered tables; sort
+        // them so the per-process table seed cannot shuffle the file.
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(
@@ -843,7 +853,12 @@ given CodeGen {
                     emitted,
                 ),
                 .Given(_, _, _, methods, _) then {
+                    let mutable ordered_methods = List[Symbol].new();
                     for method in methods then {
+                        ordered_methods.push(method);
+                    };
+                    ordered_methods.sort_by((m) => self.c_identifier_for_symbol(m));
+                    for method in ordered_methods then {
                         self.emit_symbol_function_declaration(method, emitted);
                     };
                 },
@@ -1072,8 +1087,16 @@ given CodeGen {
 
     public emit_mir_function_implementations(self): Void = {
         let mutable emitted_count = UInt(0);
+        let mutable ordered = List[MIRFunction].new();
+        for f in self.program.functions then {
+            ordered.push(f);
+        };
+        ordered.sort_by((f) => self.c_identifier_for_symbol(f.identifier));
         while not self.program.functions.is_empty() then {
-            let function = self.program.functions.pop().unwrap();
+            self.program.functions.pop();
+        };
+        while not ordered.is_empty() then {
+            let function = ordered.pop().unwrap();
             emitted_count += 1;
             if codegen_function_trace_enabled() then {
                 eprintln(

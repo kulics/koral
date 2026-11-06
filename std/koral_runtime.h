@@ -132,8 +132,11 @@ static inline uint8_t __koral_global_state_ready(uint8_t* state) {
 }
 
 // The per-process hash seed: KORAL_HASH_SEED pins it, otherwise the runtime
-// draws one from the platform entropy source once.
+// draws one from the platform entropy source once. A tool whose output must
+// be reproducible (the compiler) pins it explicitly at startup instead --
+// user programs keep the random seed.
 uintptr_t __koral_hash_seed(void);
+void __koral_hash_seed_pin(uintptr_t v);
 void __koral_global_state_finish(uint8_t* state);
 void __koral_global_init_lock(void);
 void __koral_global_init_unlock(void);

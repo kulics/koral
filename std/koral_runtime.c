@@ -5934,9 +5934,20 @@ void __koral_global_state_finish(uint8_t* state) {
 // otherwise the runtime draws one from the platform entropy source, once.
 // Unseeded table hashing is invertible end to end: crafted keys map to
 // chosen buckets and a table walk becomes a denial of service.
+// The seed value lives at file scope so a tool can pin it before first
+// use (see __koral_hash_seed_pin).
+static uintptr_t __koral_hash_seed_value = 0;
+
+void __koral_hash_seed_pin(uintptr_t v) {
+    if (v == 0) v = (uintptr_t)0x9E3779B97F4A7C15ull;
+    uintptr_t expected = 0;
+    (void)__atomic_compare_exchange_n(
+        &__koral_hash_seed_value, &expected, v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+}
+
 uintptr_t __koral_hash_seed(void) {
-    static uintptr_t seed = 0;
-    uintptr_t s = __atomic_load_n(&seed, __ATOMIC_ACQUIRE);
+    uintptr_t* seed = &__koral_hash_seed_value;
+    uintptr_t s = __atomic_load_n(seed, __ATOMIC_ACQUIRE);
     if (s != 0) return s;
     uintptr_t v = 0;
     const char* pinned = getenv("KORAL_HASH_SEED");
@@ -5951,7 +5962,7 @@ uintptr_t __koral_hash_seed(void) {
     }
     if (v == 0) v = (uintptr_t)0x9E3779B97F4A7C15ull;
     uintptr_t expected = 0;
-    if (__atomic_compare_exchange_n(&seed, &expected, v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+    if (__atomic_compare_exchange_n(seed, &expected, v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
         return v;
     }
     return expected;
