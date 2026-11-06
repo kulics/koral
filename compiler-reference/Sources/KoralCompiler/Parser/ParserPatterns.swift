@@ -393,6 +393,8 @@ extension Parser {
         var elements: [PatternNode] = [first]
         while currentToken === .comma {
           try match(.comma)
+          // A trailing comma is allowed: `(a, b,)`.
+          if currentToken === .rightParen { break }
           elements.append(try parsePatternSlot())
         }
         try match(.rightParen)

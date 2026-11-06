@@ -2289,15 +2289,102 @@ given CstParser {
     // Control flow expressions
     // ========================================================================
 
+    /// A branch body -- the slot after `then` / `else` in `if` / `while` /
+    /// `for` and the `then` of a `when` arm. It is an expression, or one of
+    /// the three CONTROL TRANSFERS written bare: `return <value>?` / `break` /
+    /// `continue`. The jump keeps its own tokens; the compilers desugar it to
+    /// a single-jump block.
+    private parse_branch_body(self): Result[CstExpr] = {
+        if self.jump_body_starts_here() then {
+            let mutable leading_comments = List[Token].new();
+            while self.peek() is .LineComment(_) or is .BlockComment(_) or is .Semi() then {
+                if self.peek() is .Semi() then {
+                    let ignored_semi = self.eat();
+                } else {
+                    leading_comments.push(self.eat());
+                };
+            };
+            let jump = self.parse_jump_expr() or return;
+            if leading_comments.count() > 0 then {
+                return .Ok(.Commented(leading_comments, jump));
+            };
+            return .Ok(jump);
+        };
+        return self.parse_expr_node();
+    };
+
+    /// The bare control transfer of a branch body.
+    private parse_jump_expr(self): Result[CstExpr] = {
+        if self.check(.KwReturn()) then {
+            let kw = self.eat();
+            let mutable value = Option[CstExpr].None();
+            if self.jump_body_value_follows() then {
+                let parsed = self.parse_expr_node() or return;
+                value = .Some(parsed);
+            };
+            return .Ok(.ReturnJump(kw, value));
+        };
+        if self.check(.KwBreak()) then {
+            let kw = self.eat();
+            return .Ok(.BreakJump(kw));
+        };
+        if self.check(.KwContinue()) then {
+            let kw = self.eat();
+            return .Ok(.ContinueJump(kw));
+        };
+        return .Error("Parse error: expected 'return', 'break', or 'continue'");
+    };
+
+    /// The next code token at or after the cursor, skipping newlines and
+    /// comments -- the token that decides both "is this a bare control
+    /// transfer" and "does `return` here carry a value".
+    private jump_body_token(self): Token = {
+        let mutable i = self.pos;
+        while i < self.tokens.count() then {
+            when self.tokens[i] in {
+                .Newline() or .LineComment(_) or .BlockComment(_) then {
+                    i += 1;
+                },
+                _ then {
+                    return self.tokens[i];
+                },
+            };
+        };
+        return Token.EOF();
+    };
+
+    private jump_body_starts_here(self): Bool = {
+        return when self.jump_body_token() in {
+            .KwReturn() or .KwBreak() or .KwContinue() then true,
+            _ then false,
+        };
+    };
+
+    /// Does `return` in a branch body carry a value? The body slot ends at
+    /// exactly the tokens that may follow a complete body (`;` closing the
+    /// enclosing statement, `else`, the `,` / `}` of `when` arms, a closing
+    /// bracket, end of file) and at a statement head (`let` / `return` /
+    /// `break` / `continue` / `defer`), where the author is missing a `;`.
+    /// Anything else starts the return value -- the same greedy rule the
+    /// `return <value>;` statement follows.
+    private jump_body_value_follows(self): Bool = {
+        return when self.jump_body_token() in {
+            .Semi() or .KwElse() or .Comma() or .RBrace() or .RParen() or .RBracket()
+            or .EOF() or .KwLet() or .KwReturn() or .KwBreak() or .KwContinue()
+            or .KwDefer() then false,
+            _ then true,
+        };
+    };
+
     private parse_if_expr(self): Result[CstExpr] = {
         let kw = self.expect(.KwIf(), "'if'") or return;
         let cond = self.parse_expr_node() or return;
 
         let then_kw = self.expect(.KwThen(), "'then'") or return;
-        let then_body = self.parse_expr_node() or return;
+        let then_body = self.parse_branch_body() or return;
         if self.check(.KwElse()) then {
             let else_kw = self.eat();
-            let else_body = self.parse_expr_node() or return;
+            let else_body = self.parse_branch_body() or return;
             return .Ok(
                 .If(kw, cond, then_kw, then_body, .Some(else_kw), .Some(else_body)),
             );
@@ -2313,7 +2400,7 @@ given CstParser {
         let body = if self.check(.LBrace()) then {
             self.parse_block_expr() or return
         } else {
-            self.parse_expr_node() or return
+            self.parse_branch_body() or return
         };
         return .Ok(.While(kw, cond, then_kw, body));
     };
@@ -2344,7 +2431,7 @@ given CstParser {
             return .Error("Pattern guards use 'where', not 'if'");
         };
         let then_kw = self.expect(.KwThen(), "'then'") or return;
-        let body = self.parse_expr_node() or return;
+        let body = self.parse_branch_body() or return;
         return .Ok(.For(kw, binding, in_kw, iterable, where_kw, guard, then_kw, body));
     };
 
@@ -2408,7 +2495,7 @@ given CstParser {
         let body = if self.check(.LBrace()) then {
             self.parse_block_expr() or return
         } else {
-            self.parse_expr_node() or return
+            self.parse_branch_body() or return
         };
         let comma = self.eat_comma();
         let mutable trailing_comments = List[Token].new();

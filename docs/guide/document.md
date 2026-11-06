@@ -1140,7 +1140,7 @@ In Koral, selection structures use `if` syntax. `if` is followed by a judgment c
 let main(): Void = if 1 == 1 then println("yes") else println("no");
 ```
 
-`if` with `else` is also an expression. The `then` and `else` branches must be followed by expressions.
+`if` with `else` is also an expression. The `then` and `else` branches must be followed by expressions — or by a bare control transfer, described below.
 
 ```koral
 let main(): Void = println(if 1 == 1 then "yes" else "no");
@@ -1172,6 +1172,23 @@ let label = if score >= 90 then {
     "other"
 };
 ```
+
+#### Branch Bodies and Control Transfers
+
+A branch body — the slot after `then` or `else` — is an expression, or one of the three control transfers written **bare**: `return <value>?`, `break`, or `continue`. A bare transfer is sugar for the single-jump block you would otherwise write: `then return x` means exactly `then { return x; }`. The branch types `Never`, so it unifies with a value branch like any block that cannot fall through. The same rule covers every body slot: both branches of `if`, the body of `while` and `for`, and the arms of `when`.
+
+```koral
+let classify(x: Int): String = {
+    if x > 0 then return "pos" else return "non-pos";
+};
+
+let findFirst(xs: List[Int]): Int = {
+    for x in xs then return x;
+    return 0 - 1;
+};
+```
+
+A control transfer is not an expression. It is legal only in a branch body — `let x = return 3;` or `f(break)` is a parse error. Whether `return` carries a value follows the same rule as the `return <value>;` statement: whatever can start an expression does. A branch body takes no `;` of its own; the `;` in `if c then return 3;` terminates the enclosing statement.
 
 ### Loops
 
@@ -1255,6 +1272,8 @@ while true then {
 
 - `return` leaves the enclosing function with a value (or `Void`).
 - Plain `break` exits the nearest enclosing `while` / `for` loop.
+
+All three may be written bare as a branch body — `if c then return v`, `when x in { .None() then break, ... }` — which is sugar for the single-jump block (see [Branch Bodies and Control Transfers](#branch-bodies-and-control-transfers)).
 
 `break` always binds to the innermost enclosing loop. Branches do not intercept it: an `if`, a `when` arm, an `or else` default, an `and then` transform, or an `if` used as an expression all sit between the `break` and its loop without changing the target. A function or lambda boundary does intercept both statements — `break` or `continue` inside a closure has no loop to bind to and is an error.
 
@@ -1979,6 +1998,8 @@ let result = when x in {
     _ then "other",
 };
 ```
+
+An arm body may also be a bare control transfer — `1 then return 31` is sugar for `1 then { return 31; }` (see [Branch Bodies and Control Transfers](#branch-bodies-and-control-transfers)).
 
 An arm may carry a guard: `pat where cond then body`. The pattern's bindings are
 visible in `cond`, the guard is evaluated before the branch body, and a false

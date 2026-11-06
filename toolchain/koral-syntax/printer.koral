@@ -715,6 +715,15 @@ given Printer {
             arms,
             rb,
         ),
+        .ReturnJump(kw, value) then {
+            self.write_token(kw);
+            if value is .Some(v) then {
+                self.write_space();
+                self.print_expr(v);
+            };
+        },
+        .BreakJump(kw) then self.write_token(kw),
+        .ContinueJump(kw) then self.write_token(kw),
         .AndThen(left, and_kw, then_kw, right) then {
             self.print_expr(left);
             self.write_space();
@@ -2491,6 +2500,11 @@ given Printer {
         },
         .AsCast(operand, as_kw, cast_type) then self.estimate_expr_length(operand) + 1 + as_kw.to_string(
         ).count() + 1 + self.estimate_type_length(cast_type),
+        .ReturnJump(kw, value) then when value in {
+            .Some(v) then kw.to_string().count() + 1 + self.estimate_expr_length(v),
+            _ then kw.to_string().count(),
+        },
+        .BreakJump(kw) or .ContinueJump(kw) then kw.to_string().count(),
         _ then 10,
     };
 
@@ -3267,6 +3281,9 @@ private let validate_expr_usage(expr: CstExpr, statement_context: Bool): Result[
         return .Ok({});
     },
     .Lambda(_, _, _, _, _, body) then validate_expr_usage(body, false),
+    .ReturnJump(_, value) then validate_optional_expr_usage(value, false),
+    .BreakJump(_) then .Ok({}),
+    .ContinueJump(_) then .Ok({}),
 };
 
 /// The printed spelling of a type, laid out exactly as the printer would write

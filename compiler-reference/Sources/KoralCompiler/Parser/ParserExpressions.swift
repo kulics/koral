@@ -1872,16 +1872,80 @@ extension Parser {
   
   // MARK: - Control Flow Expressions
 
+  /// A branch body -- the slot after `then` / `else` in `if` / `while` /
+  /// `for` and the `then` of a `when` arm. It is an expression, or one of
+  /// the three CONTROL TRANSFERS written bare: `return <value>?` / `break` /
+  /// `continue`. A bare transfer is sugar for a single-jump block (`then
+  /// return v` is exactly `then { return v; }`, typed `Never`); it is not an
+  /// expression and is admitted nowhere else.
+  private func branchBody() throws -> ExpressionNode {
+    switch currentToken {
+    case .returnKeyword, .breakKeyword, .continueKeyword:
+      return try jumpBody()
+    default:
+      return try expression()
+    }
+  }
+
+  /// The bare control transfer of a branch body, desugared to the block a
+  /// reader would otherwise have to write: a one-statement block with no tail.
+  /// Every later phase already understands that shape, so the sugar stops here.
+  private func jumpBody() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    var statements: [StatementNode] = []
+    switch currentToken {
+    case .returnKeyword:
+      try match(.returnKeyword)
+      var value: ExpressionNode? = nil
+      if jumpBodyValueFollows() {
+        value = try expression()
+      }
+      statements.append(.return(value: value, span: SourceSpan(start: startSpan.start, end: currentSpan.end)))
+    case .breakKeyword:
+      try match(.breakKeyword)
+      statements.append(.break(span: SourceSpan(start: startSpan.start, end: currentSpan.end)))
+    case .continueKeyword:
+      try match(.continueKeyword)
+      statements.append(.continue(span: SourceSpan(start: startSpan.start, end: currentSpan.end)))
+    default:
+      throw ParserError.unexpectedToken(
+        span: currentSpan,
+        got: currentToken.description,
+        expected: "'return', 'break', or 'continue'"
+      )
+    }
+    return .blockExpression(
+      statements: statements, tailExpression: nil,
+      span: SourceSpan(start: startSpan.start, end: currentSpan.end))
+  }
+
+  /// Does `return` in a branch body carry a value? The body slot ends at
+  /// exactly the tokens that may follow a complete body (`;` closing the
+  /// enclosing statement, `else`, the `,` / `}` of `when` arms, a closing
+  /// bracket, end of file) and at a statement head (`let` / `return` /
+  /// `break` / `continue` / `defer`), where the author is missing a `;`.
+  /// Anything else starts the return value -- the same greedy rule the
+  /// `return <value>;` statement follows.
+  private func jumpBodyValueFollows() -> Bool {
+    switch currentToken {
+    case .semicolon, .elseKeyword, .comma, .rightBrace, .rightParen, .rightBracket,
+      .eof, .letKeyword, .returnKeyword, .breakKeyword, .continueKeyword, .deferKeyword:
+      return false
+    default:
+      return true
+    }
+  }
+
   private func ifExpression() throws -> ExpressionNode {
     let startSpan = currentSpan
     try match(.ifKeyword)
     let condition = try expression()
     try match(.thenKeyword)
-    let thenBranch = try expression()
+    let thenBranch = try branchBody()
     var elseBranch: ExpressionNode? = nil
     if currentToken === .elseKeyword {
       try match(.elseKeyword)
-      elseBranch = try expression()
+      elseBranch = try branchBody()
     }
     return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
@@ -1891,7 +1955,7 @@ extension Parser {
     try match(.whileKeyword)
     let condition = try expression()
     try match(.thenKeyword)
-    let body = try expression()
+    let body = try branchBody()
     return .whileExpression(condition: condition, body: body, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
   }
 
@@ -1921,7 +1985,7 @@ extension Parser {
       )
     }
     try match(.thenKeyword)
-    let body = try expression()
+    let body = try branchBody()
     return .forExpression(
       pattern: pattern, iterable: iterable, body: body, guardExpr: guardExpr,
       span: SourceSpan(start: startSpan.start, end: currentSpan.end))
@@ -1962,7 +2026,7 @@ extension Parser {
       if currentToken === .leftBrace {
         body = try blockExpression()
       } else {
-        body = try expression()
+        body = try branchBody()
       }
 
       cases.append(MatchCaseNode(pattern: pattern, guardExpr: guardExpr, body: body))

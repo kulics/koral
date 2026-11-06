@@ -410,12 +410,23 @@
 // Control Flow Expressions (parsed as prefix expressions)
 // ============================================================================
 
-<if-expression> ::= "if" <expression> "then" <expression> ("else" <expression>)?
-<while-expression> ::= "while" <expression> "then" <expression>
-<for-expression> ::= "for" <match-pattern> "in" <expression> ("where" <expression>)? "then" <expression>
+<if-expression> ::= "if" <expression> "then" <branch-body> ("else" <branch-body>)?
+<while-expression> ::= "while" <expression> "then" <branch-body>
+<for-expression> ::= "for" <match-pattern> "in" <expression> ("where" <expression>)? "then" <branch-body>
 <when-expression> ::= "when" <expression> "in" "{" <match-arm-list> "}"
 <match-arm-list> ::= <match-arm> ("," <match-arm>)* ","?
-<match-arm> ::= <match-pattern> ("where" <expression>)? "then" <expression>
+<match-arm> ::= <match-pattern> ("where" <expression>)? "then" <branch-body>
+// 分支体（branch body）：一个表达式，或一个**裸控制转移**。裸控制转移只在
+// `then` / `else` 之后的分支体槽位合法（`if` 两分支、`while` / `for` 体、
+// `when` arm 体），是单跳块 `{ … }` 的语法糖：`then return v` 就是
+// `then { return v; }`，类型 `Never`，与块形态完全同义，分支照常按值汇合。
+// 它**不是表达式**：`let x = return 3`、`f(break)` 等任意其它位置都拒绝。
+// `return` 带值判别与 `return <value>;` 语句同规则（其后能起表达式即取值）；
+// 分支体本身不写 `;`，`if c then return 3;` 的 `;` 终结的是外层语句。
+<branch-body> ::= <expression> | <control-transfer>
+<control-transfer> ::= "return" <expression>?
+                     | "break"
+                     | "continue"
 // 守卫（guard）：`pat where cond then body`。`when` 与 `for` 同一套：
 // 都用 `in` 做间隔字，都用 `where` 做守卫，都收全模式。规则：
 //   1. 守卫在 arm / 循环级，不进子模式：`a or b where c` 是 `(a or b) where c`。

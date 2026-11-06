@@ -1105,7 +1105,7 @@ let sum = add(20)(22);   // sum == 42
 let main(): Void = if 1 == 1 then println("yes") else println("no");
 ```
 
-`if` 始终是表达式。`then` 与 `else` 都写时它产生一个值；不写 `else` 时，单分支 `if` 产生 `Void`。两个分支后都必须是表达式。
+`if` 始终是表达式。`then` 与 `else` 都写时它产生一个值；不写 `else` 时，单分支 `if` 产生 `Void`。两个分支后都必须是表达式——或一个裸控制转移（见下文）。
 
 ```koral
 let main(): Void = println(if 1 == 1 then "yes" else "no");
@@ -1137,6 +1137,23 @@ let label = if score >= 90 then {
     "other"
 };
 ```
+
+#### 分支体与控制转移
+
+分支体——`then` / `else` 之后的槽位——是一个表达式，或者三个控制转移之一的**裸写法**：`return <值>?`、`break`、`continue`。裸控制转移是你本来要写的单跳块的语法糖：`then return x` 就是 `then { return x; }`。该分支类型为 `Never`，与一个不会落穿的块分支完全一样，照常与值分支汇合。同一规则覆盖所有分支体槽位：`if` 的两个分支、`while` 与 `for` 的循环体、`when` 的 arm。
+
+```koral
+let classify(x: Int): String = {
+    if x > 0 then return "pos" else return "non-pos";
+};
+
+let findFirst(xs: List[Int]): Int = {
+    for x in xs then return x;
+    return 0 - 1;
+};
+```
+
+控制转移不是表达式，只在分支体里合法——`let x = return 3;`、`f(break)` 是语法错误。`return` 带不带值的规则与 `return <值>;` 语句一致：其后能起表达式就取值。分支体自身不带 `;`；`if c then return 3;` 里那个 `;` 终结的是外层语句。
 
 ### 循环
 
@@ -1224,6 +1241,8 @@ while true then {
 
 - `return` 带值（或 `Void`）离开所在函数。
 - 裸 `break` 退出最近的 `while` / `for` 循环。
+
+三者都可以在分支体里裸写——`if c then return v`、`when x in { .None() then break, ... }`——这是单跳块的语法糖（见 [分支体与控制转移](#分支体与控制转移)）。
 
 `break` 始终绑定到最内层的循环。分支不会拦截它：`if`、`when` 的分支体、`or else` 的默认值、`and then` 的变换体，以及作为表达式使用的 `if`，都只是位于 `break` 与它的循环之间，不改变绑定目标。函数或 lambda 边界会拦截这两个语句——闭包里的 `break` 或 `continue` 没有可绑定的循环，是错误。
 
@@ -1913,6 +1932,8 @@ let result = when x in {
     _ then "other",
 };
 ```
+
+arm 的分支体也可以是裸控制转移——`1 then return 31` 就是 `1 then { return 31; }`（见 [分支体与控制转移](#分支体与控制转移)）。
 
 分支可以带守卫：`pat where cond then body`。模式绑定在 `cond` 里可见，守卫先于
 分支体求值，为假则落到下一个分支。守卫是 arm 级的，不进子模式——`a or b where c`

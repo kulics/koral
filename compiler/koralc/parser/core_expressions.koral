@@ -838,11 +838,83 @@ given Parser {
     };
 
     parse_control_flow_body(self): Result[Expr] = {
-        return self.parse_expression_checked("control-flow body");
+        return self.parse_branch_body("control-flow body");
+    };
+
+    /// A branch body -- the slot after `then` / `else` in `if` / `while` /
+    /// `for` and the `then` of a `when` arm. It is an expression, or one of
+    /// the three CONTROL TRANSFERS written bare: `return <value>?` / `break` /
+    /// `continue`. A bare transfer is sugar for a single-jump block (`then
+    /// return v` is exactly `then { return v; }`, typed `Never`); it is not an
+    /// expression and is admitted nowhere else.
+    parse_branch_body(self, context: String): Result[Expr] = {
+        return when self.current().kind in {
+            .KwReturn() or .KwBreak() or .KwContinue() then self.parse_jump_body(),
+            _ then self.parse_expression_checked(context),
+        };
+    };
+
+    /// The bare control transfer of a branch body, desugared to the block a
+    /// reader would otherwise have to write: `Expr.Block([jump], None)`. Every
+    /// later phase already understands that shape, so the sugar stops here.
+    parse_jump_body(self): Result[Expr] = {
+        let start = self.current();
+        let mutable statements = List[Statement].new();
+        when self.current().kind in {
+            .KwReturn() then {
+                self.advance();
+                let mutable value = Option[Expr].None();
+                if self.jump_body_value_follows() then {
+                    let parsed = self.parse_expression_checked("return value") or return;
+                    value = Option[Expr].Some(parsed);
+                };
+                statements.push(
+                    Statement.ReturnStmt(value, self.span_from_start(start)),
+                );
+            },
+            .KwBreak() then {
+                self.advance();
+                statements.push(Statement.BreakStmt(self.span_from_start(start)));
+            },
+            .KwContinue() then {
+                self.advance();
+                statements.push(Statement.ContinueStmt(self.span_from_start(start)));
+            },
+            _ then {
+                return .Error(
+                    self.parser_error_at_current(
+                        "expected 'return', 'break', or 'continue'",
+                    ),
+                );
+            },
+        };
+        return .Ok(
+            Expr.Block(statements, Option[Expr].None(), self.span_from_start(start)),
+        );
+    };
+
+    /// Does `return` in a branch body carry a value? The body slot ends at
+    /// exactly the tokens that may follow a complete body (`;` closing the
+    /// enclosing statement, `else`, the `,` / `}` of `when` arms, a closing
+    /// bracket, end of file) and at a statement head (`let` / `return` /
+    /// `break` / `continue` / `defer`), where the author is missing a `;`.
+    /// Anything else starts the return value -- the same greedy rule the
+    /// `return <value>;` statement follows.
+    jump_body_value_follows(self): Bool = {
+        return when self.current().kind in {
+            .Semicolon() or .KwElse() or .Comma() or .RBrace() or .RParen()
+            or .RBracket() or .Eof() or .KwLet() or .KwReturn() or .KwBreak()
+            or .KwContinue() or .KwDefer() then false,
+            _ then true,
+        };
     };
 
     parse_when_arm_body(self): Result[Expr] = {
-        // `when` arm body follows expression grammar; block is one expression form.
+        // `when` arm body follows expression grammar; block is one expression
+        // form, and a bare control transfer is sugar for a single-jump block.
+        if self.current().kind is .KwReturn() or is .KwBreak() or is .KwContinue() then {
+            return self.parse_jump_body();
+        };
         if self.current().kind is .LBrace() then {
             let body = self.parse_block_expression() or return;
             return .Ok(body);
@@ -1393,6 +1465,10 @@ given Parser {
                     slot_elements.push(first);
                     while self.current().kind is .Comma() then {
                         self.advance();
+                        // 尾逗号（元组模式元素表的 ","?）：逗号后直接闭括号。
+                        if self.current().kind is .RParen() then {
+                            break;
+                        };
                         let next = self.parse_pattern_slot(stop_on_in) or return;
                         slot_elements.push(next);
                     };
@@ -1635,7 +1711,7 @@ given Parser {
         let mutable else_expr = Option[Expr].None();
         if self.current().kind is .KwElse() then {
             self.advance();
-            let parsed_else = self.parse_expression_checked("if else body") or return;
+            let parsed_else = self.parse_branch_body("if else body") or return;
             else_expr = .Some(parsed_else);
         };
 
