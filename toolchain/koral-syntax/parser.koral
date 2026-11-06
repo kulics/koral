@@ -118,9 +118,13 @@ given CstParser {
         };
         return when self.tokens[i] in {
             .KwWeakref() or .KwSelfType() then true,
+            // `[N]Type` -- a fixed array head.
+            .LBracket() then true,
             .Star() then {
                 let n = self.sig_index_at(i + 1);
-                n < self.tokens.count() and self.token_is_type_head(self.tokens[n])
+                n < self.tokens.count()
+                    and (self.token_is_type_head(self.tokens[n])
+                        or self.tokens[n] is .LBracket())
             },
             .Ident(name) then self.is_type_start(.Ident(name)),
             _ then false,
@@ -155,7 +159,8 @@ given CstParser {
                 // lowercase pointee (`**p`) is a deref chain, not a type.
                 if n >= self.tokens.count() then {
                     more_prefixes = false;
-                } else if self.token_is_type_head(self.tokens[n]) or self.tokens[n] is .LParen() then {
+                } else if self.token_is_type_head(self.tokens[n]) or self.tokens[n] is .LParen()
+                    or self.tokens[n] is .LBracket() then {
                     i = n;
                     if i < self.tokens.count() and self.tokens[i] is .KwMut() then {
                         i += 1;
@@ -173,6 +178,24 @@ given CstParser {
         };
         if self.tokens[i] is .KwSelfType() then {
             return Option[UInt].Some(i + 1);
+        };
+        if self.tokens[i] is .LBracket() then {
+            // `[N]Type` -- fixed array: `[` int-literal `]` then the element.
+            let len_i = self.sig_index_at(i + 1);
+            if len_i >= self.tokens.count() then {
+                return Option[UInt].None();
+            };
+            if self.tokens[len_i] is not .IntLit(_) then {
+                return Option[UInt].None();
+            };
+            let rb = self.sig_index_at(len_i + 1);
+            if rb >= self.tokens.count() then {
+                return Option[UInt].None();
+            };
+            if self.tokens[rb] is not .RBracket() then {
+                return Option[UInt].None();
+            };
+            return self.scan_type_shape_at(rb + 1);
         };
         if self.tokens[i] is .LParen() then {
             // Two shapes open with `(`: the function type
@@ -439,6 +462,8 @@ given CstParser {
         .LParen() then true,
         // A foreign function type opens with the keyword: `foreign (T) -> R`.
         .KwForeign() then true,
+        // A fixed array opens with its length: `[N]Type`.
+        .LBracket() then true,
         .Ident(name) then {
             // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf): leading
             // underscores are allowed, the first letter is not.
@@ -831,6 +856,22 @@ given CstParser {
             // `?T`, not a mutable weak reference). `mutable` fails as a type.
             let inner = self.parse_type_node() or return;
             return .Ok(.Weakref(inner, kw));
+        };
+
+        // Fixed array: `[N]Type` (grammar.bnf <fixed-array-type>). N is an
+        // integer literal; the element is the full type that follows.
+        if self.check(.LBracket()) then {
+            let lb = self.eat();
+            let len = self.eat();
+            when len in {
+                .IntLit(_) then {},
+                _ then {
+                    return .Error("Parse error: expected integer array length after '['");
+                },
+            };
+            let rb = self.expect(.RBracket(), "']'") or return;
+            let element = self.parse_type_node() or return;
+            return .Ok(CstType.FixedArray(lb, len, rb, element));
         };
 
         // Two shapes open with `(`. A function type is `(T1, T2) -> R` -- its
@@ -2183,6 +2224,7 @@ given CstParser {
         .ConstraintKeyword(kw) then .Ident(kw),
         .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
         .ForeignFunction(_, _, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
+        .FixedArray(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
     };
 
     private parse_paren_or_lambda(self): Result[CstExpr] = {
