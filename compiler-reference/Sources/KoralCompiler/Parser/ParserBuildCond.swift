@@ -120,7 +120,7 @@ func buildCondPlacementName(_ node: GlobalNode) -> (String, SourceSpan)? {
     .intrinsicTypeDeclaration(let name, _, _, _, let nameSpan),
     .foreignTypeDeclaration(let name, _, _, _, let nameSpan),
     .traitDeclaration(let name, _, _, _, _, _, let nameSpan),
-    .typeAliasDeclaration(let name, _, _, _, let nameSpan):
+    .typeAliasDeclaration(let name, _, _, _, _, let nameSpan):
     return (name, nameSpan)
   case .usingDeclaration, .givenDeclaration, .givenTraitDeclaration, .intrinsicGivenDeclaration:
     return nil

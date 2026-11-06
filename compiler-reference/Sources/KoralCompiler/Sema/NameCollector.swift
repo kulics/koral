@@ -297,9 +297,11 @@ public class NameCollector: CompilerPass {
                 throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
             }
 
-        case .typeAliasDeclaration(let name, _, let access, let span, let nameSpan):
+        case .typeAliasDeclaration(let name, let typeParams, let targetType, let access, let span, let nameSpan):
             try collectTypeAliasDeclaration(
                 name: name,
+                typeParams: typeParams,
+                targetType: targetType,
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
@@ -732,6 +734,8 @@ public class NameCollector: CompilerPass {
 
     private func collectTypeAliasDeclaration(
         name: String,
+        typeParams: [TypeParameterDecl],
+        targetType: TypeNode,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
@@ -768,6 +772,21 @@ public class NameCollector: CompilerPass {
             sourceFile: currentSourceFile,
             modulePath: currentModulePath
         )
+
+        // A generic alias registers its template here so every later resolution
+        // sees it regardless of declaration order -- the same reason struct
+        // templates are collected before anything resolves against them.
+        if !typeParams.isEmpty {
+            defIdMap.registerGenericAliasTemplate(
+                name: name,
+                defId: defId,
+                info: DefIdMap.GenericAliasTemplateInfo(
+                    name: name,
+                    typeParameters: typeParams,
+                    targetType: targetType
+                )
+            )
+        }
 
         // 标记标准库类型
         if isStdLib {

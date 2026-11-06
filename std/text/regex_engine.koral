@@ -1,0 +1,918 @@
+using "std" { ... };
+// ============================================================================
+// std.text - Regular expression engine (pure Koral)
+// ============================================================================
+//
+// The pattern compiles to a small instruction program and a Pike-VM
+// simulates every thread of that program in lockstep, one input byte at a
+// time. Nothing recurses at match time and there is no backtracking stack:
+// a `*` over a long input is one loop iteration per byte, not one call
+// frame per repetition, so matching is linear in the text length and
+// cannot exhaust the stack. Thread priority order reproduces the
+// leftmost-first, greedy semantics a backtracking search would give -- the
+// match found is exactly the one backtracking would have returned, without
+// its worst-case exponential blowup.
+//
+// Semantics (the single definition for every platform):
+//   * byte-oriented matching and byte offsets, UTF-8 opaque;
+//   * alternation, concatenation, groups `( )`, classes `[...]` with
+//     ranges and negation, `.` (any byte but `\n`), anchors `^` / `$`,
+//     quantifiers `*` `+` `?` `{n}` `{n,}` `{n,m}` -- all greedy;
+//   * escapes `\d \D \w \W \s \S` plus literal escapes;
+//   * `^`/`$` anchor to text ends unless the multiline flag is set.
+// There are no backreferences and no lookaround: neither existed here
+// before, and the Pike-VM class of engines does not grow them.
+
+// ----------------------------------------------------------------------------
+// Bytecode
+// ----------------------------------------------------------------------------
+
+/// One matcher instruction. `Class` holds a 256-bit set as 32 bytes; the
+/// fixed array is a value, so reading an instruction copies plain bytes --
+/// no reference counting in the step loop.
+type ReInst {
+    /// Match one byte. `ci` folds ASCII case; `ch` is stored lowercase.
+    Byte(ch: UInt8, ci: Bool),
+    /// Match one byte against a 256-bit class (negation folded at compile).
+    Class(bits: [32]UInt8),
+    /// Try `x` first (higher priority), then `y`.
+    Split(x: UInt, y: UInt),
+    /// Jump to `x`.
+    Jump(x: UInt),
+    /// Record the current position in capture slot `slot`.
+    Save(slot: UInt),
+    /// Assert the start of the text, or of a line in multiline mode.
+    Bol(multiline: Bool),
+    /// Assert the end of the text, or of a line in multiline mode.
+    Eol(multiline: Bool),
+    /// Accept.
+    Match(),
+};
+
+// ----------------------------------------------------------------------------
+// Byte class construction
+// ----------------------------------------------------------------------------
+
+type mutable ClassBuilder(mutable bits: [32]UInt8);
+
+given ClassBuilder {
+
+    new(): ClassBuilder = {
+        let mutable bits: [32]UInt8 = [];
+        return ClassBuilder(bits);
+    };
+
+    set_byte(self, ch: UInt8): Void = {
+        let i = UInt(ch);
+        self.bits[i >> 3] = self.bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
+    };
+
+    set_range(self, lo: UInt, hi: UInt): Void = {
+        let mutable b = lo;
+        while b <= hi then {
+            self.set_byte(UInt8(b));
+            b += 1;
+        };
+    };
+
+    set_ascii_letters_ci(self): Void = {
+        self.set_range(65, 90);
+        self.set_range(97, 122);
+    };
+
+    invert(self): Void = {
+        for i in UInt(0)..<UInt(32) then {
+            self.bits[i] = ~self.bits[i];
+        };
+    };
+
+    build(self): ReInst = ReInst.Class(self.bits);
+};
+
+/// `[0-9]`
+let re_class_digit(): ReInst = {
+    let b = ClassBuilder.new();
+    b.set_range(48, 57);
+    return b.build();
+};
+
+/// `[a-zA-Z0-9_]`
+let re_class_word(): ReInst = {
+    let b = ClassBuilder.new();
+    b.set_range(48, 57);
+    b.set_range(65, 90);
+    b.set_byte(95);
+    b.set_range(97, 122);
+    return b.build();
+};
+
+/// `[ \t\n\r\f\v]`
+let re_class_space(): ReInst = {
+    let b = ClassBuilder.new();
+    b.set_range(9, 13);
+    b.set_byte(32);
+    return b.build();
+};
+
+/// Any byte except `\n`.
+let re_class_dot(): ReInst = {
+    let b = ClassBuilder.new();
+    b.set_range(0, 255);
+    b.invert();
+    b.set_byte(10);
+    b.invert();
+    return b.build();
+};
+
+let re_lower_byte(b: UInt8): UInt8 = {
+    return if b >= 'A' and b <= 'Z' then b + 32 else b;
+};
+
+// ----------------------------------------------------------------------------
+// Assembly: segments with segment-relative pcs, relocated when appended
+// ----------------------------------------------------------------------------
+
+let re_relocate(inst: ReInst, base: UInt): ReInst = {
+    return when inst in {
+        .Jump(x) then .Jump(x + base),
+        .Split(x, y) then .Split(x + base, y + base),
+        _ then inst,
+    };
+};
+
+/// Append `seg` to `dst`, rebasing the segment-relative `Jump`/`Split` pcs
+/// so they stay absolute within the growing program.
+let re_append(dst: List[ReInst], seg: List[ReInst]): Void = {
+    let base = dst.count();
+    for inst in seg then {
+        dst.push(re_relocate(inst, base));
+    };
+};
+
+/// `<atom>*` -- greedy: `split body / done; body; jmp split; done`.
+let re_wrap_star(atom: List[ReInst]): List[ReInst] = {
+    let out = List[ReInst].new();
+    out.push(ReInst.Split(1, atom.count() + 2));
+    re_append(out, atom);
+    out.push(ReInst.Jump(0));
+    return out;
+};
+
+/// `<atom>+` -- greedy: `body; split body / done`.
+let re_wrap_plus(atom: List[ReInst]): List[ReInst] = {
+    let out = List[ReInst].new();
+    re_append(out, atom);
+    out.push(ReInst.Split(0, atom.count() + 1));
+    return out;
+};
+
+/// `<atom>?` -- greedy: `split body / done; body`.
+let re_wrap_question(atom: List[ReInst]): List[ReInst] = {
+    let out = List[ReInst].new();
+    out.push(ReInst.Split(1, atom.count() + 1));
+    re_append(out, atom);
+    return out;
+};
+
+// ----------------------------------------------------------------------------
+// Parser
+// ----------------------------------------------------------------------------
+
+type mutable ReParser(
+    pat: String,
+    ignore_case: Bool,
+    multiline: Bool,
+    mutable pos: UInt,
+    mutable ngroups: UInt,
+    mutable error: String,
+);
+
+given ReParser {
+
+    fail(self, msg: String): Bool = {
+        if self.error.is_empty() then {
+            self.error = msg;
+        };
+        return false;
+    };
+
+    at_end(self): Bool = self.pos >= self.pat.count();
+
+    peek(self): UInt8 = self.pat[self.pos];
+
+    /// One alternation level: `concat ( '|' concat )*`.
+    parse_alt(self, out: List[ReInst]): Bool = {
+        let branches = List[List[ReInst]].new();
+        let first = List[ReInst].new();
+        if not self.parse_concat(first) then {
+            return false;
+        };
+        branches.push(first);
+        while not self.at_end() and self.peek() == '|' then {
+            self.pos += 1;
+            let branch = List[ReInst].new();
+            if not self.parse_concat(branch) then {
+                return false;
+            };
+            branches.push(branch);
+        };
+        if branches.count() == 1 then {
+            re_append(out, branches[0]);
+            return true;
+        };
+        // split b0 / next; b0; jmp end; split b1 / next; b1; jmp end; ...
+        let mutable jmps = List[UInt].new();
+        for i in 0..<branches.count() then {
+            if i + 1 < branches.count() then {
+                let split_at = out.count();
+                out.push(ReInst.Split(split_at + 1, 0));
+                re_append(out, branches[i]);
+                jmps.push(out.count());
+                out.push(ReInst.Jump(0));
+                out[split_at] = ReInst.Split(split_at + 1, out.count());
+            } else {
+                re_append(out, branches[i]);
+            };
+        };
+        let end = out.count();
+        for j in jmps then {
+            out[j] = ReInst.Jump(end);
+        };
+        return true;
+    };
+
+    /// One concatenation: quantified atoms until `|`, `)` or end.
+    parse_concat(self, out: List[ReInst]): Bool = {
+        while not self.at_end() and self.peek() != '|' and self.peek() != ')' then {
+            if not self.parse_quantified(out) then {
+                return false;
+            };
+        };
+        return true;
+    };
+
+    /// An atom with an optional greedy quantifier.
+    parse_quantified(self, out: List[ReInst]): Bool = {
+        let atom = List[ReInst].new();
+        if not self.parse_atom(atom) then {
+            return false;
+        };
+        if self.at_end() then {
+            re_append(out, atom);
+            return true;
+        };
+        let c = self.peek();
+        if c == '*' then {
+            self.pos += 1;
+            re_append(out, re_wrap_star(atom));
+            return true;
+        };
+        if c == '+' then {
+            self.pos += 1;
+            re_append(out, re_wrap_plus(atom));
+            return true;
+        };
+        if c == '?' then {
+            self.pos += 1;
+            re_append(out, re_wrap_question(atom));
+            return true;
+        };
+        if c == '{' then {
+            return self.parse_bounded(out, atom);
+        };
+        re_append(out, atom);
+        return true;
+    };
+
+    /// `{n}`, `{n,}`, `{n,m}` over `atom`, greedy.
+    parse_bounded(self, out: List[ReInst], atom: List[ReInst]): Bool = {
+        self.pos += 1;
+        let mutable n: UInt = 0;
+        let mutable n_digits = false;
+        while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
+            n = n * 10 + UInt(self.peek() - '0');
+            n_digits = true;
+            self.pos += 1;
+        };
+        let mutable m: UInt = n;
+        let mutable unbounded = false;
+        if not self.at_end() and self.peek() == ',' then {
+            self.pos += 1;
+            if not self.at_end() and self.peek() != '}' then {
+                m = 0;
+                while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
+                    m = m * 10 + UInt(self.peek() - '0');
+                    self.pos += 1;
+                };
+            } else {
+                unbounded = true;
+            };
+        };
+        if self.at_end() or self.peek() != '}' then {
+            return self.fail("Invalid {n,m} quantifier");
+        };
+        self.pos += 1;
+        if not n_digits then {
+            return self.fail("Invalid {n,m} quantifier");
+        };
+        if not unbounded and m < n then {
+            return self.fail("Invalid {n,m} quantifier");
+        };
+        if n > 4096 or m > 4096 then {
+            return self.fail("Pattern too large");
+        };
+        if unbounded then {
+            for _ in 0..<n then {
+                re_append(out, atom);
+            };
+            re_append(out, re_wrap_star(atom));
+        } else {
+            for _ in 0..<n then {
+                re_append(out, atom);
+            };
+            for _ in n..<m then {
+                re_append(out, re_wrap_question(atom));
+            };
+        };
+        return true;
+    };
+
+    /// One atom: group, class, dot, anchor, escape or literal byte.
+    parse_atom(self, out: List[ReInst]): Bool = {
+        if self.at_end() then {
+            return self.fail("Unexpected end of pattern");
+        };
+        let c = self.peek();
+        if c == '(' then {
+            self.pos += 1;
+            if self.ngroups >= 16 then {
+                return self.fail("Too many capture groups (at most 16)");
+            };
+            self.ngroups += 1;
+            let g = self.ngroups;
+            out.push(ReInst.Save(g * 2));
+            if not self.parse_alt(out) then {
+                return false;
+            };
+            if self.at_end() or self.peek() != ')' then {
+                return self.fail("Unmatched (");
+            };
+            self.pos += 1;
+            out.push(ReInst.Save(g * 2 + 1));
+            return true;
+        };
+        if c == '[' then {
+            return self.parse_class(out);
+        };
+        if c == '.' then {
+            self.pos += 1;
+            out.push(re_class_dot());
+            return true;
+        };
+        if c == '^' then {
+            self.pos += 1;
+            out.push(ReInst.Bol(self.multiline));
+            return true;
+        };
+        if c == '$' then {
+            self.pos += 1;
+            out.push(ReInst.Eol(self.multiline));
+            return true;
+        };
+        if c == '\\' then {
+            return self.parse_escape(out);
+        };
+        if c == '*' or c == '+' or c == '?' or c == '{' then {
+            return self.fail("Invalid preceding regular expression");
+        };
+        self.pos += 1;
+        out.push(ReInst.Byte(re_lower_byte(c), self.ignore_case));
+        return true;
+    };
+
+    /// `\d \D \w \W \s \S` and literal escapes.
+    parse_escape(self, out: List[ReInst]): Bool = {
+        self.pos += 1;
+        if self.at_end() then {
+            return self.fail("Trailing backslash");
+        };
+        let c = self.peek();
+        self.pos += 1;
+        if c == 'd' then {
+            out.push(re_class_digit());
+            return true;
+        };
+        if c == 'D' then {
+            let b = ClassBuilder.new();
+            b.set_range(48, 57);
+            b.invert();
+            out.push(b.build());
+            return true;
+        };
+        if c == 'w' then {
+            out.push(re_class_word());
+            return true;
+        };
+        if c == 'W' then {
+            let b = ClassBuilder.new();
+            b.set_range(48, 57);
+            b.set_range(65, 90);
+            b.set_byte(95);
+            b.set_range(97, 122);
+            b.invert();
+            out.push(b.build());
+            return true;
+        };
+        if c == 's' then {
+            out.push(re_class_space());
+            return true;
+        };
+        if c == 'S' then {
+            let b = ClassBuilder.new();
+            b.set_range(9, 13);
+            b.set_byte(32);
+            b.invert();
+            out.push(b.build());
+            return true;
+        };
+        if c == 'n' then {
+            out.push(ReInst.Byte(10, false));
+            return true;
+        };
+        if c == 't' then {
+            out.push(ReInst.Byte(9, false));
+            return true;
+        };
+        if c == 'r' then {
+            out.push(ReInst.Byte(13, false));
+            return true;
+        };
+        out.push(ReInst.Byte(re_lower_byte(c), self.ignore_case));
+        return true;
+    };
+
+    /// `[...]` with ranges, negation, and literal `]` / `-` in the first slot.
+    parse_class(self, out: List[ReInst]): Bool = {
+        self.pos += 1;
+        let b = ClassBuilder.new();
+        let mutable negated = false;
+        if not self.at_end() and self.peek() == '^' then {
+            negated = true;
+            self.pos += 1;
+        };
+        let mutable first = true;
+        let mutable closed = false;
+        while not self.at_end() then {
+            let c = self.peek();
+            if c == ']' and not first then {
+                self.pos += 1;
+                closed = true;
+                break;
+            };
+            first = false;
+            self.pos += 1;
+            let mutable lo = c;
+            if c == '\\' then {
+                if self.at_end() then {
+                    return self.fail("Trailing backslash");
+                };
+                let e = self.peek();
+                self.pos += 1;
+                if e == 'd' then {
+                    b.set_range(48, 57);
+                    continue;
+                };
+                if e == 'w' then {
+                    b.set_range(48, 57);
+                    b.set_range(65, 90);
+                    b.set_byte(95);
+                    b.set_range(97, 122);
+                    continue;
+                };
+                if e == 's' then {
+                    b.set_range(9, 13);
+                    b.set_byte(32);
+                    continue;
+                };
+                if e == 'n' then {
+                    lo = 10;
+                } else if e == 't' then {
+                    lo = 9;
+                } else if e == 'r' then {
+                    lo = 13;
+                } else {
+                    lo = e;
+                };
+            };
+            // Range: `lo-hi` when a `-` and a follower come next.
+            if not self.at_end() and self.peek() == '-' and self.pos + 1 < self.pat.count(
+            ) and self.pat[self.pos + 1] != ']' then {
+                self.pos += 1;
+                let mut_hi = self.peek();
+                self.pos += 1;
+                let mutable hi = mut_hi;
+                if hi == '\\' then {
+                    if self.at_end() then {
+                        return self.fail("Trailing backslash");
+                    };
+                    let e = self.peek();
+                    self.pos += 1;
+                    hi = if e == 'n' then 10
+                    else if e == 't' then 9 else if e == 'r' then 13 else e;
+                };
+                if self.ignore_case and lo >= 'A' and lo <= 'Z' and hi >= 'A' and hi <= 'Z' then {
+                    b.set_range(UInt(lo) + 32, UInt(hi) + 32);
+                };
+                if UInt(lo) > UInt(hi) then {
+                    return self.fail("Invalid character range");
+                };
+                b.set_range(UInt(lo), UInt(hi));
+            } else {
+                if self.ignore_case and lo >= 'A' and lo <= 'Z' then {
+                    b.set_byte(lo + 32);
+                };
+                if self.ignore_case and lo >= 'a' and lo <= 'z' then {
+                    b.set_byte(lo - 32);
+                };
+                b.set_byte(lo);
+            };
+        };
+        if not closed then {
+            return self.fail("Unterminated [");
+        };
+        if negated then {
+            b.invert();
+        };
+        out.push(b.build());
+        return true;
+    };
+};
+
+// ----------------------------------------------------------------------------
+// Compilation
+// ----------------------------------------------------------------------------
+
+/// Per-regex match scratch. A run allocates nothing: the marks sets, the
+/// capture template, the closure worklist and the two thread lists are
+/// reused across runs. Marks reset with generations (bumped per list build,
+/// never re-zeroed); `in_use` guards nesting -- a `matches` call inside a
+/// `find_all` loop over the same regex falls back to a fresh scratch.
+type mutable ReScratch(
+    mutable in_use: Bool,
+    mutable gen: Int32,
+    cm: List[Int32],
+    nm: List[Int32],
+    blank: [34]Int32,
+    work: List[ReSeed],
+    clist: List[ReThread],
+    nlist: List[ReThread],
+);
+
+let re_new_scratch(inst_count: UInt): ReScratch = {
+    let cm = List[Int32].with_capacity(inst_count);
+    let nm = List[Int32].with_capacity(inst_count);
+    for _ in 0..<inst_count then cm.push(0);
+    for _ in 0..<inst_count then nm.push(0);
+    return ReScratch(
+        false,
+        2,
+        cm,
+        nm,
+        re_blank_caps(),
+        List[ReSeed].with_capacity(16),
+        List[ReThread].with_capacity(16),
+        List[ReThread].with_capacity(16),
+    );
+};
+
+/// A compiled program: instructions plus the number of capture groups, the
+/// start-byte analysis used to skip hopeless search positions, and the
+/// match scratch shared by every run of this regex.
+type ReProgram(
+    insts: List[ReInst],
+    ngroups: UInt,
+    start_any: Bool,
+    start_bits: [32]UInt8,
+    scratch: ReScratch,
+);
+
+/// The bytes a match can start with, or the fact that any position can
+/// (empty-matching patterns like `a*`). Computed from the program's
+/// epsilon closure at pc 0; assertions are treated as pass-through, so the
+/// set may over-approximate -- safe for a skip test.
+let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
+    let mutable start_any = false;
+    let mutable bits: [32]UInt8 = [];
+    let mutable marks = List[Int32].new();
+    for _ in 0..<insts.count() then marks.push(0);
+    let mutable work = List[UInt].new();
+    work.push(0);
+    while not work.is_empty() then {
+        let pc = work.take_at(work.count() - 1);
+        if marks[pc] == 1 then {
+            continue;
+        };
+        marks[pc] = 1;
+        when insts[pc] in {
+            .Jump(x) then work.push(x),
+            .Split(x, y) then {
+                work.push(y);
+                work.push(x);
+            },
+            .Save(_) then work.push(pc + 1),
+            .Bol(_) then work.push(pc + 1),
+            .Eol(_) then work.push(pc + 1),
+            .Match() then {
+                start_any = true;
+            },
+            .Byte(ch, ci) then {
+                let i = UInt(ch);
+                bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
+                if ci and ch >= 'a' and ch <= 'z' then {
+                    let u = UInt(ch - 32);
+                    bits[u >> 3] = bits[u >> 3] | (UInt8(1) << UInt8(u & 7));
+                };
+            },
+            .Class(bs) then {
+                for k in UInt(0)..<UInt(32) then {
+                    bits[k] = bits[k] | bs[k];
+                };
+            },
+        };
+    };
+    return ReProgram(insts, ngroups, start_any, bits, re_new_scratch(insts.count()));
+};
+
+/// Compile `pattern` to a program: `save 0; body; save 1; match`.
+let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[ReProgram] = {
+    let parser = ReParser(pattern, ignore_case, multiline, 0, 0, "");
+    let body = List[ReInst].new();
+    if not parser.parse_alt(body) then {
+        return Result[ReProgram].Error(parser.error);
+    };
+    if parser.pos < pattern.count() then {
+        return Result[ReProgram].Error("Unmatched )");
+    };
+    if body.count() > 4096 then {
+        return Result[ReProgram].Error("Pattern too large");
+    };
+    let insts = List[ReInst].new();
+    insts.push(ReInst.Save(0));
+    re_append(insts, body);
+    insts.push(ReInst.Save(1));
+    insts.push(ReInst.Match());
+    return Result[ReProgram].Ok(re_analyze_start(insts, parser.ngroups));
+};
+
+// ----------------------------------------------------------------------------
+// Matching: the Pike-VM
+// ----------------------------------------------------------------------------
+
+/// Capture slots ride in the thread value itself: a fixed array copies as
+/// plain bytes -- no reference counting, no allocation -- so the step loop
+/// never touches the heap. The whole match occupies slots 0 and 1; capture
+/// group `k` (1-based) occupies slots `2k` and `2k + 1`; a slot of `0 - 1`
+/// means "did not take part in this match". The array carries at most 16
+/// capture groups (34 slots); patterns with more are refused at compile.
+type ReThread(pc: UInt, caps: [34]Int32);
+
+/// A pending epsilon-closure step.
+type ReSeed(pc: UInt, caps: [34]Int32);
+
+/// All-`-1` capture slots: the state of a thread that has matched nothing.
+let re_blank_caps(): [34]Int32 = {
+    let unset = Int32(0) - Int32(1);
+    let mutable a: [34]Int32 = [];
+    for i in UInt(0)..<UInt(34) then {
+        a[i] = unset;
+    };
+    return a;
+};
+
+/// One match's capture slots as a VALUE: a run hands its result back without
+/// building a list, so `matches`/`find` allocate nothing at all and
+/// `captures` builds its lists once, at the very end.
+type ReSlots(slots: [34]Int32);
+
+/// Search `text` from `offset` for the leftmost-first match. Returns the
+/// flat capture-slot list of the winning thread: `[s0, e0, s1, e1, ...]`,
+/// with `0 - 1` for slots that did not take part. With `track_groups` off
+/// only slots 0 and 1 (the whole match) are followed -- `matches`/`find`
+/// never pay for group bookkeeping.
+let re_run(
+    prog: ReProgram,
+    text: String,
+    offset: UInt,
+    track_groups: Bool,
+): Option[ReSlots] = {
+    let insts = prog.insts;
+    let text_len = text.count();
+
+    // Reuse the regex's scratch; a nested run (same regex re-entered from a
+    // callback) falls back to a fresh one and stays correct.
+    let scratch = prog.scratch;
+    let reuse = not scratch.in_use;
+    let mutable cm = if reuse then scratch.cm else List[Int32].new();
+    let mutable nm = if reuse then scratch.nm else List[Int32].new();
+    let blank = if reuse then scratch.blank else re_blank_caps();
+    let work = if reuse then scratch.work else List[ReSeed].new();
+    let mutable clist = if reuse then scratch.clist else List[ReThread].new();
+    let mutable nlist = if reuse then scratch.nlist else List[ReThread].new();
+    // Each thread list is built against its own marks set: a program counter
+    // may appear at most once per list, and the first thread to reach it
+    // (highest priority) keeps the slot. The sets travel with the lists when
+    // they swap -- a thread carried into the next position still owns its
+    // program counter against a fresh start's closure. Fresh generations per
+    // build make every entry from a previous run invisible.
+    let mutable cg: Int32 = 1;
+    let mutable ng: Int32 = 0;
+    let mutable gtop: Int32 = 0;
+    if reuse then {
+        scratch.in_use = true;
+        if scratch.gen > 1000000000 then {
+            // Generations are about to wrap: re-zero the sets once.
+            cm.clear();
+            nm.clear();
+            for _ in 0..<insts.count() then cm.push(0);
+            for _ in 0..<insts.count() then nm.push(0);
+            scratch.gen = 2;
+        };
+        cg = scratch.gen;
+        ng = scratch.gen + 1;
+        gtop = ng;
+    } else {
+        for _ in 0..<insts.count() then cm.push(0);
+        for _ in 0..<insts.count() then nm.push(0);
+    };
+    clist.clear();
+    nlist.clear();
+    let mutable best_caps = re_blank_caps();
+    let mutable matched = false;
+
+    let mutable pos = offset;
+    while pos <= text_len then {
+        if not matched then {
+            // Only start a thread where a match could actually begin.
+            let mutable inject = false;
+            if prog.start_any then {
+                inject = true;
+            } else if pos < text_len then {
+                let i = UInt(text[pos]);
+                inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
+            };
+            if inject then {
+                re_add(insts, cm, cg, text, text_len, pos, clist, 0, blank, track_groups, work);
+            };
+        };
+
+        // Scan this position's threads in priority order. The first Match
+        // thread wins its slot; everything after it is lower priority and
+        // dies. Threads before it survive to the next byte and may still
+        // produce a higher-priority match later -- that one overwrites.
+        ng += 1;
+        if ng > gtop then {
+            gtop = ng;
+        };
+        let mutable cut = false;
+        for t in clist then {
+            if cut then {
+                break;
+            };
+            when insts[t.pc] in {
+                .Match() then {
+                    best_caps = t.caps;
+                    matched = true;
+                    cut = true;
+                },
+                .Byte(ch, ci) then {
+                    if pos < text_len then {
+                        let b = text[pos];
+                        if b == ch or (ci and re_lower_byte(b) == ch) then {
+                            re_add(
+                                insts,
+                                nm,
+                                ng,
+                                text,
+                                text_len,
+                                pos + 1,
+                                nlist,
+                                t.pc + 1,
+                                t.caps,
+                                track_groups,
+                                work,
+                            );
+                        };
+                    };
+                },
+                .Class(bits) then {
+                    if pos < text_len then {
+                        let b = text[pos];
+                        let i = UInt(b);
+                        if ((bits[i >> 3] >> UInt8(i & 7)) & 1) == 1 then {
+                            re_add(
+                                insts,
+                                nm,
+                                ng,
+                                text,
+                                text_len,
+                                pos + 1,
+                                nlist,
+                                t.pc + 1,
+                                t.caps,
+                                track_groups,
+                                work,
+                            );
+                        };
+                    };
+                },
+                _ then {},
+            };
+        };
+
+        let tmp = clist;
+        clist = nlist;
+        nlist = tmp;
+        nlist.clear();
+        let tmpm = cm;
+        cm = nm;
+        nm = tmpm;
+        let tmpg = cg;
+        cg = ng;
+        ng = tmpg;
+
+        pos += 1;
+        if matched and clist.is_empty() then {
+            break;
+        };
+    };
+    if reuse then {
+        scratch.in_use = false;
+        scratch.gen = gtop + 2;
+    };
+    if not matched then {
+        return Option[ReSlots].None();
+    };
+    return Option[ReSlots].Some(ReSlots(best_caps));
+};
+
+/// Epsilon closure from `(pc, caps)`, in priority order, adding the
+/// consuming and `Match` threads it reaches to `list`. The marks make the
+/// closure a traversal, not a loop: a zero-width cycle (`()*`) visits each
+/// program counter once and stops instead of spinning.
+let re_add(
+    insts: List[ReInst],
+    marks: List[Int32],
+    generation: Int32,
+    text: String,
+    text_len: UInt,
+    pos: UInt,
+    list: List[ReThread],
+    pc0: UInt,
+    caps0: [34]Int32,
+    track_groups: Bool,
+    work: List[ReSeed],
+): Void = {
+    work.clear();
+    work.push(ReSeed(pc0, caps0));
+    while not work.is_empty() then {
+        let seed = work.take_at(work.count() - 1);
+        if marks[seed.pc] == generation then {
+            continue;
+        };
+        marks[seed.pc] = generation;
+        when insts[seed.pc] in {
+            .Jump(x) then {
+                work.push(ReSeed(x, seed.caps));
+            },
+            .Split(x, y) then {
+                // Pushed in reverse: the stack pops `x` first.
+                work.push(ReSeed(y, seed.caps));
+                work.push(ReSeed(x, seed.caps));
+            },
+            .Save(slot) then {
+                if track_groups or slot < 2 then {
+                    // Value copy plus one store: the fixed array moves as
+                    // plain bytes, no allocation, no reference count.
+                    let mutable caps = seed.caps;
+                    caps[slot] = Int32(pos);
+                    work.push(ReSeed(seed.pc + 1, caps));
+                } else {
+                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                };
+            },
+            .Bol(multiline) then {
+                if pos == 0 or (multiline and pos > 0 and text[pos - 1] == '\n') then {
+                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                };
+            },
+            .Eol(multiline) then {
+                if pos == text_len or (multiline and pos < text_len and text[pos] == '\n') then {
+                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                };
+            },
+            _ then {
+                list.push(ReThread(seed.pc, seed.caps));
+            },
+        };
+    };
+};

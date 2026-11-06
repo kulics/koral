@@ -1580,20 +1580,45 @@ extension TypeChecker {
       // Handled in pass 2 (signature) and pass 3 (body)
       break
 
-    case .typeAliasDeclaration(let name, let targetType, let access, let span, _):
+    case .typeAliasDeclaration(let name, let typeParams, let targetType, let access, let span, _):
       self.currentSpan = span
       let isPrivate = (access == .private)
-      
+
+      if !typeParams.isEmpty {
+        // Generic alias: the name keeps its collected placeholder type and the
+        // template (registered during name collection) expands per use. The
+        // target is validated here with the parameter bindings; a direct
+        // self-reference is a spelling error, like the non-generic form.
+        var selfReferentialSpan: SourceSpan? = nil
+        switch targetType {
+        case .identifier(let targetName, let targetSpan) where targetName == name:
+          selfReferentialSpan = targetSpan
+        case .generic(let base, _, let targetSpan) where base == name:
+          selfReferentialSpan = targetSpan
+        default:
+          selfReferentialSpan = nil
+        }
+        if let targetSpan = selfReferentialSpan {
+          throw SemanticError(.generic("Undefined type: \(name)"), span: targetSpan)
+        }
+        var substitution: [String: Type] = [:]
+        for tp in typeParams {
+          substitution[tp.name] = .genericParameter(name: tp.name)
+        }
+        _ = try resolveTypeNodeWithSubstitution(targetType, substitution: substitution)
+        return
+      }
+
       // Circular type alias detection
       if resolvingTypeAliases.contains(name) {
         throw SemanticError(.generic("Circular type alias: \(name)"), span: span)
       }
       resolvingTypeAliases.insert(name)
       defer { resolvingTypeAliases.remove(name) }
-      
+
       // Resolve the target type
       let resolvedType = try resolveTypeNode(targetType)
-      
+
       // Register the resolved type in scope
       if isPrivate {
         try currentScope.definePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)

@@ -345,6 +345,10 @@ public class TypeChecker {
   
   // Set of type aliases currently being resolved (for circular alias detection)
   var resolvingTypeAliases: Set<String> = []
+  // Generic aliases currently mid-expansion. Re-entering one is a circular
+  // alias (`type A[T] = B[T]; type B[U] = A[U]`); a direct self-reference is
+  // caught earlier, at the declaration's spelling check.
+  var expandingGenericAliases: Set<String> = []
   
   // Sets to track intrinsic generic types and functions for special handling during monomorphization
   var intrinsicGenericTypes: Set<String> = []

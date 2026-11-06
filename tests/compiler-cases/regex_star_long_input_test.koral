@@ -1,0 +1,42 @@
+// EXPECT: all star tests passed
+// A `*` over a long input must not exhaust the stack (the old C engine died
+// with STATUS_STACK_OVERFLOW on this shape) and `(a*)*b` must not blow up
+// exponentially: the Pike-VM matches in linear time by construction.
+
+using "std/text" { Regex };
+
+let main(): Void = {
+    let mutable s: String = "a";
+    while s.count() < 200000 then {
+        s = s + s;
+    };
+
+    // Long non-matching scan with a star: linear, no stack growth.
+    let r1 = Regex.compile(".*b").expect("r1 compile");
+    assert(r1.matches(s) == false, "star scan");
+
+    // The classic catastrophic-backtracking shape.
+    let r2 = Regex.compile("(a*)*b").expect("r2 compile");
+    assert(r2.matches(s) == false, "catastrophic");
+
+    // Greedy quantifiers still prefer the longest repetition.
+    let r3 = Regex.compile("a+").expect("r3 compile");
+    when r3.find("aaa") in {
+        .Some(m) then assert(m.text() == "aaa", "greedy"),
+        .None() then assert(false, "greedy missing"),
+    };
+
+    // A capture inside a quantifier records the last repetition.
+    let r4 = Regex.compile("(a)+").expect("r4 compile");
+    when r4.captures("aaa") in {
+        .Some(c) then {
+            when c.group(1) in {
+                .Some(g) then assert(g == "a", "star captures"),
+                .None() then assert(false, "star captures missing"),
+            };
+        },
+        .None() then assert(false, "star captures missing"),
+    };
+
+    println("all star tests passed");
+};

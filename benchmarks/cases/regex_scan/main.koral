@@ -1,0 +1,49 @@
+using "std/time" { MonoTime };
+using "std/text" { Regex };
+
+// Capturing regex scan throughput: compile once, then walk every match of a
+// 5-group pattern over a ~5 MB deterministic text and checksum the spans.
+let main(): Int = {
+    let mutable b = StringBuilder.with_capacity(6_000_000);
+    let mutable i = UInt(0);
+    while i < UInt(250_000) then {
+        b.push_string("user");
+        b.push_string((i % 1000).to_string());
+        b.push_string("@host");
+        b.push_string((i % 97).to_string());
+        b.push_string(".org ");
+        i += UInt(1);
+    };
+    let text = b.to_string();
+
+    let re = Regex.compile("([a-z]+)([0-9]+)@([a-z]+)([0-9]+)\\.([a-z]+)") or else {
+        println("compile failed");
+        return 1;
+    };
+
+    let start = MonoTime.now();
+    let mutable sum = UInt64(0);
+    let mutable count = UInt64(0);
+    for c in re.captures_all(text) then {
+        count += UInt64(1);
+        let mutable g = UInt(0);
+        while g < c.group_count() then {
+            when c.group_start(g) in {
+                .Some(v) then {
+                    sum = sum + UInt64(v);
+                },
+                .None() then {},
+            };
+            when c.group_end(g) in {
+                .Some(v) then {
+                    sum = sum + UInt64(v);
+                },
+                .None() then {},
+            };
+            g += UInt(1);
+        };
+    };
+    let elapsed = start.elapsed().as_nanoseconds();
+    println("RESULT \(sum + count) \(elapsed)");
+    return 0;
+};

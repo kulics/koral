@@ -268,6 +268,25 @@ public class DefIdMap {
         }
     }
 
+    /// A generic type alias template: `type OrdList[T: Ord] = List[T]`. The
+    /// target stays a raw TypeNode and resolves per instantiation with the
+    /// parameter bindings, the same laziness as generic struct fields.
+    public struct GenericAliasTemplateInfo {
+        public let name: String
+        public let typeParameters: [TypeParameterDecl]
+        public let targetType: TypeNode
+
+        public init(
+            name: String,
+            typeParameters: [TypeParameterDecl],
+            targetType: TypeNode
+        ) {
+            self.name = name
+            self.typeParameters = typeParameters
+            self.targetType = targetType
+        }
+    }
+
     public struct GenericFunctionTemplateInfo {
         public let typeParameters: [TypeParameterDecl]
         public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
@@ -431,12 +450,14 @@ public class DefIdMap {
     private var genericStructTemplates: [String: DefId] = [:]
     private var genericEnumTemplates: [String: DefId] = [:]
     private var genericFunctionTemplates: [String: DefId] = [:]
+    private var genericAliasTemplates: [String: DefId] = [:]
 
 
     /// 泛型模板详细信息
     private var genericStructTemplateInfo: [UInt64: GenericStructTemplateInfo] = [:]
     private var genericEnumTemplateInfo: [UInt64: GenericEnumTemplateInfo] = [:]
     private var genericFunctionTemplateInfo: [UInt64: GenericFunctionTemplateInfo] = [:]
+    private var genericAliasTemplateInfo: [UInt64: GenericAliasTemplateInfo] = [:]
 
     /// 标记禁止 `.val` 解引用的类型
 
@@ -1062,6 +1083,35 @@ public class DefIdMap {
             genericEnumTemplates[DefIdMap.bareKey(name)] = defId
         }
         genericEnumTemplateInfo[defId.id] = info
+    }
+
+    public func registerGenericAliasTemplate(name: String, defId: DefId, info: GenericAliasTemplateInfo) {
+        genericAliasTemplates[makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)] = defId
+        if !currentModulePath.isEmpty {
+            genericAliasTemplates[DefIdMap.bareKey(name)] = defId
+        }
+        genericAliasTemplateInfo[defId.id] = info
+    }
+
+    /// The generic type alias template a spelling resolves to in the module
+    /// being checked, when it names one at all.
+    public func lookupGenericAliasTemplateInfo(_ name: String) -> GenericAliasTemplateInfo? {
+        let candidates = [
+            makeKey(modulePath: currentModulePath, name: name, sourceFile: nil),
+            name,
+            DefIdMap.bareKey(name),
+        ]
+        for key in candidates {
+            if let defId = genericAliasTemplates[key], let info = genericAliasTemplateInfo[defId.id] {
+                return info
+            }
+        }
+        return nil
+    }
+
+    /// The generic type alias template with this DECLARATION.
+    public func genericAliasTemplateInfo(for defId: DefId) -> GenericAliasTemplateInfo? {
+        genericAliasTemplateInfo[defId.id]
     }
 
     public func registerGenericFunctionTemplate(name: String, defId: DefId, info: GenericFunctionTemplateInfo) {

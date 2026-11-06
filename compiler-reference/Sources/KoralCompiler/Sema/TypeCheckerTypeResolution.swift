@@ -339,6 +339,10 @@ extension TypeChecker {
       let base = try resolveTypeNode(inner)
       return mutable ? .mutablePointer(element: base) : .pointer(element: base)
     case .generic(let base, let args, let span):
+      if let aliasTemplate = currentScope.lookupGenericAliasTemplate(base) {
+        let resolvedArgs = try args.map { try resolveTypeNode($0) }
+        return try expandGenericAlias(aliasTemplate, args: resolvedArgs, span: span, checkConformance: false)
+      }
       if let template = currentScope.lookupGenericStructTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
@@ -496,7 +500,10 @@ extension TypeChecker {
       
     case .generic(let base, let args, let span):
       let resolvedArgs = try args.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
-      
+
+      if let aliasTemplate = currentScope.lookupGenericAliasTemplate(base) {
+        return try expandGenericAlias(aliasTemplate, args: resolvedArgs, span: span, checkConformance: false)
+      }
       if let template = currentScope.lookupGenericStructTemplate(base) {
         try ensureGenericTemplateVisible(base, templateDefId: template.defId, span: span)
         return .genericStruct(templateDefId: template.defId, args: resolvedArgs)
@@ -564,6 +571,60 @@ extension TypeChecker {
     }
   }
   
+  /// Instantiate a generic type alias: `OrdList[Int]` for
+  /// `type OrdList[T: Ord] = List[T]`. Arity and bounds are checked here, and
+  /// the target resolves with the parameter bindings. Re-entering an alias
+  /// that is already mid-expansion is the mutual-recursion case; a direct
+  /// self-reference never reaches here because the declaration's spelling
+  /// check rejects it first.
+  func expandGenericAlias(
+    _ template: DefIdMap.GenericAliasTemplateInfo,
+    args: [Type],
+    span: SourceSpan,
+    checkConformance: Bool
+  ) throws -> Type {
+    let expected = template.typeParameters.count
+    if expected != args.count {
+      let expectedNote = expected == 1 ? "1 type argument" : "\(expected) type arguments"
+      let gotNote = args.count == 1 ? "1" : "\(args.count)"
+      throw SemanticError(
+        .generic("Type alias '\(template.name)' expects \(expectedNote), got \(gotNote)"),
+        span: span
+      )
+    }
+    if checkConformance && !deferGenericConstraintValidation {
+      let outerSpan = currentSpan
+      currentSpan = span
+      defer { currentSpan = outerSpan }
+      try enforceGenericConstraints(typeParameters: template.typeParameters, args: args)
+    }
+    if expandingGenericAliases.contains(template.name) {
+      throw SemanticError(.generic("Circular type alias: \(template.name)"), span: span)
+    }
+    var substitution: [String: Type] = [:]
+    for (i, param) in template.typeParameters.enumerated() {
+      substitution[param.name] = args[i]
+    }
+    expandingGenericAliases.insert(template.name)
+    defer { expandingGenericAliases.remove(template.name) }
+    return try resolveTypeNodeWithSubstitution(template.targetType, substitution: substitution)
+  }
+
+  /// Shallow structural substitution of type-parameter names in a TypeNode,
+  /// for rewriting a generic alias's target into its instantiation spelling.
+  /// Only the identifier/generic shapes participate; anything else is returned
+  /// unchanged and the caller falls back.
+  func substituteTypeNodeParams(_ node: TypeNode, _ map: [String: TypeNode]) -> TypeNode {
+    switch node {
+    case .identifier(let name, let span):
+      return map[name] ?? .identifier(name, span: span)
+    case .generic(let base, let args, let span):
+      return .generic(base: base, args: args.map { substituteTypeNodeParams($0, map) }, span: span)
+    default:
+      return node
+    }
+  }
+
   // MARK: - Generic Constraint Enforcement
   
   // Cache for validated generic constraint checks: "Template<Arg1,Arg2>" -> passed

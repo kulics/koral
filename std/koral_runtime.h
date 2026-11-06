@@ -256,7 +256,21 @@ uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precis
 // Checked arithmetic: add, sub, mul for all 10 integer types
 // ============================================================================
 
-#if !defined(_MSC_VER)
+// Checked-arithmetic capability probe. __builtin_*_overflow exists on Clang
+// (every target -- clang-cl and the MSVC ABI define _MSC_VER too) and on GCC
+// 5+. __has_builtin is the reliable probe; the __GNUC__ arm covers GCC < 10,
+// where __has_builtin itself is missing. _MSC_VER must NOT be read as "no
+// builtins": Clang defines it when targeting the MSVC ABI, and gating on it
+// sent every Windows Clang build down the division-based fallback.
+#if defined(__has_builtin)
+#  if __has_builtin(__builtin_add_overflow) && __has_builtin(__builtin_sub_overflow) && __has_builtin(__builtin_mul_overflow)
+#    define KORAL_HAS_BUILTIN_OVERFLOW 1
+#  endif
+#elif defined(__GNUC__)
+#  define KORAL_HAS_BUILTIN_OVERFLOW 1
+#endif
+
+#if defined(KORAL_HAS_BUILTIN_OVERFLOW)
 // ---- GCC/Clang path using __builtin_*_overflow ----
 
 #define KORAL_DEFINE_CHECKED_ADD(type, suffix) \
@@ -356,9 +370,9 @@ uint8_t* __koral_format_float64(double value, uint8_t type_char, intptr_t precis
         return a * b; \
     }
 
-#endif // !defined(_MSC_VER)
+#endif // KORAL_HAS_BUILTIN_OVERFLOW
 
-#if !defined(_MSC_VER)
+#if defined(KORAL_HAS_BUILTIN_OVERFLOW)
 KORAL_DEFINE_CHECKED_ADD(int8_t, i8)
 KORAL_DEFINE_CHECKED_SUB(int8_t, i8)
 KORAL_DEFINE_CHECKED_MUL(int8_t, i8)

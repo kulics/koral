@@ -182,6 +182,17 @@ public type GenericEnumTemplate(
     cases: List[TemplateCase],
 );
 
+/// A generic type alias template: `type OrdList[T: Ord] = List[T]`.
+/// The target stays a raw `TypeNode` and is resolved per instantiation with the
+/// parameter bindings -- the same laziness as generic struct template fields,
+/// which also keeps forward references between aliases working.
+public type GenericAliasTemplate(
+    def_id: DefId,
+    name: String,
+    type_parameters: List[TypeParameterDecl],
+    target: TypeNode,
+);
+
 public type mutable GenericFunctionTemplate(
     def_id: DefId,
     name: String,
@@ -238,6 +249,10 @@ public type mutable GenericTemplateRegistry(
     // Functions indexed by DECLARATION. `function_templates` is keyed by
     // spelling (bare and qualified), so identity must not depend on scanning it.
     mutable function_templates_by_def_id: Dict[UInt, GenericFunctionTemplate],
+    // Generic type aliases indexed by DECLARATION: `type OrdList[T: Ord] = List[T]`.
+    // An alias owns no nominal type, so it is never looked up to produce one --
+    // only to expand its target with bindings.
+    mutable alias_templates_by_def_id: Dict[UInt, GenericAliasTemplate],
     mutable extension_methods: Dict[MethodOwner, List[GenericExtensionMethodTemplate]],
     mutable intrinsic_extension_methods: Dict[MethodOwner, List[IntrinsicExtensionEntry]],
     mutable trait_tool_blocks: Dict[String, List[TraitToolBlock]],
@@ -267,6 +282,10 @@ public type mutable GenericTemplateRegistry(
     mutable current_module_path: List[String],
     mutable current_source_file: Option[String],
     mutable current_import_graph: Option[ImportGraph],
+    // Which generic aliases are mid-expansion right now. Re-entering one is a
+    // cyclic alias (`type A[T] = B[T]; type B[U] = A[U]`); a declaration-level
+    // self-reference is caught earlier, at the spelling check.
+    mutable alias_expansion_in_progress: Set[UInt],
 );
 
 given GenericTemplateRegistry {
@@ -328,6 +347,7 @@ given GenericTemplateRegistry {
             Dict[UInt, GenericEnumTemplate].new(),
             Dict[String, GenericFunctionTemplate].new(),
             Dict[UInt, GenericFunctionTemplate].new(),
+            Dict[UInt, GenericAliasTemplate].new(),
             Dict[MethodOwner, List[GenericExtensionMethodTemplate]].new(),
             Dict[MethodOwner, List[IntrinsicExtensionEntry]].new(),
             Dict[String, List[TraitToolBlock]].new(),
@@ -343,6 +363,7 @@ given GenericTemplateRegistry {
             List[String].new(),
             Option[String].None(),
             Option[ImportGraph].None(),
+            Set[UInt].new(),
         );
     };
 
@@ -512,6 +533,17 @@ given GenericTemplateRegistry {
         return when self.enum_templates_by_def_id.get(def_id.id) in {
             .Some(t) then Option[GenericEnumTemplate].Some(t),
             .None() then Option[GenericEnumTemplate].None(),
+        };
+    };
+
+    /// The generic type alias template with this DECLARATION. Same reason.
+    public alias_by_def_id(self, def_id: DefId): Option[GenericAliasTemplate] = {
+        if not def_id.is_valid() then {
+            return Option[GenericAliasTemplate].None();
+        };
+        return when self.alias_templates_by_def_id.get(def_id.id) in {
+            .Some(t) then Option[GenericAliasTemplate].Some(t),
+            .None() then Option[GenericAliasTemplate].None(),
         };
     };
 

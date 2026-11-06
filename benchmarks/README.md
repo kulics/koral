@@ -21,6 +21,7 @@ flags a row when they disagree.
 | set_membership | hash set insert + contains, Int keys (500k + 1M probes) |
 | string_build | StringBuilder append throughput (300k small appends) |
 | string_find | build 8MB text + pattern scan |
+| regex_scan | capturing regex scan over a 5MB token stream (compile once, walk every match) |
 | loop_pipeline | integer loop with branch and multiply (3.5M) |
 | fib_recursive | call overhead baseline (fib 27) |
 
@@ -112,6 +113,73 @@ except the sort pair:
    `self` to any non-escaping managed parameter slot (inherent methods and
    free functions; trait-impl slots keep the owned convention).
 7. **memcmp string compare/equals** (sort_strings 41 -> 36ms).
+
+## regex_scan notes (2026-11-06, Windows x64)
+
+`regex_scan` came in with the pure-Koral regex engine
+(`std/text/regex_engine.koral`, a Pike-VM) that replaced both C engines
+(POSIX `regexec` on Unix, a hand-written backtracker on Windows). Same
+workload, best-of runs in ms — measured locally with the Swift column as
+the C-library bar (NSRegularExpression is ICU); the Rust column and the
+Apple-arm64 numbers are pending a run with the full toolchain set:
+
+| engine | time | vs ICU |
+|---|---|---|
+| swift (ICU) | 121 | **1.00x** |
+| go (regexp, pure Go) | 275 | 2.3x |
+| koral (Pike-VM, new) | 1530 | 12.6x |
+| old C backtracker (retired) | 40600 | 265x |
+
+All four engines produce the identical checksum, so the leftmost-first,
+greedy semantics survived the replacement exactly. Against the engine it
+replaces the new one is **27x faster**: the backtracker restarted at every
+byte offset and re-split `([a-z]+)` at every step. It also cannot stack
+overflow (`.*` over 500KB killed the old engine with STATUS_STACK_OVERFLOW)
+and cannot blow up exponentially (`(a*)*b` over 500KB completes in ms).
+
+The Go row answers the standing question directly: a pure-language engine
+does **not** have to lose badly to a C library -- Go's `regexp`, an NFA
+simulation like this one, lands 2.3x behind ICU here. The first cut of the
+Koral engine sat at 4040ms (33x); a profiling pass attributed the gap and
+closed 2.65x of it (4040 -> 1530ms). What mattered, in order:
+
+1. **Capture slots as fixed arrays** (the big one): every `Save` used to
+   clone a `List[Int32]` — an allocation plus geometric growth per write,
+   ~2.5M mallocs across the scan. `caps: [34]Int32` rides in the thread
+   value and copies as plain bytes (value semantics, no reference counting).
+   Same for the class bitsets (`[32]UInt8` in the instruction payload):
+   a List payload made every bytecode read an RC operation. 4040 -> ~1700ms.
+2. **Per-regex match scratch**: `find_all` opens a run per match, and each
+   run rebuilt marks sets and templates (two 30-element lists plus fills;
+   ~700ns/call measured in isolation). The scratch is cached on the regex
+   and reset with marks generations; nesting falls back to fresh buffers.
+3. **Results as values**: `re_run` handed its match back as a fresh
+   `List[Int32]` per run (2.75M allocations in the `[a-z]` case). The
+   result is now a `ReSlots` value; `matches`/`find` allocate nothing and
+   `captures` builds its public lists exactly once per match.
+4. **Start-byte prefilter**: skip injection where no match can begin
+   (~1.4x on sparse scans).
+
+What Go does that the Koral engine still does not, for follow-up tracking:
+
+1. **Reference traffic in the step loop**: Go's `machine.add` takes one
+   machine pointer and works over pooled `*thread`s (32-byte values); every
+   Koral step still moves 144-byte thread/seed values and passes several
+   List/String references per closure call — each reference parameter is a
+   retain/release pair, and local bindings of the run's buffers add more.
+   Passing one bundled mutable context (method receiver) and carrying only
+   a capture-block index in the thread (blocks in a per-position pool) is
+   the direct translation of Go's shape.
+2. **Deferred capture copies**: Go shares one capture array through the
+   closure walk (`InstCapture` writes in place and undoes) and copies only
+   when a thread materializes — and skips even that when the buffers
+   already alias. The Koral engine copies the slots at every `Save`.
+3. **Run-per-match iteration**: `find_all` calls `re_run` per match (250k
+   calls here). Go reuses one machine per match too, but its per-call work
+   is smaller (see 1).
+4. **Literal-prefix acceleration**: Go's `Regexp` hoists a literal prefix
+   and scans with `Index`-class string search; ICU/PCRE use SIMD. The
+   Pike-VM visits every byte (the prefilter only rules out start positions).
 
 Remaining gaps and their causes:
 

@@ -352,9 +352,6 @@ given RegexFlag {
     public has(self, flag: RegexFlag): Bool;
 };
 
-/// Drop conformance: free the compiled pattern's native resources.
-given Regex: Drop {};
-
 /// Accessors for the compiled pattern's source and capture-group count.
 given Regex {
     /// Return the original pattern string.

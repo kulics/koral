@@ -3,27 +3,6 @@ using "std" { ... };
 // std.text - Core Operations
 // ============================================================================
 
-// FFI declarations for C runtime regex functions
-let foreign __koral_regex_compile(
-    pattern: *UInt8,
-    flags: Int32,
-    out_handle: **UInt8,
-    out_error_buf: *UInt8,
-    error_buf_size: Int32,
-    out_error_len: *Int32,
-): Int32;
-
-let foreign __koral_regex_match(
-    handle: *UInt8,
-    text: *UInt8,
-    text_offset: Int32,
-    max_groups: Int32,
-    out_starts: *Int32,
-    out_ends: *Int32,
-): Int32;
-
-let foreign __koral_regex_free(handle: *UInt8): Void;
-
 // ============================================================================
 // Regex — Compilation
 // ============================================================================
@@ -38,59 +17,12 @@ given Regex {
 
     /// Compile `pattern` with `flags` applied, returning `Result.Error` on an invalid pattern.
     public compile_with_flags(pattern: String, flags: RegexFlag): Result[Regex] = {
-        let c_flags = flags.to_c_flags();
-
-        // 分配输出缓冲区
-        let handle_out = alloc_memory[*UInt8](1);
-        let error_buf = alloc_memory[UInt8](256);
-        let error_len_out = alloc_memory[Int32](1);
-        defer dealloc_memory(handle_out);
-        defer dealloc_memory(error_buf);
-        defer dealloc_memory(error_len_out);
-
-        let rc = __koral_regex_compile(
-            pattern.data,
-            c_flags,
-            handle_out,
-            error_buf,
-            256,
-            error_len_out,
-        );
-
-        if rc != 0 then {
-            let err_len = *error_len_out;
-            let msg = String.from_utf8_ptr(error_buf, UInt(err_len));
-            return when msg in {
-                .Ok(msg) then .Error(msg),
-                .Error(e) then .Error(e),
-            };
+        let ignore_case = flags.has(RegexFlag.ignore_case());
+        let multiline = flags.has(RegexFlag.multiline());
+        return when re_compile(pattern, ignore_case, multiline) in {
+            .Ok(prog) then Result[Regex].Ok(Regex(prog, pattern, prog.ngroups)),
+            .Error(e) then Result[Regex].Error(e),
         };
-
-        let handle = *handle_out;
-
-        // 计算捕获组数量：扫描 pattern 中未转义的 '('
-        let groups = Regex.count_groups(pattern);
-
-        return .Ok(Regex(handle, pattern, groups));
-    };
-
-    // 计算正则表达式中的捕获组数量
-    count_groups(pattern: String): UInt = {
-        let mutable count: UInt = 0;
-        let mutable i: UInt = 0;
-        let len = pattern.count();
-        while i < len then {
-            let ch = pattern[i];
-            if ch == '\\' then {
-                i += 2; // 跳过转义字符
-                continue;
-            };
-            if ch == '(' then {
-                count += 1;
-            };
-            i += 1;
-        };
-        return count;
     };
 };
 
@@ -103,14 +35,10 @@ given Regex {
 
     /// Test whether the pattern matches anywhere in `text`, capturing no groups.
     public matches(self, text: String): Bool = {
-        let starts = alloc_memory[Int32](1);
-        let ends = alloc_memory[Int32](1);
-        defer dealloc_memory(starts);
-        defer dealloc_memory(ends);
-
-        let matched = __koral_regex_match(self.handle, text.data, 0, 1, starts, ends);
-
-        return matched > 0;
+        return when re_run(self.prog, text, 0, false) in {
+            .Some(_) then true,
+            .None() then false,
+        };
     };
 
     /// Return the first match in `text`, recording only the whole match's span.
@@ -119,28 +47,12 @@ given Regex {
 
     // 从指定偏移开始查找（内部方法，仅 $0）
     find_at(self, text: String, offset: UInt): Option[Match] = {
-        let starts = alloc_memory[Int32](1);
-        let ends = alloc_memory[Int32](1);
-        defer dealloc_memory(starts);
-        defer dealloc_memory(ends);
-
-        let matched = __koral_regex_match(
-            self.handle,
-            text.data,
-            Int32(offset),
-            1,
-            starts,
-            ends,
-        );
-
-        if matched == 0 then {
-            return Option[Match].None();
+        return when re_run(self.prog, text, offset, false) in {
+            .Some(m) then Option[Match].Some(
+                Match(text, UInt(m.slots[0]), UInt(m.slots[1])),
+            ),
+            .None() then Option[Match].None(),
         };
-
-        let s = UInt((*starts));
-        let e = UInt((*ends));
-
-        return Option[Match].Some(Match(text, s, e));
     };
 };
 
@@ -161,33 +73,19 @@ given Regex {
 
     // 从指定偏移开始查找并捕获所有 group（内部方法）
     captures_at(self, text: String, offset: UInt): Option[Captures] = {
-        let max_groups = Int32((self.groups + 1)); // +1 for $0
-        let starts = alloc_memory[Int32](UInt(max_groups));
-        let ends = alloc_memory[Int32](UInt(max_groups));
-        defer dealloc_memory(starts);
-        defer dealloc_memory(ends);
-
-        let matched = __koral_regex_match(
-            self.handle,
-            text.data,
-            Int32(offset),
-            max_groups,
-            starts,
-            ends,
-        );
-
-        if matched == 0 then {
-            return Option[Captures].None();
+        return when re_run(self.prog, text, offset, true) in {
+            .Some(m) then {
+                let group_slots = self.groups + 1;
+                let start_list = List[Int32].with_capacity(group_slots);
+                let end_list = List[Int32].with_capacity(group_slots);
+                for i in 0..<group_slots then {
+                    start_list.push(m.slots[i * 2]);
+                    end_list.push(m.slots[i * 2 + 1]);
+                };
+                Option[Captures].Some(Captures(text, start_list, end_list))
+            },
+            .None() then Option[Captures].None(),
         };
-
-        let mutable start_list: List[Int32] = [];
-        let mutable end_list: List[Int32] = [];
-        for i in 0..<UInt(max_groups) then {
-            start_list.push(starts[i]);
-            end_list.push(ends[i]);
-        };
-
-        return Option[Captures].Some(Captures(text, start_list, end_list));
     };
 
     /// Iterate over every non-overlapping match in `text`, each with its capture groups.
