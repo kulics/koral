@@ -1,0 +1,38 @@
+// EXPECT: Drop Box 7
+// EXPECT: observe 7
+// EXPECT: Drop Box 0
+// EXPECT: done
+// EXPECT: Drop Box 1
+// The borrowed-parameter convention must not outlive the object. The call
+// passes `h.box` -- a projection, not a stable local -- +0, and the callee
+// rewrites the holder mid-call: the old box's last owner is gone while the
+// borrowed parameter still points at it. The call site retains the
+// projection for the call's duration, so the read below still sees 7 and
+// the drop happens on the caller's side of the return.
+
+type Box(value: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        print("Drop Box ");
+        println(self.value);
+    };
+};
+
+type mutable Holder(mutable box: Box);
+
+/// Observational in `b` (the slot is borrowed), but rewrites the holder
+/// that also owns `b`'s object during the call.
+let observe(h: Holder, b: Box): Int = {
+    h.box = Box(0);
+    return b.value;
+};
+
+let main(): Int = {
+    let h = Holder(Box(7));
+    let v = observe(h, h.box);
+    println("observe \(v)");
+    h.box = Box(1);
+    println("done");
+    return 0;
+};

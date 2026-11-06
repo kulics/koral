@@ -2013,7 +2013,25 @@ given MIRFunctionCodeEmitter {
                 }
             },
             .Borrow() then {
-                let emission = self.emit_value_source(value);
+                // A projection read (field/global/deref) can be overwritten
+                // during the call: the callee rewrites the holder, the old
+                // object dies, and this +0 handle dangles. Retain a temp for
+                // the call's duration -- its cleanup drops right after the
+                // call. A bare local is stable: the callee cannot release
+                // the caller's binding, so the convention keeps passing it
+                // +0 untouched.
+                let emission = when value in {
+                    .PlaceRead(place, _) then {
+                        if not (place is .Local(_)) and self.codegen.needs_drop(
+                            value_type,
+                        ) then {
+                            self.emit_place_read(place, MIROwnershipUse.Copy(), false)
+                        } else {
+                            self.emit_value_source(value)
+                        }
+                    },
+                    _ then self.emit_value_source(value),
+                };
                 MIRValueEmission(
                     self.adapt_expression_for_target_type(
                         emission.expression,
