@@ -25,7 +25,12 @@ public type JsonError(public msg: String, public position: UInt);
 public type JsonValue {
     Null(),
     Bool(value: Bool),
+    /// A non-integer number. Integers that fit `Int`/`UInt` are stored
+    /// exactly in those cases instead: a `Float64` rounds everything past
+    /// 2^53, and JSON integers carry IDs that must survive a round trip.
     Number(value: Float64),
+    Int(value: Int),
+    UInt(value: UInt),
     String(value: String),
     Array(elements: List[JsonValue]),
     Object(entries: Dict[String, JsonValue]),
@@ -52,7 +57,7 @@ given JsonValue {
     public is_null(self): Bool;
     /// Check whether this is a `Bool`.
     public is_bool(self): Bool;
-    /// Check whether this is a `Number`.
+    /// Check whether this is a number (integer or not).
     public is_number(self): Bool;
     /// Check whether this is a `String`.
     public is_string(self): Bool;
@@ -62,8 +67,14 @@ given JsonValue {
     public is_object(self): Bool;
     /// Return the `Bool` payload, or `None` when this is not a `Bool`.
     public as_bool(self): Option[Bool];
-    /// Return the `Number` payload, or `None` when this is not a `Number`.
+    /// Return the numeric payload as `Float64`, or `None` when this is not
+    /// a number. An integer payload converts (and can round past 2^53 --
+    /// read the `Int`/`UInt` cases for the exact value).
     public as_number(self): Option[Float64];
+    /// Return the exact `Int` payload, or `None` when this is not an `Int`.
+    public as_int(self): Option[Int];
+    /// Return the exact `UInt` payload, or `None` when this is not a `UInt`.
+    public as_uint(self): Option[UInt];
     /// Return the `String` payload, or `None` when this is not a `String`.
     public as_string(self): Option[String];
     /// Return the `Array` elements, or `None` when this is not an `Array`.

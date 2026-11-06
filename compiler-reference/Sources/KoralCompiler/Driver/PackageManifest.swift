@@ -95,7 +95,8 @@ public struct PackageModuleConfig {
   /// (cffi-design.md §E).
   public let cSources: [String]
   /// Per-os overlay (`cffi-design.md` §E), keyed by os atoms from the closed
-  /// set `{"windows", "linux", "macos"}`.
+  /// set `{"windows", "linux", "macos"}`, plus `"default"` as the fallback
+  /// for any other host.
   public let platform: [String: PackagePlatformOverlay]
 }
 
@@ -114,7 +115,7 @@ public func effectiveLinksForOS(
   osAtom: String
 ) -> [String] {
   var out = links
-  if let overlay = platform[osAtom] {
+  if let overlay = platform[osAtom] ?? platform["default"] {
     out.append(contentsOf: overlay.links)
   }
   return out
@@ -128,7 +129,7 @@ public func effectiveCSourcesForOS(
   osAtom: String
 ) -> [String] {
   var out = cSources
-  if let overlay = platform[osAtom] {
+  if let overlay = platform[osAtom] ?? platform["default"] {
     out.append(contentsOf: overlay.cSources)
   }
   return out
@@ -757,10 +758,10 @@ private func loadPlatformOverlays(
   let object = try expectObject(value, path: fieldPath)
   var out: [String: PackagePlatformOverlay] = [:]
   for (osAtom, rawOverlay) in object {
-    guard isOSConditionAtom(osAtom) else {
+    guard isOSConditionAtom(osAtom) || osAtom == "default" else {
       throw PackageManifestError.invalidField(
         path: fieldPath,
-        message: "unknown platform key '\(osAtom)'; expected one of windows, linux, macos"
+        message: "unknown platform key '\(osAtom)'; expected one of windows, linux, macos, default"
       )
     }
     let overlayObject = try expectObject(rawOverlay, path: "\(fieldPath).\(osAtom)")
@@ -930,6 +931,20 @@ public func loadPackageRegistry(
       // built-in, not a package that happens to share its name.
       if manifest.packageName == "std" {
         throw PackageManifestError.reservedName(name: manifest.packageName)
+      }
+      // Native code is root-package only (cffi-design.md §E): a dependency's
+      // `c_sources` would run arbitrary C in every build that pulls it in.
+      // The gate is by package identity -- a dependency manifest declaring
+      // native code is refused however its paths spell.
+      for module in manifest.modules.values {
+        if !module.cSources.isEmpty
+          || module.platform.values.contains(where: { !$0.cSources.isEmpty })
+        {
+          throw PackageManifestError.invalidField(
+            path: "dependencies.\(dependency.key)",
+            message: "dependency '\(manifest.packageName)' cannot bring native code (c_sources are root-package only)"
+          )
+        }
       }
       let package = LoadedPackage(
         identity: dependency.source,

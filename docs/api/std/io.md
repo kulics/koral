@@ -151,6 +151,11 @@ given[W: Writer] BufWriter[W]: Writer {
     public flush(self): Result[Void];
 };
 
+/// A dropped `BufWriter` flushes: buffered bytes land in the inner writer.
+/// A flush failure at drop time is silent data loss with no caller left to
+/// see it, so it panics with the cause instead of dropping the bytes.
+given[W: Writer] BufWriter[W]: Drop {};
+
 /// Implements `Seeker`, flushing before moving the inner writer's cursor.
 given[W: Writer and Seeker] BufWriter[W]: Seeker {
     /// Flush the internal buffer, then move the inner writer to `pos`.

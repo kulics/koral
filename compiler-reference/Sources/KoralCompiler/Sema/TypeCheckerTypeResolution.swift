@@ -446,13 +446,13 @@ extension TypeChecker {
       for paramType in resolvedParams {
         // A C function pointer's parameter slot has the same shape rules as a
         // `let foreign` one: no `Void` / `Never` values, no opaque handles.
-        try assertNotOpaqueType(paramType, span: nodeSpan)
+        try assertNotOpaqueValueType(paramType, span: nodeSpan)
         if paramType == .void || paramType == .never || !isFfiCompatibleType(paramType) {
           throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
         }
       }
       let resolvedReturn = try resolveTypeNode(returnType)
-      try assertNotOpaqueType(resolvedReturn, span: nodeSpan)
+      try assertNotOpaqueValueType(resolvedReturn, span: nodeSpan)
       if !isFfiCompatibleType(resolvedReturn) {
         throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
       }
@@ -533,13 +533,13 @@ extension TypeChecker {
       for paramType in resolvedParams {
         // A C function pointer's parameter slot has the same shape rules as a
         // `let foreign` one: no `Void` / `Never` values, no opaque handles.
-        try assertNotOpaqueType(paramType, span: nodeSpan)
+        try assertNotOpaqueValueType(paramType, span: nodeSpan)
         if paramType == .void || paramType == .never || !isFfiCompatibleType(paramType) {
           throw SemanticError(.ffiIncompatibleType(type: paramType.description, reason: ffiTypeError(paramType)), span: nodeSpan)
         }
       }
       let resolvedReturn = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
-      try assertNotOpaqueType(resolvedReturn, span: nodeSpan)
+      try assertNotOpaqueValueType(resolvedReturn, span: nodeSpan)
       if !isFfiCompatibleType(resolvedReturn) {
         throw SemanticError(.ffiIncompatibleType(type: resolvedReturn.description, reason: ffiTypeError(resolvedReturn)), span: nodeSpan)
       }
@@ -783,8 +783,10 @@ extension TypeChecker {
 
   /// Whether `type`'s representation is fixed outside Koral's layout freedom and
   /// may therefore cross the FFI boundary. A CLOSED set, decided by the compiler
-  /// and not claimable by any user declaration: the built-in scalars (including
-  /// std's `Rune`), raw pointers, and `foreign type` declarations.
+  /// and not claimable by any user declaration: the built-in scalars, raw
+  /// pointers, and `foreign type` declarations. std's `Rune` is not in it
+  /// either: like `String` it is a std nominal whose representation is the
+  /// compiler's business, so it never crosses.
   func satisfiesForeignConstraint(_ type: Type) -> Bool {
     switch type {
     case .bool, .int, .int8, .int16, .int32, .int64,
@@ -799,7 +801,7 @@ extension TypeChecker {
       // as `String` does. `*Void` is C's `void*` and crosses.
       return inner == .void || satisfiesForeignConstraint(inner)
     case .structure(let defId):
-      return context.isForeignStruct(defId) || context.isStdNominal(defId, context.stdRuneDefId)
+      return context.isForeignStruct(defId)
     case .opaque:
       // An opaque `type foreign X {}` handle: the classic incomplete-struct
       // pointer pattern. Its representation is C's, so it crosses.

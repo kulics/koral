@@ -1287,11 +1287,10 @@ public class TypeChecker {
       return false
     case .opaque:
       return true
-    case .structure(let defId):
-      // std's `Rune` is the one nominal type in the set (same admission as
-      // satisfiesForeignConstraint): scalar representation, nominal only to
-      // carry methods. Guide §6 promises it on every boundary.
-      return context.isStdNominal(defId, context.stdRuneDefId)
+    case .structure:
+      // std's `Rune` is a nominal like `String` and never crosses: its
+      // representation is the compiler's business (guide §6).
+      return false
     case .`enum`, .reference, .mutableReference, .function, .genericParameter:
       return false
     case .fixedArray:

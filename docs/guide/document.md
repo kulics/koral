@@ -1674,10 +1674,12 @@ it from the type's own declaration.
   weak references require (`x as ?T` / `?expr` spell it).
 - `T: foreign` — the subject's representation is fixed outside Koral's layout
   freedom and may cross the FFI boundary: a built-in scalar, a `*` /
-  `*mutable` pointer (to one of these, or to `Void` — C's `void*`), a
-  `type foreign` declaration, or std's `Rune`. It is
+  `*mutable` pointer (to one of these, or to `Void` — C's `void*`), or a
+  `type foreign` declaration. It is
   a **closed set**; a Koral `type` is not in it, because the compiler chooses its
-  layout. This is what `List.borrow_ptr` / `borrow_mut_ptr` require.
+  layout — and neither is std's `Rune`, a nominal like `String` whose
+  representation is the compiler's business. This is what `List.borrow_ptr`
+  / `borrow_mut_ptr` require.
 
 ```koral
 let consume[I: Iterator[Int]](iter: I): Void = {};
@@ -3276,7 +3278,7 @@ let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
 What may cross a `let foreign` function boundary is a closed set decided by the
 compiler — parameter and return types must be:
 
-- a built-in scalar (std's `Rune` included); `Void` / `Never` are legal in
+- a built-in scalar; `Void` / `Never` are legal in
   **return** position only — C has no void values, so a parameter cannot be
   either, and `foreign (Void) -> R` would just be the zero-argument pointer
   spelled wrong;
@@ -3317,8 +3319,8 @@ The rules are C's, spelled in Koral:
 - Fields are bare `name: Type`: positional, with no access modifiers, no
   `mutable` marker, no named fields, no defaults. C layout is public and
   always writable; a marker that changes nothing would only lie.
-- Every field type must cross the FFI boundary — a built-in scalar (std's
-  `Rune` included), a `*` / `*mutable` pointer to one (or to `Void`, C's
+- Every field type must cross the FFI boundary — a built-in scalar, a `*`
+  / `*mutable` pointer to one (or to `Void`, C's
   `void*`), or another `type foreign` declaration: the same closed set the
   `foreign` constraint names. An opaque `type foreign X {}` still appears only
   behind `*` — it has no layout to store. Direct self-recursion is refused

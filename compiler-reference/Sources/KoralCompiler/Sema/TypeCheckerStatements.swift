@@ -437,7 +437,17 @@ extension TypeChecker {
       var expectedType: Type? = nil
       
       if let typeNode = typeNode {
-        expectedType = try resolveTypeNode(typeNode)
+        let resolvedAnnotation = try resolveTypeNode(typeNode)
+        expectedType = resolvedAnnotation
+        // A binding's annotation is a by-value position: an opaque one has
+        // no layout to hold. Recorded (not thrown) so the initializer still
+        // gets checked -- both mistakes in one statement are reported, in
+        // order, matching the other compiler's stream.
+        do {
+          try assertNotOpaqueValueType(resolvedAnnotation, span: span)
+        } catch let error as SemanticError {
+          try handleError(error)
+        }
       }
       
       // Check if value is a Lambda expression and pass expected type
@@ -483,7 +493,7 @@ extension TypeChecker {
         type = typedValue.type
       }
 
-      try assertNotOpaqueType(type, span: span)
+      try assertNotOpaqueValueType(type, span: span)
 
       let symbol = makeLocalSymbol(
         name: name,
@@ -540,6 +550,9 @@ extension TypeChecker {
           slotSymbols.append(nil)
           continue
         }
+        // The slot binds a by-value field: an opaque one has no layout to
+        // destructure into.
+        try assertNotOpaqueValueType(fieldType, span: span)
         // Validate type annotation if present
         if let typeNode = binding.type {
           let annotatedType = try resolveTypeNode(typeNode)

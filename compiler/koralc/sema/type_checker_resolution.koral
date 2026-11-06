@@ -299,9 +299,30 @@ given TypeChecker {
             .FunctionType(param_types, return_type, span) then {
                 let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
-                    resolved_params.push(self.resolve_type(pt));
+                    let resolved_pt = self.resolve_type(pt);
+                    // A function TYPE's slots are by-value positions: an
+                    // opaque one has no layout to pass or return.
+                    when self.opaque_by_value_type(resolved_pt) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                type_node_span(node),
+                            );
+                        },
+                        .None() then {},
+                    };
+                    resolved_params.push(resolved_pt);
                 };
                 let resolved_ret = self.resolve_type(return_type);
+                when self.opaque_by_value_type(resolved_ret) in {
+                    .Some(opaque_t) then {
+                        self.push_diagnostic(
+                            self.opaque_instantiation_message(opaque_t),
+                            type_node_span(node),
+                        );
+                    },
+                    .None() then {},
+                };
                 return make_function_type(resolved_params, resolved_ret);
             },
             .FixedArray(len, element, span) then {
@@ -321,11 +342,14 @@ given TypeChecker {
                     // A C function pointer's parameter slot has the same shape
                     // rules as a `let foreign` one: no `Void` / `Never` values,
                     // no opaque handles.
-                    if rp is .OpaqueType(_) then {
-                        self.push_diagnostic(
-                            self.opaque_instantiation_message(rp),
-                            type_node_span(node),
-                        );
+                    when self.opaque_by_value_type(rp) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                type_node_span(node),
+                            );
+                        },
+                        .None() then {},
                     };
                     if (rp is .VoidType()) or (rp is .NeverType()) or (not self.is_ffi_compatible_type(rp)) then {
                         self.push_diagnostic(
@@ -336,11 +360,14 @@ given TypeChecker {
                     resolved_params.push(rp);
                 };
                 let resolved_ret = self.resolve_type(return_type);
-                if resolved_ret is .OpaqueType(_) then {
-                    self.push_diagnostic(
-                        self.opaque_instantiation_message(resolved_ret),
-                        type_node_span(node),
-                    );
+                when self.opaque_by_value_type(resolved_ret) in {
+                    .Some(opaque_t) then {
+                        self.push_diagnostic(
+                            self.opaque_instantiation_message(opaque_t),
+                            type_node_span(node),
+                        );
+                    },
+                    .None() then {},
                 };
                 if not self.is_ffi_compatible_type(resolved_ret) then {
                     self.push_diagnostic(

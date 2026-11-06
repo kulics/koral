@@ -273,8 +273,10 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
 }
 ```
 
-- **`c_sources`**：相对包根的 `.c` 路径；与 `links` 同款沿模块图传递、按包身份去重、编译一次。
-- **`platform` 覆盖层**：键是 `#if` 同一套 os 原子（字符串），值是 `{ links?, c_sources? }`
+- **`c_sources`**：相对包根的 `.c` 路径；编译一次。**仅根包可声明**（2026-11-06 收紧）：
+  依赖包清单带 `c_sources` 在加载时拒绝——原生代码是信任边界，按包身份把关，不看路径拼法。
+- **`platform` 覆盖层**：键是 `#if` 同一套 os 原子（字符串）加 **`default`**（其余主机的兜底，
+  运行时链接库不因主机不在封闭集而静默丢失），值是 `{ links?, c_sources? }`
   增量叠加。它收编 driver 今天硬编码的平台库（Windows `-lbcrypt -lws2_32 -lpsapi`、
   POSIX `-lm -lpthread` 迁入 std 的 manifest），driver 硬编码删除——条件词汇与源码侧一套。
 - **同一条 C 管线**：`run_clang` 从「一条平铺命令」重构为「编译 C 单元 + 链接」：生成 `.c`、
@@ -355,10 +357,9 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
 
 ## 风险与未决
 
-1. **`Rune` 在函数边界的归属是分歧**：guide §6 两份都写「内建标量（含 std 的 `Rune`）」，
-   实现的 `is_ffi_compatible_type` 没有收它（`Rune` 是名义类型，落到 `_ then false`）；
-   布局边界（集合二）明确收。**收敛义务**——倾向按 guide 补实现（`Rune` 表示是定长
-   Unicode scalar，进 C 槽位无害），或改 guide；二选一，不许第三态。
+1. **`Rune` 在函数边界的归属**——已收敛（2026-11-06 定案）：二选一走了「改 guide」。
+   `Rune` 与 `String` 同为 std 名义类型，表示由编译器做主，**不过 FFI**（函数边界与
+   布局边界都拒，static 初值白名单同步剔除 rune 字面量）。guide §6 两份已同步。
 2. **不捕获 lambda 进 `foreign (A) -> R`**：仓颉 `CFunc` 与 Rust 的 fn-pointer 强转都允许
    非捕获 lambda；对 Koral 是 B 节的延伸（捕获与否语法可见、局部可判）。**已提议，未定案。**
 3. **自定义条件（feature 轴）**：仓颉走 `--cfg` / `cfg.toml` 键值对；Koral 若引入，条件文法加

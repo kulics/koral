@@ -1617,6 +1617,25 @@ extension TypeChecker {
     case .givenDeclaration(let typeParams, let typeNode, let methods, let span):
       self.currentSpan = span
 
+      // By-value signature rows: an opaque parameter or return has no
+      // layout to pass -- the same gate plain function signatures get.
+      // Only bare names are decided here: resolving a full type this early
+      // (the namespace is still settling) registers bare names for later
+      // phases to trip over. A bare name is a scope lookup -- no side
+      // effects -- and wrapped forms are settled at their use sites.
+      for method in methods {
+        for param in method.parameters {
+          if case .identifier(let typeName, _) = param.type,
+             let resolved = currentScope.lookupType(typeName) {
+            try assertNotOpaqueValueType(resolved, span: span)
+          }
+        }
+        if case .identifier(let returnName, _) = method.returnType,
+           let resolvedReturn = currentScope.lookupType(returnName) {
+          try assertNotOpaqueValueType(resolvedReturn, span: span)
+        }
+      }
+
       // `given Trait { ... }` tool method declaration.
       // Generic `given[T] [T]Trait { ... }` must be treated as a generic type extension,
       // not as a trait tool block.
@@ -2432,6 +2451,7 @@ extension TypeChecker {
         
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
+          try assertNotOpaqueValueType(paramType, span: span)
           try assertNoBorrowedReferenceType(paramType, context: "struct field '\(param.name)'", span: span)
           try assertNoNeverType(paramType, context: "struct field '\(param.name)'", span: span)
           // Allow direct recursion in structs — the compiler will
@@ -2477,10 +2497,10 @@ extension TypeChecker {
       var resolvedFields: [(name: String, type: Type)] = []
       for field in fields {
         let fieldType = try resolveTypeNode(field.type)
+        try assertNotOpaqueValueType(fieldType, span: span)
         try assertNoBorrowedReferenceType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         try assertNoNeverType(fieldType, context: "foreign struct field '\(field.name)'", span: span)
         // An opaque field has no layout; only `*FILE` can hold one.
-        try assertNotOpaqueValueType(fieldType, span: span)
         try enforceForeignConstraint(fieldType, context: "foreign struct field '\(field.name)'")
         if fieldType == placeholder {
           throw SemanticError.invalidOperation(
@@ -2524,6 +2544,7 @@ extension TypeChecker {
           var params: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
           for p in c.parameters {
             let resolved = try resolveTypeNode(p.type)
+            try assertNotOpaqueValueType(resolved, span: span)
             try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             try assertNoNeverType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             // Allow direct recursion in enums — the compiler will automatically
@@ -2564,11 +2585,11 @@ extension TypeChecker {
         let resolvedSignature: (params: [Parameter], returnType: Type)?
         do {
           let returnType = try resolveTypeNode(returnTypeNode)
-          try assertNotOpaqueType(returnType, span: span)
+          try assertNotOpaqueValueType(returnType, span: span)
           try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
           let params = try parameters.map { param -> Parameter in
             let paramType = try resolveTypeNode(param.type)
-            try assertNotOpaqueType(paramType, span: span)
+            try assertNotOpaqueValueType(paramType, span: span)
             try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
             // In Koral, 'mutable' in parameter means it's a mutable reference (ref)
             let passKind = passKindForParameterType(paramType)
@@ -2641,10 +2662,10 @@ extension TypeChecker {
       }
 
       let returnType = try resolveTypeNode(returnTypeNode)
-      try assertNotOpaqueType(returnType, span: span)
+      try assertNotOpaqueValueType(returnType, span: span)
       let params = try parameters.map { param -> Parameter in
         let paramType = try resolveTypeNode(param.type)
-        try assertNotOpaqueType(paramType, span: span)
+        try assertNotOpaqueValueType(paramType, span: span)
         try assertNoNeverType(paramType, context: "foreign function parameter '\(param.name)'", span: span)
         let passKind = passKindForParameterType(paramType)
         return Parameter(type: paramType, kind: passKind)
@@ -2672,6 +2693,7 @@ extension TypeChecker {
         let returnType = try resolveTypeNode(returnTypeNode)
         let params = try parameters.map { param -> Parameter in
           let paramType = try resolveTypeNode(param.type)
+          try assertNotOpaqueValueType(paramType, span: span)
           try assertNoNeverType(paramType, context: "intrinsic function parameter '\(param.name)'", span: span)
           let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
@@ -2977,6 +2999,7 @@ extension TypeChecker {
           for c in cases {
             for p in c.parameters {
               let payloadType = try resolveTypeNode(p.type)
+              try assertNotOpaqueValueType(payloadType, span: span)
               try assertNoBorrowedReferenceType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
               try assertNoNeverType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             }
@@ -3055,7 +3078,7 @@ extension TypeChecker {
             // type at error.
             if annotated != .error {
               do {
-                try assertNotOpaqueType(annotated, span: span)
+                try assertNotOpaqueValueType(annotated, span: span)
                 try assertNoBorrowedReferenceType(annotated, context: "global variable type", span: span)
                 try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [annotated], span: nameSpan)
                 expectedType = annotated
@@ -3069,7 +3092,7 @@ extension TypeChecker {
           } else {
             do {
               let resolvedType = try resolveTypeNode(typeNode!)
-              try assertNotOpaqueType(resolvedType, span: span)
+              try assertNotOpaqueValueType(resolvedType, span: span)
               try assertNoBorrowedReferenceType(resolvedType, context: "global variable type", span: span)
               try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [resolvedType], span: nameSpan)
               expectedType = resolvedType
@@ -3107,7 +3130,7 @@ extension TypeChecker {
           }
         } else {
           type = typedValue.type
-          try assertNotOpaqueType(type, span: span)
+          try assertNotOpaqueValueType(type, span: span)
           try assertNoBorrowedReferenceType(type, context: "global variable type", span: span)
           try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
         }
@@ -3303,9 +3326,11 @@ extension TypeChecker {
           try recordGenericTraitBounds(genericTypeParameters)
 
           let returnType = try resolveTypeNode(returnTypeNode)
+          try assertNotOpaqueValueType(returnType, span: span)
           try assertNoBorrowedReferenceType(returnType, context: "function return type", span: span)
           let params = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
+            try assertNotOpaqueValueType(paramType, span: span)
             try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
             return makeLocalSymbol(
               name: param.name, type: paramType,
@@ -3342,6 +3367,7 @@ extension TypeChecker {
       let returnType = try resolveTypeNode(returnTypeNode)
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
+        try assertNotOpaqueValueType(paramType, span: span)
         try assertNoNeverType(paramType, context: "function parameter '\(param.name)'", span: span)
         return makeLocalSymbol(
           name: param.name, type: paramType,
@@ -3402,6 +3428,7 @@ extension TypeChecker {
       self.currentSpan = span
 
       let returnType = try resolveTypeNode(returnTypeNode)
+      try assertNotOpaqueValueType(returnType, span: span)
       try assertNoBorrowedReferenceType(returnType, context: "foreign function return type", span: span)
       if !isFfiCompatibleType(returnType) {
         // The message names the TYPE, so it points at the type's spelling --
@@ -3414,6 +3441,7 @@ extension TypeChecker {
 
       let params = try parameters.map { param -> Symbol in
         let paramType = try resolveTypeNode(param.type)
+        try assertNotOpaqueValueType(paramType, span: span)
         try assertNoNeverType(paramType, context: "foreign function parameter '\(param.name)'", span: span)
         // `Void` in a parameter slot would generate `f(void x)` -- C has no
         // void values. `Never` is owned by assertNoNeverType above.
@@ -3469,6 +3497,7 @@ extension TypeChecker {
           }
           try recordGenericTraitBounds(typeParameters)
           let returnType = try resolveTypeNode(returnTypeNode)
+          try assertNotOpaqueValueType(returnType, span: span)
           try assertNoBorrowedReferenceType(returnType, context: "intrinsic function return type", span: span)
           _ = try parameters.map { param -> Symbol in
             let paramType = try resolveTypeNode(param.type)
@@ -3505,6 +3534,7 @@ extension TypeChecker {
 
       let (functionType, _, _) = try withNewScope {
         let returnType = try resolveTypeNode(returnTypeNode)
+        try assertNotOpaqueValueType(returnType, span: span)
         try assertNoBorrowedReferenceType(returnType, context: "intrinsic function return type", span: span)
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
@@ -4877,6 +4907,7 @@ extension TypeChecker {
           // Validate all field types are valid under the type parameters
           for param in parameters {
             let fieldType = try resolveTypeNode(param.type)
+            try assertNotOpaqueValueType(fieldType, span: span)
             try assertNoBorrowedReferenceType(fieldType, context: "struct field '\(param.name)'", span: span)
           }
         }

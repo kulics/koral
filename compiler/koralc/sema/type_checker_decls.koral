@@ -591,6 +591,15 @@ given TypeChecker {
                     [resolved],
                     name_span,
                 );
+                when self.opaque_by_value_type(resolved) in {
+                    .Some(opaque_t) then {
+                        self.push_diagnostic(
+                            self.opaque_instantiation_message(opaque_t),
+                            unknown_span(),
+                        );
+                    },
+                    .None() then {},
+                };
                 if self.contains_borrowed_reference_type(resolved) then {
                     self.push_diagnostic(
                         "global variable type cannot contain borrowed reference type '\(self.context().type_display_name(resolved))'",
@@ -667,11 +676,29 @@ given TypeChecker {
                 };
                 let result = if type_params.is_empty() then {
                     let resolved_ret = self.resolve_type(return_type);
+                    when self.opaque_by_value_type(resolved_ret) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                unknown_span(),
+                            );
+                        },
+                        .None() then {},
+                    };
                     if self.contains_borrowed_reference_type(resolved_ret) then {
                         self.push_diagnostic(
                             "function return type cannot contain borrowed reference type '\(self.context().type_display_name(resolved_ret))'",
                             unknown_span(),
                         );
+                        when self.opaque_by_value_type(resolved_ret) in {
+                            .Some(opaque_t) then {
+                                self.push_diagnostic(
+                                    self.opaque_instantiation_message(opaque_t),
+                                    unknown_span(),
+                                );
+                            },
+                            .None() then {},
+                        };
                         if self.contains_never_type(resolved_ret) then {
                             self.push_diagnostic(
                                 "function return type cannot contain Never type: '\(self.context().type_display_name(resolved_ret))'",
@@ -690,6 +717,15 @@ given TypeChecker {
                     signature_types.push(resolved_ret);
 
                     for p in typed_params then {
+                        when self.opaque_by_value_type(p.param_type) in {
+                            .Some(opaque_t) then {
+                                self.push_diagnostic(
+                                    self.opaque_instantiation_message(opaque_t),
+                                    unknown_span(),
+                                );
+                            },
+                            .None() then {},
+                        };
                         if self.contains_never_type(p.param_type) then {
                             self.push_diagnostic(
                                 "function parameter '\(p.name)' cannot contain Never type: '\(self.context().type_display_name(p.param_type))'",
@@ -799,6 +835,15 @@ given TypeChecker {
                         signature_types,
                         name_span,
                     );
+                    when self.opaque_by_value_type(resolved_ret) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                unknown_span(),
+                            );
+                        },
+                        .None() then {},
+                    };
                     if self.contains_borrowed_reference_type(resolved_ret) then {
                         self.push_diagnostic(
                             "function return type cannot contain borrowed reference type '\(self.context().type_display_name(resolved_ret))'",
@@ -921,21 +966,25 @@ given TypeChecker {
                 // Seed-parity signature gates: an opaque handle cannot cross
                 // by value (write `<X> ptr`), a parameter cannot be `Never`,
                 // and the return cannot carry a borrowed `ref`.
-                if resolved_ret is .OpaqueType(_) then {
-                    let spelled = self.context().type_display_name(resolved_ret);
-                    self.push_diagnostic(
-                        "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
-                        span,
-                    );
+                when self.opaque_by_value_type(resolved_ret) in {
+                    .Some(opaque_t) then {
+                        self.push_diagnostic(
+                            self.opaque_instantiation_message(opaque_t),
+                            span,
+                        );
+                    },
+                    .None() then {},
                 };
                 for param in params then {
                     let param_type = self.resolve_type(param.type_name);
-                    if param_type is .OpaqueType(_) then {
-                        let spelled = self.context().type_display_name(param_type);
-                        self.push_diagnostic(
-                            "opaque type '\(spelled)' cannot be instantiated directly, use '\(spelled) ptr' instead",
-                            span,
-                        );
+                    when self.opaque_by_value_type(param_type) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                span,
+                            );
+                        },
+                        .None() then {},
                     };
                     if self.contains_never_type(param_type) then {
                         self.push_diagnostic(
@@ -1116,11 +1165,29 @@ given TypeChecker {
                     self.check_fields_in_scope(fields, type_scope)
                 };
                 for field in typed_fields then {
+                    when self.opaque_by_value_type(field.field_type) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                unknown_span(),
+                            );
+                        },
+                        .None() then {},
+                    };
                     if self.contains_borrowed_reference_type(field.field_type) then {
                         self.push_diagnostic(
                             "struct field '\(field.name)' cannot contain borrowed reference type '\(self.context().type_display_name(field.field_type))'",
                             unknown_span(),
                         );
+                    };
+                    when self.opaque_by_value_type(field.field_type) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                unknown_span(),
+                            );
+                        },
+                        .None() then {},
                     };
                     if self.contains_never_type(field.field_type) then {
                         self.push_diagnostic(
@@ -1176,11 +1243,29 @@ given TypeChecker {
                 };
                 for enum_case in typed_cases then {
                     for field in enum_case.fields then {
+                        when self.opaque_by_value_type(field.field_type) in {
+                            .Some(opaque_t) then {
+                                self.push_diagnostic(
+                                    self.opaque_instantiation_message(opaque_t),
+                                    unknown_span(),
+                                );
+                            },
+                            .None() then {},
+                        };
                         if self.contains_borrowed_reference_type(field.field_type) then {
                             self.push_diagnostic(
                                 "enum payload '\(name).\(enum_case.name).\(field.name)' cannot contain borrowed reference type '\(self.context().type_display_name(field.field_type))'",
                                 unknown_span(),
                             );
+                        };
+                        when self.opaque_by_value_type(field.field_type) in {
+                            .Some(opaque_t) then {
+                                self.push_diagnostic(
+                                    self.opaque_instantiation_message(opaque_t),
+                                    unknown_span(),
+                                );
+                            },
+                            .None() then {},
                         };
                         if self.contains_never_type(field.field_type) then {
                             self.push_diagnostic(

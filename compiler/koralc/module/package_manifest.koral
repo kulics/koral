@@ -83,7 +83,14 @@ public let effective_links_for_os(
     for link in links then {
         out.push(link);
     };
-    when platform.get(os_atom) in {
+    // A `default` overlay covers any host without its own key -- the
+    // runtime's link libraries must not silently disappear on an OS the
+    // closed atom set does not name.
+    let overlay_opt = when platform.get(os_atom) in {
+        .Some(overlay) then Option[PackagePlatformOverlay].Some(overlay),
+        .None() then platform.get("default"),
+    };
+    when overlay_opt in {
         .Some(overlay) then {
             for link in overlay.links then {
                 out.push(link);
@@ -105,7 +112,11 @@ public let effective_c_sources_for_os(
     for source in c_sources then {
         out.push(source);
     };
-    when platform.get(os_atom) in {
+    let overlay_opt = when platform.get(os_atom) in {
+        .Some(overlay) then Option[PackagePlatformOverlay].Some(overlay),
+        .None() then platform.get("default"),
+    };
+    when overlay_opt in {
         .Some(overlay) then {
             for source in overlay.c_sources then {
                 out.push(source);
@@ -681,12 +692,12 @@ private let load_platform_overlays(
     let mutable out = Dict[String, PackagePlatformOverlay].new();
     for entry in platform_obj then {
         let os_atom = entry.first;
-        if not is_os_condition_atom(os_atom) then {
+        if not (is_os_condition_atom(os_atom) or os_atom == "default") then {
             return Result[Dict[String, PackagePlatformOverlay]].Error(
                 manifest_error_text(
                     .InvalidField(
                         field_path,
-                        "unknown platform key '\(os_atom)'; expected one of windows, linux, macos",
+                        "unknown platform key '\(os_atom)'; expected one of windows, linux, macos, default",
                     ),
                 ),
             );
@@ -1245,6 +1256,33 @@ public let load_package_registry(
                 return Result[PackageRegistry].Error(
                     manifest_error_text(.ReservedName(manifest.package_name)),
                 );
+            };
+
+            // Native code is root-package only (cffi-design.md §E): a
+            // dependency's `c_sources` would run arbitrary C in every build
+            // that pulls it in. The gate is by package identity -- a
+            // dependency manifest declaring native code is refused however
+            // its paths spell.
+            for module_entry in manifest.modules then {
+                let module = module_entry.second;
+                let mutable has_native = not module.c_sources.is_empty();
+                if not has_native then {
+                    for overlay_entry in module.platform then {
+                        if not overlay_entry.second.c_sources.is_empty() then {
+                            has_native = true;
+                        };
+                    };
+                };
+                if has_native then {
+                    return Result[PackageRegistry].Error(
+                        manifest_error_text(
+                            .InvalidField(
+                                "dependencies.\(dependency.key)",
+                                "dependency '\(manifest.package_name)' cannot bring native code (c_sources are root-package only)",
+                            ),
+                        ),
+                    );
+                };
             };
 
             let package = LoadedPackage(

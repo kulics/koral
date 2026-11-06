@@ -1439,6 +1439,22 @@ given TypeChecker {
                     ),
                     .None() then Option[Type].None(),
                 };
+                // A binding's annotation is a by-value position: an opaque
+                // one has no layout to hold.
+                when val_expected in {
+                    .Some(annotated_t) then {
+                        when self.opaque_by_value_type(annotated_t) in {
+                            .Some(opaque_t) then {
+                                self.push_diagnostic(
+                                    self.opaque_instantiation_message(opaque_t),
+                                    span,
+                                );
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .None() then {},
+                };
                 let raw_typed_val = when value in {
                     .Identifier(sym_name, sym_span) then self.check_identifier_expr_at(
                         sym_name,
@@ -1652,6 +1668,17 @@ given TypeChecker {
                 let mutable symbols = List[Option[Symbol]].new();
                 for pair in bindings.lazy().enumerate() then {
                     let field_type = field_types.get(pair.first) or else Type.Unknown();
+                    // The slot binds a by-value field: an opaque one has no
+                    // layout to destructure into.
+                    when self.opaque_by_value_type(field_type) in {
+                        .Some(opaque_t) then {
+                            self.push_diagnostic(
+                                self.opaque_instantiation_message(opaque_t),
+                                span,
+                            );
+                        },
+                        .None() then {},
+                    };
                     symbols.push(
                         self.bind_pair_let_symbol(pair.second, field_type, scope),
                     );

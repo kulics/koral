@@ -1,6 +1,41 @@
 // ParserDeclarations.swift
 // Declaration parsing methods for the Koral compiler Parser
 
+/// C reserved words (C89 through C23, plus the standard-spelling
+/// alternatives): none of them can name a C identifier.
+private let cReservedWords: Set<String> = [
+  "auto", "break", "case", "char", "const", "constexpr", "consteval",
+  "continue", "default", "do", "double", "else", "enum", "extern", "float",
+  "for", "goto", "if", "inline", "int", "long", "register", "restrict",
+  "return", "short", "signed", "sizeof", "static", "struct", "switch",
+  "typedef", "union", "unsigned", "void", "volatile", "while", "_Alignas",
+  "_Alignof", "_Atomic", "_BitInt", "_Bool", "_Complex", "_Decimal128",
+  "_Decimal32", "_Decimal64", "_Generic", "_Imaginary", "_Noreturn",
+  "_Static_assert", "_Thread_local", "alignas", "alignof", "bool", "complex",
+  "decimal32", "decimal64", "decimal128", "false", "imaginary", "nullptr",
+  "static_assert", "thread_local", "true", "typeof", "typeof_unqual",
+]
+
+/// A declared C name is spelled verbatim in `extern` prototypes and export
+/// headers, so it must be a legal C identifier: the C identifier shape, and
+/// no C reserved word.
+private func isValidCName(_ s: String) -> Bool {
+  let bytes = Array(s.utf8)
+  guard let first = bytes.first else { return false }
+  let isHead = (first >= UInt8(ascii: "A") && first <= UInt8(ascii: "Z"))
+    || (first >= UInt8(ascii: "a") && first <= UInt8(ascii: "z"))
+    || first == UInt8(ascii: "_")
+  guard isHead else { return false }
+  for b in bytes.dropFirst() {
+    let isTail = (b >= UInt8(ascii: "A") && b <= UInt8(ascii: "Z"))
+      || (b >= UInt8(ascii: "a") && b <= UInt8(ascii: "z"))
+      || (b >= UInt8(ascii: "0") && b <= UInt8(ascii: "9"))
+      || b == UInt8(ascii: "_")
+    guard isTail else { return false }
+  }
+  return !cReservedWords.contains(s)
+}
+
 /// Extension containing all declaration parsing methods
 extension Parser {
 
@@ -128,6 +163,11 @@ extension Parser {
       // 紧跟 `foreign`（docs/design/cffi-design.md §C）；不写即 Koral 名逐字。
       var cname: String? = nil
       if isForeign, case .string(let text) = currentToken {
+        // The name reaches the generated TU verbatim (extern prototypes,
+        // export headers): it must spell one.
+        guard isValidCName(text) else {
+          throw ParserError.invalidCName(span: currentSpan, name: text)
+        }
         cname = text
         try match(.string(text))
       }
@@ -1199,7 +1239,9 @@ extension Parser {
   /// 常量表达式（docs/design/cffi-design.md §B）。
   private func isForeignConstantInitializer(_ expr: ExpressionNode) -> Bool {
     switch expr {
-    case .integerLiteral, .floatLiteral, .runeLiteral, .booleanLiteral, .nullLiteral:
+    // A rune literal is not a C constant of any foreign type: `Rune` is not
+    // in the foreign set, and nothing else the set holds takes one.
+    case .integerLiteral, .floatLiteral, .booleanLiteral, .nullLiteral:
       return true
     case .unaryMinusExpression(let inner, _):
       switch inner {

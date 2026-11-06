@@ -8,7 +8,7 @@
 ## P1 —— 声明语法（2026-11-05）
 
 **范围**：设计 §B（`let foreign` 体/初值 = 引用/定义、宏常量）+ §C（C 名槽位）+
-未决 1（`Rune` 收进函数边界集合）。P2（原生构建）、P3（`#if`）未动。
+未决 1 已定案（2026-11-06：`Rune` 不过 FFI，guide 同步）。P2（原生构建）、P3（`#if`）未动。
 
 ### 落地面
 
@@ -42,7 +42,7 @@
   `let_foreign_macro_constant_ok`（C 名是 C 关键字仍编译——证明宏名不进符号）、
   `let_foreign_export_global_ok`（静态初始化 + 原地改写）、
   `let_foreign_init_non_literal_error`（非字面量初值拒绝）、
-  `let_foreign_rune_param_ok`（`Rune` 过函数边界）。
+  `let_foreign_rune_param_error`（`Rune` 不过函数边界）。
 - 差分预言机（全量）与 `verify.sh` 全链：见下方「验收补记」。
 
 ### 验收补记

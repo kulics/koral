@@ -484,15 +484,18 @@ public class CodeGen {
       return foreignStaticInitializerText(inner)
     case .intrinsicCall(let node):
       if case .nullPtr = node { return "NULL" }
-      return "0"
+      fatalError("unsupported foreign static initializer")
     case .arithmeticExpression(_, let op, let right, _, _):
       if op == .minus { return "-" + foreignStaticInitializerText(right) }
-      return "0"
+      fatalError("unsupported foreign static initializer")
     case .wrappingArithmeticExpression(_, let op, let right, _, _):
       if op == .minus { return "-" + foreignStaticInitializerText(right) }
-      return "0"
+      fatalError("unsupported foreign static initializer")
     default:
-      return "0"
+      // Sema and the parser whitelist admit only the shapes above; a wrong C
+      // initializer is silent miscompilation, so anything else is an internal
+      // error, not a zero.
+      fatalError("unsupported foreign static initializer")
     }
   }
 

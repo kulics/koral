@@ -14,8 +14,48 @@ private type ParseDeclFlags(
 
 /// foreign 变量的初值只收常量字面量（可带负号 / null）：C 的静态初始化器必须是
 /// 常量表达式（`docs/design/cffi-design.md` §B）。
+/// C reserved words (C89 through C23, plus the standard-spelling
+/// alternatives): none of them can name a C identifier.
+private let c_reserved_words: List[String] = [
+    "auto", "break", "case", "char", "const", "constexpr", "consteval",
+    "continue", "default", "do", "double", "else", "enum", "extern", "float",
+    "for", "goto", "if", "inline", "int", "long", "register", "restrict",
+    "return", "short", "signed", "sizeof", "static", "struct", "switch",
+    "typedef", "union", "unsigned", "void", "volatile", "while", "_Alignas",
+    "_Alignof", "_Atomic", "_BitInt", "_Bool", "_Complex", "_Decimal128",
+    "_Decimal32", "_Decimal64", "_Generic", "_Imaginary", "_Noreturn",
+    "_Static_assert", "_Thread_local", "alignas", "alignof", "bool", "complex",
+    "decimal32", "decimal64", "decimal128", "false", "imaginary", "nullptr",
+    "static_assert", "thread_local", "true", "typeof", "typeof_unqual",
+];
+
+/// A declared C name is spelled verbatim in `extern` prototypes and export
+/// headers, so it must be a legal C identifier: the C identifier shape, and
+/// no C reserved word.
+private let is_valid_c_name(s: String): Bool = {
+    let bytes = s.to_bytes();
+    if bytes.count() == UInt(0) then {
+        return false;
+    };
+    let first = bytes[UInt(0)];
+    if not ((first >= 'A' and first <= 'Z') or (first >= 'a' and first <= 'z')
+        or first == '_') then {
+        return false;
+    };
+    for i in UInt(1)..<bytes.count() then {
+        let b = bytes[i];
+        if not ((b >= 'A' and b <= 'Z') or (b >= 'a' and b <= 'z')
+            or (b >= '0' and b <= '9') or b == '_') then {
+            return false;
+        };
+    };
+    return not c_reserved_words.contains(s);
+};
+
 private let is_foreign_constant_initializer(expr: Expr): Bool = when expr in {
-    .IntegerLiteral(_, _) or .FloatLiteral(_, _) or .RuneLiteral(_, _)
+    // A rune literal is not a C constant of any foreign type: `Rune` is not
+    // in the foreign set, and nothing else the set holds takes one.
+    .IntegerLiteral(_, _) or .FloatLiteral(_, _)
     or .BoolLiteral(_, _) or .NullLiteral(_) then true,
     .Unary(op, inner, _) then (when op in {
         .Negate() then true,
@@ -1878,6 +1918,16 @@ given Parser {
         if decl_is_foreign then {
             when self.current().kind in {
                 .StringLiteral(text) then {
+                    // The name reaches the generated TU verbatim (extern
+                    // prototypes, export headers): it must spell one.
+                    if not is_valid_c_name(text) then {
+                        return .Error(
+                            self.parser_error_at(
+                                "C name \"\(text)\" is not a legal C identifier",
+                                self.current(),
+                            ),
+                        );
+                    };
                     cname = .Some(text);
                     self.advance();
                 },
