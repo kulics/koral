@@ -1215,7 +1215,7 @@ extension TypeChecker {
         try handleError(SemanticError(
           .generic("Rune literal must be a single ASCII character when used as UInt8"),
           span: blame))
-        return .integerLiteral(value: String(cp), type: .uint8)
+        return .integerLiteral(value: "0", type: .uint8)
       }
 
     }

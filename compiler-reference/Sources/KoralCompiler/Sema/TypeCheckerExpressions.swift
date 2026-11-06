@@ -802,7 +802,7 @@ extension TypeChecker {
           try handleError(SemanticError(
             .generic("Rune literal must be a single ASCII character when used as UInt8"),
             span: literalSpan))
-          return .integerLiteral(value: String(singleRuneCodePoint(from: value) ?? 0), type: .uint8)
+          return .integerLiteral(value: "0", type: .uint8)
         }
         return .integerLiteral(value: String(cp), type: .uint8)
       }
@@ -1965,7 +1965,15 @@ extension TypeChecker {
       // Default inference: Rune. If expected type is UInt8 (byte), infer as byte directly.
       if let expected = expectedType, expected == .uint8 {
         guard let cp = singleRuneCodePoint(from: value), cp <= 127 else {
-          throw SemanticError(.generic("Rune literal must be a single ASCII character when used as UInt8"), span: currentSpan)
+          // The byte complaint is recoverable at its own raise site: record
+          // it and keep typing the literal as the byte, so the rest of the
+          // declaration -- and the statements after it -- keep checking.
+          // The one problem is reported once, and independent problems in
+          // the same file are still found.
+          try handleError(SemanticError(
+            .generic("Rune literal must be a single ASCII character when used as UInt8"),
+            span: currentSpan))
+          return .integerLiteral(value: "0", type: .uint8)
         }
         return .integerLiteral(value: String(cp), type: .uint8)
       }
