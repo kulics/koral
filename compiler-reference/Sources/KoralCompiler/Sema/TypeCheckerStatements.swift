@@ -376,7 +376,54 @@ extension TypeChecker {
     do {
       return try checkStatementInternal(stmt)
     } catch let e as SemanticError {
+      // Statement-level recovery: an error in one statement must not hide
+      // the independent problems in the next. A rejected binding still
+      // leaves the names it introduced DEFINED, so uses after the failure
+      // are not new problems (the is-binding design guard).
+      if collectErrors && speculativeQueryDepth == 0 {
+        recordSemanticError(e)
+        defineNamesOfFailedStatement(stmt)
+        return .expression(.blockExpression(statements: [], tailExpression: nil, type: .void))
+      }
       throw e
+    }
+  }
+
+  /// The names a failed binding introduced stay DEFINED: `let b: UInt8 =
+  /// '中'` reports the literal and nothing later piles `Undefined variable:
+  /// b` on top of it.
+  private func defineNamesOfFailedStatement(_ stmt: StatementNode) {
+    switch stmt {
+    case .variableDeclaration(let name, let typeNode, _, let mutable, _):
+      let type: Type
+      if let typeNode, let resolved = try? resolveTypeNode(typeNode) {
+        type = resolved
+      } else {
+        type = .error
+      }
+      let symbol = makeLocalSymbol(
+        name: name,
+        type: type,
+        kind: mutable ? .variable(.MutableValue) : .variable(.Value)
+      )
+      try? currentScope.defineLocal(name, defId: symbol.defId, span: currentSpan)
+    case .tupleVariableDeclaration(let bindings, _, _):
+      for binding in bindings where !binding.isDiscard {
+        let type: Type
+        if let typeNode = binding.type, let resolved = try? resolveTypeNode(typeNode) {
+          type = resolved
+        } else {
+          type = .error
+        }
+        let symbol = makeLocalSymbol(
+          name: binding.name,
+          type: type,
+          kind: binding.mutable ? .variable(.MutableValue) : .variable(.Value)
+        )
+        try? currentScope.defineLocal(binding.name, defId: symbol.defId, span: currentSpan)
+      }
+    default:
+      break
     }
   }
 

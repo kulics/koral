@@ -791,6 +791,22 @@ extension TypeChecker {
         return .floatLiteral(value: value, type: targetType)
       }
       return nil
+    case .runeLiteral(let value, let literalSpan):
+      // `UInt8('a')` is the one rune-to-integer inference the language has
+      // (document.md "Rune literal typing rules"): a single ASCII character
+      // becomes its byte. Anything else is the byte complaint, at the
+      // literal, and is coerced to the byte anyway so the one problem is
+      // reported once. A wider target gets no inference at all.
+      if targetType == .uint8 {
+        guard let cp = singleRuneCodePoint(from: value), cp <= 127 else {
+          try handleError(SemanticError(
+            .generic("Rune literal must be a single ASCII character when used as UInt8"),
+            span: literalSpan))
+          return .integerLiteral(value: String(singleRuneCodePoint(from: value) ?? 0), type: .uint8)
+        }
+        return .integerLiteral(value: String(cp), type: .uint8)
+      }
+      return nil
     default:
       return nil
     }
@@ -2805,6 +2821,11 @@ extension TypeChecker {
     return false
   }
 
+  private func isRuneLiteralExpression(_ expr: ExpressionNode) -> Bool {
+    if case .runeLiteral = expr { return true }
+    return false
+  }
+
   /// Type a binary operator's operands so an integer literal is range-checked
   /// against the width it JOINS, not against its Int default.
   ///
@@ -2845,6 +2866,24 @@ extension TypeChecker {
       let typedLiteral = autoDereferenceValueContext(
         try inferTypedExpression(literal, expectedType: joinType))
       return leftIsLiteral ? (typedLiteral, typedOther) : (typedOther, typedLiteral)
+    }
+    let leftIsRune = isRuneLiteralExpression(left)
+    let rightIsRune = isRuneLiteralExpression(right)
+    if leftIsRune != rightIsRune {
+      let literal = leftIsRune ? left : right
+      let other = leftIsRune ? right : left
+      let typedOther = autoDereferenceValueContext(try inferTypedExpression(other))
+      // A rune literal joins the neighbour's integer width (or its rune
+      // type), exactly as the other compiler's comparison re-aim does:
+      // `b >= 'a'` on a `UInt8` is a byte comparison. Only `UInt8` has a
+      // rune-literal inference rule (document.md "Rune literal typing
+      // rules") -- a wider neighbour gets no coercion and the literal stays
+      // a `Rune`, so the comparison is the mismatch row.
+      let joinType: Type? = (isIntegerType(typedOther.type) || isRuneType(typedOther.type))
+        ? typedOther.type : nil
+      let typedLiteral = autoDereferenceValueContext(
+        try inferTypedExpression(literal, expectedType: joinType))
+      return leftIsRune ? (typedLiteral, typedOther) : (typedOther, typedLiteral)
     }
     if leftIsLiteral, rightIsLiteral, let expectedType, isIntegerType(expectedType) {
       let typedLeft = try coerceLiteral(

@@ -1200,10 +1200,19 @@ extension TypeChecker {
       }
 
       // Allow 'a' (rune literal, single-byte ASCII) to coerce to UInt8.
+      // A rune literal that is not a single ASCII character says so at the
+      // literal -- the same complaint the binding path makes -- and is
+      // coerced to the byte anyway, so the one problem is reported once.
       if expected == .uint8, case .typeConstruction(_, _, let args, let srcType) = expr,
          isRuneType(srcType),
          case .integerLiteral(let cpStr, _) = args.first,
-         let cp = UInt32(cpStr), cp <= 127 {
+         let cp = UInt32(cpStr) {
+        if cp <= 127 {
+          return .integerLiteral(value: String(cp), type: .uint8)
+        }
+        try handleError(SemanticError(
+          .generic("Rune literal must be a single ASCII character when used as UInt8"),
+          span: blame))
         return .integerLiteral(value: String(cp), type: .uint8)
       }
 

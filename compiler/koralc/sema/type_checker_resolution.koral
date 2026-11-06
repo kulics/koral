@@ -1050,20 +1050,33 @@ given TypeChecker {
     };
 
     lower_rune_literal_for_cast(self, value: String, target_type: Type): TypedExpr = {
-        // A cast checks its operand as a value first: `UInt8('ab')` is a bad
-        // rune literal before it is a cast, and that is the complaint to make.
-        let _ = self.validate_rune_literal_value(value);
-        let scalar_value = self.rune_literal_scalar_value(value);
-        if self.is_numeric_type(target_type) or self.is_float_type(target_type) then {
+        // A rune literal is a byte exactly where a byte is what is wanted
+        // (document.md "Rune literal typing rules") -- the same closed rule
+        // the binding path follows. A cast to `UInt8` checks the byte rule
+        // and complains at the literal the way the binding does.
+        if target_type is .UInt8Type() then {
+            let _ = self.validate_rune_literal_ascii_for_uint8(value);
+            let scalar_value = self.rune_literal_scalar_value(value);
             return make_typed_expr(
                 TypedExprKind.IntegerLiteral(scalar_value),
                 target_type,
             );
         };
+        // A cast checks its operand as a value first: `UInt16('ab')` is a bad
+        // rune literal before it is a cast, and that is the complaint to make.
+        let _ = self.validate_rune_literal_value(value);
+        let scalar_value = self.rune_literal_scalar_value(value);
         if self.is_rune_type(target_type) then {
             return self.build_rune_constructor_expr(scalar_value, target_type);
         };
-        return self.lower_rune_literal(value, Option[Type].None());
+        // No inference rule turns a rune literal into a wider number: hand
+        // back the Rune value so the cast's own validity check refuses the
+        // conversion ("Invalid operation cast between types Rune and T"),
+        // exactly as the reference does.
+        return self.build_rune_constructor_expr(
+            scalar_value,
+            self.builtin_rune_type(),
+        );
     };
 
     /// Std's `String`, by declaration identity -- a user type also named
