@@ -55,6 +55,36 @@ given CodeGen {
         );
     };
 
+    /// The static-initializer side of `generate_string_literal`: hoists the
+    /// immortal storage block into the current buffer (file scope) and
+    /// returns the brace initializer that points a handle at it. A literal
+    /// string global is then `T name = { .ptr = (void*)&block.payload };` --
+    /// an address constant, so the C initializer is valid.
+    string_literal_static_initializer(self, value: String, str_type: Type): String = {
+        let bytes_var = self.next_temp();
+        let bytes_var_name = "\(bytes_var)_bytes";
+        let storage_var_name = "\(bytes_var)_storage";
+        let utf8_bytes = value.to_bytes();
+        let formatted_bytes = utf8_bytes.map((b) => format_hex_byte(b));
+        let mutable byte_literals = StringBuilder.new();
+        if not formatted_bytes.is_empty() then {
+            byte_literals.push_string(formatted_bytes.join_to_string(", "));
+            byte_literals.push_string(", ");
+        };
+        byte_literals.push_string("0x00");
+
+        self.buffer.push_string(
+            "static const uint8_t \(bytes_var_name)[] = { \(byte_literals.to_string()) };\n",
+        );
+
+        let storage_c_type = self.managed_payload_type_name(str_type);
+        let byte_count = utf8_bytes.count();
+        self.buffer.push_string(
+            "static const struct { struct __koral_Control ctrl; struct \(storage_c_type) payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
+        );
+        return "{ .ptr = (void*)&\(storage_var_name)_block.payload }";
+    };
+
     sanitize_c_numeric_literal(self, value: String): String = {
         let cleaned = value.replace_all("_", with = "");
         if cleaned.starts_with("0o") or cleaned.starts_with("0O") then {

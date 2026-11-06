@@ -496,6 +496,70 @@ public class CodeGen {
     }
   }
 
+  /// The constant a global initializer function returns, when its body is
+  /// nothing but `return <constant>`. Fail-safe by construction: a body of
+  /// any other shape returns nil and the global keeps its runtime
+  /// initializer -- detection can miss an optimization, never emit wrong
+  /// code.
+  func globalInitializerConstant(_ initFunction: Symbol) -> MIRConstant? {
+    for function in mirProgram.functions where function.identifier.defId == initFunction.defId {
+      guard function.blocks.count == 1 else { return nil }
+      let block = function.blocks[0]
+      for stmt in block.statements {
+        switch stmt {
+        case .declare, .debugSource, .scopeEnter, .scopeExit:
+          continue
+        default:
+          return nil
+        }
+      }
+      guard case .returnValue(.some(.constant(let constant))) = block.terminator else {
+        return nil
+      }
+      if case .void = constant { return nil }
+      return constant
+    }
+    return nil
+  }
+
+  /// The C initializer text for a statically initialized global's constant.
+  func globalStaticConstantText(_ constant: MIRConstant) -> String {
+    switch constant {
+    case .integer(let value, _):
+      return integerConstantLiteral(value)
+    case .float(let value, let type):
+      if type != .float32 { return value }
+      if value.contains(".") || value.contains("e") || value.contains("E") {
+        return value + "f"
+      }
+      return value + ".0f"
+    case .boolean(let value):
+      return value ? "1" : "0"
+    default:
+      return "0"
+    }
+  }
+
+  /// The static-initializer side of `generateStringLiteral`: hoists an
+  /// immortal storage block into the current buffer (file scope) and
+  /// returns the brace initializer that points a handle at it. A literal
+  /// string global is then `T name = { .ptr = (void*)&block.payload };` --
+  /// an address constant, so the C initializer is valid.
+  func stringLiteralStaticInitializer(_ value: String, type: Type) -> String {
+    let bytesVar = nextTemp() + "_bytes"
+    let storageVar = nextTemp() + "_storage"
+    let utf8Bytes = Array(value.utf8)
+    var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
+    if !byteLiterals.isEmpty {
+      byteLiterals += ", "
+    }
+    byteLiterals += "0x00"
+    buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
+    let payloadType = managedPayloadTypeName(for: type)
+    buffer += "static const struct { struct __koral_Control ctrl; struct \(payloadType) payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
+    return "{ .ptr = (void*)&\(storageVar)_block.payload }"
+  }
+
   func cIdentifier(for symbol: Symbol) -> String {
     let symName = context.getName(symbol.defId) ?? ""
     if symName == "count" || symName == "fold" {
@@ -1062,37 +1126,70 @@ public class CodeGen {
       }
     }
     for global in globals {
-      if case .globalVariable(let identifier, _, _) = global {
+      if case .globalVariable(let identifier, let initializerFunction, _) = global {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
-        buffer += "\(cType) \(cName);\n"
+        // A constant-literal initializer is statically initialized: the C
+        // storage carries the value from process start (see
+        // `globalInitializerConstant` for the fail-safe shape test).
+        var emittedStatically = false
+        if let constant = globalInitializerConstant(initializerFunction) {
+          switch constant {
+          case .string(let value, let strType):
+            let initText = stringLiteralStaticInitializer(value, type: strType)
+            buffer += "\(cType) \(cName) = \(initText);\n"
+            emittedStatically = true
+          case .integer, .float, .boolean:
+            buffer += "\(cType) \(cName) = \(globalStaticConstantText(constant));\n"
+            emittedStatically = true
+          default:
+            break
+          }
+        }
+        if !emittedStatically {
+          buffer += "\(cType) \(cName);\n"
+        }
       }
     }
     // Each Koral global carries a state value (0 = uninitialized,
     // 1 = initializing, 2 = done) and an accessor that guarantees its
     // initializer has run before the storage is touched -- the runtime
-    // half of the global-variable contract.
+    // half of the global-variable contract. A statically initialized
+    // global needs no machine (the value is there from process start and
+    // the accessor is a bare `return &X` for C inliners to fold into a
+    // direct load); the rest split hot from cold so the ready path stays
+    // two lines and the state machine does not sit between the read and
+    // its inlining.
     for global in globals {
       if case .globalVariable(let identifier, let initializerFunction, _) = global {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
         let initName = cIdentifier(for: initializerFunction)
         let displayName = context.getName(identifier.defId) ?? cName
-        globalInitializations.append((cName, initializerFunction))
-        buffer += "uint8_t __koral_gstate_\(cName) = 0;\n"
-        buffer += "\(cType)* __koral_gptr_\(cName)(void) {\n"
-        buffer += "    if (__koral_global_state_ready(&__koral_gstate_\(cName))) return &\(cName);\n"
-        buffer += "    __koral_global_init_lock();\n"
-        buffer += "    if (__koral_gstate_\(cName) == 2) { __koral_global_init_unlock(); return &\(cName); }\n"
-        buffer += "    if (__koral_gstate_\(cName) == 1) { __koral_global_init_cycle(\"\(displayName)\"); }\n"
-        buffer += "    __koral_gstate_\(cName) = 1;\n"
-        buffer += "    __koral_global_init_push(\"\(displayName)\");\n"
-        buffer += "    \(cName) = \(initName)();\n"
-        buffer += "    __koral_global_init_pop();\n"
-        buffer += "    __koral_global_state_finish(&__koral_gstate_\(cName));\n"
-        buffer += "    __koral_global_init_unlock();\n"
-        buffer += "    return &\(cName);\n"
-        buffer += "}\n"
+        if globalInitializerConstant(initializerFunction) != nil {
+          buffer += "uint8_t __koral_gstate_\(cName) = 2;\n"
+          buffer += "\(cType)* __koral_gptr_\(cName)(void) { return &\(cName); }\n"
+        } else {
+          globalInitializations.append((cName, initializerFunction))
+          buffer += "uint8_t __koral_gstate_\(cName) = 0;\n"
+          buffer += "\(cType)* __koral_gptr_\(cName)_cold(void);\n"
+          buffer += "\(cType)* __koral_gptr_\(cName)(void) {\n"
+          buffer += "    if (__koral_global_state_ready(&__koral_gstate_\(cName))) return &\(cName);\n"
+          buffer += "    return __koral_gptr_\(cName)_cold();\n"
+          buffer += "}\n"
+          buffer += "KORAL_COLD \(cType)* __koral_gptr_\(cName)_cold(void) {\n"
+          buffer += "    __koral_global_init_lock();\n"
+          buffer += "    if (__koral_gstate_\(cName) == 2) { __koral_global_init_unlock(); return &\(cName); }\n"
+          buffer += "    if (__koral_gstate_\(cName) == 1) { __koral_global_init_cycle(\"\(displayName)\"); }\n"
+          buffer += "    __koral_gstate_\(cName) = 1;\n"
+          buffer += "    __koral_global_init_push(\"\(displayName)\");\n"
+          buffer += "    \(cName) = \(initName)();\n"
+          buffer += "    __koral_global_init_pop();\n"
+          buffer += "    __koral_global_state_finish(&__koral_gstate_\(cName));\n"
+          buffer += "    __koral_global_init_unlock();\n"
+          buffer += "    return &\(cName);\n"
+          buffer += "}\n"
+        }
       }
     }
     buffer += "\n"

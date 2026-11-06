@@ -3042,7 +3042,7 @@ extension CodeGen {
 /// literal too large for `long long` as implicitly unsigned and warns; values
 /// at or above 2^63 carry an explicit `ULL` suffix instead. Non-decimal
 /// spellings size themselves in C and stay as written.
-private func integerConstantLiteral(_ value: String) -> String {
+func integerConstantLiteral(_ value: String) -> String {
   if value.hasPrefix("-") { return value }
   let lower = value.lowercased()
   if lower.hasPrefix("0x") || lower.hasPrefix("0b") || lower.hasPrefix("0o") { return value }

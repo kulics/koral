@@ -5926,10 +5926,6 @@ int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr
 // state value (1 = initializing => cycle), another thread waits until the
 // initializer has finished (state 2 is published with release ordering).
 
-uint8_t __koral_global_state_ready(uint8_t* state) {
-    return __atomic_load_n(state, __ATOMIC_ACQUIRE) == 2;
-}
-
 void __koral_global_state_finish(uint8_t* state) {
     __atomic_store_n(state, 2, __ATOMIC_RELEASE);
 }

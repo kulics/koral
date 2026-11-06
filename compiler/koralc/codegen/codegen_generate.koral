@@ -887,6 +887,61 @@ given CodeGen {
         };
     };
 
+    /// The constant a global initializer function returns, when its body is
+    /// nothing but `return <constant>`. Fail-safe by construction: a body of
+    /// any other shape returns `None` and the global keeps its runtime
+    /// initializer -- detection can miss an optimization, never emit wrong
+    /// code.
+    global_initializer_constant(self, init_function: Symbol): Option[MIRConstant] = {
+        for function in self.program.functions then {
+            if not (function.identifier.def_id == init_function.def_id) then {
+                continue;
+            };
+            if function.blocks.count() != UInt(1) then {
+                return Option[MIRConstant].None();
+            };
+            let block = function.blocks[UInt(0)];
+            for stmt in block.statements then {
+                let benign = when stmt in {
+                    .Declare(_) or .DebugSource(_) or .ScopeEnter(_) or .ScopeExit(_) then true,
+                    _ then false,
+                };
+                if not benign then {
+                    return Option[MIRConstant].None();
+                };
+            };
+            return when block.terminator in {
+                .ReturnValue(.Some(.Constant(constant))) then when constant in {
+                    .Void() then Option[MIRConstant].None(),
+                    _ then Option[MIRConstant].Some(constant),
+                },
+                _ then Option[MIRConstant].None(),
+            };
+        };
+        return Option[MIRConstant].None();
+    };
+
+    /// The C initializer text for a statically initialized global's constant.
+    global_static_constant_text(self, constant: MIRConstant): String = {
+        return when constant in {
+            .Integer(value, _) then self.integer_constant_literal(value),
+            .Float(value, constant_type) then {
+                let base = self.sanitize_c_numeric_literal(value);
+                if constant_type is not .Float32Type() then {
+                    base
+                } else {
+                    if base.contains(".") or base.contains("e") or base.contains("E") then {
+                        base + "f"
+                    } else {
+                        base + ".0f"
+                    }
+                }
+            },
+            .Boolean(value) then if value then "1" else "0",
+            _ then "0",
+        };
+    };
+
     emit_mir_global_variables(self): Void = {
         for global in self.program.globals then {
             when global in {
@@ -908,10 +963,37 @@ given CodeGen {
                         },
                     };
                 },
-                .GlobalVariable(identifier, _, _, decl_type) then {
+                .GlobalVariable(identifier, initializer_function, _, decl_type) then {
                     let mutable c_type = self.c_type_name(decl_type);
                     let c_name = self.c_identifier_for_symbol(identifier);
-                    self.buffer.push_string("\(c_type) \(c_name);\n");
+                    // A constant-literal initializer is statically
+                    // initialized: the C storage carries the value from
+                    // process start (see `global_initializer_constant` for
+                    // the fail-safe shape test).
+                    let emitted_statically = when self.global_initializer_constant(
+                        initializer_function,
+                    ) in {
+                        .Some(constant) then when constant in {
+                            .StringLiteral(value, str_type) then {
+                                let init_text = self.string_literal_static_initializer(
+                                    value,
+                                    str_type,
+                                );
+                                self.buffer.push_string("\(c_type) \(c_name) = \(init_text);\n");
+                                true
+                            },
+                            .Integer(_, _) or .Float(_, _) or .Boolean(_) then {
+                                let text = self.global_static_constant_text(constant);
+                                self.buffer.push_string("\(c_type) \(c_name) = \(text);\n");
+                                true
+                            },
+                            _ then false,
+                        },
+                        .None() then false,
+                    };
+                    if not emitted_statically then {
+                        self.buffer.push_string("\(c_type) \(c_name);\n");
+                    };
                 },
                 _ then {},
             };
@@ -919,7 +1001,12 @@ given CodeGen {
         // Each Koral global carries a state value (0 = uninitialized,
         // 1 = initializing, 2 = done) and an accessor that guarantees its
         // initializer has run before the storage is touched -- the runtime
-        // half of the global-variable contract.
+        // half of the global-variable contract. A statically initialized
+        // global needs no machine (the value is there from process start and
+        // the accessor is a bare `return &X` for C inliners to fold into a
+        // direct load); the rest split hot from cold so the ready path stays
+        // two lines and the state machine does not sit between the read and
+        // its inlining.
         for global in self.program.globals then {
             when global in {
                 .GlobalVariable(identifier, initializer_function, _, decl_type) then {
@@ -927,26 +1014,41 @@ given CodeGen {
                     let c_name = self.c_identifier_for_symbol(identifier);
                     let init_name = self.callable_c_name(initializer_function);
                     let display_name = self.context.symbol_name(identifier);
-                    self.buffer.push_string("uint8_t __koral_gstate_\(c_name) = 0;\n");
-                    self.buffer.push_string("\(c_type)* __koral_gptr_\(c_name)(void) {\n");
-                    self.buffer.push_string(
-                        "    if (__koral_global_state_ready(&__koral_gstate_\(c_name))) return &\(c_name);\n",
-                    );
-                    self.buffer.push_string("    __koral_global_init_lock();\n");
-                    self.buffer.push_string(
-                        "    if (__koral_gstate_\(c_name) == 2) { __koral_global_init_unlock(); return &\(c_name); }\n",
-                    );
-                    self.buffer.push_string(
-                        "    if (__koral_gstate_\(c_name) == 1) { __koral_global_init_cycle(\"\(display_name)\"); }\n",
-                    );
-                    self.buffer.push_string("    __koral_gstate_\(c_name) = 1;\n");
-                    self.buffer.push_string("    __koral_global_init_push(\"\(display_name)\");\n");
-                    self.buffer.push_string("    \(c_name) = \(init_name)();\n");
-                    self.buffer.push_string("    __koral_global_init_pop();\n");
-                    self.buffer.push_string("    __koral_global_state_finish(&__koral_gstate_\(c_name));\n");
-                    self.buffer.push_string("    __koral_global_init_unlock();\n");
-                    self.buffer.push_string("    return &\(c_name);\n");
-                    self.buffer.push_string("}\n");
+                    if self.global_initializer_constant(initializer_function) is .Some(_) then {
+                        self.buffer.push_string("uint8_t __koral_gstate_\(c_name) = 2;\n");
+                        self.buffer.push_string(
+                            "\(c_type)* __koral_gptr_\(c_name)(void) { return &\(c_name); }\n",
+                        );
+                    } else {
+                        self.buffer.push_string("uint8_t __koral_gstate_\(c_name) = 0;\n");
+                        self.buffer.push_string("\(c_type)* __koral_gptr_\(c_name)_cold(void);\n");
+                        self.buffer.push_string("\(c_type)* __koral_gptr_\(c_name)(void) {\n");
+                        self.buffer.push_string(
+                            "    if (__koral_global_state_ready(&__koral_gstate_\(c_name))) return &\(c_name);\n",
+                        );
+                        self.buffer.push_string("    return __koral_gptr_\(c_name)_cold();\n");
+                        self.buffer.push_string("}\n");
+                        self.buffer.push_string(
+                            "KORAL_COLD \(c_type)* __koral_gptr_\(c_name)_cold(void) {\n",
+                        );
+                        self.buffer.push_string("    __koral_global_init_lock();\n");
+                        self.buffer.push_string(
+                            "    if (__koral_gstate_\(c_name) == 2) { __koral_global_init_unlock(); return &\(c_name); }\n",
+                        );
+                        self.buffer.push_string(
+                            "    if (__koral_gstate_\(c_name) == 1) { __koral_global_init_cycle(\"\(display_name)\"); }\n",
+                        );
+                        self.buffer.push_string("    __koral_gstate_\(c_name) = 1;\n");
+                        self.buffer.push_string("    __koral_global_init_push(\"\(display_name)\");\n");
+                        self.buffer.push_string("    \(c_name) = \(init_name)();\n");
+                        self.buffer.push_string("    __koral_global_init_pop();\n");
+                        self.buffer.push_string(
+                            "    __koral_global_state_finish(&__koral_gstate_\(c_name));\n",
+                        );
+                        self.buffer.push_string("    __koral_global_init_unlock();\n");
+                        self.buffer.push_string("    return &\(c_name);\n");
+                        self.buffer.push_string("}\n");
+                    };
                 },
                 _ then {},
             };
@@ -1124,10 +1226,14 @@ given CodeGen {
         // the spot.
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(identifier, _, _, _) then {
-                    let var_name = self.c_identifier_for_symbol(identifier);
-                    self.add_indent();
-                    self.buffer.push_string("(void)__koral_gptr_\(var_name)();\n");
+                .GlobalVariable(identifier, initializer_function, _, _) then {
+                    // A statically initialized global is already done; the
+                    // eager pass runs only the ones with work to do.
+                    if not (self.global_initializer_constant(initializer_function) is .Some(_)) then {
+                        let var_name = self.c_identifier_for_symbol(identifier);
+                        self.add_indent();
+                        self.buffer.push_string("(void)__koral_gptr_\(var_name)();\n");
+                    };
                 },
                 _ then {},
             };
