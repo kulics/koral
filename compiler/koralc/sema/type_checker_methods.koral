@@ -171,6 +171,33 @@ given TypeChecker {
     /// identity -- a user type also named `List` does not get subscripting.
     resolve_builtin_subscript_kind(self, base_type: Type): Option[BuiltinSubscriptKind] = {
         let unwrapped = self.builtin_subscript_base_type(base_type);
+        // Structural shapes first: `*mutable String` is a POINTER whose
+        // pointee happens to be a std collection. `is_std_type` looks
+        // through pointer types, so the collection checks below must not
+        // see a pointer base -- otherwise `e[0]` on `*mutable String` walks
+        // the collection subscript path and asks a pointer for
+        // `__index_get`.
+        return when unwrapped in {
+            .PointerType(inner) then Option[BuiltinSubscriptKind].Some(
+                BuiltinSubscriptKind.Pointer(inner, false),
+            ),
+            .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(
+                BuiltinSubscriptKind.Pointer(inner, true),
+            ),
+            .FixedArrayType(len, inner) then Option[BuiltinSubscriptKind].Some(
+                BuiltinSubscriptKind.FixedArray(len, inner),
+            ),
+            _ then self.resolve_builtin_subscript_collection_kind(unwrapped),
+        };
+    };
+
+    /// The std-collection half of subscript kind resolution: std's
+    /// `String`/`List`/`Deque`/`Dict`, by DECLARATION identity -- a user
+    /// type also named `List` does not get subscripting.
+    resolve_builtin_subscript_collection_kind(
+        self,
+        unwrapped: Type,
+    ): Option[BuiltinSubscriptKind] = {
         if self.is_std_type(unwrapped, "String") then {
             return Option[BuiltinSubscriptKind].Some(BuiltinSubscriptKind.String());
         };
@@ -198,18 +225,7 @@ given TypeChecker {
                 );
             };
         };
-        return when unwrapped in {
-            .PointerType(inner) then Option[BuiltinSubscriptKind].Some(
-                BuiltinSubscriptKind.Pointer(inner, false),
-            ),
-            .MutablePointerType(inner) then Option[BuiltinSubscriptKind].Some(
-                BuiltinSubscriptKind.Pointer(inner, true),
-            ),
-            .FixedArrayType(len, inner) then Option[BuiltinSubscriptKind].Some(
-                BuiltinSubscriptKind.FixedArray(len, inner),
-            ),
-            _ then Option[BuiltinSubscriptKind].None(),
-        };
+        return Option[BuiltinSubscriptKind].None();
     };
 
     /// 定长数组下标的元素位点：`*((*T*)&base + i)`。包装 struct 的首成员就是
@@ -230,6 +246,19 @@ given TypeChecker {
         let length: UInt = when base_type in {
             .FixedArrayType(len, _) then len,
             _ then UInt(0),
+        };
+        // A non-integer index has no ordering to check and no C arithmetic
+        // to ride: reject it here instead of handing it to the walk below
+        // (which would emit `ptr + double`-shaped C). Anchored at the
+        // subscript, like every other subscript diagnostic.
+        if not (self.is_integer_type(index.expr_type) or self.is_unresolved_expr_type(
+            index.expr_type,
+        ) or index.expr_type is .NeverType()) then {
+            self.push_diagnostic_at_span(
+                "Fixed array index must be an integer, got \(self.context().type_display_name(index.expr_type))",
+                self.typed_expr_span(base),
+            );
+            return self.empty_typed_block(Type.Unknown());
         };
         let checked_index = self.wrap_fixed_array_index_with_bounds_check(
             index,
@@ -253,13 +282,14 @@ given TypeChecker {
 
     /// A fixed array indexes into the array's own storage, so a numeric
     /// subscript is bounds-checked before the pointer walk: `a[i]` evaluates
-    /// the index once, panics when it is not `< N`, and hands the checked
-    /// value to the element place. Reads, writes and compound writes all pass
-    /// through the place, so the check covers every form.
+    /// the index once, panics when it is not in `0..<N`, and hands the
+    /// checked value to the element place. Reads, writes and compound writes
+    /// all pass through the place, so the check covers every form.
     ///
-    /// The desugar is `block { let tmp = index; if tmp >= N then panic(...); tmp }`
-    /// -- ordinary typed code, with the panic call typed the way user code's
-    /// is, so no phase below sema knows the check exists.
+    /// The desugar is `block { let tmp = index; if tmp < 0 or tmp >= N then
+    /// panic(...); tmp }` for signed index widths (`if tmp >= N` alone for
+    /// unsigned ones) -- ordinary typed code, with the panic call typed the
+    /// way user code's is, so no phase below sema knows the check exists.
     wrap_fixed_array_index_with_bounds_check(
         self,
         index: TypedExpr,
@@ -293,7 +323,7 @@ given TypeChecker {
             index.expr_type,
             VariableKind.Value(),
         );
-        let condition = make_typed_expr_at(
+        let upper_bound_violated = make_typed_expr_at(
             TypedExprKind.ComparisonExpr(
                 make_typed_expr_at(
                     TypedExprKind.Variable(tmp_symbol),
@@ -310,6 +340,41 @@ given TypeChecker {
             Type.BoolType(),
             span,
         );
+        // A signed index can also arrive below zero: the guard is
+        // `tmp < 0 or tmp >= N` there, plain `tmp >= N` for the unsigned
+        // widths (where the lower half is vacuous and would only earn a C
+        // "always false" warning).
+        let index_is_signed = when index.expr_type in {
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type()
+            or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+            or .WrappingInt32Type() or .WrappingInt64Type() then true,
+            _ then false,
+        };
+        let condition = if index_is_signed then make_typed_expr_at(
+            TypedExprKind.OrExpr(
+                make_typed_expr_at(
+                    TypedExprKind.ComparisonExpr(
+                        make_typed_expr_at(
+                            TypedExprKind.Variable(tmp_symbol),
+                            index.expr_type,
+                            span,
+                        ),
+                        ComparisonOperator.Less(),
+                        make_typed_expr_at(
+                            TypedExprKind.IntegerLiteral("0"),
+                            index.expr_type,
+                            span,
+                        ),
+                    ),
+                    Type.BoolType(),
+                    span,
+                ),
+                upper_bound_violated,
+            ),
+            Type.BoolType(),
+            span,
+        )
+        else upper_bound_violated;
         let guard_stmt = TypedStatement.IfStmt(
             condition,
             make_typed_expr_at(
@@ -391,13 +456,25 @@ given TypeChecker {
         for pair in args.lazy().enumerate() then {
             let arg_idx = pair.first;
             let arg_ref = pair.second;
-            let mutable expected_arg_type = when param_types.get(arg_idx) in {
-                .Some(param_type) then Option[Type].Some(param_type),
-                .None() then Option[Type].None(),
+            // The helper ABI is exact: literals were aimed at the parameter
+            // types when they were checked, so a remaining mismatch is a
+            // real one (the reference coerces literals and then demands
+            // equality -- adapting here would smuggle `list[i]` with `i:
+            // Int` past a `UInt` parameter).
+            when param_types.get(arg_idx) in {
+                .Some(param_type) then {
+                    if not self.same_expr_type(arg_ref.expr_type, param_type)
+                    and not self.is_unresolved_expr_type(arg_ref.expr_type)
+                    and not self.is_unresolved_expr_type(param_type) then {
+                        self.push_diagnostic_at_span(
+                            self.type_mismatch_message(param_type, arg_ref.expr_type),
+                            self.typed_expr_span(base),
+                        );
+                    };
+                },
+                .None() then {},
             };
-            typed_args.push(
-                self.adapt_expr_to_expected_type(arg_ref, expected_arg_type),
-            );
+            typed_args.push(arg_ref);
         };
 
         let mutable bindings = self.resolve_signature_method_type_bindings(

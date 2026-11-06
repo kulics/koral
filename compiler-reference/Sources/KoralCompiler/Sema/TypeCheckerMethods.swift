@@ -1365,6 +1365,14 @@ extension TypeChecker {
     guard case .fixedArray(let size, let element) = builtinSubscriptBaseType(base.type) else {
       throw SemanticError(.generic("Fixed array subscript requires a fixed array base"), span: span)
     }
+    // A non-integer index has no ordering to check and no C arithmetic to
+    // ride: reject it here instead of handing it to the walk below (which
+    // would emit `ptr + double`-shaped C). Anchored at the subscript, like
+    // every other subscript diagnostic.
+    if index.type != .error && index.type != .never && !isIntegerType(index.type) {
+      throw SemanticError(.generic(
+        "Fixed array index must be an integer, got \(index.type.description)"), span: span)
+    }
     let checkedIndex = try wrapFixedArrayIndexWithBoundsCheck(index: index, length: size, span: span)
     let ptrOfBase: TypedExpressionNode = .ptrExpression(
       expression: base, type: .mutablePointer(element: builtinSubscriptBaseType(base.type)))
@@ -1377,14 +1385,16 @@ extension TypeChecker {
 
   /// A fixed array indexes into the array's own storage, so a numeric
   /// subscript is bounds-checked before the pointer walk: `a[i]` evaluates the
-  /// index once, panics when it is not `< N`, and hands the checked value to
-  /// the element place. Reads, writes and compound writes all pass through the
+  /// index once, panics when it is not in `0..<N`, and hands the checked value
+  /// to the element place. Reads, writes and compound writes all pass through the
   /// place, so the check covers every form.
   ///
-  /// The desugar is `block { let tmp = index; if tmp >= N then panic(...); tmp }`.
-  /// It is ordinary typed code -- the panic call is typed the way user code's
-  /// is -- so no phase below sema knows the check exists. Raw pointers stay
-  /// unchecked on purpose (`*T` walking is the unsafe escape hatch).
+  /// The desugar is `block { let tmp = index; if tmp < 0 or tmp >= N then
+  /// panic(...); tmp }` for signed index widths (`if tmp >= N` alone for
+  /// unsigned ones) -- ordinary typed code, with the panic call typed the
+  /// way user code's is, so no phase below sema knows the check exists. Raw
+  /// pointers stay unchecked on purpose (`*T` walking is the unsafe escape
+  /// hatch).
   private func wrapFixedArrayIndexWithBoundsCheck(
     index: TypedExpressionNode,
     length: UInt64,
@@ -1407,11 +1417,28 @@ extension TypeChecker {
           "Fixed array index out of bounds: length \(length)", span: span))
       ])
     let tmpSymbol = nextSynthSymbol(prefix: "arr_idx", type: index.type)
-    let condition = TypedExpressionNode.comparisonExpression(
+    let upperBoundViolated = TypedExpressionNode.comparisonExpression(
       left: .variable(identifier: tmpSymbol),
       op: .greaterEqual,
       right: .integerLiteral(value: String(length), type: index.type),
       type: .bool)
+    // A signed index can also arrive below zero: the guard is
+    // `tmp < 0 or tmp >= N` there, plain `tmp >= N` for the unsigned widths
+    // (where the lower half is vacuous and would only earn a C "always
+    // false" warning).
+    let condition: TypedExpressionNode
+    switch index.type {
+    case .int, .int8, .int16, .int32, .int64,
+         .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64:
+      let belowZero = TypedExpressionNode.comparisonExpression(
+        left: .variable(identifier: tmpSymbol),
+        op: .less,
+        right: .integerLiteral(value: "0", type: index.type),
+        type: .bool)
+      condition = .orExpression(left: belowZero, right: upperBoundViolated, type: .bool)
+    default:
+      condition = upperBoundViolated
+    }
     let guardStatement = TypedStatementNode.ifStatement(
       condition: condition,
       thenBranch: .blockExpression(
