@@ -3808,6 +3808,10 @@ private let lookup_exact_receiver_method_symbol(
     };
 
     if not strict_wrapper_dispatch then {
+        // Candidates are collected first and the lowest id wins: the table
+        // walk order must not choose which instance a call resolves to.
+        let mutable best_symbol = Option[Symbol].None();
+        let mutable best_id = UInt(0);
         for entry in mono.storage.concrete_callables_by_def_id.iterator() then {
             let def_id = entry.first;
             let concrete = entry.second;
@@ -3851,7 +3855,19 @@ private let lookup_exact_receiver_method_symbol(
                 continue;
             };
             let bound_symbol_type = mono.storage.context.get_function_type(def_id) or else method.symbol_type;
-            return Option[Symbol].Some(Symbol(def_id, bound_symbol_type, method.kind));
+            let candidate = Symbol(def_id, bound_symbol_type, method.kind);
+            let is_better = when best_symbol in {
+                .Some(_) then def_id.id < best_id,
+                .None() then true,
+            };
+            if is_better then {
+                best_symbol = Option[Symbol].Some(candidate);
+                best_id = def_id.id;
+            };
+        };
+        when best_symbol in {
+            .Some(best) then return Option[Symbol].Some(best),
+            .None() then {},
         };
     };
 

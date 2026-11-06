@@ -1,6 +1,13 @@
 // Receiver matching and adaptation for the monomorphization phase: wrapper
 // receiver aliases, receiver/param matching, and call argument adaptation.
 
+/// A stable string key for a `MethodOwner`: owner-attempt order must not
+/// follow a hash walk.
+let method_owner_stable_key(owner: MethodOwner): String = when owner in {
+    .Decl(def_id) then "d\(def_id.id)",
+    .Builtin(name) then "b\(name)",
+};
+
 let concrete_trait_receiver_type(mono: Monomorphizer, expr: TypedExpr): Type = {
     return when expr.expr_kind in {
         .TraitObjectConversion(inner, _, concrete_type) then {
@@ -507,6 +514,9 @@ let trait_tool_expected_self_type(
                     };
                 };
             };
+            // Deterministic attempt order: the first candidate owner whose
+            // lookup hits wins, and a hash walk must not be the one choosing.
+            owners.sort_by(method_owner_stable_key);
             for owner in owners then {
                 // Registration key shape: `make_extension_method_identity_key`
                 // takes the MethodOwner DIRECTLY. Building it from a receiver

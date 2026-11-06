@@ -816,6 +816,27 @@ given CodeGen {
         self.buffer.push_string("\n");
     };
 
+    /// A stable string key for one globals-entry's prototype group: the
+    /// group order must not follow a hash walk.
+    mir_global_prototype_sort_key(self, global: MIRGlobal): String = {
+        return when global in {
+            .GlobalVariable(_, initializer_function, _, _) then self
+                .c_identifier_for_symbol(initializer_function),
+            .Function(identifier, _, _, _) then self.c_identifier_for_symbol(identifier),
+            .Given(_, _, _, methods, _) then {
+                let mutable first_name = "";
+                for method in methods then {
+                    let name = self.c_identifier_for_symbol(method);
+                    if first_name == "" or name < first_name then {
+                        first_name = name;
+                    };
+                };
+                first_name
+            },
+            _ then "",
+        };
+    };
+
     // ── emit_mir_function_declarations ───────────────────────────────────────
 
     emit_mir_function_declarations(self): Void = {
@@ -839,8 +860,14 @@ given CodeGen {
         // Emit remaining declarations from globals (initializers, given
         // methods). The methods of a `given` reach the codegen in
         // monomorphization order, which follows hash-ordered tables; sort
-        // them so the per-process table seed cannot shuffle the file.
+        // both the groups and their members so the per-process table seed
+        // cannot shuffle the file.
+        let mutable ordered_globals = List[MIRGlobal].new();
         for global in self.program.globals then {
+            ordered_globals.push(global);
+        };
+        ordered_globals.sort_by((global) => self.mir_global_prototype_sort_key(global));
+        for global in ordered_globals then {
             when global in {
                 .GlobalVariable(_, initializer_function, _, _) then self.emit_symbol_function_declaration(
                     initializer_function,

@@ -2192,7 +2192,23 @@ given Monomorphizer {
                 owner_type,
                 def_id,
             );
-            lookup.insert(key, def_id);
+            // Prefer the materialized instance, then the lower id: a hash
+            // walk must not choose which candidate a key names.
+            let should_insert = when lookup.get(key) in {
+                .Some(existing) then {
+                    let existing_materialized = materialized.contains(existing.id);
+                    let new_materialized = materialized.contains(def_id.id);
+                    if existing_materialized != new_materialized then {
+                        new_materialized
+                    } else {
+                        def_id.id < existing.id
+                    }
+                },
+                .None() then true,
+            };
+            if should_insert then {
+                lookup.insert(key, def_id);
+            };
         };
 
         return lookup;
@@ -2259,9 +2275,17 @@ given Monomorphizer {
                         concrete.logical_name,
                     );
                     let should_insert = when lookup.get(key) in {
-                        .Some(existing_def_id) then not materialized.contains(
-                            existing_def_id.id,
-                        ) and materialized.contains(def_id.id),
+                        .Some(existing_def_id) then {
+                            let existing_materialized = materialized.contains(
+                                existing_def_id.id,
+                            );
+                            let new_materialized = materialized.contains(def_id.id);
+                            if existing_materialized != new_materialized then {
+                                new_materialized
+                            } else {
+                                def_id.id < existing_def_id.id
+                            }
+                        },
                         .None() then true,
                     };
                     if should_insert then {

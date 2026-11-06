@@ -1791,6 +1791,17 @@ public class TypeChecker {
       try assertNotOpaqueType(type, span: span)
     case .fixedArray(_, let element):
       try assertNotOpaqueValueType(element, span: span)
+    // A generic argument is a by-value slot in the instantiated layout
+    // (`List[FILE]`'s element has no more layout than `FILE` itself). An
+    // argument behind `*` is a pointer and falls through.
+    case .genericStruct(_, let args), .genericEnum(_, let args):
+      for arg in args {
+        try assertNotOpaqueValueType(arg, span: span)
+      }
+    case .structure(let defId), .`enum`(let defId):
+      for arg in context.getTypeArguments(defId) ?? [] {
+        try assertNotOpaqueValueType(arg, span: span)
+      }
     default:
       return
     }

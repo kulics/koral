@@ -1582,8 +1582,28 @@ given TypeChecker {
         return when t in {
             .OpaqueType(_) then Option[Type].Some(t),
             .FixedArrayType(_, inner) then self.opaque_by_value_type(inner),
+            // A generic argument is a by-value slot in the instantiated
+            // layout (`List[FILE]`'s element has no more layout than `FILE`
+            // itself). An argument behind `*` is a pointer and falls through.
+            .GenericStruct(_, args) or .GenericEnum(_, args) then self
+                .opaque_in_type_arguments(args),
+            .StructureType(def_id) or .EnumType(def_id) then self
+                .opaque_in_type_arguments(
+                    self.context().get_type_arguments(def_id) or else List[Type].new(),
+                ),
             _ then Option[Type].None(),
         };
+    };
+
+    /// The first opaque-by-value type argument, if any.
+    opaque_in_type_arguments(self, args: List[Type]): Option[Type] = {
+        for arg in args then {
+            let found = self.opaque_by_value_type(arg);
+            if found is .Some(_) then {
+                return found;
+            };
+        };
+        return Option[Type].None();
     };
 
     opaque_instantiation_message(self, t: Type): String = {
