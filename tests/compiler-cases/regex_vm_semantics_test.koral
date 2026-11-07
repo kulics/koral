@@ -1,0 +1,159 @@
+// EXPECT: vm semantics ok
+// Pins the Pike-VM's observable match semantics -- leftmost-first priority,
+// greedy bounds, capture-slot lifetimes, anchors, classes -- so the engine's
+// internals can be re-plumbed without the meaning drifting.
+
+using "std/text" { ... };
+
+let main(): Void = {
+    // Leftmost-first alternation: the first alternative wins even when a
+    // later one would match more text (backtracking-equivalent priority).
+    let r1 = Regex.compile("a|ab").expect("c1");
+    when r1.captures("ab") in {
+        .Some(c) then assert(c.text() == "a", "alt priority: first branch wins"),
+        .None() then assert(false, "alt priority: must match"),
+    };
+
+    // Greedy quantifier takes as much as possible.
+    let r2 = Regex.compile("a+").expect("c2");
+    when r2.find("aaa") in {
+        .Some(m) then {
+            assert(m.text() == "aaa", "greedy plus");
+            assert(m.start() == 0 and m.end() == 3, "greedy plus span");
+        },
+        .None() then assert(false, "greedy plus: must match"),
+    };
+
+    // Bounded greedy: {2,3} tops out at 3.
+    let r3 = Regex.compile("a{2,3}").expect("c3");
+    when r3.find("aaaa") in {
+        .Some(m) then assert(m.text() == "aaa", "bounded greedy"),
+        .None() then assert(false, "bounded greedy: must match"),
+    };
+
+    // Unanchored leftmost start, and find_all resumes after each match
+    // without overlapping.
+    let r4 = Regex.compile("ab").expect("c4");
+    when r4.find("zabab") in {
+        .Some(m) then assert(m.start() == 1, "leftmost start"),
+        .None() then assert(false, "leftmost: must match"),
+    };
+    let mutable spans = List[String].new();
+    for m in r4.find_all("abab") then {
+        spans.push(m.start().to_string() + ":" + m.end().to_string());
+    };
+    assert(spans.count() == 2, "find_all non-overlap count");
+    assert(spans[0] == "0:2" and spans[1] == "2:4", "find_all non-overlap spans");
+
+    // Capture slots under a greedy star: the last iteration's slots survive
+    // into the winning thread (backtracking-equivalent).
+    let r5 = Regex.compile("(ab)*").expect("c5");
+    when r5.captures("abab") in {
+        .Some(c) then {
+            assert(c.text() == "abab", "star group 0");
+            when c.group(1) in {
+                .Some(g) then assert(g == "ab", "star group 1 last iteration"),
+                .None() then assert(false, "star group 1 missing"),
+            };
+        },
+        .None() then assert(false, "star: must match"),
+    };
+
+    // Alternation groups: only the taken branch's slot is set.
+    let r6 = Regex.compile("(a)|(b)").expect("c6");
+    when r6.captures("b") in {
+        .Some(c) then {
+            when c.group(1) in {
+                .Some(_) then assert(false, "untaken branch must be empty"),
+                .None() then assert(true, "untaken branch empty"),
+            };
+            when c.group(2) in {
+                .Some(g) then assert(g == "b", "taken branch set"),
+                .None() then assert(false, "taken branch missing"),
+            };
+        },
+        .None() then assert(false, "alt groups: must match"),
+    };
+
+    // Classes: ranges, negation, and the escape classes.
+    let r7 = Regex.compile("[^a-c]+").expect("c7");
+    when r7.find("abcXYZ123") in {
+        .Some(m) then assert(m.text() == "XYZ123", "negated class"),
+        .None() then assert(false, "negated class: must match"),
+    };
+    let r8 = Regex.compile("\\d+").expect("c8");
+    when r8.find("ab12cd") in {
+        .Some(m) then assert(m.text() == "12", "digit class"),
+        .None() then assert(false, "digit class: must match"),
+    };
+    let r9 = Regex.compile(".").expect("c9");
+    assert(r9.matches("x") == true, "dot matches byte");
+    assert(r9.matches("\n") == false, "dot rejects newline");
+
+    // Anchors.
+    let r10 = Regex.compile("^abc").expect("c10");
+    assert(r10.matches("xabc") == false, "start anchor rejects");
+    assert(r10.matches("abcx") == true, "start anchor accepts");
+    let r11 = Regex.compile("abc$").expect("c11");
+    assert(r11.matches("abcx") == false, "end anchor rejects");
+    assert(r11.matches("xabc") == true, "end anchor accepts");
+
+    // The email shape from the benchmark: exact spans over a small text.
+    let r12 = Regex.compile("([a-z]+)([0-9]+)@([a-z]+)([0-9]+)\\.([a-z]+)").expect(
+        "c12",
+    );
+    when r12.captures("x user42@host7.org y") in {
+        .Some(c) then {
+            assert(c.start() == 2 and c.end() == 18, "email span");
+            when c.group(1) in {
+                .Some(g) then assert(g == "user", "email group 1"),
+                .None() then assert(false, "email group 1 missing"),
+            };
+            when c.group(2) in {
+                .Some(g) then assert(g == "42", "email group 2"),
+                .None() then assert(false, "email group 2 missing"),
+            };
+            when c.group(5) in {
+                .Some(g) then assert(g == "org", "email group 5"),
+                .None() then assert(false, "email group 5 missing"),
+            };
+        },
+        .None() then assert(false, "email: must match"),
+    };
+
+    // The star-over-long-input shape: linear, and the tail still matches.
+    let r13 = Regex.compile("a*b").expect("c13");
+    let mutable lb = StringBuilder.new();
+    let mutable li = 0;
+    while li < 10000 then {
+        lb.push_string("a");
+        li += 1;
+    };
+    lb.push_string("b");
+    let long = lb.to_string();
+    when r13.find(long) in {
+        .Some(m) then {
+            assert(m.start() == 0 and m.end() == 10001, "star long input span");
+        },
+        .None() then assert(false, "star long input: must match"),
+    };
+
+    // captures_all streams non-overlapping captures with live slots.
+    let r14 = Regex.compile("(\\w)(\\d)").expect("c14");
+    let mutable got = List[String].new();
+    for c in r14.captures_all("a1 b2c3") then {
+        when c.group(1) in {
+            .Some(g1) then {
+                when c.group(2) in {
+                    .Some(g2) then got.push(g1 + g2),
+                    .None() then assert(false, "stream group 2"),
+                };
+            },
+            .None() then assert(false, "stream group 1"),
+        };
+    };
+    assert(got.count() == 3, "captures_all count");
+    assert(got[0] == "a1" and got[1] == "b2" and got[2] == "c3", "captures_all values");
+
+    println("vm semantics ok");
+};

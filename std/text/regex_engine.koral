@@ -552,17 +552,91 @@ given ReParser {
 // Compilation
 // ----------------------------------------------------------------------------
 
+/// Scratch-owned capture storage. A row is 34 `Int32`s -- one thread's whole
+/// capture-slot state -- identified by its index in the pool; seeds and
+/// threads carry the index (two words of transport) instead of a row VALUE
+/// (34 ints).
+///
+/// Lifetimes are explicit because rows outlive positions: a thread without an
+/// intervening `Save` keeps one row across many input bytes, so nothing is
+/// ever reclaimed by position. A thread's row is ITS OWN copy -- taken at
+/// spawn, returned at death -- and a `Save` copies-on-write into a
+/// CALL-SCOPED temp row (`take_temp` / `end_call`): the seed's row may be
+/// shared with sibling branches or belong to the thread being consumed, and
+/// neither may see the write. Since every thread copies its row out at spawn,
+/// no live thread references a temp when the call ends.
+///
+/// Row 0 is the permanent all-unset row threads start from; `take` hands out
+/// rows 1..cap. Live rows are bounded by the marks (threads per list <= one
+/// per program counter, two lists) plus one call's temps; if that bound is
+/// ever wrong, `take` panics instead of scribbling past the buffer.
+type mutable ReRowPool(
+    buf: *mutable Int32,
+    free: List[UInt],
+    mutable temp_top: UInt,
+    thread_cap: UInt,
+    cap: UInt,
+);
+
+given ReRowPool {
+    /// Address of row `i`.
+    at(self, i: UInt): *mutable Int32 = {
+        return self.buf + i * UInt(34);
+    };
+
+    /// A thread's fresh row, from the free stack. The stack is pre-filled
+    /// with every thread row at build, so this never allocates; the marks
+    /// bound the live threads and `give` returns each row at thread death.
+    take(self): UInt = {
+        if self.free.is_empty() then {
+            panic("regex: capture row pool exhausted");
+        };
+        return self.free.take_at(self.free.count() - 1);
+    };
+
+    /// Return a row to the pool -- a thread's death.
+    give(self, i: UInt): Void = {
+        self.free.push(i);
+    };
+
+    /// A fresh row for a `Save`'s copy-on-write, bumped from the call-scoped
+    /// temp region. The thread that survives this call has copied the row
+    /// out at spawn, so `end_call` can reclaim the region unconditionally.
+    take_temp(self): UInt = {
+        if self.temp_top >= self.cap then {
+            panic("regex: capture row pool exhausted");
+        };
+        let i = self.temp_top;
+        self.temp_top = self.temp_top + UInt(1);
+        return i;
+    };
+
+    /// Reclaim every temp taken during the closure call: one store, the
+    /// region is a bump allocator by construction.
+    end_call(self): Void = {
+        self.temp_top = self.thread_cap;
+    };
+};
+
+given ReRowPool: Drop {
+    /// Release the row buffer owned by the pool.
+    drop(self): Void = {
+        dealloc_memory(self.buf);
+    };
+};
+
 /// Per-regex match scratch. A run allocates nothing: the marks sets, the
-/// capture template, the closure worklist and the two thread lists are
-/// reused across runs. Marks reset with generations (bumped per list build,
-/// never re-zeroed); `in_use` guards nesting -- a `matches` call inside a
-/// `find_all` loop over the same regex falls back to a fresh scratch.
+/// capture template, the closure worklist, the two thread lists and the two
+/// capture-row arenas are reused across runs. Marks reset with generations
+/// (bumped per list build, never re-zeroed); `in_use` guards nesting -- a
+/// `matches` call inside a `find_all` loop over the same regex falls back to
+/// a fresh scratch (which drops, and frees its arenas, at scope exit).
 type mutable ReScratch(
     mutable in_use: Bool,
     mutable gen: Int32,
     cm: List[Int32],
     nm: List[Int32],
-    blank: [34]Int32,
+    pool: ReRowPool,
     work: List[ReSeed],
     clist: List[ReThread],
     nlist: List[ReThread],
@@ -573,15 +647,41 @@ let re_new_scratch(inst_count: UInt): ReScratch = {
     let nm = List[Int32].with_capacity(inst_count);
     for _ in 0..<inst_count then cm.push(0);
     for _ in 0..<inst_count then nm.push(0);
+    // Row 0 is the permanent all-unset row. Thread rows (one per live
+    // thread; the marks cap those at two lists x one thread per program
+    // counter) are pre-filled into the free stack at build; the temp region
+    // (one call's copy-on-writes; the marks cap those at one per Save
+    // instruction) is a bump allocator reset at every call end.
+    let thread_cap = inst_count * UInt(2) + UInt(8);
+    let cap = thread_cap + inst_count + UInt(8);
+    let free = List[UInt].new();
+    let mutable fi = thread_cap;
+    while fi > UInt(1) then {
+        fi -= UInt(1);
+        free.push(fi);
+    };
+    let pool = ReRowPool(
+        alloc_memory[Int32](cap * UInt(34)),
+        free,
+        thread_cap,
+        thread_cap,
+        cap,
+    );
+    let blankp = pool.at(UInt(0));
+    let mutable bi = UInt(0);
+    while bi < UInt(34) then {
+        blankp[bi] = Int32(0) - Int32(1);
+        bi += UInt(1);
+    };
     return ReScratch(
         false,
         2,
         cm,
         nm,
-        re_blank_caps(),
-        List[ReSeed].with_capacity(16),
-        List[ReThread].with_capacity(16),
-        List[ReThread].with_capacity(16),
+        pool,
+        List[ReSeed].with_capacity(inst_count * UInt(4) + UInt(16)),
+        List[ReThread].with_capacity(inst_count + UInt(8)),
+        List[ReThread].with_capacity(inst_count + UInt(8)),
     );
 };
 
@@ -668,16 +768,40 @@ let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[RePr
 // Matching: the Pike-VM
 // ----------------------------------------------------------------------------
 
-/// Capture slots ride in the thread value itself: a fixed array copies as
-/// plain bytes -- no reference counting, no allocation -- so the step loop
-/// never touches the heap. The whole match occupies slots 0 and 1; capture
-/// group `k` (1-based) occupies slots `2k` and `2k + 1`; a slot of `0 - 1`
-/// means "did not take part in this match". The array carries at most 16
-/// capture groups (34 slots); patterns with more are refused at compile.
-type ReThread(pc: UInt, caps: [34]Int32);
+/// A thread's capture slots live in a pool row (see `ReRowPool`) and the
+/// thread value carries only the row's index: pushing, popping and iterating
+/// threads moves two words, not 34 ints. The whole match occupies slots 0
+/// and 1; capture group `k` (1-based) occupies slots `2k` and `2k + 1`; a
+/// slot of `0 - 1` means "did not take part in this match". The row carries
+/// at most 16 capture groups (34 slots); patterns with more are refused at
+/// compile.
+type ReThread(pc: UInt, row: UInt);
 
-/// A pending epsilon-closure step.
-type ReSeed(pc: UInt, caps: [34]Int32);
+/// A pending epsilon-closure step: same transport as a thread.
+type ReSeed(pc: UInt, row: UInt);
+
+/// Copy one capture row into another -- the copy-on-write half of a `Save`.
+/// This 34-int copy is the ONLY row copy in the step loop; everything else
+/// passes row pointers.
+let re_copy_caps(src: *Int32, dst: *mutable Int32): Void = {
+    let mutable i = UInt(0);
+    while i < UInt(34) then {
+        dst[i] = src[i];
+        i += UInt(1);
+    };
+};
+
+/// Load a capture row into a value -- the winning match's one copy out of
+/// the arena, taken before the arena is reused.
+let re_load_caps(src: *Int32): [34]Int32 = {
+    let mutable caps = re_blank_caps();
+    let mutable i = UInt(0);
+    while i < UInt(34) then {
+        caps[i] = src[i];
+        i += UInt(1);
+    };
+    return caps;
+};
 
 /// All-`-1` capture slots: the state of a thread that has matched nothing.
 let re_blank_caps(): [34]Int32 = {
@@ -707,17 +831,13 @@ let re_run(
 ): Option[ReSlots] = {
     let insts = prog.insts;
     let text_len = text.count();
+    let bp = text.borrow_ptr();
 
     // Reuse the regex's scratch; a nested run (same regex re-entered from a
     // callback) falls back to a fresh one and stays correct.
-    let scratch = prog.scratch;
-    let reuse = not scratch.in_use;
-    let mutable cm = if reuse then scratch.cm else List[Int32].new();
-    let mutable nm = if reuse then scratch.nm else List[Int32].new();
-    let blank = if reuse then scratch.blank else re_blank_caps();
-    let work = if reuse then scratch.work else List[ReSeed].new();
-    let mutable clist = if reuse then scratch.clist else List[ReThread].new();
-    let mutable nlist = if reuse then scratch.nlist else List[ReThread].new();
+    let shared = prog.scratch;
+    let reuse = not shared.in_use;
+    let scratch = if reuse then shared else re_new_scratch(insts.count());
     // Each thread list is built against its own marks set: a program counter
     // may appear at most once per list, and the first thread to reach it
     // (highest priority) keeps the slot. The sets travel with the lists when
@@ -731,19 +851,26 @@ let re_run(
         scratch.in_use = true;
         if scratch.gen > 1000000000 then {
             // Generations are about to wrap: re-zero the sets once.
-            cm.clear();
-            nm.clear();
-            for _ in 0..<insts.count() then cm.push(0);
-            for _ in 0..<insts.count() then nm.push(0);
+            scratch.cm.clear();
+            scratch.nm.clear();
+            for _ in 0..<insts.count() then scratch.cm.push(0);
+            for _ in 0..<insts.count() then scratch.nm.push(0);
             scratch.gen = 2;
         };
         cg = scratch.gen;
         ng = scratch.gen + 1;
         gtop = ng;
-    } else {
-        for _ in 0..<insts.count() then cm.push(0);
-        for _ in 0..<insts.count() then nm.push(0);
     };
+    // Marks are walked through raw pointers (the wrap refill above is the
+    // last list operation on them). The worklist and thread lists stay
+    // lists: their elements are two words now, so push/pop is cheap and
+    // `re_new_scratch` reserved room for every bound the marks enforce.
+    let mutable cmp = scratch.cm.borrow_mut_ptr();
+    let mutable nmp = scratch.nm.borrow_mut_ptr();
+    let work = scratch.work;
+    let mutable clist = scratch.clist;
+    let mutable nlist = scratch.nlist;
+    let pool = scratch.pool;
     clist.clear();
     nlist.clear();
     let mutable best_caps = re_blank_caps();
@@ -757,11 +884,24 @@ let re_run(
             if prog.start_any then {
                 inject = true;
             } else if pos < text_len then {
-                let i = UInt(text[pos]);
+                let i = UInt(bp[pos]);
                 inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
             };
             if inject then {
-                re_add(insts, cm, cg, text, text_len, pos, clist, 0, blank, track_groups, work);
+                re_add(
+                    insts,
+                    cmp,
+                    cg,
+                    bp,
+                    text_len,
+                    pos,
+                    clist,
+                    UInt(0),
+                    UInt(0),
+                    track_groups,
+                    pool,
+                    work,
+                );
             };
         };
 
@@ -776,56 +916,63 @@ let re_run(
         let mutable cut = false;
         for t in clist then {
             if cut then {
-                break;
-            };
-            when insts[t.pc] in {
-                .Match() then {
-                    best_caps = t.caps;
-                    matched = true;
-                    cut = true;
-                },
-                .Byte(ch, ci) then {
-                    if pos < text_len then {
-                        let b = text[pos];
-                        if b == ch or (ci and re_lower_byte(b) == ch) then {
-                            re_add(
-                                insts,
-                                nm,
-                                ng,
-                                text,
-                                text_len,
-                                pos + 1,
-                                nlist,
-                                t.pc + 1,
-                                t.caps,
-                                track_groups,
-                                work,
-                            );
+                // Lower priority than the match: the thread dies here.
+                pool.give(t.row);
+            } else {
+                when insts[t.pc] in {
+                    .Match() then {
+                        best_caps = re_load_caps(pool.at(t.row));
+                        matched = true;
+                        cut = true;
+                    },
+                    .Byte(ch, ci) then {
+                        if pos < text_len then {
+                            let b = bp[pos];
+                            if b == ch or (ci and re_lower_byte(b) == ch) then {
+                                re_add(
+                                    insts,
+                                    nmp,
+                                    ng,
+                                    bp,
+                                    text_len,
+                                    pos + 1,
+                                    nlist,
+                                    t.pc + 1,
+                                    t.row,
+                                    track_groups,
+                                    pool,
+                                    work,
+                                );
+                            };
                         };
-                    };
-                },
-                .Class(bits) then {
-                    if pos < text_len then {
-                        let b = text[pos];
-                        let i = UInt(b);
-                        if ((bits[i >> 3] >> UInt8(i & 7)) & 1) == 1 then {
-                            re_add(
-                                insts,
-                                nm,
-                                ng,
-                                text,
-                                text_len,
-                                pos + 1,
-                                nlist,
-                                t.pc + 1,
-                                t.caps,
-                                track_groups,
-                                work,
-                            );
+                    },
+                    .Class(bits) then {
+                        if pos < text_len then {
+                            let b = bp[pos];
+                            let i = UInt(b);
+                            if ((bits[i >> 3] >> UInt8(i & 7)) & 1) == 1 then {
+                                re_add(
+                                    insts,
+                                    nmp,
+                                    ng,
+                                    bp,
+                                    text_len,
+                                    pos + 1,
+                                    nlist,
+                                    t.pc + 1,
+                                    t.row,
+                                    track_groups,
+                                    pool,
+                                    work,
+                                );
+                            };
                         };
-                    };
-                },
-                _ then {},
+                    },
+                    _ then {},
+                };
+                // Every consumed thread's row returns to the pool here --
+                // after its closure call, which copies what survives.
+                pool.give(t.row);
             };
         };
 
@@ -833,9 +980,9 @@ let re_run(
         clist = nlist;
         nlist = tmp;
         nlist.clear();
-        let tmpm = cm;
-        cm = nm;
-        nm = tmpm;
+        let tmpm = cmp;
+        cmp = nmp;
+        nmp = tmpm;
         let tmpg = cg;
         cg = ng;
         ng = tmpg;
@@ -844,6 +991,11 @@ let re_run(
         if matched and clist.is_empty() then {
             break;
         };
+    };
+    // Threads spawned by the last position were never consumed; their rows
+    // return to the pool here.
+    for t in clist then {
+        pool.give(t.row);
     };
     if reuse then {
         scratch.in_use = false;
@@ -855,25 +1007,29 @@ let re_run(
     return Option[ReSlots].Some(ReSlots(best_caps));
 };
 
-/// Epsilon closure from `(pc, caps)`, in priority order, adding the
-/// consuming and `Match` threads it reaches to `list`. The marks make the
-/// closure a traversal, not a loop: a zero-width cycle (`()*`) visits each
-/// program counter once and stops instead of spinning.
+/// Epsilon closure from `(pc, row)`, in priority order, adding the consuming
+/// and `Match` threads it reaches to `list`. The marks make the closure a
+/// traversal, not a loop: a zero-width cycle (`()*`) visits each program
+/// counter once and stops instead of spinning. Seeds share row indices; a
+/// `Save` copies-on-write into a call-scoped temp and a surviving thread
+/// takes its own copy at spawn, so nothing this call writes is visible to a
+/// sibling branch or to the consumed thread's row.
 let re_add(
     insts: List[ReInst],
-    marks: List[Int32],
+    marks: *mutable Int32,
     generation: Int32,
-    text: String,
+    bp: *UInt8,
     text_len: UInt,
     pos: UInt,
     list: List[ReThread],
     pc0: UInt,
-    caps0: [34]Int32,
+    row0: UInt,
     track_groups: Bool,
+    pool: ReRowPool,
     work: List[ReSeed],
 ): Void = {
     work.clear();
-    work.push(ReSeed(pc0, caps0));
+    work.push(ReSeed(pc0, row0));
     while not work.is_empty() then {
         let seed = work.take_at(work.count() - 1);
         if marks[seed.pc] == generation then {
@@ -882,37 +1038,45 @@ let re_add(
         marks[seed.pc] = generation;
         when insts[seed.pc] in {
             .Jump(x) then {
-                work.push(ReSeed(x, seed.caps));
+                work.push(ReSeed(x, seed.row));
             },
             .Split(x, y) then {
                 // Pushed in reverse: the stack pops `x` first.
-                work.push(ReSeed(y, seed.caps));
-                work.push(ReSeed(x, seed.caps));
+                work.push(ReSeed(y, seed.row));
+                work.push(ReSeed(x, seed.row));
             },
             .Save(slot) then {
                 if track_groups or slot < 2 then {
-                    // Value copy plus one store: the fixed array moves as
-                    // plain bytes, no allocation, no reference count.
-                    let mutable caps = seed.caps;
-                    caps[slot] = Int32(pos);
-                    work.push(ReSeed(seed.pc + 1, caps));
+                    // Copy-on-write into a call-scoped temp: the seed's row
+                    // may be shared with sibling branches or belong to the
+                    // thread being consumed, neither of which this write may
+                    // disturb. `end_call` reclaims the temp.
+                    let row = pool.take_temp();
+                    re_copy_caps(pool.at(seed.row), pool.at(row));
+                    pool.at(row)[slot] = Int32(pos);
+                    work.push(ReSeed(seed.pc + 1, row));
                 } else {
-                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                    work.push(ReSeed(seed.pc + 1, seed.row));
                 };
             },
             .Bol(multiline) then {
-                if pos == 0 or (multiline and pos > 0 and text[pos - 1] == '\n') then {
-                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                if pos == 0 or (multiline and pos > 0 and bp[pos - 1] == '\n') then {
+                    work.push(ReSeed(seed.pc + 1, seed.row));
                 };
             },
             .Eol(multiline) then {
-                if pos == text_len or (multiline and pos < text_len and text[pos] == '\n') then {
-                    work.push(ReSeed(seed.pc + 1, seed.caps));
+                if pos == text_len or (multiline and pos < text_len and bp[pos] == '\n') then {
+                    work.push(ReSeed(seed.pc + 1, seed.row));
                 };
             },
             _ then {
-                list.push(ReThread(seed.pc, seed.caps));
+                // The thread outlives this call, so it takes its own copy of
+                // the row: no live thread ever references a call-scoped temp.
+                let row = pool.take();
+                re_copy_caps(pool.at(seed.row), pool.at(row));
+                list.push(ReThread(seed.pc, row));
             },
         };
     };
+    pool.end_call();
 };
