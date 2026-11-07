@@ -1453,6 +1453,35 @@ extension TypeChecker {
       type: index.type)
   }
 
+  /// The element slot of a built-in subscript: `xs.__index_slot(i)` wrapped in
+  /// a deref place. Reads and writes go through the slot pointer --
+  /// member-access semantics, no element copy in and out. The bounds/lookup
+  /// panic lives inside the slot helper.
+  func buildBuiltinSubscriptSlotPlace(
+    base: TypedExpressionNode,
+    args: [TypedExpressionNode]
+  ) throws -> TypedExpressionNode {
+    let slotPtr = try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_slot")
+    let elementType: Type
+    switch slotPtr.type {
+    case .mutablePointer(let element), .pointer(let element):
+      elementType = element
+    default:
+      elementType = .error
+    }
+    // The slot points INTO the base temporary. When the helper call bound an
+    // rvalue base in a let-block, the block's scope exit drops that base --
+    // so the load through the slot has to happen inside the block tail, before
+    // the drops. (The block result assignment copies the element first.)
+    if case .blockExpression(let statements, let tail, _) = slotPtr, let tailExpr = tail {
+      return .blockExpression(
+        statements: statements,
+        tailExpression: .unsafeDerefExpression(expression: tailExpr, type: elementType),
+        type: elementType)
+    }
+    return .unsafeDerefExpression(expression: slotPtr, type: elementType)
+  }
+
   func buildBuiltinSubscriptHelperCall(
     base: TypedExpressionNode,
     args: [TypedExpressionNode],
@@ -1597,13 +1626,15 @@ extension TypeChecker {
       switch expectedType {
       case .reference, .mutableReference:
         switch builtinKind {
-        case .pointer:
+        case .pointer, .list, .deque, .dict:
+          // The element slot is addressable storage (the container's own), so
+          // a reference to it is fine -- unlike a get result copy.
           break
         case .fixedArray:
           // The element place is addressable storage (the array's own), so a
           // reference to it is fine -- unlike collection get results.
           break
-        case .string, .list, .deque, .dict:
+        case .string:
           throw SemanticError(.generic("Collection subscript results are values, not addressable references"), span: currentSpan)
         }
       default:
@@ -1612,10 +1643,10 @@ extension TypeChecker {
     }
 
     switch builtinKind {
-    case .string, .list, .deque:
+    case .string:
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
-    case .dict:
-      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .list, .deque, .dict:
+      return try buildBuiltinSubscriptSlotPlace(base: base, args: args)
     case .fixedArray:
       guard args.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: "subscript", expected: 1, got: args.count)

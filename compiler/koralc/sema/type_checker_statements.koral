@@ -697,7 +697,7 @@ given TypeChecker {
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(
                                 typed_outer_base.expr_type,
-                                "__index_get",
+                                "__index_slot",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
                             for pair in outer_args.lazy().enumerate() then {
@@ -710,10 +710,9 @@ given TypeChecker {
                                     self.check_expr_scoped_ref(arg, arg_expected, scope),
                                 );
                             };
-                            let subscript_value = self.build_builtin_subscript_helper_call(
+                            let subscript_value = self.build_builtin_subscript_slot_place(
                                 typed_outer_base,
                                 typed_outer_args,
-                                "__index_get",
                             );
                             if not self.is_type_mutable_nominal(
                                 subscript_value.expr_type,
@@ -1042,12 +1041,14 @@ given TypeChecker {
                 );
             },
         };
+        // The store goes through the element slot pointer, so the index
+        // signatures come from `__index_slot` -- the same index parameters as
+        // the old `__index_set`, without the trailing value parameter.
         let set_param_types = self.resolve_method_param_types(
             typed_base.expr_type,
-            "__index_set",
+            "__index_slot",
         );
-        let expected_index_count = if set_param_types.is_empty() then UInt(0)
-        else set_param_types.count() - UInt(1);
+        let expected_index_count = set_param_types.count();
 
         let mutable typed_args = List[TypedExpr].new();
         for pair in args.lazy().enumerate() then {
@@ -1059,12 +1060,11 @@ given TypeChecker {
             typed_args.push(self.check_expr_scoped_ref(arg, arg_expected, scope));
         };
 
-        let mutable expected_value_type = if expected_index_count < set_param_types.count(
-        ) then set_param_types[expected_index_count] else typed_target.expr_type;
+        let mutable expected_value_type = typed_target.expr_type;
 
         let mutable expected_self_type = self.resolve_method_self_type(
             typed_base.expr_type,
-            "__index_set",
+            "__index_slot",
         );
         let adapted_base = self.adapt_receiver_to_expected_self_type(
             typed_base,
@@ -1216,17 +1216,16 @@ given TypeChecker {
             TypedExprKind.Variable(value_symbol),
             value_symbol.symbol_type,
         );
-        let mutable call_args = List[TypedExpr].new();
-        for arg_var in arg_vars then {
-            call_args.push(arg_var);
-        };
-        call_args.push(value_var);
-        let set_call = self.build_builtin_subscript_helper_call(
+        // The store goes through the element slot pointer. The slot is taken
+        // AFTER the value is bound, so a value that grows the container
+        // cannot leave the store writing through a stale buffer pointer.
+        let slot_place = self.build_builtin_subscript_slot_place(
             base_var,
-            call_args,
-            "__index_set",
+            arg_vars,
         );
-        block_statements.push(TypedStatement.ExprStmt(set_call, unknown_span()));
+        block_statements.push(
+            TypedStatement.AssignmentStmt(slot_place, value_var, unknown_span()),
+        );
         return TypedStatement.ExprStmt(
             make_typed_expr(
                 TypedExprKind.Block(block_statements, Option[TypedExpr].None()),
@@ -2432,7 +2431,7 @@ given TypeChecker {
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(
                                 typed_outer_base.expr_type,
-                                "__index_get",
+                                "__index_slot",
                             );
                             let mutable typed_outer_args = List[TypedExpr].new();
                             for pair in outer_args.lazy().enumerate() then {
@@ -2445,10 +2444,9 @@ given TypeChecker {
                                     self.check_expr_scoped_ref(arg, arg_expected, scope),
                                 );
                             };
-                            let subscript_value = self.build_builtin_subscript_helper_call(
+                            let subscript_value = self.build_builtin_subscript_slot_place(
                                 typed_outer_base,
                                 typed_outer_args,
-                                "__index_get",
                             );
                             if not self.is_type_mutable_nominal(
                                 subscript_value.expr_type,

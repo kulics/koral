@@ -732,12 +732,13 @@ extension TypeChecker {
             fatalError("Unknown compound assignment operator")
           }
 
-          let setCall = try buildBuiltinSubscriptHelperCall(
-            base: baseVar,
-            args: argVars + [newValueExpr],
-            helperName: "__index_set"
-          )
-          stmts.append(.expression(setCall))
+          let newValueSym = nextSynthSymbol(prefix: "sub_new", type: newValueExpr.type)
+          stmts.append(.variableDeclaration(identifier: newValueSym, value: newValueExpr, mutable: false))
+          // The store goes through the element slot pointer. The slot is taken
+          // AFTER the value is bound, so a value that grows the container
+          // cannot leave the store writing through a stale buffer pointer.
+          let slotPlace = try buildBuiltinSubscriptSlotPlace(base: baseVar, args: argVars)
+          stmts.append(.assignment(target: slotPlace, operator: nil, value: .variable(identifier: newValueSym), span: span))
 
           return .expression(.blockExpression(statements: stmts, tailExpression: nil, type: .void))
         }
@@ -924,12 +925,11 @@ extension TypeChecker {
 
         let baseVar: TypedExpressionNode = .variable(identifier: baseSym)
         let argVars: [TypedExpressionNode] = argSyms.map { .variable(identifier: $0) }
-        let setCall = try buildBuiltinSubscriptHelperCall(
-          base: baseVar,
-          args: argVars + [.variable(identifier: valSym)],
-          helperName: "__index_set"
-        )
-        stmts.append(.expression(setCall))
+        // The store goes through the element slot pointer. The slot is taken
+        // AFTER the value is bound, so a value that grows the container
+        // cannot leave the store writing through a stale buffer pointer.
+        let slotPlace = try buildBuiltinSubscriptSlotPlace(base: baseVar, args: argVars)
+        stmts.append(.assignment(target: slotPlace, operator: nil, value: .variable(identifier: valSym), span: span))
 
         return .expression(.blockExpression(statements: stmts, tailExpression: nil, type: .void))
       }

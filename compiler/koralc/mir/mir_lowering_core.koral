@@ -659,15 +659,20 @@ given MIRFunctionBuilder {
     };
 
     private lower_assignment(self, target: TypedExpr, value: TypedExpr): Void = {
+        // The value lands before the target place is computed, matching Swift
+        // MIRLowerer's lowerAssignment order. A place can carry a
+        // side-effecting address computation -- a built-in subscript slot
+        // lookup -- and computing it first would let a value that grows the
+        // container leave the store writing through a stale buffer.
+        let lowered_value = self.lower_value(value);
         when self.lower_place(target) in {
             .Some(place) then self.append_statement(
-                MIRStatement.Assign(place, self.lower_value(value)),
+                MIRStatement.Assign(place, lowered_value),
             ),
             .None() then {
                 // Swift MIRLowerer never reaches this: a member path whose base is a
                 // call falls back to lowerMaterializedMemberPathPlace. Report instead of
                 // silently discarding the store, which is how `pairs[0].x = 200` lost its write.
-                let _ = self.lower_expression(value);
                 self.report_lowering_error(
                     "Unsupported assignment target reached MIR lowering",
                 );

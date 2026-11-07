@@ -193,7 +193,27 @@ given MIRFunctionBuilder {
             .Some(result) then when result.operand in {
                 .Some(operand) then MIRValue.Operand(operand),
                 .None() then when result.place in {
-                    .Some(place) then MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
+                    .Some(place) then {
+                        // A load through a call-produced pointer (an element
+                        // slot) is materialized HERE, at the value's own
+                        // evaluation position: later instructions in the
+                        // block can run side effects (a call argument that
+                        // grows a container), and a deferred load would then
+                        // read through an already-invalidated slot pointer.
+                        // Everything else keeps the deferred read so the call
+                        // convention can pass non-escaping parameters
+                        // straight from their locals.
+                        if self.place_needs_eager_load(place) then {
+                            MIRValue.Operand(
+                                self.materialize(
+                                    MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
+                                    result.result_type,
+                                ),
+                            )
+                        } else {
+                            MIRValue.PlaceRead(place, MIROwnershipUse.Copy())
+                        }
+                    },
                     .None() then MIRValue.Operand(
                         MIROperand.Constant(MIRConstant.Void()),
                     ),
@@ -447,9 +467,11 @@ given MIRFunctionBuilder {
                     inner.expr_type,
                     expression.expr_type,
                 );
-                Option[MIRPlace].Some(
-                    MIRPlace.Deref(self.lower_borrowed_source_value(inner), pointee),
-                )
+                let source = self.lower_borrowed_source_value(inner);
+                if self.expr_lowers_to_pointer_call(inner) then {
+                    self.mark_call_derived_pointer(source);
+                };
+                Option[MIRPlace].Some(MIRPlace.Deref(source, pointee))
             },
             .CastExpr(target_type, inner) then {
                 if self.is_ownership_preserving_place_cast(inner.expr_type, target_type) then {

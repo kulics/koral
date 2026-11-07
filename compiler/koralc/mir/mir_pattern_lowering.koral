@@ -956,7 +956,16 @@ given MIRFunctionBuilder {
                                 pair.first,
                                 param.param_type,
                             );
-                            let resolved_place = if self.goes_through_deref(
+                            // Claim must not read: an `or` pattern's claim walk
+                            // runs before any tag test, and a payload copy there
+                            // would read another variant's union memory. A
+                            // sub-pattern that binds nothing needs no copy in
+                            // any mode. Only a real binding reached through a
+                            // deref is materialized, so the body cannot read a
+                            // stale slot after the deref target changes.
+                            let resolved_place = if mode is not .Claim()
+                            and typed_pattern_introduces_binding(pair.second.pattern)
+                            and self.goes_through_deref(
                                 matched_place,
                             ) and param.param_type is not .VoidType() then {
                                 let local_name = if param.name.is_empty() then "payload"
@@ -1020,7 +1029,9 @@ given MIRFunctionBuilder {
                                     pair.first,
                                     elem_type,
                                 );
-                                let resolved_place = if self.goes_through_deref(
+                                let resolved_place = if mode is not .Claim()
+                                and typed_pattern_introduces_binding(elem.pattern)
+                                and self.goes_through_deref(
                                     matched_place,
                                 ) then {
                                     let local = self.make_temporary(elem_type, "payload");
