@@ -204,7 +204,10 @@ CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
-static void __koral_panic_print(const char* msg, const char* loc) {
+// Every panic is terminal (this helper ends in abort): marked noreturn so
+// the C backend stops treating a failed check as a memory clobber on the
+// success path -- a call in the loop otherwise forces per-iteration reloads.
+static KORAL_NORETURN void __koral_panic_print(const char* msg, const char* loc) {
     if (loc != NULL && loc[0] != '\0') {
         fprintf(stderr, "Panic: %s at %s\n", msg, loc);
     } else {
