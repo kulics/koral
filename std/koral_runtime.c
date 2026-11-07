@@ -5248,8 +5248,10 @@ void __koral_global_state_finish(uint8_t* state) {
 // Unseeded table hashing is invertible end to end: crafted keys map to
 // chosen buckets and a table walk becomes a denial of service.
 // The seed value lives at file scope so a tool can pin it before first
-// use (see __koral_hash_seed_pin).
-static uintptr_t __koral_hash_seed_value = 0;
+// use (see __koral_hash_seed_pin). Non-static on purpose: std's hash_mix
+// reads it through a foreign global for a call-free hot path (see the
+// header note on `__koral_hash_seed_value`).
+uintptr_t __koral_hash_seed_value = 0;
 
 void __koral_hash_seed_pin(uintptr_t v) {
     if (v == 0) v = (uintptr_t)0x9E3779B97F4A7C15ull;

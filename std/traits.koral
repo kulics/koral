@@ -32,6 +32,22 @@ given Hash {
 // otherwise the runtime draws one from the platform entropy source.
 let foreign __koral_hash_seed(): UInt;
 
+// The seed's storage as a bare extern global: reading it is a plain load,
+// not a call -- this is the hot half of every table hash. Zero means "not
+// drawn yet"; `hash_seed` falls back to the lazy function, which draws and
+// publishes the seed (a tool's pin stays first-writer-wins). `mutable` is
+// the runtime's write, not an invitation to write from Koral.
+let foreign mutable __koral_hash_seed_value: UInt;
+
+/// The current hash seed, drawn lazily on first use.
+let hash_seed(): UInt = {
+    let drawn = __koral_hash_seed_value;
+    if drawn != UInt(0) then {
+        return drawn;
+    };
+    return __koral_hash_seed();
+};
+
 // Table-level hash mixing (splitmix64 finalizer over the per-process seed):
 // folds the high bits of a hash into the low bits so power-of-two bucket
 // masks (`h & (cap - 1)`) can't be fed patterned low bits — sequential Int
@@ -44,7 +60,7 @@ let foreign __koral_hash_seed(): UInt;
 let hash_mix(h: UInt): UInt = {
     let k1 = (UInt(3210233709) << 32) | UInt(484763065); // 0xBF58476D1CE4E5B9
     let k2 = (UInt(2496678331) << 32) | UInt(321982955); // 0x94D049BB133111EB
-    let mutable x = h ^ __koral_hash_seed();
+    let mutable x = h ^ hash_seed();
     x = x ^ (x >> 30);
     x = UInt(WrappingUInt(x) * WrappingUInt(k1));
     x = x ^ (x >> 27);

@@ -135,6 +135,16 @@ static inline uint8_t __koral_global_state_ready(uint8_t* state) {
 // draws one from the platform entropy source once. A tool whose output must
 // be reproducible (the compiler) pins it explicitly at startup instead --
 // user programs keep the random seed.
+// `__koral_hash_seed_value` is the seed's storage, exposed so table hashing
+// can take a plain load instead of a call (std's `hash_mix` reads it as a
+// foreign global). Zero means "not drawn yet" -- a reader that sees zero
+// falls back to the function below, which draws and publishes the seed.
+// The word-sized aligned read is deliberately plain, not atomic: the value
+// transitions 0 -> nonzero exactly once, so a reader sees either zero (the
+// slow path corrects via the function's CAS) or the final value. Pins keep
+// working unchanged -- `__koral_hash_seed_pin` CASes 0 -> v, so whoever
+// writes first (a pin or the lazy draw) wins.
+extern uintptr_t __koral_hash_seed_value;
 uintptr_t __koral_hash_seed(void);
 void __koral_hash_seed_pin(uintptr_t v);
 void __koral_global_state_finish(uint8_t* state);
