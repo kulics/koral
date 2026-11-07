@@ -85,10 +85,17 @@ given[T: Any] List[T] {
     };
 
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
+    /// The hot fields are read before the store and `len + 1` computes once:
+    /// the element store may alias the list box in the C backend's memory
+    /// model, so anything read after it would reload from memory per push.
     public push(self, value: T): Void = {
-        self.ensure_capacity(self.len + 1);
-        init_memory(self.source + self.len, value);
-        self.len = self.len + 1;
+        let len = self.len;
+        let next = len + UInt(1);
+        if next > self.cap then {
+            self.grow_to(next);
+        };
+        init_memory(self.source + len, value);
+        self.len = next;
     };
 
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
@@ -101,11 +108,16 @@ given[T: Any] List[T] {
             return;
         };
         self.ensure_capacity(self.len + (end - start));
+        // The same pre-load shape as `push`: the element store may alias
+        // the list box, so `len` is carried locally and written back once.
+        let source = self.source;
+        let mutable len = self.len;
         for i in start..<end then {
             let v = other.source[i];
-            init_memory(self.source + self.len, v);
-            self.len = self.len + 1;
+            init_memory(source + len, v);
+            len = len + UInt(1);
         };
+        self.len = len;
     };
 
     // Using if is pattern matching
@@ -114,8 +126,9 @@ given[T: Any] List[T] {
         if self.len == 0 then {
             return Option[T].None();
         };
-        self.len = self.len - 1;
-        let value = take_memory(self.source + self.len);
+        let len = self.len - UInt(1);
+        self.len = len;
+        let value = take_memory(self.source + len);
         return Option[T].Some(value);
     };
 
