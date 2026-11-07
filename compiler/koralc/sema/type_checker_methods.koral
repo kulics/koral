@@ -441,7 +441,24 @@ given TypeChecker {
             base.expr_type,
             method,
         );
-        let prepared_base = self.prepare_call_receiver(base, expected_self_type);
+        // The subscript helpers bind an rvalue base in a let-block
+        // UNCONDITIONALLY (Swift `buildBuiltinSubscriptHelperCall`): the slot
+        // points into the base's storage, so the base must outlive the slot
+        // use, and only a named binding guarantees that. The slot-place
+        // builder then moves the load into the block tail, before the block's
+        // drops.
+        let mutable prepared_base = self.prepare_call_receiver(base, expected_self_type);
+        if typed_expr_value_category(base) is .RValue() then {
+            let temp_symbol = self.make_receiver_temp_symbol("__recv", base.expr_type);
+            let temp_var = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
+            prepared_base = Pair[TypedExpr, Option[Symbol]](
+                temp_var,
+                Option[Symbol].Some(temp_symbol),
+            );
+        };
         let adapted_base = self.adapt_receiver_to_expected_self_type_for_method(
             prepared_base.first,
             expected_self_type,
@@ -536,6 +553,28 @@ given TypeChecker {
         let element_type = when slot_ptr.expr_type in {
             .MutablePointerType(inner) or .PointerType(inner) then inner,
             _ then Type.Unknown(),
+        };
+        // The slot points INTO the base temporary. When the helper call bound
+        // an rvalue base in a let-block, the block's scope exit drops that
+        // base -- so the load through the slot has to happen inside the block
+        // tail, before the drops. (The block result assignment copies the
+        // element first.) Mirrors Swift `buildBuiltinSubscriptSlotPlace`.
+        when slot_ptr.expr_kind in {
+            .Block(statements, .Some(tail_expr)) then {
+                return make_typed_expr(
+                    TypedExprKind.Block(
+                        statements,
+                        Option[TypedExpr].Some(
+                            make_typed_expr(
+                                TypedExprKind.UnsafeDerefExpr(tail_expr),
+                                element_type,
+                            ),
+                        ),
+                    ),
+                    element_type,
+                );
+            },
+            _ then {},
         };
         return make_typed_expr(TypedExprKind.UnsafeDerefExpr(slot_ptr), element_type);
     };
