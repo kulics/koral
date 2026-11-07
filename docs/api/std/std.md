@@ -3526,6 +3526,11 @@ given String {
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
     public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String;
+    /// The concatenation of `left` and `right` in ONE allocation: both parts
+    /// copy straight into the result's own buffer. `String.add` routes here --
+    /// building a temporary raw buffer and copying it again into the result
+    /// doubled the cost of every `+`.
+    public concat(left: String, right: String): String;
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
     public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String];
