@@ -640,7 +640,31 @@ type mutable ReScratch(
     work: List[ReSeed],
     clist: List[ReThread],
     nlist: List[ReThread],
+    bmarks: *mutable Int32,
+    mutable bcur: *mutable UInt32,
+    mutable bcur_len: UInt,
+    mutable bnext: *mutable UInt32,
+    mutable bnext_len: UInt,
+    bstack: *mutable UInt32,
+    mutable bstack_len: UInt,
+    bstarts: List[UInt],
+    banchors: List[UInt],
+    mutable bgen: Int32,
+    alt_buf: *mutable UInt32,
+    undo_buf: *mutable UInt32,
 );
+
+given ReScratch: Drop {
+    /// Release the backward-scan buffers owned by the scratch.
+    drop(self): Void = {
+        dealloc_memory(self.bmarks);
+        dealloc_memory(self.bcur);
+        dealloc_memory(self.bnext);
+        dealloc_memory(self.bstack);
+        dealloc_memory(self.alt_buf);
+        dealloc_memory(self.undo_buf);
+    };
+};
 
 let re_new_scratch(inst_count: UInt): ReScratch = {
     let cm = List[Int32].with_capacity(inst_count);
@@ -673,6 +697,15 @@ let re_new_scratch(inst_count: UInt): ReScratch = {
         blankp[bi] = Int32(0) - Int32(1);
         bi += UInt(1);
     };
+    // Backward-scan buffers: the marks set, the two frontiers (at most one
+    // entry per program counter) and the closure stack (at most every
+    // epsilon edge in one position).
+    let bmarks = alloc_memory[Int32](inst_count);
+    let mutable zi = UInt(0);
+    while zi < inst_count then {
+        bmarks[zi] = Int32(0);
+        zi += UInt(1);
+    };
     return ReScratch(
         false,
         2,
@@ -682,17 +715,149 @@ let re_new_scratch(inst_count: UInt): ReScratch = {
         List[ReSeed].with_capacity(inst_count * UInt(4) + UInt(16)),
         List[ReThread].with_capacity(inst_count + UInt(8)),
         List[ReThread].with_capacity(inst_count + UInt(8)),
+        bmarks,
+        alloc_memory[UInt32](inst_count),
+        UInt(0),
+        alloc_memory[UInt32](inst_count),
+        UInt(0),
+        alloc_memory[UInt32](inst_count * UInt(4) + UInt(8)),
+        UInt(0),
+        List[UInt].new(),
+        List[UInt].new(),
+        Int32(2),
+        alloc_memory[UInt32](UInt(3) * (re_bt_budget() + UInt(2))),
+        alloc_memory[UInt32](UInt(2) * (re_bt_budget() + UInt(2))),
     );
 };
 
+/// A literal byte every match must contain: its instruction, and the reverse
+/// epsilon edges the backward scan walks. Present only when the byte's
+/// instruction DOMINATES Match -- every path through the program consumes
+/// it -- and no instruction on any path to it can consume the same byte.
+/// That second property is what makes feasible starts strictly increase with
+/// the byte's occurrences in the text (a prefix match can contain the byte
+/// only as its LAST byte), so a leftmost search can stop at the first viable
+/// candidate. Patterns without such a byte keep the plain unanchored scan.
+type ReReq(
+    byte: UInt8,
+    ci: Bool,
+    pc: UInt,
+    eps_from: *mutable UInt32,
+    eps_off: *mutable UInt32,
+);
+
+given ReReq: Drop {
+    /// Release the scan buffers owned by the scan data.
+    drop(self): Void = {
+        dealloc_memory(self.eps_from);
+        dealloc_memory(self.eps_off);
+    };
+};
+
+/// The program in flat arrays -- the step loop's dispatch reads a tag byte
+/// and scalar operands instead of materializing a `ReInst` variant per
+/// thread step. `op` values: 0 consume (Byte and Class both reduce to a
+/// bitmap test), 1 Split, 2 Jump, 3 Save, 4 Bol, 5 Eol, 6 Match. `aux1`
+/// holds x / slot / the multiline flag; `aux2` holds y. `match_bits` is the
+/// per-instruction byte set (32 bytes each), zero for non-consumers.
+type ReCode(
+    op: *mutable UInt8,
+    aux1: *mutable UInt32,
+    aux2: *mutable UInt32,
+    match_bits: *mutable UInt8,
+    count: UInt,
+);
+
+given ReCode: Drop {
+    /// Release the flat program buffers.
+    drop(self): Void = {
+        dealloc_memory(self.op);
+        dealloc_memory(self.aux1);
+        dealloc_memory(self.aux2);
+        dealloc_memory(self.match_bits);
+    };
+};
+
+/// Mirror the instruction list into flat arrays. Parsing and analysis keep
+/// the variant form; the step loop never touches it again.
+let re_build_code(insts: List[ReInst]): ReCode = {
+    let n = insts.count();
+    let op = alloc_memory[UInt8](n);
+    let aux1 = alloc_memory[UInt32](n);
+    let aux2 = alloc_memory[UInt32](n);
+    let match_bits = alloc_memory[UInt8](n * UInt(32));
+    let mutable zi = UInt(0);
+    while zi < n * UInt(32) then {
+        match_bits[zi] = UInt8(0);
+        zi += UInt(1);
+    };
+    for pc in UInt(0)..<n then {
+        let base = pc * UInt(32);
+        aux1[pc] = UInt32(0);
+        aux2[pc] = UInt32(0);
+        when insts[pc] in {
+            .Byte(ch, ci) then {
+                op[pc] = UInt8(0);
+                let i = UInt(ch);
+                match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
+                if ci and ch >= 'a' and ch <= 'z' then {
+                    let up = UInt(ch - 32);
+                    match_bits[base + (up >> 3)] = match_bits[base + (up >> 3)] | (UInt8(1) << UInt8(up & 7));
+                };
+            },
+            .Class(bits) then {
+                op[pc] = UInt8(0);
+                for k in UInt(0)..<UInt(32) then {
+                    match_bits[base + k] = bits[k];
+                };
+            },
+            .Split(x, y) then {
+                op[pc] = UInt8(1);
+                aux1[pc] = UInt32(x);
+                aux2[pc] = UInt32(y);
+            },
+            .Jump(x) then {
+                op[pc] = UInt8(2);
+                aux1[pc] = UInt32(x);
+            },
+            .Save(slot) then {
+                op[pc] = UInt8(3);
+                aux1[pc] = UInt32(slot);
+            },
+            .Bol(multiline) then {
+                op[pc] = UInt8(4);
+                aux1[pc] = if multiline then UInt32(1) else UInt32(0);
+            },
+            .Eol(multiline) then {
+                op[pc] = UInt8(5);
+                aux1[pc] = if multiline then UInt32(1) else UInt32(0);
+            },
+            .Match() then {
+                op[pc] = UInt8(6);
+            },
+        };
+    };
+    return ReCode(op, aux1, aux2, match_bits, n);
+};
+
+/// Does instruction `u`'s byte set (the precomputed bitmap) cover `b`?
+let re_bits_match(match_bits: *mutable UInt8, u: UInt, b: UInt8): Bool = {
+    let base = u * UInt(32);
+    let i = UInt(b);
+    return ((match_bits[base + (i >> 3)] >> UInt8(i & 7)) & 1) == 1;
+};
+
 /// A compiled program: instructions plus the number of capture groups, the
-/// start-byte analysis used to skip hopeless search positions, and the
-/// match scratch shared by every run of this regex.
+/// start-byte analysis used to skip hopeless search positions, the required
+/// literal byte (when there is one) and the match scratch shared by every
+/// run of this regex.
 type ReProgram(
     insts: List[ReInst],
     ngroups: UInt,
     start_any: Bool,
     start_bits: [32]UInt8,
+    code: ReCode,
+    req: Option[ReReq],
     scratch: ReScratch,
 );
 
@@ -740,7 +905,250 @@ let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
             },
         };
     };
-    return ReProgram(insts, ngroups, start_any, bits, re_new_scratch(insts.count()));
+    let code = re_build_code(insts);
+    return ReProgram(
+        insts,
+        ngroups,
+        start_any,
+        bits,
+        code,
+        re_analyze_required(insts, code.match_bits),
+        re_new_scratch(insts.count()),
+    );
+};
+
+// ----------------------------------------------------------------------------
+// Required-literal analysis
+// ----------------------------------------------------------------------------
+
+/// Pick a literal byte that dominates Match -- deleting its instruction
+/// disconnects Match from pc 0, so every match contains the byte -- and for
+/// which the property of `ReReq` holds. Punctuation beats alnum (the rarest
+/// in ordinary text); among equals the earliest instruction wins.
+let re_analyze_required(
+    insts: List[ReInst],
+    match_bits: *mutable UInt8,
+): Option[ReReq] = {
+    let n = insts.count();
+    let mutable candidates = List[UInt].new();
+    for pc in UInt(0)..<n then {
+        when insts[pc] in {
+            .Byte(_, _) then {
+                let mutable marks = List[Bool].new();
+                for _ in 0..<n then marks.push(false);
+                let mutable work = List[UInt].new();
+                work.push(UInt(0));
+                let mutable reaches = false;
+                while not work.is_empty() then {
+                    let cur = work.take_at(work.count() - 1);
+                    if cur == pc or marks[cur] then {
+                        continue;
+                    };
+                    marks[cur] = true;
+                    when insts[cur] in {
+                        .Jump(x) then work.push(x),
+                        .Split(x, y) then {
+                            work.push(y);
+                            work.push(x);
+                        },
+                        .Match() then { reaches = true; },
+                        _ then work.push(cur + UInt(1)),
+                    };
+                };
+                if not reaches then {
+                    candidates.push(pc);
+                };
+            },
+            _ then {},
+        };
+    };
+    // Preference: non-alnum first, then program order.
+    let mutable ordered = List[UInt].new();
+    for pass in UInt(0)..<UInt(2) then {
+        for pc in candidates then {
+            when insts[pc] in {
+                .Byte(ch, _) then {
+                    let alnum = (ch >= 'a' and ch <= 'z')
+                        or (ch >= 'A' and ch <= 'Z')
+                        or (ch >= '0' and ch <= '9');
+                    if (pass == UInt(0) and not alnum)
+                        or (pass == UInt(1) and alnum) then {
+                        ordered.push(pc);
+                    };
+                },
+                _ then {},
+            };
+        };
+    };
+    for pc in ordered then {
+        when re_build_required(insts, pc, match_bits) in {
+            .Some(req) then {
+                return Option[ReReq].Some(req);
+            },
+            .None() then {},
+        };
+    };
+    return Option[ReReq].None();
+};
+
+/// Build the reverse epsilon edges for `req_pc` and check the safety
+/// property: no instruction on any path TO the required byte consumes that
+/// byte (so a prefix match can contain the byte only as its LAST byte --
+/// the property that makes feasible starts strictly increase with the byte's
+/// occurrences). Returns None when the property fails.
+let re_build_required(
+    insts: List[ReInst],
+    req_pc: UInt,
+    match_bits: *mutable UInt8,
+): Option[ReReq] = {
+    let n = insts.count();
+    let mutable req_byte = UInt8(0);
+    let mutable req_ci = false;
+    when insts[req_pc] in {
+        .Byte(ch, ci) then {
+            req_byte = ch;
+            req_ci = ci;
+        },
+        _ then {
+            return Option[ReReq].None();
+        },
+    };
+    // Reverse epsilon edges in CSR form: a Jump/Split source and a
+    // Save/Bol/Eol at u (whose edge goes to u + 1) point back at their
+    // targets. Flat arrays keep the backward scan's closure free of
+    // container traffic.
+    let eps_off = alloc_memory[UInt32](n + UInt(1));
+    let mutable oi = UInt(0);
+    while oi < n + UInt(1) then {
+        eps_off[oi] = UInt32(0);
+        oi += UInt(1);
+    };
+    for u in UInt(0)..<n then {
+        when insts[u] in {
+            .Jump(x) then {
+                eps_off[x + UInt(1)] = eps_off[x + UInt(1)] + UInt32(1);
+            },
+            .Split(x, y) then {
+                eps_off[x + UInt(1)] = eps_off[x + UInt(1)] + UInt32(1);
+                eps_off[y + UInt(1)] = eps_off[y + UInt(1)] + UInt32(1);
+            },
+            .Save(_) then {
+                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+            },
+            .Bol(_) then {
+                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+            },
+            .Eol(_) then {
+                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+            },
+            _ then {},
+        };
+    };
+    for k in UInt(0)..<n then {
+        eps_off[k + UInt(1)] = eps_off[k + UInt(1)] + eps_off[k];
+    };
+    let eps_from = alloc_memory[UInt32](UInt(eps_off[n]));
+    let mutable fill = alloc_memory[UInt32](n);
+    let mutable fi = UInt(0);
+    while fi < n then {
+        fill[fi] = UInt32(0);
+        fi += UInt(1);
+    };
+    for u in UInt(0)..<n then {
+        when insts[u] in {
+            .Jump(x) then {
+                eps_from[UInt(eps_off[x]) + UInt(fill[x])] = UInt32(u);
+                fill[x] = fill[x] + UInt32(1);
+            },
+            .Split(x, y) then {
+                eps_from[UInt(eps_off[x]) + UInt(fill[x])] = UInt32(u);
+                fill[x] = fill[x] + UInt32(1);
+                eps_from[UInt(eps_off[y]) + UInt(fill[y])] = UInt32(u);
+                fill[y] = fill[y] + UInt32(1);
+            },
+            .Save(_) then {
+                let v = u + UInt(1);
+                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
+                fill[v] = fill[v] + UInt32(1);
+            },
+            .Bol(_) then {
+                let v = u + UInt(1);
+                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
+                fill[v] = fill[v] + UInt32(1);
+            },
+            .Eol(_) then {
+                let v = u + UInt(1);
+                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
+                fill[v] = fill[v] + UInt32(1);
+            },
+            _ then {},
+        };
+    };
+    dealloc_memory(fill);
+    // Every instruction that can reach req_pc -- the prefix territory.
+    let mutable reach = List[Bool].new();
+    for _ in 0..<n then reach.push(false);
+    let mutable work = List[UInt].new();
+    work.push(req_pc);
+    reach[req_pc] = true;
+    while not work.is_empty() then {
+        let cur = work.take_at(work.count() - 1);
+        if cur > UInt(0) then {
+            let u = cur - UInt(1);
+            when insts[u] in {
+                .Byte(_, _) or .Class(_) then {
+                    if not reach[u] then {
+                        reach[u] = true;
+                        work.push(u);
+                    };
+                },
+                _ then {},
+            };
+        };
+        let es = UInt(eps_off[cur]);
+        let ee = UInt(eps_off[cur + UInt(1)]);
+        let mutable ek = es;
+        while ek < ee then {
+            let u = UInt(eps_from[ek]);
+            ek += UInt(1);
+            if not reach[u] then {
+                reach[u] = true;
+                work.push(u);
+            };
+        };
+    };
+    // The property: no reachable consumer of any byte the required
+    // instruction matches, other than the instruction itself. A
+    // case-insensitive instruction matches the upper-case twin too, and a
+    // prefix that could consume EITHER byte could hide one mid-match --
+    // which would let feasible starts interleave across occurrences and
+    // break the leftmost early stop.
+    for u in UInt(0)..<n then {
+        if u != req_pc and reach[u] then {
+            if re_bits_match(match_bits, u, req_byte) then {
+                return Option[ReReq].None();
+            };
+            if req_ci and req_byte >= 'a' and req_byte <= 'z' then {
+                if re_bits_match(match_bits, u, req_byte - UInt8(32)) then {
+                    return Option[ReReq].None();
+                };
+            };
+        };
+    };
+    // The backward scan's closure is dispatch-free: a prefix assertion would
+    // need its meaning evaluated per position, so patterns with one on the
+    // path to the byte keep the plain scan.
+    for u in UInt(0)..<n then {
+        if reach[u] then {
+            when insts[u] in {
+                .Bol(_) or .Eol(_) then {
+                    return Option[ReReq].None();
+                },
+                _ then {},
+            };
+        };
+    };
+    return Option[ReReq].Some(ReReq(req_byte, req_ci, req_pc, eps_from, eps_off));
 };
 
 /// Compile `pattern` to a program: `save 0; body; save 1; match`.
@@ -829,7 +1237,29 @@ let re_run(
     offset: UInt,
     track_groups: Bool,
 ): Option[ReSlots] = {
+    // With a required literal byte the search goes through the prefilter:
+    // enumerate feasible starts at the byte's occurrences and run the
+    // machine anchored at each, leftmost first.
+    if prog.req is .Some(_) then {
+        return re_run_filtered(prog, text, offset, track_groups);
+    };
+    return re_run_scan(prog, text, offset, track_groups, Option[List[UInt]].None());
+};
+
+/// The Pike-VM itself. With `anchors` set (increasing), a start thread is
+/// injected only at those positions -- the candidate-start match attempts --
+/// and the run resolves as soon as one matches or all are spent. With
+/// `anchors` unset, every viable position injects and the machine returns
+/// the leftmost-first match.
+let re_run_scan(
+    prog: ReProgram,
+    text: String,
+    offset: UInt,
+    track_groups: Bool,
+    anchors: Option[List[UInt]],
+): Option[ReSlots] = {
     let insts = prog.insts;
+    let code = prog.code;
     let text_len = text.count();
     let bp = text.borrow_ptr();
 
@@ -876,20 +1306,31 @@ let re_run(
     let mutable best_caps = re_blank_caps();
     let mutable matched = false;
 
+    let mutable anchor_i = UInt(0);
     let mutable pos = offset;
     while pos <= text_len then {
         if not matched then {
             // Only start a thread where a match could actually begin.
             let mutable inject = false;
-            if prog.start_any then {
-                inject = true;
-            } else if pos < text_len then {
-                let i = UInt(bp[pos]);
-                inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
+            when anchors in {
+                .Some(list) then {
+                    if anchor_i < list.count() and list[anchor_i] == pos then {
+                        inject = true;
+                        anchor_i += UInt(1);
+                    };
+                },
+                .None() then {
+                    if prog.start_any then {
+                        inject = true;
+                    } else if pos < text_len then {
+                        let i = UInt(bp[pos]);
+                        inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
+                    };
+                },
             };
             if inject then {
                 re_add(
-                    insts,
+                    code,
                     cmp,
                     cg,
                     bp,
@@ -919,57 +1360,29 @@ let re_run(
                 // Lower priority than the match: the thread dies here.
                 pool.give(t.row);
             } else {
-                when insts[t.pc] in {
-                    .Match() then {
-                        best_caps = re_load_caps(pool.at(t.row));
-                        matched = true;
-                        cut = true;
-                    },
-                    .Byte(ch, ci) then {
-                        if pos < text_len then {
-                            let b = bp[pos];
-                            if b == ch or (ci and re_lower_byte(b) == ch) then {
-                                re_add(
-                                    insts,
-                                    nmp,
-                                    ng,
-                                    bp,
-                                    text_len,
-                                    pos + 1,
-                                    nlist,
-                                    t.pc + 1,
-                                    t.row,
-                                    track_groups,
-                                    pool,
-                                    work,
-                                );
-                            };
-                        };
-                    },
-                    .Class(bits) then {
-                        if pos < text_len then {
-                            let b = bp[pos];
-                            let i = UInt(b);
-                            if ((bits[i >> 3] >> UInt8(i & 7)) & 1) == 1 then {
-                                re_add(
-                                    insts,
-                                    nmp,
-                                    ng,
-                                    bp,
-                                    text_len,
-                                    pos + 1,
-                                    nlist,
-                                    t.pc + 1,
-                                    t.row,
-                                    track_groups,
-                                    pool,
-                                    work,
-                                );
-                            };
-                        };
-                    },
-                    _ then {},
-                };
+                let opc = code.op[t.pc];
+                if opc == UInt8(6) then {
+                    best_caps = re_load_caps(pool.at(t.row));
+                    matched = true;
+                    cut = true;
+                } else if opc == UInt8(0) and pos < text_len then {
+                    if re_bits_match(code.match_bits, t.pc, bp[pos]) then {
+                        re_add(
+                            code,
+                            nmp,
+                            ng,
+                            bp,
+                            text_len,
+                            pos + 1,
+                            nlist,
+                            t.pc + 1,
+                            t.row,
+                            track_groups,
+                            pool,
+                            work,
+                        );
+                    };
+                } else {};
                 // Every consumed thread's row returns to the pool here --
                 // after its closure call, which copies what survives.
                 pool.give(t.row);
@@ -988,7 +1401,11 @@ let re_run(
         ng = tmpg;
 
         pos += 1;
-        if matched and clist.is_empty() then {
+        let drained = when anchors in {
+            .Some(list) then matched or anchor_i >= list.count(),
+            .None() then matched,
+        };
+        if drained and clist.is_empty() then {
             break;
         };
     };
@@ -1007,6 +1424,336 @@ let re_run(
     return Option[ReSlots].Some(ReSlots(best_caps));
 };
 
+// ----------------------------------------------------------------------------
+// Backtracking fast path
+// ----------------------------------------------------------------------------
+
+/// The step budget for one anchored backtracking attempt. A pattern whose
+/// exploration would exceed it -- ambiguous stars over long runs, empty
+/// loops -- falls back to the Pike-VM, which is always correct: the budget
+/// only picks the engine, never the answer. The scratch's alt/undo buffers
+/// are sized from it (at most one alternative and one capture write per
+/// step).
+let re_bt_budget(): UInt = UInt(4000);
+
+/// The three outcomes of one anchored backtracking attempt. `Budget` means
+/// UNKNOWN, never "no match": a search that ran out of budget has not
+/// proven the start dead, and the caller must not skip past it to a later
+/// start -- that would break leftmost-first.
+type ReBt {
+    /// A match, with its capture slots.
+    Found(slots: ReSlots),
+    /// The start is provably dead: the whole search tree fit the budget.
+    Missing(),
+    /// The budget ran out before the search concluded.
+    Budget(),
+};
+
+/// Backtracking matcher for one anchored start: the classic greedy,
+/// first-alternative-first exploration -- exactly the match the Pike-VM's
+/// thread priority preserves, with one path at a time instead of a thread
+/// per branch. Captures undo on backtrack.
+let re_backtrack(
+    prog: ReProgram,
+    bp: *UInt8,
+    text_len: UInt,
+    start: UInt,
+    track_groups: Bool,
+    pool: ReRowPool,
+): ReBt = {
+    let code = prog.code;
+    let scratch = prog.scratch;
+    let alt = scratch.alt_buf;
+    let undo = scratch.undo_buf;
+    let row = pool.take_temp();
+    re_copy_caps(pool.at(UInt(0)), pool.at(row));
+    let caps = pool.at(row);
+    let mutable alt_len = UInt(0);
+    let mutable undo_len = UInt(0);
+    let mutable pc = UInt(0);
+    let mutable pos = start;
+    let mutable budget = re_bt_budget();
+
+    while true then {
+        if budget == UInt(0) then {
+            pool.end_call();
+            return ReBt.Budget();
+        };
+        budget = budget - UInt(1);
+        let mutable failed = false;
+        let opc = code.op[pc];
+        if opc == UInt8(0) then {
+            if pos < text_len and re_bits_match(code.match_bits, pc, bp[pos]) then {
+                pos = pos + UInt(1);
+                pc = pc + UInt(1);
+            } else {
+                failed = true;
+            };
+        } else if opc == UInt8(1) then {
+            // Split: `x` first (the higher-priority branch), `y` later.
+            let f = alt_len * UInt(3);
+            alt[f] = UInt32(code.aux2[pc]);
+            alt[f + UInt(1)] = UInt32(pos);
+            alt[f + UInt(2)] = UInt32(undo_len);
+            alt_len = alt_len + UInt(1);
+            pc = UInt(code.aux1[pc]);
+        } else if opc == UInt8(2) then {
+            pc = UInt(code.aux1[pc]);
+        } else if opc == UInt8(3) then {
+            let slot = UInt(code.aux1[pc]);
+            if track_groups or slot < UInt(2) then {
+                let u = undo_len * UInt(2);
+                undo[u] = UInt32(slot);
+                undo[u + UInt(1)] = UInt32(caps[slot]);
+                undo_len = undo_len + UInt(1);
+                caps[slot] = Int32(pos);
+            };
+            pc = pc + UInt(1);
+        } else if opc == UInt8(4) then {
+            let multiline = code.aux1[pc] == UInt32(1);
+            if pos == UInt(0) or (multiline and pos > UInt(0) and bp[pos - UInt(1)] == '\n') then {
+                pc = pc + UInt(1);
+            } else {
+                failed = true;
+            };
+        } else if opc == UInt8(5) then {
+            let multiline = code.aux1[pc] == UInt32(1);
+            if pos == text_len or (multiline and pos < text_len and bp[pos] == '\n') then {
+                pc = pc + UInt(1);
+            } else {
+                failed = true;
+            };
+        } else {
+            let out = re_load_caps(caps);
+            pool.end_call();
+            return ReBt.Found(ReSlots(out));
+        };
+        if failed then {
+            if alt_len == UInt(0) then {
+                pool.end_call();
+                return ReBt.Missing();
+            };
+            alt_len = alt_len - UInt(1);
+            let f = alt_len * UInt(3);
+            pc = UInt(alt[f]);
+            pos = UInt(alt[f + UInt(1)]);
+            let mark = UInt(alt[f + UInt(2)]);
+            while undo_len > mark then {
+                undo_len = undo_len - UInt(1);
+                let u = undo_len * UInt(2);
+                caps[UInt(undo[u])] = Int32(undo[u + UInt(1)]);
+            };
+        };
+    };
+    // Unreachable: the loop returns from every exit. Present for the
+    // checker, which does not treat `while true` as non-terminating.
+    return ReBt.Budget();
+};
+
+// ----------------------------------------------------------------------------
+// Required-literal prefilter
+// ----------------------------------------------------------------------------
+
+/// Feasible match starts for one required-byte occurrence at `q`: the
+/// positions `p` where text[p..=q] matches the program up to and including
+/// the required byte's instruction. A backward subset construction walks
+/// positions left until the frontier empties; `G(i)` is the set of program
+/// counters that can finish the prefix starting at `i`, and `i` is a start
+/// exactly when pc 0 is among them. Returned starts DECREASE (the walk runs
+/// right to left); the caller wants leftmost first, so it iterates the list
+/// backwards.
+let re_backward_starts(
+    prog: ReProgram,
+    req: ReReq,
+    bp: *UInt8,
+    q: UInt,
+    text_len: UInt,
+): List[UInt] = {
+    let insts = prog.insts;
+    let n = insts.count();
+    let scratch = prog.scratch;
+    let bmarks = scratch.bmarks;
+    let mutable bgen = scratch.bgen + Int32(1);
+    if bgen > Int32(1000000000) then {
+        // Generations are about to wrap: re-zero the set once.
+        let mutable zi = UInt(0);
+        while zi < n then {
+            bmarks[zi] = Int32(0);
+            zi += UInt(1);
+        };
+        bgen = Int32(1);
+    };
+    scratch.bgen = bgen;
+    let mutable bcur = scratch.bcur;
+    let mutable bnext = scratch.bnext;
+    let bstack = scratch.bstack;
+    scratch.bcur_len = UInt(0);
+    let starts = scratch.bstarts;
+    starts.clear();
+    let mutable i = q;
+
+    while true then {
+        // Seed the frontier for position `i`: at `q` the required byte has
+        // consumed text[q]; earlier, every consumer of text[i] whose
+        // successor can finish.
+        scratch.bstack_len = UInt(0);
+        if i == q then {
+            bstack[0] = UInt32(req.pc);
+            scratch.bstack_len = UInt(1);
+        } else {
+            let cur_len = scratch.bcur_len;
+            let mutable ci = UInt(0);
+            while ci < cur_len then {
+                let pc = UInt(bcur[ci]);
+                ci += UInt(1);
+                if pc > UInt(0) then {
+                    let u = pc - UInt(1);
+                    if re_bits_match(prog.code.match_bits, u, bp[i]) then {
+                        let t = scratch.bstack_len;
+                        bstack[t] = UInt32(u);
+                        scratch.bstack_len = t + UInt(1);
+                    };
+                };
+            };
+        };
+        scratch.bnext_len = UInt(0);
+        while scratch.bstack_len > UInt(0) then {
+            let t = scratch.bstack_len - UInt(1);
+            scratch.bstack_len = t;
+            let u = UInt(bstack[t]);
+            if bmarks[u] == bgen then {
+                continue;
+            };
+            bmarks[u] = bgen;
+            // No assertion can be on the path (the analysis refuses those
+            // patterns), so every popped instruction simply joins the
+            // frontier and walks its reverse epsilon edges.
+            let nt = scratch.bnext_len;
+            bnext[nt] = UInt32(u);
+            scratch.bnext_len = nt + UInt(1);
+            let es = UInt(req.eps_off[u]);
+            let ee = UInt(req.eps_off[u + UInt(1)]);
+            let mutable ek = es;
+            while ek < ee then {
+                let st = scratch.bstack_len;
+                bstack[st] = req.eps_from[ek];
+                scratch.bstack_len = st + UInt(1);
+                ek += UInt(1);
+            };
+        };
+        // pc 0 in the frontier means a match can start exactly at `i`.
+        if bmarks[UInt(0)] == bgen then {
+            starts.push(i);
+        };
+        if scratch.bnext_len == UInt(0) or i == UInt(0) then {
+            break;
+        };
+        // The next position's frontier is this one's; the buffers trade
+        // places so the marks stay one generation per position.
+        let tmp = bcur;
+        bcur = bnext;
+        bnext = tmp;
+        scratch.bcur = bcur;
+        scratch.bnext = bnext;
+        let tmp_len = scratch.bcur_len;
+        scratch.bcur_len = scratch.bnext_len;
+        scratch.bnext_len = tmp_len;
+        i -= UInt(1);
+        bgen += Int32(1);
+        if bgen > Int32(1000000000) then {
+            let mutable zi = UInt(0);
+            while zi < n then {
+                bmarks[zi] = Int32(0);
+                zi += UInt(1);
+            };
+            bgen = Int32(1);
+        };
+        scratch.bgen = bgen;
+    };
+    return starts;
+};
+
+/// The prefilter path: enumerate feasible starts at the required byte's
+/// occurrences and run the anchored machine at each, leftmost first.
+/// Candidates strictly increase across occurrences (see `ReReq`), so the
+/// first match found IS the leftmost match -- the scan stops there.
+let re_run_filtered(
+    prog: ReProgram,
+    text: String,
+    offset: UInt,
+    track_groups: Bool,
+): Option[ReSlots] = {
+    let req = when prog.req in {
+        .Some(r) then r,
+        .None() then {
+            return re_run_scan(prog, text, offset, track_groups, Option[List[UInt]].None());
+        },
+    };
+    let bp = text.borrow_ptr();
+    let text_len = text.count();
+    let scratch = prog.scratch;
+    let pool = scratch.pool;
+    let mutable q = offset;
+    while q < text_len then {
+        let b = bp[q];
+        // An occurrence is a byte the required instruction would consume.
+        if b == req.byte or (req.ci and re_lower_byte(b) == req.byte) then {
+            let starts = re_backward_starts(prog, req, bp, q, text_len);
+            // The walk produced the starts decreasing; the machine takes
+            // them increasing (leftmost first). One run per occurrence, its
+            // anchor set every start at or past `offset` -- candidates
+            // before that belong to matches the caller has moved past.
+            let anchors = scratch.banchors;
+            anchors.clear();
+            let mutable k = starts.count();
+            while k > UInt(0) then {
+                k -= UInt(1);
+                if starts[k] >= offset then {
+                    anchors.push(starts[k]);
+                };
+            };
+            if not anchors.is_empty() then {
+                // The backtracking fast path first: one greedy path per
+                // start, an order of magnitude fewer ops than threading the
+                // whole frontier. A proven-dead start moves on; a budget
+                // overrun hands the whole anchor set to the Pike-VM below,
+                // which answers leftmost-first correctly at any cost.
+                let mutable unknown = false;
+                let mutable ka = UInt(0);
+                while (not unknown) and ka < anchors.count() then {
+                    let p = anchors[ka];
+                    ka = ka + UInt(1);
+                    when re_backtrack(prog, bp, text_len, p, track_groups, pool) in {
+                        .Found(slots) then {
+                            return Option[ReSlots].Some(slots);
+                        },
+                        .Missing() then {},
+                        .Budget() then {
+                            unknown = true;
+                        },
+                    };
+                };
+                if unknown then {
+                    when re_run_scan(
+                        prog,
+                        text,
+                        offset,
+                        track_groups,
+                        Option[List[UInt]].Some(anchors),
+                    ) in {
+                        .Some(slots) then {
+                            return Option[ReSlots].Some(slots);
+                        },
+                        .None() then {},
+                    };
+                };
+            };
+        };
+        q += UInt(1);
+    };
+    return Option[ReSlots].None();
+};
+
 /// Epsilon closure from `(pc, row)`, in priority order, adding the consuming
 /// and `Match` threads it reaches to `list`. The marks make the closure a
 /// traversal, not a loop: a zero-width cycle (`()*`) visits each program
@@ -1015,7 +1762,7 @@ let re_run(
 /// takes its own copy at spawn, so nothing this call writes is visible to a
 /// sibling branch or to the consumed thread's row.
 let re_add(
-    insts: List[ReInst],
+    code: ReCode,
     marks: *mutable Int32,
     generation: Int32,
     bp: *UInt8,
@@ -1036,46 +1783,44 @@ let re_add(
             continue;
         };
         marks[seed.pc] = generation;
-        when insts[seed.pc] in {
-            .Jump(x) then {
-                work.push(ReSeed(x, seed.row));
-            },
-            .Split(x, y) then {
-                // Pushed in reverse: the stack pops `x` first.
-                work.push(ReSeed(y, seed.row));
-                work.push(ReSeed(x, seed.row));
-            },
-            .Save(slot) then {
-                if track_groups or slot < 2 then {
-                    // Copy-on-write into a call-scoped temp: the seed's row
-                    // may be shared with sibling branches or belong to the
-                    // thread being consumed, neither of which this write may
-                    // disturb. `end_call` reclaims the temp.
-                    let row = pool.take_temp();
-                    re_copy_caps(pool.at(seed.row), pool.at(row));
-                    pool.at(row)[slot] = Int32(pos);
-                    work.push(ReSeed(seed.pc + 1, row));
-                } else {
-                    work.push(ReSeed(seed.pc + 1, seed.row));
-                };
-            },
-            .Bol(multiline) then {
-                if pos == 0 or (multiline and pos > 0 and bp[pos - 1] == '\n') then {
-                    work.push(ReSeed(seed.pc + 1, seed.row));
-                };
-            },
-            .Eol(multiline) then {
-                if pos == text_len or (multiline and pos < text_len and bp[pos] == '\n') then {
-                    work.push(ReSeed(seed.pc + 1, seed.row));
-                };
-            },
-            _ then {
-                // The thread outlives this call, so it takes its own copy of
-                // the row: no live thread ever references a call-scoped temp.
-                let row = pool.take();
+        let opc = code.op[seed.pc];
+        if opc == UInt8(2) then {
+            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+        } else if opc == UInt8(1) then {
+            // Pushed in reverse: the stack pops `x` first.
+            work.push(ReSeed(UInt(code.aux2[seed.pc]), seed.row));
+            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+        } else if opc == UInt8(3) then {
+            let slot = UInt(code.aux1[seed.pc]);
+            if track_groups or slot < 2 then {
+                // Copy-on-write into a call-scoped temp: the seed's row
+                // may be shared with sibling branches or belong to the
+                // thread being consumed, neither of which this write may
+                // disturb. `end_call` reclaims the temp.
+                let row = pool.take_temp();
                 re_copy_caps(pool.at(seed.row), pool.at(row));
-                list.push(ReThread(seed.pc, row));
-            },
+                pool.at(row)[slot] = Int32(pos);
+                work.push(ReSeed(seed.pc + 1, row));
+            } else {
+                work.push(ReSeed(seed.pc + 1, seed.row));
+            };
+        } else if opc == UInt8(4) then {
+            let multiline = code.aux1[seed.pc] == UInt32(1);
+            if pos == 0 or (multiline and pos > 0 and bp[pos - UInt(1)] == '\n') then {
+                work.push(ReSeed(seed.pc + 1, seed.row));
+            };
+        } else if opc == UInt8(5) then {
+            let multiline = code.aux1[seed.pc] == UInt32(1);
+            if pos == text_len or (multiline and pos < text_len and bp[pos] == '\n') then {
+                work.push(ReSeed(seed.pc + 1, seed.row));
+            };
+        } else {
+            // A consumer or the Match: a live thread. It outlives this
+            // call, so it takes its own copy of the row -- no live thread
+            // ever references a call-scoped temp.
+            let row = pool.take();
+            re_copy_caps(pool.at(seed.row), pool.at(row));
+            list.push(ReThread(seed.pc, row));
         };
     };
     pool.end_call();

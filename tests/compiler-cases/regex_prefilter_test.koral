@@ -1,0 +1,91 @@
+// EXPECT: prefilter ok
+// Pins the required-literal prefilter's search semantics: the candidate
+// starts it enumerates must find exactly the matches the plain scan finds,
+// including the shapes where the analysis REFUSES the prefilter (a prefix
+// that can consume the literal byte, or an assertion on the path) and falls
+// back to the unanchored machine.
+
+using "std/text" { ... };
+
+let main(): Void = {
+    // A required byte every match contains: leftmost first, exact spans.
+    let r1 = Regex.compile("([a-z]+)([0-9]+)@([a-z]+)").expect("c1");
+    when r1.captures("x u42@ab y v7@cd z") in {
+        .Some(c) then {
+            assert(c.start() == 2 and c.end() == 8, "leftmost span");
+            when c.group(1) in {
+                .Some(g) then assert(g == "u", "leftmost group 1"),
+                .None() then assert(false, "group 1 missing"),
+            };
+        },
+        .None() then assert(false, "leftmost: must match"),
+    };
+
+    // The literal at the very start: the only feasible start is its
+    // occurrence.
+    let r2 = Regex.compile("@bc").expect("c2");
+    when r2.find("zzz@bc") in {
+        .Some(m) then assert(m.start() == 3 and m.end() == 6, "literal at start"),
+        .None() then assert(false, "literal start: must match"),
+    };
+
+    // Every candidate fails the suffix: the prefilter must not report a
+    // match the plain scan would reject.
+    let r3 = Regex.compile("a@zzz").expect("c3");
+    assert(r3.matches("a@a@a@") == false, "no candidate survives");
+    when r3.find("q a@zzz") in {
+        .Some(m) then assert(m.start() == 2, "suffix match found"),
+        .None() then assert(false, "suffix: must match"),
+    };
+
+    // The property refusal: the prefix can consume the literal byte (`.`
+    // matches '@'), so feasible starts could interleave -- the engine falls
+    // back to the plain scan and must still find the leftmost match.
+    let r4 = Regex.compile(".@").expect("c4");
+    when r4.find("x@y@") in {
+        .Some(m) then assert(m.start() == 0 and m.end() == 2, "dot prefix leftmost"),
+        .None() then assert(false, "dot prefix: must match"),
+    };
+
+    // The assertion refusal: `^` on the path to the literal keeps the plain
+    // scan; results stay exact.
+    let r5 = Regex.compile("^ab@c").expect("c5");
+    assert(r5.matches("ab@x") == false, "anchored reject");
+    assert(r5.matches("ab@c") == true, "anchored accept");
+
+    // Case-insensitive occurrences: the scan must see upper-case twins.
+    let r6 = Regex.compile_with_flags("ab@cd", RegexFlag.ignore_case()).expect(
+        "c6",
+    );
+    when r6.find("xx AB@CD yy") in {
+        .Some(m) then assert(m.start() == 3 and m.end() == 8, "ci spans"),
+        .None() then assert(false, "ci: must match"),
+    };
+
+    // A literal that appears in the prefix too: `a@b@` -- the first '@' is
+    // the required instruction's byte and the prefix consumes only 'a'.
+    let r7 = Regex.compile("a@b@").expect("c7");
+    when r7.find("z a@b@ q") in {
+        .Some(m) then assert(m.start() == 2 and m.end() == 6, "double literal"),
+        .None() then assert(false, "double literal: must match"),
+    };
+
+    // Streaming over the prefilter path: non-overlapping, live spans.
+    let r8 = Regex.compile("(\\w)(@)").expect("c8");
+    let mutable got = List[String].new();
+    for c in r8.captures_all("a@ b@ c@") then {
+        when c.group(1) in {
+            .Some(g) then {
+                when c.group(2) in {
+                    .Some(at) then got.push(g + at),
+                    .None() then assert(false, "stream group 2"),
+                };
+            },
+            .None() then assert(false, "stream group 1"),
+        };
+    };
+    assert(got.count() == 3, "stream count");
+    assert(got[0] == "a@" and got[1] == "b@" and got[2] == "c@", "stream values");
+
+    println("prefilter ok");
+};
