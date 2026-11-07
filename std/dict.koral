@@ -378,6 +378,19 @@ given[K: Hash, V: Any] Dict[K, V] {
         deinit_memory(bucket_ptr);
         init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
     };
+
+    /// 内置下标 `d[key]` 的内部操作：返回桶内 value 字段的槽位指针。读写
+    /// 直接作用于槽位；缺失键 panic 与 `__index_get` 一致。
+    private __index_slot(self, key: K): *mutable V = {
+        let final_idx = when self.find_slot(key) in {
+            .None() then {
+                panic("Dict key not found");
+            },
+            .Some(i) then i,
+        };
+        let bucket_ptr = self.buckets + final_idx;
+        return (&bucket_ptr.value) as *mutable V;
+    };
 };
 
 /// `Clone` for `Dict[K, V]`: an independent shallow copy.

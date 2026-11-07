@@ -519,6 +519,27 @@ given TypeChecker {
         return self.wrap_receiver_materialized_call(prepared_base.second, base, call_expr);
     };
 
+    /// The element slot of a built-in subscript: `xs.__index_slot(i)` wrapped
+    /// in a deref place. Reads and writes go through the slot pointer --
+    /// member-access semantics, no element copy in and out. The bounds/lookup
+    /// panic lives inside the slot helper.
+    build_builtin_subscript_slot_place(
+        self,
+        base: TypedExpr,
+        args: List[TypedExpr],
+    ): TypedExpr = {
+        let slot_ptr = self.build_builtin_subscript_helper_call(
+            base,
+            args,
+            "__index_slot",
+        );
+        let element_type = when slot_ptr.expr_type in {
+            .MutablePointerType(inner) or .PointerType(inner) then inner,
+            _ then Type.Unknown(),
+        };
+        return make_typed_expr(TypedExprKind.UnsafeDerefExpr(slot_ptr), element_type);
+    };
+
     resolve_builtin_subscript_as_reference(
         self,
         base: TypedExpr,
@@ -571,9 +592,19 @@ given TypeChecker {
                     )
                 },
                 .Dict(_, _) or .List(_) or .Deque(_) then {
-                    let helper_name = if is_mutable then "__index_mut_ref"
-                    else "__index_ref";
-                    self.build_builtin_subscript_helper_call(base, args, helper_name)
+                    // The element slot is addressable storage (the container's
+                    // own), so a reference to it is fine -- unlike a get result
+                    // copy.
+                    let slot_place = self.build_builtin_subscript_slot_place(
+                        base,
+                        args,
+                    );
+                    let expected_ref_type = if is_mutable then Option[Type].Some(
+                        Type.MutableReferenceType(slot_place.expr_type),
+                    ) else Option[Type].Some(
+                        Type.ReferenceType(slot_place.expr_type),
+                    );
+                    self.adapt_expr_to_expected_type(slot_place, expected_ref_type)
                 },
                 .Pointer(element_type, _) then {
                     let index_expr = if args.is_empty() then make_typed_expr(

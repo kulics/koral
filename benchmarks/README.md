@@ -114,6 +114,17 @@ except the sort pair:
    free functions; trait-impl slots keep the owned convention).
 7. **memcmp string compare/equals** (sort_strings 41 -> 36ms).
 
+A later pass (2026-11-07) gave the built-in subscript member-access (place)
+semantics: `xs[i]` addresses the element slot through `List.__index_slot`
+(and the Deque/Dict equivalents) instead of copying the element through
+`__index_get`/`__index_set`. Reads retain exactly as field reads do, stores
+release the old element in place, and `xs[i].f = v` writes through the slot
+-- the copy-modify-write-back and the member-base handle copy per field read
+are gone (a managed-element field read dropped from 1 retain + 2 releases +
+2 copies to no RC traffic in the generated C). The subscript-heavy cases
+(`list_sum`, `struct_iter`, `dict_lookup`) should be re-measured on the
+reference machine.
+
 ## regex_scan notes (2026-11-06, Windows x64)
 
 `regex_scan` came in with the pure-Koral regex engine

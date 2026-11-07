@@ -226,12 +226,27 @@ given TypeChecker {
         return self.adapt_expr_to_expected_type(receiver, expected_self_type);
     };
 
+    /// Whether the expression is the built-in element slot call
+    /// (`xs.__index_slot(i)`): its deref is a real storage place, so member
+    /// reads through it need no materialized copy.
+    is_builtin_subscript_slot_callee(self, expr: TypedExpr): Bool = {
+        return when expr.expr_kind in {
+            .Call(callee, _) then when callee.expr_kind in {
+                .MethodReference(_, _, method, _, _, _) then self.context().symbol_name(
+                    method,
+                ) == "__index_slot",
+                _ then false,
+            },
+            _ then false,
+        };
+    };
+
     receiver_is_addressable_without_temp(self, receiver: TypedExpr): Bool = {
         return when receiver.expr_kind in {
             .Variable(_) or .MemberPath(...) then true,
             .DerefExpr(inner_ref) or .UnsafeDerefExpr(inner_ref) then when inner_ref.expr_kind in {
                 .Variable(_) or .MemberPath(...) or .DerefExpr(_) or .UnsafeDerefExpr(_) then true,
-                _ then false,
+                _ then self.is_builtin_subscript_slot_callee(inner_ref),
             },
             _ then false,
         };
@@ -340,10 +355,14 @@ given TypeChecker {
     ): TypedExpr = {
         return when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
             .Some(kind) then when kind in {
-                .String() or .List(_) or .Deque(_) or .Dict(_, _) then self.build_builtin_subscript_helper_call(
+                .String() then self.build_builtin_subscript_helper_call(
                     typed_base,
                     typed_args,
                     "__index_get",
+                ),
+                .List(_) or .Deque(_) or .Dict(_, _) then self.build_builtin_subscript_slot_place(
+                    typed_base,
+                    typed_args,
                 ),
                 .Pointer(element_type, _) then {
                     let pointer_base_type = self.builtin_subscript_base_type(
