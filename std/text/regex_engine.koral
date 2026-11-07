@@ -1673,6 +1673,21 @@ let re_backward_starts(
     return starts;
 };
 
+/// The next position at or after `from` whose byte the required
+/// instruction would consume. Kept as a tight loop so the C compiler can
+/// vectorize the scan -- the per-occurrence work lives in the caller.
+let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: UInt, from: UInt): UInt = {
+    let mutable q = from;
+    while q < text_len then {
+        let b = bp[q];
+        if b == req.byte or (req.ci and re_lower_byte(b) == req.byte) then {
+            return q;
+        };
+        q += UInt(1);
+    };
+    return text_len;
+};
+
 /// The prefilter path: enumerate feasible starts at the required byte's
 /// occurrences and run the anchored machine at each, leftmost first.
 /// Candidates strictly increase across occurrences (see `ReReq`), so the
@@ -1693,11 +1708,9 @@ let re_run_filtered(
     let text_len = text.count();
     let scratch = prog.scratch;
     let pool = scratch.pool;
-    let mutable q = offset;
+    let mutable q = re_find_occurrence(req, bp, text_len, offset);
     while q < text_len then {
-        let b = bp[q];
-        // An occurrence is a byte the required instruction would consume.
-        if b == req.byte or (req.ci and re_lower_byte(b) == req.byte) then {
+        {
             let starts = re_backward_starts(prog, req, bp, q, text_len);
             // The walk produced the starts decreasing; the machine takes
             // them increasing (leftmost first). One run per occurrence, its
@@ -1749,7 +1762,7 @@ let re_run_filtered(
                 };
             };
         };
-        q += UInt(1);
+        q = re_find_occurrence(req, bp, text_len, q + UInt(1));
     };
     return Option[ReSlots].None();
 };
