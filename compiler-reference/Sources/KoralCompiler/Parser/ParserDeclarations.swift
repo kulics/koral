@@ -187,6 +187,17 @@ extension Parser {
       let nameSpan = currentSpan
       try match(.identifier(name))
 
+      // koralc checks the name's shape here -- flavored by the raw `(` peek,
+      // exactly as `parse_let_decl` does -- then the derived C name, all
+      // before type parameters: name errors come first, in that order.
+      if currentToken === .leftParen {
+        if !isValidVariableName(name) {
+          throw ParserError.invalidFunctionName(span: nameSpan, name: name)
+        }
+      } else if !isValidVariableName(name) {
+        throw ParserError.invalidVariableName(span: nameSpan, name: name)
+      }
+
       // A `let foreign` declaration's name in the C world is the C-name slot --
       // or, spelled nowhere, the Koral name verbatim. Either way it must be a
       // legal C identifier: it reaches the generated TU and the export headers
@@ -203,9 +214,6 @@ extension Parser {
 
       // If mutable keyword was detected, it must be a variable declaration
       if mutable {
-        if !isValidVariableName(name) {
-          throw ParserError.invalidVariableName(span: nameSpan, name: name)
-        }
         if isForeign {
           if currentToken === .leftParen && !parenOpensTypeAnnotation() {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
@@ -224,9 +232,6 @@ extension Parser {
       // 1`) is an annotation, not a signature: the contents scan as a type, or
       // a `->` follows the closing `)`.
       if currentToken === .leftParen && !parenOpensTypeAnnotation() {
-        if !isValidVariableName(name) {
-          throw ParserError.invalidFunctionName(span: nameSpan, name: name)
-        }
         if isForeign {
           return try foreignFunctionDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
         }
@@ -234,9 +239,6 @@ extension Parser {
           name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
           span: startSpan, nameSpan: nameSpan)
       } else {
-        if !isValidVariableName(name) {
-          throw ParserError.invalidVariableName(span: nameSpan, name: name)
-        }
         if isForeign {
           return try foreignLetDeclaration(name: name, mutable: false, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
         }

@@ -454,10 +454,12 @@ given CodeGen {
                 .ForeignType(identifier) then {
                     empty_types.push(self.c_identifier_for_symbol(identifier));
                 },
-                .ForeignStruct(identifier, fields) then {
-                    if fields.is_empty() then {
-                        empty_types.push(self.c_identifier_for_symbol(identifier));
-                    };
+                .ForeignStruct(_, _) then {
+                    // A zero-field foreign STRUCT (`type foreign X();`) is a
+                    // struct, not a typedef form: it emits `struct X { }` via
+                    // the type declarations like every other foreign struct.
+                    // (It used to also land in `empty_types` and pick up a
+                    // second, typedef-shaped emission the seed never had.)
                 },
                 .ForeignFunction(identifier, params, return_type, is_definition) then {
                     // 导出定义（有体）自带定义体，不发 extern 原型。
@@ -717,7 +719,15 @@ given CodeGen {
             return;
         };
 
+        // One typedef per C name: two declarations may legitimately share one
+        // (two opaque views of one C type, e.g. a user's and std's `CFile`),
+        // and the typedef text is identical.
+        let mutable emitted = Set[String].new();
         for name in foreign_declarations.empty_types then {
+            if emitted.contains(name) then {
+                continue;
+            };
+            emitted.insert(name);
             self.buffer.push_string("typedef struct \(name) \(name);\n");
         };
         self.buffer.push_string("\n");

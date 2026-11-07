@@ -223,11 +223,22 @@ C 名不透明类型的声明权让渡 + 文档三处修正。设计 §A.3 / §B
   （非 C 标识符 Koral 名 + 槽位的豁免路径，导出函数直呼）——两编译器同输出。
 - 1251 用例 seed / bootstrap / 差分（含逐字诊断对照）三线全绿。
 
-### 实现中发现的既有问题（记档未动）
+### 实现中发现的既有问题（随批处置）
 
-1. **一条 foreign 类型声明两个 DefId（两端同款）**：生成 TU 里同类型出两条 typedef——
-   Koral 名一条、C 名一条（`typedef struct CFile CFile;` + `typedef struct FILE FILE;`）。
-   合法 C 且两编译器逐字一致，属撞名检查早已记档的「一个声明多个 DefId」族；按名去重
-   是顺手活，留给后续清理批次。
-2. **double-failure 角序**：Koral 名同时不合值命名法与 C 标识符时，两端都报「名字类」错误
-   但先后次序不同（koralc 形状在前、Swift 派生在前）——病态输入，单故障面报文一致。
+1. **「一条声明两条 typedef」是误诊**：那两条 `typedef struct CFile CFile;` +
+   `typedef struct FILE FILE;` 是**两条真实声明**——std 自己就有
+   `type foreign CFile {}`（`std/utils.koral`），探针撞了它的名字，各发各的 C 名，
+   行为正确。单声明只发一条（`type foreign "PH" X {}` 实测）。顺手做的两件卫生：
+   同名 typedef 去重（两编译器）；**真查出一个双端分歧**——零字段括号形态
+   `type foreign X();` koralc 发 typedef+struct 双份、seed 只发 struct（P1 起就岔），
+   已按「零字段 foreign struct 也是 struct」对齐（只发 struct 形态）。
+2. **double-failure 角序已修**：Koral 名同时不合值命名法与 C 标识符时两端报文次序
+   曾不同。Swift 的 let 路径改成 koralc 的检查序（**形状 → 派生 → 类型参数**，形状
+   口味同 koralc 的裸 `(` 嗅探）：`let foreign Ç(…)` 两端都报形状、`let foreign
+   café[T](…)` 两端都报派生。顺带对齐了形状错误的口味分歧（注解型 `let Bad (Int) ->
+   Int` 两端都归函数名）。
+
+**随批记档（未动）**：同 C 名的两条 foreign **结构体**声明（如用户重声明 std 的
+`KoralTimespec` 但字段表不同）在生成 TU 里由 decl_map 按 C 名并成一份定义（字段多者
+赢）——两个 Koral 类型共用一个 C tag 的布局分歧没有诊断，`_Static_assert` 体检是
+登记在案的加固位。

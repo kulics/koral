@@ -1069,8 +1069,15 @@ public class CodeGen {
     }
 
     if !foreignTypes.isEmpty {
+      // One typedef per C name: two declarations may legitimately share one
+      // (two opaque views of one C type, e.g. a user's and std's `CFile`),
+      // and the typedef text is identical.
+      var emittedTypedefs = Set<String>()
       for typeSymbol in foreignTypes {
-        generateForeignTypeDeclaration(typeSymbol)
+        let cName = context.getCname(typeSymbol.defId) ?? context.getName(typeSymbol.defId) ?? "<unknown>"
+        if emittedTypedefs.insert(cName).inserted {
+          buffer += "typedef struct \(cName) \(cName);\n"
+        }
       }
       buffer += "\n"
     }
@@ -1269,13 +1276,6 @@ public class CodeGen {
       buffer += "return 0;\n"
     }
     buffer += "}\n"
-  }
-
-  private func generateForeignTypeDeclaration(_ identifier: Symbol) {
-    // The type's name in the C world: the written C name, or the Koral name
-    // verbatim (a foreign name is never rewritten -- it is a real symbol).
-    let cName = context.getCname(identifier.defId) ?? context.getName(identifier.defId) ?? "<unknown>"
-    buffer += "typedef struct \(cName) \(cName);\n"
   }
 
   private func generateForeignFunctionDeclaration(_ identifier: Symbol, _ params: [Symbol]) {
