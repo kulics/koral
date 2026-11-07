@@ -429,6 +429,11 @@ public class DefIdMap {
     /// DefId 到 C 名称的映射（用于 foreign type 的 cname）
     private var cnameMap: [UInt64: String] = [:]
 
+    /// 用户显式写过 C 名槽位的声明（`let foreign "c_name" …` / `type foreign
+    /// "c_name" …`）。与 cnameMap 分开：mono 会把派生名也灌进 cnameMap，
+    /// 「名字是什么」和「名字是不是用户拼的」是两件事——导出头只对后者让出声明权。
+    private var declaredCnameIds: Set<UInt64> = []
+
     /// DefId 到符号信息的映射
     private var symbolInfoMap: [UInt64: SymbolInfo] = [:]
 
@@ -860,6 +865,17 @@ public class DefIdMap {
 
     public func getCname(_ defId: DefId) -> String? {
         return cnameMap[defId.id]
+    }
+
+    /// Record that `cname` was spelled in the source's C-name slot (not derived
+    /// from the Koral name by the compiler).
+    public func setDeclaredCname(_ defId: DefId, _ cname: String) {
+        cnameMap[defId.id] = cname
+        declaredCnameIds.insert(defId.id)
+    }
+
+    public func hasDeclaredCname(_ defId: DefId) -> Bool {
+        return declaredCnameIds.contains(defId.id)
     }
 
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {

@@ -823,13 +823,16 @@ given Parser {
     ): Result[Decl] = {
         if is_foreign then {
             // `let foreign` 的函数/变量形态在 `parse_let_decl` 里直接构造
-            // （ForeignFunctionDecl / ForeignLetDecl）；这里只收类型声明。
+            // （ForeignFunctionDecl / ForeignLetDecl）；类型声明的 foreign 形态
+            // 也在 `parse_type_decl` 里直接构造并带着 C 名槽位——这条臂只是兜底，
+            // 走到即无槽位可带。
             return when base in {
                 .TypeStructDecl(_, name, _, _, fields, span, name_span) then .Ok(
                     Decl.ForeignTypeDecl(
                         access,
                         name,
                         Option[List[Field]].Some(fields),
+                        Option[String].None(),
                         span,
                         name_span,
                     ),
@@ -1957,6 +1960,20 @@ given Parser {
                 self.parser_error_at(self.invalid_variable_name_error(name), name_token),
             );
         };
+
+        // A `let foreign` declaration's name in the C world is the C-name
+        // slot -- or, spelled nowhere, the Koral name verbatim. Either way it
+        // must be a legal C identifier: it reaches the generated TU and the
+        // export headers as a C symbol spelling.
+        if decl_is_foreign and (cname is .None()) and not is_valid_c_name(name) then {
+            return .Error(
+                self.parser_error_at(
+                    "Koral name \"\(name)\" is not a legal C identifier; write a C name string after 'foreign'",
+                    name_token,
+                ),
+            );
+        };
+
         let type_params = self.parse_type_parameters() or return;
 
         // A `(` that opens a function TYPE's parameter list (`let f (Int) ->
@@ -2172,6 +2189,28 @@ given Parser {
         let decl_is_foreign = decl_qualifiers.is_foreign;
         let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
 
+        // C 名槽位：`type foreign "timespec" KoralTimespec(…)`。与 `let foreign`
+        // 同一拼写、同一规则——外来词汇是字符串，紧跟 `foreign`；不写即 Koral 名
+        // 逐字。它是这条声明在 C 世界的名字（结构体 = C 的 struct tag）。
+        let mutable cname = Option[String].None();
+        if decl_is_foreign then {
+            when self.current().kind in {
+                .StringLiteral(text) then {
+                    if not is_valid_c_name(text) then {
+                        return .Error(
+                            self.parser_error_at(
+                                "C name \"\(text)\" is not a legal C identifier",
+                                self.current(),
+                            ),
+                        );
+                    };
+                    cname = .Some(text);
+                    self.advance();
+                },
+                _ then {},
+            };
+        };
+
         let mutable is_nominal_mutable = false;
         if self.current().kind is .KwMut() then {
             is_nominal_mutable = true;
@@ -2183,6 +2222,16 @@ given Parser {
         if not self.is_upper_first(name) then {
             return .Error(
                 self.parser_error_at(self.invalid_type_name_error(name), name_token),
+            );
+        };
+
+        // 同 `let foreign`：省略 C 名时，Koral 名就是 C 名，必须是合法 C 标识符。
+        if decl_is_foreign and (cname is .None()) and not is_valid_c_name(name) then {
+            return .Error(
+                self.parser_error_at(
+                    "Koral name \"\(name)\" is not a legal C identifier; write a C name string after 'foreign'",
+                    name_token,
+                ),
             );
         };
         let type_params = self.parse_type_parameters() or return;
@@ -2281,6 +2330,7 @@ given Parser {
                             access,
                             name,
                             Option[List[Field]].Some(fields),
+                            cname,
                             self.span_from_start(start),
                             self.token_span(name_token),
                         ),
@@ -2380,6 +2430,7 @@ given Parser {
                             access,
                             name,
                             Option[List[Field]].Some(fields),
+                            cname,
                             self.span_from_start(start),
                             self.token_span(name_token),
                         ),
@@ -2414,6 +2465,7 @@ given Parser {
                                 access,
                                 name,
                                 Option[List[Field]].None(),
+                                cname,
                                 self.span_from_start(start),
                                 self.token_span(name_token),
                             ),

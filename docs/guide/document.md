@@ -3245,9 +3245,11 @@ let foreign add_one(x: Int32): Int32 = {                 // definition: exported
 - **The C-name slot**: a string written right after `foreign`, before the Koral
   name — it is this declaration's **name in the C world**. Identifiers belong to
   the Koral namespace only; foreign vocabulary (C symbol names, macro names) is
-  spelled as strings. Omitted, the C name is the Koral name verbatim. The Koral
-  name keeps value naming and may collide with a C keyword harmlessly — the
-  two names differ, each side calls its own.
+  spelled as strings. Omitted, the C name is the Koral name verbatim, so the
+  Koral name must then itself be a legal C identifier — the compiler refuses
+  one that is not and points at the slot. With a slot the two names part ways,
+  and the Koral name may even collide with a C keyword harmlessly — each side
+  calls its own.
 - An exported (body-bearing) function's signature restrictions are **exactly**
   the reference ones: closed set, positional parameters, no generics. It is
   callable from Koral like any function, and as a value its type is
@@ -3262,7 +3264,7 @@ The value's presence and `mutable` pick the form:
 
 ```koral
 let foreign mutable errno: Int32;            // reference: extern mutable variable
-let foreign stdin: CFile;                    // reference: extern read-only (const)
+let foreign stdin: *CFile;                   // reference: extern read-only (const)
 let foreign mutable counter: Int32 = 0;      // definition: C variable (static init)
 let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
 ```
@@ -3272,6 +3274,9 @@ let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
 - A value with no `mutable` is a **C macro constant** binding: the value is
   copied from the C header, and no C entity is produced (a macro has no link
   symbol); the C-name slot records the macro's name as a correspondence label.
+  The value is copied **by hand** — nothing checks it against the macro's real
+  value, so a header change moves silently; re-check the binding when the
+  header changes.
 
 #### Boundary Types
 
@@ -3308,12 +3313,24 @@ Declare external C types:
 // Opaque type (no fields)
 type foreign CFile {};
 
+// The same kind of type under its name in the C world
+type foreign "FILE" CFileHandle {};
+
 // FFI struct with fields (aligned with C layout)
-type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
+type foreign "timespec" KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 ```
 
 The rules are C's, spelled in Koral:
 
+- **The C-name slot** works exactly as on `let foreign` (same spelling, same
+  validation): it is the type's **name in the C world** — the C struct tag for
+  the struct form (`"timespec"` makes it `struct timespec`), the C type's own
+  spelling for the opaque form (`"FILE"` makes it `FILE`). That is what lets a
+  real C type cross a boundary untranslated: a shim that includes the owning
+  header meets the same tag and type. An opaque type with a C name is the C
+  side's declaration — the export header does **not** redeclare it, so include
+  the owning header before `koral_exports.h`. Omitted, the C name is the Koral
+  name verbatim, and the Koral name must itself be a legal C identifier.
 - A `type foreign` cannot be declared `mutable` — mutability is a property of
   Koral's own nominal declarations — and it takes no generic parameters.
 - Fields are bare `name: Type`: positional, with no access modifiers, no

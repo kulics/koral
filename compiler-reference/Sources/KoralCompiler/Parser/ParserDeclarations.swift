@@ -187,6 +187,14 @@ extension Parser {
       let nameSpan = currentSpan
       try match(.identifier(name))
 
+      // A `let foreign` declaration's name in the C world is the C-name slot --
+      // or, spelled nowhere, the Koral name verbatim. Either way it must be a
+      // legal C identifier: it reaches the generated TU and the export headers
+      // as a C symbol spelling.
+      if isForeign, cname == nil, !isValidCName(name) {
+        throw ParserError.invalidDerivedCName(span: nameSpan, name: name)
+      }
+
       let typePrams = try parseTypeParameters()
 
       if isForeign && !typePrams.isEmpty {
@@ -246,6 +254,18 @@ extension Parser {
       let isIntrinsic = quals.isIntrinsic
       let isForeign = quals.isForeign
 
+      // C 名槽位：`type foreign "timespec" KoralTimespec(…)`。与 `let foreign`
+      // 同一拼写、同一规则——外来词汇是字符串，紧跟 `foreign`；不写即 Koral 名
+      // 逐字。它是这条声明在 C 世界的名字（结构体 = C 的 struct tag）。
+      var cname: String? = nil
+      if isForeign, case .string(let text) = currentToken {
+        guard isValidCName(text) else {
+          throw ParserError.invalidCName(span: currentSpan, name: text)
+        }
+        cname = text
+        try match(.string(text))
+      }
+
       // New declaration-site mutability: type mutable Name { ... }
       // Only nominal types are mutable; enums and aliases remain non-mutable.
       var isNominalMutable = false
@@ -261,6 +281,11 @@ extension Parser {
 
       if !isValidTypeName(name) {
         throw ParserError.invalidTypeName(span: nameSpan, name: name)
+      }
+
+      // 同 `let foreign`：省略 C 名时，Koral 名就是 C 名，必须是合法 C 标识符。
+      if isForeign, cname == nil, !isValidCName(name) {
+        throw ParserError.invalidDerivedCName(span: nameSpan, name: name)
       }
 
       try match(.identifier(name))
@@ -318,7 +343,7 @@ extension Parser {
         )
       }
       if isForeign {
-        return try foreignTypeDeclaration(name: name, access: access, span: startSpan, nameSpan: nameSpan)
+        return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
       }
       return try parseStructDeclaration(
         name,
@@ -1160,7 +1185,7 @@ extension Parser {
   }
 
   private func foreignTypeDeclaration(
-    name: String, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     var fields: [(name: String, type: TypeNode)]? = nil
     if currentToken === .leftBrace {
@@ -1192,6 +1217,7 @@ extension Parser {
     return .foreignTypeDeclaration(
       name: name,
       fields: fields,
+      cname: cname,
       access: access,
       span: span,
       nameSpan: nameSpan

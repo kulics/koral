@@ -250,7 +250,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignTypeDeclaration(let name, let fields, let access, let span, _):
+        case .foreignTypeDeclaration(let name, let fields, _, let access, let span, _):
             if fields == nil {
                 try resolveOpaqueTypeSignature(
                     name: name,
@@ -669,7 +669,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignTypeDeclaration(let name, _, let access, _, _):
+        case .foreignTypeDeclaration(let name, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,

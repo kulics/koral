@@ -262,10 +262,11 @@ public class NameCollector: CompilerPass {
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
+        case .foreignTypeDeclaration(let name, let fields, let cname, let access, let span, let nameSpan):
             try collectForeignTypeDefinition(
                 name: name,
                 fields: fields,
+                cname: cname,
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
@@ -551,7 +552,7 @@ public class NameCollector: CompilerPass {
             span: span
         )
         if let cname {
-            defIdMap.setCname(defId, cname)
+            defIdMap.setDeclaredCname(defId, cname)
         }
 
         // 收集函数信息
@@ -595,7 +596,7 @@ public class NameCollector: CompilerPass {
             span: span
         )
         if let cname {
-            defIdMap.setCname(defId, cname)
+            defIdMap.setDeclaredCname(defId, cname)
         }
     }
     
@@ -690,6 +691,7 @@ public class NameCollector: CompilerPass {
     private func collectForeignTypeDefinition(
         name: String,
         fields: [(name: String, type: TypeNode)]?,
+        cname: String? = nil,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
@@ -712,6 +714,11 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+        if let cname {
+            // The C-name slot: this type's name in the C world -- a struct tag
+            // for the struct form, the C type's own spelling for the opaque one.
+            defIdMap.setDeclaredCname(defId, cname)
+        }
 
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
         let collectedKind: CollectedTypeKind = fields == nil ? .opaque : .structure

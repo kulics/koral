@@ -1486,9 +1486,10 @@ given Printer {
             rp,
             ret,
         ),
-        .Type(vis, mods, kw, mut_kw, gp, name, body) then self.print_type_decl(
+        .Type(vis, mods, cname, kw, mut_kw, gp, name, body) then self.print_type_decl(
             vis,
             mods,
+            cname,
             kw,
             mut_kw,
             gp,
@@ -1935,6 +1936,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         kw: Token,
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -1950,6 +1952,11 @@ given Printer {
         // `foreign` / `intrinsic` sit right after the keyword: `type foreign`.
         for mod in mods then {
             self.write_token(mod);
+            self.write_space();
+        };
+        // C 名槽位紧跟 `foreign`（cffi-design.md §C）。
+        if cname is .Some(c) then {
+            self.write_token(c);
             self.write_space();
         };
         if mut_kw is .Some(m) then {
@@ -1969,6 +1976,7 @@ given Printer {
                         let decl_len = self.estimate_struct_decl_length(
                             vis,
                             mods,
+                            cname,
                             kw,
                             mut_kw,
                             gp,
@@ -2651,6 +2659,7 @@ given Printer {
         self,
         vis: Option[Token],
         mods: List[Token],
+        cname: Option[Token],
         kw: Token,
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
@@ -2663,6 +2672,9 @@ given Printer {
         };
         for mod in mods then {
             len += mod.to_string().count() + 1;
+        };
+        if cname is .Some(c) then {
+            len += c.to_string().count() + 1;
         };
         len += kw.to_string().count() + 1;
         if mut_kw is .Some(m) then {
@@ -2790,7 +2802,7 @@ given Printer {
                 self.print_type(vt);
             };
         },
-        .Type(vis, mods, kw, mut_kw, gp, name, body) then {
+        .Type(vis, mods, cname, kw, mut_kw, gp, name, body) then {
             if vis is .Some(v) then {
                 self.write_token(v);
                 self.write_space();
@@ -2799,6 +2811,11 @@ given Printer {
             self.write_space();
             for mod in mods then {
                 self.write_token(mod);
+                self.write_space();
+            };
+            // C 名槽位紧跟 `foreign`（cffi-design.md §C）。
+            if cname is .Some(c) then {
+                self.write_token(c);
                 self.write_space();
             };
             if mut_kw is .Some(m) then {
@@ -3087,7 +3104,7 @@ given Printer {
     /// and never carry visibility.
     public decl_visibility(d: CstDecl): Option[Token] = when d in {
         .Func(v, _, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _, _)
-        or .Type(v, _, _, _, _, _, _) or .Given(v, _, _, _, _, _, _, _, _, _) or .Var(v, _, _, _, _)
+        or .Type(v, _, _, _, _, _, _, _) or .Given(v, _, _, _, _, _, _, _, _, _) or .Var(v, _, _, _, _)
         or .Trait(v, _, _, _, _, _, _, _) or .TraitMethod(v, _, _, _, _, _, _) then v,
         .Using(_) then Option[Token].None(),
     };
@@ -3164,7 +3181,7 @@ private let validate_type_body(body: CstTypeBody): Result[Void] = when body in {
 
 private let validate_decl(decl: CstDecl): Result[Void] = when decl in {
     .Func(_, _, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
-    .Type(_, _, _, _, _, _, body) then validate_type_body(body),
+    .Type(_, _, _, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, members, _) or .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
     .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok(
         {},

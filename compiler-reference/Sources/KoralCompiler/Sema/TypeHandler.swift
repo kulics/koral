@@ -239,7 +239,10 @@ public class OpaqueHandler: TypeHandler {
         guard case .opaque(let defId) = type else {
             return "void*"
         }
-        return TypeHandlerRegistry.shared.currentContext?.getName(defId) ?? "void*"
+        guard let context = TypeHandlerRegistry.shared.currentContext else { return "void*" }
+        // A written C name is the type's spelling in the C world; spelled
+        // nowhere, the Koral name is it -- verbatim, never rewritten.
+        return context.getCname(defId) ?? context.getName(defId) ?? "void*"
     }
 
     public func generateCopyCode(_ type: Type, source: String, dest: String) -> String {

@@ -78,6 +78,7 @@ public enum ParserError: Error {
   case invalidEnumCaseName(span: SourceSpan, name: String)
   case invalidModuleName(span: SourceSpan, name: String)
   case invalidCName(span: SourceSpan, name: String)
+  case invalidDerivedCName(span: SourceSpan, name: String)
   // Module system errors
   case usingAfterDeclaration(span: SourceSpan)
   case invalidUsingAliasCase(span: SourceSpan, alias: String, referenced: String, expectedUppercase: Bool)
@@ -120,6 +121,7 @@ public enum ParserError: Error {
     case .invalidEnumCaseName(let span, _): return span
     case .invalidModuleName(let span, _): return span
     case .invalidCName(let span, _): return span
+    case .invalidDerivedCName(let span, _): return span
     case .usingAfterDeclaration(let span): return span
     case .invalidUsingAliasCase(let span, _, _, _): return span
     case .invalidFunctionType(let span, _): return span
@@ -180,6 +182,8 @@ public enum ParserError: Error {
       return "Module name '\(name)' must start with a lowercase letter"
     case .invalidCName(_, let name):
       return "C name \"\(name)\" is not a legal C identifier"
+    case .invalidDerivedCName(_, let name):
+      return "Koral name \"\(name)\" is not a legal C identifier; write a C name string after 'foreign'"
     case .usingAfterDeclaration:
       return "Using declarations must appear before other declarations"
     case .invalidUsingAliasCase(_, let alias, let referenced, let expectedUppercase):

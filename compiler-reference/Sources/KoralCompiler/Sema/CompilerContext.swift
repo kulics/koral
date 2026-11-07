@@ -202,6 +202,16 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.getCname(defId)
     }
 
+    /// Set the C name from a written C-name slot — the declaration's name in
+    /// the C world was spelled by the user, not derived from the Koral name.
+    public func setDeclaredCname(_ defId: DefId, _ cname: String) {
+        defIdMap.setDeclaredCname(defId, cname)
+    }
+
+    public func hasDeclaredCname(_ defId: DefId) -> Bool {
+        defIdMap.hasDeclaredCname(defId)
+    }
+
     public func isGenericInstantiation(_ defId: DefId) -> Bool? {
         defIdMap.isGenericInstantiation(defId)
     }

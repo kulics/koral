@@ -3765,6 +3765,21 @@ given CstParser {
         let kw = self.expect(.KwType(), "'type'") or return;
         // `foreign` / `intrinsic` sit immediately after `type`: `type foreign`.
         let mods = self.eat_kind_modifiers();
+        // C 名槽位：`type foreign "timespec" KoralTimespec(…)`——与 `let foreign`
+        // 同一拼写（docs/design/cffi-design.md §C）。
+        let mutable has_foreign = false;
+        for m in mods then {
+            when m in {
+                .KwForeign() then {
+                    has_foreign = true;
+                },
+                _ then {},
+            };
+        };
+        let mutable cname = Option[Token].None();
+        if has_foreign and self.check(.StrLit("")) then {
+            cname = .Some(self.eat());
+        };
         // `type` `mutable`? — the two nominal forms the language has
         // (grammar.bnf `<type-decl>`). `mutable` applies to structs only.
         let mutable mut_kw = Option[Token].None();
@@ -3853,7 +3868,7 @@ given CstParser {
             };
             let rp = self.expect(.RParen(), "')'") or return;
             return .Ok(
-                .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Struct(lp, items, rp)),
+                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Struct(lp, items, rp)),
             );
         };
 
@@ -3904,7 +3919,7 @@ given CstParser {
             };
             let rb = self.expect(.RBrace(), "'}'") or return;
             return .Ok(
-                .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Enum(lb, cases, rb)),
+                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Enum(lb, cases, rb)),
             );
         };
 
@@ -3916,12 +3931,12 @@ given CstParser {
             let eq = self.expect(.Eq(), "'='") or return;
             let target = self.parse_type_node() or return;
             return .Ok(
-                .Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Alias(eq, target)),
+                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Alias(eq, target)),
             );
         };
 
         // Empty (foreign type)
-        return .Ok(.Type(vis, mods, kw, mut_kw, gp, name, CstTypeBody.Empty()));
+        return .Ok(.Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Empty()));
     };
 
     private parse_enum_variant_expr(self): Result[CstExpr] = {

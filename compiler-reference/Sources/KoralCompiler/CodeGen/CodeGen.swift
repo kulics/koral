@@ -1272,7 +1272,9 @@ public class CodeGen {
   }
 
   private func generateForeignTypeDeclaration(_ identifier: Symbol) {
-    let cName = context.getName(identifier.defId) ?? "<unknown>"
+    // The type's name in the C world: the written C name, or the Koral name
+    // verbatim (a foreign name is never rewritten -- it is a real symbol).
+    let cName = context.getCname(identifier.defId) ?? context.getName(identifier.defId) ?? "<unknown>"
     buffer += "typedef struct \(cName) \(cName);\n"
   }
 
@@ -1557,7 +1559,10 @@ public class CodeGen {
   /// Nominal types appear as forward declarations only: `type foreign` is
   /// opaque on the C side by design, and a shim that needs a by-value layout
   /// completes the struct in its own translation unit (same tag, same
-  /// members = compatible, C11 6.2.7).
+  /// members = compatible, C11 6.2.7). A type with a written C name is the
+  /// C side's own type -- an opaque one is not declared here at all (the
+  /// shim includes the owning header first); a struct's tag is the C name,
+  /// so the forward declaration is the real C tag.
   public func generateExportsHeader() -> String {
     var typedefForms: [String] = []
     var forwardForms: [String] = []
@@ -1567,7 +1572,14 @@ public class CodeGen {
 
     func collectTypeDecls(_ type: Type) {
       switch type {
-      case .opaque:
+      case .opaque(let defId):
+        // A C-named opaque type is declared by the C side: its C name is the
+        // real C type's spelling (`FILE`, …), so the export header must not
+        // redeclare it -- the shim includes the owning header before this one.
+        // Spelled nowhere, the type is ours and the header typedefs it.
+        if context.hasDeclaredCname(defId) {
+          return
+        }
         let spelling = cTypeName(type)
         if spelling.hasPrefix("struct ") {
           let name = String(spelling.dropFirst("struct ".count))

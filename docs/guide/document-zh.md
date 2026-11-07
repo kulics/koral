@@ -3099,8 +3099,9 @@ let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
 ```
 
 - **C 名槽位**：字符串写在 `foreign` 之后、Koral 名之前，是这条声明**在 C 世界的名字**。
-  标识符只属于 Koral 名字空间；外来词汇（C 符号名、宏名）是字符串。不写即 Koral 名逐字。
-  Koral 名保持值命名法，撞 C 关键字也无妨——名字不同，各叫各的。
+  标识符只属于 Koral 名字空间；外来词汇（C 符号名、宏名）是字符串。不写即 Koral 名逐字——
+  此时 Koral 名本身必须是合法 C 标识符，否则编译器报错并指路槽位。给了槽位，两个名字
+  就各归各：Koral 名保持值命名法，撞 C 关键字也无妨——各叫各的。
 - 有体（导出）的签名限制与无体**完全相同**：封闭集合、位置参数、无泛型。
   它在 Koral 侧可直接调用，名字作值的类型是 `foreign (A) -> R`——可作为回调传给 C。
 - 可见性（`public` / `internal` / …）只管 Koral 侧名字；**C 符号恒导出**（C 没有模块可见性）。
@@ -3112,14 +3113,15 @@ let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
 
 ```koral
 let foreign mutable errno: Int32;            // 引用：extern 可变量
-let foreign stdin: CFile;                    // 引用：extern 只读量（const）
+let foreign stdin: *CFile;                   // 引用：extern 只读量（const）
 let foreign mutable counter: Int32 = 0;      // 定义：C 变量（静态初始化器）
 let foreign "AF_INET6" af_inet6: Int32 = 10; // 宏常量：值绑定，无存储、无符号
 ```
 
 - 初值只收**常量字面量**（可带负号 / `null`）——C 的静态初始化器必须是常量表达式。
 - 有初值 + 无 `mutable` 是 **C 宏常量**的值绑定：值从 C 头文件复制，不产生 C 实体
-  （宏无链接符号）；C 名槽位记宏名，仅作对应标注。
+  （宏无链接符号）；C 名槽位记宏名，仅作对应标注。值是**手抄**的——没有任何机制
+  核对它与宏的真实值，头文件改值不会有任何信号；头文件变了要人手复核这条绑定。
 
 #### 边界类型
 
@@ -3149,12 +3151,21 @@ foreign 全局量是 C 直接读取的布局对象，而函数参数/返回写 `
 // 不透明类型（无字段）
 type foreign CFile {};
 
+// 同一类东西，用它在 C 世界的名字
+type foreign "FILE" CFileHandle {};
+
 // 与 C 布局对齐的 FFI 结构体
-type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
+type foreign "timespec" KoralTimespec(tv_sec: Int64, tv_nsec: Int64);
 ```
 
 规则就是 C 的规则，用 Koral 的拼写：
 
+- **C 名槽位**与 `let foreign` 完全同一条规则（同一拼写、同一校验）：它是这条类型
+  **在 C 世界的名字**——结构体形态是 C 的 struct tag（`"timespec"` 就让它是
+  `struct timespec`），不透明形态是 C 类型自己的拼写（`"FILE"` 就让它是 `FILE`）。
+  真实 C 类型由此原样过界：include 属主头文件的 shim 遇到的是同一个 tag、同一个类型。
+  带 C 名的不透明类型归 C 侧声明——导出头**不**代为声明，因此要在 `koral_exports.h`
+  之前 include 属主头文件。不写即 Koral 名逐字，且 Koral 名本身必须是合法 C 标识符。
 - foreign 类型不能声明为 `mutable`——可变性属于 Koral 自己的 nominal 声明——也不接受泛型参数。
 - 字段只收裸 `name: Type`：位置字段，没有访问修饰符、`mutable` 标记、命名字段、默认值。C 布局是公开且恒可写的；改不了什么的标记只会撒谎。
 - 每个字段类型都必须能过 FFI 边界——内建标量、指向它们（或 `Void`，即 C 的 `void*`）的 `*` / `*mutable` 指针、或另一个 `type foreign` 声明：与 `foreign` 约束那组封闭集合相同。不透明 `type foreign X {}` 仍只出现在 `*` 后——它没有可存储的布局。禁止直接自递归（写 `*Self`）。

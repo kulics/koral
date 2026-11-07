@@ -182,3 +182,52 @@
   （s3.c == s4.c）与 dangling 扫描过，运行时压力、样例、工具链（koralfmt 268/268 +
   语料 250、koral-tool 9/9、doc --check 14 模块）、7 包 lint 全过。随批动作仅一件：
   `std/os` 新增 `host_arch_name` 后重生成 `docs/api/std`。
+
+## P4 —— C 名收口（2026-11-07）
+
+**范围**：派生 C 名校验（`let foreign` / `type foreign` 无槽位时 Koral 名必须是合法 C
+标识符）+ **`type foreign` 的 C 名槽位**（与 `let foreign` 同拼写同校验）+ 导出头对
+C 名不透明类型的声明权让渡 + 文档三处修正。设计 §A.3 / §B / §C 随批回写。
+
+### 落地面
+
+| 位置 | 内容 |
+|---|---|
+| `compiler/koralc` | parser（`parse_type_decl` C 名槽位 + 两侧派生名校验，报文同槽位族）、AST（`ForeignTypeDecl` 加 `cname`）、name collector（`set_declared_cname`——声明的 vs 派生的分开记）、mono（foreign 类型名表「cname 优先、逐字」）、codegen（导出头：带声明 C 名的不透明类型不发 typedef；foreign 全局量派生名兜底从 sanitize 改逐字） |
+| `compiler-reference` | 同上镜像：Parser（槽位 + 派生校验 + `invalidDerivedCName`）、NameCollector、DefIdMap（`declaredCnameIds`）、TypeCheckerPasses（symbol def-id 补挂 C 名——Swift 一条声明两个 DefId）、TypeHandler（opaque 命名认 cname）、CodeGen（导出头让渡 + typedef 命名认 cname） |
+| `docs/guide/document.md` / `document-zh.md` | C 名槽位规则加派生名校验；Foreign 类型加槽位；宏常量手抄风险提示；**修掉示例错**：`let foreign stdin: CFile;`（不透明按值收进全局量，与边界规则矛盾）→ `*CFile` |
+| `docs/design/cffi-design.md` | §A.3「C 标签由 mangling 生成」改写（真实 C 类型面前理由不成立）；§C 覆盖面扩到 `type foreign`；§E 导出头让渡说明 |
+
+### 语义要点（实现口径）
+
+- **一个 C 名两种来源，一种校验**：显式槽位过 `is_valid_c_name`；省略即 Koral 名逐字，
+  同样必须过 `is_valid_c_name`，否则 `Koral name "X" is not a legal C identifier; write a
+  C name string after 'foreign'`（两端逐字同报、同锚 Koral 名记号）。豁免路径 = 给槽位。
+- **`type foreign` 槽位语义**：结构体 = C 的 struct tag（生成 TU 发 `struct <cname>{…}`、
+  导出头前向 `struct <cname>;`、原型拼 `struct <cname>`）；不透明 = C 类型自己的拼写。
+  同 tag 同成员（C11 6.2.7）是布局契约，字段表即布局断言。
+- **导出头让渡**：带声明 C 名的不透明类型**不**在 `koral_exports.h` 里 typedef——C 名意味着
+  声明归 C 侧，shim 先 include 属主头；无槽位的照旧 typedef（自包含）。生成 TU 恒自发
+  声明（自包含不动）。
+- **declared ≠ derived**：mono 会把派生名也灌进 cname 表，「名字是什么」与「名字是不是
+  用户拼的」分开记（`declared_cname_ids`）——让渡只认后者。
+- 生成 C 的派生名一律逐字（foreign 名从不改写：改写=改掉一个已存在的符号）；原来
+  foreign 全局量兜底分支的 sanitize（静默改链接名）已删。
+
+### 验收
+
+- `foreign_derived_cname_error`（非 ASCII Koral 名）、`foreign_derived_cname_keyword_error`
+  （Koral 名撞 C 关键字）、`foreign_type_derived_cname_error`、`foreign_type_cname_error`
+  （槽位非法）——四条报文两端逐字一致。
+- `foreign_type_cname_ok`（C 名结构体 + 两种不透明）、`foreign_derived_cname_escape_ok`
+  （非 C 标识符 Koral 名 + 槽位的豁免路径，导出函数直呼）——两编译器同输出。
+- 1251 用例 seed / bootstrap / 差分（含逐字诊断对照）三线全绿。
+
+### 实现中发现的既有问题（记档未动）
+
+1. **一条 foreign 类型声明两个 DefId（两端同款）**：生成 TU 里同类型出两条 typedef——
+   Koral 名一条、C 名一条（`typedef struct CFile CFile;` + `typedef struct FILE FILE;`）。
+   合法 C 且两编译器逐字一致，属撞名检查早已记档的「一个声明多个 DefId」族；按名去重
+   是顺手活，留给后续清理批次。
+2. **double-failure 角序**：Koral 名同时不合值命名法与 C 标识符时，两端都报「名字类」错误
+   但先后次序不同（koralc 形状在前、Swift 派生在前）——病态输入，单故障面报文一致。

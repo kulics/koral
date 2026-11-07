@@ -325,6 +325,11 @@ public type mutable DefIdMap(
     // 模块路径（点分）-> 派生符号键（§5.3.1）。C 符号前缀取自（包来源，入口
     // 位置），而模块 PATH 是消费方的拼写——换依赖 key 就变，只能当名字用。
     mutable module_symbol_keys: Dict[String, String],
+
+    // 用户显式写过 C 名槽位的声明（`let foreign "c_name" …` / `type foreign
+    // "c_name" …`）。与 cname_map 分开：mono 会把派生名也灌进 cname_map，
+    // 「名字是什么」和「名字是不是用户拼的」是两件事——导出头只对后者让出声明权。
+    mutable declared_cname_ids: Set[UInt],
 );
 
 given DefIdMap {
@@ -363,6 +368,7 @@ given DefIdMap {
             Option[DefId].None(),
             Dict[String, DefId].new(),
             Dict[String, String].new(),
+            Set[UInt].new(),
         );
     };
 
@@ -888,6 +894,17 @@ given DefIdMap {
 
     public get_cname(self, id: DefId): Option[String] = {
         return self.cname_map.get(id.id);
+    };
+
+    /// Record that `cname` was spelled in the source's C-name slot (not derived
+    /// from the Koral name by the compiler).
+    public set_declared_cname(self, id: DefId, cname: String): Void = {
+        self.cname_map.insert(id.id, cname);
+        self.declared_cname_ids.insert(id.id);
+    };
+
+    public has_declared_cname(self, id: DefId): Bool = {
+        return self.declared_cname_ids.contains(id.id);
     };
 
     // ── 类型映射 ─────────────────────────────────────────────────────────

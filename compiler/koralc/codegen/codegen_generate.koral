@@ -509,7 +509,10 @@ given CodeGen {
     /// Nominal types appear as forward declarations only: `type foreign` is
     /// opaque on the C side by design, and a shim that needs a by-value layout
     /// completes the struct in its own translation unit (same tag, same
-    /// members = compatible, C11 6.2.7).
+    /// members = compatible, C11 6.2.7). A type with a written C name is the
+    /// C side's own type -- an opaque one is not declared here at all (the
+    /// shim includes the owning header first); a struct's tag is the C name,
+    /// so the forward declaration is the real C tag.
     public generate_exports_header(self): String = {
         let out = ExportHeaderDecls(
             List[String].new(),
@@ -631,7 +634,15 @@ given CodeGen {
     /// array / function-pointer wrapper typedefs as their registration names.
     collect_export_type_decls(self, t: Type, out: ExportHeaderDecls): Void = {
         when t in {
-            .OpaqueType(_) then {
+            .OpaqueType(def_id) then {
+                // A C-named opaque type is declared by the C side: its C name
+                // is the real C type's spelling (`FILE`, …), so the export
+                // header must not redeclare it -- the shim includes the owning
+                // header before this one. Spelled nowhere, the type is ours
+                // and the header typedefs it.
+                if self.context.has_declared_cname(def_id) then {
+                    return;
+                };
                 let spelling = self.c_type_name(t);
                 if spelling.starts_with("struct ") then {
                     let name = spelling.substring(7..<spelling.count());

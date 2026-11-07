@@ -134,7 +134,10 @@ type foreign KoralTimespec(tv_sec: Int64, tv_nsec: Int64); // FFI 结构体
   `mutable` 字段 ✓；`let` / 普通参数 / `self` / `*T` 链 / 临时值 ✗。
 - 显式 `Drop` 被拒绝：C 值没有析构——代码生成是纯 C 赋值拷贝，drop 是空操作。
 - `given` 方法可写（`self` 语义同上）。
-- **C 结构标签由 mangling 生成**：Koral 名是本地名，不必与 C 头的 tag 同名（布局匹配不靠名字）。
+- **C 名槽位**（2026-11-07）：`type foreign "timespec" KoralTimespec(…)` ——结构体形态取 C 的
+  struct tag，不透明形态取 C 类型自己的拼写；不写则 Koral 名逐字（且必须是合法 C 标识符）。
+  布局匹配仍不靠名字（字段表=布局断言，同 tag 同成员 = C11 6.2.7 兼容），但名字对上了，
+  shim include 真实头文件后按值也能过 export 原型。
 
 #### A.4 `[N]T`：定长数组
 
@@ -211,12 +214,17 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
   身份仍是 DefId，C 名只是改编结果。
 - **语义**：这条声明**在 C 世界的名字**。函数 / 全局量 = 链接名（进 `cname` 通路，codegen 已
   「cname 优先、逐字使用」）；宏常量 = 宏名（对应标注，无实体）。可省略；省略 = Koral 名逐字
-  （现状兼容，std 的 `__koral_*` 绑定不动）。
-- **覆盖面**：只给 `let foreign` 位（函数、全局量、宏常量）。`type foreign` 的名字是 Koral
-  侧名，C 标签由 mangling 生成，不需要别名。
+  （现状兼容，std 的 `__koral_*` 绑定不动）——**但此时 Koral 名就是 C 名，必须是合法 C
+  标识符**，否则报错要求给槽位（2026-11-07 收紧：此前派生名不校验，非法 C 一路漏到 clang）。
+- **覆盖面**：`let foreign`（函数、全局量、宏常量）与 **`type foreign`**（2026-11-07 起同一
+  槽位）：结构体形态是 C 的 struct tag（`"timespec"` → `struct timespec`），不透明形态是 C
+  类型自己的拼写（`"FILE"` → `FILE`）。带 C 名的不透明类型**归 C 侧声明**——导出头不代为
+  typedef，shim 先 include 属主头；结构体照发前向声明（同 tag 同成员 = C11 6.2.7 兼容）。
+  原「C 标签由 mangling 生成、不需要别名」的理由在真实 C 类型面前不成立：`FILE` / `timespec`
+  的名字是 C 世界的，Koral 名对不上就要转型、按值位根本没法桥接。
 - **一并修掉存量坑**：Koral 名撞 C 关键字（`let foreign "abs" int(…)`）从此有出路——
-  C 名与 Koral 名各归各。注意 C 名本身必须是合法 C 标识符：`open$NOCANCEL` 这类
-  链接器级怪名（汇编级符号）仍走 C shim——extern 拼写受 C 词法约束。
+  C 名与 Koral 名各归各（不给槽位则报错，见上）。注意 C 名本身必须是合法 C 标识符：
+  `open$NOCANCEL` 这类链接器级怪名（汇编级符号）仍走 C shim——extern 拼写受 C 词法约束。
 - **原则**：标识符只属于 Koral 名字空间；**外来词汇（路径、模块名、C 名、构建目标名）一律
   字符串**——与 `using "std/io"`、`#if os("windows")` 同一条规则。
 
@@ -282,7 +290,8 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
 - **同一条 C 管线**：`run_clang` 从「一条平铺命令」重构为「编译 C 单元 + 链接」：生成 `.c`、
   `koral_runtime.c`（内置）、各包 `c_sources` 先各自编译再统一链接，`-O` 级别随构建模式。
 - **导出头**：按有体 `let foreign`（与导出全局量）生成 `koral_exports.h`，挂到各 `c_sources`
-  的 include path——C 文件回叫 Koral 的原型不靠手抄；`type foreign` 以不透明前向声明出现。
+  的 include path——C 文件回叫 Koral 的原型不靠手抄；`type foreign` 以不透明前向声明出现
+  （带 C 名的不透明类型除外——那是 C 侧的类型，导出头不代为声明，shim 先 include 属主头）。
 - **`koral_runtime.c` 保持内置**：它是 ABI 基座（`koral_runtime.h` 带 ABI 版本号，`--no-std`
   也要链），不是包特性；被替换的是「硬编码单文件」这条通路本身——同一条管线，runtime 是
   第一个常客（公理 7 的替换项）。

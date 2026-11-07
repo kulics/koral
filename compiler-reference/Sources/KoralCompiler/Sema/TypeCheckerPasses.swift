@@ -1054,7 +1054,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, _, let access, _, _):
+    case .foreignTypeDeclaration(let name, _, _, let access, _, _):
       let type = access == .private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -1405,7 +1405,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
@@ -2509,7 +2509,7 @@ extension TypeChecker {
       }
       // Generic structs are handled in pass 3
 
-    case .foreignTypeDeclaration(let name, let fields, let access, let span, _):
+    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, _):
       self.currentSpan = span
       guard let fields else {
         break
@@ -3202,7 +3202,7 @@ extension TypeChecker {
         throw error
       }
 
-    case .foreignTypeDeclaration(let name, let fields, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       let type: Type
@@ -3226,14 +3226,29 @@ extension TypeChecker {
           try currentScope.defineType(name, type: type)
         }
       }
+      // One declaration carries two DefIds (the collected type and the global
+      // symbol). A written C name is the declaration's name in the C world --
+      // it must land on both, or the two spell the type differently.
+      func foreignTypeSymbol() -> Symbol {
+        let symbol = makeGlobalSymbol(name: name, type: type, kind: .type, access: access)
+        switch type {
+        case .opaque(let defId), .structure(let defId):
+          if let cname = context.getCname(defId) {
+            context.setDeclaredCname(symbol.defId, cname)
+          }
+        default:
+          break
+        }
+        return symbol
+      }
       if fields != nil, case .structure(let defId) = type {
         let resolvedFields = context.getForeignStructFields(defId) ?? []
         return .foreignStruct(
-          identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access),
+          identifier: foreignTypeSymbol(),
           fields: resolvedFields
         )
       }
-      return .foreignType(identifier: makeGlobalSymbol(name: name, type: type, kind: .type, access: access))
+      return .foreignType(identifier: foreignTypeSymbol())
 
     case .foreignLetDeclaration(let name, let typeNode, let mutable, let initializer, _, let access, let span, let nameSpan):
       self.currentSpan = span

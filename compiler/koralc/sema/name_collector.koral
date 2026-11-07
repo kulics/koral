@@ -350,7 +350,7 @@ given NameCollector {
                     intrinsic_type,
                 );
             },
-            .ForeignTypeDecl(access, name, fields, span, name_span) then {
+            .ForeignTypeDecl(access, name, fields, cname, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -372,6 +372,12 @@ given NameCollector {
                     access,
                     span,
                 );
+                if cname is .Some(c) then {
+                    // The C-name slot: this type's name in the C world -- a
+                    // struct tag for the struct form, the C type's own
+                    // spelling for the opaque form.
+                    context.set_declared_cname(def_id, c);
+                };
                 let t = when fields in {
                     .Some(_) then Type.StructureType(def_id),
                     .None() then Type.OpaqueType(def_id),
@@ -485,7 +491,7 @@ given NameCollector {
                 );
                 let _ = body;
                 if cname is .Some(c) then {
-                    context.set_cname(def_id, c);
+                    context.set_declared_cname(def_id, c);
                 };
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
@@ -514,7 +520,7 @@ given NameCollector {
                 let sym = self.make_var_symbol(name, is_mutable, access, span);
                 if cname is .Some(c) then {
                     let mutable context = self.context;
-                    context.set_cname(sym.def_id, c);
+                    context.set_declared_cname(sym.def_id, c);
                 };
                 self.global_scope.define(self.context, sym);
             },
