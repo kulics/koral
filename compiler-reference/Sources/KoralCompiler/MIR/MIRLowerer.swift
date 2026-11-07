@@ -703,6 +703,11 @@ private final class MIRFunctionBuilder {
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
   private var deferredExpressionsByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
+  // Locals holding POINTERS RETURNED BY CALLS (built-in element slot
+  // lookups): loads through them must be materialized eagerly, because a
+  // later side effect can free the buffer the pointer addresses. Plain
+  // pointer locals are stable and keep the deferred read.
+  private var callDerivedPointerLocals: Set<MIRLocalID> = []
 
   init(
     program: MonomorphizedProgram,
@@ -4410,6 +4415,15 @@ private final class MIRFunctionBuilder {
         return .operand(operand)
       }
       if let place = result.place {
+        // A load through a call-produced pointer (an element slot) is
+        // materialized HERE, at the value's own evaluation position: later
+        // instructions in the block can run side effects (a call argument
+        // that grows a container), and a deferred load would then read
+        // through an already-invalidated slot pointer. Everything else keeps
+        // the deferred read.
+        if placeNeedsEagerLoad(place) {
+          return .operand(materialize(.placeRead(place, ownership: .copy), type: result.type))
+        }
         return .placeRead(place, ownership: .copy)
       }
     }
@@ -4536,7 +4550,11 @@ private final class MIRFunctionBuilder {
       return place
         case .derefExpression(let inner, let type),
           .unsafeDerefExpression(let inner, let type):
-      return .deref(base: lowerBorrowedSourceValue(inner), pointee: type)
+      let source = lowerBorrowedSourceValue(inner)
+      if exprLowersToPointerCall(inner) {
+        markCallDerivedPointer(source)
+      }
+      return .deref(base: source, pointee: type)
     case .castExpression(let inner, let type, _):
       switch (inner.type, type) {
       case (.reference, .reference),
@@ -4609,6 +4627,52 @@ private final class MIRFunctionBuilder {
     switch type {
     case .reference, .mutableReference, .weakReference, .mutableWeakReference:
       return true
+    default:
+      return false
+    }
+  }
+
+  /// Whether the expression's value is a pointer produced by a call (the
+  /// built-in element slot shape, possibly wrapped in a block): loads through
+  /// such pointers must run eagerly.
+  private func exprLowersToPointerCall(_ expr: TypedExpressionNode) -> Bool {
+    switch expr {
+    case .call:
+      return true
+    case .blockExpression(_, let tail, _):
+      if let tailExpr = tail { return exprLowersToPointerCall(tailExpr) }
+      return false
+    default:
+      return false
+    }
+  }
+
+  /// Record that `source` holds a pointer produced by a call (see
+  /// placeNeedsEagerLoad).
+  private func markCallDerivedPointer(_ source: MIRValue) {
+    if case .placeRead(.local(let id), _) = source {
+      callDerivedPointerLocals.insert(id)
+    } else if case .operand(.local(let id)) = source {
+      callDerivedPointerLocals.insert(id)
+    }
+  }
+
+  /// Whether a load through this place must run eagerly: the place reaches
+  /// through a pointer RETURNED BY A CALL (an element slot). Plain pointer
+  /// locals are stable and keep the deferred read.
+  private func placeNeedsEagerLoad(_ place: MIRPlace) -> Bool {
+    switch place {
+    case .deref(let base, _), .pointerElement(let base, _):
+      switch base {
+      case .placeRead(.local(let id), _), .operand(.local(let id)):
+        return callDerivedPointerLocals.contains(id)
+      default:
+        return false
+      }
+    case .field(let base, _):
+      return placeNeedsEagerLoad(base)
+    case .enumPayload(let base, _, _, _, _):
+      return placeNeedsEagerLoad(base)
     default:
       return false
     }

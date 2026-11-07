@@ -2714,6 +2714,17 @@ given TypeChecker {
                 let typed = self.check_expr_scoped_ref(expr_ref, .None(), scope);
                 when typed.expr_type in {
                     _ then if self.is_string_type(typed.expr_type) then typed
+                    else if typed.expr_type is .Unknown() then {
+                        // The part already failed to check; asking it for
+                        // `ToString` on top would build a method call on an
+                        // error-typed expression under a message that already
+                        // explains the failure. Mirrors Swift
+                        // buildToStringExpression's `.error` short-circuit.
+                        make_typed_expr(
+                            TypedExprKind.StringLiteral(""),
+                            self.builtin_string_type(),
+                        )
+                    }
                     else {
                         let _ = self.enforce_explicit_trait_requirement_with_context(
                             typed.expr_type,

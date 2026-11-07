@@ -49,6 +49,12 @@ type mutable MIRFunctionBuilder(
     mutable pattern_comparison_local: Option[MIRLocalID],
     mutable temporary_value_source_locations: Dict[UInt, MIRTemporaryValueSourceLocation],
     mutable ambiguous_temporary_value_source_locals: Set[UInt],
+    // Locals holding POINTERS RETURNED BY CALLS (built-in element slot
+    // lookups). Loads through them must be materialized eagerly: a later
+    // side effect can free the buffer the pointer addresses. Plain pointer
+    // locals (a container's `source` field) are stable and keep the deferred
+    // read the borrowed-parameter convention relies on.
+    mutable call_derived_pointer_locals: Set[UInt],
     mutable diagnostics: DiagnosticCollector,
 );
 
@@ -90,6 +96,7 @@ given MIRFunctionBuilder {
             Option[MIROperand].None(),
             Option[MIRLocalID].None(),
             Dict[UInt, MIRTemporaryValueSourceLocation].new(),
+            Set[UInt].new(),
             Set[UInt].new(),
             DiagnosticCollector.new(),
         );
@@ -432,12 +439,100 @@ given MIRFunctionBuilder {
         ) else Option[MIRPlace].None();
     };
 
+    /// Whether the expression's value is a pointer produced by a call (the
+    /// built-in element slot shape, possibly wrapped in a block): loads
+    /// through such pointers must run eagerly.
+    expr_lowers_to_pointer_call(self, expr: TypedExpr): Bool = {
+        return when expr.expr_kind in {
+            .Call(_, _) then true,
+            .Block(_, tail) then when tail in {
+                .Some(inner) then self.expr_lowers_to_pointer_call(inner),
+                .None() then false,
+            },
+            _ then false,
+        };
+    };
+
+    /// Whether a load through this place must run eagerly: the place reaches
+    /// through a pointer RETURNED BY A CALL (a built-in element slot), and a
+    /// later side effect can free the buffer that pointer addresses. A plain
+    /// pointer local (a container's `source` field) is stable, so reads
+    /// through it keep the deferred form the borrowed-parameter convention
+    /// relies on.
+    place_needs_eager_load(self, place: MIRPlace): Bool = {
+        return when place in {
+            .Deref(value, _) or .PointerElement(value, _) then when value in {
+                .PlaceRead(inner_place, _) then when inner_place in {
+                    .Local(local_id) then self.call_derived_pointer_locals.contains(
+                        local_id.raw_value,
+                    ),
+                    _ then false,
+                },
+                .Operand(operand) then when operand in {
+                    .Local(local_id) then self.call_derived_pointer_locals.contains(
+                        local_id.raw_value,
+                    ),
+                    _ then false,
+                },
+                _ then false,
+            },
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then self.place_needs_eager_load(
+                base,
+            ),
+            .Local(_) or .Global(_) then false,
+        };
+    };
+
+    /// Record that `source` holds a pointer produced by a call, so loads
+    /// through it are materialized eagerly (see place_needs_eager_load).
+    mark_call_derived_pointer(self, source: MIRValue): Void = {
+        when source in {
+            .PlaceRead(inner_place, _) then when inner_place in {
+                .Local(local_id) then {
+                    self.call_derived_pointer_locals.insert(local_id.raw_value);
+                },
+                _ then {},
+            },
+            .Operand(operand) then when operand in {
+                .Local(local_id) then {
+                    self.call_derived_pointer_locals.insert(local_id.raw_value);
+                },
+                _ then {},
+            },
+            _ then {},
+        };
+    };
+
     read_place_for_expected_type(
         self,
         place: MIRPlace,
         actual_type: Type,
         expected_type: Type,
     ): MIRValue = {
+        // A load through a call-produced pointer (an element slot) is
+        // materialized HERE, at the read's evaluation position: later
+        // instructions can run side effects (a call argument that grows the
+        // container), and a deferred load would read through an already
+        // invalidated slot pointer. Everything else keeps the deferred read:
+        // the call convention passes non-escaping parameters straight from
+        // their locals, and a materialized copy would add retain/drop churn
+        // in hot loops.
+        if self.place_needs_eager_load(place) then {
+            return when self.adapt_place_for_expected_type(place, actual_type, expected_type) in {
+                .Some(adapted_place) then MIRValue.Operand(
+                    self.materialize(
+                        MIRValue.PlaceRead(adapted_place, MIROwnershipUse.Copy()),
+                        expected_type,
+                    ),
+                ),
+                .None() then MIRValue.Operand(
+                    self.materialize(
+                        MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
+                        actual_type,
+                    ),
+                ),
+            };
+        };
         return when self.adapt_place_for_expected_type(place, actual_type, expected_type) in {
             .Some(adapted_place) then MIRValue.PlaceRead(
                 adapted_place,
