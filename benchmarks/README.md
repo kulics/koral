@@ -186,13 +186,20 @@ find/captures probes 12.4x / 6.1x):
   subscript already inlined and the overflow branches predicted-and-cheap —
   the loop sits at ~2.4 cycles/element and the remaining gap is C codegen
   loop quality against Go's wrapping arithmetic, not std-level overhead.
-- `dict_lookup` (1.41x to Swift): key construction and hashing dominate —
-  two short strings per operation (single-block allocation, no SSO) and a
-  per-byte `combine_hash` chain where a multiplicative hash would do. Both
-  are std-level; the string hash is the next target.
+- `dict_lookup` (1.41x to Swift): key construction is the whole gap — one
+  short-string allocation plus digit fill per operation, measured at 35ns
+  per key against ~3ns to hash one. Koral's dict operations alone are
+  already faster than Swift's; Swift's interpolated short strings cost
+  nearly nothing (inline buffers). An SSO-shaped short string is the fix;
+  single-block allocation was chosen over SSO and the swap is a String
+  representation project.
 - `set_membership` (1.31x to rust): the splitmix finalizer's flood immunity
-  costs a few ns per operation (see the seeding note); a residual regression
-  against the 2026-11-06 numbers is undiagnosed and tracked.
+  costs a few ns per operation (see the seeding note). Numbers for this case
+  swing up to ~25% across days with no code change — the 2026-11-06 table's
+  11.00 re-measures at ~13.9 on the SAME commit today (verified by building
+  that exact revision), so the drift is machine state (core scheduling,
+  thermals), not a regression. Compare within one session; cross-day
+  readings need a same-session anchor.
 
 ## regex_scan engine notes (2026-11-06, Windows x64)
 
