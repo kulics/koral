@@ -1,0 +1,31 @@
+// EXPECT: swap ok
+// Pins a seed-compiler regression in the borrowed-forwarding analysis: a
+// `let mutable` bound directly to a managed field and then swapped through
+// a temp inside a loop records a copy-chain CYCLE (tmp->a, b->tmp, a->b),
+// and the root walk followed that chain without a visited set -- the whole
+// compile hung in dictionary lookups, not the program. That this file
+// compiles at all is half the assertion; the swap semantics are the other.
+
+type mutable Box(items: List[Int], other: List[Int]);
+
+let main(): Void = {
+    let b = Box(List[Int].new(), List[Int].new());
+    b.items.push(1);
+    b.items.push(2);
+    b.other.push(3);
+    let mutable a = b.items;
+    let mutable c = b.other;
+    let mutable i = 0;
+    while i < 3 then {
+        let tmp = a;
+        a = c;
+        c = tmp;
+        i += 1;
+    };
+    // Three swaps: `a` holds Box.other (one element), `c` holds Box.items.
+    if a.count() == 1 and c.count() == 2 and a[0] == 3 and c[0] == 1 then {
+        println("swap ok");
+    } else {
+        println("FAIL swap: " + a.count().to_string() + " " + c.count().to_string());
+    };
+};

@@ -630,9 +630,13 @@ final class MIRFunctionCodeEmitter {
     // heapOwnedRefLocal.  When a heapOwned ref flows through copies
     // (e.g. %3 -> %5 -> %6) the intermediate locals are NOT in
     // heapOwnedRefLocals, so a direct .contains() check misses them.
+    // The chain is a functional graph, not a tree: a handle swap records
+    // tmp->a, a->b, b->tmp and closes a cycle, so the walk needs a visited
+    // set or it spins forever (the whole compile hangs in dictionary lookups).
     func findHeapOwnedRoot(_ localID: MIRLocalID) -> MIRLocalID? {
       var current: MIRLocalID? = localID
-      while let candidate = current {
+      var visited: Set<MIRLocalID> = []
+      while let candidate = current, visited.insert(candidate).inserted {
         if heapOwnedRefLocals.contains(candidate) { return candidate }
         current = copiedFromByLocal[candidate]
       }
