@@ -85,16 +85,22 @@ given[T: Any] List[T] {
     };
 
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
-    /// The hot fields are read before the store and `len + 1` computes once:
-    /// the element store may alias the list box in the C backend's memory
-    /// model, so anything read after it would reload from memory per push.
+    /// Every hot field is read before the growth call and re-read only in
+    /// the growth path: an opaque call in the loop forces the C backend to
+    /// reload whatever sits after it, per element. `len` flushes before
+    /// `grow_to` because growth moves exactly `len` elements.
     public push(self, value: T): Void = {
+        let mutable source = self.source;
+        let mutable cap = self.cap;
         let len = self.len;
         let next = len + UInt(1);
-        if next > self.cap then {
+        if next > cap then {
+            self.len = len;
             self.grow_to(next);
+            source = self.source;
+            cap = self.cap;
         };
-        init_memory(self.source + len, value);
+        init_memory(source + len, value);
         self.len = next;
     };
 
