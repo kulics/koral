@@ -10,6 +10,7 @@ type CNameCollisionEntry(
     line: UInt,
     column: UInt,
     span: SourceSpan,
+    is_foreign_type: Bool,
 );
 
 /// 一次待报告的碰撞：折叠出的 C 名字 + 两个不同拼写。
@@ -74,11 +75,24 @@ public let c_name_collision_diagnostics(
         // UTF-8 字节序，与 Swift 端的比较一致，两侧都取同两个拼写。
         sort_strings_utf8(names);
         when by_name.get(names[UInt(0)]) in {
-            .Some(f) then when by_name.get(names[UInt(1)]) in {
-                .Some(s) then {
-                    reports.push(CNameCollisionReport(c_name, f, s));
-                },
-                .None() then {},
+            .Some(f) then {
+                // 首对边界不变（一组只报一对）；但 foreign 类型×类型的对不归
+                // 这里管：结构体×结构体由布局声明检查（sema，自己的报文）报，
+                // 含不透明的对是同一个 C 类型的多个视图，合法。
+                let mutable reported = false;
+                let mutable k: UInt = 1;
+                while k < names.count() and not reported then {
+                    when by_name.get(names[k]) in {
+                        .Some(other) then {
+                            if not (f.is_foreign_type and other.is_foreign_type) then {
+                                reports.push(CNameCollisionReport(c_name, f, other));
+                                reported = true;
+                            };
+                        },
+                        .None() then {},
+                    };
+                    k += 1;
+                };
             },
             .None() then {},
         };
@@ -108,25 +122,31 @@ private let collect_c_name_collision_entries(
 ): Void = {
     when global in {
         .ForeignType(identifier) then {
-            push_foreign_c_name_entry(context, identifier.def_id, out);
+            push_foreign_c_name_entry(context, identifier.def_id, true, out);
             when identifier.symbol_type in {
-                .OpaqueType(def_id) then push_foreign_c_name_entry(context, def_id, out),
+                .OpaqueType(def_id) then push_foreign_c_name_entry(
+                    context,
+                    def_id,
+                    true,
+                    out,
+                ),
                 _ then {},
             };
         },
         .ForeignStruct(identifier, _) then {
-            push_foreign_c_name_entry(context, identifier.def_id, out);
+            push_foreign_c_name_entry(context, identifier.def_id, true, out);
             when identifier.symbol_type in {
                 .StructureType(def_id) then push_foreign_c_name_entry(
                     context,
                     def_id,
+                    true,
                     out,
                 ),
                 _ then {},
             };
         },
         .ForeignFunction(identifier, _, _, _) or .ForeignGlobalVariable(identifier, _, _, _) then {
-            push_foreign_c_name_entry(context, identifier.def_id, out);
+            push_foreign_c_name_entry(context, identifier.def_id, false, out);
         },
         .StructDeclaration(identifier, _) then {
             push_plain_c_name_entry(context, identifier.def_id, out);
@@ -166,26 +186,30 @@ private let push_plain_c_name_entry(
     out: List[CNameCollisionEntry],
 ): Void = {
     let c_name = context.get_c_identifier(def_id) or else "T_\(def_id.id)";
-    push_c_name_entry(context, def_id, c_name, out);
+    push_c_name_entry(context, def_id, c_name, false, out);
 };
 
 /// foreign 声明的 C 名字：`cname` 或 Koral 名字原样，不加模块前缀
-/// （Swift `buildCIdentifierMap` 的 foreign 分支同规则）。
+/// （Swift `buildCIdentifierMap` 的 foreign 分支同规则）。`is_foreign_type`
+/// 标出 `type foreign` 位：类型×类型的对不归撞名检查管（结构体×结构体由
+/// 布局声明检查按自己的报文报，含不透明的对是同一个 C 类型的多个视图）。
 private let push_foreign_c_name_entry(
     context: CompilerContext,
     def_id: DefId,
+    is_foreign_type: Bool,
     out: List[CNameCollisionEntry],
 ): Void = {
     let c_name = context.get_cname(def_id) or else {
         context.get_name(def_id) or else "T_\(def_id.id)"
     };
-    push_c_name_entry(context, def_id, c_name, out);
+    push_c_name_entry(context, def_id, c_name, is_foreign_type, out);
 };
 
 private let push_c_name_entry(
     context: CompilerContext,
     def_id: DefId,
     c_name: String,
+    is_foreign_type: Bool,
     out: List[CNameCollisionEntry],
 ): Void = {
     // 没有显示名的条目无拼写可报告；它们的 C 名字本来就是 DefId 兜底。
@@ -200,6 +224,7 @@ private let push_c_name_entry(
                 span.start.line,
                 span.start.column,
                 span,
+                is_foreign_type,
             ),
         );
     };

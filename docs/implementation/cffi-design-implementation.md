@@ -238,7 +238,36 @@ C 名不透明类型的声明权让渡 + 文档三处修正。设计 §A.3 / §B
    café[T](…)` 两端都报派生。顺带对齐了形状错误的口味分歧（注解型 `let Bad (Int) ->
    Int` 两端都归函数名）。
 
-**随批记档（未动）**：同 C 名的两条 foreign **结构体**声明（如用户重声明 std 的
-`KoralTimespec` 但字段表不同）在生成 TU 里由 decl_map 按 C 名并成一份定义（字段多者
-赢）——两个 Koral 类型共用一个 C tag 的布局分歧没有诊断，`_Static_assert` 体检是
-登记在案的加固位。
+### 补记 —— 同 C 名布局声明的政策（2026-11-07，随批落地）
+
+**问题**：同 C 名的 foreign 类型声明此前被 decl_map 按 C 名并成一份定义（字段多者
+赢），两类真实伤害全程静默——同名字段不同类型（用户以为 `tv_sec: Int32`，实际是
+std 的 Int64）、互异字段被并集吞掉（clang 在几百行外报 `no member named 'foo'`）。
+而 C 自己把同 tag 双定义叫 redefinition。
+
+**政策（沿用 `let foreign` 的定义位/引用位分野）**：
+
+- **struct 形态 = 布局定义位**：两条声明 C 名相同即报错，**字段表一致也报**（两个
+  Koral 类型 distinct、不能互传，共享一条声明才是出路）。报文：
+  `foreign types 'A' and 'B' both define the C type 'Z'; a C type gets one definition`，
+  锚在后一条声明，按来源序（文件、行、列）定先后。
+- **opaque 形态 = 引用位**：重复合法（不声明布局，同一个 C 类型的多个视图）；
+  **struct × opaque** 同名合法（定义独一份）。
+- 撞名检查对 foreign 类型×类型对不再报（结构体对归上面的布局检查，含不透明的对
+  合法）；「rename one of them」对这一族是坏建议（C 名是真身份，改名不解决冲突），
+  布局检查给自己的报文。折叠检测（值符号、类型×值符号交叉对）照旧。
+
+**随批修掉的两个相邻问题**：
+
+1. **check/build 口径**：布局检查落在名字层（两条命令同路），`check` 现在与
+   `build` 一样报 p1/p2/p3 类冲突。折叠族（`aα`/`a_`）的 check 覆盖仍缺——实例
+   级名字只在 mono 后可见，把撞名检查搬过 mono 会让 check 失去「免 mono」的低
+   时延；记档为取舍，build/emit-c 全覆盖。
+2. **声明 span 的双端分歧**：带访问前缀的声明，koralc 的 span 从关键字起、Swift
+   从 `public` 起（既有分歧，诊断锚位在前缀声明上会岔开 7 列）。Swift 的
+   `startSpan` 捕获移到修饰符之后，无前缀行为不变；`foreign_type_layout_conflict_
+   alias_error` 用带 `public` 的第二条声明钉住。
+
+**政策验证**（两端逐字一致）：p1 不同名同 C 名、p2 同名字段漂移、p3 同名同字段、
+p4 字段被吞——四案报同一文案；opaque×opaque、struct×opaque、std 的 `CFile` 共存
+——三案合法；折叠照报。

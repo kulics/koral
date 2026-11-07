@@ -12,6 +12,11 @@ public class CodeGen {
   var tempVarCounter = 0
   private var globalInitializations: [(name: String, initializer: Symbol)] = []
   private(set) var cIdentifierByDefId: [UInt64: String] = [:]
+  /// DefIds of `type foreign` declarations (both the symbol and the type
+  /// DefId). Foreign-type x foreign-type pairs are not folding collisions:
+  /// struct x struct is rejected by the layout-claim check in the name
+  /// collector, and any pair involving an opaque is two views of one C type.
+  private var foreignTypeDefIds: Set<UInt64> = []
   private var cTypeNameCache: [Type: String] = [:]
   private var callableNameByDefId: [UInt64: String] = [:]
   private var callParametersByDefId: [UInt64: [Parameter]] = [:]
@@ -263,16 +268,20 @@ public class CodeGen {
       case .foreignType(let identifier):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .internal)
         foreignDefIds.insert(defIdKey(identifier.defId))
+        foreignTypeDefIds.insert(defIdKey(identifier.defId))
         if case .opaque(let defId) = identifier.type {
           register(defId: defId, access: context.getAccess(defId) ?? .internal)
           foreignDefIds.insert(defIdKey(defId))
+          foreignTypeDefIds.insert(defIdKey(defId))
         }
       case .foreignStruct(let identifier, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .internal)
         foreignDefIds.insert(defIdKey(identifier.defId))
+        foreignTypeDefIds.insert(defIdKey(identifier.defId))
         if case .structure(let defId) = identifier.type {
           register(defId: defId, access: context.getAccess(defId) ?? .internal)
           foreignDefIds.insert(defIdKey(defId))
+          foreignTypeDefIds.insert(defIdKey(defId))
         }
       case .foreignFunction(let identifier, _, _):
         register(defId: identifier.defId, access: context.getAccess(identifier.defId) ?? .internal)
@@ -357,6 +366,7 @@ public class CodeGen {
       let name: String
       let fileName: String
       let span: SourceSpan
+      let isForeignType: Bool
     }
     // Least entry by (file, line, column): the declaration of this spelling
     // the diagnostic points at, chosen identically on both compilers.
@@ -382,7 +392,8 @@ public class CodeGen {
         cName: cId,
         name: name,
         fileName: context.getSourceFile(defId) ?? "",
-        span: context.getSpan(defId) ?? .unknown
+        span: context.getSpan(defId) ?? .unknown,
+        isForeignType: foreignTypeDefIds.contains(defIdKey(defId))
       )
       groups[cId, default: []].append(entry)
     }
@@ -399,7 +410,21 @@ public class CodeGen {
       }
       let names = byName.keys.sorted(by: lessName)
       guard names.count >= 2 else { continue }
-      reports.append((cId, byName[names[0]]!, byName[names[1]]!))
+      // First-pair boundary unchanged (one report per group); but a
+      // foreign-type x foreign-type pair is not ours: struct x struct is the
+      // name collector's layout-claim check (its own message), and a pair
+      // involving an opaque is two views of one C type -- legal.
+      let first = byName[names[0]]!
+      var reported = false
+      var k = 1
+      while k < names.count && !reported {
+        let other = byName[names[k]]!
+        if !(first.isForeignType && other.isForeignType) {
+          reports.append((cId, first, other))
+          reported = true
+        }
+        k += 1
+      }
     }
     reports.sort { lessName($0.cName, $1.cName) }
     guard !reports.isEmpty else { return }

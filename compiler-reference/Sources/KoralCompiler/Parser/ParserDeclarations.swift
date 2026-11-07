@@ -147,10 +147,14 @@ extension Parser {
   }
 
   func parseGlobalDeclaration() throws -> GlobalNode {
-    let startSpan = currentSpan
     let flags = try parseTopLevelDeclFlags()
     let explicitAccess = flags.explicitAccess
     let access = flags.access
+    // The declaration's span starts at its keyword (`let` / `type` / ...), not
+    // at the access prefix -- koralc's `span_from_start` starts after
+    // `parse_access_modifier` has consumed the prefixes, and a diagnostic
+    // anchored at the declaration has to land on the same column on both.
+    let startSpan = currentSpan
 
     if currentToken === .letKeyword {
       let keywordSpan = currentSpan

@@ -65,6 +65,11 @@ public class NameCollector: CompilerPass {
     
     /// 收集到的函数声明
     private var collectedFunctions: [String: CollectedFunctionInfo] = [:]
+
+    /// Foreign struct layout claims: one entry per struct-form `type foreign`
+    /// (its C name, Koral name, source). Checked across declarations at the
+    /// end of `run` -- see the report there.
+    private var foreignStructClaims: [(cName: String, name: String, sourceFile: String, span: SourceSpan)] = []
     
     /// 收集到的模块信息
 
@@ -100,6 +105,7 @@ public class NameCollector: CompilerPass {
         collectedTypes = [:]
         collectedGenericTemplates = [:]
         collectedFunctions = [:]
+        foreignStructClaims = []
 
         if let checker {
             checker.defIdMap = defIdMap
@@ -150,6 +156,37 @@ public class NameCollector: CompilerPass {
             }
         }
         
+        // Foreign struct layout claims (cffi-design.md §A.3 / §C): the C tag
+        // is one type identity, so two `type foreign` STRUCT declarations whose
+        // C names coincide are two layout claims for one C type -- C itself
+        // calls that a redefinition, and the drift between the two field lists
+        // is silent. The opaque form claims nothing and may repeat (two views
+        // of one C type -- the `let foreign` "same external symbol bound
+        // twice" rule). Reported in source order after the first claim.
+        let sortedClaims = foreignStructClaims.sorted { a, b in
+            if a.sourceFile != b.sourceFile {
+                return Array(a.sourceFile.utf8).lexicographicallyPrecedes(Array(b.sourceFile.utf8))
+            }
+            if a.span.start.line != b.span.start.line {
+                return a.span.start.line < b.span.start.line
+            }
+            return a.span.start.column < b.span.start.column
+        }
+        var firstClaimByCName: [String: (name: String, sourceFile: String, span: SourceSpan)] = [:]
+        for claim in sortedClaims {
+            if let first = firstClaimByCName[claim.cName] {
+                let message = "foreign types '\(first.name)' and '\(claim.name)' both define the C type '\(claim.cName)'; a C type gets one definition"
+                let error = SemanticError(.generic(message), fileName: claim.sourceFile, span: claim.span)
+                if let checker {
+                    try? checker.handleError(error)
+                } else {
+                    throw error
+                }
+            } else {
+                firstClaimByCName[claim.cName] = (name: claim.name, sourceFile: claim.sourceFile, span: claim.span)
+            }
+        }
+
         return NameCollectorOutput(
             defIdMap: defIdMap,
             moduleResolverOutput: moduleResolverOutput
@@ -718,6 +755,9 @@ public class NameCollector: CompilerPass {
             // The C-name slot: this type's name in the C world -- a struct tag
             // for the struct form, the C type's own spelling for the opaque one.
             defIdMap.setDeclaredCname(defId, cname)
+        }
+        if fields != nil {
+            foreignStructClaims.append((cName: cname ?? name, name: name, sourceFile: currentSourceFile, span: span))
         }
 
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName

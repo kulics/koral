@@ -484,6 +484,11 @@ private let type_check_resolver_output(
     ) then {
         name_pass.diagnostics.push(diag);
     };
+    for diag in check_foreign_struct_c_name_claims(
+        resolver_output.loaded_nodes_with_path,
+    ) then {
+        name_pass.diagnostics.push(diag);
+    };
 
     if name_pass.output is .None() then {
         return BodyCheckerOutput(
@@ -518,6 +523,106 @@ private let type_check_resolver_output(
         output.diagnostics.push(record.diagnostic);
     };
     return output;
+};
+
+/// 一条 foreign 结构体的布局声明：C 名（槽位或 Koral 名逐字）+ 显示名 + 来源。
+private type ForeignStructClaim(
+    c_name: String,
+    display_name: String,
+    source_file: String,
+    span: SourceSpan,
+);
+
+private let foreign_struct_claim_less(a: ForeignStructClaim, b: ForeignStructClaim): Bool = {
+    if a.source_file != b.source_file then {
+        let ar = a.source_file.to_runes();
+        let br = b.source_file.to_runes();
+        let shared = if ar.count() < br.count() then ar.count() else br.count();
+        let mutable i: UInt = 0;
+        while i < shared then {
+            if ar[i] < br[i] then {
+                return true;
+            };
+            if ar[i] > br[i] then {
+                return false;
+            };
+            i += 1;
+        };
+        return ar.count() < br.count();
+    };
+    if a.span.start.line != b.span.start.line then {
+        return a.span.start.line < b.span.start.line;
+    };
+    return a.span.start.column < b.span.start.column;
+};
+
+/// Foreign 结构体的布局声明检查（cffi-design.md §A.3 / §C）：C 的 tag 是一个
+/// 类型身份，两条 `type foreign` **结构体**声明的 C 名相同就是对同一个 C 类型的
+/// 两份布局声明——C 自己把同 tag 双定义叫 redefinition，而声明间的字段漂移
+/// （同名字段不同类型、互异字段被并集吞掉）是静默错。不透明形态不声明布局，
+/// 可以重复（同一个 C 类型的两个视图，与 `let foreign`「同一外部符号绑两次」
+/// 同一条规则）；struct × opaque 同名合法（定义独一份）。
+/// 按来源序（文件、行、列）报告第一条之后的每一条，点名第一条。
+private let check_foreign_struct_c_name_claims(
+    loaded_nodes: List[Pair[LoadedNode, List[String]]],
+): List[DiagnosticError] = {
+    let mutable claims = List[ForeignStructClaim].new();
+    for node_pair in loaded_nodes then {
+        let node = node_pair.first;
+        when node.decl in {
+            .ForeignTypeDecl(_, name, fields, cname, span, _) then {
+                if fields is .Some(_) then {
+                    let c_name = when cname in {
+                        .Some(c) then c,
+                        .None() then name,
+                    };
+                    claims.push(
+                        ForeignStructClaim(
+                            c_name,
+                            name,
+                            node.source_file,
+                            span,
+                        ),
+                    );
+                };
+            },
+            _ then {},
+        };
+    };
+    if claims.count() < 2 then {
+        return List[DiagnosticError].new();
+    };
+    let mutable i: UInt = 1;
+    while i < claims.count() then {
+        let mutable j: UInt = i;
+        while j > 0 and foreign_struct_claim_less(claims[j], claims[j - 1]) then {
+            let tmp = claims[j - 1];
+            claims[j - 1] = claims[j];
+            claims[j] = tmp;
+            j -= 1;
+        };
+        i += 1;
+    };
+    let mutable first_by_c_name = Dict[String, ForeignStructClaim].new();
+    let mutable diagnostics = List[DiagnosticError].new();
+    for claim in claims then {
+        when first_by_c_name.get(claim.c_name) in {
+            .Some(first) then {
+                diagnostics.push(
+                    make_diagnostic(
+                        DiagnosticStage.Semantic(),
+                        claim.source_file,
+                        "foreign types '\(first.display_name)' and '\(claim.display_name)' both define the C type '\(claim.c_name)'; a C type gets one definition",
+                        claim.span,
+                    ),
+                );
+            },
+            .None() then {
+                first_by_c_name.insert(claim.c_name, claim);
+            },
+        };
+    };
+    return diagnostics;
 };
 
 public let type_check_resolved_graph(
