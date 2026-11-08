@@ -13,8 +13,8 @@ func main() {
 		xs = append(xs, i)
 	}
 	sum := 0
-	for j := 0; j < len(xs); j++ {
-		sum += xs[j]
+	for _, v := range xs {
+		sum += v
 	}
 	fmt.Printf("RESULT %d %d\n", sum, time.Since(start).Nanoseconds())
 }

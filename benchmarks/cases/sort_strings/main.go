@@ -27,7 +27,7 @@ func main() {
 			panic("sort_strings: output must be sorted")
 		}
 		g := 0
-		for i := 0; i < len(v); i++ {
+		for i := range v {
 			g = (g*131+int(v[i])) % 2147483648
 		}
 		checksum = (checksum*131 + g) % 2147483648

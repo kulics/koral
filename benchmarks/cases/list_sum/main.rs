@@ -6,8 +6,8 @@ fn main() {
         xs.push(i);
     }
     let mut sum: i64 = 0;
-    for j in 0..xs.len() {
-        sum += xs[j];
+    for &v in &xs {
+        sum += v;
     }
     println!("RESULT {} {}", sum, start.elapsed().as_nanos());
 }

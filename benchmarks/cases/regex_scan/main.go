@@ -21,13 +21,20 @@ func main() {
 
 	start := time.Now()
 	var sum, count uint64
-	for _, m := range re.FindAllStringSubmatchIndex(text, -1) {
+	// Stream the matches one at a time -- the same workload as the other
+	// languages -- instead of materializing all 250k match records up front.
+	for pos := 0; pos < len(text); {
+		m := re.FindStringSubmatchIndex(text[pos:])
+		if m == nil {
+			break
+		}
 		count++
 		for _, v := range m {
 			if v >= 0 {
-				sum += uint64(v)
+				sum += uint64(v + pos)
 			}
 		}
+		pos += m[1]
 	}
 	elapsed := time.Since(start).Nanoseconds()
 	fmt.Printf("RESULT %d %d\n", sum+count, elapsed)
