@@ -117,7 +117,7 @@ given CstParser {
             return false;
         };
         return when self.tokens[i] in {
-            .KwWeakref() or .KwSelfType() then true,
+            .KwWeakref() or .KwSelfType() or .KwSendable() then true,
             // `[N]Type` -- a fixed array head.
             .LBracket() then true,
             .Star() then {
@@ -132,10 +132,10 @@ given CstParser {
     };
 
     /// Whether a token can start a type head (after `*`).
-    /// Type heads are `mutable`, `Self`, and uppercase identifiers.
+    /// Type heads are `mutable`, `sendable`, `Self`, and uppercase identifiers.
     private token_is_type_head(self, token: Token): Bool = {
         return when token in {
-            .KwMut() or .KwSelfType() then true,
+            .KwMut() or .KwSelfType() or .KwSendable() then true,
             .Ident(name) then self.is_type_start(.Ident(name)),
             _ then false,
         };
@@ -151,6 +151,10 @@ given CstParser {
                 return Option[UInt].None();
             };
             if self.tokens[i] is .KwWeakref() then {
+                i += 1;
+            } else if self.tokens[i] is .KwSendable() then {
+                // `sendable T` -- the qualifier prefix (grammar.bnf
+                // <type-prefix>); it nests like the others.
                 i += 1;
             } else if self.tokens[i] is .Star() then {
                 let n = self.sig_index_at(i + 1);
@@ -457,7 +461,8 @@ given CstParser {
     };
 
     private is_type_start(self, t: Token): Bool = when t in {
-        .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() then true,
+        // `sendable T` is a type-position prefix (grammar.bnf <type-prefix>).
+        .Star() or .KwPtr() or .KwWeakref() or .KwSelfType() or .KwSendable() then true,
         // A function type opens with its parameter list: `(T1, T2) -> R`.
         .LParen() then true,
         // A foreign function type opens with the keyword: `foreign (T) -> R`.
@@ -820,6 +825,16 @@ given CstParser {
     };
 
     private parse_type_node(self): Result[CstType] = {
+        // `sendable T` -- the type-position prefix qualifier (grammar.bnf
+        // <type-prefix>): `sendable (A) -> R`, `sendable Trait`. It nests
+        // (`sendable (A) -> sendable (B) -> R`), and the parser accepts the
+        // prefix on any type shape; narrowing it to function types and trait
+        // objects is the compilers' sema, not the grammar's.
+        if self.check(.KwSendable()) then {
+            let kw = self.eat();
+            let inner = self.parse_type_node() or return;
+            return .Ok(CstType.Sendable(kw, inner));
+        };
         // `foreign (A) -> R` -- the bare C function pointer type
         // (grammar.bnf <foreign-function-type>).
         if self.check(.KwForeign()) then {
@@ -2222,6 +2237,9 @@ given CstParser {
         },
         .Paren(lp, inner, rp) then .Paren(lp, self.type_as_expr(inner), rp),
         .ConstraintKeyword(kw) then .Ident(kw),
+        // `sendable T` keeps its keyword as a prefix keyword operand, the same
+        // shape `mutable T` takes.
+        .Sendable(kw, inner) then .PrefixKw(kw, self.type_as_expr(inner)),
         .Function(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
         .ForeignFunction(_, _, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
         .FixedArray(_, _, _, _) then .Ident(Token.Ident(type_to_string(t))),
@@ -3780,6 +3798,22 @@ given CstParser {
         if has_foreign and self.check(.StrLit("")) then {
             cname = .Some(self.eat());
         };
+        // `unsafe`? `sendable`? sit after `foreign` / the C name and before
+        // `mutable`: `type unsafe sendable mutable X` (grammar.bnf
+        // <sendability>). `unsafe` must be accompanied by `sendable`;
+        // `sendable` may stand alone. The order is fixed and the tokens are
+        // kept as written -- the printer round-trips them in source order.
+        let mutable unsafe_kw = Option[Token].None();
+        let mutable sendable_kw = Option[Token].None();
+        if self.check(.KwUnsafe()) then {
+            unsafe_kw = .Some(self.eat());
+            if not self.check(.KwSendable()) then {
+                return .Error("Parse error: 'unsafe' must be accompanied by 'sendable'");
+            };
+            sendable_kw = .Some(self.eat());
+        } else if self.check(.KwSendable()) then {
+            sendable_kw = .Some(self.eat());
+        };
         // `type` `mutable`? — the two nominal forms the language has
         // (grammar.bnf `<type-decl>`). `mutable` applies to structs only.
         let mutable mut_kw = Option[Token].None();
@@ -3868,7 +3902,18 @@ given CstParser {
             };
             let rp = self.expect(.RParen(), "')'") or return;
             return .Ok(
-                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Struct(lp, items, rp)),
+                .Type(
+                    vis,
+                    mods,
+                    cname,
+                    kw,
+                    unsafe_kw,
+                    sendable_kw,
+                    mut_kw,
+                    gp,
+                    name,
+                    CstTypeBody.Struct(lp, items, rp),
+                ),
             );
         };
 
@@ -3919,7 +3964,18 @@ given CstParser {
             };
             let rb = self.expect(.RBrace(), "'}'") or return;
             return .Ok(
-                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Enum(lb, cases, rb)),
+                .Type(
+                    vis,
+                    mods,
+                    cname,
+                    kw,
+                    unsafe_kw,
+                    sendable_kw,
+                    mut_kw,
+                    gp,
+                    name,
+                    CstTypeBody.Enum(lb, cases, rb),
+                ),
             );
         };
 
@@ -3931,12 +3987,25 @@ given CstParser {
             let eq = self.expect(.Eq(), "'='") or return;
             let target = self.parse_type_node() or return;
             return .Ok(
-                .Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Alias(eq, target)),
+                .Type(
+                    vis,
+                    mods,
+                    cname,
+                    kw,
+                    unsafe_kw,
+                    sendable_kw,
+                    mut_kw,
+                    gp,
+                    name,
+                    CstTypeBody.Alias(eq, target),
+                ),
             );
         };
 
         // Empty (foreign type)
-        return .Ok(.Type(vis, mods, cname, kw, mut_kw, gp, name, CstTypeBody.Empty()));
+        return .Ok(
+            .Type(vis, mods, cname, kw, unsafe_kw, sendable_kw, mut_kw, gp, name, CstTypeBody.Empty()),
+        );
     };
 
     private parse_enum_variant_expr(self): Result[CstExpr] = {
@@ -4003,6 +4072,12 @@ given CstParser {
     private parse_trait_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
         let kw = self.expect(.KwTrait(), "'trait'") or return;
+        // `trait sendable Name` -- declaration-site trait sendability
+        // (concurrency-design.md). Syntax-only here; the compilers own the rules.
+        let mutable sendable_kw = Option[Token].None();
+        if self.check(.KwSendable()) then {
+            sendable_kw = Option[Token].Some(self.eat());
+        };
         let name = self.expect_ident("trait name") or return;
         let gp = self.parse_generic_params() or return;
 
@@ -4023,7 +4098,7 @@ given CstParser {
         let lb = self.expect(.LBrace(), "'{'") or return;
         let members = self.parse_trait_members() or return;
         let rb = self.expect(.RBrace(), "'}'") or return;
-        return .Ok(.Trait(vis, kw, gp, name, supers, lb, members, rb));
+        return .Ok(.Trait(vis, kw, sendable_kw, gp, name, supers, lb, members, rb));
     };
 
     // ========================================================================

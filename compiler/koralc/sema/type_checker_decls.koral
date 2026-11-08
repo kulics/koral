@@ -443,7 +443,15 @@ given TypeChecker {
                 );
                 let annotated_type = when type_name in {
                     .Some(ta) then {
-                        let t = self.resolve_type(ta);
+                        let pre_resolve_diagnostics = self.storage.diagnostics.count();
+                        let resolved_ta = self.resolve_type(ta);
+                        // 参考编译器在标注解析失败时把标注降级为错误占位
+                        // （Swift registerPendingGlobalInit 的 catch）；同形
+                        // 处理：解析过程出过诊断就沉到 Unknown，绑定与后续
+                        // 检查不再拿半成型类型级联。
+                        let t = if self.storage.diagnostics.count() > pre_resolve_diagnostics then {
+                            Type.Unknown()
+                        } else resolved_ta;
                         let variable_kind = if is_mutable then VariableKind.MutableValue()
                         else VariableKind.Value();
                         let _ = self.make_top_level_symbol(
@@ -628,6 +636,7 @@ given TypeChecker {
                 // pending.
                 let typed_init = self.check_expr_global_ref(initializer, expected_type);
                 let resolved = expected_type or else typed_init.expr_type;
+                let pre_sendable_diagnostics = self.storage.diagnostics.count();
                 self.validate_signature_type_visibility(
                     name,
                     access,
@@ -647,6 +656,16 @@ given TypeChecker {
                     self.push_diagnostic(
                         "global variable type cannot contain borrowed reference type '\(self.context().type_display_name(resolved))'",
                         unknown_span(),
+                    );
+                };
+                // 全局量类型必须 sendable（concurrency-design.md §跨界检查 (c)）。
+                // 与参考编译器同形：签名类检查先失败时该绑定的类型退化为错误
+                // 恢复占位、不再级联本检查，所以这里只在同一绑定安静时报告。
+                if self.storage.diagnostics.count() == pre_sendable_diagnostics
+                    and not self.context().is_sendable_type(resolved) then {
+                    self.push_diagnostic(
+                        "Global variable '\(name)' must have a sendable type",
+                        name_span,
                     );
                 };
                 let stable_initializer = if retain_checked_template_bodies then {
@@ -800,7 +819,13 @@ given TypeChecker {
                     for param in stable_params then {
                         param_refs.push(param.param_type);
                     };
-                    let mutable fn_type = make_function_type(param_refs, stable_ret);
+                    // 顶层函数引用无环境可捕获，值类型天然 `sendable`
+                    // （concurrency-design.md §派生规则 5）。
+                    let mutable fn_type = make_function_type_with_flag(
+                        param_refs,
+                        stable_ret,
+                        true,
+                    );
                     let fn_sym = self.make_top_level_symbol(
                         name,
                         fn_type,
@@ -986,7 +1011,12 @@ given TypeChecker {
                 for param in typed_params then {
                     param_refs.push(param.param_type);
                 };
-                let mutable fn_type = make_function_type(param_refs, resolved_ret);
+                // intrinsic 函数同样无捕获，值类型天然 `sendable`。
+                let mutable fn_type = make_function_type_with_flag(
+                    param_refs,
+                    resolved_ret,
+                    true,
+                );
                 TypedDecl.IntrinsicFunctionDecl(
                     access,
                     name,
@@ -1197,7 +1227,7 @@ given TypeChecker {
                     ),
                 )
             },
-            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
+            .TypeStructDecl(access, name, is_mutable_type, sendability, type_params, fields, span, name_span) then {
                 let typed_fields = if type_params.is_empty() then {
                     self.check_fields(fields)
                 } else {
@@ -1244,6 +1274,13 @@ given TypeChecker {
                             unknown_span(),
                         );
                     };
+                    if sendability is .Sendable()
+                        and not self.context().is_sendable_type(field.field_type) then {
+                        self.push_diagnostic(
+                            "sendable type '\(name)' cannot have non-sendable field '\(field.name)'",
+                            unknown_span(),
+                        );
+                    };
                 };
                 if type_params.is_empty() then {
                     let fallback_type = Type.StructureType(
@@ -1261,6 +1298,7 @@ given TypeChecker {
                         .StructureType(def_id) then {
                             let mutable context = self.context();
                             context.set_struct_mutable(def_id, is_mutable_type);
+                            context.set_type_sendability(def_id, sendability);
                         },
                         _ then {},
                     };
@@ -1274,7 +1312,7 @@ given TypeChecker {
                     TypedDecl.TypeStructDecl(access, name, typed_fields, span, type_sym)
                 } else TypedDecl.GenericTypeStructDecl(access, name, span)
             },
-            .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
+            .TypeEnumDecl(access, name, sendability, type_params, cases, span, name_span) then {
                 let typed_cases = if type_params.is_empty() then {
                     self.check_enum_cases(cases)
                 } else {
@@ -1316,6 +1354,13 @@ given TypeChecker {
                                 unknown_span(),
                             );
                         };
+                        if sendability is .Sendable()
+                            and not self.context().is_sendable_type(field.field_type) then {
+                            self.push_diagnostic(
+                                "sendable type '\(name)' cannot have non-sendable payload '\(enum_case.name).\(field.name)'",
+                                unknown_span(),
+                            );
+                        };
                     };
                 };
                 if type_params.is_empty() then {
@@ -1327,10 +1372,17 @@ given TypeChecker {
                             span,
                         ),
                     );
+                    let resolved_enum_type = self.lookup_current_file_type_symbol(name) or else fallback_type;
+                    when resolved_enum_type in {
+                        .EnumType(def_id) then {
+                            self.context().set_type_sendability(def_id, sendability);
+                        },
+                        _ then {},
+                    };
                     let type_sym = self.make_top_level_type_symbol(
                         name,
                         TypeDefKind.Enum(),
-                        self.lookup_current_file_type_symbol(name) or else fallback_type,
+                        resolved_enum_type,
                         access,
                         span,
                     );
@@ -1341,6 +1393,11 @@ given TypeChecker {
                 let self_referential_target = when target in {
                     .Identifier(target_name, span) then target_name == name,
                     .Generic(base, _, span) then base == name,
+                    .SendableQualified(inner) then when inner in {
+                        .Identifier(target_name, _) then target_name == name,
+                        .Generic(base, _, _) then base == name,
+                        _ then false,
+                    },
                     _ then false,
                 };
                 if not type_params.is_empty() then {
@@ -1398,18 +1455,26 @@ given TypeChecker {
             .IntrinsicTypeDecl(access, name, type_params, span, name_span) then {
                 TypedDecl.IntrinsicTypeDecl(access, name, span)
             },
-            .ForeignTypeDecl(access, name, fields, cname, span, name_span) then {
+            .ForeignTypeDecl(access, name, sendability, fields, cname, span, name_span) then {
                 let _ = cname;
                 let typed_fields = when fields in {
                     .Some(raw_fields) then {
                         let mutable out = List[TypedField].new();
                         for f in raw_fields then {
+                            let resolved = self.resolve_type(f.type_name);
+                            if sendability is .Sendable()
+                                and not self.context().is_sendable_type(resolved) then {
+                                self.push_diagnostic(
+                                    "sendable type '\(name)' cannot have non-sendable field '\(f.name)'",
+                                    unknown_span(),
+                                );
+                            };
                             out.push(
                                 TypedField(
                                     f.access,
                                     f.name,
                                     f.is_mutable,
-                                    self.resolve_type(f.type_name),
+                                    resolved,
                                     f.named,
                                     f.default_value,
                                 ),
@@ -1450,6 +1515,12 @@ given TypeChecker {
                     ),
                 };
                 let mutable symbol_type = self.lookup_current_file_type_symbol(name) or else fallback_type;
+                when symbol_type in {
+                    .StructureType(def_id) or .OpaqueType(def_id) then {
+                        self.context().set_type_sendability(def_id, sendability);
+                    },
+                    _ then {},
+                };
                 TypedDecl.ForeignTypeDecl(
                     access,
                     name,
@@ -1469,7 +1540,7 @@ given TypeChecker {
                 path_segments.push(specifier);
                 TypedDecl.UsingDecl(AccessModifier.Private(), path_segments, span)
             },
-            .TraitDecl(access, name, type_params, parents, members, span, name_span) then {
+            .TraitDecl(access, name, _, type_params, parents, members, span, name_span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(
                     type_params,
                 );
@@ -1729,6 +1800,18 @@ given TypeChecker {
                         trait_name,
                         resolved_trait_args,
                     );
+                    // sendable trait 的实现类型必须自身 sendable（safe /
+                    // unsafe 形态都算），trait object 才能恒 sendable
+                    // （concurrency-design.md）。泛型实现按条件规则（实参全
+                    // sendable）判定。
+                    if self.context().is_sendable_trait(trait_def_id) and not self.context().is_sendable_type(
+                        resolved_target,
+                    ) then {
+                        self.push_diagnostic(
+                            "Type '\(self.context().type_display_name(resolved_target))' must be sendable to implement sendable trait '\(trait_name)'",
+                            type_node_span(target_type),
+                        );
+                    };
                     let mutable typed_members = self.check_given_members_for_type(
                         members,
                         resolved_target,
@@ -2024,6 +2107,7 @@ given TypeChecker {
         return when node in {
             .Identifier(name, span) then name,
             .Generic(base, _, span) then base,
+            .SendableQualified(inner) then self.type_node_name(inner),
             _ then "?",
         };
     };

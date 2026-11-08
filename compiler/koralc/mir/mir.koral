@@ -1,6 +1,7 @@
 using "./mir_function_builder.koral";
 using "./mir_lowering_core.koral";
 using "./mir_lowering_control_flow.koral";
+using "./mir_lock_lowering.koral";
 using "./mir_pattern_lowering.koral";
 using "./mir_receiver_lookup.koral";
 using "./mir_method_types.koral";
@@ -208,9 +209,24 @@ public type MIRStatement {
     Retain(value: MIRValue),
     Release(value: MIRValue),
     Evaluate(value: MIRValue),
+    // 对象锁临界区边界（concurrency-design.md §对象锁语义）。由 lowerer 成对
+    // 放置：锁地址要么是 safe `sendable mutable` 对象 payload 的隐藏首字段
+    // （`handle.ptr` 即锁地址），要么是 `let mutable` 全局量的每变量静态锁。
+    Lock(lock: MIRLockTarget),
+    Unlock(lock: MIRLockTarget),
     ScopeEnter(scope: MIRScopeID),
     ScopeExit(scope: MIRScopeID),
     DebugSource(span: SourceSpan),
+};
+
+/// `Lock`/`Unlock` 操作的锁目标。
+///
+/// `ObjectLock(handle)` 的 handle 局部持有受管名义句柄（`struct X { void* ptr; }`）；
+/// 锁是 payload 隐藏首字段，`handle.ptr` 经指针转换即锁地址（首字段偏移为 0，
+/// 但 codegen 按 `&payload->__lock` 发射，不依赖偏移巧合）。
+public type MIRLockTarget {
+    ObjectLock(handle: MIRLocalID),
+    GlobalLock(def_id: DefId),
 };
 
 public type MIRTerminator {

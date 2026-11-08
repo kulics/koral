@@ -25,6 +25,13 @@ given TypeChecker {
     ): TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then {
+                // 接收者位的隐式借用与 `&x.f` 同一逃逸舱（concurrency-design.md
+                // §对象锁语义·裁定二）：锁定对象的字段取址/借用一律拒绝。
+                self.report_locked_field_borrow_of(
+                    receiver,
+                    expected_self,
+                    self.typed_expr_span(receiver),
+                );
                 if self.receiver_needs_value_deref(receiver, expected_self) then {
                     return make_typed_expr(
                         TypedExprKind.DerefExpr(receiver),
@@ -94,6 +101,13 @@ given TypeChecker {
     ): TypedExpr = {
         when expected_self_type in {
             .Some(expected_self) then {
+                // 同 `adapt_receiver_to_expected_self_type`：接收者位的隐式
+                // 借用锁定字段 = `&x.f` 逃逸舱，拒绝（裁定二）。
+                self.report_locked_field_borrow_of(
+                    receiver,
+                    expected_self,
+                    self.typed_expr_span(receiver),
+                );
                 if self.receiver_needs_value_deref(receiver, expected_self) then {
                     return make_typed_expr(
                         TypedExprKind.DerefExpr(receiver),
@@ -355,7 +369,7 @@ given TypeChecker {
     ): TypedExpr = {
         return when self.resolve_builtin_subscript_kind(typed_base.expr_type) in {
             .Some(kind) then when kind in {
-                .String() then self.build_builtin_subscript_helper_call(
+                .String() or .FrozenList(_) or .FrozenDict(_, _) then self.build_builtin_subscript_helper_call(
                     typed_base,
                     typed_args,
                     "__index_get",
@@ -400,7 +414,7 @@ given TypeChecker {
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                     self.typed_expr_span(typed_base),
                 );
                 self.empty_typed_block(result_type)
@@ -941,6 +955,47 @@ given TypeChecker {
             return self.empty_typed_block(Type.Unknown());
         };
 
+        // Frozen targets build their storage directly from the literal: a
+        // mutable buffer accumulates the elements, then the buffer freezes in
+        // one bulk copy at the block tail (`to_frozen_list` / `to_frozen_set`).
+        // No intermediate container is visible to the user.
+        if self.is_std_type(result_type, "FrozenList") then {
+            let elem_args = self.std_type_arguments(result_type);
+            let mutable temp_args = List[Type].new();
+            if elem_args.count() > UInt(0) then {
+                temp_args.push(elem_args[UInt(0)]);
+            };
+            let temp_type = Type.GenericStruct(
+                self.context().std_type_def_id("List") or else def_id_invalid(),
+                temp_args,
+            );
+            return self.lower_frozen_collection_literal_from_typed(
+                typed_elems,
+                result_type,
+                temp_type,
+                "push",
+                "to_frozen_list",
+            );
+        };
+        if self.is_std_type(result_type, "FrozenSet") then {
+            let elem_args = self.std_type_arguments(result_type);
+            let mutable temp_args = List[Type].new();
+            if elem_args.count() > UInt(0) then {
+                temp_args.push(elem_args[UInt(0)]);
+            };
+            let temp_type = Type.GenericStruct(
+                self.context().std_type_def_id("Set") or else def_id_invalid(),
+                temp_args,
+            );
+            return self.lower_frozen_collection_literal_from_typed(
+                typed_elems,
+                result_type,
+                temp_type,
+                "insert",
+                "to_frozen_set",
+            );
+        };
+
         let temp_symbol = self.make_expr_temp_symbol(
             "__collection",
             result_type,
@@ -988,6 +1043,66 @@ given TypeChecker {
         );
     };
 
+    /// The frozen-target half of collection literals: accumulate into a
+    /// mutable buffer (`temp_type`), then freeze it with one bulk copy at the
+    /// block tail. `element_method_name` is `push` (list) or `insert` (set).
+    lower_frozen_collection_literal_from_typed(
+        self,
+        typed_elems: List[TypedExpr],
+        result_type: Type,
+        temp_type: Type,
+        element_method_name: String,
+        freeze_method_name: String,
+    ): TypedExpr = {
+        if self.is_unresolved_expr_type(result_type) then {
+            return self.empty_typed_block(Type.Unknown());
+        };
+
+        let temp_symbol = self.make_expr_temp_symbol(
+            "__collection",
+            temp_type,
+            VariableKind.MutableValue(),
+        );
+        let init_expr = self.lower_static_method_call_expr(
+            temp_type,
+            "new",
+            List[TypedExpr].new(),
+            temp_type,
+        );
+        let mutable block_statements = List[TypedStatement].new();
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()),
+        );
+        for elem in typed_elems then {
+            let receiver = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
+            let mutable call_args = List[TypedExpr].new();
+            call_args.push(elem);
+            let call_expr = self.lower_receiver_method_call_expr(
+                receiver,
+                element_method_name,
+                call_args,
+            );
+            block_statements.push(TypedStatement.ExprStmt(call_expr, unknown_span()));
+        };
+
+        let buffer_var = make_typed_expr(
+            TypedExprKind.Variable(temp_symbol),
+            temp_symbol.symbol_type,
+        );
+        let freeze_expr = self.lower_receiver_method_call_expr(
+            buffer_var,
+            freeze_method_name,
+            List[TypedExpr].new(),
+        );
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(freeze_expr)),
+            result_type,
+        );
+    };
+
     lower_dict_literal_from_typed(
         self,
         typed_entries: List[Pair[TypedExpr, TypedExpr]],
@@ -995,6 +1110,27 @@ given TypeChecker {
     ): TypedExpr = {
         if self.is_unresolved_expr_type(result_type) then {
             return self.empty_typed_block(Type.Unknown());
+        };
+
+        // Frozen targets build their storage directly from the literal (see
+        // `lower_frozen_collection_literal_from_typed`): last-wins duplicate
+        // keys fall out of the mutable `Dict` buffer that then freezes.
+        if self.is_std_type(result_type, "FrozenDict") then {
+            let kv_args = self.std_type_arguments(result_type);
+            let mutable temp_args = List[Type].new();
+            if kv_args.count() > UInt(1) then {
+                temp_args.push(kv_args[UInt(0)]);
+                temp_args.push(kv_args[UInt(1)]);
+            };
+            let temp_type = Type.GenericStruct(
+                self.context().std_type_def_id("Dict") or else def_id_invalid(),
+                temp_args,
+            );
+            return self.lower_frozen_dict_literal_from_typed(
+                typed_entries,
+                result_type,
+                temp_type,
+            );
         };
 
         let temp_symbol = self.make_expr_temp_symbol(
@@ -1035,6 +1171,64 @@ given TypeChecker {
         );
         return make_typed_expr(
             TypedExprKind.Block(block_statements, Option[TypedExpr].Some(result_var)),
+            result_type,
+        );
+    };
+
+    /// The frozen-target half of dict literals: accumulate into a mutable
+    /// `Dict` buffer, then freeze it with one bulk copy at the block tail.
+    lower_frozen_dict_literal_from_typed(
+        self,
+        typed_entries: List[Pair[TypedExpr, TypedExpr]],
+        result_type: Type,
+        temp_type: Type,
+    ): TypedExpr = {
+        if self.is_unresolved_expr_type(result_type) then {
+            return self.empty_typed_block(Type.Unknown());
+        };
+
+        let temp_symbol = self.make_expr_temp_symbol(
+            "__dict",
+            temp_type,
+            VariableKind.MutableValue(),
+        );
+        let init_expr = self.lower_static_method_call_expr(
+            temp_type,
+            "new",
+            List[TypedExpr].new(),
+            temp_type,
+        );
+        let mutable block_statements = List[TypedStatement].new();
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, init_expr, unknown_span()),
+        );
+        for entry in typed_entries then {
+            let receiver = make_typed_expr(
+                TypedExprKind.Variable(temp_symbol),
+                temp_symbol.symbol_type,
+            );
+            let mutable call_args = List[TypedExpr].new();
+            call_args.push(entry.first);
+            call_args.push(entry.second);
+            let call_expr = self.lower_receiver_method_call_expr(
+                receiver,
+                "insert",
+                call_args,
+            );
+            block_statements.push(TypedStatement.ExprStmt(call_expr, unknown_span()));
+        };
+
+        let buffer_var = make_typed_expr(
+            TypedExprKind.Variable(temp_symbol),
+            temp_symbol.symbol_type,
+        );
+        let freeze_expr = self.lower_receiver_method_call_expr(
+            buffer_var,
+            "to_frozen_dict",
+            List[TypedExpr].new(),
+        );
+        return make_typed_expr(
+            TypedExprKind.Block(block_statements, Option[TypedExpr].Some(freeze_expr)),
             result_type,
         );
     };
@@ -1133,7 +1327,7 @@ given TypeChecker {
         };
         if expected is .Some(et) and kv_types.first is .None() then {
             self.push_diagnostic(
-                "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range",
+                "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range",
                 unknown_span(),
             );
             return self.empty_typed_block(Type.Unknown());

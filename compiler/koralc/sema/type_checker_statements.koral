@@ -694,6 +694,15 @@ given TypeChecker {
                             );
                             self.empty_typed_block(Type.Unknown())
                         },
+                        .FrozenList(_) or .FrozenDict(_, _) then {
+                            // Nested write through a frozen subscript is a
+                            // compile error, same family as the direct case.
+                            self.push_diagnostic_at_span(
+                                "Cannot assign to immutable subscript of type '\(type_to_string(self.builtin_subscript_base_type(typed_outer_base.expr_type)))'",
+                                expr_span(base),
+                            );
+                            self.empty_typed_block(Type.Unknown())
+                        },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(
                                 typed_outer_base.expr_type,
@@ -776,7 +785,7 @@ given TypeChecker {
                     },
                     .None() then {
                         self.push_diagnostic_at_span(
-                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                             self.typed_expr_span(typed_outer_base),
                         );
                         self.empty_typed_block(Type.Unknown())
@@ -1028,11 +1037,24 @@ given TypeChecker {
                         unknown_span(),
                     );
                 },
+                .FrozenList(_) or .FrozenDict(_, _) then {
+                    // A frozen subscript is read-only by construction (no
+                    // `__index_slot`), same diagnostic family as immutable
+                    // field assignment.
+                    self.push_diagnostic_at_span(
+                        "Cannot assign to immutable subscript of type '\(type_to_string(base_inner_type))'",
+                        target_span,
+                    );
+                    return TypedStatement.ExprStmt(
+                        self.empty_typed_block(Type.Unknown()),
+                        unknown_span(),
+                    );
+                },
                 .List(_) or .Deque(_) or .Dict(_, _) then {},
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                     target_span,
                 );
                 return TypedStatement.ExprStmt(
@@ -1851,7 +1873,7 @@ given TypeChecker {
                     Option[Type].Some(typed_target.expr_type),
                     Option[SourceSpan].Some(expr_span(value)),
                 );
-                if not self.same_expr_type(typed_target.expr_type, typed_val.expr_type) and not self.is_unresolved_expr_type(
+                if not self.same_expr_type(typed_val.expr_type, typed_target.expr_type) and not self.is_unresolved_expr_type(
                     typed_target.expr_type,
                 ) and not self.is_unresolved_expr_type(typed_val.expr_type) then {
                     self.push_diagnostic_at_span(
@@ -2428,6 +2450,15 @@ given TypeChecker {
                             );
                             self.empty_typed_block(Type.Unknown())
                         },
+                        .FrozenList(_) or .FrozenDict(_, _) then {
+                            // Nested write through a frozen subscript is a
+                            // compile error, same family as the direct case.
+                            self.push_diagnostic_at_span(
+                                "Cannot assign to immutable subscript of type '\(type_to_string(self.builtin_subscript_base_type(typed_outer_base.expr_type)))'",
+                                expr_span(base),
+                            );
+                            self.empty_typed_block(Type.Unknown())
+                        },
                         .Dict(_, _) or .List(_) or .Deque(_) then {
                             let param_types = self.resolve_method_param_types(
                                 typed_outer_base.expr_type,
@@ -2510,7 +2541,7 @@ given TypeChecker {
                     },
                     .None() then {
                         self.push_diagnostic_at_span(
-                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                             self.typed_expr_span(typed_outer_base),
                         );
                         self.empty_typed_block(Type.Unknown())

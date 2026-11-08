@@ -5,7 +5,7 @@ using "std/rand" { ... };
 using "std/sync" { ... };
 using "std/time" { ... };
 
-private type CaseWorkerEvent {
+private type sendable CaseWorkerEvent {
     Started(info: CaseInfo),
     Finished(result: CaseResult),
     WorkerExited(),
@@ -167,7 +167,9 @@ private let run_cases_parallel(config: RunnerConfig, cases: List[CaseInfo]): Run
 
     for _ in 0..<worker_count then {
         let shared_sender = sender;
-        let shared_cases = shuffled_cases;
+        // The workers only read the case table: share a frozen snapshot, the
+        // transferable form (mutable containers are thread-confined state).
+        let shared_cases = shuffled_cases.to_frozen_list();
         let shared_config = config;
         let shared_index = next_index;
         let shared_stop_requested = stop_requested;
@@ -191,7 +193,7 @@ private let run_cases_parallel(config: RunnerConfig, cases: List[CaseInfo]): Run
                         break;
                     };
 
-                    let case_info = shared_cases[UInt(idx)];
+                    let case_info = shared_cases.get(UInt(idx)).unwrap();
                     run_case_with_group_lock(
                         shared_config,
                         case_info,

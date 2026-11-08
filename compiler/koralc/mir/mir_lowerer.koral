@@ -312,6 +312,10 @@ given MIRLowerer {
                             ),
                         );
                     } else {
+                        // C 实体直读的 foreign 变量：存储归 C 侧管，编译器不给
+                        // 每变量锁（concurrency-design.md §对象锁语义的全局量
+                        // 落点只覆盖 Koral `let mutable` 全局量）。
+                        self.context.set_foreign_global(identifier.def_id);
                         collected_globals.push(
                             MIRGlobal.ForeignGlobalVariable(
                                 identifier,
@@ -1036,7 +1040,7 @@ given MIRLowerer {
         let mutable function_type = Type.FunctionType(
             List[FunctionParamEntry].new(),
             identifier.symbol_type,
-        );
+        false);
         let mutable context = self.context;
         return context.create_symbol(
             "__mir_global_init_\(identifier.def_id.id)",
@@ -1076,7 +1080,7 @@ given MIRLowerer {
         let rebuilt_function_type = Type.FunctionType(
             types_to_param_entries(rebuilt_param_types),
             member.return_type,
-        );
+        false);
         let mutable function_type = rebuilt_function_type;
         if not is_drop_method then {
             function_type = when self.context.get_function_type(member.def_id) in {
@@ -1424,6 +1428,17 @@ given MIRLowerer {
                     self.resolve_trait_type_node_with_bindings(return_type, bindings),
                 )
             },
+            // `sendable` 位在 mir 层擦除：按 sema 规则携带，不合法形态 sema 已报。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_trait_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                when type_with_sendable_qualifier(resolved_inner) in {
+                    .Some(sendable_t) then sendable_t,
+                    .None() then resolved_inner,
+                }
+            },
         };
     };
 
@@ -1485,16 +1500,17 @@ given MIRLowerer {
             .MutableBorrowedReferenceType(inner) then Type.MutableBorrowedReferenceType(
                 self.apply_type_bindings(inner, bindings),
             ),
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, is_sendable) then {
                 let mutable bound_params = List[Type].new();
                 for param in params then {
                     bound_params.push(
                         self.apply_type_bindings(param.param_type, bindings),
                     );
                 };
-                make_function_type(
+                make_function_type_with_flag(
                     bound_params,
                     self.apply_type_bindings(return_type, bindings),
+                    is_sendable,
                 )
             },
             .ForeignFunctionType(params, return_type) then {
@@ -1524,12 +1540,12 @@ given MIRLowerer {
                 };
                 Type.GenericEnum(template_def_id, bound_args)
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, is_sendable) then {
                 let mutable bound_args = List[Type].new();
                 for arg in args then {
                     bound_args.push(self.apply_type_bindings(arg, bindings));
                 };
-                Type.TraitObject(trait_def_id, bound_args)
+                Type.TraitObject(trait_def_id, bound_args, is_sendable)
             },
             _ then t,
         };

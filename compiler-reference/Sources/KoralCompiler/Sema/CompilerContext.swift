@@ -220,6 +220,53 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isStructMutable(defId)
     }
 
+    public func setTypeSendability(_ defId: DefId, _ sendability: TypeSendability) {
+        defIdMap.setTypeSendability(defId, sendability)
+    }
+
+    public func typeSendability(_ defId: DefId) -> TypeSendability {
+        defIdMap.typeSendability(defId)
+    }
+
+    public func isSendableType(_ t: Type) -> Bool {
+        defIdMap.isSendableType(t)
+    }
+
+    /// `trait sendable` (concurrency-design.md): the trait's objects are always
+    /// sendable and every impl type must itself be sendable (safe / unsafe
+    /// forms both count).
+    public func isSendableTrait(_ traitDefId: DefId) -> Bool {
+        defIdMap.typeSendability(traitDefId) != .unmarked
+    }
+
+    /// safe `sendable mutable` nominal types carry a built-in object lock
+    /// (concurrency-design.md). The address-of ban, the MIR Lock/Unlock
+    /// emission, and the codegen layout must all answer from this one rule.
+    public func isLockedType(_ t: Type) -> Bool {
+        defIdMap.isLockedType(t)
+    }
+
+    public func isLockedDef(_ defId: DefId) -> Bool {
+        defIdMap.isLockedDef(defId)
+    }
+
+    public func setForeignGlobal(_ defId: DefId) {
+        defIdMap.setForeignGlobal(defId)
+    }
+
+    public func isForeignGlobal(_ defId: DefId) -> Bool {
+        defIdMap.isForeignGlobal(defId)
+    }
+
+    public func allSendableTypes(_ types: [Type]) -> Bool {
+        for t in types {
+            if !defIdMap.isSendableType(t) {
+                return false
+            }
+        }
+        return true
+    }
+
     public func isGenericStructTemplateMutable(_ defId: DefId) -> Bool {
         defIdMap.getGenericStructTemplateInfo(defId)?.isMutable ?? false
     }
@@ -523,6 +570,12 @@ public final class CompilerContext: @unchecked Sendable {
     public var stdSetTemplateDefId: DefId? {
         defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "Set")
     }
+    public var stdFrozenListTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "FrozenList")
+    }
+    public var stdFrozenDictTemplateDefId: DefId? {
+        defIdMap.lookupGenericStructTemplateDefId(modulePath: ["Std"], name: "FrozenDict")
+    }
     /// `Range` is a generic ENUM in std, so it lives in the enum-template table.
     public var stdRangeTemplateDefId: DefId? {
         defIdMap.lookupGenericEnumTemplateDefId(modulePath: ["Std"], name: "Range")
@@ -616,7 +669,7 @@ public final class CompilerContext: @unchecked Sendable {
         case .bool: return "Bool"
         case .void: return "Void"
         case .never: return "Never"
-        case .function(let params, let returns):
+        case .function(let params, let returns, _):
             let paramStr = params.map { getDebugName($0.type) }.joined(separator: ", ")
             return "(\(paramStr)) -> \(getDebugName(returns))"
         case .fixedArray(let size, let element): return "[\(size)]\(getDebugName(element))"
@@ -659,7 +712,7 @@ public final class CompilerContext: @unchecked Sendable {
             return "module \(info.modulePath.joined(separator: "."))"
         case .typeVariable(let tv):
             return "?\(tv.id)"
-        case .traitObject(let tplDefId, let typeArgs):
+        case .traitObject(let tplDefId, let typeArgs, _):
             if typeArgs.isEmpty { return Type.spelling(tplDefId) }
             let argsStr = typeArgs.map { getDebugName($0) }.joined(separator: ", ")
             return "[\(argsStr)]\(Type.spelling(tplDefId))"
@@ -680,7 +733,7 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .typeVariable(let tv):
             return [tv]
-        case .function(let params, let returns):
+        case .function(let params, let returns, _):
             var result: [TypeVariable] = []
             for param in params {
                 result.append(contentsOf: freeTypeVariables(in: param.type))
@@ -736,7 +789,7 @@ public final class CompilerContext: @unchecked Sendable {
             return []
         case .opaque:
             return []
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, let typeArgs, _):
             return typeArgs.flatMap { freeTypeVariables(in: $0) }
         case .error:
             return []
@@ -781,7 +834,7 @@ public final class CompilerContext: @unchecked Sendable {
         // I` both spell `Fn_R_I`) -- and why a borrowed reference is not folded
         // into an owning one. They are different types, and instances
         // parameterized by them are different instances.
-        case .function(let parameters, let returns):
+        case .function(let parameters, let returns, _):
             var out = "Fn_\(parameters.count)"
             for p in parameters {
                 out += "_" + getLayoutKey(p.type)
@@ -822,7 +875,7 @@ public final class CompilerContext: @unchecked Sendable {
             return "M_\(defIdMap.moduleSymbolKey(for: info.modulePath))"
         case .typeVariable(let tv):
             return "TV_\(tv.id)"
-        case .traitObject(let traitDefId, let typeArgs):
+        case .traitObject(let traitDefId, let typeArgs, _):
             let suffix = traitDefId.isValid ? "_d\(traitDefId.id)" : ""
             if typeArgs.isEmpty { return "TO_\(Type.spelling(traitDefId))\(suffix)" }
             let argsKeys = typeArgs.map { getLayoutKey($0) }.joined(separator: "_")
@@ -880,7 +933,7 @@ public final class CompilerContext: @unchecked Sendable {
              .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
              .float32, .float64, .bool, .void, .never:
             return false
-        case .function(let params, let returns):
+        case .function(let params, let returns, _):
             return containsGenericParameterInternal(returns, visited: &visited)
                 || params.contains { containsGenericParameterInternal($0.type, visited: &visited) }
         case .fixedArray(_, let element):
@@ -934,7 +987,7 @@ public final class CompilerContext: @unchecked Sendable {
             return false
         case .typeVariable:
             return true
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, let typeArgs, _):
             return typeArgs.contains { containsGenericParameterInternal($0, visited: &visited) }
         case .error:
             return false

@@ -548,8 +548,8 @@ extension TypeChecker {
       }
       return true
 
-    case .function(let pParams, let pRet):
-      guard case .function(let aParams, let aRet) = actual,
+    case .function(let pParams, let pRet, _):
+      guard case .function(let aParams, let aRet, _) = actual,
             pParams.count == aParams.count else { return false }
       for (pParam, aParam) in zip(pParams, aParams) {
         guard unifyGenericTypePattern(pattern: pParam.type, actual: aParam.type, typeParamNames: typeParamNames, inferred: &inferred) else {
@@ -602,7 +602,7 @@ extension TypeChecker {
 
     for (_, sig) in traitMethods {
       guard let concreteMethod = try lookupDeclaredMethodDirect(on: receiverType, name: sig.name),
-            case .function(let actualParams, let actualReturn) = concreteMethod.type else {
+            case .function(let actualParams, let actualReturn, _) = concreteMethod.type else {
         continue
       }
 
@@ -822,7 +822,7 @@ extension TypeChecker {
             receiverMutable: receiverMutable)
         )
       }
-      functionType = Type.function(parameters: params, returns: returnType)
+      functionType = Type.function(parameters: params, returns: returnType, isSendable: false)
     } else {
       let returnType = try resolveTypeNodeWithSubstitution(method.returnType, substitution: substitution)
       let receiverMutable = isMutableNominalReceiverType(baseType)
@@ -841,7 +841,7 @@ extension TypeChecker {
             receiverMutable: receiverMutable)
         )
       }
-      functionType = Type.function(parameters: params, returns: returnType)
+      functionType = Type.function(parameters: params, returns: returnType, isSendable: false)
     }
     
     // Record instantiation request if type args are concrete
@@ -923,7 +923,7 @@ extension TypeChecker {
           receiverMutable: receiverMutable)
       )
     }
-    let functionType = Type.function(parameters: params, returns: returnType)
+    let functionType = Type.function(parameters: params, returns: returnType, isSendable: false)
     
     let methodSymbol = makeMethodSymbol(
       name: method.name,
@@ -1147,7 +1147,7 @@ extension TypeChecker {
         )
       }
       
-      return Type.function(parameters: params, returns: returnType)
+      return Type.function(parameters: params, returns: returnType, isSendable: false)
     }
     
     // Record instantiation request if all type args are concrete
@@ -1256,7 +1256,7 @@ extension TypeChecker {
             return Parameter(type: paramType, kind: passKindForParameterType(paramType))
           }
           
-          return Type.function(parameters: params, returns: returnType)
+          return Type.function(parameters: params, returns: returnType, isSendable: false)
         }
         
         // Create a placeholder symbol without __trait_ prefix
@@ -1292,11 +1292,13 @@ extension TypeChecker {
     case list(element: Type)
     case deque(element: Type)
     case dict(key: Type, value: Type)
+    case frozenList(element: Type)
+    case frozenDict(key: Type, value: Type)
     case pointer(element: Type, mutable: Bool)
     case fixedArray(size: UInt64, element: Type)
   }
 
-  private func builtinSubscriptBaseType(_ type: Type) -> Type {
+  func builtinSubscriptBaseType(_ type: Type) -> Type {
     switch type {
     case .reference(let inner), .mutableReference(let inner),
          .borrowedReference(let inner), .mutableBorrowedReference(let inner):
@@ -1308,9 +1310,12 @@ extension TypeChecker {
 
   /// What `base[i]` means for `base`.
   ///
-  /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict` and for
-  /// raw pointers. Which std type is meant is a question about the DECLARATION
-  /// identity -- a user type also named `List` does not get subscripting.
+  /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict`/
+  /// `FrozenList`/`FrozenDict` and for raw pointers. The frozen forms are
+  /// READ ONLY: they carry no `__index_slot`, so a frozen subscript can never
+  /// become a write target. Which std type is meant is a question about the
+  /// DECLARATION identity -- a user type also named `List` does not get
+  /// subscripting.
   func resolveBuiltinSubscriptKind(baseType: Type) -> BuiltinSubscriptKind? {
     let unwrapped = builtinSubscriptBaseType(baseType)
     switch unwrapped {
@@ -1328,6 +1333,12 @@ extension TypeChecker {
         if context.isStdNominal(defId, context.stdDictTemplateDefId), typeArgs.count == 2 {
           return .dict(key: typeArgs[0], value: typeArgs[1])
         }
+        if context.isStdNominal(defId, context.stdFrozenListTemplateDefId), typeArgs.count == 1 {
+          return .frozenList(element: typeArgs[0])
+        }
+        if context.isStdNominal(defId, context.stdFrozenDictTemplateDefId), typeArgs.count == 2 {
+          return .frozenDict(key: typeArgs[0], value: typeArgs[1])
+        }
       }
       return nil
     case .genericStruct(let templateDefId, let args):
@@ -1339,6 +1350,12 @@ extension TypeChecker {
       }
       if context.isStdNominal(templateDefId, context.stdDictTemplateDefId), args.count == 2 {
         return .dict(key: args[0], value: args[1])
+      }
+      if context.isStdNominal(templateDefId, context.stdFrozenListTemplateDefId), args.count == 1 {
+        return .frozenList(element: args[0])
+      }
+      if context.isStdNominal(templateDefId, context.stdFrozenDictTemplateDefId), args.count == 2 {
+        return .frozenDict(key: args[0], value: args[1])
       }
       return nil
     case .pointer(let element):
@@ -1493,7 +1510,7 @@ extension TypeChecker {
         "Missing builtin subscript helper '\(helperName)' for type '\(lookupType)'"
       ), span: currentSpan)
     }
-    guard case .function(let params, let returns) = method.type else {
+    guard case .function(let params, let returns, _) = method.type else {
       fatalError("builtin subscript helper must be a function")
     }
 
@@ -1618,7 +1635,7 @@ extension TypeChecker {
 
     guard let builtinKind = resolveBuiltinSubscriptKind(baseType: base.type) else {
       throw SemanticError(.generic(
-        "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
+        "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types"
       ), span: span)
     }
 
@@ -1636,6 +1653,11 @@ extension TypeChecker {
           break
         case .string:
           throw SemanticError(.generic("Collection subscript results are values, not addressable references"), span: currentSpan)
+        case .frozenList, .frozenDict:
+          // A frozen subscript yields a value copy (the read-only
+          // `__index_get` path) and is never an addressable place -- same
+          // treatment as `String`, without the borrow.
+          throw SemanticError(.generic("Frozen subscript is not addressable"), span: span)
         }
       default:
         break
@@ -1644,6 +1666,9 @@ extension TypeChecker {
 
     switch builtinKind {
     case .string:
+      return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
+    case .frozenList, .frozenDict:
+      // Read-only subscript: the `__index_get` value path, same as `String`.
       return try buildBuiltinSubscriptHelperCall(base: base, args: args, helperName: "__index_get")
     case .list, .deque, .dict:
       return try buildBuiltinSubscriptSlotPlace(base: base, args: args)
@@ -1820,7 +1845,7 @@ extension TypeChecker {
       guard case .mutablePointer(.uint64) = outTid.type else {
         throw SemanticError(.generic("spawn_thread: second argument must be *mutable UInt64"), span: arguments[1].span)
       }
-      guard case .function(let params, let ret) = closure.type,
+      guard case .function(let params, let ret, _) = closure.type,
             params.isEmpty, ret == .void else {
         throw SemanticError(.generic("spawn_thread: third argument must be () -> Void"))
       }

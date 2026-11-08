@@ -9,16 +9,20 @@ extension TypeChecker {
     for param in typeParameters {
       var bounds: [Bound] = []
       for bound in param.constraints {
-        // `mutable` is a shape requirement, not a trait, so it has no trait
-        // declaration to validate. Real trait bounds are resolved to their
-        // declaration identity here -- the one boundary where a bound's
-        // spelling becomes a declaration -- and every later comparison is on
-        // that identity.
+        // `mutable` / `foreign` / `sendable` are shape requirements, not
+        // traits, so they have no trait declaration to validate. Real trait
+        // bounds are resolved to their declaration identity here -- the one
+        // boundary where a bound's spelling becomes a declaration -- and every
+        // later comparison is on that identity.
         if case .mutable = bound {
           bounds.append(bound)
           continue
         }
         if case .foreign = bound {
+          bounds.append(bound)
+          continue
+        }
+        if case .sendable = bound {
           bounds.append(bound)
           continue
         }
@@ -154,7 +158,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable, .foreign:
+          case .mutable, .foreign, .sendable:
             continue
           }
         }
@@ -228,7 +232,7 @@ extension TypeChecker {
       }
     case .functionType(let paramTypes, let returnType, _):
       // Match against function type
-      if case .function(let params, let returns) = type {
+      if case .function(let params, let returns, _) = type {
         if params.count == paramTypes.count {
           for (paramNode, param) in zip(paramTypes, params) {
             try unify(node: paramNode, type: param.type, inferred: &inferred, typeParams: typeParams)
@@ -263,6 +267,10 @@ extension TypeChecker {
         }
         try unify(node: returnNode, type: actualReturns, inferred: &inferred, typeParams: typeParams)
       }
+    case .sendableQualified(let inner):
+      // The `sendable` slot never participates in identity/inference: match
+      // the qualified shape (koralc's flag-erased comparison semantics).
+      try unify(node: inner, type: type, inferred: &inferred, typeParams: typeParams)
     }
   }
 
@@ -358,7 +366,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable, .foreign:
+          case .mutable, .foreign, .sendable:
             continue
           }
         }

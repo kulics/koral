@@ -1,7 +1,9 @@
 #ifndef KORAL_RUNTIME_H
 #define KORAL_RUNTIME_H
 
-#define KORAL_RUNTIME_ABI_VERSION 7
+// v8: 非原子 RC 族（concurrency-design.md §RC 分流）——`*_nonatomic` 的
+// retain/release/weak/closure-env 入口与析构慢路径。
+#define KORAL_RUNTIME_ABI_VERSION 8
 
 #include <stdatomic.h>
 #include <stdint.h>
@@ -94,6 +96,24 @@ struct __koral_Control {
     ((void*)((char*)(control) + sizeof(struct __koral_Control)))
 #define __koral_control_of(payload) \
     ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
+
+// ── Reentrant object lock (concurrency-design.md §对象锁语义) ────────────────
+//
+// 紧凑可重入互斥，作为 safe `type sendable mutable` 对象 payload 的隐藏首字段
+// 与 `let mutable` 全局槽的保护锁。临界区只有一处字段访问或一条赋值语句，所以
+// 快路径是一次 CAS；慢路径平台 yield 退避（临界区短，不引 futex 依赖）。
+//
+// 契约：持锁者必须在退出临界区前释放（codegen 的 lock/unlock 成对发射保证）；
+// 不得在持锁期间退出线程。owner 记 __koral_thread_current_id()，0 为空闲。
+struct __koral_Lock {
+    _Atomic uint64_t owner;
+    uint32_t recursion;
+    uint32_t reserved;
+};
+
+void __koral_lock_init(struct __koral_Lock* lock);
+void __koral_lock_acquire(struct __koral_Lock* lock);
+void __koral_lock_release(struct __koral_Lock* lock);
 
 // String 字节块的堆载荷布局。与 std/string.koral 的 `type mutable Bytes(data,
 // len)` 字段序耦合，字面量发射（generate_string_literal）同样按 {data, len}
@@ -250,6 +270,68 @@ struct __koral_Ref __koral_upgrade_ref(struct __koral_WeakRef w, int* success);
 void __koral_closure_retain(struct __koral_Closure closure);
 void __koral_closure_release(struct __koral_Closure closure);
 void __koral_closure_drop(void* raw_closure);
+
+// ---- 非原子 RC 族（concurrency-design.md §RC 分流）--------------------------
+//
+// 静态类型确定为**非 sendable** 的受管对象不跨线程（或只经 `unsafe sendable`
+// 的开发者承诺跨界，RC 竞态在承诺范围内），计数器退化为普通整数操作：
+// load/add/store，无 RMW。sendable（含 `unsafe sendable`）仍走上面的原子族。
+//
+// 同一个 `struct __koral_Control` 两族共用；**一个块只由一族碰**——族由对象
+// 的静态类型在每个 codegen 调用点决定（`uses_nonatomic_rc`），两族绝不混用
+// 于同一块。非原子族以普通 `int` 读写 `_Atomic int` 存储（lock-free 原子与
+// `int` 同表示同对齐），换取无锁指令的快路径。
+//
+// 哨兵语义与原子族逐一相同：
+//   - immortal（strong = -1）：retain/release 早退，weak 操作读到 -1 早退，
+//     downgrade/upgrade 不碰哨兵（upgrade 对 -1 一律失败）；
+//   - 析构窗口（strong = -2）：retain/release 读到任何负数早退（防
+//     `drop(self)` 复活与析构递归），weak 计数照常递减；
+//   - free 唯一判定点仍是 weak_count 到 0 的那次递减（RcBox 协议）。
+void __koral_release_slow_nonatomic(struct __koral_Control* control, __koral_Dtor dtor);
+
+static inline void __koral_retain_nonatomic(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int* strong = (int*)&control->strong_count;
+    if (*strong < 0) return;
+    *strong += 1;
+}
+
+static inline void __koral_release_nonatomic(void* raw_control, __koral_Dtor dtor) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int* strong = (int*)&control->strong_count;
+    if (*strong < 0) return;
+    int prev = *strong;
+    *strong = prev - 1;
+    if (prev == 1) {
+        __koral_release_slow_nonatomic(control, dtor);
+    }
+}
+
+// ---- 非原子族的值层 API（生成代码用这一对）----
+// 入参与原子族一致：payload 指针，计数块固定在 ptr - 1。
+static inline void __koral_retain_value_nonatomic(void* payload) {
+    if (!payload) return;
+    __koral_retain_nonatomic(__koral_control_of(payload));
+}
+static inline void __koral_release_value_nonatomic(void* payload, __koral_Dtor dtor) {
+    if (!payload) return;
+    __koral_release_nonatomic(__koral_control_of(payload), dtor);
+}
+
+void __koral_weak_retain_nonatomic(void* raw_control);
+void __koral_weak_release_nonatomic(void* raw_control);
+void __koral_weakref_drop_nonatomic(void* raw_weak_ref);
+void __koral_traitref_drop_nonatomic(void* raw_trait_ref);
+void __koral_closure_drop_nonatomic(void* raw_closure);
+
+struct __koral_WeakRef __koral_downgrade_ref_nonatomic(struct __koral_Ref r);
+struct __koral_Ref __koral_upgrade_ref_nonatomic(struct __koral_WeakRef w, int* success);
+
+void __koral_closure_retain_nonatomic(struct __koral_Closure closure);
+void __koral_closure_release_nonatomic(struct __koral_Closure closure);
 
 KORAL_COLD KORAL_NORETURN void __koral_panic_overflow_add(const char* loc);
 KORAL_COLD KORAL_NORETURN void __koral_panic_overflow_sub(const char* loc);

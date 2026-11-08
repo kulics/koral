@@ -597,7 +597,7 @@ given TypeChecker {
             );
         };
         let closure_ok = when closure.expr_type in {
-            .FunctionType(fn_params, return_type) or .ForeignFunctionType(fn_params, return_type) then fn_params.is_empty() and return_type is .VoidType(),
+            .FunctionType(fn_params, return_type, _) or .ForeignFunctionType(fn_params, return_type) then fn_params.is_empty() and return_type is .VoidType(),
             _ then false,
         };
         if not closure_ok then {
@@ -734,10 +734,11 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when normalized in {
-            .TraitObject(existing_trait_def_id, existing_args) then {
+            .TraitObject(existing_trait_def_id, existing_args, _) then {
                 if existing_trait_def_id == requested_trait_id then Type.TraitObject(
                     existing_trait_def_id,
                     existing_args,
+                    self.context().is_sendable_type(normalized),
                 ) else self.canonical_trait_object_type(trait_name)
             },
             _ then self.canonical_trait_object_type(trait_name),
@@ -1875,7 +1876,7 @@ given TypeChecker {
         let method_opt = self.resolve_method_signature(self_type, method_name);
         return when method_opt in {
             .Some(method) then when method.symbol_type in {
-                .FunctionType(params, _) then {
+                .FunctionType(params, _, _) then {
                     if params.count() > UInt(0) then {
                         let self_param = (params[UInt(0)]).param_type;
                         type_is_any_ref(self_param) and type_is_mutable_handle(self_param)
@@ -2110,9 +2111,9 @@ given TypeChecker {
     /// The `as` trait-object row: a resolved trait-object reference target.
     as_cast_trait_object_target(self, t: Type): Option[Type] = {
         return when t in {
-            .TraitObject(_, _) then Option[Type].Some(t),
+            .TraitObject(_, _, _) then Option[Type].Some(t),
             .ReferenceType(inner) or .MutableReferenceType(inner) then when inner in {
-                .TraitObject(_, _) then Option[Type].Some(inner),
+                .TraitObject(_, _, _) then Option[Type].Some(inner),
                 _ then Option[Type].None(),
             },
             _ then Option[Type].None(),
@@ -2330,7 +2331,7 @@ given TypeChecker {
         cast_span: SourceSpan,
     ): TypedExpr = {
         let trait_def_id = when trait_obj in {
-            .TraitObject(d, _) then d,
+            .TraitObject(d, _, _) then d,
             _ then DefId(UInt(0)),
         };
         let trait_name = def_id_spelling(trait_def_id);
@@ -3666,7 +3667,7 @@ given TypeChecker {
                 cached_method_sig = Option[Symbol].Some(bound_method);
                 method_param_types_for_inference = List[Type].new();
                 let param_types = when bound_method.symbol_type in {
-                    .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
+                    .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                     _ then List[Type].new(),
                 };
                 for param_type in param_types.lazy().skip(1) then {
@@ -3703,7 +3704,7 @@ given TypeChecker {
                             cached_method_sig = Option[Symbol].Some(method);
                             method_param_types_for_inference = List[Type].new();
                             let param_types = when method.symbol_type in {
-                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
+                                .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
                             for param_type in param_types.lazy().skip(1) then {
@@ -3752,7 +3753,7 @@ given TypeChecker {
                             cached_method_sig = Option[Symbol].Some(method);
                             method_param_types_for_inference = List[Type].new();
                             let param_types = when method.symbol_type in {
-                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
+                                .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then param_entry_types(params),
                                 _ then List[Type].new(),
                             };
                             for param_type in param_types.lazy().skip(1) then {
@@ -4032,7 +4033,7 @@ given TypeChecker {
                         ) in {
                             .Some(method_index) then {
                                 let return_type = when typed_callee.expr_type in {
-                                    .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
+                                    .FunctionType(_, return_type_ref, _) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
                                     _ then Type.Unknown(),
                                 };
                                 let trait_receiver = when base.expr_kind in {
@@ -4646,7 +4647,7 @@ given TypeChecker {
                 let method_ret_type = when ret_type in {
                     .Unknown() then when direct_method_signature_opt in {
                         .Some(method_symbol) then when method_symbol.symbol_type in {
-                            .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
+                            .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then ret,
                             _ then self.resolve_method_return_type(
                                 adapted_base.expr_type,
                                 method_name,
@@ -4944,7 +4945,7 @@ given TypeChecker {
                     let method_ret_type = when ret_type in {
                         .Unknown() then when direct_method_signature_opt in {
                             .Some(method_symbol) then when method_symbol.symbol_type in {
-                                .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
+                                .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then ret,
                                 _ then self.resolve_method_return_type(
                                     adapted_base.expr_type,
                                     method_name,
@@ -5249,7 +5250,7 @@ given TypeChecker {
                 .TraitMethodCall(receiver, trait_type, method_name, method_index, _) then {
                     let expected_self_type = when trait_type in {
                         // The DECLARATION travels; the spelling is display-only.
-                        .TraitObject(trait_def_id, _) then self.resolve_trait_method_self_type(
+                        .TraitObject(trait_def_id, _, _) then self.resolve_trait_method_self_type(
                             trait_def_id,
                             method_name,
                             receiver.expr_type,

@@ -1,0 +1,56 @@
+// `sendable` function types in type position (concurrency-design.md §派生规则 5):
+// a closure is `sendable` iff every capture is sendable; non-capturing function
+// references are `sendable` naturally. Widening `sendable (A) -> R` -> `(A) -> R`
+// is legal; the reverse is refused elsewhere.
+// EXPECT: plain lambda
+// EXPECT: capture int 42
+// EXPECT: capture point 7
+// EXPECT: callback
+// EXPECT: holder
+// EXPECT: widened
+// EXPECT: inner
+// EXPECT: twice 3
+
+type sendable Point(x: Int);
+
+type sendable Holder(f: sendable () -> Void);
+
+let run(f: sendable () -> Void): Void = f();
+
+let plain_run(f: () -> Void): Void = f();
+
+let callback(): Void = {
+    println("callback");
+};
+
+let mk(): sendable () -> Void = () => println("inner");
+
+let main(): Void = {
+    // (a) non-capturing lambda.
+    run(() => println("plain lambda"));
+
+    // (b) lambda capturing sendable values (Int, `type sendable` struct).
+    let n = 40;
+    run(() => println("capture int \(n + 2)"));
+    let p = Point(7);
+    run(() => println("capture point \(p.x)"));
+
+    // (c) bare top-level function reference.
+    run(callback);
+
+    // A `sendable` fn-typed field.
+    let h = Holder(() => println("holder"));
+    let stored = h.f;
+    stored();
+
+    // (d) widening: a sendable fn value where plain is expected.
+    let s: sendable () -> Void = () => println("widened");
+    plain_run(s);
+
+    // Nested qualifier: `sendable` in a return position.
+    let inner = mk();
+    inner();
+
+    let apply = (f: sendable (Int) -> Int, x: Int) => f(x);
+    println("twice \(apply((y: Int) => y + 1, 2))");
+};

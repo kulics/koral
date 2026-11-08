@@ -1,0 +1,34 @@
+// EXPECT: g=400000
+
+// Per-variable lock for module-level `let mutable` globals
+// (concurrency-design.md §对象锁语义的全局量落点): reads and writes of the
+// binding wrap in the variable's static lock, and `g = g + 1` holds that lock
+// across the whole RHS evaluation and the write — same statement rule as
+// object fields.
+
+using "std/async" { ... };
+
+let mutable g: Int = 0;
+
+let main(): Void = {
+    let mutable threads = List[Thread].new();
+    let mutable i = 0;
+    while i < 8 then {
+        threads.push(
+            run_task(
+                () => {
+                    let mutable j = 0;
+                    while j < 50000 then {
+                        g = g + 1;
+                        j = j + 1;
+                    };
+                },
+            ),
+        );
+        i = i + 1;
+    };
+    for t in threads then {
+        let _ = t.wait();
+    };
+    println("g=\(g)");
+};

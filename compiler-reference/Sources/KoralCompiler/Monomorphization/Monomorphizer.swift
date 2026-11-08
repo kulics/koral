@@ -400,7 +400,7 @@ public class Monomorphizer {
                     let parameterTypes = method.parameters.map {
                         Parameter(type: $0.type, kind: passKindForParameterType($0.type))
                     }
-                    let functionType = Type.function(parameters: parameterTypes, returns: method.returnType)
+                    let functionType = Type.function(parameters: parameterTypes, returns: method.returnType, isSendable: false)
                     let methodSymbol = copySymbolPreservingDefId(
                         method.identifier,
                         newType: functionType
@@ -800,8 +800,7 @@ public class Monomorphizer {
                 ?? slot.traitMethodDefId
             let functionType = Type.function(
                 parameters: slot.parameters.map { Parameter(type: $0.type, kind: .byVal) },
-                returns: slot.returnType
-            )
+                returns: slot.returnType, isSendable: false)
             let definition = Symbol(defId: originalDefId, type: functionType, kind: .function)
             if let resolved = try? resolveMethodInstanceByIdentityForReceiver(
                 definitionMethod: definition,
@@ -906,7 +905,7 @@ public class Monomorphizer {
                     for candidate in candidates {
                         // Check if the candidate's symbol type has the right receiver type
                         if let symbolType = context.getSymbolType(candidate.defId),
-                           case .function(let params, _) = symbolType,
+                           case .function(let params, _, _) = symbolType,
                            let firstParam = params.first {
                             let paramKey = firstParam.type.stableKey
                             if paramKey == selfTypeKey || paramKey.contains(selfTypeKey) {

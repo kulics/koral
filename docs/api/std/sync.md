@@ -26,47 +26,53 @@ public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChanne
 ```koral
 /// 原子布尔，用于标志位和开关
 /// 所有操作使用顺序一致性内存序
-public type mutable AtomicBool;
+/// Sendable contract: self-synchronized -- every operation is one atomic
+/// FFI step (seq_cst), interior mutation bypasses object locks by design.
+public type unsafe sendable mutable AtomicBool;
 
 /// 原子有符号整数（Int，平台相关宽度），支持无锁的原子读写和 CAS 操作
 /// 所有操作使用顺序一致性内存序
-public type mutable AtomicInt;
+public type unsafe sendable mutable AtomicInt;
 
 /// 原子无符号整数（UInt，平台相关宽度），支持无锁的原子读写和 CAS 操作
 /// 所有操作使用顺序一致性内存序
-public type mutable AtomicUInt;
+public type unsafe sendable mutable AtomicUInt;
 
 /// The sending half of a bounded channel; dropping it closes the channel for receivers.
-public type mutable SendChannel[T: Any];
+public type unsafe sendable mutable SendChannel[T: Any];
 
 /// The receiving half of a bounded channel; dropping it closes the channel for senders.
-public type mutable RecvChannel[T: Any];
+public type unsafe sendable mutable RecvChannel[T: Any];
 
 /// Countdown gate that opens once every latch has been removed.
-public type mutable LatchGate;
+public type unsafe sendable mutable LatchGate;
 
 /// Thread-safe lazy value whose initializer runs at most once.
-public type mutable Lazy[T: Any];
+/// Sendable contract: self-synchronized -- double-checked locking runs the
+/// initializer at most once; `get` from any thread is safe.
+public type unsafe sendable mutable Lazy[T: Any];
 
 /// A bare mutex lock that protects whatever shared data the caller guards between `lock` and `unlock`.
-public type mutable Mutex;
+/// Sendable contract: self-synchronized -- `lock`/`unlock` are the
+/// programmer's critical-section discipline over shared state.
+public type unsafe sendable mutable Mutex;
 
 /// Condition variable bound to a `Mutex` for waiting on shared-state changes.
-public type mutable MutexCondvar;
+public type unsafe sendable mutable MutexCondvar;
 
 /// Classic counting semaphore: `acquire` decrements the permit count (blocking
 /// at zero) and `release` increments it unconditionally, exactly as in the
 /// Dijkstra P/V discipline. The count is not capped, so releases may outnumber
 /// acquires — that is a legitimate way to pre-load wake-ups for later waits.
-public type mutable Semaphore;
+public type unsafe sendable mutable Semaphore;
 
 /// Reader-writer lock with exclusive `lock` and shared `lock_shared` modes.
 /// Writer preference is provided on Linux (glibc); on other platforms readers
 /// may barge ahead of a waiting writer.
-public type mutable SharedMutex;
+public type unsafe sendable mutable SharedMutex;
 
 /// Condition variable bound to a `SharedMutex`'s exclusive mode.
-public type mutable SharedMutexCondvar;
+public type unsafe sendable mutable SharedMutexCondvar;
 ```
 
 ## Given Implementations
@@ -179,7 +185,7 @@ given LatchGate {
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`.
-    public new(f: () -> T): Lazy[T];
+    public new(f: sendable () -> T): Lazy[T];
     /// Return the value, running and caching the initializer on first use.
     /// The initializer must not call `get()` on the same `Lazy`: the guard
     /// mutex is non-recursive, so the re-entrant call would deadlock holding

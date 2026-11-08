@@ -285,6 +285,126 @@ void __koral_closure_drop(void* raw_closure) {
     __koral_closure_release(*closure);
 }
 
+// ── 非原子 RC 族（concurrency-design.md §RC 分流）────────────────────────────
+//
+// 与上面的原子族逐入口一一对应，计数改普通整数操作（经 `int*` 访问同一个
+// `_Atomic int` 存储）。协议、哨兵、free 判定点完全一致；区别只在内存序：
+// 单线程（或经 `unsafe sendable` 承诺自管同步的跨界）语义不变。一个块只由
+// 一族碰——族由静态类型在 codegen 调用点决定，绝不混用。
+
+// 慢路径：强引用归零后的析构与释放。与 __koral_release_slow 同协议
+// （析构窗口 -2、隐式 weak 释放在 dtor 之后、free 只看 weak 的零穿越）。
+void __koral_release_slow_nonatomic(struct __koral_Control* control, __koral_Dtor dtor) {
+    if (dtor) {
+        int* strong = (int*)&control->strong_count;
+        *strong = KORAL_DESTROYING_REFCOUNT;
+        dtor(__koral_payload_of(control));
+        *strong = 0;
+    }
+    int* weak = (int*)&control->weak_count;
+    int prev_weak = *weak;
+    *weak = prev_weak - 1;
+    if (prev_weak == 1) {
+        free(control);
+    }
+}
+
+void __koral_weak_retain_nonatomic(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int* strong = (int*)&control->strong_count;
+    if (*strong == KORAL_IMMORTAL_REFCOUNT) return;
+    int* weak = (int*)&control->weak_count;
+    *weak += 1;
+}
+
+void __koral_weak_release_nonatomic(void* raw_control) {
+    if (!raw_control) return;
+    struct __koral_Control* control = (struct __koral_Control*)raw_control;
+    int* strong = (int*)&control->strong_count;
+    if (*strong == KORAL_IMMORTAL_REFCOUNT) return;
+    // 唯一的 free 判定点：weak 计数递减到 0 的这一方释放整块（同原子族）。
+    int* weak = (int*)&control->weak_count;
+    int prev_weak = *weak;
+    *weak = prev_weak - 1;
+    if (prev_weak == 1) {
+        free(control);
+    }
+}
+
+void __koral_weakref_drop_nonatomic(void* raw_weak_ref) {
+    if (!raw_weak_ref) return;
+    struct __koral_WeakRef* weak_ref = (struct __koral_WeakRef*)raw_weak_ref;
+    __koral_weak_release_nonatomic(weak_ref->control);
+}
+
+// 类型无关的 trait object 销毁（非原子族）：vtable 头里取具体类型的 drop glue。
+void __koral_traitref_drop_nonatomic(void* raw_trait_ref) {
+    if (!raw_trait_ref) return;
+    struct __koral_TraitRef* ref = (struct __koral_TraitRef*)raw_trait_ref;
+    if (!ref->ptr) return;
+    __koral_Dtor destroy = NULL;
+    if (ref->vtable) {
+        destroy = ((const struct __koral_VTableHeader*)ref->vtable)->destroy;
+    }
+    __koral_release_value_nonatomic(ref->ptr, destroy);
+}
+
+struct __koral_WeakRef __koral_downgrade_ref_nonatomic(struct __koral_Ref r) {
+    struct __koral_WeakRef w;
+    w.control = r.ptr ? __koral_control_of(r.ptr) : NULL;
+    if (w.control) {
+        __koral_weak_retain_nonatomic(w.control);
+    }
+    return w;
+}
+
+struct __koral_Ref __koral_upgrade_ref_nonatomic(struct __koral_WeakRef w, int* success) {
+    struct __koral_Ref r;
+    r.ptr = NULL;
+    *success = 0;
+
+    if (!w.control) return r;
+
+    struct __koral_Control* control = (struct __koral_Control*)w.control;
+    int* strong = (int*)&control->strong_count;
+    // immortal（-1）不是活计数：upgrade 一律失败（与原子族同契约）。
+    // 非原子升级就是普通「查 > 0 再 +1」——单线程内与 CAS 循环语义相同。
+    if (*strong > 0) {
+        *strong += 1;
+        r.ptr = __koral_payload_of(control);
+        *success = 1;
+    }
+    return r;
+}
+
+void __koral_closure_retain_nonatomic(struct __koral_Closure closure) {
+    if (!closure.env) return;
+    intptr_t* refcount = (intptr_t*)closure.env;
+    *refcount += 1;
+}
+
+void __koral_closure_release_nonatomic(struct __koral_Closure closure) {
+    if (!closure.env) return;
+    intptr_t* refcount = (intptr_t*)closure.env;
+    intptr_t prev = *refcount;
+    *refcount = prev - 1;
+    if (prev == 1) {
+        // 单线程归零方自己跑析构/释放，无需 fence（同协议、同 free 判定点）。
+        if (closure.drop) {
+            closure.drop(closure.env);
+        } else {
+            free(closure.env);
+        }
+    }
+}
+
+void __koral_closure_drop_nonatomic(void* raw_closure) {
+    if (!raw_closure) return;
+    struct __koral_Closure* closure = (struct __koral_Closure*)raw_closure;
+    __koral_closure_release_nonatomic(*closure);
+}
+
 CFile* __koral_stdin(void) {
     return (CFile*)stdin;
 }
@@ -4128,6 +4248,45 @@ uint32_t __koral_hardware_concurrency(void) {
 }
 
 #endif
+
+// ============================================================================
+// Reentrant object lock (concurrency-design.md §对象锁语义)
+// ============================================================================
+
+void __koral_lock_init(struct __koral_Lock* lock) {
+    atomic_store_explicit(&lock->owner, 0, memory_order_relaxed);
+    lock->recursion = 0;
+    lock->reserved = 0;
+}
+
+void __koral_lock_acquire(struct __koral_Lock* lock) {
+    uint64_t self = __koral_thread_current_id();
+    // Reentrant fast path: relaxed load is advisory -- a stale miss falls
+    // through to the CAS, which is the authoritative owner test.
+    if (atomic_load_explicit(&lock->owner, memory_order_relaxed) == self) {
+        lock->recursion++;
+        return;
+    }
+    for (;;) {
+        uint64_t expected = 0;
+        if (atomic_compare_exchange_weak_explicit(&lock->owner, &expected, self,
+                memory_order_acquire, memory_order_relaxed)) {
+            break;
+        }
+        // Contended: critical sections are one field access or one assignment
+        // statement, so yielding out is cheaper than a futex round-trip here.
+        __koral_thread_yield();
+    }
+    lock->recursion = 1;
+}
+
+void __koral_lock_release(struct __koral_Lock* lock) {
+    // Owner-only contract (codegen pairs acquire/release); the recursion count
+    // therefore needs no atomics of its own.
+    if (--lock->recursion == 0) {
+        atomic_store_explicit(&lock->owner, 0, memory_order_release);
+    }
+}
 
 // ============================================================================
 // Timer context management (std.task)

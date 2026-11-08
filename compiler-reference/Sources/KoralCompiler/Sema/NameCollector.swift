@@ -206,9 +206,10 @@ public class NameCollector: CompilerPass {
             // Using 声明在 ModuleResolver 中处理，这里跳过
             return
             
-        case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
+        case .traitDeclaration(let name, let isSendable, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
             try collectTraitDefinition(
                 name: name,
+                isSendable: isSendable,
                 typeParameters: typeParameters,
                 superTraits: superTraits,
                 methods: methods,
@@ -218,7 +219,7 @@ public class NameCollector: CompilerPass {
                 isStdLib: isStdLib
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutableType, let access, let span, let nameSpan):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutableType, let sendability, let access, let span, let nameSpan):
             try collectStructDefinition(
                 name: name,
                 typeParameters: typeParameters,
@@ -227,10 +228,11 @@ public class NameCollector: CompilerPass {
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib,
-                isMutableType: isMutableType
+                isMutableType: isMutableType,
+                sendability: sendability
             )
-            
-        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
+
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, let sendability, let access, let span, let nameSpan):
             try collectEnumDefinition(
                 name: name,
                 typeParameters: typeParameters,
@@ -238,7 +240,8 @@ public class NameCollector: CompilerPass {
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
-                isStdLib: isStdLib
+                isStdLib: isStdLib,
+                sendability: sendability
             )
             
         case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span, let nameSpan):
@@ -299,7 +302,7 @@ public class NameCollector: CompilerPass {
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignTypeDeclaration(let name, let fields, let cname, let access, let span, let nameSpan):
+        case .foreignTypeDeclaration(let name, let fields, let cname, let sendability, let access, let span, let nameSpan):
             try collectForeignTypeDefinition(
                 name: name,
                 fields: fields,
@@ -307,7 +310,8 @@ public class NameCollector: CompilerPass {
                 access: access,
                 span: span,
                 nameSpan: nameSpan,
-                isStdLib: isStdLib
+                isStdLib: isStdLib,
+                sendability: sendability
             )
 
         case .foreignLetDeclaration(let name, _, _, _, let cname, let access, let span, let nameSpan):
@@ -352,6 +356,7 @@ public class NameCollector: CompilerPass {
     
     private func collectTraitDefinition(
         name: String,
+        isSendable: Bool,
         typeParameters: [TypeParameterDecl],
         superTraits: [TypeNode],
         methods: [TraitMethodSignature],
@@ -366,14 +371,14 @@ public class NameCollector: CompilerPass {
         if collectedTraits[qualifiedName] != nil {
             throw SemanticError.duplicateDefinition(name, span: nameSpan)
         }
-        
+
         // 检查方法级类型参数冲突
         try checkMethodTypeParameterConflicts(
             methods: methods,
             outerTypeParams: typeParameters,
             contextName: "trait '\(name)'"
         )
-        
+
         // 分配 DefId
         let defId = defIdMap.allocate(
             modulePath: currentModulePath,
@@ -384,6 +389,13 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+
+        // `trait sendable` (concurrency-design.md): the trait's objects are
+        // always sendable, so the declaration registers the same sendability
+        // slot a nominal type would.
+        if isSendable {
+            defIdMap.setTypeSendability(defId, .sendable)
+        }
 
         // 收集 trait 信息
         collectedTraits[qualifiedName] = CollectedTraitInfo(
@@ -410,7 +422,8 @@ public class NameCollector: CompilerPass {
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool,
-        isMutableType: Bool = false
+        isMutableType: Bool = false,
+        sendability: TypeSendability = .unmarked
     ) throws {
         let isPrivate = (access == .private)
         
@@ -453,6 +466,9 @@ public class NameCollector: CompilerPass {
         if isMutableType {
             defIdMap.markStructMutable(defId)
         }
+        // Nominal sendability (`sendable` / `unsafe sendable`) travels with the
+        // declaration for the same reason (concurrency-design.md).
+        defIdMap.setTypeSendability(defId, sendability)
 
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -492,7 +508,8 @@ public class NameCollector: CompilerPass {
         cases: [EnumCaseDeclaration],
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
-        isStdLib: Bool
+        isStdLib: Bool,
+        sendability: TypeSendability = .unmarked
     ) throws {
         let isPrivate = (access == .private)
         
@@ -527,6 +544,9 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+        // Nominal sendability (`sendable` / `unsafe sendable`) travels with the
+        // declaration (concurrency-design.md).
+        defIdMap.setTypeSendability(defId, sendability)
 
         // 收集类型信息
         if !typeParameters.isEmpty {
@@ -731,7 +751,8 @@ public class NameCollector: CompilerPass {
         cname: String? = nil,
         access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
-        isStdLib: Bool
+        isStdLib: Bool,
+        sendability: TypeSendability = .unmarked
     ) throws {
         let isPrivate = (access == .private)
         // 生成完整限定名用于重复检查
@@ -756,6 +777,9 @@ public class NameCollector: CompilerPass {
             // for the struct form, the C type's own spelling for the opaque one.
             defIdMap.setDeclaredCname(defId, cname)
         }
+        // Nominal sendability (`sendable` / `unsafe sendable`) travels with the
+        // declaration (concurrency-design.md). Both forms register.
+        defIdMap.setTypeSendability(defId, sendability)
         if fields != nil {
             foreignStructClaims.append((cName: cname ?? name, name: name, sourceFile: currentSourceFile, span: span))
         }

@@ -705,13 +705,13 @@ given TypeChecker {
             .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then "fn intrinsic \(name)",
             .ForeignFunctionDecl(_, name, _, _, _, _, _, _) then "fn foreign \(name)",
             .ForeignLetDecl(_, name, _, _, _, _, _, _) then "let foreign \(name)",
-            .TypeStructDecl(_, name, _, _, _, _, _) then "struct \(name)",
-            .TypeEnumDecl(_, name, _, _, _, _) then "enum \(name)",
+            .TypeStructDecl(_, name, _, _, _, _, _, _) then "struct \(name)",
+            .TypeEnumDecl(_, name, _, _, _, _, _) then "enum \(name)",
             .TypeAliasDecl(_, name, _, _, _, _) then "type \(name)",
             .IntrinsicTypeDecl(_, name, _, _, _) then "type intrinsic \(name)",
-            .ForeignTypeDecl(_, name, _, _, _, _) then "type foreign \(name)",
+            .ForeignTypeDecl(_, name, _, _, _, _, _) then "type foreign \(name)",
             .UsingDecl(specifier, _, _, _) then "using \(specifier)",
-            .TraitDecl(_, name, _, _, _, _, _) then "trait \(name)",
+            .TraitDecl(_, name, _, _, _, _, _, _) then "trait \(name)",
             .GivenDecl(_, _, _, _) then "given",
             .GivenTraitDecl(_, _, _, _, _) then "given as trait",
             .IntrinsicGivenDecl(_, _, _, _) then "given intrinsic",
@@ -1426,10 +1426,10 @@ given TypeChecker {
         return when decl in {
             .LetDecl(_, _, _, _, _, span, _) or .FunctionDecl(_, _, _, _, _, _, span, _)
             or .IntrinsicFunctionDecl(_, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, _, _, span, _)
-            or .ForeignLetDecl(_, _, _, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, span, _)
-            or .TypeEnumDecl(_, _, _, _, span, _) or .TypeAliasDecl(_, _, _, _, span, _)
-            or .IntrinsicTypeDecl(_, _, _, span, _) or .ForeignTypeDecl(_, _, _, _, span, _)
-            or .UsingDecl(_, _, _, span) or .TraitDecl(_, _, _, _, _, span, _) or .GivenDecl(_, _, _, span)
+            or .ForeignLetDecl(_, _, _, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, _, span, _)
+            or .TypeEnumDecl(_, _, _, _, _, span, _) or .TypeAliasDecl(_, _, _, _, span, _)
+            or .IntrinsicTypeDecl(_, _, _, span, _) or .ForeignTypeDecl(_, _, _, _, _, span, _)
+            or .UsingDecl(_, _, _, span) or .TraitDecl(_, _, _, _, _, _, span, _) or .GivenDecl(_, _, _, span)
             or .GivenTraitDecl(_, _, _, _, span) or .IntrinsicGivenDecl(_, _, _, span) then span,
         };
     };
@@ -1488,7 +1488,7 @@ given TypeChecker {
         };
         when self.storage.global_scope.lookup_type(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
-                .TraitObject(trait_object_def_id, _) then {
+                .TraitObject(trait_object_def_id, _, _) then {
                     if trait_object_def_id.is_valid() then {
                         return trait_object_def_id;
                     };
@@ -1512,14 +1512,18 @@ given TypeChecker {
     };
 
     make_trait_object_type(self, trait_name: String, type_args: List[Type]): Type = {
-        return Type.TraitObject(self.trait_def_id_by_name(trait_name), type_args);
+        return Type.TraitObject(self.trait_def_id_by_name(trait_name), type_args, false);
     };
 
     canonical_trait_object_type(self, trait_name: String): Type = {
         when self.lookup_current_file_type_symbol(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
-                .TraitObject(trait_object_def_id, _) then {
-                    return Type.TraitObject(trait_object_def_id, List[Type].new());
+                .TraitObject(trait_object_def_id, _, _) then {
+                    return Type.TraitObject(
+                        trait_object_def_id,
+                        List[Type].new(),
+                        self.context().is_sendable_type(resolved_type),
+                    );
                 },
                 _ then {},
             },
@@ -1528,10 +1532,11 @@ given TypeChecker {
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when self.storage.global_scope.lookup_type(trait_name) in {
             .Some(resolved_type) then when resolved_type in {
-                .TraitObject(trait_def_id, existing_args) then {
+                .TraitObject(trait_def_id, existing_args, _) then {
                     if trait_def_id == requested_trait_id then Type.TraitObject(
                         trait_def_id,
                         existing_args,
+                        self.context().is_sendable_type(resolved_type),
                     ) else self.make_trait_object_type(trait_name, List[Type].new())
                 },
                 _ then self.make_trait_object_type(trait_name, List[Type].new()),
@@ -1622,7 +1627,7 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then self.contains_borrowed_reference_type(
                 inner,
             ),
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, _) then {
                 for param in params then {
                     if self.contains_borrowed_reference_type(param.param_type) then {
                         return true;
@@ -1638,7 +1643,7 @@ given TypeChecker {
                 };
                 self.contains_borrowed_reference_type(return_type)
             },
-            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args, _) then {
                 for arg in args then {
                     if self.contains_borrowed_reference_type(arg) then {
                         return true;
@@ -1655,7 +1660,7 @@ given TypeChecker {
             .NeverType() then true,
             .ReferenceType(inner) or .MutableReferenceType(inner) or .PointerType(inner)
             or .MutablePointerType(inner) or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.contains_never_type(inner),
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, _) then {
                 for param in params then {
                     if self.contains_never_type(param.param_type) then {
                         return true;
@@ -1671,7 +1676,7 @@ given TypeChecker {
                 };
                 self.contains_never_type(return_type)
             },
-            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args, _) then {
                 for arg in args then {
                     if self.contains_never_type(arg) then {
                         return true;
@@ -1706,15 +1711,328 @@ given TypeChecker {
             self.concretize_default_literal_type(right),
         );
         if normalized_left == normalized_right then {
-            return true;
+            // `sendable` 槽按放宽方向核对：left 是实际类型、right 是期望类型，
+            // `sendable (A) -> R` 可用在 `(A) -> R` 的位置，反向拒绝
+            // （concurrency-design.md §派生规则 5）。
+            return self.sendable_slots_compatible(normalized_left, normalized_right);
         };
         if self.nominal_instantiation_matches_generic(normalized_left, normalized_right) then {
-            return true;
+            return self.sendable_slots_compatible(normalized_left, normalized_right);
         };
         if self.nominal_instantiation_matches_generic(normalized_right, normalized_left) then {
-            return true;
+            return self.sendable_slots_compatible(normalized_left, normalized_right);
         };
         return false;
+    };
+
+    /// 宽放规则（concurrency-design.md §派生规则 5、6）：`sendable (A) -> R`
+    /// 可用在 `(A) -> R` 的位置，反向拒绝；trait object 同规则。逐节点比较
+    /// `sendable` 槽——期望侧为 true 的槽实际侧必须也是 true。逐节点（含泛型
+    /// 实参与引用层）是条件 sendable 的反走私口：`List[sendable () -> V]` 的
+    /// 位置不收 `List[() -> V]`。
+    sendable_slots_compatible(self, actual: Type, expected: Type): Bool = {
+        return when expected in {
+            .FunctionType(expected_params, expected_ret, _) then {
+                if self.context().is_sendable_type(expected) and not self.context().is_sendable_type(
+                    actual,
+                ) then {
+                    return false;
+                };
+                when actual in {
+                    .FunctionType(actual_params, actual_ret, _) then {
+                        if actual_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in actual_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params) then {
+                            if not self.sendable_slots_compatible(
+                                (pair.first).param_type,
+                                (pair.second).param_type,
+                            ) then {
+                                return false;
+                            };
+                        };
+                        return self.sendable_slots_compatible(actual_ret, expected_ret);
+                    },
+                    _ then {},
+                };
+                true
+            },
+            .TraitObject(_, expected_args, _) then {
+                if self.context().is_sendable_type(expected) and not self.context().is_sendable_type(
+                    actual,
+                ) then {
+                    return false;
+                };
+                when actual in {
+                    .TraitObject(_, actual_args, _) then {
+                        if actual_args.count() != expected_args.count() then {
+                            return false;
+                        };
+                        for pair in actual_args.lazy().zip[
+                            Type,
+                            ListIterator[Type],
+                            List[Type],
+                        ](expected_args) then {
+                            if not self.sendable_slots_compatible(pair.first, pair.second) then {
+                                return false;
+                            };
+                        };
+                        return true;
+                    },
+                    _ then {},
+                };
+                true
+            },
+            .ReferenceType(expected_inner) then when actual in {
+                .ReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .MutableReferenceType(expected_inner) then when actual in {
+                .MutableReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .BorrowedReferenceType(expected_inner) then when actual in {
+                .BorrowedReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .MutableBorrowedReferenceType(expected_inner) then when actual in {
+                .MutableBorrowedReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .WeakReferenceType(expected_inner) then when actual in {
+                .WeakReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .MutableWeakReferenceType(expected_inner) then when actual in {
+                .MutableWeakReferenceType(actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .GenericStruct(_, expected_args) or .GenericEnum(_, expected_args) then {
+                when actual in {
+                    .GenericStruct(_, actual_args) or .GenericEnum(_, actual_args) then {
+                        if actual_args.count() != expected_args.count() then {
+                            return false;
+                        };
+                        for pair in actual_args.lazy().zip[
+                            Type,
+                            ListIterator[Type],
+                            List[Type],
+                        ](expected_args) then {
+                            if not self.sendable_slots_compatible(pair.first, pair.second) then {
+                                return false;
+                            };
+                        };
+                        true
+                    },
+                    _ then true,
+                }
+            },
+            .FixedArrayType(_, expected_inner) then when actual in {
+                .FixedArrayType(_, actual_inner) then self.sendable_slots_compatible(
+                    actual_inner,
+                    expected_inner,
+                ),
+                _ then true,
+            },
+            .ForeignFunctionType(expected_params, expected_ret) then {
+                when actual in {
+                    .ForeignFunctionType(actual_params, actual_ret) then {
+                        if actual_params.count() != expected_params.count() then {
+                            return false;
+                        };
+                        for pair in actual_params.lazy().zip[
+                            FunctionParamEntry,
+                            ListIterator[FunctionParamEntry],
+                            List[FunctionParamEntry],
+                        ](expected_params) then {
+                            if not self.sendable_slots_compatible(
+                                (pair.first).param_type,
+                                (pair.second).param_type,
+                            ) then {
+                                return false;
+                            };
+                        };
+                        return self.sendable_slots_compatible(actual_ret, expected_ret);
+                    },
+                    _ then true,
+                }
+            },
+            _ then true,
+        };
+    };
+
+    /// 合流用：两个等形类型逐位与出 `sendable` 槽（取弱者，不放大
+    /// sendability）。分支一边 sendable 一边不 sendable 时，合流结果是弱者。
+    type_with_and_sendable_slots(self, a: Type, b: Type): Type = {
+        return when a in {
+            .FunctionType(a_params, a_ret, _) then when b in {
+                .FunctionType(b_params, b_ret, _) then {
+                    let mutable merged_params = List[FunctionParamEntry].with_capacity(
+                        a_params.count(),
+                    );
+                    for pair in a_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](b_params) then {
+                        merged_params.push(
+                            FunctionParamEntry(
+                                self.type_with_and_sendable_slots(
+                                    (pair.first).param_type,
+                                    (pair.second).param_type,
+                                ),
+                                (pair.first).pass_kind,
+                            ),
+                        );
+                    };
+                    Type.FunctionType(
+                        merged_params,
+                        self.type_with_and_sendable_slots(a_ret, b_ret),
+                        self.context().is_sendable_type(a) and self.context().is_sendable_type(b),
+                    )
+                },
+                _ then a,
+            },
+            .TraitObject(a_trait_def_id, a_args, _) then when b in {
+                .TraitObject(_, b_args, _) then {
+                    let mutable merged_args = List[Type].with_capacity(a_args.count());
+                    for pair in a_args.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](b_args) then {
+                        merged_args.push(self.type_with_and_sendable_slots(pair.first, pair.second));
+                    };
+                    Type.TraitObject(
+                        a_trait_def_id,
+                        merged_args,
+                        self.context().is_sendable_type(a) and self.context().is_sendable_type(b),
+                    )
+                },
+                _ then a,
+            },
+            .ReferenceType(a_inner) then when b in {
+                .ReferenceType(b_inner) then Type.ReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .MutableReferenceType(a_inner) then when b in {
+                .MutableReferenceType(b_inner) then Type.MutableReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .BorrowedReferenceType(a_inner) then when b in {
+                .BorrowedReferenceType(b_inner) then Type.BorrowedReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .MutableBorrowedReferenceType(a_inner) then when b in {
+                .MutableBorrowedReferenceType(b_inner) then Type.MutableBorrowedReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .WeakReferenceType(a_inner) then when b in {
+                .WeakReferenceType(b_inner) then Type.WeakReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .MutableWeakReferenceType(a_inner) then when b in {
+                .MutableWeakReferenceType(b_inner) then Type.MutableWeakReferenceType(
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .GenericStruct(a_def_id, a_args) then when b in {
+                .GenericStruct(_, b_args) then {
+                    let mutable merged_args = List[Type].with_capacity(a_args.count());
+                    for pair in a_args.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](b_args) then {
+                        merged_args.push(self.type_with_and_sendable_slots(pair.first, pair.second));
+                    };
+                    Type.GenericStruct(a_def_id, merged_args)
+                },
+                _ then a,
+            },
+            .GenericEnum(a_def_id, a_args) then when b in {
+                .GenericEnum(_, b_args) then {
+                    let mutable merged_args = List[Type].with_capacity(a_args.count());
+                    for pair in a_args.lazy().zip[
+                        Type,
+                        ListIterator[Type],
+                        List[Type],
+                    ](b_args) then {
+                        merged_args.push(self.type_with_and_sendable_slots(pair.first, pair.second));
+                    };
+                    Type.GenericEnum(a_def_id, merged_args)
+                },
+                _ then a,
+            },
+            .FixedArrayType(len, a_inner) then when b in {
+                .FixedArrayType(_, b_inner) then Type.FixedArrayType(
+                    len,
+                    self.type_with_and_sendable_slots(a_inner, b_inner),
+                ),
+                _ then a,
+            },
+            .ForeignFunctionType(a_params, a_ret) then when b in {
+                .ForeignFunctionType(b_params, b_ret) then {
+                    let mutable merged_params = List[FunctionParamEntry].with_capacity(
+                        a_params.count(),
+                    );
+                    for pair in a_params.lazy().zip[
+                        FunctionParamEntry,
+                        ListIterator[FunctionParamEntry],
+                        List[FunctionParamEntry],
+                    ](b_params) then {
+                        merged_params.push(
+                            FunctionParamEntry(
+                                self.type_with_and_sendable_slots(
+                                    (pair.first).param_type,
+                                    (pair.second).param_type,
+                                ),
+                                (pair.first).pass_kind,
+                            ),
+                        );
+                    };
+                    Type.ForeignFunctionType(
+                        merged_params,
+                        self.type_with_and_sendable_slots(a_ret, b_ret),
+                    )
+                },
+                _ then a,
+            },
+            _ then a,
+        };
     };
 
     nominal_instantiation_matches_generic(
@@ -1813,14 +2131,18 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(
                 self.canonicalize_alias_type(inner),
             ),
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
                     resolved_params.push(intern_type(self.canonicalize_alias_type(pt)));
                 };
                 let resolved_ret = self.canonicalize_alias_type(return_type);
-                make_function_type(resolved_params, resolved_ret)
+                make_function_type_with_flag(
+                    resolved_params,
+                    resolved_ret,
+                    self.context().is_sendable_type(t),
+                )
             },
             .ForeignFunctionType(fn_params, return_type) then {
                 let param_types = param_entry_types(fn_params);
@@ -1863,7 +2185,7 @@ given TypeChecker {
             .MutableWeakReferenceType(inner) then Type.MutableWeakReferenceType(
                 self.concretize_default_literal_type(inner),
             ),
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable resolved_params = List[Type].new();
                 for pt in param_types then {
@@ -1872,6 +2194,7 @@ given TypeChecker {
                 Type.FunctionType(
                     types_to_param_entries(resolved_params),
                     self.concretize_default_literal_type(return_type),
+                    self.context().is_sendable_type(resolved),
                 )
             },
             .ForeignFunctionType(fn_params, return_type) then {
@@ -1899,12 +2222,12 @@ given TypeChecker {
                 };
                 Type.GenericEnum(template_def_id, resolved_args)
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
                     resolved_args.push(self.concretize_default_literal_type(arg));
                 };
-                Type.TraitObject(trait_def_id, resolved_args)
+                Type.TraitObject(trait_def_id, resolved_args, self.context().is_sendable_type(resolved))
             },
             _ then resolved,
         };
@@ -1942,9 +2265,10 @@ given TypeChecker {
                 .Some(mapped) then self.display_type_name(mapped),
                 .None() then type_to_string(resolved),
             },
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, is_sendable) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable out = StringBuilder.new();
+                out.push_string(sendable_prefix_text(is_sendable));
                 out.push_byte('(');
                 let mutable first = true;
                 for pt in param_types then {
@@ -2008,6 +2332,7 @@ given TypeChecker {
                 out.push_byte(']');
                 out.to_string()
             },
+            .TraitObject(trait_def_id, _, is_sendable) then "\(sendable_prefix_text(is_sendable))\(def_id_spelling(trait_def_id))",
             _ then type_to_string(resolved),
         };
     };
@@ -2034,8 +2359,10 @@ given TypeChecker {
             return Type.VoidType();
         };
 
-        if self.same_expr_type(then_type, else_t) then {
-            return then_type;
+        // 分支合流：两向都试（槽位方向只允许放宽），合流结果按位取弱者，
+        // 不放大 sendability。
+        if self.same_expr_type(then_type, else_t) or self.same_expr_type(else_t, then_type) then {
+            return self.type_with_and_sendable_slots(then_type, else_t);
         };
 
         when then_type in {
@@ -2340,7 +2667,7 @@ given TypeChecker {
         // when the owning declaration is visited before the trait file.
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, _, _, _, _) then {
+                .TraitDecl(_, _, _, _, _, _, _, _) then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
                     self.install_name_resolution_context();
@@ -2365,19 +2692,25 @@ given TypeChecker {
         // any other, is an error when nothing declares it.
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, parents, _, span, _) then {
+                .TraitDecl(_, trait_name, trait_is_sendable, _, parents, _, span, name_span) then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
                     self.install_name_resolution_context();
                     self.storage.package_id = pair.first.package_id;
                     self.validate_trait_parent_existence(parents, span);
+                    self.enforce_sendable_trait_inheritance(
+                        trait_name,
+                        trait_is_sendable,
+                        parents,
+                        name_span,
+                    );
                 },
                 _ then {},
             };
         };
         for pair in nodes then {
             when pair.first.decl in {
-                .TraitDecl(_, _, _, _, _, _, _) then {},
+                .TraitDecl(_, _, _, _, _, _, _, _) then {},
                 _ then {
                     self.storage.file_path = pair.first.source_file;
                     self.storage.module_path = pair.second;
@@ -2987,7 +3320,7 @@ given TypeChecker {
     collect_signatures(self, program: Program): Void = {
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, _, _, _, _) then self.collect_decl_signature(decl),
+                .TraitDecl(_, _, _, _, _, _, _, _) then self.collect_decl_signature(decl),
                 _ then {},
             };
         };
@@ -2996,16 +3329,21 @@ given TypeChecker {
         // any other, is an error when nothing declares it.
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, parents, _, span, _) then self.validate_trait_parent_existence(
-                    parents,
-                    span,
-                ),
+                .TraitDecl(_, trait_name, trait_is_sendable, _, parents, _, span, name_span) then {
+                    self.validate_trait_parent_existence(parents, span);
+                    self.enforce_sendable_trait_inheritance(
+                        trait_name,
+                        trait_is_sendable,
+                        parents,
+                        name_span,
+                    );
+                },
                 _ then {},
             };
         };
         for decl in program.declarations then {
             when decl in {
-                .TraitDecl(_, _, _, _, _, _, _) then {},
+                .TraitDecl(_, _, _, _, _, _, _, _) then {},
                 _ then self.collect_decl_signature(decl),
             };
         };
@@ -3137,13 +3475,51 @@ given TypeChecker {
         };
     };
 
+    /// `trait A: B` where B is `trait sendable` forces A to declare `sendable`
+    /// as well (concurrency-design.md): an always-sendable trait object family
+    /// must not grow a non-sendable branch. Explicit, no inference.
+    ///
+    /// `name_span` is where the trait's NAME is written -- the fix (adding
+    /// `sendable`) belongs at the declaration's head, so that is where the
+    /// diagnostic points. Only the first offending parent is named: the fix is
+    /// the same for every parent, and one declaration reports one error.
+    enforce_sendable_trait_inheritance(
+        self,
+        trait_name: String,
+        is_sendable: Bool,
+        parents: List[TypeNode],
+        name_span: SourceSpan,
+    ): Void = {
+        if is_sendable then {
+            return;
+        };
+        for parent in parents then {
+            let pname = self.type_node_name(parent);
+            when self.storage.trait_registry.get_in_module(
+                pname,
+                self.storage.module_path,
+            ) in {
+                .Some(parent_info) then {
+                    if self.context().is_sendable_trait(parent_info.def_id) then {
+                        self.push_diagnostic(
+                            "Trait '\(trait_name)' extends sendable trait '\(pname)' and must be declared sendable",
+                            name_span,
+                        );
+                        return;
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+
     collect_decl_signature(self, decl: Decl): Void = {
         let outer_span = self.enter_current_span(self.decl_span(decl));
         defer {
             self.leave_current_span(outer_span);
         };
         when decl in {
-            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, _) then {
+            .TypeStructDecl(access, name, is_mutable_type, sendability, type_params, fields, span, _) then {
                 let mutable resolved_type = self.lookup_current_file_type_symbol(name) or else {
                     self.report_pass2_decl_consistency_error(
                         "struct declaration",
@@ -3215,6 +3591,7 @@ given TypeChecker {
                 if resolved_type is .StructureType(def_id) then {
                     let mutable context = self.context();
                     context.set_struct_mutable(def_id, is_mutable_type);
+                    context.set_type_sendability(def_id, sendability);
                     // Lang-item link point: a struct declared in std is recorded
                     // by its DECLARATION identity, so built-in operator behaviour
                     // can be attached without matching on the spelling later.
@@ -3282,7 +3659,7 @@ given TypeChecker {
                     return;
                 };
             },
-            .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
+            .TypeEnumDecl(access, name, _, type_params, cases, span, name_span) then {
                 let mutable resolved_type = self.lookup_current_file_type_symbol(name) or else {
                     self.report_pass2_decl_consistency_error(
                         "enum declaration",
@@ -3483,7 +3860,9 @@ given TypeChecker {
                 for pt in stable_param_types then {
                     pt_refs.push(pt);
                 };
-                let mutable fn_type = make_function_type(pt_refs, stable_ret);
+                // 顶层函数引用无环境可捕获，值类型天然 `sendable`
+                // （concurrency-design.md §派生规则 5）。
+                let mutable fn_type = make_function_type_with_flag(pt_refs, stable_ret, true);
                 let sym = self.make_top_level_symbol(
                     name,
                     fn_type,
@@ -3548,6 +3927,7 @@ given TypeChecker {
                             self.to_type_ref_list(stable_param_types),
                         ),
                         stable_ret,
+                        true,
                     );
                     let sym = self.make_top_level_symbol(
                         name,
@@ -3598,7 +3978,7 @@ given TypeChecker {
                     ),
                 );
             },
-            .ForeignTypeDecl(access, name, fields, _, span, name_span) then {
+            .ForeignTypeDecl(access, name, _, fields, _, span, name_span) then {
                 if fields is .Some(raw_fields) and self.lookup_current_file_type_symbol(
                     name,
                 ) is .Some(t) and t is .StructureType(def_id) then {
@@ -4146,11 +4526,12 @@ given TypeChecker {
                     };
                 };
             },
-            .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
-                let resolved = when type_name in {
-                    .Some(tn) then self.resolve_type(tn),
-                    .None() then Type.Unknown(),
-                };
+            .LetDecl(access, name, is_mutable, _, _, span, _) then {
+                // `let` 的类型在注册阶段（register_pending_global_init）沉定：
+                // 签到阶段只登记名字与 DefId（与参考编译器同形——"the type is
+                // settled at its definition pass"）。这里再解析一遍会把标注
+                // 诊断提前到签到阶段，并因去重让注册阶段的失败降级失灵。
+                let resolved = Type.Unknown();
                 let variable_kind = if is_mutable then VariableKind.MutableValue()
                 else VariableKind.Value();
                 let _ = self.make_top_level_symbol(
@@ -4175,7 +4556,7 @@ given TypeChecker {
                     is_mutable,
                 );
             },
-            .TraitDecl(access, name, type_params, parents, members, span, name_span) then {
+            .TraitDecl(access, name, _, type_params, parents, members, span, name_span) then {
                 // 在 signature 收集阶段注册完整 Trait（包含方法）,
                 // 确保跨模块 given 检查能读取到正确的 requirement 集合。
                 let mutable parent_constraints = List[ParentTraitConstraint].new();
@@ -4613,6 +4994,9 @@ given TypeChecker {
                 };
                 TypeNode.ForeignFunction(copied_params, self.copy_type_node_ref(return_type), span)
             },
+            .SendableQualified(inner) then TypeNode.SendableQualified(
+                self.copy_type_node_ref(inner),
+            ),
         };
     };
 
@@ -4686,6 +5070,11 @@ given TypeChecker {
                 "foreign",
                 List[Type].new(),
             ),
+            .Sendable() then GenericConstraintBound(
+                DefId(UInt(0)),
+                "sendable",
+                List[Type].new(),
+            ),
         };
     };
 
@@ -4706,6 +5095,15 @@ given TypeChecker {
                 is_mutable,
                 param_names,
             ),
+            // `sendable` 前缀限定：与主解析路径同一裁定（此处 miss 不报）。
+            .SendableQualified(inner) then {
+                when type_with_sendable_qualifier(
+                    self.resolve_constraint_type_arg(inner, param_names),
+                ) in {
+                    .Some(sendable_t) then sendable_t,
+                    .None() then Type.Unknown(),
+                }
+            },
             _ then Type.Unknown(),
         };
     };
@@ -4851,7 +5249,7 @@ given TypeChecker {
             let mutable shape_bounds = List[Bound].new();
             for constraint in tp.constraints then {
                 when constraint in {
-                    .Mutable() or .Foreign() then shape_bounds.push(constraint),
+                    .Mutable() or .Foreign() or .Sendable() then shape_bounds.push(constraint),
                     .Trait(_, _, _) then {},
                 };
             };

@@ -322,6 +322,13 @@ final class MIRFunctionCodeEmitter {
              .release(let value),
              .evaluate(let value):
           walkValue(value)
+        case .lock(let lock), .unlock(let lock):
+          switch lock {
+          case .objectLock(let handle):
+            recordUse(handle)
+          case .globalLock:
+            break
+          }
         case .debugSource:
           break
         }
@@ -589,7 +596,7 @@ final class MIRFunctionCodeEmitter {
           walkValue(value)
         case .drop(let place):
           walkPlace(place)
-        case .declare, .scopeEnter, .scopeExit, .debugSource:
+        case .declare, .scopeEnter, .scopeExit, .debugSource, .lock, .unlock:
           break
         }
       }
@@ -615,7 +622,7 @@ final class MIRFunctionCodeEmitter {
         if let parameters = codeGen.callParameters(for: symbol) {
           return parameters
         }
-        if case .function(let parameters, _) = symbol.type {
+        if case .function(let parameters, _, _) = symbol.type {
           return parameters
         }
         return []
@@ -797,6 +804,10 @@ final class MIRFunctionCodeEmitter {
       emitRelease(value)
     case .evaluate(let value):
       emitEvaluate(value)
+    case .lock(let lock):
+      emitLockOp(lock, acquire: true)
+    case .unlock(let lock):
+      emitLockOp(lock, acquire: false)
     case .scopeEnter:
       break
     case .scopeExit(let scope):
@@ -1014,6 +1025,39 @@ final class MIRFunctionCodeEmitter {
     emitCleanups(emission.cleanups)
   }
 
+  /// Object-lock critical-section boundary (concurrency-design.md).
+  ///
+  /// `objectLock(handle)`: the lock is the payload's hidden first field;
+  /// `handle.ptr` is the payload pointer, so the lock address is
+  /// `&payload->__lock` (not relying on the first field's offset-0
+  /// coincidence). `globalLock(defId)`: the per-variable static lock of a
+  /// `let mutable` global (static zero-init is a valid fresh state -- owner=0
+  /// / recursion=0 is the runtime's idle state, no startup init needed).
+  private func emitLockOp(_ lock: MIRLockTarget, acquire: Bool) {
+    let lockFn = acquire ? "__koral_lock_acquire" : "__koral_lock_release"
+    let lockExpr: String
+    switch lock {
+    case .objectLock(let handle):
+      let name = localName(for: handle)
+      let handleType = localByID[handle]?.type ?? .error
+      let payloadType = codeGen.managedPayloadTypeName(for: handleType)
+      lockExpr = "&((struct \(payloadType)*)\(name).ptr)->__lock"
+    case .globalLock(let defId):
+      let name: String
+      if let symbolType = codeGen.context.getSymbolType(defId),
+         let symbolKind = codeGen.context.getSymbolKind(defId) {
+        name = codeGen.cIdentifier(for: Symbol(defId: defId, type: symbolType, kind: symbolKind))
+      } else {
+        name = codeGen.cIdentifierByDefId[codeGen.defIdKey(defId)]
+          ?? codeGen.context.getCIdentifier(defId)
+          ?? sanitizeCIdentifier(codeGen.context.getName(defId) ?? "global_\(defId.id)")
+      }
+      lockExpr = "&__koral_glock_\(name)"
+    }
+    codeGen.addIndent()
+    codeGen.appendToBuffer("\(lockFn)((struct __koral_Lock*)\(lockExpr));\n")
+  }
+
   private func emitScopeCleanup(_ scope: MIRScopeID, excluding preservedLocal: MIRLocalID?) {
     let locals = lifetimePlan.localsByScope[scope] ?? []
     for local in locals.reversed() {
@@ -1226,7 +1270,7 @@ final class MIRFunctionCodeEmitter {
     _ lambda: MIRLambda,
     captureSourceOverrides: [UInt64: String]
   ) -> String {
-    guard case .function(let functionParameters, let returnType) = lambda.type else {
+    guard case .function(let functionParameters, let returnType, _) = lambda.type else {
       fatalError("Lambda expression must have function type")
     }
 
@@ -1575,7 +1619,7 @@ final class MIRFunctionCodeEmitter {
     case .function(let symbol):
       if let exactParameterTypes = globalFunctionParameterTypes(for: symbol) {
         parameterTypes = exactParameterTypes
-      } else if case .function(let parameters, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
+      } else if case .function(let parameters, _, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
         parameterTypes = parameters.map(\.type)
       } else if case .foreignFunction(let parameters, _) = codeGen.context.getSymbolType(symbol.defId) ?? symbol.type {
         parameterTypes = parameters.map(\.type)
@@ -1584,7 +1628,7 @@ final class MIRFunctionCodeEmitter {
       }
     default:
       let calleeType = resolver.type(of: call.callee) ?? .void
-      if case .function(let parameters, _) = calleeType {
+      if case .function(let parameters, _, _) = calleeType {
         parameterTypes = parameters.map(\.type)
       } else if case .foreignFunction(let parameters, _) = calleeType {
         parameterTypes = parameters.map(\.type)
@@ -1606,7 +1650,7 @@ final class MIRFunctionCodeEmitter {
     default:
       let calleeType = resolver.type(of: call.callee) ?? .void
       switch calleeType {
-      case .function(let parameters, let returns):
+      case .function(let parameters, let returns, _):
         let calleeExpr = emitOperandExpression(call.callee)
         expression = emitClosureCall(closureExpr: calleeExpr, parameters: parameters, returnType: returns, arguments: argumentList)
       case .foreignFunction:
@@ -1799,6 +1843,13 @@ final class MIRFunctionCodeEmitter {
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->strong_count = 1;\n")
       codeGen.addIndent()
       codeGen.appendToBuffer("__koral_control_of(\(expression).ptr)->weak_count = 1;\n")
+      if codeGen.context.isLockedType(aggregate.type) {
+        // A locked type's built-in object lock initializes on the
+        // construction path (concurrency-design.md). The lock holds no
+        // resources, so destruction needs no action.
+        codeGen.addIndent()
+        codeGen.appendToBuffer("__koral_lock_init(&((struct \(payloadType)*)\(expression).ptr)->__lock);\n")
+      }
       let payloadExpr = "((struct \(payloadType)*)\(expression).ptr)"
       for ((value, emission), member) in zip(zip(aggregate.fields, fieldEmissions), members) {
         let fieldName = sanitizeCIdentifier(member.name)

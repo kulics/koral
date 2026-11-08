@@ -560,7 +560,7 @@ given TypeChecker {
                                         .None() then {},
                                     };
                                 },
-                                .Mutable() or .Foreign() then {},
+                                .Mutable() or .Foreign() or .Sendable() then {},
                             };
                         };
                     };
@@ -1391,14 +1391,15 @@ given TypeChecker {
     };
 
     type_matches_expected_pattern(self, expected_pattern: Type, actual_type: Type): Bool = {
-        if self.same_expr_type(expected_pattern, actual_type) then {
+        // same_expr_type 的槽位方向是 (实际, 期望)，这里要按该方向传。
+        if self.same_expr_type(actual_type, expected_pattern) then {
             return true;
         };
         let mutable bindings = Dict[String, Type].new();
         self.infer_type_bindings(expected_pattern, actual_type, bindings);
         return self.same_expr_type(
-            self.apply_type_bindings(expected_pattern, bindings),
             actual_type,
+            self.apply_type_bindings(expected_pattern, bindings),
         );
     };
 
@@ -1444,7 +1445,7 @@ given TypeChecker {
         ) is .Some(_);
 
         return when normalized in {
-            .TraitObject(trait_object_def_id, _) then Option[String].Some(
+            .TraitObject(trait_object_def_id, _, _) then Option[String].Some(
                 def_id_spelling(trait_object_def_id),
             ),
             .GenericParameter(name) then {
@@ -1548,7 +1549,7 @@ given TypeChecker {
         // DefId -> name -> DefId round-trip, and the name lands in whichever
         // module is checking rather than the one that wrote the expectation.
         let expected_trait_id = when expected_trait_type in {
-            .TraitObject(trait_object_def_id, _) then trait_object_def_id,
+            .TraitObject(trait_object_def_id, _, _) then trait_object_def_id,
             _ then self.trait_def_id_of(self.trait_name_from_type(expected_trait_type)) or else DefId(
                 UInt(0),
             ),
@@ -1601,7 +1602,7 @@ given TypeChecker {
     /// A trait with no parameters contributes none.
     trait_object_type_args(self, t: Type): List[Type] = {
         return when t in {
-            .TraitObject(_, args) then args,
+            .TraitObject(_, args, _) then args,
             _ then List[Type].new(),
         };
     };
@@ -1641,6 +1642,17 @@ given TypeChecker {
             },
             _ then trait_type,
         };
+        let concrete_type = self.trait_object_concrete_type(expr.expr_type);
+        // 装箱处检查（concurrency-design.md §派生规则 6）：`sendable Trait`
+        // 只收 sendable 的具体类型；不带 `sendable` 的装箱不查。
+        if self.context().is_sendable_type(erased_trait_type) and not self.context().is_sendable_type(
+            concrete_type,
+        ) then {
+            self.push_diagnostic_at_span(
+                "Cannot form 'sendable' trait object from non-sendable type '\(self.context().type_display_name(concrete_type))'",
+                expr.span,
+            );
+        };
         return make_typed_expr(
             TypedExprKind.TraitObjectConversion(
                 expr,
@@ -1664,6 +1676,76 @@ given TypeChecker {
             _ then trait_type,
         };
     };
+    /// 借用裁定二的隐式形态（concurrency-design.md §对象锁语义·裁定二）：
+    /// 值→引用的隐式借用（实参位、接收者位等）把锁定字段的地址漏进借用方，
+    /// 与显式 `&x.f` 是同一个逃逸舱——报同一个错。显式形态的检查在
+    /// `check_ptr_expr_ref`；这里覆盖一切走类型适配形成的隐式借用。
+    report_locked_field_borrow_of(
+        self,
+        expr: TypedExpr,
+        expected_type: Type,
+        span: SourceSpan,
+    ): Void = {
+        let expected_is_ref_like = when expected_type in {
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) then true,
+            _ then false,
+        };
+        if not expected_is_ref_like then {
+            return;
+        };
+        // 已是地址形态的表达式（引用/指针类型的字段等）只是传递或重类型，
+        // 不形成对字段槽的新借用——字段里存的指针指向别处，与锁定对象的
+        // payload 无关。
+        let expr_is_ref_like = when expr.expr_type in {
+            .ReferenceType(_) or .MutableReferenceType(_) or .BorrowedReferenceType(_)
+            or .MutableBorrowedReferenceType(_) or .PointerType(_)
+            or .MutablePointerType(_) then true,
+            _ then false,
+        };
+        if expr_is_ref_like then {
+            return;
+        };
+        when expr.expr_kind in {
+            .MemberPath(base, path) then {
+                let mutable banned = path.count() > UInt(0)
+                    and self.lock_probe_owner_is_locked(base.expr_type);
+                let mutable index = UInt(0);
+                while (not banned) and (index + UInt(1) < path.count()) then {
+                    banned = self.lock_probe_owner_is_locked(path[index].symbol_type);
+                    index += UInt(1);
+                };
+                if banned then {
+                    self.push_diagnostic(
+                        "Cannot take the address of a field of a 'sendable mutable' object",
+                        span,
+                    );
+                };
+            },
+            _ then {},
+        };
+    };
+
+    /// 取 owner 类型前剥掉引用/指针壳（与 MIR 侧 `lock_owner_probe_type` 同规则）。
+    lock_probe_owner_is_locked(self, t: Type): Bool = {
+        let mutable current = t;
+        let mutable again = true;
+        while again then {
+            when current in {
+                .ReferenceType(inner) or .MutableReferenceType(inner)
+                or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+                or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner)
+                or .PointerType(inner) or .MutablePointerType(inner) then {
+                    current = inner;
+                },
+                _ then {
+                    again = false;
+                },
+            };
+        };
+        return self.context().is_locked_type(current);
+    };
+
     adapt_expr_to_expected_type_at(
         self,
         expr: TypedExpr,
@@ -1725,6 +1807,9 @@ given TypeChecker {
                 },
                 _ then Option[Type].None(),
             };
+            // 隐式借用锁定字段 = 显式 `&x.f` 的同一逃逸舱（裁定二），在适配
+            // 形成借用前拒绝。
+            self.report_locked_field_borrow_of(expr_ref, expected_type, diagnostic_span);
             when expected_type in {
                 .MutableReferenceType(inner) then {
                     let expected_inner = inner;
@@ -2376,8 +2461,12 @@ given TypeChecker {
                         _ then {},
                     };
                 },
-                .TraitObject(trait_def_id, trait_args) then {
-                    let expected_trait_type = Type.TraitObject(trait_def_id, trait_args);
+                .TraitObject(trait_def_id, trait_args, _) then {
+                    let expected_trait_type = Type.TraitObject(
+                        trait_def_id,
+                        trait_args,
+                        self.context().is_sendable_type(expected_type),
+                    );
                     when expr.expr_type in {
                         .TraitObject(...) then {
                             if self.same_expr_type(expr.expr_type, expected_trait_type) then {

@@ -1,0 +1,50 @@
+// EXPECT: t1_early_exit_ok
+// EXPECT: hits=50000
+
+// Early-exit lock-release regression (concurrency-design.md §对象锁语义):
+// `or return` jumps out of the assignment RHS while the statement critical
+// section is held. The exit path must release the object lock — thread 2's
+// increments must complete (they would deadlock on the leaked lock before
+// the fix, and the case would time out).
+
+using "std/async" { ... };
+
+type sendable mutable Counter(mutable hits: Int);
+
+let nothing(): Option[Int] = {
+    return Option.None();
+};
+
+let early_exit_worker(c: Counter): Option[Int] = {
+    c.hits = nothing() or return;
+    c.hits = c.hits + 1;
+    return Option.Some(c.hits);
+};
+
+let main(): Void = {
+    let c = Counter(0);
+    let c1 = c;
+    let t1 = run_task(
+        () => {
+            let result = early_exit_worker(c1);
+            when result in {
+                .Some(_) then assert(false, "early-exit worker should return None"),
+                .None() then {},
+            };
+        },
+    );
+    let _ = t1.wait();
+    println("t1_early_exit_ok");
+    let c2 = c;
+    let t2 = run_task(
+        () => {
+            let mutable j = 0;
+            while j < 50000 then {
+                c2.hits = c2.hits + 1;
+                j = j + 1;
+            };
+        },
+    );
+    let _ = t2.wait();
+    println("hits=\(c.hits)");
+};

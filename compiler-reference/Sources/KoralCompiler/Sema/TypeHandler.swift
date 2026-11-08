@@ -1136,7 +1136,7 @@ public class FunctionHandler: TypeHandler {
     }
     
     public func getQualifiedName(_ type: Type) -> String {
-        guard case .function(let params, let returns) = type else {
+        guard case .function(let params, let returns, _) = type else {
             return ""
         }
         let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
@@ -1144,7 +1144,7 @@ public class FunctionHandler: TypeHandler {
     }
     
     public func containsGenericParameter(_ type: Type) -> Bool {
-        guard case .function(let params, let returns) = type else {
+        guard case .function(let params, let returns, _) = type else {
             return false
         }
         guard let context = TypeHandlerRegistry.shared.currentContext else {
@@ -1157,7 +1157,7 @@ public class FunctionHandler: TypeHandler {
     
     /// 获取函数参数列表
     public func getParameters(_ type: Type) -> [Parameter]? {
-        guard case .function(let params, _) = type else {
+        guard case .function(let params, _, _) = type else {
             return nil
         }
         return params
@@ -1165,7 +1165,7 @@ public class FunctionHandler: TypeHandler {
     
     /// 获取函数返回类型
     public func getReturnType(_ type: Type) -> Type? {
-        guard case .function(_, let returns) = type else {
+        guard case .function(_, let returns, _) = type else {
             return nil
         }
         return returns

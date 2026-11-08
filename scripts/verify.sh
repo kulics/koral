@@ -154,6 +154,24 @@ clang -I std tests/runtime-cases/refcount_release_race.c "$WORK/rt_track.o" \
 "$WORK/refcount_release_race$EXE"
 echo "refcount protocol OK"
 
+# The non-atomic RC family of determinately non-sendable objects
+# (concurrency-design.md §RC 分流): same strong/weak protocol single-threaded
+# -- exactly-one-free, weak upgrade/downgrade, the destructor window (retain
+# inside drop must not resurrect), immortal sentinels -- pinned through the
+# same tracked free.
+clang -I std tests/runtime-cases/nonatomic_refcount_stress.c "$WORK/rt_track.o" \
+  -o "$WORK/nonatomic_refcount_stress$EXE" -Wno-everything -O1 $RT_LIBS
+"$WORK/nonatomic_refcount_stress$EXE"
+echo "nonatomic refcount protocol OK"
+
+# The reentrant object lock of safe `type sendable mutable` objects
+# (concurrency-design.md §对象锁语义): mutual exclusion, owner reentry, hand-off.
+clang -c -I std std/koral_runtime.c -o "$WORK/rt_plain.o" -Wno-everything -O1
+clang -I std tests/runtime-cases/object_lock_stress.c "$WORK/rt_plain.o" \
+  -o "$WORK/object_lock_stress$EXE" -Wno-everything -O1 $RT_LIBS
+"$WORK/object_lock_stress$EXE"
+echo "object lock protocol OK"
+
 "$BOOTSTRAP" emit-c tests/runtime-cases/weak_init_probe.koral -o "$WORK/weak_init_probe"
 probe_c="$WORK/weak_init_probe/weak_init_probe.c"
 grep -q 'weak_count = 1' "$probe_c"

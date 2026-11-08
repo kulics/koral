@@ -1,0 +1,38 @@
+// EXPECT: frozen subscript ok
+// Read-only built-in subscript over the frozen family: `frozen_list[i]` and
+// `frozen_dict[key]` mirror the mutable `List[i]` / `Dict[key]` reads (the
+// exact out-of-range/missing behavior is pinned in the *_panic cases).
+
+using "std" { ... };
+
+let main(): Void = {
+    // FrozenList read subscript, in range.
+    let source = List[Int].new();
+    source.push(10);
+    source.push(20);
+    source.push(30);
+    let frozen = source.to_frozen_list();
+    assert(frozen[0] == 10, "list subscript 0");
+    assert(frozen[2] == 30, "list subscript 2");
+    assert(frozen.get(1).unwrap() == 20, "list get agrees");
+
+    // FrozenDict read subscript.
+    let map_source = Dict[String, Int].new();
+    map_source.insert("a", 1);
+    map_source.insert("b", 2);
+    let frozen_map = map_source.to_frozen_dict();
+    assert(frozen_map["a"] == 1, "dict subscript a");
+    assert(frozen_map["b"] == 2, "dict subscript b");
+
+    // Literal-built snapshots subscript the same way.
+    let lit: FrozenList[String] = ["x", "y"];
+    assert(lit[1] == "y", "literal list subscript");
+    let map_lit: FrozenDict[String, Int] = ["k": 7];
+    assert(map_lit["k"] == 7, "literal dict subscript");
+
+    // Nested reads chain through the value copy.
+    let nested: FrozenList[FrozenList[Int]] = [[1, 2], [3]];
+    assert(nested[1][0] == 3, "nested subscript");
+
+    println("frozen subscript ok");
+};

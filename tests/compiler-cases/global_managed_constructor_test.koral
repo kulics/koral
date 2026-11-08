@@ -6,13 +6,20 @@
 using "std" { ... };
 using "std/sync" { ... };
 
-let xs = List[Lazy[Int]].new();
-let ys = List[List[Int]].new();
+/// Escape-hatch holder: a global's type must be sendable, while these
+/// growable lists are thread-confined working state (the constructors still
+/// run in the global initializer, which is what this regression pins).
+type unsafe sendable mutable ManagedGlobals(
+    mutable xs: List[Lazy[Int]],
+    mutable ys: List[List[Int]],
+);
+
+let globals = ManagedGlobals(List[Lazy[Int]].new(), List[List[Int]].new());
 
 let main(): Void = {
-    println(xs.count().to_string());
+    println(globals.xs.count().to_string());
     let inner = List[Int].new();
     inner.push(7);
-    ys.push(inner);
-    println(ys.get(0).unwrap().get(0).unwrap().to_string());
+    globals.ys.push(inner);
+    println(globals.ys.get(0).unwrap().get(0).unwrap().to_string());
 };

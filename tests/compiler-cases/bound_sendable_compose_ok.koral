@@ -1,0 +1,26 @@
+// The `sendable` kind bound composes with trait bounds (`T: Reader and
+// sendable`): a sendable type satisfying the trait instantiates fine
+// (concurrency-design.md §派生规则).
+// EXPECT: read 0
+
+using "std/io" { ... };
+
+type sendable Msg(len: UInt);
+
+given Msg: Reader {
+    read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = Result[UInt].Ok(
+        UInt(0),
+    );
+};
+
+let drain[T: Reader and sendable](source: T): UInt = {
+    let buf = List[UInt8].new();
+    return when source.read(into = buf, span = ...) in {
+        .Ok(n) then n,
+        .Error(_) then UInt(0),
+    };
+};
+
+let main(): Void = {
+    println("read \(drain(Msg(1)))");
+};

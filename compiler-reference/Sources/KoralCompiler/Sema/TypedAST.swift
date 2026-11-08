@@ -87,10 +87,14 @@ public struct CapturedVariable {
   public let symbol: Symbol
   /// How the variable is captured
   public let captureKind: CaptureKind
-  
-  public init(symbol: Symbol, captureKind: CaptureKind) {
+  /// The FIRST use of the capture inside the closure (blame anchor for
+  /// capture diagnostics, koralc's `Dict[def_id, Pair[Symbol, SourceSpan]]`).
+  public let span: SourceSpan
+
+  public init(symbol: Symbol, captureKind: CaptureKind, span: SourceSpan = .unknown) {
     self.symbol = symbol
     self.captureKind = captureKind
+    self.span = span
   }
 }
 public struct Symbol {

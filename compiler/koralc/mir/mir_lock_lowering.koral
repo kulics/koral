@@ -1,0 +1,440 @@
+// MIR lowering: built-in object locks (concurrency-design.md §对象锁语义).
+//
+// safe `sendable mutable` 对象的每一次字段读写都是该对象锁上的临界区；
+// 赋值整句（`x.f = expr`）持有「最终字段所属对象」的锁贯穿 RHS 求值与写入，
+// 所以 `c.hits = c.hits + 1` 天然原子。`let mutable` 全局量每变量一锁，赋值
+// 整句同规则。锁由 runtime 的 `__koral_Lock` 提供（可重入，同线程嵌套安全）。
+//
+// 发射规则：
+// - 字段读（非赋值语境）：取值（含复制句柄的 retain）包在所属对象锁内。
+// - 赋值语句：锁在 RHS 降级开始前获取，写入后释放。
+// - 嵌套路径 `a.b.c`：读 `a.b` 短暂持 a 的锁（`load_place_owner` 递归处理），
+//   语句临界区落在最终字段所属对象（a.b）上。
+// - 方法体不是整段临界区（设计裁定）：方法内字段访问逐次上锁，靠可重入不死锁。
+//
+// 只对带锁类型的访问发射 Lock/Unlock；其余访问保持原 MIR 形状（非锁定类型
+// 的 codegen 逐字节不变是硬性约束）。
+
+/// 语句级「读 place」的落点（Evaluate 丢弃 / 装入 if-when 结果局部）。
+type LockedPlaceStmtKind {
+    EvaluateStmt(),
+    AssignToLocal(target: MIRLocalID),
+};
+
+/// 一条在飞的锁临界区：Lock 已发、Unlock 未发。`loop_depth` 记获取时的
+/// 循环深度（`loop_stack.count()`）——break/continue 早退只释放「被退出的
+/// 循环体内」取得的锁，外层语句临界区仍然合法持有。
+type InFlightLockSection(lock: MIRLockTarget, loop_depth: UInt);
+
+given MIRFunctionBuilder {
+    // ── 在飞锁簿记（早退必须补释放）────────────────────────────────────────
+
+    lock_targets_equal(self, a: MIRLockTarget, b: MIRLockTarget): Bool = {
+        let _ = self;
+        return when a in {
+            .ObjectLock(handle_a) then when b in {
+                .ObjectLock(handle_b) then handle_a.raw_value == handle_b.raw_value,
+                _ then false,
+            },
+            .GlobalLock(def_a) then when b in {
+                .GlobalLock(def_b) then def_a.id == def_b.id,
+                _ then false,
+            },
+        };
+    };
+
+    /// 开一段临界区：记入在飞簿记后发 Lock。
+    enter_lock_section(self, lock: MIRLockTarget): Void = {
+        self.in_flight_locks.push(InFlightLockSection(lock, self.loop_stack.count()));
+        self.append_statement(MIRStatement.Lock(lock));
+    };
+
+    /// 正常闭合一段临界区：发 Unlock 并销账。若目标已不在簿记里，说明早退
+    /// 路径（return / break / continue）已经替这里释放过——同一条锁不能放
+    /// 两次，跳过。
+    exit_lock_section(self, lock: MIRLockTarget): Void = {
+        let mutable found = false;
+        let mutable index = self.in_flight_locks.count();
+        while index > UInt(0) then {
+            index -= UInt(1);
+            if self.lock_targets_equal(self.in_flight_locks[index].lock, lock) then {
+                self.in_flight_locks.remove_at(index);
+                found = true;
+                break;
+            };
+        };
+        if found then {
+            self.append_statement(MIRStatement.Unlock(lock));
+        };
+    };
+
+    /// 早退（return / break / continue）走出临界区的补释放：所有获取时循环
+    /// 深度 >= `min_loop_depth` 的在飞锁逐条 Unlock（LIFO 序）。return 传 0
+    /// 全部释放；break/continue 传当前循环深度，只放被退出循环体内的锁。
+    ///
+    /// 释放先于 `emit_scope_exits`：在飞锁的 owner 可能是本函数的临时局部
+    /// （嵌套路径的 owner 装载），scope 清理会 drop 它——先解锁，owner 一定
+    /// 还活着。
+    release_in_flight_locks_for_exit(self, min_loop_depth: UInt): Void = {
+        let mutable index = self.in_flight_locks.count();
+        while index > UInt(0) then {
+            index -= UInt(1);
+            let entry = self.in_flight_locks[index];
+            if entry.loop_depth >= min_loop_depth then {
+                self.in_flight_locks.remove_at(index);
+                self.append_statement(MIRStatement.Unlock(entry.lock));
+            };
+        };
+    };
+};
+
+given MIRFunctionBuilder {
+    // ── 锁相关性判定 ────────────────────────────────────────────────────────
+
+    /// `let mutable` 全局绑定（Koral 存储 + accessor）才有每变量锁。foreign
+    /// 变量的存储归 C 侧管，不加编译器锁；不可变 `let` 无锁。
+    global_slot_is_locked(self, def_id: DefId): Bool = {
+        if self.context.is_foreign_global(def_id) then {
+            return false;
+        };
+        return when self.context.get_symbol(def_id) in {
+            .Some(symbol) then symbol.is_mutable(),
+            .None() then false,
+        };
+    };
+
+    /// place 的求值是否会经过「锁定对象的字段读」或「可变全局绑定读」。
+    /// 是 ⇒ 必须走加锁装载；否 ⇒ 保持原有延迟读形状（字节级不变约束）。
+    place_locked_relevant(self, place: MIRPlace): Bool = {
+        return when place in {
+            .Local(_) then false,
+            .Global(def_id) then self.global_slot_is_locked(def_id),
+            .Field(base, _) then {
+                self.context.is_locked_type(self.place_type(base))
+                    or self.place_locked_relevant(base)
+            },
+            .EnumPayload(base, _, _, _, _) then self.place_locked_relevant(base),
+            .Deref(value, _) or .PointerElement(value, _) then self.value_locked_relevant(
+                value,
+            ),
+        };
+    };
+
+    value_locked_relevant(self, value: MIRValue): Bool = {
+        return when value in {
+            .PlaceRead(place, _) then self.place_locked_relevant(place),
+            _ then false,
+        };
+    };
+
+    /// 赋值目标（Typed AST）是否触及锁定访问。只做预判，用于保留非锁定
+    /// 赋值原有的「先降 RHS 再算目标 place」次序（含下标陈旧缓冲防护）；
+    /// 锁定赋值必须先取锁，次序按设计反转。
+    target_touches_locked(self, target: TypedExpr): Bool = {
+        when target.expr_kind in {
+            .Variable(symbol) then {
+                return self.global_slot_is_locked(symbol.def_id);
+            },
+            .MemberPath(base, path) then {
+                if path.count() == UInt(0) then {
+                    return false;
+                };
+                let mutable owner_type = self.lock_owner_probe_type(base.expr_type);
+                if self.context.is_locked_type(owner_type) then {
+                    return true;
+                };
+                let mutable index = UInt(0);
+                while index + UInt(1) < path.count() then {
+                    owner_type = self.lock_owner_probe_type(path[index].symbol_type);
+                    if self.context.is_locked_type(owner_type) then {
+                        return true;
+                    };
+                    index += UInt(1);
+                };
+                return false;
+            },
+            _ then {},
+        };
+        return false;
+    };
+
+    /// 取址/取 owner 类型前剥掉引用/指针壳：`r.f = v`（r: &Counter）的字段
+    /// 所属对象仍是 Counter，按锁定对象算。
+    private lock_owner_probe_type(self, t: Type): Type = {
+        let _ = self;
+        let mutable current = t;
+        let mutable again = true;
+        while again then {
+            when current in {
+                .ReferenceType(inner) or .MutableReferenceType(inner)
+                or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+                or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner)
+                or .PointerType(inner) or .MutablePointerType(inner) then {
+                    current = inner;
+                },
+                _ then {
+                    again = false;
+                },
+            };
+        };
+        return current;
+    };
+
+    // ── owner 装载与加锁读 ──────────────────────────────────────────────────
+
+    /// place 的「所属对象句柄」操作数。字段读的锁目标就是它。
+    ///
+    /// 链上的锁定链接（`a.b.c` 里的 `a.b`）在这里递归装载，每个链接的读包在
+    /// 其所属对象的锁里（语义 4：嵌套路径逐对象上锁）；`Local` 句柄直接用，
+    /// 不产生读（读局部变量不是字段访问）。
+    load_place_owner(self, base: MIRPlace): MIROperand = {
+        when base in {
+            .Local(local_id) then {
+                return MIROperand.Local(local_id);
+            },
+            _ then {},
+        };
+        let base_type = self.place_type(base);
+        return when self.lower_locked_read(base, MIROwnershipUse.Copy(), base_type) in {
+            .Some(operand) then operand,
+            .None() then self.materialize_raw(
+                MIRValue.PlaceRead(base, MIROwnershipUse.Copy()),
+                base_type,
+            ),
+        };
+    };
+
+    /// 加锁装载 place 的值（含复制句柄的 retain）：读包在所属对象锁内。
+    /// place 不涉及锁定访问时返回 None，调用方保持原有延迟读路径。
+    lower_locked_read(
+        self,
+        place: MIRPlace,
+        ownership: MIROwnershipUse,
+        result_type: Type,
+    ): Option[MIROperand] = {
+        if not self.place_locked_relevant(place) then {
+            return Option[MIROperand].None();
+        };
+        when place in {
+            .Field(base, field) then {
+                let owner = self.load_place_owner(base);
+                let handle_id = owner.local_id_or_zero();
+                let rewritten = MIRPlace.Field(MIRPlace.Local(handle_id), field);
+                if self.context.is_locked_type(self.place_type(base)) then {
+                    let lock = MIRLockTarget.ObjectLock(handle_id);
+                    self.enter_lock_section(lock);
+                    let result = self.materialize_raw(
+                        MIRValue.PlaceRead(rewritten, ownership),
+                        result_type,
+                    );
+                    self.exit_lock_section(lock);
+                    return Option[MIROperand].Some(result);
+                };
+                return Option[MIROperand].Some(
+                    self.materialize_raw(MIRValue.PlaceRead(rewritten, ownership), result_type),
+                );
+            },
+            .Global(def_id) then {
+                let lock = MIRLockTarget.GlobalLock(def_id);
+                self.enter_lock_section(lock);
+                let result = self.materialize_raw(
+                    MIRValue.PlaceRead(place, ownership),
+                    result_type,
+                );
+                self.exit_lock_section(lock);
+                return Option[MIROperand].Some(result);
+            },
+            .EnumPayload(base, case_name, field_name, field_index, field_type) then {
+                let owner = self.load_place_owner(base);
+                let rewritten = MIRPlace.EnumPayload(
+                    MIRPlace.Local(owner.local_id_or_zero()),
+                    case_name,
+                    field_name,
+                    field_index,
+                    field_type,
+                );
+                return Option[MIROperand].Some(
+                    self.materialize_raw(MIRValue.PlaceRead(rewritten, ownership), result_type),
+                );
+            },
+            .Deref(value, pointee) then {
+                let rewritten = MIRPlace.Deref(self.rewrite_locked_value(value), pointee);
+                return Option[MIROperand].Some(
+                    self.materialize_raw(MIRValue.PlaceRead(rewritten, ownership), result_type),
+                );
+            },
+            .PointerElement(value, element) then {
+                let rewritten = MIRPlace.PointerElement(
+                    self.rewrite_locked_value(value),
+                    element,
+                );
+                return Option[MIROperand].Some(
+                    self.materialize_raw(MIRValue.PlaceRead(rewritten, ownership), result_type),
+                );
+            },
+            .Local(_) then {},
+        };
+        return Option[MIROperand].None();
+    };
+
+    /// 重写 place 基链上的锁定链接为已装载的临时局部（每个链接按所属对象
+    /// 锁装取）。最终链接的字段读/写不在此处理（读由 lower_locked_read 包锁，
+    /// 写由赋值语句临界区包锁）。
+    rewrite_locked_place_links(self, place: MIRPlace): MIRPlace = {
+        return when place in {
+            .Field(base, field) then MIRPlace.Field(
+                MIRPlace.Local(self.load_place_owner(base).local_id_or_zero()),
+                field,
+            ),
+            .EnumPayload(base, case_name, field_name, field_index, field_type) then MIRPlace.EnumPayload(
+                MIRPlace.Local(self.load_place_owner(base).local_id_or_zero()),
+                case_name,
+                field_name,
+                field_index,
+                field_type,
+            ),
+            .Deref(value, pointee) then MIRPlace.Deref(
+                self.rewrite_locked_value(value),
+                pointee,
+            ),
+            .PointerElement(value, element) then MIRPlace.PointerElement(
+                self.rewrite_locked_value(value),
+                element,
+            ),
+            _ then place,
+        };
+    };
+
+    rewrite_locked_value(self, value: MIRValue): MIRValue = {
+        return when value in {
+            .PlaceRead(place, ownership) then {
+                if not self.place_locked_relevant(place) then {
+                    value
+                } else {
+                    when self.lower_locked_read(place, ownership, self.place_type(place)) in {
+                        .Some(operand) then MIRValue.Operand(operand),
+                        .None() then value,
+                    }
+                }
+            },
+            _ then value,
+        };
+    };
+
+    // ── 语句级发射 ──────────────────────────────────────────────────────────
+
+    /// 「读 place 的语句」（Evaluate 丢弃 / 装入结果局部）：最终字段所属对象
+    /// 锁贯穿整条语句（值装载 + 复制句柄的 retain 都在内，语义 1）；基链上的
+    /// 锁定链接先按所属对象锁装取重写。不涉及锁定访问 ⇒ 原样发射。
+    append_locked_place_statement(
+        self,
+        place: MIRPlace,
+        ownership: MIROwnershipUse,
+        kind: LockedPlaceStmtKind,
+    ): Void = {
+        if not self.place_locked_relevant(place) then {
+            self.append_statement(self.locked_place_statement(kind, place, ownership));
+            return;
+        };
+        when place in {
+            .Field(base, field) then {
+                if self.context.is_locked_type(self.place_type(base)) then {
+                    let owner = self.load_place_owner(base);
+                    let handle_id = owner.local_id_or_zero();
+                    let lock = MIRLockTarget.ObjectLock(handle_id);
+                    let rewritten = MIRPlace.Field(MIRPlace.Local(handle_id), field);
+                    self.enter_lock_section(lock);
+                    self.append_statement(self.locked_place_statement(kind, rewritten, ownership));
+                    self.exit_lock_section(lock);
+                    return;
+                };
+            },
+            .Global(def_id) then {
+                if self.global_slot_is_locked(def_id) then {
+                    let lock = MIRLockTarget.GlobalLock(def_id);
+                    self.enter_lock_section(lock);
+                    self.append_statement(self.locked_place_statement(kind, place, ownership));
+                    self.exit_lock_section(lock);
+                    return;
+                };
+            },
+            _ then {},
+        };
+        let rewritten = self.rewrite_locked_place_links(place);
+        self.append_statement(self.locked_place_statement(kind, rewritten, ownership));
+    };
+
+    private locked_place_statement(
+        self,
+        kind: LockedPlaceStmtKind,
+        place: MIRPlace,
+        ownership: MIROwnershipUse,
+    ): MIRStatement = {
+        let _ = self;
+        return when kind in {
+            .EvaluateStmt() then MIRStatement.Evaluate(MIRValue.PlaceRead(place, ownership)),
+            .AssignToLocal(target) then MIRStatement.Assign(
+                MIRPlace.Local(target),
+                MIRValue.PlaceRead(place, ownership),
+            ),
+        };
+    };
+
+    // ── 赋值整句临界区（语义 3）────────────────────────────────────────────
+
+    /// 锁定赋值：最终字段所属对象（或全局槽）的锁在 RHS 降级开始前获取、
+    /// 写入后释放 —— `x.f = x.f + 1` 的读-改-写是原子的。嵌套路径的中间
+    /// 链接由 `load_place_owner` 按各自所属对象锁短暂装取（语义 4）。
+    lower_assignment_locked(self, target: TypedExpr, value: TypedExpr): Void = {
+        when self.lower_place(target) in {
+            .Some(place) then {
+                when place in {
+                    .Field(base, field) then {
+                        if self.context.is_locked_type(self.place_type(base)) then {
+                            let owner = self.load_place_owner(base);
+                            let handle_id = owner.local_id_or_zero();
+                            let lock = MIRLockTarget.ObjectLock(handle_id);
+                            self.enter_lock_section(lock);
+                            let lowered_value = self.lower_value(value);
+                            self.append_statement(
+                                MIRStatement.Assign(
+                                    MIRPlace.Field(MIRPlace.Local(handle_id), field),
+                                    lowered_value,
+                                ),
+                            );
+                            self.exit_lock_section(lock);
+                            return;
+                        };
+                    },
+                    .Global(def_id) then {
+                        if self.global_slot_is_locked(def_id) then {
+                            let lock = MIRLockTarget.GlobalLock(def_id);
+                            self.enter_lock_section(lock);
+                            let lowered_value = self.lower_value(value);
+                            self.append_statement(MIRStatement.Assign(place, lowered_value));
+                            self.exit_lock_section(lock);
+                            return;
+                        };
+                    },
+                    _ then {},
+                };
+                // 最终字段所属对象不带锁、但基链上有锁定链接：逐链接装取后
+                // 写入重写后的 place（无整句临界区——最终 owner 没有锁承诺）。
+                if self.place_locked_relevant(place) then {
+                    let rewritten = self.rewrite_locked_place_links(place);
+                    let lowered_value = self.lower_value(value);
+                    self.append_statement(MIRStatement.Assign(rewritten, lowered_value));
+                    return;
+                };
+                let lowered_value = self.lower_value(value);
+                self.append_statement(MIRStatement.Assign(place, lowered_value));
+            },
+            .None() then {
+                let _ = self.lower_value(value);
+                self.report_lowering_error(
+                    "Unsupported assignment target reached MIR lowering",
+                );
+            },
+        };
+    };
+};

@@ -380,7 +380,7 @@ given TypeChecker {
         else self.allocate_unindexed_def_id(method_name, DefKind.Function());
         return Symbol(
             def_id,
-            Type.FunctionType(List[FunctionParamEntry].new(), return_type),
+            Type.FunctionType(List[FunctionParamEntry].new(), return_type, false),
             SymbolKind.Function(),
         );
     };
@@ -392,7 +392,7 @@ given TypeChecker {
     /// carried on the node so the monomorphizer never re-derives it.
     trait_method_def_id_of(self, trait_type: Type, method_name: String): DefId = {
         return when trait_type in {
-            .TraitObject(trait_def_id, _) then when self.storage.generic_templates.trait_method_def_id(
+            .TraitObject(trait_def_id, _, _) then when self.storage.generic_templates.trait_method_def_id(
                 trait_def_id,
                 method_name,
             ) in {
@@ -439,7 +439,7 @@ given TypeChecker {
         );
         return when self.context().get_function_type(method_symbol.def_id) in {
             .Some(function_type) then when function_type in {
-                .FunctionType(param_entries, return_type_ref) then {
+                .FunctionType(param_entries, return_type_ref, _) then {
                     if param_entries.count() != param_specs.count() then {
                         return Option[ReusedGivenMemberSignature].None();
                     };
@@ -529,7 +529,7 @@ given TypeChecker {
     /// not be in scope there at all.
     trait_name_from_type(self, trait_type: Type): String = {
         return when trait_type in {
-            .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then def_id_spelling(trait_def_id),
             _ then self.context().type_display_name(trait_type),
         };
     };
@@ -537,7 +537,7 @@ given TypeChecker {
     /// The trait DECLARATION a trait reference names, straight off the type.
     trait_def_id_from_type(self, trait_type: Type): DefId = {
         return when trait_type in {
-            .TraitObject(trait_def_id, _) then trait_def_id,
+            .TraitObject(trait_def_id, _, _) then trait_def_id,
             _ then def_id_invalid(),
         };
     };
@@ -974,6 +974,34 @@ given TypeChecker {
                     self.resolve_type_with_self_and_bindings(return_type, self_type, bindings),
                 )
             },
+            // `sendable` 前缀限定只属于函数类型；trait object 的 sendable 由
+            // `trait sendable` 声明处给（concurrency-design.md §派生规则 5、6）。
+            // 与其他解析路径同一裁定，锚点一致。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_type_with_self_and_bindings(
+                    inner,
+                    self_type,
+                    bindings,
+                );
+                if is_trait_object_shape(resolved_inner) then {
+                    self.push_diagnostic(
+                        "'sendable' qualifier applies only to function types; declare the trait 'sendable' instead",
+                        type_node_span(node),
+                    );
+                    Type.Unknown()
+                } else {
+                    when type_with_sendable_qualifier(resolved_inner) in {
+                        .Some(sendable_t) then sendable_t,
+                        .None() then {
+                            self.push_diagnostic(
+                                "'sendable' qualifier applies only to function types",
+                                type_node_span(node),
+                            );
+                            Type.Unknown()
+                        },
+                    }
+                }
+            },
         };
     };
 
@@ -1014,7 +1042,7 @@ given TypeChecker {
     resolve_reference_type(self, inner_type: Type): Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_object_def_id, _) then {
+            .TraitObject(trait_object_def_id, _, _) then {
                 when self.storage.trait_registry.check_object_safety_by_def_id(
                     trait_object_def_id,
                 ) in {
@@ -1038,7 +1066,7 @@ given TypeChecker {
     resolve_mutable_reference_type(self, inner_type: Type): Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_object_def_id, _) then {
+            .TraitObject(trait_object_def_id, _, _) then {
                 when self.storage.trait_registry.check_object_safety_by_def_id(
                     trait_object_def_id,
                 ) in {
@@ -1077,7 +1105,7 @@ given TypeChecker {
     resolve_weak_reference_type(self, inner_type: Type, span: SourceSpan): Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_object_def_id, _) then {
+            .TraitObject(trait_object_def_id, _, _) then {
                 when self.storage.trait_registry.check_object_safety_by_def_id(
                     trait_object_def_id,
                 ) in {
@@ -1104,7 +1132,7 @@ given TypeChecker {
     resolve_mutable_weak_reference_type(self, inner_type: Type, span: SourceSpan): Type = {
         when inner_type in {
             // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_object_def_id, _) then {
+            .TraitObject(trait_object_def_id, _, _) then {
                 when self.storage.trait_registry.check_object_safety_by_def_id(
                     trait_object_def_id,
                 ) in {
@@ -1307,7 +1335,7 @@ given TypeChecker {
         ) else Option[Type].None();
         let self_constraint_snapshot = when generic_self_trait in {
             .Some(trait_object) then when trait_object in {
-                .TraitObject(trait_object_def_id, trait_args) then {
+                .TraitObject(trait_object_def_id, trait_args, _) then {
                     let previous = when self.storage.generic_param_constraints.get(
                         "Self",
                     ) in {
@@ -2171,7 +2199,7 @@ given TypeChecker {
                             return false;
                         };
                     },
-                    .Mutable() or .Foreign() then {},
+                    .Mutable() or .Foreign() or .Sendable() then {},
                 };
             };
         };

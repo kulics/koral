@@ -56,6 +56,7 @@ given TypeChecker {
             },
             .Mutable() then Bound.Mutable(),
             .Foreign() then Bound.Foreign(),
+            .Sendable() then Bound.Sendable(),
         };
     };
 
@@ -66,6 +67,7 @@ given TypeChecker {
             ),
             .Mutable() then Bound.Mutable(),
             .Foreign() then Bound.Foreign(),
+            .Sendable() then Bound.Sendable(),
         };
     };
 
@@ -486,6 +488,33 @@ given TypeChecker {
                     types_to_param_entries(resolved_params),
                     self.resolve_template_type_node_with_bindings(return_type, bindings),
                 )
+            },
+            // `sendable` 前缀限定只属于函数类型；trait object 的 sendable 由
+            // `trait sendable` 声明处给（concurrency-design.md §派生规则 5、6）。
+            // 与其他解析路径同一裁定，锚点一致。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_template_type_node_with_bindings(
+                    inner,
+                    bindings,
+                );
+                if is_trait_object_shape(resolved_inner) then {
+                    self.push_diagnostic(
+                        "'sendable' qualifier applies only to function types; declare the trait 'sendable' instead",
+                        type_node_span(node),
+                    );
+                    Type.Unknown()
+                } else {
+                    when type_with_sendable_qualifier(resolved_inner) in {
+                        .Some(sendable_t) then sendable_t,
+                        .None() then {
+                            self.push_diagnostic(
+                                "'sendable' qualifier applies only to function types",
+                                type_node_span(node),
+                            );
+                            Type.Unknown()
+                        },
+                    }
+                }
             },
         };
     };

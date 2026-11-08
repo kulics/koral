@@ -58,24 +58,32 @@ public let run_command_output(program: String, args: List[String]): Result[Comma
 public type mutable Command;
 
 /// Synchronous command execution result containing exit status and captured output.
-public type CommandOutput(public status: ExitStatus, public stdout: String, public stderr: String);
+public type sendable CommandOutput(public status: ExitStatus, public stdout: String, public stderr: String);
 
 /// Child process exit status.
 /// raw_status encoding: normal exit = exit code (0-255), signal termination = -(signal_number)
-public type ExitStatus;
+public type sendable ExitStatus;
 
 /// Child process stdin pipe (implements Writer trait).
 /// Closing the pipe via drop sends EOF to the child process.
-public type mutable StdinPipe;
+/// Sendable contract: handoff to a worker thread is idiomatic; concurrent
+/// use of one pipe end is the caller's framing responsibility.
+public type unsafe sendable mutable StdinPipe;
 
 /// Child process stdout pipe (implements Reader trait).
-public type mutable StdoutPipe;
+/// Sendable contract: handoff to a worker thread is idiomatic; concurrent
+/// use of one pipe end is the caller's framing responsibility.
+public type unsafe sendable mutable StdoutPipe;
 
 /// Child process stderr pipe (implements Reader trait).
-public type mutable StderrPipe;
+/// Sendable contract: handoff to a worker thread is idiomatic; concurrent
+/// use of one pipe end is the caller's framing responsibility.
+public type unsafe sendable mutable StderrPipe;
 
 /// Child process handle providing wait, pipe access, and lifecycle management.
-public type mutable Process;
+/// Sendable contract: `wait`/`kill` from another thread is idiomatic (a
+/// watchdog reaps while the spawner continues).
+public type unsafe sendable mutable Process;
 
 /// I/O redirection configuration for child process stdin/stdout/stderr.
 ///
@@ -86,7 +94,7 @@ public type mutable Process;
 ///   File      — Redirect to/from an already-opened File (owns the File; closed on drop).
 ///   StdoutPipe — Use another child process's stdout pipe as input (for process chaining).
 ///   StderrPipe — Use another child process's stderr pipe as input (for process chaining).
-public type IoRedirect {
+public type sendable IoRedirect {
     /// Inherit the parent process's corresponding file descriptor (default behavior).
     Inherit(),
     /// Create a pipe connecting parent and child processes.

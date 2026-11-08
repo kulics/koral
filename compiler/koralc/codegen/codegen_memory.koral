@@ -15,13 +15,25 @@ let fn_ptr_typedef_marker(): String = {
 /// 定长数组包装 struct 的 typedef：形状 → 名字，以及待 splice 的 typedef 文本。
 /// 名字由 codegen 的命名路径统一发（指针命名等递归都经过它），顺序即注册
 /// 顺序（内层形状先注册），生成的 typedef 天然有序。
-let mutable fixed_array_typedef_names: Dict[String, String] = Dict[String, String].new();
-let mutable fixed_array_typedef_texts: List[String] = List[String].new();
-
 /// foreign 函数指针的 typedef：形状 → 名字，以及待 splice 的 typedef 文本
 /// （`typedef R (*name)(params);`）。
-let mutable foreign_function_typedef_names: Dict[String, String] = Dict[String, String].new();
-let mutable foreign_function_typedef_texts: List[String] = List[String].new();
+///
+/// 这些表在 codegen 期间就地增长，是编译器自身的可变工作状态；按全局量
+/// 规则装进 `unsafe sendable mutable` 持有者（全局绑定的类型必须 sendable，
+/// 容器本身保持线程内工作状态的未标注形态）。
+type unsafe sendable mutable TypedefTables(
+    mutable fixed_array_typedef_names: Dict[String, String],
+    mutable fixed_array_typedef_texts: List[String],
+    mutable foreign_function_typedef_names: Dict[String, String],
+    mutable foreign_function_typedef_texts: List[String],
+);
+
+let mutable typedef_tables = TypedefTables(
+    Dict[String, String].new(),
+    List[String].new(),
+    Dict[String, String].new(),
+    List[String].new(),
+);
 
 /// niche 布局的描述：用「空位模式」而不是 tag 来区分 case。
 type EnumNicheLayout(
@@ -50,6 +62,90 @@ given CodeGen {
             return true;
         };
         return type_needs_drop(var_type);
+    };
+
+    // ── RC 分流（concurrency-design.md §RC 分流）────────────────────────────
+    //
+    // 受管对象的 RC 走非原子族当且仅当它的静态类型**确定**为非 sendable
+    // （`uses_nonatomic_rc(type) = managed && not is_sendable_type(type)`）；
+    // sendable（含 `unsafe sendable`）保持原子族，发射的 C 逐字节不变。
+    //
+    // 定族看「块的归属类型」：句柄形态 `*T` / `?*T` 按被指对象 T 定族；
+    // 函数类型按 `sendable` 修饰位（false → 非原子）；trait object 按 trait
+    // 声明的 `trait sendable` 定（concurrency-design.md §派生规则 6）；
+    // OpaqueType 解映射后递归。Unknown/TypeVar 是错误恢复与类型擦除占位，
+    // 保守走原子族（宁可多算不可少算）。
+    //
+    // 同一个块只由一族碰：族由静态类型在每个 retain/release/weak/闭包环境
+    // 发射点决定，绝不混用于同一块。
+    public uses_nonatomic_rc(self, t: Type): Bool = {
+        return when t in {
+            .ReferenceType(inner) or .MutableReferenceType(inner)
+            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+            or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.uses_nonatomic_rc(
+                inner,
+            ),
+            .FunctionType(_, _, is_sendable) then not is_sendable,
+            .TraitObject(_, _, _) then not self.context.is_sendable_type(t),
+            .OpaqueType(def_id) then {
+                when self.context.lookup_type(def_id) in {
+                    .Some(mapped) then self.uses_nonatomic_rc(mapped),
+                    .None() then false,
+                }
+            },
+            .Unknown() or .TypeVar(_) or .GenericParameter(_) or .ModuleType(_) then false,
+            _ then not self.context.is_sendable_type(t),
+        };
+    };
+
+    /// 强 retain 的值层入口名（`*T` 句柄与受管名义值都走这一对）。
+    public rc_retain_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_retain_value_nonatomic" else "__koral_retain_value";
+    };
+
+    /// 强 release 的值层入口名（dtor 仍按释放调用点单态化传入）。
+    public rc_release_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_release_value_nonatomic" else "__koral_release_value";
+    };
+
+    /// weak 计数入口名（retain/release 同族）。
+    public rc_weak_retain_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_weak_retain_nonatomic" else "__koral_weak_retain";
+    };
+
+    public rc_weak_release_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_weak_release_nonatomic" else "__koral_weak_release";
+    };
+
+    /// 闭包环境计数入口名（retain/release 同族）。
+    public rc_closure_retain_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_closure_retain_nonatomic" else "__koral_closure_retain";
+    };
+
+    public rc_closure_release_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_closure_release_nonatomic" else "__koral_closure_release";
+    };
+
+    /// weak 句柄转换入口名（downgrade/upgrade 同族）。
+    public rc_downgrade_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_downgrade_ref_nonatomic" else "__koral_downgrade_ref";
+    };
+
+    public rc_upgrade_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_upgrade_ref_nonatomic" else "__koral_upgrade_ref";
+    };
+
+    /// 类型无关 drop glue 的入口名（`__koral_Dtor` 实参用）。
+    public rc_closure_drop_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_closure_drop_nonatomic" else "__koral_closure_drop";
+    };
+
+    public rc_weakref_drop_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_weakref_drop_nonatomic" else "__koral_weakref_drop";
+    };
+
+    public rc_traitref_drop_fn(self, t: Type): String = {
+        return if self.uses_nonatomic_rc(t) then "__koral_traitref_drop_nonatomic" else "__koral_traitref_drop";
     };
 
     append_assignment_line(self, dest: String, source: String): Void = {
@@ -84,7 +180,13 @@ given CodeGen {
         self.buffer.push_string("));\n");
     };
 
-    append_release_control_line(self, runtime_name: String, value: String): Void = {
+    /// `nonatomic` 由调用点按被碰块的静态类型定（RC 分流，见 uses_nonatomic_rc）。
+    append_release_control_line(
+        self,
+        runtime_name: String,
+        value: String,
+        nonatomic: Bool,
+    ): Void = {
         // 弱引用持有 control 字；owning ref / 托管值是单字 payload 指针。
         let is_weak = runtime_name == "__koral_weak_retain" or runtime_name == "__koral_weak_release";
         if runtime_name == "__koral_release" then {
@@ -94,7 +196,9 @@ given CodeGen {
                 "append_release_control_line: release must go through append_release_handle_statement",
             );
         };
-        let resolved_name = if is_weak then runtime_name else "__koral_retain_value";
+        let resolved_name = if is_weak then {
+            if nonatomic then runtime_name + "_nonatomic" else runtime_name
+        } else if nonatomic then "__koral_retain_value_nonatomic" else "__koral_retain_value";
         self.buffer.push_string(resolved_name);
         self.buffer.push_string("((");
         self.buffer.push_string(value);
@@ -102,9 +206,12 @@ given CodeGen {
     };
 
     /// `__koral_release_value((value).ptr, dtor)`：头里不存析构函数，
-    /// drop glue 在释放调用点单态化后作为第二个参数传入。
-    append_release_value_line(self, value: String, dtor: String): Void = {
-        self.buffer.push_string("__koral_release_value((");
+    /// drop glue 在释放调用点单态化后作为第二个参数传入。`nonatomic` 按
+    /// 被碰块的静态类型定族（RC 分流）。
+    append_release_value_line(self, value: String, dtor: String, nonatomic: Bool): Void = {
+        self.buffer.push_string(
+            if nonatomic then "__koral_release_value_nonatomic((" else "__koral_release_value((",
+        );
         self.buffer.push_string(value);
         self.buffer.push_string(").ptr, ");
         self.buffer.push_string(dtor);
@@ -121,7 +228,10 @@ given CodeGen {
         when handle_type in {
             .BorrowedReferenceType(_) or .MutableBorrowedReferenceType(_) then {},
             .WeakReferenceType(_) or .MutableWeakReferenceType(_) then {
-                self.buffer.push_string("__koral_weak_release((");
+                self.buffer.push_string(
+                    if self.uses_nonatomic_rc(handle_type) then "__koral_weak_release_nonatomic(("
+                    else "__koral_weak_release((",
+                );
                 self.buffer.push_string(value);
                 self.buffer.push_string(").control);\n");
             },
@@ -129,6 +239,7 @@ given CodeGen {
                 self.append_release_value_line(
                     value,
                     "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
+                    self.uses_nonatomic_rc(handle_type),
                 );
             },
             .ReferenceType(inner) or .MutableReferenceType(inner) then {
@@ -136,11 +247,13 @@ given CodeGen {
                     self.append_release_value_line(
                         value,
                         "((const struct __koral_VTableHeader*)(\(value)).vtable)->destroy",
+                        self.uses_nonatomic_rc(inner),
                     );
                 } else {
                     self.append_release_value_line(
                         value,
                         self.drop_function_pointer(inner),
+                        self.uses_nonatomic_rc(inner),
                     );
                 };
             },
@@ -327,9 +440,9 @@ given CodeGen {
                 };
                 "(__koral_Dtor)__koral_\(type_name)_drop"
             },
-            .FunctionType(...) then "(__koral_Dtor)__koral_closure_drop",
-            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "(__koral_Dtor)__koral_weakref_drop",
-            .TraitObject(...) then "(__koral_Dtor)__koral_traitref_drop",
+            .FunctionType(...) then "(__koral_Dtor)\(self.rc_closure_drop_fn(var_type))",
+            .WeakReferenceType(_) or .MutableWeakReferenceType(_) then "(__koral_Dtor)\(self.rc_weakref_drop_fn(var_type))",
+            .TraitObject(...) then "(__koral_Dtor)\(self.rc_traitref_drop_fn(var_type))",
             .ReferenceType(_) or .MutableReferenceType(_) then "(__koral_Dtor)\(self.materialize_drop_thunk(var_type))",
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
@@ -396,12 +509,12 @@ given CodeGen {
     /// 定长数组的包装 struct typedef 名（首次出现时登记形状）。
     public fixed_array_type_name(self, len: UInt, inner: Type): String = {
         let key = "[\(len)]\(self.c_type_name(inner))";
-        when fixed_array_typedef_names.get(key) in {
+        when typedef_tables.fixed_array_typedef_names.get(key) in {
             .Some(existing) then existing,
             .None() then {
-                let name = "__koral_arr_\(fixed_array_typedef_texts.count())";
-                fixed_array_typedef_names.insert(key, name);
-                fixed_array_typedef_texts.push(
+                let name = "__koral_arr_\(typedef_tables.fixed_array_typedef_texts.count())";
+                typedef_tables.fixed_array_typedef_names.insert(key, name);
+                typedef_tables.fixed_array_typedef_texts.push(
                     "typedef struct { \(self.c_type_name(inner)) data[\(len)]; } \(name);",
                 );
                 name
@@ -411,7 +524,7 @@ given CodeGen {
 
     fixed_array_typedef_code(self): String = {
         let mutable code = StringBuilder.new();
-        for text in fixed_array_typedef_texts then {
+        for text in typedef_tables.fixed_array_typedef_texts then {
             code.push_string(text);
             code.push_string("\n");
         };
@@ -433,11 +546,11 @@ given CodeGen {
         key.push_string(")->");
         key.push_string(self.c_type_name(return_type));
         let key_text = key.to_string();
-        when foreign_function_typedef_names.get(key_text) in {
+        when typedef_tables.foreign_function_typedef_names.get(key_text) in {
             .Some(existing) then existing,
             .None() then {
-                let name = "__koral_fnptr_\(foreign_function_typedef_texts.count())";
-                foreign_function_typedef_names.insert(key_text, name);
+                let name = "__koral_fnptr_\(typedef_tables.foreign_function_typedef_texts.count())";
+                typedef_tables.foreign_function_typedef_names.insert(key_text, name);
                 let mutable param_str = StringBuilder.new();
                 let mutable p_first = true;
                 for p in params then {
@@ -447,7 +560,7 @@ given CodeGen {
                     param_str.push_string(self.c_type_name(p.param_type));
                     p_first = false;
                 };
-                foreign_function_typedef_texts.push(
+                typedef_tables.foreign_function_typedef_texts.push(
                     "typedef \(self.c_type_name(return_type)) (*\(name))(\(param_str.to_string()));",
                 );
                 name
@@ -457,7 +570,7 @@ given CodeGen {
 
     foreign_function_typedef_code(self): String = {
         let mutable code = StringBuilder.new();
-        for text in foreign_function_typedef_texts then {
+        for text in typedef_tables.foreign_function_typedef_texts then {
             code.push_string(text);
             code.push_string("\n");
         };
@@ -482,7 +595,8 @@ given CodeGen {
                 value,
             ),
             .FunctionType(...) then {
-                self.buffer.push_string("__koral_closure_release(");
+                self.buffer.push_string(self.rc_closure_release_fn(var_type));
+                self.buffer.push_string("(");
                 self.buffer.push_string(value);
                 self.buffer.push_string(");\n");
             },
@@ -518,8 +632,8 @@ given CodeGen {
             .TypeVar(_) then {
                 // TypeVar 是编译器内部的类型擦除，落到 codegen 时内层类型已不可知。
                 // 头里不存析构函数之后只能传 NULL（drop glue 不会跑）——这是一个
-                // 已存在的擦除空洞，不是本次改动引入的。
-                self.append_release_value_line(value, "NULL");
+                // 已存在的擦除空洞，不是本次改动引入的。族同保守走原子。
+                self.append_release_value_line(value, "NULL", false);
             },
             _ then {},
         };
@@ -549,13 +663,18 @@ given CodeGen {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
-                self.append_release_control_line("__koral_retain", dest);
+                self.append_release_control_line(
+                    "__koral_retain",
+                    dest,
+                    self.uses_nonatomic_rc(var_type),
+                );
             },
             .FunctionType(...) then {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
-                self.buffer.push_string("__koral_closure_retain(");
+                self.buffer.push_string(self.rc_closure_retain_fn(var_type));
+                self.buffer.push_string("(");
                 self.buffer.push_string(dest);
                 self.buffer.push_string(");\n");
             },
@@ -563,7 +682,11 @@ given CodeGen {
                 self.add_indent();
                 self.append_assignment_line(dest, source);
                 self.add_indent();
-                self.append_release_control_line("__koral_weak_retain", dest);
+                self.append_release_control_line(
+                    "__koral_weak_retain",
+                    dest,
+                    self.uses_nonatomic_rc(var_type),
+                );
             },
             .OpaqueType(def_id) then {
                 when self.context.lookup_type(def_id) in {
@@ -572,7 +695,11 @@ given CodeGen {
                             self.add_indent();
                             self.append_assignment_line(dest, source);
                             self.add_indent();
-                            self.append_release_control_line("__koral_retain", dest);
+                            self.append_release_control_line(
+                                "__koral_retain",
+                                dest,
+                                self.uses_nonatomic_rc(var_type),
+                            );
                         },
                         .OpaqueType(_) then {
                             self.add_indent();

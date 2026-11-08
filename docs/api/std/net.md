@@ -24,41 +24,48 @@ public trait IntoSocketAddr {
 ## Types
 ```koral
 /// IPv4 address type, stored as four octets.
-public type Ipv4Addr;
+public type sendable Ipv4Addr;
 
 /// IPv6 address type, stored as eight 16-bit segments.
-public type Ipv6Addr;
+public type sendable Ipv6Addr;
 
 /// Unified IP address enum, containing either an IPv4 or IPv6 address.
-public type IpAddr {
+public type sendable IpAddr {
     V4(addr: Ipv4Addr),
     V6(addr: Ipv6Addr),
 };
 
 /// Shutdown mode for socket connections.
 /// Maps to system call values: SHUT_RD(0), SHUT_WR(1), SHUT_RDWR(2).
-public type Shutdown {
+public type sendable Shutdown {
     Read(),
     Write(),
     Both(),
 };
 
 /// Socket address type, combining an IP address and a port number.
-public type SocketAddr;
+public type sendable SocketAddr;
 
 /// TCP listening socket that accepts incoming connections.
 /// Created by TcpListener.bind(); the socket is closed when the listener is dropped.
-public type mutable TcpListener;
+/// Sendable contract: handoff to a worker thread is idiomatic (the classic
+/// accept-loop handoff); concurrent use of one listener is the caller's
+/// framing responsibility.
+public type unsafe sendable mutable TcpListener;
 
 /// TCP socket type.
 /// Holds a socket file descriptor. Automatically closed on drop.
 /// Implements Reader and Writer traits for use with BufReader/BufWriter.
-public type mutable TcpSocket;
+/// Sendable contract: handoff to a worker thread is idiomatic; concurrent use
+/// of one socket is the caller's framing responsibility.
+public type unsafe sendable mutable TcpSocket;
 
 /// UDP socket type.
 /// Holds a socket file descriptor. Automatically closed on drop.
 /// Supports both connectionless (send_to/recv_from) and connected (send/recv) modes.
-public type mutable UdpSocket;
+/// Sendable contract: handoff to a worker thread is idiomatic; concurrent use
+/// of one socket is the caller's framing responsibility.
+public type unsafe sendable mutable UdpSocket;
 ```
 
 ## Given Implementations

@@ -570,6 +570,181 @@ public class TypeChecker {
     .blockExpression(statements: [], tailExpression: nil, type: .error)
   }
 
+  // MARK: - Object-lock borrow ban (concurrency-design.md)
+
+  /// Strip reference/pointer shells before probing the owner type (the same
+  /// rule as the MIR side's `lockOwnerProbeType`).
+  func lockProbeOwnerIsLocked(_ t: Type) -> Bool {
+    var current = t
+    while true {
+      switch current {
+      case .reference(let inner), .mutableReference(let inner), .borrowedReference(let inner),
+           .mutableBorrowedReference(let inner), .weakReference(let inner),
+           .mutableWeakReference(let inner), .pointer(let inner), .mutablePointer(let inner):
+        current = inner
+      default:
+        return context.isLockedType(current)
+      }
+    }
+  }
+
+  /// `&x.f` would bypass the object lock (concurrency-design.md): taking the
+  /// address of a field of a safe `sendable mutable` object is banned -- the
+  /// pointer handed to FFI could be used for unsynchronized reads and writes.
+  /// The check covers the whole owner chain of the addressed path (`&a.b.c`:
+  /// a or a.b locked => banned); reference/pointer shells are stripped first
+  /// (`&r.f`'s field owner is still the referenced object).
+  func reportLockedFieldAddressOf(_ inner: TypedExpressionNode, span: SourceSpan) throws {
+    guard case .memberPath(let base, let path) = inner, !path.isEmpty else {
+      return
+    }
+    if lockProbeOwnerIsLocked(base.type) {
+      try handleError(SemanticError(
+        .generic("Cannot take the address of a field of a 'sendable mutable' object"),
+        span: span
+      ))
+      return
+    }
+    var index = 0
+    while index + 1 < path.count {
+      if lockProbeOwnerIsLocked(path[index].type) {
+        try handleError(SemanticError(
+          .generic("Cannot take the address of a field of a 'sendable mutable' object"),
+          span: span
+        ))
+        return
+      }
+      index += 1
+    }
+  }
+
+  /// Implicit shape of the borrow ruling (value -> reference adaptation at
+  /// argument positions, receiver positions, etc.): the implicit borrow of a
+  /// locked field leaks the field's address to the borrower -- the same
+  /// escape hatch `&x.f` opens -- and is banned with the same diagnostic.
+  /// The explicit `&` form is checked in the ptr-expression case; this covers
+  /// every borrow formed by type adaptation.
+  func reportLockedFieldBorrowOf(
+    _ expr: TypedExpressionNode,
+    expectedType: Type,
+    span: SourceSpan
+  ) throws {
+    let expectedIsRefLike: Bool
+    switch expectedType {
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference:
+      expectedIsRefLike = true
+    default:
+      expectedIsRefLike = false
+    }
+    guard expectedIsRefLike else {
+      return
+    }
+    // An already address-shaped expression (a reference/pointer-typed field,
+    // say) only passes through or is re-typed -- no new borrow of the field
+    // slot forms; the pointer stored in the field points elsewhere, unrelated
+    // to the locked object's payload.
+    switch expr.type {
+    case .reference, .mutableReference, .borrowedReference, .mutableBorrowedReference,
+         .pointer, .mutablePointer:
+      return
+    default:
+      break
+    }
+    guard case .memberPath(let base, let path) = expr else {
+      return
+    }
+    var banned = !path.isEmpty && lockProbeOwnerIsLocked(base.type)
+    var index = 0
+    while !banned && index + 1 < path.count {
+      banned = lockProbeOwnerIsLocked(path[index].type)
+      index += 1
+    }
+    if banned {
+      try handleError(SemanticError(
+        .generic("Cannot take the address of a field of a 'sendable mutable' object"),
+        span: span
+      ))
+    }
+  }
+
+  /// Where a typed expression was written. `expr.span` when it knows;
+  /// otherwise the walk below finds the nearest subtree that does -- the same
+  /// answer the type checker's own diagnostics blame (mirrors koralc's
+  /// `typed_expr_span_at`).
+  func typedExprSpan(of expr: TypedExpressionNode) -> SourceSpan {
+    if expr.span.isKnown {
+      return expr.span
+    }
+    switch expr {
+    case .variable(let symbol):
+      return context.getSpan(symbol.defId) ?? .unknown
+    case .castExpression(let inner, _, _),
+         .notExpression(let inner, _),
+         .bitwiseNotExpression(let inner, _),
+         .referenceExpression(let inner, _),
+         .ptrExpression(let inner, _),
+         .derefExpression(let inner, _),
+         .unsafeDerefExpression(let inner, _):
+      return typedExprSpan(of: inner)
+    case .arithmeticExpression(let left, _, _, _, _),
+         .wrappingArithmeticExpression(let left, _, _, _, _),
+         .comparisonExpression(let left, _, _, _),
+         .bitwiseExpression(let left, _, _, _, _),
+         .andExpression(let left, _, _),
+         .orExpression(let left, _, _):
+      return typedExprSpan(of: left)
+    case .isExpression(let subject, _, _),
+         .isNotExpression(let subject, _, _):
+      let subjectSpan = typedExprSpan(of: subject)
+      return subjectSpan.isKnown ? subjectSpan : .unknown
+    case .call(let callee, _, _):
+      return typedExprSpan(of: callee)
+    case .memberPath(let source, _):
+      return typedExprSpan(of: source)
+    case .methodReference(let base, let method, _, _, _):
+      let baseSpan = typedExprSpan(of: base)
+      return baseSpan.isKnown ? baseSpan : (context.getSpan(method.defId) ?? .unknown)
+    case .ifExpression(let condition, _, _, _),
+         .ifPatternExpression(let condition, _, _, _, _, _):
+      return typedExprSpan(of: condition)
+    case .whenExpression(let subject, _, _):
+      return typedExprSpan(of: subject)
+    case .lambdaExpression(_, _, let body, _):
+      return typedExprSpan(of: body)
+    case .blockExpression(let statements, let tailExpression, _):
+      if statements.isEmpty {
+        if let tail = tailExpression {
+          return typedExprSpan(of: tail)
+        }
+        return .unknown
+      }
+      // Typed statements carry no spans in this compiler (the span was
+      // dropped at construction); the block answers unknown.
+      return .unknown
+    case .typeConstruction(let identifier, _, let arguments, _):
+      let typeSpan = context.getSpan(identifier.defId) ?? .unknown
+      if typeSpan.isKnown {
+        return typeSpan
+      }
+      if let first = arguments.first {
+        return typedExprSpan(of: first)
+      }
+      return .unknown
+    case .enumConstruction(_, _, let arguments):
+      if let first = arguments.first {
+        return typedExprSpan(of: first)
+      }
+      return .unknown
+    case .traitMethodPlaceholder(_, _, let methodDefId, _, let base, _, _):
+      let baseSpan = typedExprSpan(of: base)
+      return baseSpan.isKnown ? baseSpan : (context.getSpan(methodDefId) ?? .unknown)
+    case .traitObjectConversion(let inner, _, _, _, _, _):
+      return typedExprSpan(of: inner)
+    default:
+      return .unknown
+    }
+  }
+
   /// 检查是否有收集到的错误
   var hasCollectedErrors: Bool {
     return diagnosticCollector.hasErrors()
@@ -922,7 +1097,7 @@ public class TypeChecker {
         nextMode = .exact
       }
       return .mutableWeakReference(inner: conformanceTypeKey(inner, mode: nextMode))
-    case .traitObject(let defId, let typeArgs):
+    case .traitObject(let defId, let typeArgs, _):
       if mode == .wildcardTraitArg {
         return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { conformanceTypeKey($0, mode: .wildcardTraitArg) })
       }
@@ -1106,6 +1281,8 @@ public class TypeChecker {
       return .mutable
     case .foreign:
       return .foreign
+    case .sendable:
+      return .sendable
     }
   }
 
@@ -1122,6 +1299,8 @@ public class TypeChecker {
       return "m"
     case .foreign:
       return "f"
+    case .sendable:
+      return "s"
     }
   }
 
@@ -1943,14 +2122,15 @@ public class TypeChecker {
         typedBody = implicitDeref
       }
       typedBody = try coerceLiteral(typedBody, to: returnType)
-      if typedBody.type != .never && typedBody.type != .error && returnType != .error && typedBody.type != returnType {
+      if typedBody.type != .never && typedBody.type != .error && returnType != .error
+        && (typedBody.type != returnType || !sendableSlotsCompatible(typedBody.type, returnType)) {
         throw SemanticError.typeMismatch(
           expected: returnType.description, got: typedBody.type.description)
       }
       let functionType = Type.function(
         parameters: params.map {
           Parameter(type: $0.type, kind: passKindForParameterType($0.type))
-        }, returns: returnType)
+        }, returns: returnType, isSendable: false)
       return (typedBody, functionType)
     }
   }
@@ -2072,7 +2252,7 @@ public class TypeChecker {
       bindings[name] = actual
       return true
       
-    case (.function(let expectedParams, let expectedReturn), .function(let actualParams, let actualReturn)):
+    case (.function(let expectedParams, let expectedReturn, _), .function(let actualParams, let actualReturn, _)):
       guard expectedParams.count == actualParams.count else { return false }
       for (ep, ap) in zip(expectedParams, actualParams) {
         if !unifyTypes(ep.type, ap.type, bindings: &bindings) {
@@ -2126,7 +2306,7 @@ public class TypeChecker {
         seen.insert(name)
         names.append(name)
       }
-    case .function(let params, let returns):
+    case .function(let params, let returns, _):
       for param in params {
         extractGenericParameterNamesHelper(from: param.type, names: &names, seen: &seen)
       }

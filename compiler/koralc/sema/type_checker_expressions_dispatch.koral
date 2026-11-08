@@ -49,10 +49,11 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when normalized in {
-            .TraitObject(existing_trait_def_id, existing_args) then {
+            .TraitObject(existing_trait_def_id, existing_args, _) then {
                 if existing_trait_def_id == requested_trait_id then Type.TraitObject(
                     existing_trait_def_id,
                     existing_args,
+                    self.context().is_sendable_type(normalized),
                 ) else self.canonical_trait_object_type(trait_name)
             },
             _ then self.canonical_trait_object_type(trait_name),
@@ -969,9 +970,10 @@ given TypeChecker {
                         lambda_span,
                     );
                     let mutable lambda_fn_type = self.build_lambda_function_type(
-                        bidi_result,
+                        bidi_result.first,
+                        bidi_result.second,
                     );
-                    make_typed_expr_ref(bidi_result.expr_kind, lambda_fn_type)
+                    make_typed_expr_ref(bidi_result.first.expr_kind, lambda_fn_type)
                 } else {
                     let mutable typed_params = List[TypedParam].new();
                     for p in params then {
@@ -1043,7 +1045,29 @@ given TypeChecker {
                         lambda_scope,
                     );
                     let inferred_return_type = self.storage.function_return_context.inferred_return_type;
-                    self.validate_lambda_captures(typed_params, typed_body);
+                    let captures = self.validate_lambda_captures(typed_params, typed_body);
+                    // 闭包 sendable 判定（concurrency-design.md §派生规则 5）。
+                    let expected_sendable = when expected in {
+                        .Some(et) then when et in {
+                            .FunctionType(_, _, sendable_expected) then sendable_expected,
+                            _ then false,
+                        },
+                        .None() then false,
+                    };
+                    let mutable captures_sendable = true;
+                    for entry in captures.iterator() then {
+                        let captured = (entry.second).first;
+                        let capture_span = (entry.second).second;
+                        if not self.context().is_sendable_type(captured.symbol_type) then {
+                            captures_sendable = false;
+                            if expected_sendable then {
+                                self.push_diagnostic_at_span(
+                                    "sendable closure cannot capture non-sendable value '\(self.context().symbol_name(captured))'",
+                                    capture_span,
+                                );
+                            };
+                        };
+                    };
                     if not self.is_unresolved_expr_type(ret) and not self.contains_generic_parameter(
                         ret,
                     ) then {
@@ -1066,6 +1090,7 @@ given TypeChecker {
                     let mutable lambda_type = self.build_function_type_from_params(
                         typed_params,
                         actual_ret,
+                        captures_sendable,
                     );
                     make_typed_expr(
                         TypedExprKind.LambdaExpr(typed_params, actual_ret, typed_body),
@@ -1983,7 +2008,9 @@ given TypeChecker {
         params: List[TypedParam],
         body: TypedExpr,
     ): TypedExpr = {
-        let lambda_type = self.build_function_type_from_params(params, body.expr_type);
+        // 可调用值的重建可能带环境（如绑定 receiver），无法证明无捕获：
+        // 按「存疑即 false」低报 sendable（concurrency-design.md §派生规则 5）。
+        let lambda_type = self.build_function_type_from_params(params, body.expr_type, false);
         return make_typed_expr(
             TypedExprKind.LambdaExpr(params, body.expr_type, body),
             lambda_type,
@@ -3325,6 +3352,46 @@ given TypeChecker {
                                 value_type,
                             )
                         },
+                        .FrozenList(element_type) or .FrozenDict(_, element_type) then {
+                            // Read-only subscript: the `__index_get` value path.
+                            // A frozen subscript is never an addressable place,
+                            // so a reference expectation is refused below.
+                            let wants_mut_ref = when expected in {
+                                .Some(expected_type) then expected_type is .MutableReferenceType(_),
+                                .None() then false,
+                            };
+                            let expects_shared_ref = when expected in {
+                                .Some(expected_type) then expected_type is .ReferenceType(_),
+                                .None() then false,
+                            };
+                            let wants_ref = wants_mut_ref or expects_shared_ref;
+                            let param_types = self.resolve_method_param_types(
+                                typed_base.expr_type,
+                                "__index_get",
+                            );
+                            let mutable typed_args = List[TypedExpr].new();
+                            for pair in args.lazy().enumerate() then {
+                                let arg_idx = pair.first;
+                                let a = pair.second;
+                                let arg_expected = when param_types.get(arg_idx) in {
+                                    .Some(param_type) then Option[Type].Some(param_type),
+                                    .None() then Option[Type].None(),
+                                };
+                                typed_args.push(
+                                    self.check_expr_scoped_ref(a, arg_expected, scope),
+                                );
+                            };
+                            if wants_ref then self.resolve_builtin_subscript_as_reference(
+                                typed_base,
+                                typed_args,
+                                wants_mut_ref,
+                            )
+                            else self.lower_subscript_read_expr(
+                                typed_base,
+                                typed_args,
+                                element_type,
+                            )
+                        },
                         .FixedArray(_, _) then {
                             let index_expr = if args.is_empty() then make_typed_expr(
                                 TypedExprKind.IntegerLiteral("0"),
@@ -3340,7 +3407,7 @@ given TypeChecker {
                     .None() then {
                         self.push_expr_diagnostic(
                             expr,
-                            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                            "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                         );
                         self.empty_typed_block(Type.Unknown())
                     },
@@ -3794,6 +3861,29 @@ given TypeChecker {
                                         );
                                     };
                                 },
+                                .FrozenList(_) or .FrozenDict(_, _) then {
+                                    let param_types = self.resolve_method_param_types(
+                                        typed_base.expr_type,
+                                        "__index_get",
+                                    );
+                                    for pair in args.lazy().enumerate() then {
+                                        let arg_idx = pair.first;
+                                        let arg = pair.second;
+                                        let arg_expected = when param_types.get(arg_idx) in {
+                                            .Some(param_type) then Option[Type].Some(
+                                                param_type,
+                                            ),
+                                            .None() then Option[Type].None(),
+                                        };
+                                        typed_args.push(
+                                            self.check_expr_scoped_ref(
+                                                arg,
+                                                arg_expected,
+                                                scope,
+                                            ),
+                                        );
+                                    };
+                                },
                                 .FixedArray(_, _) then {
                                     for arg in args then {
                                         typed_args.push(
@@ -3915,6 +4005,39 @@ given TypeChecker {
         };
     };
 
+    /// `&x.f` 会绕过对象锁（concurrency-design.md §对象锁语义·裁定二）：safe
+    /// `sendable mutable` 对象的字段取址被禁止——取址交给 FFI 就绕开锁承诺。
+    /// 判定覆盖整条取址路径的 owner 链（`&a.b.c` 里 a、a.b 任一带锁即禁）；
+    /// 引用/指针壳先剥掉（`&r.f` 的字段所属对象仍是被引用对象）。
+    report_locked_field_address_of(self, inner: TypedExpr, expr: Expr): Void = {
+        when inner.expr_kind in {
+            .MemberPath(base, path) then {
+                if path.count() == UInt(0) then {
+                    return;
+                };
+                if self.lock_probe_owner_is_locked(base.expr_type) then {
+                    self.push_diagnostic(
+                        "Cannot take the address of a field of a 'sendable mutable' object",
+                        self.ast_expr_span(expr),
+                    );
+                    return;
+                };
+                let mutable index = UInt(0);
+                while index + UInt(1) < path.count() then {
+                    if self.lock_probe_owner_is_locked(path[index].symbol_type) then {
+                        self.push_diagnostic(
+                            "Cannot take the address of a field of a 'sendable mutable' object",
+                            self.ast_expr_span(expr),
+                        );
+                        return;
+                    };
+                    index += UInt(1);
+                };
+            },
+            _ then {},
+        };
+    };
+
     check_ptr_expr_ref(
         self,
         expr: Expr,
@@ -3926,6 +4049,7 @@ given TypeChecker {
             .PtrExpr(inner, is_mutable, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
                 let typed_inner_ref = typed_inner;
+                self.report_locked_field_address_of(typed_inner_ref, expr);
                 let is_addressable = self.is_implicit_ref_candidate_shape(
                     typed_inner_ref,
                 ) or inner is .DerefExpr(_, _) or is .UnsafeDerefExpr(_, _);

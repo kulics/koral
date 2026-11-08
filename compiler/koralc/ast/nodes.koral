@@ -21,6 +21,23 @@ public let access_modifier_label(access: AccessModifier): String = {
 
 public type TypeParameter(name: String, constraints: List[Bound]);
 
+/// 声明处的跨线程共享能力修饰符（concurrency-design.md）：`unsafe`? `sendable`。
+/// 只出现在名义类型的声明修饰符槽；`unsafe` 必须伴随 `sendable`（解析期拒绝）。
+public type Sendability {
+    Unmarked(),
+    Sendable(),
+    UnsafeSendable(),
+};
+
+/// The declaration spelling of a sendability modifier, for diagnostics.
+public let sendability_label(sendability: Sendability): String = {
+    return when sendability in {
+        .Unmarked() then "sendable",
+        .Sendable() then "sendable",
+        .UnsafeSendable() then "unsafe sendable",
+    };
+};
+
 /// A type as WRITTEN.
 ///
 /// `span` is where the type appears. A diagnostic that names a type
@@ -40,6 +57,9 @@ public type TypeNode {
     FixedArray(len: UInt, element: TypeNode, span: SourceSpan),
     /// foreign 函数指针：`foreign (A, B) -> R`
     ForeignFunction(param_types: List[TypeNode], return_type: TypeNode, span: SourceSpan),
+    /// `sendable` 前缀限定（concurrency-design.md）：`sendable (A) -> R`、
+    /// `sendable Trait`。限定只对函数类型与 trait object 成立，解析处裁定。
+    SendableQualified(inner: TypeNode),
 };
 
 /// Where a type is written.
@@ -48,6 +68,8 @@ public let type_node_span(node: TypeNode): SourceSpan = {
         .Identifier(_, span) or .Reference(_, _, span) or .BorrowedReference(_, _, span)
         or .Pointer(_, _, span) or .WeakReference(_, _, span) or .Generic(_, _, span) or .InferredSelf(span)
         or .FunctionType(_, _, span) or .FixedArray(_, _, span) or .ForeignFunction(_, _, span) then span,
+        // 无独立 span 槽：锚点跟随被限定类型的 span（两侧解析路径一致）。
+        .SendableQualified(inner) then type_node_span(inner),
     };
 };
 
@@ -77,6 +99,7 @@ public let type_node_with_span(node: TypeNode, span: SourceSpan): TypeNode = {
         ),
         .FixedArray(len, element, _) then TypeNode.FixedArray(len, element, span),
         .ForeignFunction(param_types, return_type, _) then TypeNode.ForeignFunction(param_types, return_type, span),
+        .SendableQualified(inner) then TypeNode.SendableQualified(type_node_with_span(inner, span)),
     };
 };
 
@@ -147,6 +170,7 @@ public let type_node_spelling(node: TypeNode): String = {
             out.push_string(type_node_spelling(return_type));
             out.to_string()
         },
+        .SendableQualified(inner) then "sendable " + type_node_spelling(inner),
     };
 };
 
@@ -162,6 +186,7 @@ public let type_node_name(node: TypeNode): String = {
         .FunctionType(_, _, _) then "fn",
         .FixedArray(_, element, _) then type_node_name(element),
         .ForeignFunction(_, _, _) then "fn",
+        .SendableQualified(inner) then type_node_name(inner),
     };
 };
 
@@ -193,6 +218,11 @@ public type Bound {
     /// pointer, or a `foreign type` declaration. A shape requirement, not a
     /// trait: no user declaration can claim it.
     Foreign(),
+    /// `T sendable` -- the subject may cross thread boundaries
+    /// (concurrency-design.md). A shape requirement like `mutable`/`foreign`:
+    /// satisfaction is the `is_sendable_type` derivation. Composes with trait
+    /// bounds and the other shape bounds (`T Reader and sendable`).
+    Sendable(),
 };
 
 /// Recognise a bound from its source spelling. `Any` produces no bound at all
@@ -208,6 +238,8 @@ public let bound_from_type_node(node: TypeNode): Option[Bound] = {
                 Option[Bound].None()
             } else if name == "mutable" then {
                 Option[Bound].Some(Bound.Mutable())
+            } else if name == "sendable" then {
+                Option[Bound].Some(Bound.Sendable())
             } else {
                 Option[Bound].Some(
                     Bound.Trait(DefId(UInt(0)), name, List[TypeNode].new()),
@@ -230,7 +262,7 @@ public let bound_from_type_node(node: TypeNode): Option[Bound] = {
 public let bound_trait_args(b: Bound): List[TypeNode] = {
     return when b in {
         .Trait(_, _, args) then args,
-        .Mutable() or .Foreign() then List[TypeNode].new(),
+        .Mutable() or .Foreign() or .Sendable() then List[TypeNode].new(),
     };
 };
 
@@ -296,6 +328,7 @@ public let type_node_display(node: TypeNode): String = {
             out.push_string(type_node_display(return_type));
             out.to_string()
         },
+        .SendableQualified(inner) then "sendable " + type_node_display(inner),
     };
 };
 
@@ -326,6 +359,7 @@ public let bound_display(b: Bound): String = {
         },
         .Mutable() then "mutable",
         .Foreign() then "foreign",
+        .Sendable() then "sendable",
     };
 };
 
@@ -437,13 +471,13 @@ public type Decl {
     IntrinsicFunctionDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], params: List[Param], return_type: TypeNode, span: SourceSpan, name_span: SourceSpan),
     ForeignFunctionDecl(access: AccessModifier, name: String, params: List[Param], return_type: TypeNode, body: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
     ForeignLetDecl(access: AccessModifier, name: String, is_mutable: Bool, type_name: TypeNode, initializer: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
-    TypeStructDecl(access: AccessModifier, name: String, is_mutable_type: Bool, type_params: List[TypeParameter], fields: List[Field], span: SourceSpan, name_span: SourceSpan),
-    TypeEnumDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], cases: List[EnumCase], span: SourceSpan, name_span: SourceSpan),
+    TypeStructDecl(access: AccessModifier, name: String, is_mutable_type: Bool, sendability: Sendability, type_params: List[TypeParameter], fields: List[Field], span: SourceSpan, name_span: SourceSpan),
+    TypeEnumDecl(access: AccessModifier, name: String, sendability: Sendability, type_params: List[TypeParameter], cases: List[EnumCase], span: SourceSpan, name_span: SourceSpan),
     TypeAliasDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], target: TypeNode, span: SourceSpan, name_span: SourceSpan),
     IntrinsicTypeDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], span: SourceSpan, name_span: SourceSpan),
-    ForeignTypeDecl(access: AccessModifier, name: String, fields: Option[List[Field]], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
+    ForeignTypeDecl(access: AccessModifier, name: String, sendability: Sendability, fields: Option[List[Field]], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
     UsingDecl(specifier: String, items: Option[List[UsingModuleItem]], import_all: Bool, span: SourceSpan),
-    TraitDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], parents: List[TypeNode], members: List[TraitMember], span: SourceSpan, name_span: SourceSpan),
+    TraitDecl(access: AccessModifier, name: String, is_sendable: Bool, type_params: List[TypeParameter], parents: List[TypeNode], members: List[TraitMember], span: SourceSpan, name_span: SourceSpan),
     GivenDecl(target_type: TypeNode, type_params: List[TypeParameter], members: List[GivenMember], span: SourceSpan),
     GivenTraitDecl(target_type: TypeNode, type_params: List[TypeParameter], trait_type: TypeNode, members: List[GivenMember], span: SourceSpan),
     IntrinsicGivenDecl(target_type: TypeNode, type_params: List[TypeParameter], members: List[GivenMember], span: SourceSpan),
@@ -455,10 +489,10 @@ public type Decl {
 public let decl_name(decl: Decl): Option[String] = when decl in {
     .LetDecl(_, name, _, _, _, _, _) or .FunctionDecl(_, name, _, _, _, _, _, _)
     or .IntrinsicFunctionDecl(_, name, _, _, _, _, _) or .ForeignFunctionDecl(_, name, _, _, _, _, _, _)
-    or .ForeignLetDecl(_, name, _, _, _, _, _, _) or .TypeStructDecl(_, name, _, _, _, _, _)
-    or .TypeEnumDecl(_, name, _, _, _, _) or .TypeAliasDecl(_, name, _, _, _, _)
-    or .IntrinsicTypeDecl(_, name, _, _, _) or .ForeignTypeDecl(_, name, _, _, _, _)
-    or .TraitDecl(_, name, _, _, _, _, _) then Option[String].Some(name),
+    or .ForeignLetDecl(_, name, _, _, _, _, _, _) or .TypeStructDecl(_, name, _, _, _, _, _, _)
+    or .TypeEnumDecl(_, name, _, _, _, _, _) or .TypeAliasDecl(_, name, _, _, _, _)
+    or .IntrinsicTypeDecl(_, name, _, _, _) or .ForeignTypeDecl(_, name, _, _, _, _, _)
+    or .TraitDecl(_, name, _, _, _, _, _, _) then Option[String].Some(name),
     .UsingDecl(_, _, _, _) or .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
     or .IntrinsicGivenDecl(_, _, _, _) then Option[String].None(),
 };
@@ -469,11 +503,11 @@ public let decl_name_span(decl: Decl): SourceSpan = {
         .LetDecl(_, _, _, _, _, _, name_span) or .FunctionDecl(_, _, _, _, _, _, _, name_span)
         or .IntrinsicFunctionDecl(_, _, _, _, _, _, name_span)
         or .ForeignFunctionDecl(_, _, _, _, _, _, _, name_span) or .ForeignLetDecl(_, _, _, _, _, _, _, name_span)
-        or .TypeStructDecl(_, _, _, _, _, _, name_span) or .TypeEnumDecl(_, _, _, _, _, name_span)
+        or .TypeStructDecl(_, _, _, _, _, _, _, name_span) or .TypeEnumDecl(_, _, _, _, _, _, name_span)
         or .TypeAliasDecl(_, _, _, _, _, name_span) or .IntrinsicTypeDecl(_, _, _, _, name_span)
-        or .ForeignTypeDecl(_, _, _, _, _, name_span) then name_span,
+        or .ForeignTypeDecl(_, _, _, _, _, _, name_span) then name_span,
         .UsingDecl(_, _, _, span) then span,
-        .TraitDecl(_, _, _, _, _, _, name_span) then name_span,
+        .TraitDecl(_, _, _, _, _, _, _, name_span) then name_span,
         .GivenDecl(_, _, _, span) or .GivenTraitDecl(_, _, _, _, span) or .IntrinsicGivenDecl(_, _, _, span) then span,
     };
 };
@@ -489,9 +523,9 @@ public let decl_access(decl: Decl): Option[AccessModifier] = when decl in {
         access,
     ),
     .ForeignFunctionDecl(access, _, _, _, _, _, _, _) or .ForeignLetDecl(access, _, _, _, _, _, _, _)
-    or .TypeStructDecl(access, _, _, _, _, _, _) or .TypeEnumDecl(access, _, _, _, _, _)
+    or .TypeStructDecl(access, _, _, _, _, _, _, _) or .TypeEnumDecl(access, _, _, _, _, _, _)
     or .TypeAliasDecl(access, _, _, _, _, _) or .IntrinsicTypeDecl(access, _, _, _, _)
-    or .ForeignTypeDecl(access, _, _, _, _, _) or .TraitDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    or .ForeignTypeDecl(access, _, _, _, _, _, _) or .TraitDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
     .UsingDecl(_, _, _, _) or .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
     or .IntrinsicGivenDecl(_, _, _, _) then Option[AccessModifier].None(),
 };

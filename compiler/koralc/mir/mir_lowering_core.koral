@@ -287,12 +287,12 @@ given MIRFunctionBuilder {
                 // If the method takes only self (1 param), call it with base as receiver.
                 // If it takes more params, return as a function value.
                 let param_count = when method.symbol_type in {
-                    .FunctionType(params, _) or .ForeignFunctionType(params, _) then params.count(),
+                    .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then params.count(),
                     _ then UInt(0),
                 };
                 if param_count <= UInt(1) then {
                     let result_type = when method.symbol_type in {
-                        .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
+                        .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then ret,
                         _ then expression.expr_type,
                     };
                     let base_emission = self.lower_value(base_expr);
@@ -455,10 +455,12 @@ given MIRFunctionBuilder {
                             MIRStatement.Evaluate(MIRValue.Operand(operand)),
                         ),
                         .None() then when result.place in {
-                            .Some(place) then self.append_statement(
-                                MIRStatement.Evaluate(
-                                    MIRValue.PlaceRead(place, self.ownership_use(expr)),
-                                ),
+                            // 锁定读的取值（含 retain）落在所属对象锁的
+                            // 临界区里（concurrency-design.md §对象锁语义 1）。
+                            .Some(place) then self.append_locked_place_statement(
+                                place,
+                                self.ownership_use(expr),
+                                LockedPlaceStmtKind.EvaluateStmt(),
                             ),
                             .None() then {},
                         },
@@ -659,6 +661,14 @@ given MIRFunctionBuilder {
     };
 
     private lower_assignment(self, target: TypedExpr, value: TypedExpr): Void = {
+        // 锁定赋值走整句临界区（concurrency-design.md §对象锁语义 3）：目标
+        // 所属对象的锁在 RHS 降级开始前获取、写入后释放，`x.f = x.f + 1` 的
+        // 读-改-写因此是原子的。这类赋值的目标 place 必须先降（取锁需要
+        // owner），与下面非锁定路径的次序相反——设计如此。
+        if self.target_touches_locked(target) then {
+            self.lower_assignment_locked(target, value);
+            return;
+        };
         // The value lands before the target place is computed, matching Swift
         // MIRLowerer's lowerAssignment order. A place can carry a
         // side-effecting address computation -- a built-in subscript slot
@@ -703,6 +713,7 @@ given MIRFunctionBuilder {
                                 ),
                                 expr.expr_type,
                             );
+                            self.release_in_flight_locks_for_exit(UInt(0));
                             self.emit_scope_exits(UInt(0));
                             self.terminate(
                                 MIRTerminator.ReturnValue(
@@ -721,6 +732,7 @@ given MIRFunctionBuilder {
                 };
                 when self.return_operand(result) in {
                     .Some(operand) then {
+                        self.release_in_flight_locks_for_exit(UInt(0));
                         self.emit_scope_exits(UInt(0));
                         self.terminate(
                             MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
@@ -730,6 +742,7 @@ given MIRFunctionBuilder {
                 };
             },
             .None() then {
+                self.release_in_flight_locks_for_exit(UInt(0));
                 self.emit_scope_exits(UInt(0));
                 self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
             },
@@ -741,6 +754,7 @@ given MIRFunctionBuilder {
             return;
         };
         let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
+        self.release_in_flight_locks_for_exit(self.loop_stack.count());
         self.emit_scope_exits(loop.scope_depth);
         self.terminate(MIRTerminator.Goto(loop.break_block));
     };
@@ -750,6 +764,7 @@ given MIRFunctionBuilder {
             return;
         };
         let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
+        self.release_in_flight_locks_for_exit(self.loop_stack.count());
         self.emit_scope_exits(loop.scope_depth);
         self.terminate(MIRTerminator.Goto(loop.continue_block));
     };
@@ -792,11 +807,12 @@ given MIRFunctionBuilder {
                 MIRStatement.Assign(MIRPlace.Local(local_id), MIRValue.Operand(operand)),
             ),
             .None() then when result.place in {
-                .Some(place) then self.append_statement(
-                    MIRStatement.Assign(
-                        MIRPlace.Local(local_id),
-                        MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
-                    ),
+                // 分支结果的取值同普通读：锁定访问包在所属对象锁里
+                // （concurrency-design.md §对象锁语义 1）。
+                .Some(place) then self.append_locked_place_statement(
+                    place,
+                    MIROwnershipUse.Copy(),
+                    LockedPlaceStmtKind.AssignToLocal(local_id),
                 ),
                 .None() then {},
             },
@@ -858,9 +874,36 @@ given MIRFunctionBuilder {
     ): Option[Pair[MIRPlace, Option[MIRScopeID]]] = {
         return when self.lower_expression(subject) in {
             .Some(result) then when result.place in {
-                .Some(place) then Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
-                    Pair[MIRPlace, Option[MIRScopeID]](place, Option[MIRScopeID].None()),
-                ),
+                .Some(place) then {
+                    if self.place_locked_relevant(place) then {
+                        // 锁定字段的主语在所属对象锁内复制一份（concurrency-
+                        // design.md §对象锁语义 1）：模式机器会多次读主语
+                        // （tag、payload 绑定），全部走私有副本，副本随
+                        // subject_scope 释放。
+                        let subject_scope = self.make_scope_id();
+                        self.scope_stack.push(subject_scope);
+                        self.append_statement(MIRStatement.ScopeEnter(subject_scope));
+                        let subject_local = self.make_temporary(
+                            subject.expr_type,
+                            name_hint,
+                        );
+                        self.append_statement(MIRStatement.Declare(subject_local.id));
+                        self.append_locked_place_statement(
+                            place,
+                            MIROwnershipUse.Copy(),
+                            LockedPlaceStmtKind.AssignToLocal(subject_local.id),
+                        );
+                        return Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
+                            Pair[MIRPlace, Option[MIRScopeID]](
+                                MIRPlace.Local(subject_local.id),
+                                Option[MIRScopeID].Some(subject_scope),
+                            ),
+                        );
+                    };
+                    Option[Pair[MIRPlace, Option[MIRScopeID]]].Some(
+                        Pair[MIRPlace, Option[MIRScopeID]](place, Option[MIRScopeID].None()),
+                    )
+                },
                 .None() then when result.operand in {
                     .Some(operand) then {
                         let subject_scope = self.make_scope_id();

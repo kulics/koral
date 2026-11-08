@@ -551,7 +551,7 @@ given CompilerContext {
     public get_function_return_type(self, def_id: DefId): Option[Type] = {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
-                .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then Option[Type].Some(
+                .FunctionType(_, return_type_ref, _) or .ForeignFunctionType(_, return_type_ref) then Option[Type].Some(
                     return_type_ref,
                 ),
                 _ then Option[Type].None(),
@@ -563,7 +563,7 @@ given CompilerContext {
     public get_function_param_type(self, def_id: DefId, arg_index: UInt): Option[Type] = {
         return when self.get_function_type(def_id) in {
             .Some(function_type) then when function_type in {
-                .FunctionType(params, _) then {
+                .FunctionType(params, _, _) then {
                     if arg_index < params.count() then Option[Type].Some(
                         params[arg_index].param_type,
                     ) else Option[Type].None()
@@ -1051,7 +1051,7 @@ given CompilerContext {
     /// `incoherent_impls: FxIndexMap<SimplifiedType, Vec<DefId>>`.
     public method_owner_of(self, t: Type): MethodOwner = {
         return when t in {
-            .TraitObject(trait_def_id, _) then self.method_owner_decl(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then self.method_owner_decl(trait_def_id),
             .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.method_owner_decl(def_id),
             .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then self.method_owner_decl(
                 template_def_id,
@@ -1131,7 +1131,7 @@ given CompilerContext {
                 self.method_owner_decl(def_id),
                 self.get_type_arguments(def_id) or else List[Type].new(),
             ),
-            .TraitObject(trait_def_id, type_args) then Pair[MethodOwner, List[Type]](
+            .TraitObject(trait_def_id, type_args, _) then Pair[MethodOwner, List[Type]](
                 self.method_owner_decl(trait_def_id),
                 type_args,
             ),
@@ -1230,6 +1230,52 @@ given CompilerContext {
 
     public is_struct_mutable(self, def_id: DefId): Bool = {
         return self.def_id_map.is_struct_mutable(def_id);
+    };
+
+    public set_type_sendability(self, def_id: DefId, sendability: Sendability): Void = {
+        self.def_id_map.set_type_sendability(def_id, sendability);
+    };
+
+    public type_sendability(self, def_id: DefId): Sendability = {
+        return self.def_id_map.type_sendability(def_id);
+    };
+
+    public is_sendable_type(self, t: Type): Bool = {
+        return self.def_id_map.is_sendable_type(t);
+    };
+
+    /// `trait sendable`（concurrency-design.md）：该 trait 的 trait object 恒
+    /// sendable，且每个实现类型自身必须 sendable（safe / unsafe 形态都算）。
+    public is_sendable_trait(self, trait_def_id: DefId): Bool = {
+        return self.def_id_map.type_sendability(trait_def_id) is not .Unmarked();
+    };
+
+    /// safe `sendable mutable` 名义类型带内建对象锁（concurrency-design.md
+    /// §对象锁语义）。语义（取址禁令）、MIR（Lock/Unlock）、codegen（布局与
+    /// 初始化）三处必须用同一个判定。
+    public is_locked_type(self, t: Type): Bool = {
+        return self.def_id_map.is_locked_type(t);
+    };
+
+    public is_locked_def(self, def_id: DefId): Bool = {
+        return self.def_id_map.is_locked_def(def_id);
+    };
+
+    public set_foreign_global(self, def_id: DefId): Void = {
+        self.def_id_map.set_foreign_global(def_id);
+    };
+
+    public is_foreign_global(self, def_id: DefId): Bool = {
+        return self.def_id_map.is_foreign_global(def_id);
+    };
+
+    public all_sendable_types(self, types: List[Type]): Bool = {
+        for t in types then {
+            if not self.def_id_map.is_sendable_type(t) then {
+                return false;
+            };
+        };
+        return true;
     };
 
     public set_symbol_info(self, def_id: DefId, info: SymbolInfo): Void = {
@@ -1336,7 +1382,7 @@ given CompilerContext {
             .BoolType() then "Bool",
             .VoidType() then "Void",
             .NeverType() then "Never",
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 let mutable parts = List[String].new();
                 for entry in params then {
                     parts.push(self.get_debug_name(entry.param_type));
@@ -1424,7 +1470,7 @@ given CompilerContext {
                 out.push_byte(']');
                 out.to_string()
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 if args.is_empty() then {
                     def_id_spelling(trait_def_id)
                 } else {
@@ -1468,7 +1514,7 @@ given CompilerContext {
     public contains_type_variable(self, t: Type): Bool = {
         return when t in {
             .TypeVar(_) then true,
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 if self.contains_type_variable(ret) then {
                     return true;
                 };
@@ -1568,7 +1614,7 @@ given CompilerContext {
             // and why a borrowed reference is not folded into an owning one.
             // They are different types, and instances parameterized by them
             // are different instances.
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable out = StringBuilder.new();
                 out.push_string("Fn");
@@ -1651,7 +1697,7 @@ given CompilerContext {
                 };
                 out.to_string()
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 let suffix = if trait_def_id.is_valid() then "_d\(trait_def_id.id)"
                 else "";
                 if args.is_empty() then {

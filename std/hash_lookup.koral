@@ -1,0 +1,92 @@
+// ============================================================================
+// Koral Standard Library - Shared Hash Lookup Primitives
+// ============================================================================
+// The open-addressing probe shared by the hash-backed containers: the mutable
+// `Dict` / `Set` and the frozen `FrozenDict` / `FrozenSet`. This is the one
+// place the probing/lookup algorithm lives; the frozen types depend only on
+// these primitives, never on the mutable container types.
+//
+// Buckets use a struct+tag layout (not an enum) so that key/value fields are
+// directly addressable by pointer. Only Occupied buckets have initialized
+// key/value; Empty and Deleted buckets have raw (uninitialized) key/value
+// memory; only the tag is valid.
+// ============================================================================
+
+/// A hash table bucket: tag word + inline key + payload. The tag occupies the
+/// head of the struct so a bucket pointer can be re-read as `*mutable UInt`:
+/// `UInt(0)` = Empty, `UInt(1)` = Occupied, `UInt(2)` = Deleted (tombstone).
+/// The payload is the mapped value (`Dict`), an entry-array index
+/// (`FrozenDict` / `FrozenSet`), or unused (`Set`).
+///
+/// The key deliberately carries NO `Hash` bound here: the bound is enforced at
+/// the probe (`find_hash_slot`), and a bound on the bucket type would be
+/// re-checked against whatever type parameters the USING declaration happens
+/// to name its arguments (Set's `T`, say) when a helper signature containing
+/// `HashBucket[K, V]` is resolved there. Only the probe hashes keys.
+type HashBucket[K: Any, V: Any](tag: UInt, key: K, value: V);
+
+// Bucket tag constants (inlined as UInt(0), UInt(1), UInt(2))
+
+let bucket_tag_ptr[K: Any, V: Any](
+    bucket_ptr: *mutable HashBucket[K, V],
+): *mutable UInt =
+    bucket_ptr as *mutable UInt;
+
+let bucket_set_tag[K: Any, V: Any](
+    bucket_ptr: *mutable HashBucket[K, V],
+    tag: UInt,
+): Void = {
+    let tag_ptr = bucket_tag_ptr(bucket_ptr);
+    *tag_ptr = tag;
+};
+
+/// The tombstone-aware linear probe behind every hash lookup: return the slot
+/// holding `key`, or the slot an insertion should use (the first tombstone
+/// when one was seen, else the first empty slot). `capacity` is a power of
+/// two (or 0 for a table with no buckets). Frozen tables are built once and
+/// never delete, so they contain no tombstones and the Deleted case simply
+/// never fires for them.
+// capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
+let find_hash_slot[K: Hash, V: Any](
+    buckets: *mutable HashBucket[K, V],
+    capacity: UInt,
+    key: K,
+): Option[UInt] = {
+    // 尚未分配桶数组（空表）：没有可命中的槽位。
+    if capacity == UInt(0) then {
+        return Option[UInt].None();
+    };
+    let mask = capacity - 1;
+    let h = hash_mix(key.hash());
+    let mutable idx = h & mask;
+    let mutable first_deleted = Option[UInt].None();
+    let mutable probes: UInt = 0;
+    while probes < capacity then {
+        let bucket_tag = (buckets + idx).tag;
+        if bucket_tag == UInt(0) then {
+            when first_deleted in {
+                .Some(_) then {
+                    return first_deleted;
+                },
+                .None() then {
+                    return Option[UInt].Some(idx);
+                },
+            };
+        } else if bucket_tag == UInt(2) then {
+            when first_deleted in {
+                .None() then {
+                    first_deleted = Option[UInt].Some(idx);
+                },
+                _ then {},
+            };
+        } else {
+            // Occupied
+            if (buckets + idx).key == key then {
+                return Option[UInt].Some(idx);
+            };
+        };
+        idx = (idx + 1) & mask;
+        probes += 1;
+    };
+    return first_deleted;
+};

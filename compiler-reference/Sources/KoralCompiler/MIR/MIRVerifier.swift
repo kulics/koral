@@ -176,6 +176,13 @@ final class MIRVerifier {
          .release(let value),
           .evaluate(let value):
       try verifyValue(value, in: function, localIDs: localIDs)
+    case .lock(let lock), .unlock(let lock):
+      switch lock {
+      case .objectLock(let handle):
+        try verifyLocal(handle, in: function, localIDs: localIDs)
+      case .globalLock:
+        break
+      }
     case .scopeEnter, .scopeExit, .debugSource:
       break
     }
@@ -543,13 +550,13 @@ final class MIRVerifier {
     _ type: Type
   ) -> (traitName: String, traitDefId: DefId, typeArguments: [Type])? {
     switch type {
-    case .traitObject(let traitDefId, let typeArguments):
+    case .traitObject(let traitDefId, let typeArguments, _):
       return (Type.spelling(traitDefId), traitDefId, typeArguments)
     case .reference(let inner),
          .mutableReference(let inner),
          .borrowedReference(let inner),
          .mutableBorrowedReference(let inner):
-      if case .traitObject(let traitDefId, let typeArguments) = inner {
+      if case .traitObject(let traitDefId, let typeArguments, _) = inner {
         return (Type.spelling(traitDefId), traitDefId, typeArguments)
       }
       return nil

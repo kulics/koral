@@ -30,7 +30,7 @@ given MIRFunctionBuilder {
     trait_object_ref(self, t: Type): CanonicalTraitRef = {
         return when t in {
             // The name is display-only; `def_id` is the identity.
-            .TraitObject(def_id, args) then CanonicalTraitRef(
+            .TraitObject(def_id, args, _) then CanonicalTraitRef(
                 def_id_spelling(def_id),
                 def_id,
                 self.copy_type_args(args),
@@ -195,7 +195,7 @@ given MIRFunctionBuilder {
                             // Swift `lowerCall` derives expected arg types from
                             // `preferredFunctionType(for: callableMethod)`.
                             let method_type = when callable_method.symbol_type in {
-                                .FunctionType(_, _) then {
+                                .FunctionType(_, _, _) then {
                                     if not self.context.contains_generic_parameter(
                                         callable_method.symbol_type,
                                     ) then {
@@ -216,7 +216,7 @@ given MIRFunctionBuilder {
                                 _ then self.preferred_function_type(callable_method),
                             };
                             let method_params = when method_type in {
-                                .FunctionType(params, _) or .ForeignFunctionType(params, _) then params,
+                                .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then params,
                                 _ then List[FunctionParamEntry].new(),
                             };
                             let mutable values = List[MIRValue].new();
@@ -271,7 +271,7 @@ given MIRFunctionBuilder {
                 let concrete_type = Type.FunctionType(
                     types_to_param_entries(param_types),
                     result_type,
-                );
+                false);
                 if not self.context.contains_generic_parameter(concrete_type) then {
                     let fallback_method = Symbol(
                         method.def_id,
@@ -315,7 +315,7 @@ given MIRFunctionBuilder {
                         let mutable concrete_type = Type.FunctionType(
                             types_to_param_entries(concrete_param_types),
                             result_type,
-                        );
+                        false);
                         if not self.context.contains_generic_parameter(concrete_type) then {
                             // Identity only. The definition-time DefId names the
                             // method; a name-bridged fallback here would re-decide
@@ -360,7 +360,7 @@ given MIRFunctionBuilder {
         };
         let mutable method_type = self.receiver_aware_method_type(method);
         return when method_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.is_empty() then {
                     return Option[MIRValue].None();
                 };
@@ -564,7 +564,7 @@ given MIRFunctionBuilder {
             _ then normalized_base_type,
         };
         return when method_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.is_empty() then {
                     return normalized_base_type;
                 };
@@ -708,7 +708,7 @@ given MIRFunctionBuilder {
         let mutable concrete_type = Type.FunctionType(
             types_to_param_entries(param_types),
             result_type,
-        );
+        false);
 
         if self.context.contains_generic_parameter(concrete_type) then {
             return when self.context.get_function_type(method.def_id) in {
@@ -802,7 +802,7 @@ given MIRFunctionBuilder {
                             let owner_is_trait_receiver = when info.owner_type in {
                                 .Some(owner_type) then self.method_owner_matches_receiver(
                                     owner_type,
-                                    Type.TraitObject(trait_def_id, List[Type].new()),
+                                    Type.TraitObject(trait_def_id, List[Type].new(), false),
                                 ),
                                 .None() then false,
                             };
@@ -906,7 +906,7 @@ given MIRFunctionBuilder {
                     let info = entry.second;
                     when self.context.get_function_type(def_id) in {
                         .Some(function_type) then when function_type in {
-                            .FunctionType(params, _) then {
+                            .FunctionType(params, _, _) then {
                                 if params.is_empty() then {
                                     continue;
                                 };
@@ -914,7 +914,7 @@ given MIRFunctionBuilder {
                                     (params[UInt(0)]).param_type,
                                 );
                                 let candidate_trait_def_id = when first_param_type in {
-                                    .TraitObject(candidate_trait, _) then candidate_trait,
+                                    .TraitObject(candidate_trait, _, _) then candidate_trait,
                                     _ then def_id_invalid(),
                                 };
                                 if not candidate_trait_def_id.is_valid() then {
@@ -942,7 +942,7 @@ given MIRFunctionBuilder {
                                     (params[UInt(0)]).param_type,
                                 );
                                 let candidate_trait_def_id = when first_param_type in {
-                                    .TraitObject(candidate_trait, _) then candidate_trait,
+                                    .TraitObject(candidate_trait, _, _) then candidate_trait,
                                     _ then def_id_invalid(),
                                 };
                                 if not candidate_trait_def_id.is_valid() then {
@@ -992,7 +992,7 @@ given MIRFunctionBuilder {
                     let owner_is_trait_receiver = when info.owner_type in {
                         .Some(owner_type) then self.method_owner_matches_receiver(
                             owner_type,
-                            Type.TraitObject(trait_def_id, List[Type].new()),
+                            Type.TraitObject(trait_def_id, List[Type].new(), false),
                         ),
                         .None() then false,
                     };
@@ -1033,7 +1033,7 @@ given MIRFunctionBuilder {
                         .Some(trait_def_id) then when info.owner_type in {
                             .Some(owner_type) then self.method_owner_matches_receiver(
                                 owner_type,
-                                Type.TraitObject(trait_def_id, List[Type].new()),
+                                Type.TraitObject(trait_def_id, List[Type].new(), false),
                             ),
                             .None() then false,
                         },
@@ -1118,8 +1118,8 @@ given MIRFunctionBuilder {
         };
         let mutable expected_method_type = method.symbol_type;
         when callee_type in {
-            .FunctionType(params, _) then {
-                expected_method_type = Type.FunctionType(params, result_type);
+            .FunctionType(params, _, _) then {
+                expected_method_type = Type.FunctionType(params, result_type, false);
             },
             .ForeignFunctionType(params, _) then {
                 expected_method_type = Type.ForeignFunctionType(params, result_type);
@@ -1138,7 +1138,7 @@ given MIRFunctionBuilder {
         };
         // 1. method.type already concrete — the monomorphizer substituted it.
         when method.symbol_type in {
-            .FunctionType(_, _) then {
+            .FunctionType(_, _, _) then {
                 if not self.context.contains_generic_parameter(method.symbol_type) then {
                     return Option[Symbol].Some(
                         Symbol(method.def_id, method.symbol_type, method.kind),
@@ -1166,7 +1166,7 @@ given MIRFunctionBuilder {
         // 3. preferredFunctionType(for: method)
         let preferred_type = self.preferred_function_type(method);
         when preferred_type in {
-            .FunctionType(_, _) then {
+            .FunctionType(_, _, _) then {
                 if not self.context.contains_generic_parameter(preferred_type) then {
                     return Option[Symbol].Some(
                         Symbol(method.def_id, preferred_type, method.kind),
@@ -1184,8 +1184,8 @@ given MIRFunctionBuilder {
         };
         // 4. Build concreteType from calleeType params + resultType.
         when callee_type in {
-            .FunctionType(params, _) then {
-                let concrete_type = Type.FunctionType(params, result_type);
+            .FunctionType(params, _, _) then {
+                let concrete_type = Type.FunctionType(params, result_type, false);
                 if self.context.contains_generic_parameter(concrete_type) then {
                     return Option[Symbol].None();
                 };

@@ -14,7 +14,7 @@ Import the module with `using "std/async" { ... };`.
 /// 创建新线程执行闭包，返回线程句柄
 /// 等价于 Task.new(f).spawn()，覆盖最常见场景
 /// 失败时 panic
-public let run_task(f: () -> Void): Thread;
+public let run_task(f: sendable () -> Void): Thread;
 
 /// 获取当前线程 ID
 public let current_thread_id(): UInt64;
@@ -34,18 +34,23 @@ public let available_parallelism(): UInt;
 ```koral
 /// Thread builder, configures thread parameters then creates thread via spawn().
 /// Analogous to Command builder -> Process handle pattern.
-public type mutable Task;
+public type unsafe sendable mutable Task;
 
 /// Handle to a spawned thread, obtained from Task.spawn().
 /// Release it with wait() or detach(); dropping it without either detaches the thread automatically.
-public type mutable Thread;
+/// Sendable contract: `wait`/`detach` from another thread is idiomatic.
+public type unsafe sendable mutable Thread;
 
 /// One-shot countdown timer that blocks in wait() until its duration elapses.
-public type mutable Timer;
+/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
+/// another thread is safe.
+public type unsafe sendable mutable Timer;
 
 /// Periodic timer whose wait() blocks for one interval at a time.
 /// Each interval is measured from the previous wait() return, so drift accumulates instead of staying on a fixed schedule.
-public type mutable Ticker;
+/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
+/// another thread is safe.
+public type unsafe sendable mutable Ticker;
 ```
 
 ## Given Implementations
@@ -53,7 +58,7 @@ public type mutable Ticker;
 /// Build a task from a closure, configure its thread name and stack size, and spawn it.
 given Task {
     /// Create a Task builder, binding the closure to execute.
-    public new(f: () -> Void): Task;
+    public new(f: sendable () -> Void): Task;
     /// Set the thread name (chainable).
     public set_name(self, name: String): Task;
     /// Set the thread stack size (chainable).

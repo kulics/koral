@@ -30,7 +30,9 @@ let foreign __koral_set_binary_mode(fd: Int32): Int32;
 /// Unbuffered: every `read` is one OS read; wrap in `BufReader` for
 /// line-oriented or chunked consumption. Acquire via `stdin()` -- the private
 /// handle makes the literal unusable outside this file.
-public type mutable Stdin(private handle: Int32);
+/// Sendable contract: single reader -- concurrent reads on one stream are the
+/// caller's framing responsibility.
+public type unsafe sendable mutable Stdin(private handle: Int32);
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stdin {
@@ -72,7 +74,10 @@ given Stdin: Reader {
 /// Write-through and unbuffered, so mixing with `print`/`println` stays
 /// ordered; batch with `BufWriter` for throughput. Acquire via `stdout()` --
 /// the private handle makes the literal unusable outside this file.
-public type mutable Stdout(private handle: Int32);
+/// Sendable contract: each write/flush is atomic with respect to other writes
+/// on the same stream (an internal write lock, shared with the `print` family,
+/// is held across the call).
+public type unsafe sendable mutable Stdout(private handle: Int32, private write_lock: StdioWriteLock);
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stdout {
@@ -88,8 +93,9 @@ given Stdout {
 /// Implements `Writer` with unbuffered OS writes.
 given Stdout: Writer {
 
-    /// Unbuffered: directly calls the OS write, errors returned immediately.
-    /// Returns the number of bytes transferred; short writes are possible.
+    /// Unbuffered: directly calls the OS write under the stream's write lock,
+    /// errors returned immediately. Returns the number of bytes transferred;
+    /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
@@ -98,6 +104,8 @@ given Stdout: Writer {
             return Result[UInt].Ok(0);
         };
         let data_ptr = from.borrow_ptr() + start;
+        self.write_lock.lock();
+        defer self.write_lock.unlock();
         let n = __koral_write(self.handle, data_ptr, span.len());
         if n < 0 then {
             return Result[UInt].Error(last_error_message());
@@ -105,8 +113,13 @@ given Stdout: Writer {
         return Result[UInt].Ok(UInt(n));
     };
 
-    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
-    public flush(self): Result[Void] = Result[Void].Ok({});
+    /// flush is a no-op on the unbuffered handle (data is already in kernel
+    /// buffer); it takes the write lock so flush serializes with writes.
+    public flush(self): Result[Void] = {
+        self.write_lock.lock();
+        defer self.write_lock.unlock();
+        return Result[Void].Ok({});
+    };
 };
 
 // ============================================================================
@@ -117,7 +130,10 @@ given Stdout: Writer {
 /// Write-through and unbuffered like `Stdout` -- stderr is the immediate
 /// stream by universal convention. Acquire via `stderr()` -- the private
 /// handle makes the literal unusable outside this file.
-public type mutable Stderr(private handle: Int32);
+/// Sendable contract: each write/flush is atomic with respect to other writes
+/// on the same stream (an internal write lock, shared with the `eprint` family
+/// and `panic`, is held across the call).
+public type unsafe sendable mutable Stderr(private handle: Int32, private write_lock: StdioWriteLock);
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.
 given Stderr {
@@ -133,8 +149,9 @@ given Stderr {
 /// Implements `Writer` with unbuffered OS writes.
 given Stderr: Writer {
 
-    /// Unbuffered: directly calls the OS write, errors returned immediately.
-    /// Returns the number of bytes transferred; short writes are possible.
+    /// Unbuffered: directly calls the OS write under the stream's write lock,
+    /// errors returned immediately. Returns the number of bytes transferred;
+    /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
         let span = from.slice_spec(span);
         let start = span.start();
@@ -143,6 +160,8 @@ given Stderr: Writer {
             return Result[UInt].Ok(0);
         };
         let data_ptr = from.borrow_ptr() + start;
+        self.write_lock.lock();
+        defer self.write_lock.unlock();
         let n = __koral_write(self.handle, data_ptr, span.len());
         if n < 0 then {
             return Result[UInt].Error(last_error_message());
@@ -150,8 +169,13 @@ given Stderr: Writer {
         return Result[UInt].Ok(UInt(n));
     };
 
-    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
-    public flush(self): Result[Void] = Result[Void].Ok({});
+    /// flush is a no-op on the unbuffered handle (data is already in kernel
+    /// buffer); it takes the write lock so flush serializes with writes.
+    public flush(self): Result[Void] = {
+        self.write_lock.lock();
+        defer self.write_lock.unlock();
+        return Result[Void].Ok({});
+    };
 };
 
 // ============================================================================
@@ -167,14 +191,16 @@ public let stdin(): Stdin = {
 
 /// The process standard output stream. Each call returns a fresh handle over
 /// the same stream; the private field makes this the only construction path.
+/// All handles share the stream's write lock, so writes serialize.
 public let stdout(): Stdout = {
     let _ = __koral_set_binary_mode(1);
-    return Stdout(1);
+    return Stdout(1, stdout_write_lock);
 };
 
 /// The process standard error stream. Each call returns a fresh handle over
 /// the same stream; the private field makes this the only construction path.
+/// All handles share the stream's write lock, so writes serialize.
 public let stderr(): Stderr = {
     let _ = __koral_set_binary_mode(2);
-    return Stderr(2);
+    return Stderr(2, stderr_write_lock);
 };

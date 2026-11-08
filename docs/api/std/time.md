@@ -20,23 +20,23 @@ Import the module with `using "std/time" { ... };`.
 /// ClockTime represents a time of day with nanosecond precision.
 /// Internal storage is nanoseconds since midnight.
 /// Arithmetic wraps around: 23:00 + 7200s = 01:00.
-public type ClockTime;
+public type sendable ClockTime;
 
 /// Date represents a calendar date (year, month, day) with no timezone.
 /// Internal storage is days since Unix epoch (1970-01-01).
-public type Date;
+public type sendable Date;
 
 /// DateTime represents a calendar date and time with timezone information.
 /// Internal storage is UTC unix seconds + nanoseconds + timezone.
-public type DateTime;
+public type sendable DateTime;
 
 /// MonoTime represents a point in time from a monotonic clock.
 /// It is only useful for measuring elapsed time and is not affected
 /// by system clock adjustments (e.g. NTP).
-public type MonoTime;
+public type sendable MonoTime;
 
 /// TimeZone represents a timezone for converting between UTC and local time.
-public type TimeZone;
+public type sendable TimeZone;
 ```
 
 ## Given Implementations

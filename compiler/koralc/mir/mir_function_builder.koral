@@ -55,6 +55,12 @@ type mutable MIRFunctionBuilder(
     // locals (a container's `source` field) are stable and keep the deferred
     // read the borrowed-parameter convention relies on.
     mutable call_derived_pointer_locals: Set[UInt],
+    // 在飞的对象锁临界区（Lock 已发、Unlock 未发）。早退（return / break /
+    // continue）走出临界区时必须补释放，否则锁永远被持有、其他线程死锁
+    // （concurrency-design.md §对象锁语义）。loop_depth 记获取时的循环深度：
+    // break/continue 只释放「被退出的循环体内」取得的锁，外层语句临界区
+    // 仍然合法持有。
+    mutable in_flight_locks: List[InFlightLockSection],
     mutable diagnostics: DiagnosticCollector,
 );
 
@@ -98,6 +104,7 @@ given MIRFunctionBuilder {
             Dict[UInt, MIRTemporaryValueSourceLocation].new(),
             Set[UInt].new(),
             Set[UInt].new(),
+            List[InFlightLockSection].new(),
             DiagnosticCollector.new(),
         );
     };
@@ -328,13 +335,19 @@ given MIRFunctionBuilder {
             return;
         };
         if self.type_is_void(self.return_type) then {
+            // 防御性：函数末的隐式返回也走同一释放规则（正常情况下此处无
+            // 在飞锁——语句临界区都在语句内闭合）。
+            self.release_in_flight_locks_for_exit(UInt(0));
             self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
             return;
         };
         when self.return_operand(result) in {
-            .Some(operand) then self.terminate(
-                MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
-            ),
+            .Some(operand) then {
+                self.release_in_flight_locks_for_exit(UInt(0));
+                self.terminate(
+                    MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
+                );
+            },
             .None() then self.terminate(MIRTerminator.Unreachable()),
         };
     };
@@ -509,6 +522,13 @@ given MIRFunctionBuilder {
         actual_type: Type,
         expected_type: Type,
     ): MIRValue = {
+        // 锁定对象的字段读 / 可变全局绑定读不走延迟读：装载必须包在所属
+        // 对象锁的临界区里（concurrency-design.md §对象锁语义 1）。
+        if self.place_locked_relevant(place) then {
+            return MIRValue.Operand(
+                self.materialize_place_for_expected_type(place, expected_type),
+            );
+        };
         // A load through a call-produced pointer (an element slot) is
         // materialized HERE, at the read's evaluation position: later
         // instructions can run side effects (a call argument that grows the

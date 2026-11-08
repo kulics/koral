@@ -113,13 +113,13 @@ given MIRFunctionBuilder {
             param_symbols.push(symbol);
         };
         let effective_return_type = when lambda_type in {
-            .FunctionType(_, fn_return_type) or .ForeignFunctionType(_, fn_return_type) then fn_return_type,
+            .FunctionType(_, fn_return_type, _) or .ForeignFunctionType(_, fn_return_type) then fn_return_type,
             _ then return_type,
         };
         let mutable function_type = Type.FunctionType(
             types_to_param_entries(self.param_types_to_refs(params)),
             effective_return_type,
-        );
+        false);
         let lambda_identifier = Symbol(
             self.context.allocate_unindexed(
                 "__mir_lambda_\(self.identifier.def_id.id)_\(self.next_local_id)_\(self.next_block_id)",
@@ -194,16 +194,26 @@ given MIRFunctionBuilder {
                 .Some(operand) then MIRValue.Operand(operand),
                 .None() then when result.place in {
                     .Some(place) then {
-                        // A load through a call-produced pointer (an element
-                        // slot) is materialized HERE, at the value's own
-                        // evaluation position: later instructions in the
-                        // block can run side effects (a call argument that
-                        // grows a container), and a deferred load would then
-                        // read through an already-invalidated slot pointer.
-                        // Everything else keeps the deferred read so the call
-                        // convention can pass non-escaping parameters
-                        // straight from their locals.
-                        if self.place_needs_eager_load(place) then {
+                        // 锁定对象的字段读 / 可变全局绑定读不能延迟到使用点
+                        // （那会把装载挪出锁的临界区）：在求值位置装取并上锁
+                        // （concurrency-design.md §对象锁语义 1）。
+                        if self.place_locked_relevant(place) then {
+                            MIRValue.Operand(
+                                self.materialize(
+                                    MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
+                                    result.result_type,
+                                ),
+                            )
+                        } else if self.place_needs_eager_load(place) then {
+                            // A load through a call-produced pointer (an element
+                            // slot) is materialized HERE, at the value's own
+                            // evaluation position: later instructions in the
+                            // block can run side effects (a call argument that
+                            // grows a container), and a deferred load would then
+                            // read through an already-invalidated slot pointer.
+                            // Everything else keeps the deferred read so the call
+                            // convention can pass non-escaping parameters
+                            // straight from their locals.
                             MIRValue.Operand(
                                 self.materialize(
                                     MIRValue.PlaceRead(place, MIROwnershipUse.Copy()),
@@ -232,7 +242,30 @@ given MIRFunctionBuilder {
         };
         return when self.lower_expression(expression) in {
             .Some(result) then when result.place in {
-                .Some(place) then MIRValue.PlaceRead(place, MIROwnershipUse.Borrow()),
+                .Some(place) then {
+                    // 锁定字段的借用位装载（含 +0 别名约定的句柄位拷贝）也是
+                    // 读：必须包在所属对象锁的临界区里（concurrency-design.md
+                    // §对象锁语义 1）。装到临时后按 Borrow 语义传给使用方，
+                    // 调用约定的 +0 形状不变。
+                    if self.place_locked_relevant(place) then {
+                        when self.lower_locked_read(
+                            place,
+                            MIROwnershipUse.Borrow(),
+                            self.place_type(place),
+                        ) in {
+                            .Some(operand) then MIRValue.PlaceRead(
+                                MIRPlace.Local(operand.local_id_or_zero()),
+                                MIROwnershipUse.Borrow(),
+                            ),
+                            .None() then MIRValue.PlaceRead(
+                                place,
+                                MIROwnershipUse.Borrow(),
+                            ),
+                        }
+                    } else {
+                        MIRValue.PlaceRead(place, MIROwnershipUse.Borrow())
+                    }
+                },
                 .None() then when result.operand in {
                     .Some(operand) then when operand in {
                         .Local(local_id) then MIRValue.PlaceRead(
@@ -303,6 +336,23 @@ given MIRFunctionBuilder {
     };
 
     materialize(self, value: MIRValue, result_type: Type): MIROperand = {
+        // 锁定对象的字段读 / 可变全局绑定读必须包在所属对象锁里装载
+        // （concurrency-design.md §对象锁语义 1）。所有经 materialize 的装载
+        // 路径统一在这里收口；lower_locked_read 内部用 materialize_raw 避免
+        // 自嵌套。
+        when value in {
+            .PlaceRead(place, ownership) then {
+                when self.lower_locked_read(place, ownership, result_type) in {
+                    .Some(operand) then return operand,
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+        return self.materialize_raw(value, result_type);
+    };
+
+    materialize_raw(self, value: MIRValue, result_type: Type): MIROperand = {
         if self.type_is_void_or_never(result_type) then {
             return MIROperand.Constant(MIRConstant.Void());
         };

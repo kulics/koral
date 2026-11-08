@@ -28,7 +28,7 @@ extension TypeChecker {
     var expectedParamTypes: [Type]? = nil
     var expectedReturnType: Type? = nil
     
-    if case .function(let funcParams, let funcReturn) = expectedType {
+    if case .function(let funcParams, let funcReturn, _) = expectedType {
       expectedParamTypes = funcParams.map { $0.type }
       expectedReturnType = funcReturn
     }
@@ -130,6 +130,27 @@ extension TypeChecker {
       }
 
       let typedBody = try inferTypedExpression(body, expectedType: bodyExpectedType, usage: bodyUsage)
+
+      // Closure `sendable` derivation (concurrency-design.md rule 5): a closure
+      // is `sendable` iff every capture is; an expected `sendable` function type
+      // refuses non-sendable captures. The message blames the capture USE.
+      var capturesSendable = true
+      if case .function(_, _, let expectedSendable)? = expectedType, expectedSendable {
+        for capture in captures {
+          if !context.isSendableType(capture.symbol.type) {
+            capturesSendable = false
+            try handleError(SemanticError(.generic(
+              "sendable closure cannot capture non-sendable value '\(context.getName(capture.symbol.defId) ?? "?")'"
+            ), span: capture.span.isKnown ? capture.span : span))
+          }
+        }
+      } else {
+        for capture in captures {
+          if !context.isSendableType(capture.symbol.type) {
+            capturesSendable = false
+          }
+        }
+      }
       
       // Determine return type
       let actualReturnType: Type
@@ -138,7 +159,8 @@ extension TypeChecker {
         // Verify body type matches declared return type
         // A body that already complained about itself has no reliable type to
         // disagree about: `() -> { 1; }` against `Func() Int` is ONE mistake.
-        if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
+        if typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
+          && (typedBody.type != actualReturnType || !sendableSlotsCompatible(typedBody.type, actualReturnType))
           && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
         {
           try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
@@ -151,7 +173,8 @@ extension TypeChecker {
         } else {
           actualReturnType = expected
           // Verify body type matches expected return type
-          if typedBody.type != actualReturnType && typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
+          if typedBody.type != .never && typedBody.type != .error && actualReturnType != .error
+          && (typedBody.type != actualReturnType || !sendableSlotsCompatible(typedBody.type, actualReturnType))
             && !diagnosticCollector.hasError(in: body.span, fileName: currentFileName)
           {
             try handleError(SemanticError(.typeMismatch(expected: actualReturnType.description, got: typedBody.type.description), span: blame))
@@ -180,9 +203,10 @@ extension TypeChecker {
         throw SemanticError(.generic("lambda return type cannot contain borrowed reference types: '\(actualReturnType)'"), span: currentSpan)
       }
       
-      // Build function type
+      // Build function type. `isSendable` is the capture-derived verdict (koralc
+      // `build_function_type_from_params`, derivation rule 5).
       let funcParams = typedParams.map { Parameter(type: $0.type, kind: .byVal) }
-      let funcType = Type.function(parameters: funcParams, returns: actualReturnType)
+      let funcType = Type.function(parameters: funcParams, returns: actualReturnType, isSendable: capturesSendable)
       
       return .lambdaExpression(
         parameters: paramSymbols,
@@ -274,7 +298,7 @@ extension TypeChecker {
             captureKind = .byValue
           }
           let symbol = Symbol(defId: defId, type: info.type, kind: kind)
-          captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind))
+          captures.append(CapturedVariable(symbol: symbol, captureKind: captureKind, span: nameSpan))
         }
       }
       

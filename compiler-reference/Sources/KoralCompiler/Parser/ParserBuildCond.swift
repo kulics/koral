@@ -115,11 +115,11 @@ func buildCondPlacementName(_ node: GlobalNode) -> (String, SourceSpan)? {
     .intrinsicFunctionDeclaration(let name, _, _, _, _, _, let nameSpan),
     .foreignFunctionDeclaration(let name, _, _, _, _, _, _, let nameSpan),
     .foreignLetDeclaration(let name, _, _, _, _, _, _, let nameSpan),
-    .globalStructDeclaration(let name, _, _, _, _, _, let nameSpan),
-    .globalEnumDeclaration(let name, _, _, _, _, let nameSpan),
+    .globalStructDeclaration(let name, _, _, _, _, _, _, let nameSpan),
+    .globalEnumDeclaration(let name, _, _, _, _, _, let nameSpan),
     .intrinsicTypeDeclaration(let name, _, _, _, let nameSpan),
-    .foreignTypeDeclaration(let name, _, _, _, _, let nameSpan),
-    .traitDeclaration(let name, _, _, _, _, _, let nameSpan),
+    .foreignTypeDeclaration(let name, _, _, _, _, _, let nameSpan),
+    .traitDeclaration(let name, _, _, _, _, _, _, let nameSpan),
     .typeAliasDeclaration(let name, _, _, _, _, let nameSpan):
     return (name, nameSpan)
   case .usingDeclaration, .givenDeclaration, .givenTraitDeclaration, .intrinsicGivenDeclaration:

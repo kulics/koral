@@ -30,7 +30,11 @@ given Shape {
 
 type mutable Box(inner: List[Int]);
 
-let mutable global_boxes: List[Box] = List[Box].new();
+/// Escape-hatch holder: a global's type must be sendable, while the boxes are
+/// thread-confined working state (concurrency-design.md §跨界检查 (c)).
+type unsafe sendable mutable BoxRoots(mutable boxes: List[Box]);
+
+let mutable global_boxes = BoxRoots(List[Box].new());
 
 given Box {
     public add(self, v: Int): Void = {
@@ -56,7 +60,7 @@ given Box {
 
     // ESCAPES: stores self into a global -- must stay owned and correct.
     public register(self): Void = {
-        global_boxes.push(self);
+        global_boxes.boxes.push(self);
     };
 
     // ESCAPES: returns self.
@@ -93,9 +97,9 @@ let main(): Int = {
     println("total \(b.total())");
 
     b.register();
-    let g0 = global_boxes.get(0) or else Box(List[Int].new());
+    let g0 = global_boxes.boxes.get(0) or else Box(List[Int].new());
     g0.inner.push(1000);
-    println("globals \(global_boxes.count()) shared \(b.total())");
+    println("globals \(global_boxes.boxes.count()) shared \(b.total())");
 
     let b2 = b.alias();
     b2.inner.push(5);

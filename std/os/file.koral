@@ -40,7 +40,7 @@ let foreign __koral_errno_is_wouldblock(): Int32;
 // ============================================================================
 
 /// File open mode enumeration
-public type OpenMode {
+public type sendable OpenMode {
     Read(), // O_RDONLY — read-only
     Write(), // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
     Create(), // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
@@ -54,7 +54,7 @@ public type OpenMode {
 
 /// Internal file storage holding the file descriptor and path.
 /// Responsible for closing the fd via drop when the last reference is released.
-type mutable FileStorage(fd: Int32, path: Path);
+type unsafe sendable mutable FileStorage(fd: Int32, path: Path);
 
 given FileStorage: Drop {
 
@@ -87,7 +87,10 @@ let foreign __koral_fstat(fd: Int32, out: *KoralStatResult): Int32;
 /// The file descriptor is automatically closed when the last reference is released.
 /// Unbuffered design: directly wraps the file descriptor (fd).
 /// For buffered I/O, wrap with std.io BufReader/BufWriter.
-public type mutable File(storage: FileStorage);
+/// Sendable contract: TRANSFER, not SHARE -- a `File` may cross threads by
+/// handoff; concurrent use of one `File` must be externally synchronized (the
+/// seek cursor is shared state).
+public type unsafe sendable mutable File(storage: FileStorage);
 
 /// Handle accessors, metadata queries, syncing, and whole-file advisory locking.
 given File {

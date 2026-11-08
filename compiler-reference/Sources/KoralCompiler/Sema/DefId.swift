@@ -904,6 +904,142 @@ public class DefIdMap {
         return (structInfoMap[defId.id]?.isMutable ?? false) || declaredMutableTypeIds.contains(defId.id)
     }
 
+    // MARK: - Nominal Sendability (concurrency-design.md)
+
+    /// `sendable` / `unsafe sendable` declaration modifier (concurrency-design.md).
+    /// Struct / enum / foreign nominal declarations all register. Like
+    /// `declaredMutableTypeIds` it travels with the DECLARATION and survives
+    /// `clearTypeInfo`.
+    private var typeSendabilities: [UInt64: TypeSendability] = [:]
+
+    public func setTypeSendability(_ defId: DefId, _ sendability: TypeSendability) {
+        typeSendabilities[defId.id] = sendability
+    }
+
+    public func typeSendability(_ defId: DefId) -> TypeSendability {
+        return typeSendabilities[defId.id] ?? .unmarked
+    }
+
+    /// Derivation rule (concurrency-design.md §派生规则): whether a type can be
+    /// shared across threads.
+    ///
+    /// Nominal types answer from the registry, never by recursing into their
+    /// own fields (the declaration check guarantees those separately); generic
+    /// instantiations need their arguments to be sendable too (`unsafe` does not
+    /// exempt that condition); a bare generic parameter counts as sendable --
+    /// the argument condition closes at instantiation, so the declaration-time
+    /// field check needs no "assume" mode.
+    public func isSendableType(_ t: Type) -> Bool {
+        switch t {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
+             .float32, .float64, .bool, .void, .never,
+             .genericParameter,
+             // Unknown/TypeVar are error recovery and inference placeholders:
+             // never cascade into a second complaint.
+             .error, .typeVariable:
+            return true
+        case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+            return typeSendability(defId) != .unmarked
+        case .genericStruct(let templateDefId, let args), .genericEnum(let templateDefId, let args):
+            let declared = typeSendability(templateDefId) != .unmarked
+            return declared && allSendable(args)
+        case .fixedArray(_, let element):
+            return isSendableType(element)
+        case .weakReference(let inner), .mutableWeakReference(let inner):
+            return isSendableType(inner)
+        // A surface trait object carries the internal `reference(traitObject)`
+        // wrap (`surface_named_type`); the sendable bit lives on the trait
+        // object inside, and the derivation query reads through the wrap
+        // (concurrency-design.md derivation rule 6).
+        case .reference(let inner), .mutableReference(let inner),
+             .borrowedReference(let inner), .mutableBorrowedReference(let inner):
+            return sendableThroughReferenceWrap(inner)
+        // Function/closure types answer from the modifier bit left at
+        // formation (concurrency-design.md derivation rule 5). A trait
+        // object's sendability comes from its trait's `trait sendable`
+        // declaration -- fixed at the declaration, always true (rule 6); the
+        // stored modifier bit serves diagnostics only and never enters the
+        // derivation.
+        case .function(_, _, let isSendable):
+            return isSendable
+        case .traitObject(let traitDefId, _, _):
+            return typeSendability(traitDefId) != .unmarked
+        default:
+            return false
+        }
+    }
+
+    private func allSendable(_ types: [Type]) -> Bool {
+        for t in types {
+            if !isSendableType(t) {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// A trait object under reference-layer wraps answers from its trait
+    /// declaration's sendability; any other wrapped shape stays conservatively
+    /// non-sendable (`&T`'s concurrency ownership is not in the derivation
+    /// rules' closed list).
+    private func sendableThroughReferenceWrap(_ t: Type) -> Bool {
+        switch t {
+        case .traitObject(let traitDefId, _, _):
+            return typeSendability(traitDefId) != .unmarked
+        case .reference(let inner), .mutableReference(let inner),
+             .borrowedReference(let inner), .mutableBorrowedReference(let inner):
+            return sendableThroughReferenceWrap(inner)
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Foreign Globals (no compiler-managed per-variable lock)
+
+    /// C-entity foreign variables (`let foreign`, non-macro-constant shape).
+    /// Their storage belongs to C; the compiler gives them no per-variable
+    /// lock (concurrency-design.md's global-slot lock covers Koral
+    /// `let mutable` globals only).
+    private var foreignGlobals: Set<UInt64> = []
+
+    public func setForeignGlobal(_ defId: DefId) {
+        foreignGlobals.insert(defId.id)
+    }
+
+    public func isForeignGlobal(_ defId: DefId) -> Bool {
+        return foreignGlobals.contains(defId.id)
+    }
+
+    // MARK: - Built-in Object Locks (concurrency-design.md)
+
+    /// safe `sendable mutable` (`typeSendability == .sendable` AND `type mutable`)
+    /// nominal types carry a built-in object lock: a hidden first `__lock`
+    /// field in the payload, every field read/write a critical section on the
+    /// object's lock. `unsafe sendable mutable` synchronizes itself and has no
+    /// lock; mutable types without a cross-thread promise have no lock either.
+    public func isLockedDef(_ defId: DefId) -> Bool {
+        return isStructMutable(defId) && typeSendability(defId) == .sendable
+    }
+
+    /// Whether a type carries a built-in object lock. Generic shapes close
+    /// under conditional sendability (all arguments sendable), matching
+    /// `isSendableType`'s conditional rule; instantiated `structure`
+    /// instances answer from the registry (monomorphization propagates
+    /// mutability and conditional sendability to the instance def).
+    public func isLockedType(_ t: Type) -> Bool {
+        switch t {
+        case .structure(let defId), .`enum`(let defId), .opaque(let defId):
+            return isLockedDef(defId)
+        case .genericStruct(let templateDefId, let args), .genericEnum(let templateDefId, let args):
+            return isLockedDef(templateDefId) && allSendable(args)
+        default:
+            return false
+        }
+    }
+
     public func getTypeArguments(_ defId: DefId) -> [Type]? {
         if let info = structInfoMap[defId.id] {
             return info.typeArguments

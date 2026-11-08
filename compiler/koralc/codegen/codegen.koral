@@ -340,14 +340,14 @@ given CodeGen {
                 };
                 Type.GenericEnum(template_def_id, concrete_args)
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 let mutable concrete_args = List[Type].new();
                 for arg_ref in args then {
                     concrete_args.push(self.concretize_codegen_type(arg_ref));
                 };
-                Type.TraitObject(trait_def_id, concrete_args)
+                Type.TraitObject(trait_def_id, concrete_args, false)
             },
-            .FunctionType(fn_params, return_type_ref) then {
+            .FunctionType(fn_params, return_type_ref, _) then {
                 let mutable concrete_param_types = List[Type].new();
                 for entry in fn_params then {
                     concrete_param_types.push(
@@ -395,7 +395,7 @@ given CodeGen {
             },
             .None() then {},
         };
-        return Type.TraitObject(trait_def_id, trait_type_args);
+        return Type.TraitObject(trait_def_id, trait_type_args, false);
     };
 
     trait_name_of_trait_type(self, trait_type: Type): String = {
@@ -411,7 +411,7 @@ given CodeGen {
             ),
             // Display only: the trait's spelling, read from its declaration.
             // Display only: the trait's spelling, read from its declaration.
-            .TraitObject(trait_def_id, _) then self.context.get_name(trait_def_id) or else def_id_spelling(
+            .TraitObject(trait_def_id, _, _) then self.context.get_name(trait_def_id) or else def_id_spelling(
                 trait_def_id,
             ),
             _ then self.context.type_display_name(trait_type),
@@ -420,7 +420,7 @@ given CodeGen {
 
     trait_type_args_of_trait_type(self, trait_type: Type): List[Type] = {
         return when trait_type in {
-            .TraitObject(_, type_args) then type_args,
+            .TraitObject(_, type_args, _) then type_args,
             _ then List[Type].new(),
         };
     };
@@ -469,7 +469,7 @@ given CodeGen {
                 };
                 Type.GenericEnum(template_def_id, bound_args)
             },
-            .FunctionType(fn_params, return_type_ref) then {
+            .FunctionType(fn_params, return_type_ref, _) then {
                 let mutable bound_param_types = List[Type].new();
                 for entry in fn_params then {
                     bound_param_types.push(
@@ -626,7 +626,7 @@ given CodeGen {
 
     bind_function_type(self, fn_type: Type, receiver_bindings: Dict[String, Type]): Type = {
         return when fn_type in {
-            .FunctionType(fn_params, return_type_ref) then {
+            .FunctionType(fn_params, return_type_ref, _) then {
                 let mutable bound_param_types = List[Type].new();
                 for entry in fn_params then {
                     bound_param_types.push(
@@ -678,14 +678,14 @@ given CodeGen {
 
     function_type_param_count(self, fn_type: Type): UInt = {
         return when fn_type in {
-            .FunctionType(fn_params, _) or .ForeignFunctionType(fn_params, _) then fn_params.count(),
+            .FunctionType(fn_params, _, _) or .ForeignFunctionType(fn_params, _) then fn_params.count(),
             _ then UInt(0),
         };
     };
 
     function_type_param_type(self, fn_type: Type, index: UInt): Option[Type] = {
         return when fn_type in {
-            .FunctionType(fn_params, _) or .ForeignFunctionType(fn_params, _) then if index < fn_params.count() then Option[Type].Some(
+            .FunctionType(fn_params, _, _) or .ForeignFunctionType(fn_params, _) then if index < fn_params.count() then Option[Type].Some(
                 (fn_params[index]).param_type,
             ) else Option[Type].None(),
             _ then Option[Type].None(),
@@ -694,7 +694,7 @@ given CodeGen {
 
     function_type_return_type(self, fn_type: Type): Type = {
         return when fn_type in {
-            .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
+            .FunctionType(_, return_type_ref, _) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
@@ -979,7 +979,7 @@ given CodeGen {
             },
             .ReferenceType(inner) then "*\(self.type_stable_key(inner))",
             .MutableReferenceType(inner) then "mutable \(self.type_stable_key(inner))",
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 let mutable arg_keys = StringBuilder.new();
                 let mutable first = true;
                 for arg in args then {
@@ -1766,7 +1766,7 @@ given CodeGen {
             let method_suffix = resolved_name.substring(2...);
             if method_suffix == "into_list" then {
                 when symbol.symbol_type in {
-                    .FunctionType(params, _) then {
+                    .FunctionType(params, _, _) then {
                         if not params.is_empty() then {
                             let mutable receiver_type = params[UInt(0)].param_type;
                             if not self.context.contains_generic_parameter(
@@ -1807,7 +1807,7 @@ given CodeGen {
             .Some(method_suffix) then {
                 if method_suffix == "into_list" then {
                     when symbol.symbol_type in {
-                        .FunctionType(params, _) then {
+                        .FunctionType(params, _, _) then {
                             if not params.is_empty() then {
                                 let mutable receiver_type = params[UInt(0)].param_type;
                                 let receiver_is_ref_like = type_is_handle(receiver_type);
@@ -1854,7 +1854,7 @@ given CodeGen {
     receiver_owner_type_from_function_type(self, function_type: Type): Option[Type] = {
         let _ = self;
         return when function_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.is_empty() then {
                     return Option[Type].None();
                 };
@@ -2557,7 +2557,7 @@ given CodeGen {
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
             or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
             or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then self.cache_c_type_name(inner),
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, _) then {
                 for entry in params then {
                     self.cache_c_type_name(entry.param_type);
                 };
@@ -2569,7 +2569,7 @@ given CodeGen {
                 };
                 self.cache_c_type_name(return_type);
             },
-            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then for arg in args then {
+            .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args, _) then for arg in args then {
                 self.cache_c_type_name(arg);
             },
             .FixedArrayType(_, inner) then self.cache_c_type_name(inner),

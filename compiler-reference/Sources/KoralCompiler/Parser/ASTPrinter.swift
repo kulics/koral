@@ -48,9 +48,10 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, _, _):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let sendability, let access, _, _):
       print("\(indent)StructDeclaration \(name)")
       print("\(indent)  Access: \(access)")
+      print("\(indent)  Sendable: \(sendability.debugNote)")
       print("\(indent)  NominalMutable: \(isMutable)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
@@ -61,9 +62,10 @@ public func printAST(_ node: ASTNode) {
         print("\(indent)  Access: \(param.access)")
       }
 
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, _, _):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let sendability, let access, _, _):
       print("\(indent)EnumDeclaration \(name)")
       print("\(indent)  Access: \(access)")
+      print("\(indent)  Sendable: \(sendability.debugNote)")
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }
@@ -104,9 +106,10 @@ public func printAST(_ node: ASTNode) {
           print("\(indent)  TypeParameters: \(typeParameters)")
         }
 
-    case .foreignTypeDeclaration(let name, let fields, _, let access, _, _):
+    case .foreignTypeDeclaration(let name, let fields, _, let sendability, let access, _, _):
         print("\(indent)ForeignTypeDeclaration \(name)")
         print("\(indent)  Access: \(access)")
+        print("\(indent)  Sendable: \(sendability.debugNote)")
         if let fields {
           for field in fields {
             print("\(indent)  Field \(field.name): \(field.type)")
@@ -167,9 +170,12 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, _, _):
+    case .traitDeclaration(let name, let isSendable, let typeParameters, let superTraits, let methods, let access, _, _):
       print("\(indent)TraitDeclaration: \(name)")
       print("\(indent)  Access: \(access)")
+      if isSendable {
+        print("\(indent)  Sendable: true")
+      }
       if !typeParameters.isEmpty {
         print("\(indent)  TypeParameters: \(typeParameters)")
       }

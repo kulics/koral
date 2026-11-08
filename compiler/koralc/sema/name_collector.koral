@@ -204,7 +204,7 @@ given NameCollector {
 
     private collect_decl(self, decl: Decl): Void = {
         when decl in {
-            .TypeStructDecl(access, name, is_mutable_type, type_params, fields, span, name_span) then {
+            .TypeStructDecl(access, name, is_mutable_type, sendability, type_params, fields, span, name_span) then {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -233,10 +233,11 @@ given NameCollector {
                     span,
                 );
                 context.set_struct_mutable(def_id, is_mutable_type);
+                context.set_type_sendability(def_id, sendability);
                 let t = Type.StructureType(def_id);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
-            .TypeEnumDecl(access, name, type_params, cases, span, name_span) then {
+            .TypeEnumDecl(access, name, sendability, type_params, cases, span, name_span) then {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -265,6 +266,7 @@ given NameCollector {
                     span,
                 );
                 let t = Type.EnumType(def_id);
+                context.set_type_sendability(def_id, sendability);
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
             .TypeAliasDecl(access, name, _, target, span, name_span) then {
@@ -350,7 +352,7 @@ given NameCollector {
                     intrinsic_type,
                 );
             },
-            .ForeignTypeDecl(access, name, fields, cname, span, name_span) then {
+            .ForeignTypeDecl(access, name, sendability, fields, cname, span, name_span) then {
                 if self.has_conflicting_top_level_type_name(name, access) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -378,6 +380,7 @@ given NameCollector {
                     // spelling for the opaque form.
                     context.set_declared_cname(def_id, c);
                 };
+                context.set_type_sendability(def_id, sendability);
                 let t = when fields in {
                     .Some(_) then Type.StructureType(def_id),
                     .None() then Type.OpaqueType(def_id),
@@ -392,7 +395,7 @@ given NameCollector {
                 };
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
-            .TraitDecl(access, name, type_params, parents, members, span, name_span) then {
+            .TraitDecl(access, name, is_sendable, type_params, parents, members, span, name_span) then {
                 let trait_source_file = when access in {
                     .Private() then Option[String].Some(self.source_file),
                     _ then Option[String].None(),
@@ -414,6 +417,12 @@ given NameCollector {
                     access,
                     span,
                 );
+                // `trait sendable` (concurrency-design.md): the trait's objects
+                // are always sendable, so the declaration registers the same
+                // sendability slot a nominal type would.
+                if is_sendable then {
+                    context.set_type_sendability(def_id, Sendability.Sendable());
+                };
                 let mutable trait_type_args = List[Type].new();
                 for type_param in type_params then {
                     trait_type_args.push(Type.GenericParameter(type_param.name));
@@ -421,7 +430,7 @@ given NameCollector {
                 self.global_scope.define_scoped_type(
                     self.module_path,
                     name,
-                    Type.TraitObject(def_id, trait_type_args),
+                    Type.TraitObject(def_id, trait_type_args, false),
                 );
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {

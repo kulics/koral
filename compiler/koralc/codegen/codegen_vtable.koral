@@ -392,6 +392,14 @@ given CodeGen {
                     self.resolve_type_node_for_vtable(return_type, bindings),
                 )
             },
+            // `sendable` 位在 codegen 层擦除：按 sema 规则携带，不合法形态 sema 已报。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_type_node_for_vtable(inner, bindings);
+                when type_with_sendable_qualifier(resolved_inner) in {
+                    .Some(sendable_t) then sendable_t,
+                    .None() then resolved_inner,
+                }
+            },
         };
     };
 
@@ -1044,8 +1052,8 @@ given CodeGen {
                 "struct __koral_Ref",
                 "(struct __koral_Ref){ .ptr = self_val.ptr }",
             );
-            self.buffer.push_string("    __koral_retain_value(self_val.ptr);\n");
-            self.buffer.push_string("    __koral_retain_value(\(ref_var).ptr);\n");
+            self.buffer.push_string("    \(self.rc_retain_fn(wrapper_self_type))(self_val.ptr);\n");
+            self.buffer.push_string("    \(self.rc_retain_fn(wrapper_self_type))(\(ref_var).ptr);\n");
 
             let mutable wrapper_param_types = List[String].new();
             wrapper_param_types.push("struct __koral_Ref");
@@ -1072,14 +1080,14 @@ given CodeGen {
                     "    \(vt_call_target)(\(dynamic_call_args_str));\n",
                 );
                 self.buffer.push_string(
-                    "    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
+                    "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
                 );
             } else {
                 self.buffer.push_string(
                     "    \(return_c_type) __koral_ret = \(vt_call_target)(\(dynamic_call_args_str));\n",
                 );
                 self.buffer.push_string(
-                    "    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
+                    "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
                 );
                 self.buffer.push_string("    return __koral_ret;\n");
             };
@@ -1091,14 +1099,14 @@ given CodeGen {
         if is_void_return then {
             self.buffer.push_string("    \(actual_method_c_name)(\(call_args_str));\n");
             self.buffer.push_string(
-                "    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
+                "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
             );
         } else {
             self.buffer.push_string(
                 "    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n",
             );
             self.buffer.push_string(
-                "    __koral_release_value(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
+                "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
             );
             self.buffer.push_string("    return __koral_ret;\n");
         };
@@ -1571,7 +1579,7 @@ given CodeGen {
     trait_target_ref(self, t: Type): Option[CanonicalTraitRef] = {
         return when t in {
             // The name is display-only; `trait_def_id` is the identity.
-            .TraitObject(trait_def_id, args) then Option[CanonicalTraitRef].Some(
+            .TraitObject(trait_def_id, args, _) then Option[CanonicalTraitRef].Some(
                 CanonicalTraitRef(def_id_spelling(trait_def_id), trait_def_id, args),
             ),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
@@ -2373,7 +2381,7 @@ given CodeGen {
         };
         if retain_source then {
             self.add_indent();
-            self.buffer.push_string("__koral_retain_value(\(result).ptr);\n");
+            self.buffer.push_string("\(self.rc_retain_fn(normalized_concrete_type))(\(result).ptr);\n");
         };
         return result;
     };

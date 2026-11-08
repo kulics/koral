@@ -1,0 +1,23 @@
+// EXPECT-ERROR: Type 'UnmarkedErr' must be sendable to implement sendable trait 'Error'
+// EXPECT-ERROR: Cannot form 'sendable' trait object from non-sendable type 'UnmarkedErr'
+// `Error` is a `trait sendable` declaration and `Result`'s error side is the
+// always-sendable `Error` trait object. An unmarked error type therefore
+// cannot even declare the `given` (concurrency-design.md §派生规则 6), and the
+// box into `Result.Error` still refuses the non-sendable payload.
+
+type UnmarkedErr(msg: String);
+
+given UnmarkedErr: Error {
+    message(self): String = self.msg;
+};
+
+let f(): Result[Int] = Result[Int].Error(UnmarkedErr("boom"));
+
+let g(): Result[Int] = {
+    let value = f() or return;
+    return Result[Int].Ok(value + 1);
+};
+
+let main(): Void = {
+    let _ = g();
+};

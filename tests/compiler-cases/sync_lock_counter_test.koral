@@ -1,0 +1,36 @@
+// EXPECT: hits=40000
+
+// Cross-thread counter on a safe `sendable mutable` object
+// (concurrency-design.md §对象锁语义): every field access is a critical section
+// on the object's built-in lock, and the assignment statement `c.hits = ...`
+// holds the owner's lock across the whole read-modify-write, so increments
+// from 8 threads lose no updates.
+
+using "std/async" { ... };
+
+type sendable mutable Counter(mutable hits: Int);
+
+let main(): Void = {
+    let c = Counter(0);
+    let mutable threads = List[Thread].new();
+    let mutable i = 0;
+    while i < 8 then {
+        let shared = c;
+        threads.push(
+            run_task(
+                () => {
+                    let mutable j = 0;
+                    while j < 5000 then {
+                        shared.hits = shared.hits + 1;
+                        j = j + 1;
+                    };
+                },
+            ),
+        );
+        i = i + 1;
+    };
+    for t in threads then {
+        let _ = t.wait();
+    };
+    println("hits=\(c.hits)");
+};

@@ -14,7 +14,7 @@ given TypeChecker {
     // silently skipped every wrapped case.
     as_trait_object_type(self, t: Type): Option[Type] = {
         return when t in {
-            .TraitObject(tplDefId, _) then Option[Type].Some(t),
+            .TraitObject(tplDefId, _, _) then Option[Type].Some(t),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
             or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
             or .MutableWeakReferenceType(inner) then self.as_trait_object_type(inner),
@@ -32,7 +32,7 @@ given TypeChecker {
 
     trait_object_safety_name(self, t: Type): Option[String] = {
         return when t in {
-            .TraitObject(trait_def_id, _) then Option[String].Some(
+            .TraitObject(trait_def_id, _, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
             ),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_safety_name(inner),
@@ -530,6 +530,29 @@ given TypeChecker {
                 };
                 Type.ForeignFunctionType(types_to_param_entries(resolved_params), resolved_ret)
             },
+            // `sendable` 前缀限定只属于函数类型；trait object 的 sendable 由
+            // `trait sendable` 声明处给（concurrency-design.md §派生规则 5、6）。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_type(inner);
+                if is_trait_object_shape(resolved_inner) then {
+                    self.push_diagnostic(
+                        "'sendable' qualifier applies only to function types; declare the trait 'sendable' instead",
+                        type_node_span(node),
+                    );
+                    Type.Unknown()
+                } else {
+                    when type_with_sendable_qualifier(resolved_inner) in {
+                        .Some(sendable_t) then sendable_t,
+                        .None() then {
+                            self.push_diagnostic(
+                                "'sendable' qualifier applies only to function types",
+                                type_node_span(node),
+                            );
+                            Type.Unknown()
+                        },
+                    }
+                }
+            },
         };
     };
 
@@ -689,6 +712,28 @@ given TypeChecker {
                     types_to_param_entries(resolved_params),
                     self.resolve_type_with_bindings(return_type, bindings),
                 )
+            },
+            // `sendable` 前缀限定：与 `resolve_type` 同一裁定，锚点一致。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_type_with_bindings(inner, bindings);
+                if is_trait_object_shape(resolved_inner) then {
+                    self.push_diagnostic(
+                        "'sendable' qualifier applies only to function types; declare the trait 'sendable' instead",
+                        type_node_span(node),
+                    );
+                    Type.Unknown()
+                } else {
+                    when type_with_sendable_qualifier(resolved_inner) in {
+                        .Some(sendable_t) then sendable_t,
+                        .None() then {
+                            self.push_diagnostic(
+                                "'sendable' qualifier applies only to function types",
+                                type_node_span(node),
+                            );
+                            Type.Unknown()
+                        },
+                    }
+                }
             },
         };
     };
@@ -922,6 +967,28 @@ given TypeChecker {
                     types_to_param_entries(resolved_params),
                     self.resolve_type_in_scope(return_type, scope),
                 )
+            },
+            // `sendable` 前缀限定：与 `resolve_type` 同一裁定，锚点一致。
+            .SendableQualified(inner) then {
+                let resolved_inner = self.resolve_type_in_scope(inner, scope);
+                if is_trait_object_shape(resolved_inner) then {
+                    self.push_diagnostic(
+                        "'sendable' qualifier applies only to function types; declare the trait 'sendable' instead",
+                        type_node_span(node),
+                    );
+                    Type.Unknown()
+                } else {
+                    when type_with_sendable_qualifier(resolved_inner) in {
+                        .Some(sendable_t) then sendable_t,
+                        .None() then {
+                            self.push_diagnostic(
+                                "'sendable' qualifier applies only to function types",
+                                type_node_span(node),
+                            );
+                            Type.Unknown()
+                        },
+                    }
+                }
             },
         };
     };

@@ -228,7 +228,7 @@ extension CodeGen {
 
   private func collectStatementRefs(_ statement: MIRStatement, _ out: inout [String]) {
     switch statement {
-    case .declare, .scopeEnter, .scopeExit, .debugSource:
+    case .declare, .scopeEnter, .scopeExit, .debugSource, .lock, .unlock:
       break
     case .assign(let place, let value):
       collectPlaceRefs(place, &out)

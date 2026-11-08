@@ -84,6 +84,14 @@ extension CodeGen {
     let payloadName = managedPayloadTypeName(for: type)
     appendToBuffer("struct \(payloadName) {\n")
     withIndent {
+      if context.isLockedType(type) {
+        // The built-in object lock is the payload's hidden first field
+        // (concurrency-design.md): the lock address is the payload pointer
+        // (first field, offset 0); codegen emits `&payload->__lock`.
+        // Destruction needs no action (the lock holds no resources).
+        addIndent()
+        appendToBuffer("struct __koral_Lock __lock;\n")
+      }
       for param in parameters {
         addIndent()
         let paramName = context.getName(param.defId) ?? "<unknown>"

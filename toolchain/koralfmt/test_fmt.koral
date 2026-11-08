@@ -205,6 +205,61 @@ let main(): Void = {
         "type mutable Box[R: Mark](value: R);\n",
         "type mutable Box[R: Mark](value: R);\n",
     );
+    // Sendability modifiers (grammar.bnf <sendability>): `unsafe`? `sendable`?
+    // sit after `foreign` / the C name and before `mutable`, in fixed order
+    // `unsafe` `sendable` `mutable`. `unsafe` must be accompanied by
+    // `sendable`; `sendable` may stand alone. Both spellings round-trip as
+    // written -- nothing is reordered or dropped.
+    t.test_checked(
+        "type sendable",
+        "type sendable Point(x: Int, y: Int);\n",
+        "type sendable Point(x: Int, y: Int);\n",
+    );
+    t.test_checked(
+        "type sendable mutable",
+        "type sendable mutable Counter(mutable hits: Int);\n",
+        "type sendable mutable Counter(mutable hits: Int);\n",
+    );
+    t.test_checked(
+        "type unsafe sendable mutable",
+        "type unsafe sendable mutable Spin(mutable n: Int);\n",
+        "type unsafe sendable mutable Spin(mutable n: Int);\n",
+    );
+    t.test_checked(
+        "type sendable enum",
+        "type sendable Shape { Circle(r: Float64), Rect(w: Float64, h: Float64) };\n",
+        "type sendable Shape {\n    Circle(r: Float64),\n    Rect(w: Float64, h: Float64),\n};\n",
+    );
+    t.test_checked(
+        "type foreign sendable",
+        "type foreign sendable FX(a: Int32);\n",
+        "type foreign sendable FX(a: Int32);\n",
+    );
+    t.test_checked(
+        "type foreign c name unsafe sendable",
+        "type foreign \"cvar\" unsafe sendable CV(a: Int32);\n",
+        "type foreign \"cvar\" unsafe sendable CV(a: Int32);\n",
+    );
+    t.test_checked(
+        "generic type sendable",
+        "type sendable Box[T: Any](value: T);\n",
+        "type sendable Box[T: Any](value: T);\n",
+    );
+    t.test_error_contains(
+        "unsafe must be accompanied by sendable",
+        "type unsafe Point(x: Int);\n",
+        "'unsafe' must be accompanied by 'sendable'",
+    );
+    t.test_error_contains(
+        "unsafe sendable pair is required before mutable",
+        "type unsafe mutable Point(x: Int);\n",
+        "'unsafe' must be accompanied by 'sendable'",
+    );
+    t.test_error_contains(
+        "sendable unsafe is out of order",
+        "type sendable unsafe Point(x: Int);\n",
+        "expected type name",
+    );
     // `mutable` in a generic PARAMETER constraint is a type-kind constraint
     // keyword, not a type -- `[T mutable]`.
     t.test(
@@ -243,6 +298,11 @@ let main(): Void = {
         "trait named param",
         "trait T {\nm(self, a: Int =) : Int;\n};\n",
         "trait T {\n    m(self, a: Int =): Int;\n};\n",
+    );
+    t.test(
+        "trait sendable decl",
+        "trait sendable Error {\nmessage(self) : String;\n};\n",
+        "trait sendable Error {\n    message(self): String;\n};\n",
     );
 
     t.test(
@@ -1641,6 +1701,59 @@ let main(): Void = {
         "fixed array types",
         "let f(b: [32]UInt8): Int32={\nlet mutable a: [34]Int32 = [];\nlet p: *[2]*Int = q;\nreturn 0;\n};\n",
         "let f(b: [32]UInt8): Int32 = {\n    let mutable a: [34]Int32 = [];\n    let p: *[2]*Int = q;\n    return 0;\n};\n",
+    );
+
+    // === Type-position `sendable` qualifier (grammar.bnf <type-prefix>) ===
+    // `sendable` prefixes a type: function types (`sendable () -> Void`) and
+    // trait objects (`sendable Error`). It nests through return types and
+    // generic arguments. The formatter is syntax-only -- the prefix round-trips
+    // wherever a type is written, and the compilers own the restriction to
+    // those two shapes. The decl-level modifiers above are a different slot
+    // and stay untouched.
+    t.test_checked(
+        "sendable function type in param annotation",
+        "let f(cb: sendable () -> Void): Void = {};\n",
+        "let f(cb: sendable () -> Void): Void = {};\n",
+    );
+    t.test_checked(
+        "sendable trait object in param annotation",
+        "let f(error: sendable Error): Void = {};\n",
+        "let f(error: sendable Error): Void = {};\n",
+    );
+    t.test_checked(
+        "sendable function type in let annotation",
+        "let f: sendable () -> Void = g;\n",
+        "let f: sendable () -> Void = g;\n",
+    );
+    t.test_checked(
+        "sendable struct field annotation",
+        "type Holder(f: sendable () -> Void);\n",
+        "type Holder(f: sendable () -> Void);\n",
+    );
+    t.test_checked(
+        "nested sendable function return type",
+        "let f(): sendable (Int) -> sendable (Int) -> Int = g;\n",
+        "let f(): sendable (Int) -> sendable (Int) -> Int = g;\n",
+    );
+    t.test_checked(
+        "sendable generic argument",
+        "let f(v: List[sendable () -> Void]): Void = {};\n",
+        "let f(v: List[sendable () -> Void]): Void = {};\n",
+    );
+    t.test_checked(
+        "sendable lambda parameter annotation",
+        "let f() : Void={\nlet apply = (g: sendable (Int) -> Int, x: Int) => g(x);\n};\n",
+        "let f(): Void = {\n    let apply = (g: sendable (Int) -> Int, x: Int) => g(x);\n};\n",
+    );
+    t.test_checked(
+        "sendable enum variant field beside decl modifiers",
+        "type sendable Result[T: Any] { Ok(value: T), Error(error: sendable Error) };\n",
+        "type sendable Result[T: Any] {\n    Ok(value: T),\n    Error(error: sendable Error),\n};\n",
+    );
+    t.test_checked(
+        "sendable qualifier spacing normalized",
+        "let f(cb:sendable()->Void):Void={};\n",
+        "let f(cb: sendable () -> Void): Void = {};\n",
     );
 
     t.summary();

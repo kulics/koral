@@ -26,7 +26,7 @@ extension TypeChecker {
     switch type {
     case .never:
       return true
-    case .function(let parameters, let returns):
+    case .function(let parameters, let returns, _):
       return parameters.contains { containsNeverType($0.type) } || containsNeverType(returns)
     case .reference(let inner),
          .mutableReference(let inner),
@@ -37,7 +37,7 @@ extension TypeChecker {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return containsNeverType(inner)
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args, _):
       return args.contains(where: containsNeverType)
     default:
       return false
@@ -206,14 +206,14 @@ extension TypeChecker {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return firstSignatureVisibilityViolation(in: inner, requiredAccess: requiredAccess)
-    case .function(let parameters, let returns):
+    case .function(let parameters, let returns, _):
       for parameter in parameters {
         if let violation = firstSignatureVisibilityViolation(in: parameter.type, requiredAccess: requiredAccess) {
           return violation
         }
       }
       return firstSignatureVisibilityViolation(in: returns, requiredAccess: requiredAccess)
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args, _):
       for arg in args {
         if let violation = firstSignatureVisibilityViolation(in: arg, requiredAccess: requiredAccess) {
           return violation
@@ -784,7 +784,7 @@ extension TypeChecker {
   /// The trait declaration a trait-object type names. A trait is not a
   /// nominal, so `nominalTypeId` says nil for it.
   private func importedTraitDefId(_ t: Type) -> DefId {
-    if case .traitObject(let id, _) = t { return id }
+    if case .traitObject(let id, _, _) = t { return id }
     return .invalid
   }
 
@@ -1027,7 +1027,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .traitDeclaration(let name, _, _, _, _, _, _):
+    case .traitDeclaration(let name, _, _, _, _, _, _, _):
       // A trait is a type symbol: `using "m" { Tag as AlphaTag }` has to bind
       // `AlphaTag` as a trait name. Without this case traits never reached
       // `publicTypes`, so an aliased trait import bound nothing at all and the
@@ -1041,14 +1041,14 @@ extension TypeChecker {
          defId.isValid, let decl = traitDeclsByDefId[defId] {
         let symbol = Symbol(
           defId: defId,
-          type: .traitObject(traitDefId: defId, typeArgs: []),
+          type: .traitObject(traitDefId: defId, typeArgs: [], isSendable: false),
           kind: .type
         )
         return (name, symbol, nil)
       }
       return nil
 
-    case .globalStructDeclaration(let name, let typeParameters, _, _, _, _, _):
+    case .globalStructDeclaration(let name, let typeParameters, _, _, _, _, _, _):
       // Skip generic structs for now
       if !typeParameters.isEmpty { return nil }
       
@@ -1069,7 +1069,7 @@ extension TypeChecker {
       }
       return nil
       
-    case .globalEnumDeclaration(let name, let typeParameters, _, _, _, _):
+    case .globalEnumDeclaration(let name, let typeParameters, _, _, _, _, _):
       // Skip generic enums for now
       if !typeParameters.isEmpty { return nil }
       
@@ -1090,7 +1090,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignTypeDeclaration(let name, _, _, let access, _, _):
+    case .foreignTypeDeclaration(let name, _, _, _, let access, _, _):
       let type = access == .private
         ? currentScope.lookupType(name, sourceFile: sourceInfo.sourceFile)
         : currentScope.lookupType(name)
@@ -1281,19 +1281,19 @@ extension TypeChecker {
 
       return
       
-    case .traitDeclaration(let name, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
+    case .traitDeclaration(let name, let isSendable, let typeParameters, let superTraits, let methods, let access, let span, let nameSpan):
       self.currentSpan = span
       if let existing = traits[name], existing.modulePath == currentModulePath {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
-      
+
       // Check for method-level type parameter conflicts with trait-level type parameters
       try checkMethodTypeParameterConflicts(
         methods: methods,
         outerTypeParams: typeParameters,
         contextName: "trait '\(name)'"
       )
-      
+
       // Note: We don't validate superTraits here because they might be forward references
       // They will be validated in pass 2
       var resolvedSuperTraits: [TraitConstraint] = []
@@ -1315,6 +1315,12 @@ extension TypeChecker {
         access: access,
         modulePath: currentModulePath
       )
+      // `trait sendable` (concurrency-design.md): the trait's objects are
+      // always sendable, so the declaration registers the same sendability
+      // slot a nominal type would.
+      if isSendable {
+        context.setTypeSendability(traitInfo.defId, .sendable)
+      }
       // Allocate DefIds for each trait method so that `given`/`impl` blocks
       // can link their implementation methods to the trait method's DefId
       // (rustc's `trait_item_def_id`). Without this, the trait method DefId
@@ -1332,7 +1338,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let sendability, let access, let span, let nameSpan):
       self.currentSpan = span
       // For private types, allow same name in different files
       let isPrivate = (access == .private)
@@ -1345,7 +1351,7 @@ extension TypeChecker {
       } else if !isPrivate && currentScope.hasTypeDefinition(name) {
         throw SemanticError.duplicateDefinition(name, span: nameSpan)
       }
-      
+
       if !typeParameters.isEmpty {
         // Register generic enum template
         let defId = defIdMap.allocate(
@@ -1360,6 +1366,9 @@ extension TypeChecker {
         let template = GenericEnumTemplate(
           defId: defId, typeParameters: typeParameters, cases: cases)
         currentScope.defineGenericEnumTemplate(name, template: template)
+        // The template's DECLARATION identity is what `.genericEnum` carries,
+        // so nominal sendability registers on it too (concurrency-design.md).
+        context.setTypeSendability(defId, sendability)
       } else {
         // Register placeholder for non-generic enum (allows recursive references)
         let defId = getOrAllocateTypeDefId(
@@ -1382,7 +1391,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span, let nameSpan):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let sendability, let access, let span, let nameSpan):
       self.currentSpan = span
       try validateValueTypeFieldMutability(
         typeName: name,
@@ -1419,6 +1428,9 @@ extension TypeChecker {
         let template = GenericStructTemplate(
           defId: defId, typeParameters: typeParameters, parameters: parameters, isMutable: isMutable)
         currentScope.defineGenericStructTemplate(name, template: template)
+        // The template's DECLARATION identity is what `.genericStruct` carries,
+        // so nominal sendability registers on it too (concurrency-design.md).
+        context.setTypeSendability(defId, sendability)
       } else {
         // Register placeholder for non-generic struct (allows recursive references)
         let defId = getOrAllocateTypeDefId(
@@ -1441,7 +1453,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, _, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if !isPrivate && currentScope.hasTypeDefinition(name) {
@@ -1631,6 +1643,16 @@ extension TypeChecker {
           selfReferentialSpan = targetSpan
         case .generic(let base, _, let targetSpan) where base == name:
           selfReferentialSpan = targetSpan
+        case .sendableQualified(let inner):
+          // `sendable` qualifies the target: the same self-reference ruling.
+          switch inner {
+          case .identifier(let targetName, let targetSpan) where targetName == name:
+            selfReferentialSpan = targetSpan
+          case .generic(let base, _, let targetSpan) where base == name:
+            selfReferentialSpan = targetSpan
+          default:
+            selfReferentialSpan = nil
+          }
         default:
           selfReferentialSpan = nil
         }
@@ -1710,7 +1732,7 @@ extension TypeChecker {
 
         let traitArgNodes: [TypeNode]
         switch traitConstraint {
-        case .mutable, .foreign:
+        case .mutable, .foreign, .sendable:
           traitArgNodes = []
         case .trait(_, _, let args):
           traitArgNodes = args
@@ -2058,7 +2080,7 @@ extension TypeChecker {
               return Parameter(type: paramType, kind: passKind)
             }
 
-            return Type.function(parameters: params, returns: returnType)
+            return Type.function(parameters: params, returns: returnType, isSendable: false)
           }
 
           let methodSymbol = makeMethodSymbol(
@@ -2195,7 +2217,7 @@ extension TypeChecker {
         try recordGenericTraitBounds(typeParams)
         try currentScope.defineType("Self", type: selfType)
         switch traitConstraint {
-        case .mutable, .foreign:
+        case .mutable, .foreign, .sendable:
           return []
         case .trait(_, _, let argNodes):
           return try argNodes.map { try resolveTypeNode($0) }
@@ -2225,6 +2247,15 @@ extension TypeChecker {
         traitDefId: key.traitDefId,
         traitTypeArgs: traitArgTypes
       ))
+
+      // sendable trait 的实现类型必须自身 sendable（safe / unsafe 形态都
+      // 算），trait object 才能恒 sendable（concurrency-design.md）。泛型实
+      // 现按条件规则（实参全 sendable）判定。
+      if context.isSendableTrait(key.traitDefId), !context.isSendableType(selfType) {
+        recordError(
+          "Type '\(selfType)' must be sendable to implement sendable trait '\(traitName)'",
+          at: typeNode.span)
+      }
 
       // Populate blanketGivenConstraints cache for type modifier given declarations.
       // E.g., `given [T Eq] T ref Eq` → blanketGivenConstraints["Ref:<Eq's DefId>"] = [Eq]
@@ -2437,7 +2468,7 @@ extension TypeChecker {
               return Parameter(type: paramType, kind: passKind)
             }
             
-            return Type.function(parameters: params, returns: returnType)
+            return Type.function(parameters: params, returns: returnType, isSendable: false)
           }
           
           let methodSymbol = makeMethodSymbol(
@@ -2502,28 +2533,37 @@ extension TypeChecker {
         }
       }
 
-    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let access, let span, let nameSpan):
+    case .globalStructDeclaration(let name, let typeParameters, let parameters, let isMutable, let sendability, let access, let span, let nameSpan):
       self.currentSpan = span
       // Resolve non-generic struct types so function signatures can reference them
       if typeParameters.isEmpty {
         // Non-generic struct: resolve member types and finalize the type definition
         let isPrivate = (access == .private)
-        let placeholder = isPrivate 
+        let placeholder = isPrivate
           ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
           : currentScope.lookupType(name)!
-        
+
         let params = try parameters.map { param -> Symbol in
           let paramType = try resolveTypeNode(param.type)
           try assertNotOpaqueValueType(paramType, span: span)
           try assertNoBorrowedReferenceType(paramType, context: "struct field '\(param.name)'", span: span)
           try assertNoNeverType(paramType, context: "struct field '\(param.name)'", span: span)
+          // Only the SAFE `sendable` form checks its fields (`unsafe sendable`
+          // is the developer's promise); the check is recoverable like the
+          // bootstrap's, so one bad field does not hide the next (concurrency-design.md).
+          if sendability == .sendable, !context.isSendableType(paramType) {
+            try handleError(SemanticError(
+              .generic("sendable type '\(name)' cannot have non-sendable field '\(param.name)'"),
+              span: span
+            ))
+          }
           // Allow direct recursion in structs — the compiler will
           // automatically insert hidden indirect layers for recursive types.
           return makeLocalSymbol(
             name: param.name, type: paramType,
             kind: param.mutable ? .variable(.MutableValue) : .variable(.Value))
         }
-        
+
         // Update typed def info and overwrite the placeholder
         if case .structure(let defId) = placeholder {
           let members = zip(params, parameters).map { (sym, param) in
@@ -2537,6 +2577,9 @@ extension TypeChecker {
             typeArguments: nil,
             isMutable: isMutable
           )
+          // Second-chance nominal sendability registration on the resolved
+          // def id (mirrors the bootstrap's re-registration after resolution).
+          context.setTypeSendability(defId, sendability)
           let resolvedType = Type.structure(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
@@ -2547,15 +2590,24 @@ extension TypeChecker {
       }
       // Generic structs are handled in pass 3
 
-    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, _):
+    case .foreignTypeDeclaration(let name, let fields, _, let sendability, let access, let span, _):
       self.currentSpan = span
-      guard let fields else {
-        break
-      }
       let isPrivate = (access == .private)
       let placeholder = isPrivate
         ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
         : currentScope.lookupType(name)!
+      // Second-chance nominal sendability registration on the resolved def id
+      // for BOTH forms -- the opaque one registers too (mirrors the bootstrap's
+      // `.StructureType(def_id) or .OpaqueType(def_id)` re-registration).
+      switch placeholder {
+      case .structure(let defId), .opaque(let defId):
+        context.setTypeSendability(defId, sendability)
+      default:
+        break
+      }
+      guard let fields else {
+        break
+      }
 
       var resolvedFields: [(name: String, type: Type)] = []
       for field in fields {
@@ -2571,6 +2623,15 @@ extension TypeChecker {
             type1: field.name,
             type2: ""
           )
+        }
+        // Only the SAFE `sendable` form checks its fields (`unsafe sendable`
+        // is the developer's promise); recoverable like the bootstrap's
+        // (concurrency-design.md).
+        if sendability == .sendable, !context.isSendableType(fieldType) {
+          try handleError(SemanticError(
+            .generic("sendable type '\(name)' cannot have non-sendable field '\(field.name)'"),
+            span: span
+          ))
         }
         resolvedFields.append((name: field.name, type: fieldType))
       }
@@ -2592,7 +2653,7 @@ extension TypeChecker {
         }
       }
       
-    case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, let nameSpan):
+    case .globalEnumDeclaration(let name, let typeParameters, let cases, let sendability, let access, let span, let nameSpan):
       self.currentSpan = span
       // Resolve non-generic enum types so function signatures can reference them
       if typeParameters.isEmpty {
@@ -2601,7 +2662,7 @@ extension TypeChecker {
         let placeholder = isPrivate
           ? currentScope.lookupType(name, sourceFile: currentSourceFile)!
           : currentScope.lookupType(name)!
-        
+
         var enumCases: [EnumCase] = []
         for c in cases {
           var params: [(name: String, type: Type, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)] = []
@@ -2610,13 +2671,22 @@ extension TypeChecker {
             try assertNotOpaqueValueType(resolved, span: span)
             try assertNoBorrowedReferenceType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
             try assertNoNeverType(resolved, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
+            // Only the SAFE `sendable` form checks its payloads (`unsafe sendable`
+            // is the developer's promise); recoverable like the bootstrap's
+            // (concurrency-design.md).
+            if sendability == .sendable, !context.isSendableType(resolved) {
+              try handleError(SemanticError(
+                .generic("sendable type '\(name)' cannot have non-sendable payload '\(c.name).\(p.name)'"),
+                span: span
+              ))
+            }
             // Allow direct recursion in enums — the compiler will automatically
             // insert hidden indirect layers for recursive types per the simplified type system RFC.
             params.append((name: p.name, type: resolved, access: .public, named: p.named, defaultValue: p.defaultValue))
           }
           enumCases.append(EnumCase(name: c.name, parameters: params))
         }
-        
+
         // Update typed def info and overwrite the placeholder
         if case .`enum`(let defId) = placeholder {
           context.updateEnumInfo(
@@ -2625,6 +2695,9 @@ extension TypeChecker {
             isGenericInstantiation: false,
             typeArguments: nil
           )
+          // Second-chance nominal sendability registration on the resolved
+          // def id (mirrors the bootstrap's re-registration after resolution).
+          context.setTypeSendability(defId, sendability)
           let resolvedType = Type.`enum`(defId: defId)
           if isPrivate {
             currentScope.overwritePrivateType(name, sourceFile: currentSourceFile, type: resolvedType)
@@ -2664,12 +2737,15 @@ extension TypeChecker {
           resolvedSignature = nil
         }
         let functionType: Type
+        // Top-level function values capture no environment: naturally
+        // `sendable` (koralc derivation rule 5).
         if let resolvedSignature {
-          functionType = Type.function(parameters: resolvedSignature.params, returns: resolvedSignature.returnType)
+          functionType = Type.function(parameters: resolvedSignature.params, returns: resolvedSignature.returnType, isSendable: true)
         } else {
           functionType = Type.function(
             parameters: parameters.map { _ in Parameter(type: .error, kind: .byVal) },
-            returns: .error
+            returns: .error,
+            isSendable: true
           )
         }
 
@@ -2761,7 +2837,7 @@ extension TypeChecker {
           let passKind = passKindForParameterType(paramType)
           return Parameter(type: paramType, kind: passKind)
         }
-        let functionType = Type.function(parameters: params, returns: returnType)
+        let functionType = Type.function(parameters: params, returns: returnType, isSendable: true)
         currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       } else {
         // Register generic intrinsic function template in pass 2 so that
@@ -2992,7 +3068,7 @@ extension TypeChecker {
 
       return nil
       
-    case .traitDeclaration(let name, let typeParameters, let superTraits, _, _, let span, _):
+    case .traitDeclaration(let name, let isSendable, let typeParameters, let superTraits, _, _, let span, let nameSpan):
       self.currentSpan = span
       // Trait was registered in pass 1, now validate superTraits
       try withNewScope {
@@ -3042,12 +3118,32 @@ extension TypeChecker {
             )
           }
         }
+        // `trait A: B` where B is `trait sendable` forces A to declare
+        // `sendable` as well (concurrency-design.md): an always-sendable trait
+        // object family must not grow a non-sendable branch. Explicit, no
+        // inference. Only the first offending parent is named -- the fix is
+        // the same for every parent, and one declaration reports one error.
+        // The diagnostic points at the trait's NAME: the fix (adding
+        // `sendable`) belongs at the declaration's head.
+        if !isSendable {
+          for parent in superTraits {
+            let constraint = try SemaUtils.resolveTraitConstraint(from: parent)
+            if let parentInfo = visibleTraitInfo(constraint.baseName),
+              context.isSendableTrait(parentInfo.defId)
+            {
+              recordError(
+                "Trait '\(name)' extends sendable trait '\(constraint.baseName)' and must be declared sendable",
+                at: nameSpan)
+              break
+            }
+          }
+        }
         try validateTraitInheritanceGraph(name)
       }
       return nil
 
     case .globalEnumDeclaration(
-      let name, let typeParameters, let cases, let access, let span, _):
+      let name, let typeParameters, let cases, let sendability, let access, let span, _):
       self.currentSpan = span
 
       if !typeParameters.isEmpty {
@@ -3058,17 +3154,26 @@ extension TypeChecker {
             currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
-          
+
           for c in cases {
             for p in c.parameters {
               let payloadType = try resolveTypeNode(p.type)
               try assertNotOpaqueValueType(payloadType, span: span)
               try assertNoBorrowedReferenceType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
               try assertNoNeverType(payloadType, context: "enum payload '\(name).\(c.name).\(p.name)'", span: span)
+              // Only the SAFE `sendable` form checks its payloads (`unsafe sendable`
+              // is the developer's promise); recoverable like the bootstrap's
+              // (concurrency-design.md).
+              if sendability == .sendable, !context.isSendableType(payloadType) {
+                try handleError(SemanticError(
+                  .generic("sendable type '\(name)' cannot have non-sendable payload '\(c.name).\(p.name)'"),
+                  span: span
+                ))
+              }
             }
           }
         }
-        
+
         return .genericTypeTemplate(name: name)
       }
 
@@ -3198,6 +3303,18 @@ extension TypeChecker {
           try validateSignatureTypeVisibility(symbolName: name, symbolAccess: access, signatureTypes: [type], span: nameSpan)
         }
 
+        // A global's type must be sendable (concurrency-design.md §crossing
+        // check (c)). The signature assertions above degrade a failing
+        // annotated binding to the error placeholder (and an inferred one
+        // aborts), so this reports only on an otherwise-clean binding --
+        // mirroring the bootstrap's quiet-when-already-reported gate.
+        if !context.isSendableType(type) {
+          try handleError(SemanticError(
+            .generic("Global variable '\(name)' must have a sendable type"),
+            span: nameSpan
+          ))
+        }
+
         let symbol = makeGlobalSymbol(
           name: name, type: type, kind: .variable(isMut ? .MutableValue : .Value),
           access: access, preferredDefId: myDefId)
@@ -3240,7 +3357,7 @@ extension TypeChecker {
         throw error
       }
 
-    case .foreignTypeDeclaration(let name, let fields, _, let access, let span, let nameSpan):
+    case .foreignTypeDeclaration(let name, let fields, _, _, let access, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       let type: Type
@@ -3458,11 +3575,14 @@ extension TypeChecker {
         span: nameSpan
       )
 
+      // Top-level function values capture no environment: naturally
+      // `sendable` (koralc derivation rule 5).
       let functionType = Type.function(
         parameters: params.map {
           Parameter(type: $0.type, kind: passKindForParameterType($0.type))
         },
-        returns: returnType
+        returns: returnType,
+        isSendable: true
       )
 
       // Define placeholder for recursion (skip if already defined in Pass 2)
@@ -3621,7 +3741,8 @@ extension TypeChecker {
             kind: .variable(param.mutable ? .MutableValue : .Value))
         }
         let funcType = Type.function(
-          parameters: params.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }, returns: returnType)
+          parameters: params.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) }, returns: returnType,
+          isSendable: true)
         // Dummy typed body
         let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
         return (funcType, typedBody, params)
@@ -3875,7 +3996,8 @@ extension TypeChecker {
                   type: $0.type,
                   receiverMutable: receiverMutable))
             },
-            returns: returnType
+            returns: returnType,
+            isSendable: false
           )
           return (functionType, params, returnType)
         }
@@ -3985,7 +4107,7 @@ extension TypeChecker {
 
       let traitArgNodes: [TypeNode] = {
         switch traitConstraint {
-        case .mutable, .foreign:
+        case .mutable, .foreign, .sendable:
           return []
         case .trait(_, _, let args):
           return args
@@ -4115,7 +4237,7 @@ extension TypeChecker {
         let parentTraitName = parentConstraint.baseName
         let parentTraitArgTypes: [Type]
         switch parentConstraint {
-        case .mutable, .foreign:
+        case .mutable, .foreign, .sendable:
           parentTraitArgTypes = []
         case .trait(_, _, let parentArgNodes):
           parentTraitArgTypes = try parentArgNodes.map {
@@ -4225,7 +4347,8 @@ extension TypeChecker {
                   type: $0.type,
                   receiverMutable: receiverMutable))
             },
-            returns: resolvedReturn
+            returns: resolvedReturn,
+            isSendable: false
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
         }
@@ -4319,7 +4442,8 @@ extension TypeChecker {
                   type: $0.type,
                   receiverMutable: receiverMutable))
             },
-            returns: resolvedReturn
+            returns: resolvedReturn,
+            isSendable: false
           )
           return (resolvedFunctionType, resolvedParams, resolvedReturn)
         }
@@ -4881,7 +5005,8 @@ extension TypeChecker {
                   type: $0.type,
                   receiverMutable: receiverMutable))
             },
-            returns: returnType
+            returns: returnType,
+            isSendable: false
           )
           // Dummy body for intrinsic
           let typedBody = TypedExpressionNode.integerLiteral(value: "0", type: .int)
@@ -4967,7 +5092,7 @@ extension TypeChecker {
       return shouldEmitGiven ? .givenDeclaration(type: type, trait: nil, methods: typedMethods) : nil
 
     case .globalStructDeclaration(
-      let name, let typeParameters, let parameters, _, let access, let span, _):
+      let name, let typeParameters, let parameters, _, let sendability, let access, let span, _):
       self.currentSpan = span
       // Note: Type was already registered in Pass 1 (collectTypeDefinition)
       // Non-generic types are resolved in Pass 2 (collectGivenSignatures)
@@ -4981,15 +5106,24 @@ extension TypeChecker {
             currentScope.defineGenericParameter(param.name, type: .genericParameter(name: param.name))
           }
           try recordGenericTraitBounds(typeParameters)
-          
+
           // Validate all field types are valid under the type parameters
           for param in parameters {
             let fieldType = try resolveTypeNode(param.type)
             try assertNotOpaqueValueType(fieldType, span: span)
             try assertNoBorrowedReferenceType(fieldType, context: "struct field '\(param.name)'", span: span)
+            // Only the SAFE `sendable` form checks its fields (`unsafe sendable`
+            // is the developer's promise); recoverable like the bootstrap's
+            // (concurrency-design.md).
+            if sendability == .sendable, !context.isSendableType(fieldType) {
+              try handleError(SemanticError(
+                .generic("sendable type '\(name)' cannot have non-sendable field '\(param.name)'"),
+                span: span
+              ))
+            }
           }
         }
-        
+
         return .genericTypeTemplate(name: name)
       }
 

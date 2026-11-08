@@ -151,7 +151,7 @@ extension TypeChecker {
           "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
         ), span: currentSpan))
       }
-      return wrap(.traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []), mutable)
+      return wrap(.traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: [], isSendable: false), mutable)
     }
 
     if case .generic(let base, let args, _) = inner, visibleTraitInfo(base) != nil {
@@ -162,7 +162,7 @@ extension TypeChecker {
         ), span: currentSpan))
       }
       let resolvedArgs = try args.map { try resolveChild($0) }
-      return wrap(.traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs), mutable)
+      return wrap(.traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs, isSendable: false), mutable)
     }
 
     let base = try resolveChild(inner)
@@ -195,10 +195,11 @@ extension TypeChecker {
   }
 
   /// Builds a trait-object type with the trait's declaration identity.
-  func traitObjectType(traitName name: String, typeArgs: [Type]) -> Type {
+  func traitObjectType(traitName name: String, typeArgs: [Type], isSendable: Bool = false) -> Type {
     .traitObject(
       traitDefId: visibleTraitInfo(name)?.defId ?? .invalid,
-      typeArgs: typeArgs)
+      typeArgs: typeArgs,
+      isSendable: isSendable)
   }
 
   private func modulePath(of type: Type) -> [String]? {
@@ -320,7 +321,7 @@ extension TypeChecker {
             "Trait '\(name)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: nameSpan))
         }
-        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: []))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(name)?.defId ?? .invalid, typeArgs: [], isSendable: false))
       }
       if let importError = explicitImportErrorForUnresolvedType(name) {
         throw importError
@@ -427,7 +428,7 @@ extension TypeChecker {
           ), span: currentSpan))
         }
         let resolvedArgs = try args.map { try resolveTypeNode($0) }
-        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs, isSendable: false))
       } else {
         throw SemanticError.undefinedType(base)
       }
@@ -436,7 +437,21 @@ extension TypeChecker {
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0) }
       let resolvedReturnType = try resolveTypeNode(returnType)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
-      return .function(parameters: parameters, returns: resolvedReturnType)
+      return .function(parameters: parameters, returns: resolvedReturnType, isSendable: false)
+    case .sendableQualified(let inner):
+      // `sendable` prefix qualifier only qualifies function types; a trait
+      // object's sendable comes from `trait sendable` declarations
+      // (concurrency-design.md rules 5 and 6).
+      let resolvedInner = try resolveTypeNode(inner)
+      if resolvedInner.isTraitObjectShape {
+        recordError("'sendable' qualifier applies only to function types; declare the trait 'sendable' instead", at: node.span)
+        return .error
+      }
+      if let sendableType = resolvedInner.withSendableQualifier() {
+        return sendableType
+      }
+      recordError("'sendable' qualifier applies only to function types", at: node.span)
+      return .error
 
     case .fixedArray(let size, let elementNode, let nodeSpan):
       // A fixed-size array is C layout: only FFI-shaped elements fit in one.
@@ -519,17 +534,30 @@ extension TypeChecker {
             "Trait '\(base)' is not object-safe: \(reasons.joined(separator: "; "))"
           ), span: currentSpan))
         }
-        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs))
+        return .reference(inner: .traitObject(traitDefId: visibleTraitInfo(base)?.defId ?? .invalid, typeArgs: resolvedArgs, isSendable: false))
       }
 
       // Conservative default to generic struct if template is unresolved (diagnosed later)
       return .genericStruct(templateDefId: currentScope.lookupGenericStructTemplate(base)?.defId ?? .invalid, args: resolvedArgs)
-      
+
     case .functionType(let paramTypes, let returnType, _):
       let resolvedParamTypes = try paramTypes.map { try resolveTypeNodeWithSubstitution($0, substitution: substitution) }
       let resolvedReturnType = try resolveTypeNodeWithSubstitution(returnType, substitution: substitution)
       let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
-      return .function(parameters: parameters, returns: resolvedReturnType)
+      return .function(parameters: parameters, returns: resolvedReturnType, isSendable: false)
+    case .sendableQualified(let inner):
+      // `sendable` prefix qualifier: the same ruling as `resolveTypeNode`, the
+      // same anchor.
+      let resolvedInner = try resolveTypeNodeWithSubstitution(inner, substitution: substitution)
+      if resolvedInner.isTraitObjectShape {
+        recordError("'sendable' qualifier applies only to function types; declare the trait 'sendable' instead", at: node.span)
+        return .error
+      }
+      if let sendableType = resolvedInner.withSendableQualifier() {
+        return sendableType
+      }
+      recordError("'sendable' qualifier applies only to function types", at: node.span)
+      return .error
 
     case .fixedArray(let size, let elementNode, let nodeSpan):
       let element = try resolveTypeNodeWithSubstitution(elementNode, substitution: substitution)
@@ -663,6 +691,14 @@ extension TypeChecker {
           // generic-parameter argument: it must itself be declared `T foreign`.
           let ctx = "checking constraint \(param.name): foreign"
           try enforceForeignConstraint(args[i], context: ctx)
+
+        case .sendable:
+          // `sendable` is a shape requirement too (concurrency-design.md): the
+          // argument must be sendable. Same rule for a generic-parameter
+          // argument: it must itself be `T sendable` (or bounded by a
+          // `trait sendable` trait).
+          let ctx = "checking constraint \(param.name): sendable"
+          try enforceSendableConstraint(args[i], context: ctx)
 
         case .trait(_, let traitName, let traitArgs):
           // A real trait bound (e.g. `T Equatable`, `R [T]Iterator`).
@@ -902,6 +938,56 @@ extension TypeChecker {
     return context.isTypeMutable(defId) || context.isGenericStructTemplateMutable(defId)
   }
 
+  /// Whether the type parameter `name` is KNOWN sendable from its bounds: a
+  /// `T sendable` bound, or a bound to a `trait sendable` trait (every impl of
+  /// one is sendable). A bare `T` gets no free pass -- the mirror of
+  /// `genericParamHasShapeBound`: otherwise `f[T Any]` could satisfy a
+  /// `g[T sendable]` requirement by forwarding its own unconstrained `T`.
+  private func genericParamIsSendableBounded(_ name: String) -> Bool {
+    if genericParamHasShapeBound(name, { if case .sendable = $0 { return true }; return false }) {
+      return true
+    }
+    for bound in genericTraitBounds[name] ?? [] {
+      if let boundDefId = bound.defId, context.isSendableTrait(boundDefId) {
+        return true
+      }
+    }
+    return false
+  }
+
+  /// `sendable` bound satisfaction (concurrency-design.md §派生规则): the
+  /// `isSendableType` derivation, except that a bare generic parameter is
+  /// sendable only when its bounds say so (see
+  /// `genericParamIsSendableBounded`). Generic shapes recurse the conditional
+  /// rule strictly -- `Box[T]` is only known sendable when every argument is.
+  func satisfiesSendableConstraint(_ type: Type) -> Bool {
+    switch type {
+    case .genericParameter(let name):
+      return genericParamIsSendableBounded(name)
+    case .genericStruct(let templateDefId, let args), .genericEnum(let templateDefId, let args):
+      if context.typeSendability(templateDefId) == .unmarked {
+        return false
+      }
+      return args.allSatisfy { satisfiesSendableConstraint($0) }
+    default:
+      return context.isSendableType(type)
+    }
+  }
+
+  /// Checks that a type satisfies the 'sendable' constraint (concurrency-design.md).
+  func enforceSendableConstraint(_ type: Type, context ctx: String? = nil, span: SourceSpan? = nil) throws {
+    if case .error = type {
+      return
+    }
+    if satisfiesSendableConstraint(type) {
+      return
+    }
+    let ctxText = ctx.map { " (\($0))" } ?? ""
+    throw SemanticError(.generic(
+      "Type '\(type)' does not satisfy the 'sendable' constraint\(ctxText). Only types declared 'sendable' or 'unsafe sendable' can cross thread boundaries."
+    ), span: span ?? currentSpan)
+  }
+
   private func enforceTraitConformance(
     _ selfType: Type,
     traitRef: CanonicalTraitRef,
@@ -922,7 +1008,7 @@ extension TypeChecker {
       }
     }
 
-    if case .traitObject(let tplDefId, let toTraitArgs) = selfType {
+    if case .traitObject(let tplDefId, let toTraitArgs, _) = selfType {
       let actualTrait = canonicalTraitRef(traitName: Type.spelling(tplDefId), traitTypeArgs: toTraitArgs)
       if actualTrait == traitRef {
         return
@@ -957,6 +1043,8 @@ extension TypeChecker {
               try enforceMutableConstraint(innerType)
             case .foreign:
               try enforceForeignConstraint(innerType)
+            case .sendable:
+              try enforceSendableConstraint(innerType)
             case .trait:
               try enforceTraitConformance(innerType, traitName: constraint.baseName)
             }
@@ -1060,7 +1148,7 @@ extension TypeChecker {
         return Parameter(type: t, kind: passKind)
       }
       let ret = try resolveTypeNode(method.returnType)
-      return Type.function(parameters: params, returns: ret)
+      return Type.function(parameters: params, returns: ret, isSendable: false)
     }
   }
 
@@ -1305,7 +1393,7 @@ extension TypeChecker {
     
     // Try trait object conversion if types still don't match
     if expr.type != expected {
-      return try tryTraitObjectConversion(expr, to: expected)
+      return try tryTraitObjectConversion(expr, to: expected, blame: blame)
     }
     
     return expr
@@ -1314,7 +1402,11 @@ extension TypeChecker {
   /// Attempts to wrap an expression in a traitObjectConversion if the target type is a trait object reference
   /// and the source type is a compatible concrete type.
   /// Returns the original expression unchanged if no conversion is needed.
-  func tryTraitObjectConversion(_ expr: TypedExpressionNode, to expected: Type) throws -> TypedExpressionNode {
+  func tryTraitObjectConversion(
+    _ expr: TypedExpressionNode,
+    to expected: Type,
+    blame: SourceSpan? = nil
+  ) throws -> TypedExpressionNode {
     // Extract trait object info from expected type. The DECLARATION travels
     // with it: the spelling is display only and may be an alias known only in
     // this module, so nothing downstream may re-resolve it by name.
@@ -1330,7 +1422,7 @@ extension TypeChecker {
         }
         return false
       }()
-      if case .traitObject(let tplDefId, let args) = inner {
+      if case .traitObject(let tplDefId, let args, _) = inner {
         traitName = Type.spelling(tplDefId)
         traitDefId = tplDefId
         traitTypeArgs = args
@@ -1339,7 +1431,7 @@ extension TypeChecker {
       }
     case .weakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let tplDefId, let args) = inner {
+      if case .traitObject(let tplDefId, let args, _) = inner {
         traitName = Type.spelling(tplDefId)
         traitDefId = tplDefId
         traitTypeArgs = args
@@ -1348,7 +1440,7 @@ extension TypeChecker {
       }
     case .mutableWeakReference(let inner):
       expectsMutableReference = false
-      if case .traitObject(let tplDefId, let args) = inner {
+      if case .traitObject(let tplDefId, let args, _) = inner {
         traitName = Type.spelling(tplDefId)
         traitDefId = tplDefId
         traitTypeArgs = args
@@ -1364,11 +1456,50 @@ extension TypeChecker {
       return expr
     }
 
+    // Conformance complaints blame the COERCED VALUE (`blame`, the caller's
+    // `at` span), while cursor-fallback diagnostics below stay at the enclosing
+    // construct -- the two anchors the other compiler keeps apart.
+    func enforceConformance(_ concrete: Type) throws {
+      let savedSpan = currentSpan
+      if let blame { currentSpan = blame }
+      defer { currentSpan = savedSpan }
+      if traitTypeArgs.isEmpty {
+        if case .genericParameter(let paramName) = concrete,
+           hasTraitBound(paramName, traitName) {
+          // Bound generic parameters can be erased directly to the trait object.
+        } else {
+          try enforceTraitConformance(concrete, traitName: traitName, traitDefId: traitDefId)
+        }
+      } else {
+        try enforceGenericTraitConformance(concrete, traitName: traitName, traitTypeArgs: traitTypeArgs, traitDefId: traitDefId, context: nil)
+      }
+    }
+
     // Get the concrete type from the source.
     // If needed, materialize a temporary and take an implicit reference so value expressions
     // can be erased to trait objects without user-facing managed ref syntax.
     let concreteType: Type
     let sourceForConversion: TypedExpressionNode
+    // Boxing check (concurrency-design.md rule 6): a `sendable Trait` object
+    // only boxes a sendable concrete type; boxing into the plain form is
+    // unchecked. The blame anchor follows the coerced expression, falling back
+    // to the enclosing construct's cursor like koralc's `push_diagnostic`.
+    func checkSendableBoxing(_ concrete: Type) {
+      let erasedTraitType: Type
+      switch expected {
+      case .reference(let inner), .mutableReference(let inner),
+           .borrowedReference(let inner), .mutableBorrowedReference(let inner),
+           .weakReference(let inner), .mutableWeakReference(let inner):
+        erasedTraitType = inner
+      default:
+        erasedTraitType = expected
+      }
+      if context.isSendableType(erasedTraitType), !context.isSendableType(concrete) {
+        recordError(
+          "Cannot form 'sendable' trait object from non-sendable type '\(concrete.description)'",
+          at: expr.span.isKnown ? expr.span : currentSpan)
+      }
+    }
     switch expr.type {
     case .reference(let inner):
       if expectsMutableReference {
@@ -1406,16 +1537,7 @@ extension TypeChecker {
           type: .reference(inner: expr.type)
         )
 
-        if traitTypeArgs.isEmpty {
-          if case .genericParameter(let paramName) = expr.type,
-             hasTraitBound(paramName, traitName) {
-            // Bound generic parameters can be erased directly to the trait object.
-          } else {
-            try enforceTraitConformance(expr.type, traitName: traitName, traitDefId: traitDefId)
-          }
-        } else {
-          try enforceGenericTraitConformance(expr.type, traitName: traitName, traitTypeArgs: traitTypeArgs, traitDefId: traitDefId, context: nil)
-        }
+        try enforceConformance(expr.type)
 
         let conversion: TypedExpressionNode = .traitObjectConversion(
           inner: tempRef,
@@ -1425,22 +1547,14 @@ extension TypeChecker {
           concreteType: expr.type,
           type: expected
         )
+        checkSendableBoxing(expr.type)
         return .makeLetBlock(identifier: tempSymbol, value: expr, body: conversion, type: expected)
       }
     }
 
-    // Check trait conformance (with type args if generic trait)
-    if traitTypeArgs.isEmpty {
-      if case .genericParameter(let paramName) = concreteType,
-         hasTraitBound(paramName, traitName) {
-        // Bound generic parameters can be erased directly to the trait object.
-      } else {
-        try enforceTraitConformance(concreteType, traitName: traitName, traitDefId: traitDefId)
-      }
-    } else {
-      try enforceGenericTraitConformance(concreteType, traitName: traitName, traitTypeArgs: traitTypeArgs, traitDefId: traitDefId, context: nil)
-    }
+    try enforceConformance(concreteType)
 
+    checkSendableBoxing(concreteType)
     return .traitObjectConversion(
       inner: sourceForConversion,
       traitName: traitName,

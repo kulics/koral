@@ -906,6 +906,8 @@ given MIRFunctionCodeEmitter {
             .Retain(value) then self.emit_retain(value),
             .Release(value) then self.emit_release(value),
             .Evaluate(value) then self.emit_evaluate(value),
+            .Lock(lock) then self.emit_lock_op(lock, true),
+            .Unlock(lock) then self.emit_lock_op(lock, false),
             .ScopeEnter(_) then {},
             .ScopeExit(scope) then self.emit_scope_cleanup(scope),
             .DebugSource(_) then {},
@@ -1177,7 +1179,10 @@ given MIRFunctionCodeEmitter {
         when value_type in {
             .ReferenceType(_) or .MutableReferenceType(_) or .TraitObject(...) then {
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string("__koral_retain_value((");
+                self.codegen.buffer.push_string(
+                    if self.codegen.uses_nonatomic_rc(value_type) then "__koral_retain_value_nonatomic(("
+                    else "__koral_retain_value((",
+                );
                 self.codegen.buffer.push_string(emission.expression);
                 self.codegen.buffer.push_string(").ptr);\n");
             },
@@ -1186,13 +1191,16 @@ given MIRFunctionCodeEmitter {
                 self.codegen.add_indent();
                 self.codegen.buffer.push_string("if (((");
                 self.codegen.buffer.push_string(emission.expression);
-                self.codegen.buffer.push_string(").control)) { __koral_weak_retain(((");
+                self.codegen.buffer.push_string(").control)) { ");
+                self.codegen.buffer.push_string(self.codegen.rc_weak_retain_fn(value_type));
+                self.codegen.buffer.push_string("(((");
                 self.codegen.buffer.push_string(emission.expression);
                 self.codegen.buffer.push_string(").control)); }\n");
             },
             .FunctionType(...) then {
                 self.codegen.add_indent();
-                self.codegen.buffer.push_string("__koral_closure_retain(");
+                self.codegen.buffer.push_string(self.codegen.rc_closure_retain_fn(value_type));
+                self.codegen.buffer.push_string("(");
                 self.codegen.buffer.push_string(emission.expression);
                 self.codegen.buffer.push_string(");\n");
             },
@@ -1235,6 +1243,38 @@ given MIRFunctionCodeEmitter {
         } else {
             self.emit_cleanup(emission.cleanup);
         };
+    };
+
+    /// 对象锁临界区边界（concurrency-design.md §对象锁语义）。
+    ///
+    /// `ObjectLock(handle)`：锁是 payload 隐藏首字段，`handle.ptr` 即 payload
+    /// 指针，按 `&payload->__lock` 取锁地址（不依赖首字段偏移为 0 的巧合）。
+    /// `GlobalLock(def_id)`：`let mutable` 全局量的每变量静态锁（静态零初始化，
+    /// owner=0 / recursion=0 就是 runtime 的空闲态，无需启动期 init）。
+    emit_lock_op(self, lock: MIRLockTarget, acquire: Bool): Void = {
+        let lock_fn = if acquire then "__koral_lock_acquire" else "__koral_lock_release";
+        let lock_expr = when lock in {
+            .ObjectLock(handle) then {
+                let name = self.local_name(handle);
+                let handle_type = when self.local_info(handle) in {
+                    .Some(info) then info.local_type,
+                    .None() then Type.Unknown(),
+                };
+                let payload_type = self.codegen.managed_payload_type_name(handle_type);
+                "&((struct \(payload_type)*)\(name).ptr)->__lock"
+            },
+            .GlobalLock(def_id) then {
+                let name = when self.codegen.context.get_symbol(def_id) in {
+                    .Some(symbol) then self.codegen.c_identifier_for_symbol_value(symbol),
+                    .None() then self.codegen.c_identifier_opt(def_id) or else self.codegen.sanitize_codegen_identifier(
+                        self.context_name(def_id),
+                    ),
+                };
+                "&__koral_glock_\(name)"
+            },
+        };
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("\(lock_fn)((struct __koral_Lock*)\(lock_expr));\n");
     };
 
     emit_scope_cleanup(self, scope: MIRScopeID): Void = {
@@ -1311,7 +1351,10 @@ given MIRFunctionCodeEmitter {
                         return_type,
                     ) then {
                         self.codegen.add_indent();
-                        self.codegen.buffer.push_string("__koral_retain_value((");
+                        self.codegen.buffer.push_string(
+                            if self.codegen.uses_nonatomic_rc(return_type) then "__koral_retain_value_nonatomic(("
+                            else "__koral_retain_value((",
+                        );
                         self.codegen.buffer.push_string(emission.expression);
                         self.codegen.buffer.push_string(").ptr);\n");
                     };
@@ -1582,7 +1625,7 @@ given MIRFunctionCodeEmitter {
         function_type: Type,
     ): Bool = {
         return when function_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.count() != arguments.count() then {
                     return false;
                 };
@@ -1851,7 +1894,7 @@ given MIRFunctionCodeEmitter {
                     sym.def_id,
                 ) or else sym.symbol_type;
                 when function_type in {
-                    .FunctionType(params, _) then {
+                    .FunctionType(params, _, _) then {
                         for p in params then {
                             pts.push(p.param_type);
                         };
@@ -2323,7 +2366,7 @@ given MIRFunctionCodeEmitter {
     ): String = {
         let mutable param_types = List[String].new();
         when callee_type in {
-            .FunctionType(params, _) then for param in params then {
+            .FunctionType(params, _, _) then for param in params then {
                 param_types.push(self.codegen.c_type_name(param.param_type));
             },
             .ForeignFunctionType(params, _) then for param in params then {
@@ -2452,6 +2495,15 @@ given MIRFunctionCodeEmitter {
                     self.codegen.buffer.push_string(
                         "__koral_control_of(\(expression).ptr)->weak_count = 1;\n",
                     );
+                    if self.codegen.context.is_locked_type(aggregate.aggregate_type) then {
+                        // 锁定类型的内建对象锁在构造路径初始化
+                        // （concurrency-design.md §对象锁语义）。锁不持资源，
+                        // 析构无需动作。
+                        self.codegen.add_indent();
+                        self.codegen.buffer.push_string(
+                            "__koral_lock_init(&((struct \(payload_type)*)\(expression).ptr)->__lock);\n",
+                        );
+                    };
                     let payload_expr = "((struct \(payload_type)*)\(expression).ptr)";
                     for pair in aggregate.fields.lazy().zip[
                         StructField,
@@ -2779,7 +2831,7 @@ given MIRFunctionCodeEmitter {
     trait_object_target_name(self, t: Type): Option[String] = {
         return when t in {
             // Display only: the spelling is read from the declaration.
-            .TraitObject(trait_def_id, _) then Option[String].Some(
+            .TraitObject(trait_def_id, _, _) then Option[String].Some(
                 def_id_spelling(trait_def_id),
             ),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_name(inner),
@@ -2792,7 +2844,7 @@ given MIRFunctionCodeEmitter {
 
     trait_object_target_def_id(self, t: Type): Option[DefId] = {
         return when t in {
-            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_def_id(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_def_id(
                 inner,
@@ -2803,7 +2855,7 @@ given MIRFunctionCodeEmitter {
 
     trait_object_target_type_args(self, t: Type): List[Type] = {
         return when t in {
-            .TraitObject(_, args) then args,
+            .TraitObject(_, args, _) then args,
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner) then self.trait_object_target_type_args(inner),
             .MutableBorrowedReferenceType(inner) then self.trait_object_target_type_args(
                 inner,
@@ -2921,6 +2973,7 @@ given MIRFunctionCodeEmitter {
         let expression = self.emit_trait_method_call_abi(
             receiver.expression,
             call.receiver_ownership,
+            self.type_of_value(call.receiver),
             call.trait_name,
             call.trait_def_id,
             self.type_list_to_ref_list(call.trait_type_args),
@@ -2944,6 +2997,7 @@ given MIRFunctionCodeEmitter {
         self,
         receiver_result: String,
         receiver_ownership: MIROwnershipUse,
+        receiver_type: Type,
         trait_name: String,
         trait_def_id: DefId,
         trait_type_args: List[Type],
@@ -3001,7 +3055,8 @@ given MIRFunctionCodeEmitter {
         );
         if receiver_ownership is .Copy() or is .Borrow() then {
             self.codegen.add_indent();
-            self.codegen.buffer.push_string("__koral_retain_value(");
+            self.codegen.buffer.push_string(self.codegen.rc_retain_fn(receiver_type));
+            self.codegen.buffer.push_string("(");
             self.codegen.buffer.push_string(ref_var);
             self.codegen.buffer.push_string(".ptr);\n");
         };
@@ -3555,7 +3610,7 @@ given MIRFunctionCodeEmitter {
                     );
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string(
-                        "__koral_retain_value(\(expression).ptr);\n",
+                        "\(self.codegen.rc_retain_fn(result_type))(\(expression).ptr);\n",
                     );
                 } else {
                     let concrete_c_type = self.codegen.c_type_name(result_type);
@@ -3565,7 +3620,7 @@ given MIRFunctionCodeEmitter {
                     );
                     self.codegen.add_indent();
                     self.codegen.buffer.push_string(
-                        "__koral_retain_value((\(emission.expression)).ptr);\n",
+                        "\(self.codegen.rc_retain_fn(result_type))((\(emission.expression)).ptr);\n",
                     );
                     self.codegen.add_indent();
                     self.codegen.append_release_handle_statement(
@@ -3753,7 +3808,7 @@ given MIRFunctionCodeEmitter {
         let lambda_name = self.next_lambda_name();
         // Extract function parameters and return type from lambda_type
         let (function_params, return_type) = when lambda.lambda_type in {
-            .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
+            .FunctionType(params, ret, _) or .ForeignFunctionType(params, ret) then Pair(params, ret),
             _ then Pair(List[FunctionParamEntry].new(), Type.VoidType()),
         };
 
@@ -3809,7 +3864,10 @@ given MIRFunctionCodeEmitter {
                     self.codegen.buffer.push_string(source);
                     self.codegen.buffer.push_string(";\n");
                     self.codegen.add_indent();
-                    self.codegen.buffer.push_string("__koral_retain_value((");
+                    self.codegen.buffer.push_string(
+                        if self.codegen.uses_nonatomic_rc(capture.symbol_type) then "__koral_retain_value_nonatomic(("
+                        else "__koral_retain_value((",
+                    );
                     self.codegen.buffer.push_string(dest);
                     self.codegen.buffer.push_string(").ptr);\n");
                 },
@@ -4568,7 +4626,7 @@ given MIRFunctionCodeEmitter {
             let ref_expr = "(struct __koral_Ref){.ptr = \(emission.expression).ptr}";
             let result = self.codegen.next_temp_with_init(
                 "struct __koral_WeakRef",
-                "__koral_downgrade_ref(\(ref_expr))",
+                "\(self.codegen.rc_downgrade_fn(value_type))(\(ref_expr))",
             );
             self.emit_cleanup(emission.cleanup);
             return MIRValueEmission(
@@ -4582,7 +4640,7 @@ given MIRFunctionCodeEmitter {
                 result_type,
             ),
             _ then self.emit_runtime_unary_ref_from_emission(
-                "__koral_downgrade_ref",
+                self.codegen.rc_downgrade_fn(value_type),
                 emission,
                 result_type,
             ),
@@ -4604,7 +4662,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.add_indent();
         self.codegen.buffer.push_string(weak_temp);
         self.codegen.buffer.push_string(
-            " = __koral_downgrade_ref((struct __koral_Ref){",
+            " = \(self.codegen.rc_downgrade_fn(result_type))((struct __koral_Ref){",
         );
         self.codegen.buffer.push_string(emission.expression);
         self.codegen.buffer.push_string(".ptr});\n");
@@ -4653,7 +4711,7 @@ given MIRFunctionCodeEmitter {
         if is_trait_weak then {
             let upgraded = self.codegen.next_temp_with_init(
                 "struct __koral_Ref",
-                "__koral_upgrade_ref((struct __koral_WeakRef){\(emission.expression).control}, &\(success))",
+                "\(self.codegen.rc_upgrade_fn(value_type))((struct __koral_WeakRef){\(emission.expression).control}, &\(success))",
             );
             let result = self.codegen.next_temp_with_decl(
                 self.codegen.c_type_name(result_type),
@@ -4709,7 +4767,12 @@ given MIRFunctionCodeEmitter {
                 self.cleanup_for_temporary_result(result, result_type),
             );
         };
-        return self.emit_plain_upgrade_ref(emission, success, result_type);
+        return self.emit_plain_upgrade_ref(
+            emission,
+            success,
+            result_type,
+            self.codegen.rc_upgrade_fn(value_type),
+        );
     };
 
     emit_plain_upgrade_ref(
@@ -4717,10 +4780,11 @@ given MIRFunctionCodeEmitter {
         emission: MIRValueEmission,
         success: String,
         result_type: Type,
+        upgrade_fn: String,
     ): MIRValueEmission = {
         let upgraded = self.codegen.next_temp_with_init(
             "struct __koral_Ref",
-            "__koral_upgrade_ref(\(emission.expression), &\(success))",
+            "\(upgrade_fn)(\(emission.expression), &\(success))",
         );
         let result = self.codegen.next_temp_with_decl(
             self.codegen.c_type_name(result_type),
@@ -4963,6 +5027,21 @@ private let build_mir_lifetime_plan(
                     block.id,
                     active_scopes,
                 ),
+                .Lock(lock) or .Unlock(lock) then {
+                    when lock in {
+                        .ObjectLock(handle) then mir_record_local_use(
+                            shared_use_scope_by_local,
+                            first_use_block_by_local,
+                            multiple_use_blocks_by_local,
+                            tracked_drop_local_ids,
+                            parent_scope_by_scope,
+                            handle,
+                            block.id,
+                            active_scopes,
+                        ),
+                        .GlobalLock(_) then {},
+                    };
+                },
                 .DebugSource(_) then {},
             };
         };

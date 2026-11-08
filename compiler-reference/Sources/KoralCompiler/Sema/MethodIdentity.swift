@@ -175,7 +175,7 @@ extension CompilerContext {
   /// (`rustc_middle::ty::fast_reject::SimplifyType`).
   public func methodOwner(of t: Type) -> MethodOwner {
     switch t {
-    case .traitObject(let traitDefId, _):
+    case .traitObject(let traitDefId, _, _):
       return methodOwnerDecl(traitDefId)
     case .structure(let defId), .enum(let defId), .opaque(let defId):
       return methodOwnerDecl(defId)
@@ -249,7 +249,7 @@ extension CompilerContext {
       return (genericTemplateOwner(templateDefId), args)
     case .structure(let defId), .enum(let defId), .opaque(let defId):
       return (methodOwnerDecl(defId), getTypeArguments(defId) ?? [])
-    case .traitObject(let traitDefId, let typeArgs):
+    case .traitObject(let traitDefId, let typeArgs, _):
       return (methodOwnerDecl(traitDefId), typeArgs)
 
     case .reference(let inner), .borrowedReference(let inner):

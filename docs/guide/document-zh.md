@@ -18,6 +18,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 - 现代、易扫读的语法：显式分号 + 表达式化的控制流，`if`、`when`、`while`、`for` 都使用表达式形态的表层语法。`if` 与 `when` 可以产生值；`while` 与 `for` 总是产生 `Void`。
 - 由声明处类型语义驱动的自动内存管理：浅层不可变的 `type` 与共享的 `type mutable` 对象。布局与生命周期细节由编译器负责。
+- 并发安全在类型声明处决定：`sendable` 族标明哪些类型能跨线程共享，安全的 `sendable mutable` 对象自带对象锁，检查全部落在声明处与形成处。
 - 带 trait 约束的泛型与单态化，实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷举性模式匹配。
 - 基于 trait 的多态，trait object 提供运行期分发。
@@ -543,25 +544,26 @@ Rune 字面量的类型规则：
 
 #### 集合字面量
 
-Koral 为三种内建集合类型提供字面量：`List[T]`、`Set[T]`、`Dict[K, V]`。
+Koral 为内建集合类型提供字面量：`List[T]`、`Set[T]`、`Dict[K, V]`，以及冻结快照 `FrozenList[T]`、`FrozenSet[T]`、`FrozenDict[K, V]`（见[冻结集合](#冻结集合)）。
 
 ```koral
 let a = [1, 2, 3];                    // 推断为 List[Int]
 let b: Set[Int] = [1, 2, 3];           // 由上下文推断为 Set[Int]
 let c = ["x": 1, "y": 2];             // 推断为 Dict[String, Int]
+let f: FrozenList[Int] = [1, 2, 3];   // 由上下文生成冻结快照
 let empty: List[Int] = [];             // 空字面量需要类型上下文
 ```
 
 规则：
 
 - `[e1, e2, ...]` 是集合字面量。没有类型上下文时推断为 `List[T]`。
-- 在 `Set[T]` 上下文中，同样语法推断为 Set。
-- `[k1: v1, k2: v2, ...]` 是字典字面量，推断为 `Dict[K, V]`。
+- 在 `Set[T]` 或 `FrozenSet[T]` 上下文中，同样语法推断为集合；重复元素折叠。
+- `[k1: v1, k2: v2, ...]` 是字典字面量，推断为 `Dict[K, V]`——在 `FrozenDict[K, V]` 上下文中推断为后者；重复键后者取胜。
 - `[]` 没有类型上下文时无法推断，必须标注类型。
 - 集合字面量和字典字面量都允许尾随逗号。
-- 集合字面量只面向内建的 `List` / `Set` / `Dict`，不面向第三方容器类型。
+- 集合字面量只面向内建容器及其冻结快照（`List` / `Set` / `Dict` / `FrozenList` / `FrozenSet` / `FrozenDict`），不面向第三方容器类型。
 
-`List`、`Set`、`Dict`、`Deque` 是 `type mutable` 的共享对象：不使用写时复制。修改容器对每个句柄都可见，需要独立副本时必须显式使用 `clone()`。
+`List`、`Set`、`Dict`、`Deque` 是 `type mutable` 的共享对象：不使用写时复制。修改容器对每个句柄都可见，需要独立副本时必须显式使用 `clone()`。它们是线程内工作状态——全都不能跨线程边界（见[冻结集合](#冻结集合)）。
 
 `Dict` 与 `Set` 的遍历顺序**不作承诺**：顺序跟随表布局，而表布局按进程取种子（散列洪泛防线），因此每次运行可能不同。需要稳定顺序的代码应自行对键排序。`List` 与 `Deque` 按存储顺序遍历。
 
@@ -1639,17 +1641,21 @@ let contains[T: Eq](list: List[T], value: T): Bool = list.contains(value);
 let describe[T: ToString and Hash](value: T): String = value.to_string();
 ```
 
-约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及两个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
+约束也可以使用泛型 trait 形式（例如 `Iterator[T]`），以及三个**类型种类约束**。类型种类约束是关键字而不是 trait：没有任何声明能实现它，是否满足由编译器从类型自身的声明判定。
 
 - `T: mutable` —— 主体必须声明为 `type mutable`。弱引用要求的就是它（`x as ?T` / `?expr` 亦然）。
 - `T: foreign` —— 主体的表示由 Koral 的布局自由之外决定，可以跨 FFI：内置标量、`*` / `*mutable` 指针（指向集合内类型，或 `Void`——C 的 `void*`）或 `type foreign` 声明。这是**封闭集合**；Koral `type` 不在其中，因为它的布局由编译器选——std 的 `Rune` 也不在：它和 `String` 一样是 std 名义类型，表示由编译器做主。`List.borrow_ptr` / `borrow_mut_ptr` 要求的就是它。
+- `T: sendable` —— 主体可以跨线程边界：声明了 `sendable`（safe 或 `unsafe` 形态），或按派生规则成立——标量天然满足，复合类型递推（见[并发](#并发)）。共享对象字段、全局量与通道要求的就是它。
 
 ```koral
 let consume[I: Iterator[Int]](iter: I): Void = {};
 let read_bytes[T: foreign](buf: List[T]): *T = buf.borrow_ptr();
+let drain[T: Reader and sendable](source: T): Int = source.read();
+let bump[T: mutable and sendable](c: T): T = c;
+let pass[T: foreign and sendable](x: T): T = x;
 ```
 
-泛型参数把自己的约束带进调用：在 `f[T: Any]` 里调用要求 `mutable` 约束的函数会被拒绝，因为裸 `T` 并未声明为 `mutable`；在 `g[T: mutable]` 里同样的调用可以通过。
+泛型参数把自己的约束带进调用：在 `f[T: Any]` 里调用要求 `mutable` 约束的函数会被拒绝，因为裸 `T` 并未声明为 `mutable`；在 `g[T: mutable]` 里同样的调用可以通过。`sendable` 约束同样严格：裸 `T: Any` 不会满足内层的 `U: sendable` 槽位，参数必须自己声明 `T: sendable`。
 
 带约束的扩展块只在约束真正成立的类型上贡献成员。给定
 
@@ -1711,6 +1717,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
 - **`type foreign`**（可变值语义）：C 布局的值。赋值与传参按值拷贝；拷贝经 `let mutable`、`mutable` 参数、`*mutable T` 链接就地修改，`self` 是普通拷贝——没有可变 self。字段是恒可写的 C 槽位，内容限于能过 FFI 边界的类型（见[外部互操作](#6-外部互操作)）。
 - **raw pointer**：指针类型是 `*T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
+- **跨线程共享同样是声明处性质。** 内存模型多一条并发轴：哪些类型能跨线程共享、由谁保证它们的安全，由 `sendable` 族在声明处决定。见[并发](#并发)。
 - **引用计数是实现细节。** 编译器可能在两种形态内部使用 ARC 与隐藏存储。语言契约本身见本手册的「核心理念：`type` / `type mutable`」一节。
 
 #### `Drop`
@@ -1824,6 +1831,301 @@ for h in xs then {             // 可以：`h` 是 `?Node`
     };
 };
 ```
+
+### 并发
+
+Koral 的并发安全是**声明处性质**，与 `type` / `type mutable` 之分同出一辙：一个类型在声明处就定死它能否跨线程共享、由谁保证这份安全，而不是等传值时再判。`sendable` 修饰符族标明哪些类型能跨线程边界——安全形态由编译器验证并内置对象锁守护，`unsafe` 形态把同步交回开发者。这里没有借用检查器，也不引入第二套调用纪律。
+
+#### 声明 Sendable 类型
+
+类型修饰符槽收 `unsafe`? `sendable`? `mutable`?，共六种声明形态：
+
+| 声明 | 字段约束 | 对象锁 | 含义 |
+|---|---|---|---|
+| `type` | — | 无 | 线程内值 |
+| `type mutable` | 仅 `mutable` 字段可改 | 无 | 线程内共享对象 |
+| `type sendable` | 全部字段 `sendable` | 无（浅层不可变） | 冻结数据，可安全共享 |
+| `type sendable mutable` | 全部字段 `sendable` | **内置** | 共享可变，编译器守护 |
+| `type unsafe sendable` | 不限 | 无 | 开发者承诺可共享 |
+| `type unsafe sendable mutable` | 不限 | 无 | 开发者承诺，同步自管 |
+
+```koral
+type sendable Point(x: Int, y: Int);
+
+type sendable mutable Counter(mutable hits: Int);
+
+type unsafe sendable mutable Mutex(private handle: *UInt8);
+
+type sendable Shape {
+    Circle(r: Float64),
+    Rect(w: Float64, h: Float64),
+};
+```
+
+规则：
+
+- `unsafe` 必须伴随 `sendable`，单独 `unsafe` 被拒绝。安全形态让编译器验证声明；`unsafe sendable` 关掉验证，把责任交给开发者（见 [`unsafe sendable`](#unsafe-sendable)）。
+- 安全形态**验证**内容：所有字段——枚举的所有载荷——本身必须是 `sendable`。标注写错是编译错，不是洞。
+- 不做推断。字段全部 `sendable` 的 `type mutable` 仍然不是 `sendable`，除非声明写明。
+- 枚举只收 immutable 形态：`type sendable` 与 `type unsafe sendable`；`mutable` 仍然仅限结构体。
+- `type foreign` 同样收 sendability —— `type foreign sendable FX(a: Int32);` —— foreign 值与任何 `type foreign` 值一样按值拷贝跨界，没有共享。安全校验按字段走；字段含裸指针要用 `unsafe sendable`。
+- 类型别名与 `type intrinsic` 不能带这些修饰符。别名跟随它命名的类型。
+
+#### 派生规则
+
+复合类型是否 `sendable`，由各部分机械推出——封闭清单：
+
+- **标量** —— `Bool`、各数值类型、`Rune` —— 总是 `sendable`。
+- **名义类型**按声明成立。
+- **泛型**：`X[A, B]` 是 `sendable` 当且仅当 `X` 声明了 `sendable`，**且**全部类型实参都是 `sendable`。这一条对 `unsafe` 形态同样执行——否则一个可共享的容器能把非 sendable 的值夹带走私过界。
+- **枚举**：声明 `sendable` 且全部载荷类型 `sendable`（`unsafe` 免载荷检查）。
+- **函数类型**：`sendable (A) -> R` 是独立形态。无捕获的函数值天然满足；lambda 只有**全部**捕获是 `sendable` 才成立。`sendable` 函数值可以放宽转换为普通形态，反向不行。限定词只对函数类型成立。
+
+```koral
+let run(f: sendable () -> Void): Void = f();
+
+let main(): Void = {
+    let n = 40;
+    run(() => println("plain"));           // 无捕获
+    run(() => println("capture \(n)"));    // `n` 是 sendable
+};
+```
+
+- **Trait object**：trait object 是否 `sendable`，由 trait 声明本身决定——声明为 `trait sendable` 的对象永远 `sendable`，普通 trait 的对象永远不是。见 [Trait 的 Sendability](#trait-的-sendability)。
+- **弱引用**：`?T` 是 `sendable` 当且仅当 `T` 是。
+- **定长数组**：`[N]T` 是 `sendable` 当且仅当 `T` 是。
+- **永非 `sendable`**：裸指针 `*T` / `*mutable T` 与 foreign 函数指针 `foreign (A) -> R`。跨 FFI 共享的内存改走 `unsafe sendable` 包装。
+
+#### Trait 的 Sendability
+
+Trait 的 sendability 声明在 trait 自己身上：`trait sendable Foo` 声明一个对象**永远** `sendable` 的 trait。这份保证的代价落在 `given` 上——**每个**实现本身必须是 `sendable`（safe 或 `unsafe` 形态），在实现声明处检查。
+
+```koral
+trait sendable Speak {
+    speak(self): Int;
+};
+
+type sendable Robot(id: Int);
+
+given Robot: Speak {
+    speak(self): Int = self.id;
+};
+
+let greet(s: Speak): Int = s.speak();
+
+let main(): Void = {
+    let obj: Speak = Robot(7);    // `Speak` 对象是 sendable 的——可以跨界
+    println(greet(obj));
+};
+```
+
+不是 `sendable` 的实现在 `given` 处被拒绝：`Type 'Human' must be sendable to implement sendable trait 'Speak'`。继承同样要求显式声明——扩展了 `sendable` trait 的 trait 必须自己声明 `sendable`，否则永远 sendable 的对象族会长出一个非 sendable 的分支：`Trait 'Child' extends sendable trait 'Base' and must be declared sendable`。不做推断。
+
+不带 `sendable` 的 trait 的对象保持非 sendable，而且没有类型位置限定词能改变这一点：`sendable Trait` 会被拒绝——`'sendable' qualifier applies only to function types; declare the trait 'sendable' instead`——类型位置的 `sendable` 只限定函数类型（见[派生规则](#派生规则)）。也不存在 `unsafe sendable trait` 形态：实现类型自己带 safe / `unsafe` 形态，而 `trait sendable` 的对象无论哪种实现都是 `sendable` 的。
+
+**混合 trait。** 需要的 trait 不是 `sendable` 时，它的对象留在本线程内，行为通过两条路之一跨过去。主流的一条是泛型参数化——用可组合的类型种类约束同时要求 trait 与 sendability（见[泛型约束](#泛型约束)）：
+
+```koral
+trait Reader {
+    read(self): Int;
+};
+
+type sendable Msg(len: Int);
+type Plain(len: Int);          // 非 sendable
+
+given Msg: Reader {
+    read(self): Int = self.len;
+};
+
+given Plain: Reader {
+    read(self): Int = self.len;
+};
+
+let drain[T: Reader and sendable](source: T): Int = source.read();
+
+let main(): Void = {
+    println("read \(drain(Msg(3)))");
+    // drain(Plain(1));
+    //     错误：Type 'Plain' does not satisfy the 'sendable' constraint
+};
+```
+
+第二条路是把对象包进一个为它背书的 `unsafe sendable` 类型——承诺由你给出，与所有 `unsafe` 形态一样：
+
+```koral
+type unsafe sendable SharedReader(inner: Reader);
+```
+
+**错误只有一种形态。** `Error` 声明为 `trait sendable Error`：每个错误类型都必须是 `sendable`，在它的 `given` 处检查，而 `Result` 的错误侧就是普通的 `Error` trait object——不存在另一种 sendable 拼写。错误是描述失败的值、常随 `Result` 跨线程，共享性质在错误类型声明处一次定清。
+
+#### 跨越线程边界
+
+一个值跨线程只有几条路——被 spawn 的闭包捕获、存进共享对象的字段、存进全局量、经通道缓冲。每条路的检查都落在值被声明或形成的地方，**绝不落在普通函数签名上**：
+
+| 检查点 | 规则 |
+|---|---|
+| spawn（`run_task` / `Task`） | 闭包是 `sendable () -> Void`；非 `sendable` 捕获在调用处拒绝 |
+| 闭包形成 | `sendable` 函数类型只收 `sendable` 捕获 |
+| 共享对象字段 | 安全 `sendable` 形态在声明处验证每个字段 |
+| 全局量 | 类型必须是 `sendable`；`let mutable` 全局的槽位按变量上锁（见[对象锁](#对象锁)） |
+| 通道缓冲 | `Channel[T]` 仅当 `T` 是 `sendable` 才是 `sendable`，非 sendable 的消息类型在通道定型处拒绝 |
+| trait 声明 / `given` 块 | `trait sendable` 让它的对象永远 `sendable`，每个实现本身必须是 `sendable`（见 [Trait 的 Sendability](#trait-的-sendability)） |
+| 方法参数与返回 | **不检查** —— 任何类型都可以 |
+
+表外不设约束：普通函数可以接收、返回任何类型，无论 sendable 与否；同一线程上的普通调用传值，既无代价也无要求。捕获越界的闭包在 `sendable` 函数类型形成处被拒：
+
+```koral
+type mutable Local(mutable n: Int);
+
+let run(f: sendable () -> Void): Void = f();
+
+let main(): Void = {
+    let v = Local(1);
+    // run(() => println("captured \(v.n)"));
+    //     错误：sendable 闭包不能捕获非 sendable 的值 'v'
+};
+```
+
+#### 对象锁
+
+安全的 `type sendable mutable` 对象自带对象锁，编译器替你使用它：
+
+- **所有字段读与写都锁对象。** 读也要锁——不加锁的读同样是数据竞争。
+- **赋值整句是一个临界区。** `x.f = expr` 持有 x 的锁贯穿 `expr` 的求值与写回，经典的读-改-写因此不丢更新：
+
+```koral
+type sendable mutable Counter(mutable hits: Int);
+
+let main(): Void = {
+    let c = Counter(0);
+    c.hits = c.hits + 1;   // 一个临界区——任意多线程下都是原子的
+};
+```
+
+- **锁可重入。** 方法里的字段访问、赋值 RHS 中回调同一个对象，都不会和自己死锁。
+- **锁按对象划。** 嵌套路径 `a.b.c` 逐对象上锁；RHS 中碰**其他**对象会拿它的锁——跨对象的锁序由你设计。
+- **每个 `let mutable` 全局有自己的锁**，语句规则相同：全局上的 `g = g + 1` 是该变量锁上的一个临界区。
+- 对锁对象的字段**取址**被拒绝——裸指针会绕开锁。
+
+对象锁刻意**不**承诺下面这些——Rust、Go、Swift 划的是同一条边界：
+
+- **没有方法级原子性。** 临界区只到「一次字段访问」或「一整句赋值」。跨语句的复合操作不具原子性——`if c.a < c.b` 是两次读、两个临界区。确实需要更宽的原子步骤时，改写为单句赋值，或把状态放进你自己管的 `Mutex`（`unsafe` 形态）。
+- **没有显式锁块。** 语言不提供第二种临界区拼法。
+- **没有死锁自由。** 对象锁会嵌套，也会和 `std` 的锁互相死锁。
+- **原子 API 之外没有内存序承诺。**
+
+#### `unsafe sendable`
+
+`unsafe` 形态是为编译器验证不了的类型留的逃生舱：自带同步的原语、FFI 句柄、无锁设计。
+
+```koral
+type unsafe sendable mutable Mutex(private handle: *UInt8);
+```
+
+契约：**开发者承诺该类型及其可达的一切，跨线程共享时没有数据竞争。** 编译器不做字段检查，也不上锁。原子引用计数只保住计数器本身——字段上的竞争、以及可达的非 `sendable` 对象的计数器竞争，都在承诺范围内。**违背承诺是未定义行为。**
+
+类型自带同步（`Mutex`、原子单元、线程安全的 FFI 句柄）时才用 `unsafe sendable`——不是用来消掉一个你还没有真正满足的检查。
+
+#### 冻结集合
+
+可变容器——`List`、`Dict`、`Set`、`Deque`、`StringBuilder` 与各种迭代器——是 `type mutable` 的线程内工作状态：全都不是 `sendable`，全都不跨界。集合**数据**的跨线程故事是：在可变容器里构建，在**边界处冻结**——`FrozenList[T]`、`FrozenDict[K, V]`、`FrozenSet[T]` 是可以跨线程的不可变快照。
+
+快照由 `type unsafe sendable mutable` 对象承载——`mutable` 形态持有自有缓冲与析构（用户析构只住在 `type mutable` 上），「构造后不可变」承诺使快照实际上只读——且存储**独立**（不内嵌源容器）。条件规则同样适用：`FrozenList[T]` 仅当 `T` 是 `sendable` 才是，所以 `FrozenList[List[Int]]` 不能跨界。
+
+```koral
+let source = List[Int].new();
+source.push(2);
+source.push(4);
+source.push(6);
+let frozen = source.to_frozen_list();    // 拷贝进独立存储
+```
+
+- 用 `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()` 转换，源容器之后照常可用。用 `to_list()` / `to_dict()` / `to_set()` 拷贝回可变侧。
+- 读取半边是 `count`、`is_empty`、`get`、`contains`（字典上是 `contains_key`）与 `iterator`。**没有修改方法，没有 builder**——快照在构造时写一次，此后不再动它。
+- 内建下标读快照：`frozen[i]` 与 `frozen_dict[key]` 的行为与 `List[i]` / `Dict[key]` 完全一致（越界 / 缺键的 panic 相同），对它们赋值是编译错。`FrozenSet` 没有下标。
+- 集合字面量经类型上下文生成冻结族成员，规则沿用可变侧——集合字面量去重、字典字面量重复键后者取胜、`[]` 需要上下文：
+
+```koral
+let f: FrozenList[Int] = [1, 2, 3];
+let d: FrozenDict[String, Int] = ["a": 1];
+let s: FrozenSet[Int] = [1, 2, 2];        // 去重：两个元素
+let empty: FrozenList[Int] = [];
+```
+
+快照与任何 `sendable` 值一样移动——被 spawn 的闭包捕获、存进共享字段、或经通道发送：
+
+```koral
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let source = List[Int].new();
+    source.push(10);
+    let frozen = source.to_frozen_list();
+
+    let (sender, receiver) = make_channel[FrozenList[Int]](1);
+    let worker = run_task(() => {
+        let got = receiver.recv().unwrap();
+        println("worker got \(got.count()) \(got[0])");
+    });
+    let _ = sender.send(frozen);
+    let _ = worker.wait();
+};
+```
+
+`JsonValue` 坐落在冻结树上：它是 `type sendable` 枚举，`Array` 与 `Object` 载荷是 `FrozenList[JsonValue]` 与 `FrozenDict[String, JsonValue]`，所以解析好的文档直接跨线程——`Channel[JsonValue]` 直接可用。`as_array()` 与 `as_object()` 以 `Option[FrozenList[JsonValue]]` 与 `Option[FrozenDict[String, JsonValue]]` 交出冻结载荷；解析与构建留在可变侧。
+
+#### Worker 与 Channel
+
+并发的推荐形态：每个线程的状态**留在本线程内**——它可以是普通的、甚至是非 `sendable` 的，反正没有别人看得见它，也就不需要锁——线程之间用通道传递 `sendable` 消息，集合数据以冻结快照随行（见[冻结集合](#冻结集合)）。通道对消息类型是条件 `sendable` 的，非 sendable 的消息类型在通道声明处就被拒，而不是等消息流动时。
+
+```koral
+using "std/async" { ... };
+using "std/sync" { ... };
+
+type sendable Msg {
+    Job(id: Int),
+    Quit(),
+};
+
+let main(): Void = {
+    let (sender, receiver) = make_channel[Msg](16);
+
+    // 计数留在本线程内；跨线程的只有 `Msg`。
+    let worker = run_task(
+        () => {
+            let mutable total = 0;
+            while true then {
+                when receiver.recv() in {
+                    .Ok(msg) then {
+                        when msg in {
+                            .Job(id) then {
+                                total = total + id;
+                            },
+                            .Quit() then {
+                                break;
+                            },
+                        };
+                    },
+                    .Error(_) then {
+                        break;
+                    },
+                };
+            };
+            println("total \(total)");
+        },
+    );
+
+    let _ = sender.send(Msg.Job(1));
+    let _ = sender.send(Msg.Job(2));
+    let _ = sender.send(Msg.Quit());
+    let _ = worker.wait();
+};
+```
+
+自带对象锁的共享可变对象是第二形态；你信任的同步原语是 `unsafe` 形态。结束 worker 的另一条路是关掉通道：最后一个 `SendChannel` 句柄析构后，缓冲消息收完，`recv()` 就报 `.Error`。
+
+**引用计数跟随 sendability，但这不属于语言契约。** `sendable` 类型用原子引用计数，非 `sendable` 类型用非原子的；两者都不得依赖——它和布局一样是实现细节，将来可能改变。
 
 ## 4. 模式匹配
 
@@ -2652,9 +2954,11 @@ let wide = Bits(1) << 8;
 
 #### 内建下标规则
 
-- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`*T` 与 `*mutable T`。
+- `value[key]` 与 `value[key] = expr` 只支持 `String`、`List[T]`、`Deque[T]`、`Dict[K, V]`、`FrozenList[T]`、`FrozenDict[K, V]`、定长数组 `[N]T`、`*T` 与 `*mutable T`。
 - `String[key]` 返回 `UInt8` 字节值。只读且不可取址。
 - `List[T]` 与 `Deque[T]`（均为 `type mutable`）支持值读取、赋值与嵌套 place 更新。
+- `FrozenList[T]` 与 `FrozenDict[K, V]` 的下标只读：`frozen[i]` 与 `frozen_dict[key]` 的读取与 `List[i]` / `Dict[key]` 完全一致（越界 / 缺键的 panic 相同），对它们赋值是编译错。`FrozenSet[T]` 没有下标。
+- 定长数组 `[N]T` 支持值读取、赋值与复合更新，带越界检查（见[定长数组](#定长数组)）。
 - `*T` 只支持 `*expr` 读取。`*mutable T` 同时支持 `*expr` 读写。
 - 用户自定义类型不能通过 trait 实现 `[]`，泛型约束也不能增加下标能力。
 
@@ -2703,7 +3007,7 @@ let p = Point.origin();
 - `Clone`：显式浅拷贝（`clone(self): Self`）。
 - `Iterator[T]`：迭代协议——一次性游标，只有 `next(self): Option[T]` 一个方法，再无其它。
 - `Iterable[T, R]`：每次调用都能给出一个新游标（`iterator(self): R`）。惰性管线从 `lazy()` 进入，返回 `LazyView`。
-- `Error`：错误消息接口（`message(self): String`）。
+- `Error`：错误消息接口（`message(self): String`）。声明为 `trait sendable Error`——每个错误类型都必须是 `sendable`，`Result` 的错误侧就是普通的 `Error` trait object。
 - `Drop`：析构钩子（`drop(self): Void`）。
 
 算术、位与比较运算符在内部会降级为 trait 方法（例如 `+` 对应 `Add`、`&` 对应 `BitAnd`）。下标由内建编译器规则解析，不走公开 trait。

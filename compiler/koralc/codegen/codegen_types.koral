@@ -43,7 +43,7 @@ given CodeGen {
                 self.register_type_declaration_for_used_type(decl_map, seen, inner);
                 return;
             },
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, _) then {
                 for entry in params then {
                     self.register_type_declaration_for_used_type(
                         decl_map,
@@ -365,7 +365,8 @@ given CodeGen {
     /// 生成结构体类型定义 + copy 函数 + drop 函数
     ///
     /// Requirements: 3.1, 3.2, 3.3, 3.4
-    append_managed_nominal_copy_function(self, name: String): Void = {
+    /// `nonatomic` 由 decl 的静态类型定（RC 分流，见 uses_nonatomic_rc）。
+    append_managed_nominal_copy_function(self, name: String, nonatomic: Bool): Void = {
         self.buffer.push_string(
             "struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n",
         );
@@ -373,21 +374,25 @@ given CodeGen {
         self.add_indent();
         self.buffer.push_string("struct \(name) result = *self;\n");
         self.add_indent();
-        self.buffer.push_string("__koral_retain_value(result.ptr);\n");
+        self.buffer.push_string(
+            if nonatomic then "__koral_retain_value_nonatomic(result.ptr);\n"
+            else "__koral_retain_value(result.ptr);\n",
+        );
         self.add_indent();
         self.buffer.push_string("return result;\n");
         self.pop_indent_level();
         self.buffer.push_string("}\n\n");
     };
 
-    append_managed_nominal_drop_function(self, name: String): Void = {
+    append_managed_nominal_drop_function(self, name: String, nonatomic: Bool): Void = {
         self.buffer.push_string("void __koral_\(name)_drop(struct \(name)* self) {\n");
         self.push_indent_level();
         self.add_indent();
         // 头里不存析构函数：drop glue 在释放调用点单态化后传进来。
         // 这里 self->ptr 指向的是本类型自己的 payload 块。
         self.buffer.push_string(
-            "__koral_release_value(self->ptr, (__koral_Dtor)__koral_\(name)_payload_drop);\n",
+            if nonatomic then "__koral_release_value_nonatomic(self->ptr, (__koral_Dtor)__koral_\(name)_payload_drop);\n"
+            else "__koral_release_value(self->ptr, (__koral_Dtor)__koral_\(name)_payload_drop);\n",
         );
         self.pop_indent_level();
         self.buffer.push_string("}\n\n");
@@ -508,10 +513,19 @@ given CodeGen {
         self,
         name: String,
         fields: List[TypedField],
+        locked: Bool,
+        nonatomic: Bool,
     ): Void = {
         let payload_name = "__koral_payload_\(name)";
         self.buffer.push_string("struct \(payload_name) {\n");
         self.push_indent_level();
+        if locked then {
+            // 内建对象锁是 payload 的隐藏首字段（concurrency-design.md
+            // §对象锁语义）：锁地址 = payload 指针（首字段，偏移 0），codegen
+            // 按 `&payload->__lock` 发射。析构不需要动作（锁不持资源）。
+            self.add_indent();
+            self.buffer.push_string("struct __koral_Lock __lock;\n");
+        };
         for field in fields then {
             self.add_indent();
             let field_c_type = self.c_type_name(field.field_type);
@@ -520,15 +534,16 @@ given CodeGen {
         };
         self.pop_indent_level();
         self.buffer.push_string("};\n\n");
-        self.append_managed_nominal_copy_function(name);
+        self.append_managed_nominal_copy_function(name, nonatomic);
         self.append_managed_struct_payload_drop_function(name, fields);
-        self.append_managed_nominal_drop_function(name);
+        self.append_managed_nominal_drop_function(name, nonatomic);
     };
 
     generate_managed_enum_declaration(
         self,
         name: String,
         cases: List[TypedEnumCase],
+        nonatomic: Bool,
     ): Void = {
         let payload_name = "__koral_payload_\(name)";
         let niche = self.enum_niche_layout(cases);
@@ -566,9 +581,9 @@ given CodeGen {
         self.buffer.push_string("} data;\n");
         self.pop_indent_level();
         self.buffer.push_string("};\n\n");
-        self.append_managed_nominal_copy_function(name);
+        self.append_managed_nominal_copy_function(name, nonatomic);
         self.append_managed_enum_payload_drop_function(name, cases);
-        self.append_managed_nominal_drop_function(name);
+        self.append_managed_nominal_drop_function(name, nonatomic);
     };
 
     public generate_type_declaration(
@@ -576,9 +591,11 @@ given CodeGen {
         name: String,
         fields: List[TypedField],
         managed: Bool,
+        locked: Bool,
+        nonatomic: Bool,
     ): Void = {
         if managed then {
-            self.generate_managed_type_declaration(name, fields);
+            self.generate_managed_type_declaration(name, fields, locked, nonatomic);
             return;
         };
         // 生成结构体定义
@@ -653,9 +670,10 @@ given CodeGen {
         name: String,
         cases: List[TypedEnumCase],
         managed: Bool,
+        nonatomic: Bool,
     ): Void = {
         if managed then {
-            self.generate_managed_enum_declaration(name, cases);
+            self.generate_managed_enum_declaration(name, cases, nonatomic);
             return;
         };
         // 生成枚举结构体定义

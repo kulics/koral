@@ -15,10 +15,12 @@ using "std" { ... };
 let foreign __koral_thread_current_id(): UInt64;
 
 /// Thread-safe lazy value whose initializer runs at most once.
-public type mutable Lazy[T: Any](
+/// Sendable contract: self-synchronized -- double-checked locking runs the
+/// initializer at most once; `get` from any thread is safe.
+public type unsafe sendable mutable Lazy[T: Any](
     private state: AtomicInt,
     private mutex: Mutex,
-    private func: () -> T,
+    private func: sendable () -> T,
     private mutable value: Option[T],
     private mutable init_owner: UInt64,
     private mutable initializing: Bool,
@@ -27,7 +29,7 @@ public type mutable Lazy[T: Any](
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`.
-    public new(f: () -> T): Lazy[T] =
+    public new(f: sendable () -> T): Lazy[T] =
         Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None(), UInt64(0), false);
 
     /// Return the value, running and caching the initializer on first use.

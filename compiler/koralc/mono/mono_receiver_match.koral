@@ -100,11 +100,11 @@ let vtable_method_index_for_trait_type(
     method_name: String,
 ): Int = {
     let trait_name = when trait_type in {
-        .TraitObject(tplDefId, _) then def_id_spelling(tplDefId),
+        .TraitObject(tplDefId, _, _) then def_id_spelling(tplDefId),
         _ then "",
     };
     let trait_info = when trait_type in {
-        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.lookup_trait_by_def_id(
+        .TraitObject(trait_def_id, _, _) then mono.storage.generic_templates.lookup_trait_by_def_id(
             trait_def_id,
         ),
         _ then Option[TraitDeclInfo].None(),
@@ -118,7 +118,7 @@ let vtable_method_index_for_trait_type(
     let mutable seen = Set[String].new();
     // The type already carries the trait's DECLARATION; no name is re-read.
     let entry_def_id = when trait_type in {
-        .TraitObject(trait_def_id, _) then trait_def_id,
+        .TraitObject(trait_def_id, _, _) then trait_def_id,
         _ then def_id_invalid(),
     };
     if entry_def_id.is_valid() then {
@@ -172,13 +172,13 @@ let method_lookup_base_type(mono: Monomorphizer, base: TypedExpr): Type = {
 
 let type_resolution_trait_object_type(t: Type): Option[Type] = {
     return when t in {
-        .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-            Type.TraitObject(trait_def_id, type_args),
+        .TraitObject(trait_def_id, type_args, is_sendable) then Option[Type].Some(
+            Type.TraitObject(trait_def_id, type_args, is_sendable),
         ),
         .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
         or .MutableBorrowedReferenceType(inner) then when inner in {
-            .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-                Type.TraitObject(trait_def_id, type_args),
+            .TraitObject(trait_def_id, type_args, is_sendable) then Option[Type].Some(
+                Type.TraitObject(trait_def_id, type_args, is_sendable),
             ),
             _ then Option[Type].None(),
         },
@@ -193,7 +193,7 @@ let normalize_type_resolution_trait_placeholder_expected_method_type(
 ): Type = {
     let resolved_method_type = resolve_parameterized_type(mono, method_type);
     return when resolved_method_type in {
-        .FunctionType(params, return_type) then {
+        .FunctionType(params, return_type, _) then {
             if params.is_empty() then {
                 return resolved_method_type;
             };
@@ -223,7 +223,7 @@ let normalize_type_resolution_trait_placeholder_expected_method_type(
             Type.FunctionType(
                 normalized_params,
                 resolve_parameterized_type(mono, return_type),
-            )
+            false)
         },
         .ForeignFunctionType(params, return_type) then {
             if params.is_empty() then {
@@ -354,8 +354,8 @@ let register_given_decl_method_identities(
 ): List[TypedGivenMember] = {
     let resolved_target = resolve_parameterized_type(mono, target_type);
     let is_trait_target = when resolved_target in {
-        .TraitObject(_, _) then true,
-        .ReferenceType(inner) or .MutableReferenceType(inner) then resolve_parameterized_type(mono, inner) is .TraitObject(_, _),
+        .TraitObject(_, _, _) then true,
+        .ReferenceType(inner) or .MutableReferenceType(inner) then resolve_parameterized_type(mono, inner) is .TraitObject(_, _, _),
         _ then false,
     };
     if is_trait_target then {
@@ -368,7 +368,7 @@ let register_given_decl_method_identities(
             let member_fn_type = Type.FunctionType(
                 types_to_param_entries(param_types_from_typed_params(member.params)),
                 member.return_type,
-            );
+            false);
             // A given trait-member is the declaration identity. Reusing a fresh
             // DefId per conforming type makes the same method look like many
             // different definitions and breaks the identity-keyed lookup chain.
@@ -533,7 +533,7 @@ let trait_tool_expected_self_type(
                     .Some(instance_def_id) then {
                         when mono.storage.context.get_function_type(instance_def_id) in {
                             .Some(function_type) then when function_type in {
-                                .FunctionType(fn_params, _) then {
+                                .FunctionType(fn_params, _, _) then {
                                     let param_types = param_entry_types(fn_params);
                                     if param_types.count() > UInt(0) then {
                                         let first_param = resolve_parameterized_type(
@@ -541,7 +541,7 @@ let trait_tool_expected_self_type(
                                             (param_types[UInt(0)]),
                                         );
                                         when first_param in {
-                                            .TraitObject(_, _) then {
+                                            .TraitObject(_, _, _) then {
                                                 return Option[Type].Some(first_param);
                                             },
                                             _ then {},
@@ -556,7 +556,7 @@ let trait_tool_expected_self_type(
                                             (param_types[UInt(0)]),
                                         );
                                         when first_param in {
-                                            .TraitObject(_, _) then {
+                                            .TraitObject(_, _, _) then {
                                                 return Option[Type].Some(first_param);
                                             },
                                             _ then {},
@@ -614,7 +614,7 @@ let adapt_receiver_expr_for_method(
             method.def_id,
             method.symbol_type,
         ) in {
-            .FunctionType(fn_params, _) then {
+            .FunctionType(fn_params, _, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     Option[Type].None()
@@ -792,7 +792,7 @@ let adapt_call_args_for_method(
     );
     let mutable param_types = List[Type].new();
     when method_type in {
-        .FunctionType(fn_params, _) then {
+        .FunctionType(fn_params, _, _) then {
             param_types = param_entry_types(fn_params);
         },
         .ForeignFunctionType(fn_params, _) then {
@@ -851,7 +851,7 @@ let resolve_alias_receiver_match_type(mono: Monomorphizer, t: Type): Type = {
         .MutablePointerType(inner) then Type.MutablePointerType(
             resolve_alias_receiver_match_type(mono, inner),
         ),
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, _) then {
             let mutable param_types = List[Type].new();
             for entry in fn_params then {
                 param_types.push(
@@ -984,7 +984,7 @@ let method_def_id_matches_receiver_exactly(
     let mutable concrete_receiver_type = resolve_parameterized_type(mono, receiver_type);
     return when mono.storage.context.get_function_type(method_def_id) in {
         .Some(function_type) then when function_type in {
-            .FunctionType(fn_params, _) then {
+            .FunctionType(fn_params, _, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     return false;
@@ -1022,7 +1022,7 @@ let method_symbol_receiver_matches(
         method.symbol_type,
     );
     return when resolved_method_type in {
-        .FunctionType(fn_params, _) then {
+        .FunctionType(fn_params, _, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.is_empty() then {
                 return false;
@@ -1206,7 +1206,7 @@ let method_signature_matches_receiver_type(
     let concrete_receiver_type = resolve_parameterized_type(mono, receiver_type);
     return when mono.storage.context.get_function_type(method.def_id) in {
         .Some(function_type) then when function_type in {
-            .FunctionType(fn_params, _) then {
+            .FunctionType(fn_params, _, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     false
@@ -1241,7 +1241,7 @@ let method_signature_matches_receiver_type(
             _ then false,
         },
         .None() then when resolve_parameterized_type(mono, method.symbol_type) in {
-            .FunctionType(fn_params, _) then {
+            .FunctionType(fn_params, _, _) then {
                 let param_types = param_entry_types(fn_params);
                 if param_types.count() == 0 then {
                     false

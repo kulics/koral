@@ -341,6 +341,12 @@ extension TypeChecker {
       switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
       case .string:
         throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
+      case .frozenList, .frozenDict:
+        // Nested write through a frozen subscript is a compile error, same
+        // family as the direct case.
+        throw SemanticError(.generic(
+          "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedOuterBase.type).description)'"
+        ), span: outerBaseExpr.span)
       case .dict, .list, .deque:
         let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
         if isMutableNominalReceiverType(subscriptValue.type) {
@@ -363,7 +369,7 @@ extension TypeChecker {
           base: resolvedBase, index: typedOuterArgs[0], span: outerBaseExpr.span)
       case .none:
         throw SemanticError(.generic(
-          "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
+          "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types"
         ), span: outerBaseExpr.span)
       }
     }
@@ -430,12 +436,12 @@ extension TypeChecker {
       let type: Type
       if let expectedType = expectedType {
         type = expectedType
-        // Point range-check errors at the value, not the `let` keyword.
-        let outerSpan = currentSpan
-        if value.span.isKnown { currentSpan = value.span }
-        defer { currentSpan = outerSpan }
-        typedValue = try coerceLiteral(typedValue, to: type)
-        if typedValue.type != .never && typedValue.type != .error && typedValue.type != type
+        // Range-check errors blame the value through coerceLiteral's span;
+        // cursor-based fallbacks stay at the enclosing `let`, the same split
+        // the other compiler makes (its coercion runs at statement level).
+        typedValue = try coerceLiteral(typedValue, to: type, span: value.span)
+        if typedValue.type != .never && typedValue.type != .error
+          && (typedValue.type != type || !sendableSlotsCompatible(typedValue.type, type))
           && !diagnosticCollector.hasError(in: value.span, fileName: currentFileName)
         {
           // Blame the VALUE, not the binding: the annotation is fine, the
@@ -541,9 +547,11 @@ extension TypeChecker {
         if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
           let typedBase = try inferWritableSubscriptBase(baseExpr)
           var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-          // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
-          let isDict = if case .dict = resolveBuiltinSubscriptKind(baseType: typedBase.type) { true } else { false }
-          if typedArgs.count == 1, !isDict {
+          // Coerce single arg to UInt for list/deque/pointer; dict forms use their own key type.
+          let subscriptKind = resolveBuiltinSubscriptKind(baseType: typedBase.type)
+          let isKeyedSubscript = if case .dict = subscriptKind { true }
+            else if case .frozenDict = subscriptKind { true } else { false }
+          if typedArgs.count == 1, !isKeyedSubscript {
             typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
           }
 
@@ -607,6 +615,18 @@ extension TypeChecker {
 
           if case .string = resolveBuiltinSubscriptKind(baseType: typedBase.type) {
             throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
+          }
+
+          switch resolveBuiltinSubscriptKind(baseType: typedBase.type) {
+          case .frozenList, .frozenDict:
+            // A frozen subscript is read-only by construction (no
+            // `__index_slot`), same diagnostic family as immutable field
+            // assignment.
+            throw SemanticError(.generic(
+              "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedBase.type).description)'"
+            ), span: span)
+          default:
+            break
           }
 
           // Fixed arrays write into the array's storage through an element
@@ -748,7 +768,8 @@ extension TypeChecker {
         var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
         typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error && typedTarget.type != typedValue.type {
+        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error
+          && (typedTarget.type != typedValue.type || !sendableSlotsCompatible(typedValue.type, typedTarget.type)) {
           throw SemanticError.typeMismatch(
             expected: typedTarget.type.description, got: typedValue.type.description)
         }
@@ -795,9 +816,11 @@ extension TypeChecker {
       if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
         let typedBase = try inferWritableSubscriptBase(baseExpr)
         var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-        // Coerce single arg to UInt for list/deque/pointer; dict uses its own key type.
-        let isDict = if case .dict = resolveBuiltinSubscriptKind(baseType: typedBase.type) { true } else { false }
-        if typedArgs.count == 1, !isDict {
+        // Coerce single arg to UInt for list/deque/pointer; dict forms use their own key type.
+        let subscriptKind = resolveBuiltinSubscriptKind(baseType: typedBase.type)
+        let isKeyedSubscript = if case .dict = subscriptKind { true }
+          else if case .frozenDict = subscriptKind { true } else { false }
+        if typedArgs.count == 1, !isKeyedSubscript {
           typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
         }
 
@@ -838,7 +861,8 @@ extension TypeChecker {
 
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)
-          if typedValue.type != .never && typedValue.type != .error && element != .error && typedValue.type != element {
+          if typedValue.type != .never && typedValue.type != .error && element != .error
+            && (typedValue.type != element || !sendableSlotsCompatible(typedValue.type, element)) {
             throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
           }
           return .assignment(target: derefTarget, operator: nil, value: typedValue, span: span)
@@ -848,6 +872,13 @@ extension TypeChecker {
         switch resolveBuiltinSubscriptKind(baseType: typedBase.type) {
         case .string:
           throw SemanticError(.generic("String subscript returns a UInt8 value and cannot be assigned"), span: span)
+        case .frozenList, .frozenDict:
+          // A frozen subscript is read-only by construction (no
+          // `__index_slot`), same diagnostic family as immutable field
+          // assignment.
+          throw SemanticError(.generic(
+            "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedBase.type).description)'"
+          ), span: span)
         case .list(let element), .deque(let element):
           expectedValueType = element
         case .dict(_, let element):
@@ -868,7 +899,7 @@ extension TypeChecker {
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)
           if typedValue.type != .never && typedValue.type != .error && element != .error
-            && typedValue.type != element {
+            && (typedValue.type != element || !sendableSlotsCompatible(typedValue.type, element)) {
             throw SemanticError.typeMismatch(expected: element.description, got: typedValue.type.description)
           }
           return .assignment(target: elementPlace, operator: nil, value: typedValue, span: span)
@@ -876,7 +907,7 @@ extension TypeChecker {
           fatalError("pointer case should have returned above")
         case .none:
           throw SemanticError(.generic(
-            "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
+            "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types"
           ), span: span)
         }
 
@@ -916,7 +947,8 @@ extension TypeChecker {
 
         var typedValue = try inferTypedExpression(value)
         typedValue = try coerceLiteral(typedValue, to: expectedValueType)
-        if typedValue.type != .never && typedValue.type != .error && expectedValueType != .error && typedValue.type != expectedValueType {
+        if typedValue.type != .never && typedValue.type != .error && expectedValueType != .error
+          && (typedValue.type != expectedValueType || !sendableSlotsCompatible(typedValue.type, expectedValueType)) {
           throw SemanticError.typeMismatch(
             expected: expectedValueType.description, got: typedValue.type.description)
         }
@@ -939,7 +971,8 @@ extension TypeChecker {
       var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
       typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-      if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error && typedTarget.type != typedValue.type {
+      if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error
+        && (typedTarget.type != typedValue.type || !sendableSlotsCompatible(typedValue.type, typedTarget.type)) {
         throw SemanticError.typeMismatch(
           expected: typedTarget.type.description, got: typedValue.type.description)
       }
@@ -963,7 +996,8 @@ extension TypeChecker {
             var typedValue = try inferTypedExpression(value, expectedType: expectedType)
             if let expectedType {
               typedValue = try coerceLiteral(typedValue, to: expectedType)
-              if typedValue.type != .never && typedValue.type != .error && typedValue.type != expectedType {
+              if typedValue.type != .never && typedValue.type != .error
+                && (typedValue.type != expectedType || !sendableSlotsCompatible(typedValue.type, expectedType)) {
                 throw SemanticError.typeMismatch(
                   expected: expectedType.description, got: typedValue.type.description)
               }
@@ -991,7 +1025,8 @@ extension TypeChecker {
         // Pass expected type for implicit member expression support
         var typedValue = try inferTypedExpression(value, expectedType: returnType)
         typedValue = try coerceLiteral(typedValue, to: returnType)
-        if typedValue.type != .never && typedValue.type != .error && typedValue.type != returnType {
+        if typedValue.type != .never && typedValue.type != .error
+          && (typedValue.type != returnType || !sendableSlotsCompatible(typedValue.type, returnType)) {
           throw SemanticError.typeMismatch(
             expected: returnType.description, got: typedValue.type.description)
         }

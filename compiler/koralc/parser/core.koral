@@ -16,7 +16,7 @@ private type ParseDeclFlags(
 /// 常量表达式（`docs/design/cffi-design.md` §B）。
 /// C reserved words (C89 through C23, plus the standard-spelling
 /// alternatives): none of them can name a C identifier.
-private let c_reserved_words: List[String] = [
+private let c_reserved_words: FrozenList[String] = [
     "auto", "break", "case", "char", "const", "constexpr", "consteval",
     "continue", "default", "do", "double", "else", "enum", "extern", "float",
     "for", "goto", "if", "inline", "int", "long", "register", "restrict",
@@ -27,7 +27,7 @@ private let c_reserved_words: List[String] = [
     "_Static_assert", "_Thread_local", "alignas", "alignof", "bool", "complex",
     "decimal32", "decimal64", "decimal128", "false", "imaginary", "nullptr",
     "static_assert", "thread_local", "true", "typeof", "typeof_unqual",
-];
+].to_frozen_list();
 
 /// A declared C name is spelled verbatim in `extern` prototypes and export
 /// headers, so it must be a legal C identifier: the C identifier shape, and
@@ -827,10 +827,11 @@ given Parser {
             // 也在 `parse_type_decl` 里直接构造并带着 C 名槽位——这条臂只是兜底，
             // 走到即无槽位可带。
             return when base in {
-                .TypeStructDecl(_, name, _, _, fields, span, name_span) then .Ok(
+                .TypeStructDecl(_, name, _, sendability, _, fields, span, name_span) then .Ok(
                     Decl.ForeignTypeDecl(
                         access,
                         name,
+                        sendability,
                         Option[List[Field]].Some(fields),
                         Option[String].None(),
                         span,
@@ -869,7 +870,7 @@ given Parser {
                         "intrinsic given trait declaration is not supported",
                     ),
                 ),
-                .TypeStructDecl(_, name, _, type_params, _, span, name_span) then .Ok(
+                .TypeStructDecl(_, name, _, _, type_params, _, span, name_span) then .Ok(
                     Decl.IntrinsicTypeDecl(access, name, type_params, span, name_span),
                 ),
                 _ then .Error(
@@ -885,6 +886,8 @@ given Parser {
     is_type_start(self): Bool = {
         return when self.current().kind in {
             .Star() or .QuestionMark() or .KwSelfType() then true,
+            // `sendable` 前缀限定：`sendable (A) -> R`、`sendable Trait`。
+            .KwSendable() then true,
             // A function type opens with its parameter list: `(T1, T2) -> R`.
             .LParen() then true,
             // A fixed-size array opens with its size: `[N]T`.
@@ -914,7 +917,7 @@ given Parser {
             return false;
         };
         return when self.tokens[index + 1].kind in {
-            .KwMut() or .KwSelfType() then true,
+            .KwMut() or .KwSelfType() or .KwSendable() then true,
             .Identifier(name) then self.is_upper_first(name),
             _ then false,
         };
@@ -1150,13 +1153,15 @@ given Parser {
     /// the run there is not a type.
     scan_type_shape_at(self, start_index: UInt): Option[UInt] = {
         let mutable i = start_index;
-        // Prefixes: `?T`, `*T`, `*mutable T`. They nest: `?*T`.
+        // Prefixes: `?T`, `*T`, `*mutable T`, `sendable T`. They nest: `?*T`.
         let mutable more_prefixes = true;
         while more_prefixes then {
             if i >= self.tokens.count() then {
                 return Option[UInt].None();
             };
             if self.tokens[i].kind is .QuestionMark() then {
+                i += 1;
+            } else if self.tokens[i].kind is .KwSendable() then {
                 i += 1;
             } else if self.tokens[i].kind is .Star() and self.index_followed_by_type_application_at(
                 i,
@@ -1324,6 +1329,13 @@ given Parser {
             self.advance();
             return .Ok(Option[Bound].Some(Bound.Foreign()));
         };
+        // `sendable` joins the shape-bound slot (`T Reader and sendable`); it
+        // must be caught before the type fallback, which would read it as the
+        // `sendable` type qualifier.
+        if self.current().kind is .KwSendable() then {
+            self.advance();
+            return .Ok(Option[Bound].Some(Bound.Sendable()));
+        };
         if self.is_type_start() then {
             let node = self.parse_type() or return;
             return .Ok(bound_from_type_node(node));
@@ -1337,6 +1349,14 @@ given Parser {
         // names the type points here.
         let start = self.current();
         when self.current().kind in {
+            .KwSendable() then {
+                // `sendable` 前缀限定：`sendable (A) -> R`、`sendable Trait`
+                // （concurrency-design.md）。可嵌套：`sendable (A) -> sendable
+                // (B) -> R` 的返回位再来一层。
+                self.advance();
+                let inner = self.parse_type() or return;
+                return .Ok(TypeNode.SendableQualified(inner));
+            },
             .QuestionMark() then {
                 self.advance();
                 if self.current().kind is .Star() then {
@@ -2211,6 +2231,38 @@ given Parser {
             };
         };
 
+        // `unsafe`? `sendable`? sit before `mutable`: `type unsafe sendable
+        // mutable X`。`unsafe` 必须伴随 `sendable`；`type foreign` 也收这两个
+        // 修饰符（按值拷贝跨界），`type intrinsic` 与别名不收（下方各自拒绝）。
+        let mutable sendability = Sendability.Unmarked();
+        let mutable sendability_token = self.current();
+        if self.current().kind is .KwUnsafe() then {
+            sendability_token = self.current();
+            self.advance();
+            if self.current().kind is not .KwSendable() then {
+                return .Error(
+                    self.parser_error_at(
+                        "'unsafe' must be accompanied by 'sendable'",
+                        sendability_token,
+                    ),
+                );
+            };
+            self.advance();
+            sendability = Sendability.UnsafeSendable();
+        } else if self.current().kind is .KwSendable() then {
+            sendability_token = self.current();
+            self.advance();
+            sendability = Sendability.Sendable();
+        };
+        if decl_is_intrinsic and sendability is not .Unmarked() then {
+            return .Error(
+                self.parser_error_at(
+                    "intrinsic type cannot be marked \(sendability_label(sendability))",
+                    sendability_token,
+                ),
+            );
+        };
+
         let mutable is_nominal_mutable = false;
         if self.current().kind is .KwMut() then {
             is_nominal_mutable = true;
@@ -2255,6 +2307,14 @@ given Parser {
 
         when self.current().kind in {
             .Assign() then {
+                if sendability is not .Unmarked() then {
+                    return .Error(
+                        self.parser_error_at(
+                            "Type alias cannot be marked \(sendability_label(sendability))",
+                            sendability_token,
+                        ),
+                    );
+                };
                 if is_nominal_mutable then {
                     return .Error(
                         self.parser_error_at_current(
@@ -2329,6 +2389,7 @@ given Parser {
                         Decl.ForeignTypeDecl(
                             access,
                             name,
+                            sendability,
                             Option[List[Field]].Some(fields),
                             cname,
                             self.span_from_start(start),
@@ -2429,6 +2490,7 @@ given Parser {
                         Decl.ForeignTypeDecl(
                             access,
                             name,
+                            sendability,
                             Option[List[Field]].Some(fields),
                             cname,
                             self.span_from_start(start),
@@ -2440,6 +2502,7 @@ given Parser {
                     access,
                     name,
                     is_nominal_mutable,
+                    sendability,
                     type_params,
                     fields,
                     self.span_from_start(start),
@@ -2464,6 +2527,7 @@ given Parser {
                             Decl.ForeignTypeDecl(
                                 access,
                                 name,
+                                sendability,
                                 Option[List[Field]].None(),
                                 cname,
                                 self.span_from_start(start),
@@ -2617,6 +2681,7 @@ given Parser {
                 let base = Decl.TypeEnumDecl(
                     access,
                     name,
+                    sendability,
                     type_params,
                     cases,
                     self.span_from_start(start),

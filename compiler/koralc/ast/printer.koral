@@ -164,6 +164,9 @@ private let type_text(t: TypeNode): String = {
             out.push_string(type_text(return_type));
             return out.to_string();
         },
+        .SendableQualified(inner) then {
+            return "sendable " + type_text(inner);
+        },
     };
 };
 
@@ -829,10 +832,15 @@ private let print_decl(decl: Decl, level: UInt): Void = {
                 "\(pad)ForeignLetDecl: \(access_modifier_text(access))\(name): \(type_text(type_name)) (is_mutable=\(is_mutable))\(cname_note)\(init_note)",
             );
         },
-        .TypeStructDecl(access, name, is_mutable_type, type_params, fields, _, _) then {
+        .TypeStructDecl(access, name, is_mutable_type, sendability, type_params, fields, _, _) then {
             let mut_note = if is_mutable_type then "mutable " else "";
+            let send_note = when sendability in {
+                .Unmarked() then "",
+                .Sendable() then "sendable ",
+                .UnsafeSendable() then "unsafe sendable ",
+            };
             println(
-                "\(pad)TypeStructDecl: \(access_modifier_text(access))\(mut_note)\(name)\(type_params_note(type_params))",
+                "\(pad)TypeStructDecl: \(access_modifier_text(access))\(send_note)\(mut_note)\(name)\(type_params_note(type_params))",
             );
             for f in fields then {
                 let mut_note = if f.is_mutable then "mutable " else "";
@@ -841,9 +849,14 @@ private let print_decl(decl: Decl, level: UInt): Void = {
                 );
             };
         },
-        .TypeEnumDecl(access, name, type_params, cases, _, _) then {
+        .TypeEnumDecl(access, name, sendability, type_params, cases, _, _) then {
+            let send_note = when sendability in {
+                .Unmarked() then "",
+                .Sendable() then "sendable ",
+                .UnsafeSendable() then "unsafe sendable ",
+            };
             println(
-                "\(pad)TypeEnumDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))",
+                "\(pad)TypeEnumDecl: \(access_modifier_text(access))\(send_note)\(name)\(type_params_note(type_params))",
             );
             for c in cases then {
                 println("\(pad)  Case: \(c.name)");
@@ -862,8 +875,13 @@ private let print_decl(decl: Decl, level: UInt): Void = {
                 "\(pad)IntrinsicTypeDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))",
             );
         },
-        .ForeignTypeDecl(access, name, fields, _, _, _) then {
-            println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(name)");
+        .ForeignTypeDecl(access, name, sendability, fields, _, _, _) then {
+            let send_note = when sendability in {
+                .Unmarked() then "",
+                .Sendable() then "sendable ",
+                .UnsafeSendable() then "unsafe sendable ",
+            };
+            println("\(pad)ForeignTypeDecl: \(access_modifier_text(access))\(send_note)\(name)");
             if fields is .Some(field_list) then {
                 for f in field_list then {
                     let mut_note = if f.is_mutable then "mutable " else "";
@@ -898,7 +916,8 @@ private let print_decl(decl: Decl, level: UInt): Void = {
             };
             println("\(pad)UsingDecl: \"\(specifier)\" { \(list) }");
         },
-        .TraitDecl(access, name, type_params, parents, members, _, _) then {
+        .TraitDecl(access, name, is_sendable, type_params, parents, members, _, _) then {
+            let send_note = if is_sendable then "sendable " else "";
             let mutable parent_note = StringBuilder.new();
             if not parents.is_empty() then {
                 parent_note.push_string(" : ");
@@ -912,7 +931,7 @@ private let print_decl(decl: Decl, level: UInt): Void = {
                 };
             };
             println(
-                "\(pad)TraitDecl: \(access_modifier_text(access))\(name)\(type_params_note(type_params))\(parent_note.to_string())",
+                "\(pad)TraitDecl: \(access_modifier_text(access))\(send_note)\(name)\(type_params_note(type_params))\(parent_note.to_string())",
             );
             for m in members then {
                 let ret_note = " -> \(type_text(m.return_type))";

@@ -17,10 +17,12 @@ public let stdin(): Stdin;
 
 /// The process standard output stream. Each call returns a fresh handle over
 /// the same stream; the private field makes this the only construction path.
+/// All handles share the stream's write lock, so writes serialize.
 public let stdout(): Stdout;
 
 /// The process standard error stream. Each call returns a fresh handle over
 /// the same stream; the private field makes this the only construction path.
+/// All handles share the stream's write lock, so writes serialize.
 public let stderr(): Stderr;
 ```
 
@@ -61,14 +63,14 @@ public type mutable BufWriter[W: Writer];
 public type mutable ByteBuffer;
 
 /// IO failure: `InvalidUtf8` for bad UTF-8, `WriteZero` for an empty write, or `Other` with a detail message.
-public type IoError {
+public type sendable IoError {
     InvalidUtf8(),
     WriteZero(),
     Other(detail: String),
 };
 
 /// The reference point and offset for a seek: from the start, the current position, or the end, where `Current` and `End` offsets may be negative.
-public type SeekOrigin {
+public type sendable SeekOrigin {
     Start(offset: UInt64),
     End(offset: Int64),
     Current(offset: Int64),
@@ -78,19 +80,27 @@ public type SeekOrigin {
 /// Unbuffered: every `read` is one OS read; wrap in `BufReader` for
 /// line-oriented or chunked consumption. Acquire via `stdin()` -- the private
 /// handle makes the literal unusable outside this file.
-public type mutable Stdin;
+/// Sendable contract: single reader -- concurrent reads on one stream are the
+/// caller's framing responsibility.
+public type unsafe sendable mutable Stdin;
 
 /// Process standard output (fd 1) as a byte stream.
 /// Write-through and unbuffered, so mixing with `print`/`println` stays
 /// ordered; batch with `BufWriter` for throughput. Acquire via `stdout()` --
 /// the private handle makes the literal unusable outside this file.
-public type mutable Stdout;
+/// Sendable contract: each write/flush is atomic with respect to other writes
+/// on the same stream (an internal write lock, shared with the `print` family,
+/// is held across the call).
+public type unsafe sendable mutable Stdout;
 
 /// Process standard error (fd 2) as a byte stream.
 /// Write-through and unbuffered like `Stdout` -- stderr is the immediate
 /// stream by universal convention. Acquire via `stderr()` -- the private
 /// handle makes the literal unusable outside this file.
-public type mutable Stderr;
+/// Sendable contract: each write/flush is atomic with respect to other writes
+/// on the same stream (an internal write lock, shared with the `eprint` family
+/// and `panic`, is held across the call).
+public type unsafe sendable mutable Stderr;
 ```
 
 ## Given Implementations
@@ -232,10 +242,12 @@ given Stdout {
 
 /// Implements `Writer` with unbuffered OS writes.
 given Stdout: Writer {
-    /// Unbuffered: directly calls the OS write, errors returned immediately.
-    /// Returns the number of bytes transferred; short writes are possible.
+    /// Unbuffered: directly calls the OS write under the stream's write lock,
+    /// errors returned immediately. Returns the number of bytes transferred;
+    /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
-    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
+    /// flush is a no-op on the unbuffered handle (data is already in kernel
+    /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
 };
 
@@ -250,10 +262,12 @@ given Stderr {
 
 /// Implements `Writer` with unbuffered OS writes.
 given Stderr: Writer {
-    /// Unbuffered: directly calls the OS write, errors returned immediately.
-    /// Returns the number of bytes transferred; short writes are possible.
+    /// Unbuffered: directly calls the OS write under the stream's write lock,
+    /// errors returned immediately. Returns the number of bytes transferred;
+    /// short writes are possible.
     public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
-    /// flush is a no-op on the unbuffered handle (data is already in kernel buffer).
+    /// flush is a no-op on the unbuffered handle (data is already in kernel
+    /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
 };
 

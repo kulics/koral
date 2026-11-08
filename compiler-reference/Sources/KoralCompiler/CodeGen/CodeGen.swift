@@ -1061,7 +1061,7 @@ public class CodeGen {
       if case .function(let identifier, _, .global) = global,
          (context.getName(identifier.defId) ?? "") == "main" {
         userMainFunctionName = cIdentifier(for: identifier)
-        if case .function(_, let retType) = identifier.type {
+        if case .function(_, let retType, _) = identifier.type {
           userMainReturnType = retType
         }
       }
@@ -1198,11 +1198,19 @@ public class CodeGen {
     // two lines and the state machine does not sit between the read and
     // its inlining.
     for global in globals {
-      if case .globalVariable(let identifier, let initializerFunction, _) = global {
+      if case .globalVariable(let identifier, let initializerFunction, let kind) = global {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
         let initName = cIdentifier(for: initializerFunction)
         let displayName = context.getName(identifier.defId) ?? cName
+        if kind.isMutable {
+          // The per-variable lock of a `let mutable` global binding
+          // (concurrency-design.md): reads, writes, and the assignment
+          // statement's critical section all use it. Static zero-init is
+          // enough -- owner=0 / recursion=0 is the runtime's fresh lock state
+          // (owner records the thread id, 0 = idle), no startup init needed.
+          buffer += "struct __koral_Lock __koral_glock_\(cName);\n"
+        }
         if globalInitializerConstant(initializerFunction) != nil {
           buffer += "uint8_t __koral_gstate_\(cName) = 2;\n"
           buffer += "\(cType)* __koral_gptr_\(cName)(void) { return &\(cName); }\n"
@@ -1312,7 +1320,7 @@ public class CodeGen {
     let returnType = getFunctionReturnType(identifier.type)
     let paramList = params.map { getParamCDecl($0) }.joined(separator: ", ")
 
-    if case .function(_, let ret) = identifier.type, ret == .never {
+    if case .function(_, let ret, _) = identifier.type, ret == .never {
       buffer += "_Noreturn "
     }
 
@@ -1648,7 +1656,7 @@ public class CodeGen {
 
     func functionReturns(_ type: Type) -> Type {
       switch type {
-      case .function(_, let returns), .foreignFunction(_, let returns):
+      case .function(_, let returns, _), .foreignFunction(_, let returns):
         return returns
       default:
         return .void
@@ -2168,7 +2176,7 @@ public class CodeGen {
 
   func getFunctionReturnType(_ type: Type) -> String {
     switch type {
-    case .function(_, let returns):
+    case .function(_, let returns, _):
       let s = cTypeName(returns)
       return s
     case .foreignFunction(_, let returns):
@@ -2183,7 +2191,7 @@ public class CodeGen {
     switch type {
     case .foreignFunction(_, let returns):
       return returns
-    case .function(_, let returns):
+    case .function(_, let returns, _):
       return returns
     default:
       return nil

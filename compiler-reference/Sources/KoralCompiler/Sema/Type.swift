@@ -246,7 +246,12 @@ public indirect enum Type: CustomStringConvertible {
   case bool
   case void
   case never
-  case function(parameters: [Parameter], returns: Type)
+  /// Koral function/closure type. `isSendable` is the `sendable (A) -> R`
+  /// modifier: decided at formation (a non-capturing function value / a lambda
+  /// whose captures are all sendable is `true`). Conversion widens
+  /// `sendable (A) -> R` -> `(A) -> R`; the reverse is refused (koralc
+  /// `Type.FunctionType(..., is_sendable)`).
+  case function(parameters: [Parameter], returns: Type, isSendable: Bool)
   /// Fixed-size array: `[N]Element`. C layout (`T data[N]`), mutable value
   /// semantics; only FFI-shaped elements cross into one.
   case fixedArray(size: UInt64, element: Type)
@@ -268,7 +273,9 @@ public indirect enum Type: CustomStringConvertible {
   case opaque(defId: DefId)
   case module(info: ModuleSymbolInfo)
   case typeVariable(TypeVariable)
-  case traitObject(traitDefId: DefId, typeArgs: [Type])
+  /// `isSendable` is the `sendable Trait` modifier: boxing checks the concrete
+  /// type's sendability (koralc `Type.TraitObject(..., is_sendable)`).
+  case traitObject(traitDefId: DefId, typeArgs: [Type], isSendable: Bool)
   /// The type of an expression that already failed to check. It is inert: it
   /// unifies with nothing and with itself, so a construct built out of a broken
   /// part does not go on to complain about the consequence of that breakage.
@@ -413,9 +420,9 @@ public indirect enum Type: CustomStringConvertible {
     case .void: return "Void"
     case .never: return "Never"
     case .error: return "?"
-    case .function(let params, let returns):
+    case .function(let params, let returns, let isSendable):
       let paramTypes = params.map { $0.type.description }.joined(separator: ", ")
-      return "(\(paramTypes)) -> \(returns)"
+      return "\(Self.sendablePrefixText(isSendable))(\(paramTypes)) -> \(returns)"
     case .fixedArray(let size, let element):
       return "[\(size)]\(element.description)"
     case .foreignFunction(let params, let returns):
@@ -470,13 +477,13 @@ public indirect enum Type: CustomStringConvertible {
       return "module(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return tv.description
-    case .traitObject(let tplDefId, let typeArgs):
+    case .traitObject(let tplDefId, let typeArgs, let isSendable):
       // Trait objects display their args in a PREFIX bracket: `[Int]Iterator`.
       if typeArgs.isEmpty {
-        return Self.spelling(tplDefId)
+        return "\(Self.sendablePrefixText(isSendable))\(Self.spelling(tplDefId))"
       }
       let argsStr = typeArgs.map { $0.description }.joined(separator: ", ")
-      return "[\(argsStr)]\(Self.spelling(tplDefId))"
+      return "\(Self.sendablePrefixText(isSendable))[\(argsStr)]\(Self.spelling(tplDefId))"
     }
   }
 
@@ -491,6 +498,11 @@ public indirect enum Type: CustomStringConvertible {
       return context.spelling(defId)
     }
     return "d\(defId.id)"
+  }
+
+  /// The `sendable ` qualifier's display prefix (koralc `sendable_prefix_text`).
+  static func sendablePrefixText(_ show: Bool) -> String {
+    return show ? "sendable " : ""
   }
 
   public func layoutKey(in context: CompilerContext) -> String {
@@ -566,7 +578,7 @@ public indirect enum Type: CustomStringConvertible {
       hasher.combine(14)
     case .never:
       hasher.combine(15)
-    case .function(let params, let returns):
+    case .function(let params, let returns, _):
       hasher.combine(16)
       hasher.combine(params.count)
       for param in params {
@@ -632,7 +644,7 @@ public indirect enum Type: CustomStringConvertible {
     case .typeVariable(let tv):
       hasher.combine(30)
       hasher.combine(tv.id)
-    case .traitObject(let defId, let typeArgs):
+    case .traitObject(let defId, let typeArgs, _):
       hasher.combine(31)
       hasher.combine(defId.isValid ? defId.id : 0)
       hasher.combine(typeArgs.count)
@@ -684,7 +696,7 @@ public indirect enum Type: CustomStringConvertible {
     case .void: return "Void"
     case .never: return "Never"
     case .error: return "?"
-    case .function(let params, let returns):
+    case .function(let params, let returns, _):
       let paramStr = params.map { $0.type.stableKey }.joined(separator: ",")
       return "Fn(\(paramStr))->\(returns.stableKey)"
     case .fixedArray(let size, let element):
@@ -726,7 +738,7 @@ public indirect enum Type: CustomStringConvertible {
       return "M(\(info.modulePath.joined(separator: ".")))"
     case .typeVariable(let tv):
       return "TV#\(tv.id)"
-    case .traitObject(let defId, let typeArgs):
+    case .traitObject(let defId, let typeArgs, _):
       if typeArgs.isEmpty {
         return "TO#\(defId.id)"
       }
@@ -794,7 +806,7 @@ public indirect enum Type: CustomStringConvertible {
   }
   
   public var functionParameters: [Parameter]? {
-      if case .function(let params, _) = self { return params }
+      if case .function(let params, _, _) = self { return params }
       return nil
   }
 
@@ -913,7 +925,7 @@ public extension Type {
     switch self {
     case .borrowedReference, .mutableBorrowedReference:
       return true
-    case .function(let parameters, let returns):
+    case .function(let parameters, let returns, _):
       return parameters.contains { $0.type.containsBorrowedReference } || returns.containsBorrowedReference
     case .reference(let inner),
          .mutableReference(let inner),
@@ -922,11 +934,69 @@ public extension Type {
          .weakReference(let inner),
          .mutableWeakReference(let inner):
       return inner.containsBorrowedReference
-    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+    case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args, _):
       return args.contains(where: \.containsBorrowedReference)
     default:
       return false
     }
+  }
+
+  /// The `sendable` modifier bit of a function type or trait object (false on
+  /// every other shape).
+  var sendableQualifierFlag: Bool {
+    switch self {
+    case .function(_, _, let isSendable), .traitObject(_, _, let isSendable):
+      return isSendable
+    default:
+      return false
+    }
+  }
+
+  /// koralc `type_with_sendable_qualifier`: the `sendable` qualifier applied to
+  /// a RESOLVED type. A function type or a (possibly reference-wrapped) trait
+  /// object gets its flag set; anything else has no form to qualify (nil, and
+  /// the resolver reports it).
+  func withSendableQualifier() -> Type? {
+    switch self {
+    case .function(let params, let returns, _):
+      return .function(parameters: params, returns: returns, isSendable: true)
+    default:
+      return markTraitObjectSendable()
+    }
+  }
+
+  /// koralc `mark_trait_object_sendable`: mark a trait object (under any
+  /// reference-family layers) `sendable`, preserving the wrappers. Nil when no
+  /// trait object is inside -- a function type under a reference is NOT this
+  /// shape.
+  private func markTraitObjectSendable() -> Type? {
+    switch self {
+    case .traitObject(let defId, let args, _):
+      return .traitObject(traitDefId: defId, typeArgs: args, isSendable: true)
+    case .reference(let inner):
+      return inner.markTraitObjectSendable().map { .reference(inner: $0) }
+    case .mutableReference(let inner):
+      return inner.markTraitObjectSendable().map { .mutableReference(inner: $0) }
+    case .borrowedReference(let inner):
+      return inner.markTraitObjectSendable().map { .borrowedReference(inner: $0) }
+    case .mutableBorrowedReference(let inner):
+      return inner.markTraitObjectSendable().map { .mutableBorrowedReference(inner: $0) }
+    case .weakReference(let inner):
+      return inner.markTraitObjectSendable().map { .weakReference(inner: $0) }
+    case .mutableWeakReference(let inner):
+      return inner.markTraitObjectSendable().map { .mutableWeakReference(inner: $0) }
+    default:
+      return nil
+    }
+  }
+
+  /// koralc `is_trait_object_shape`: whether this is a trait-object SHAPE (a
+  /// trait object directly, or under reference-family wraps). The resolver uses
+  /// this to tell the two rejected `sendable` qualifier targets apart: a trait
+  /// object points the reader at `trait sendable`, anything else simply cannot
+  /// carry the qualifier.
+  var isTraitObjectShape: Bool {
+    return markTraitObjectSendable() != nil
   }
 }
 
@@ -950,7 +1020,10 @@ extension Type: Equatable, Hashable {
       (.never, .never):
       return true
 
-    case (.function(let lParams, let lReturns), .function(let rParams, let rReturns)):
+    // `isSendable` is not part of equality: identical representation (the same
+    // erasure semantics as mono/codegen); the widening rule is judged separately
+    // at compatibility sites (koralc `given Type: Eq`).
+    case (.function(let lParams, let lReturns, _), .function(let rParams, let rReturns, _)):
       return lParams == rParams && lReturns == rReturns
 
     case (.fixedArray(let lSize, let lElement), .fixedArray(let rSize, let rElement)):
@@ -1002,7 +1075,7 @@ extension Type: Equatable, Hashable {
     
     case (.typeVariable(let lTV), .typeVariable(let rTV)):
       return lTV == rTV
-    case (.traitObject(let lDefId, let lArgs), .traitObject(let rDefId, let rArgs)):
+    case (.traitObject(let lDefId, let lArgs, _), .traitObject(let rDefId, let rArgs, _)):
       guard lArgs == rArgs else { return false }
       return lDefId == rDefId
 

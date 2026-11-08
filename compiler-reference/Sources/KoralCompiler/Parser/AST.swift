@@ -13,6 +13,34 @@ extension AccessModifier: CustomStringConvertible {
   public var description: String { rawValue }
 }
 
+/// Declaration-site cross-thread shareability modifier (concurrency-design.md):
+/// `unsafe`? `sendable`. It only appears in a nominal type's declaration modifier
+/// slot; `unsafe` must be accompanied by `sendable` (rejected at parse time).
+public enum TypeSendability: Equatable {
+  case unmarked
+  case sendable
+  case unsafeSendable
+
+  /// The spelling used in "cannot be marked ..." diagnostics. Only consulted for
+  /// a written modifier (`.sendable` / `.unsafeSendable`), matching koralc's
+  /// `sendability_label`.
+  public var modifierLabel: String {
+    switch self {
+    case .unmarked, .sendable: return "sendable"
+    case .unsafeSendable: return "unsafe sendable"
+    }
+  }
+
+  /// Debug-print note: `no` / `sendable` / `unsafe sendable`.
+  public var debugNote: String {
+    switch self {
+    case .unmarked: return "no"
+    case .sendable: return "sendable"
+    case .unsafeSendable: return "unsafe sendable"
+    }
+  }
+}
+
 // MARK: - Module System Types
 
 /// One item of a `using` import list (§3.3): `Name`, `Name as Alias`, or
@@ -105,6 +133,10 @@ public indirect enum TypeNode: CustomStringConvertible {
   case fixedArray(size: UInt64, element: TypeNode, span: SourceSpan)
   /// Foreign function pointer: `foreign (A, B) -> R`
   case foreignFunction(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
+  /// `sendable` qualifier (concurrency-design.md): `sendable (A) -> R`,
+  /// `sendable Trait`. The qualifier only holds on function types and trait
+  /// objects; the resolver decides (koralc `TypeNode.SendableQualified`).
+  case sendableQualified(TypeNode)
 
   /// Where this type is written.
   public var span: SourceSpan {
@@ -118,6 +150,9 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .functionType(_, _, let span): return span
     case .fixedArray(_, _, let span): return span
     case .foreignFunction(_, _, let span): return span
+    // No span slot of its own: the anchor follows the qualified type's span
+    // (same on every resolution path).
+    case .sendableQualified(let inner): return inner.span
     }
   }
 
@@ -145,6 +180,8 @@ public indirect enum TypeNode: CustomStringConvertible {
     case .foreignFunction(let paramTypes, let returnType, _):
       let paramsStr = paramTypes.map { $0.description }.joined(separator: ", ")
       return "foreign (\(paramsStr)) -> \(returnType)"
+    case .sendableQualified(let inner):
+      return "sendable \(inner)"
     }
   }
 }
@@ -218,6 +255,7 @@ public indirect enum GlobalNode {
     typeParameters: [TypeParameterDecl],
     parameters: [(name: String, type: TypeNode, mutable: Bool, access: AccessModifier, named: Bool, defaultValue: ExpressionNode?)],
     isMutable: Bool,
+    sendability: TypeSendability,
     access: AccessModifier,
     span: SourceSpan,
     nameSpan: SourceSpan
@@ -226,6 +264,7 @@ public indirect enum GlobalNode {
     name: String,
     typeParameters: [TypeParameterDecl],
     cases: [EnumCaseDeclaration],
+    sendability: TypeSendability,
     access: AccessModifier,
     span: SourceSpan,
     nameSpan: SourceSpan
@@ -241,6 +280,7 @@ public indirect enum GlobalNode {
     name: String,
     fields: [(name: String, type: TypeNode)]?,
     cname: String?,
+    sendability: TypeSendability,
     access: AccessModifier,
     span: SourceSpan,
     nameSpan: SourceSpan
@@ -257,9 +297,10 @@ public indirect enum GlobalNode {
     nameSpan: SourceSpan
   )
 
-  // trait Name [SuperTrait ...] { methodSignatures... }
+  // trait [sendable] Name [SuperTrait ...] { methodSignatures... }
   case traitDeclaration(
     name: String,
+    isSendable: Bool,
     typeParameters: [TypeParameterDecl],
     superTraits: [TypeNode],
     methods: [TraitMethodSignature],
@@ -303,17 +344,17 @@ extension GlobalNode {
       return span
     case .foreignFunctionDeclaration(_, _, _, _, _, _, let span, _):
       return span
-    case .globalStructDeclaration(_, _, _, _, _, let span, _):
+    case .globalStructDeclaration(_, _, _, _, _, _, let span, _):
       return span
-    case .globalEnumDeclaration(_, _, _, _, let span, _):
+    case .globalEnumDeclaration(_, _, _, _, _, let span, _):
       return span
     case .intrinsicTypeDeclaration(_, _, _, let span, _):
       return span
-    case .foreignTypeDeclaration(_, _, _, _, let span, _):
+    case .foreignTypeDeclaration(_, _, _, _, _, let span, _):
       return span
     case .foreignLetDeclaration(_, _, _, _, _, _, let span, _):
       return span
-    case .traitDeclaration(_, _, _, _, _, let span, _):
+    case .traitDeclaration(_, _, _, _, _, _, let span, _):
       return span
     case .givenDeclaration(_, _, _, let span):
       return span
@@ -341,17 +382,17 @@ extension GlobalNode {
       return nameSpan
     case .foreignFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .globalStructDeclaration(_, _, _, _, _, _, let nameSpan):
+    case .globalStructDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .globalEnumDeclaration(_, _, _, _, _, let nameSpan):
+    case .globalEnumDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .intrinsicTypeDeclaration(_, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignTypeDeclaration(_, _, _, _, _, let nameSpan):
+    case .foreignTypeDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .foreignLetDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .traitDeclaration(_, _, _, _, _, _, let nameSpan):
+    case .traitDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .givenDeclaration(_, _, _, let span):
       return span

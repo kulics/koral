@@ -1453,6 +1453,34 @@ given Parser {
     parse_trait_decl(self, access: AccessModifier): Result[Decl] = {
         let start = self.current();
         self.advance();
+        // `sendable` sits right after `trait`: `trait sendable Name`. The trait
+        // objects of a `sendable` trait are always sendable and every impl type
+        // must itself be sendable (concurrency-design.md). There is no `unsafe`
+        // form: impl types carry their own safe/unsafe distinction.
+        let mutable is_sendable = false;
+        if self.current().kind is .KwUnsafe() then {
+            let unsafe_token = self.current();
+            self.advance();
+            if self.current().kind is .KwSendable() then {
+                self.advance();
+                return .Error(
+                    self.parser_error_at(
+                        "trait cannot be marked 'unsafe sendable'",
+                        unsafe_token,
+                    ),
+                );
+            };
+            return .Error(
+                self.parser_error_at(
+                    "'unsafe' must be accompanied by 'sendable'",
+                    unsafe_token,
+                ),
+            );
+        };
+        if self.current().kind is .KwSendable() then {
+            self.advance();
+            is_sendable = true;
+        };
         let name_token = self.current();
         let name = self.expect_identifier("trait declaration") or return;
         if not self.is_upper_first(name) then {
@@ -1493,6 +1521,7 @@ given Parser {
         let base = Decl.TraitDecl(
             access,
             name,
+            is_sendable,
             type_params,
             parents,
             members,
@@ -1753,6 +1782,7 @@ let token_text(token: Token): String = {
         .KwFalse() then "false",
         .KwNull() then "null",
         .KwUnsafe() then "unsafe",
+        .KwSendable() then "sendable",
         .KwWhere() then "where",
         .Hash() then "#",
         .Plus() then "+",

@@ -161,9 +161,29 @@ enum MIRStatement {
   case retain(MIRValue)
   case release(MIRValue)
   case evaluate(MIRValue)
+  // Object-lock critical-section boundaries (concurrency-design.md). The
+  // lowerer places them in pairs: the lock address is either the hidden first
+  // field of a safe `sendable mutable` object's managed payload (`handle.ptr`
+  // is the payload pointer) or a per-variable static lock for a `let mutable`
+  // global.
+  case lock(MIRLockTarget)
+  case unlock(MIRLockTarget)
   case scopeEnter(MIRScopeID)
   case scopeExit(MIRScopeID)
   case debugSource(SourceSpan)
+}
+
+/// The lock target of a `lock`/`unlock` operation.
+///
+/// `objectLock(handle)`: the handle local holds a managed nominal handle
+/// (`struct X { void* ptr; }`); the lock is the payload's hidden first field,
+/// and `handle.ptr` cast to the payload type is the lock address (codegen
+/// emits `&payload->__lock`, not relying on the offset-0 coincidence).
+/// `globalLock(defId)`: the per-variable static lock of a `let mutable`
+/// global (static zero-init is a valid fresh state: owner=0 / recursion=0).
+enum MIRLockTarget {
+  case objectLock(MIRLocalID)
+  case globalLock(DefId)
 }
 
 enum MIRTerminator {

@@ -244,7 +244,7 @@ public let method_receiver_is_trait_object(
     symbol_type: Type,
 ): Bool = {
     return when symbol_type in {
-        .FunctionType(params, _) then when params.get(UInt(0)) in {
+        .FunctionType(params, _, _) then when params.get(UInt(0)) in {
             .Some(entry) then type_is_trait_object_handle(
                 resolve_parameterized_type(mono, entry.param_type),
             ),
@@ -259,7 +259,7 @@ public let method_receiver_is_trait_object(
 /// type it sees is already concrete, so no resolution step exists to diverge.
 public let method_receiver_is_trait_object_instantiated(symbol_type: Type): Bool = {
     return when symbol_type in {
-        .FunctionType(params, _) then when params.get(UInt(0)) in {
+        .FunctionType(params, _, _) then when params.get(UInt(0)) in {
             .Some(entry) then type_is_trait_object_handle(entry.param_type),
             .None() then false,
         },
@@ -359,7 +359,7 @@ public let has_generic_parameter(t: Type): Bool = {
         .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
         or .MutableBorrowedReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner)
         or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then has_generic_parameter(inner),
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, _) then {
             let param_types = param_entry_types(fn_params);
             for pt in param_types then {
                 if has_generic_parameter(pt) then {
@@ -377,7 +377,7 @@ public let has_generic_parameter(t: Type): Bool = {
             };
             has_generic_parameter(return_type)
         },
-        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args, _) then {
             for a in args then {
                 if has_generic_parameter(a) then {
                     return true;
@@ -405,7 +405,7 @@ public let has_generic_parameter_excluding_self(t: Type): Bool = {
         .MutableWeakReferenceType(inner) then has_generic_parameter_excluding_self(
             inner,
         ),
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, _) then {
             for pt in param_entry_types(fn_params) then {
                 if has_generic_parameter_excluding_self(pt) then {
                     return true;
@@ -421,7 +421,7 @@ public let has_generic_parameter_excluding_self(t: Type): Bool = {
             };
             has_generic_parameter_excluding_self(return_type)
         },
-        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args) then {
+        .GenericStruct(_, args) or .GenericEnum(_, args) or .TraitObject(_, args, _) then {
             for a in args then {
                 if has_generic_parameter_excluding_self(a) then {
                     return true;
@@ -512,6 +512,15 @@ public let instantiate_struct(
     // every `next()` call, breaking for-loop termination.
     if mono.storage.context.is_struct_mutable(template.def_id) then {
         mono.storage.context.set_struct_mutable(def_id, true);
+    };
+
+    // Propagate the template's sendability CONDITIONALLY (concurrency-design.md
+    // §派生规则): the instantiation is sendable only when every type argument is.
+    // `unsafe` does not exempt the argument condition.
+    let template_sendability = mono.storage.context.type_sendability(template.def_id);
+    if template_sendability is not .Unmarked()
+        and mono.storage.context.all_sendable_types(args) then {
+        mono.storage.context.set_type_sendability(def_id, template_sendability);
     };
 
     mono.storage.context.set_struct_info(

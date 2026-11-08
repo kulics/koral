@@ -580,7 +580,7 @@ given CodeGen {
         if not out.forward_forms.is_empty() then {
             header.push_string("\n");
         };
-        for text in fixed_array_typedef_texts then {
+        for text in typedef_tables.fixed_array_typedef_texts then {
             let mutable needed = false;
             for name in out.array_names then {
                 if text.contains("\(name);") then {
@@ -592,7 +592,7 @@ given CodeGen {
                 header.push_string("\n");
             };
         };
-        for text in foreign_function_typedef_texts then {
+        for text in typedef_tables.foreign_function_typedef_texts then {
             let mutable needed = false;
             for name in out.fnptr_names then {
                 if text.contains("(*\(name))") then {
@@ -786,11 +786,22 @@ given CodeGen {
         self.buffer.push_string(fn_ptr_typedef_marker());
         for decl in sorted_decls then {
             when decl in {
-                .Structure(name, _, fields, managed) then {
-                    self.generate_type_declaration(name, fields, managed);
+                .Structure(name, symbol_type, fields, managed) then {
+                    self.generate_type_declaration(
+                        name,
+                        fields,
+                        managed,
+                        self.context.is_locked_type(symbol_type),
+                        self.uses_nonatomic_rc(symbol_type),
+                    );
                 },
-                .Enum(name, _, cases, managed) then {
-                    self.generate_enum_declaration(name, cases, managed);
+                .Enum(name, symbol_type, cases, managed) then {
+                    self.generate_enum_declaration(
+                        name,
+                        cases,
+                        managed,
+                        self.uses_nonatomic_rc(symbol_type),
+                    );
                 },
                 .ForeignStructure(name, _, fields) then {
                     self.generate_foreign_struct_declaration(name, fields);
@@ -1074,11 +1085,20 @@ given CodeGen {
         // its inlining.
         for global in self.program.globals then {
             when global in {
-                .GlobalVariable(identifier, initializer_function, _, decl_type) then {
+                .GlobalVariable(identifier, initializer_function, is_mutable, decl_type) then {
                     let mutable c_type = self.c_type_name(decl_type);
                     let c_name = self.c_identifier_for_symbol(identifier);
                     let init_name = self.callable_c_name(initializer_function);
                     let display_name = self.context.symbol_name(identifier);
+                    if is_mutable then {
+                        // `let mutable` 全局绑定的每变量锁（concurrency-design.md
+                        // §对象锁语义）：读写与赋值整句临界区都用它。静态零
+                        // 初始化即可——owner=0 / recursion=0 就是 runtime 的新鲜
+                        // 锁状态（owner 记线程 id，0 表空闲），无需启动期 init。
+                        self.buffer.push_string(
+                            "struct __koral_Lock __koral_glock_\(c_name);\n",
+                        );
+                    };
                     if self.global_initializer_constant(initializer_function) is .Some(_) then {
                         self.buffer.push_string("uint8_t __koral_gstate_\(c_name) = 2;\n");
                         self.buffer.push_string(
@@ -1358,7 +1378,7 @@ given CodeGen {
 
     public build_param_type_list_from_function_type(self, fn_type: Type): String = {
         return when fn_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.is_empty() then {
                     return "void";
                 };

@@ -41,7 +41,7 @@ extension Monomorphizer {
     }
 
     func normalizedTraitPlaceholderExpectedMethodType(_ methodType: Type, for lookupBaseType: Type) -> Type {
-        guard case .function(let params, let returns) = methodType,
+        guard case .function(let params, let returns, _) = methodType,
               let first = params.first else {
             return methodType
         }
@@ -72,7 +72,7 @@ extension Monomorphizer {
         }
 
         let normalizedParams = [Parameter(type: normalizedReceiver, kind: first.kind)] + params.dropFirst()
-        return .function(parameters: normalizedParams, returns: returns)
+        return .function(parameters: normalizedParams, returns: returns, isSendable: false)
     }
 
 
@@ -112,7 +112,7 @@ extension Monomorphizer {
     }
 
     internal func methodHasCompatibleRefLikeReceiver(_ methodType: Type, baseType: Type) -> Bool {
-        guard case .function(let params, _) = methodType,
+        guard case .function(let params, _, _) = methodType,
               let firstParam = params.first else {
             return false
         }
@@ -197,7 +197,7 @@ extension Monomorphizer {
                 resolvedTraitInfo = nil
             }
             if let traitInfo = resolvedTraitInfo {
-                return .traitObject(traitDefId: traitInfo.defId, typeArgs: [])
+                return .traitObject(traitDefId: traitInfo.defId, typeArgs: [], isSendable: false)
             }
             // Otherwise treat as generic parameter
             return .genericParameter(name: name)
@@ -246,7 +246,7 @@ extension Monomorphizer {
             let resolvedParamTypes = try paramTypes.map { try resolveTypeNode($0, substitution: substitution) }
             let resolvedReturnType = try resolveTypeNode(returnType, substitution: substitution)
             let parameters = resolvedParamTypes.map { Parameter(type: $0, kind: .byVal) }
-            return .function(parameters: parameters, returns: resolvedReturnType)
+            return .function(parameters: parameters, returns: resolvedReturnType, isSendable: false)
 
         case .fixedArray(let size, let element, _):
             let resolvedElement = try resolveTypeNode(element, substitution: substitution)
@@ -259,6 +259,12 @@ extension Monomorphizer {
             let ffParams = try paramTypes.map { try resolveTypeNode($0, substitution: substitution) }
             let ffReturn = try resolveTypeNode(returnType, substitution: substitution)
             return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
+        case .sendableQualified(let inner):
+            // Mirror koralc's `mono_type_node`: carry the `sendable` bit through
+            // (it never participates in mono identity); sema already reported
+            // the illegal shapes.
+            let resolvedInner = try resolveTypeNode(inner, substitution: substitution)
+            return resolvedInner.withSendableQualifier() ?? resolvedInner
         }
     }
     
@@ -373,7 +379,7 @@ extension Monomorphizer {
             let resolvedElement = resolveParameterizedType(element, visited: visited)
             return resolvedElement == element ? type : .mutablePointer(element: resolvedElement)
 
-        case .function(let params, let returns):
+        case .function(let params, let returns, _):
             var paramsChanged = false
             let newParams = params.map { param in
                 let resolvedType = resolveParameterizedType(param.type, visited: visited)
@@ -386,7 +392,7 @@ extension Monomorphizer {
             if !paramsChanged && newReturns == returns {
                 return type
             }
-            return .function(parameters: newParams, returns: newReturns)
+            return .function(parameters: newParams, returns: newReturns, isSendable: false)
             
         case .structure(let defId):
             if resolvedStructEnumDefIds.contains(defId.id) {
@@ -871,8 +877,7 @@ extension Monomorphizer {
                case .function = identifier.kind {
                 let expectedCallType = Type.function(
                     parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
+                    returns: newType, isSendable: false)
                 if let instantiated = resolveStandaloneMethodFunctionReference(
                     definitionMethod: identifier,
                     substitutedFunctionType: expectedCallType
@@ -888,8 +893,7 @@ extension Monomorphizer {
                 let expectedCallType = Type.function(
                     parameters: [Parameter(type: lookupBaseType, kind: .byVal)]
                         + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
+                    returns: newType, isSendable: false)
                 if let concreteMethod = resolveTraitPlaceholderMethodByIdentity(
                     traitMethodDefId: traitMethodDefId,
                     expectedMethodType: expectedCallType,
@@ -897,14 +901,13 @@ extension Monomorphizer {
                     receiverType: lookupBaseType
                 ) {
                     let resolvedMethodType = resolveParameterizedType(concreteMethod.type)
-                    if case .function(let params, _) = resolvedMethodType {
+                    if case .function(let params, _, _) = resolvedMethodType {
                         newArguments = zip(newArguments, params.dropFirst()).map { arg, param in
                             alignMethodReferenceBase(
                                 arg,
                                 to: .function(
                                     parameters: [Parameter(type: param.type, kind: param.kind)],
-                                    returns: param.type
-                                )
+                                    returns: param.type, isSendable: false)
                             )
                         }
                     }
@@ -993,8 +996,7 @@ extension Monomorphizer {
                         expectedCallType: Type.function(
                             parameters: [Parameter(type: base.type, kind: .byVal)]
                                 + newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                            returns: newType
-                        ),
+                            returns: newType, isSendable: false),
                         arguments: newArguments
                     ) {
                         newCallee = sharedCall.callee
@@ -1010,7 +1012,7 @@ extension Monomorphizer {
                !context.containsGenericParameter(base.type) {
                 let declaredMethodType = resolveParameterizedType(method.type)
                 let substMethodType: Type = {
-                    guard case .function(let declaredParams, _) = declaredMethodType,
+                    guard case .function(let declaredParams, _, _) = declaredMethodType,
                           let receiverParam = declaredParams.first else {
                         return declaredMethodType
                     }
@@ -1023,8 +1025,7 @@ extension Monomorphizer {
                     }
                     return .function(
                         parameters: [receiverParam] + argumentParams,
-                        returns: newType
-                    )
+                        returns: newType, isSendable: false)
                 }()
                 let substMArgs = (methodTypeArgs ?? []).map { resolveParameterizedType($0) }
                 let resolution = (try? resolveMethodInstanceByIdentityForReceiver(
@@ -1098,8 +1099,7 @@ extension Monomorphizer {
                 // Create the callee as a variable reference to the specialized function symbol
                 let functionType = Type.function(
                     parameters: newArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                    returns: newType
-                )
+                    returns: newType, isSendable: false)
                 let callee: TypedExpressionNode = .variable(
                     identifier: makeSymbol(name: specializedFunctionSymbolName, type: functionType, kind: .function)
                 )
@@ -1364,8 +1364,7 @@ extension Monomorphizer {
             
             let expectedMethodType = Type.function(
                 parameters: resolvedArguments.map { Parameter(type: $0.type, kind: .byVal) },
-                returns: resolvedReturnType
-            )
+                returns: resolvedReturnType, isSendable: false)
 
             let directLookupKey = context.receiverMethodLookupKey(resolvedBaseType, methodName)
             let staticEntry: ConcreteMethodEntry? = extensionMethods[directLookupKey] ?? {

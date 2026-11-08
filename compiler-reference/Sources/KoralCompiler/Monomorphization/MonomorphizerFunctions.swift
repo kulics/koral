@@ -36,7 +36,7 @@ extension Monomorphizer {
 
 
     internal func alignMethodReferenceBase(_ base: TypedExpressionNode, to methodType: Type) -> TypedExpressionNode {
-        guard case .function(let params, _) = methodType,
+        guard case .function(let params, _, _) = methodType,
               let receiverType = params.first?.type else {
             return base
         }
@@ -187,7 +187,7 @@ extension Monomorphizer {
                 resolvedParams: resolvedParams,
                 declaredParams: resolvedTemplate.parameters
             ),
-            returns: resolvedReturnType)
+            returns: resolvedReturnType, isSendable: false)
         
         // Skip code generation if function type still contains generic parameters
         if context.containsGenericParameter(functionType) {
@@ -506,8 +506,7 @@ extension Monomorphizer {
                 resolvedParams: params,
                 declaredParams: method.parameters
             ),
-            returns: returnType
-        )
+            returns: returnType, isSendable: false)
         if method.parameters.first?.name == "self",
            baseType.indirectionCompatibilityInfo != nil,
            let receiverParam = params.first,
@@ -687,8 +686,7 @@ extension Monomorphizer {
                 resolvedParams: params,
                 declaredParams: method.parameters
             ),
-            returns: returnType
-        )
+            returns: returnType, isSendable: false)
         
         instantiatedFunctions[key] = (mangledName, funcType)
         return makeSymbol(name: mangledName, type: funcType, kind: .function)
@@ -778,7 +776,7 @@ extension Monomorphizer {
         substitutedMethodTypeArgs: [Type] = []
     ) -> Symbol? {
         let resolvedFunctionType = resolveParameterizedType(substitutedFunctionType)
-        guard case .function(let parameters, let returns) = resolvedFunctionType else {
+        guard case .function(let parameters, let returns, _) = resolvedFunctionType else {
             return nil
         }
 
@@ -1110,8 +1108,8 @@ extension Monomorphizer {
                 return true
             }
             let resolvedHitType = resolveParameterizedType(hitType)
-            guard case .function(let hitParams, let hitReturns) = resolvedHitType,
-                  case .function(let expectedParams, let expectedReturns) = fullMethodType,
+            guard case .function(let hitParams, let hitReturns, _) = resolvedHitType,
+                  case .function(let expectedParams, let expectedReturns, _) = fullMethodType,
                   hitParams.count == expectedParams.count,
                   hitReturns == expectedReturns else {
                 return resolvedHitType == fullMethodType
@@ -1234,7 +1232,7 @@ extension Monomorphizer {
     private func inferMethodTypeArgsBySignature(
         template: GenericExtensionMethodTemplate, against substitutedType: Type
     ) -> [Type] {
-        guard case .function(let expectedParams, let expectedReturns) = substitutedType,
+        guard case .function(let expectedParams, let expectedReturns, _) = substitutedType,
               let checkedParams = template.checkedParameters,
               let checkedReturns = template.checkedReturnType else {
             return []
@@ -1261,7 +1259,7 @@ extension Monomorphizer {
                  .borrowedReference(let inner), .mutableBorrowedReference(let inner),
                  .weakReference(let inner), .mutableWeakReference(let inner):
                 collect(inner)
-            case .function(let params, let returns):
+            case .function(let params, let returns, _):
                 for p in params { collect(p.type) }
                 collect(returns)
             case .genericStruct(_, let args), .genericEnum(_, let args):
@@ -1289,7 +1287,7 @@ extension Monomorphizer {
              (.borrowedReference(let p), .borrowedReference(let c)),
              (.mutableBorrowedReference(let p), .mutableBorrowedReference(let c)):
             return unifyTypePattern(p, against: c, bindings: &bindings)
-        case (.function(let pParams, let pRet), .function(let cParams, let cRet)):
+        case (.function(let pParams, let pRet, _), .function(let cParams, let cRet, _)):
             guard pParams.count == cParams.count else { return false }
             var ok = zip(pParams, cParams).allSatisfy { unifyTypePattern($0.type, against: $1.type, bindings: &bindings) }
             ok = ok && unifyTypePattern(pRet, against: cRet, bindings: &bindings)
@@ -1325,14 +1323,14 @@ extension Monomorphizer {
             return .pointer(element: normalizeTypeArgument(element))
         case .mutablePointer(let element):
             return .mutablePointer(element: normalizeTypeArgument(element))
-        case .function(let params, let returns):
+        case .function(let params, let returns, _):
             let newParams = params.map { param in
                 Parameter(
                     type: normalizeTypeArgument(param.type),
                     kind: param.kind
                 )
             }
-            return .function(parameters: newParams, returns: normalizeTypeArgument(returns))
+            return .function(parameters: newParams, returns: normalizeTypeArgument(returns), isSendable: false)
         default:
             return type
         }
@@ -1452,8 +1450,8 @@ extension Monomorphizer {
                 return false
             }
             return typeMatchesExpectedPattern(actual: actualInner, expected: expectedInner)
-        case .function(let expectedParams, let expectedReturn):
-            guard case .function(let actualParams, let actualReturn) = actual,
+        case .function(let expectedParams, let expectedReturn, _):
+            guard case .function(let actualParams, let actualReturn, _) = actual,
                   actualParams.count == expectedParams.count else {
                 return false
             }
@@ -1663,8 +1661,8 @@ extension Monomorphizer {
                 }
             }
             return true
-        case .function(let pParams, let pRet):
-            guard case .function(let aParams, let aRet) = actual,
+        case .function(let pParams, let pRet, _):
+            guard case .function(let aParams, let aRet, _) = actual,
                   pParams.count == aParams.count else { return false }
             for (pParam, aParam) in zip(pParams, aParams) {
                 guard unifyGenericTypePattern(pattern: pParam.type, actual: aParam.type, typeParamNames: typeParamNames, inferred: &inferred) else {
@@ -1683,7 +1681,7 @@ extension Monomorphizer {
         expectedMethodType: Type,
         methodTypeArgs: [Type]
     ) throws -> [Type]? {
-        guard case .function(let actualParams, let actualReturn) = expectedMethodType else {
+        guard case .function(let actualParams, let actualReturn, _) = expectedMethodType else {
             return nil
         }
 
@@ -1762,7 +1760,7 @@ extension Monomorphizer {
             return providedMethodTypeArgs
         }
         guard let expectedMethodType,
-              case .function(let actualParams, let actualReturn) = expectedMethodType else {
+              case .function(let actualParams, let actualReturn, _) = expectedMethodType else {
             return providedMethodTypeArgs
         }
 
@@ -1889,7 +1887,7 @@ extension Monomorphizer {
     private func entryLikeExpectedMethodType(baseType: Type, methodName: String) -> Type {
         // Best-effort approximation used only for trait-entry instantiation when call-site
         // expected type is unavailable at this point.
-        return .function(parameters: [Parameter(type: baseType, kind: .byVal)], returns: .genericParameter(name: methodName))
+        return .function(parameters: [Parameter(type: baseType, kind: .byVal)], returns: .genericParameter(name: methodName), isSendable: false)
     }
 
     internal func lookupTraitTargetExtensionMethod(
@@ -1993,14 +1991,13 @@ extension Monomorphizer {
         }
         let resolvedToolType = resolveParameterizedType(toolMethod.type)
         var alignedArgs = arguments
-        if case .function(let params, _) = resolvedToolType {
+        if case .function(let params, _, _) = resolvedToolType {
             alignedArgs = zip(alignedArgs, params.dropFirst()).map { arg, param in
                 alignMethodReferenceBase(
                     arg,
                     to: .function(
                         parameters: [Parameter(type: param.type, kind: param.kind)],
-                        returns: param.type
-                    )
+                        returns: param.type, isSendable: false)
                 )
             }
         }
@@ -2128,11 +2125,11 @@ extension Monomorphizer {
     /// the trait arguments. The spelling is returned for display only.
     internal func extractTraitObjectType(_ type: Type) -> (traitName: String, traitDefId: DefId, typeArgs: [Type])? {
         switch type {
-        case .traitObject(let traitDefId, let typeArgs):
+        case .traitObject(let traitDefId, let typeArgs, _):
             return (Type.spelling(traitDefId), traitDefId, typeArgs)
         case .reference(let inner), .mutableReference(let inner),
              .borrowedReference(let inner), .mutableBorrowedReference(let inner):
-            if case .traitObject(let traitDefId, let typeArgs) = inner {
+            if case .traitObject(let traitDefId, let typeArgs, _) = inner {
                 return (Type.spelling(traitDefId), traitDefId, typeArgs)
             }
             return nil

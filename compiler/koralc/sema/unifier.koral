@@ -3,7 +3,7 @@
 // 对应 Swift 实现中的 Unifier。
 
 // 合一错误类型。
-public type UnificationError {
+public type unsafe sendable UnificationError {
     // 两个不兼容的类型无法合一
     TypeMismatch(lhs: Type, rhs: Type, span: SourceSpan),
     // 类型变量出现在要绑定的类型中（防止无限类型）
@@ -72,7 +72,7 @@ private let unification_base_summary(inner: Type, depth: UInt): String = {
                 def_id_spelling(template_def_id) + "[...]"
             },
             .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then def_id_spelling(def_id),
-            .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then def_id_spelling(trait_def_id),
             .TypeVar(tv_ref) then tv_ref.display(),
             .Unknown() then "?",
             _ then type_to_string(inner),
@@ -105,7 +105,7 @@ private let unification_base_summary(inner: Type, depth: UInt): String = {
         .BoolType() then "Bool",
         .VoidType() then "Void",
         .NeverType() then "Never",
-        .FunctionType(params, ret) then {
+        .FunctionType(params, ret, _) then {
             let mutable out = StringBuilder.new();
             out.push_byte('(');
             let mutable first = true;
@@ -149,7 +149,7 @@ private let unification_base_summary(inner: Type, depth: UInt): String = {
             if info.module_path.is_empty() then "Module"
             else info.module_path.join_to_string(".")
         },
-        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
+        .TraitObject(trait_def_id, _, _) then def_id_spelling(trait_def_id),
         .TypeVar(tv_ref) then tv_ref.display(),
         .Unknown() then "?",
         // Wrapper forms are peeled before we get here, so this is only reached
@@ -202,13 +202,22 @@ given Unifier {
 
         // 两边都是函数形状（含 foreign 函数指针——签名同形）
         when lhs_r in {
-            .FunctionType(lhs_params, lhs_ret) or .ForeignFunctionType(lhs_params, lhs_ret) then {
+            .FunctionType(lhs_params, lhs_ret, _) or .ForeignFunctionType(lhs_params, lhs_ret) then {
                 when rhs_r in {
-                    .FunctionType(rhs_params, rhs_ret)
+                    .FunctionType(rhs_params, rhs_ret, _)
                     or .ForeignFunctionType(rhs_params, rhs_ret) then {
                         if not (lhs_params.count() == rhs_params.count()) then {
                             return Result[Void].Error(
                                 UnificationError.ArityMismatch(lhs_r, rhs_r, span),
+                            );
+                        };
+                        // 泛型合一对 `sendable` 槽从严：槽不一致不合一
+                        // （concurrency-design.md §派生规则 5）。
+                        if lhs_r is .FunctionType(_, _, _) and rhs_r is .FunctionType(_, _, _) and self.context.is_sendable_type(
+                            lhs_r,
+                        ) != self.context.is_sendable_type(rhs_r) then {
+                            return Result[Void].Error(
+                                UnificationError.TypeMismatch(lhs_r, rhs_r, span),
                             );
                         };
                         for pair in lhs_params.lazy().zip[
@@ -402,7 +411,7 @@ given Unifier {
                     _ then self.resolve(resolved),
                 }
             },
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 let mutable changed = false;
                 let mutable new_params = List[Type].new();
                 for entry in params then {
@@ -425,6 +434,7 @@ given Unifier {
                     ) else Type.FunctionType(
                         types_to_param_entries(new_params),
                         resolved_ret,
+                        self.context.is_sendable_type(t),
                     )
                 } else t
             },
@@ -501,7 +511,7 @@ given Unifier {
                     _ then self.resolve_deep(resolved),
                 }
             },
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 let mutable changed = false;
                 let mutable new_params = List[Type].new();
                 for entry in params then {
@@ -524,6 +534,7 @@ given Unifier {
                     ) else Type.FunctionType(
                         types_to_param_entries(new_params),
                         resolved_ret,
+                        self.context.is_sendable_type(t),
                     )
                 } else t
             },
@@ -598,7 +609,7 @@ given Unifier {
             .TypeVar(tv_ref) then {
                 return tv_ref.id == tv_id;
             },
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 for param in params then {
                     if self.occurs_check_internal(tv_id, param.param_type, visited) then {
                         return true;
@@ -656,7 +667,7 @@ given Unifier {
                     .None() then false,
                 };
             },
-            .TraitObject(_, args) then {
+            .TraitObject(_, args, _) then {
                 for arg in args then {
                     if self.occurs_check_internal(tv_id, arg, visited) then {
                         return true;
@@ -674,7 +685,7 @@ given Unifier {
 /// spelling.
 private let generic_template_id(t: Type): DefId = {
     return when t in {
-        .GenericStruct(d, _) or .GenericEnum(d, _) or .TraitObject(d, _) then d,
+        .GenericStruct(d, _) or .GenericEnum(d, _) or .TraitObject(d, _, _) then d,
         _ then def_id_invalid(),
     };
 };

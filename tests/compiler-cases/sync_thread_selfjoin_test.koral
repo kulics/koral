@@ -9,15 +9,16 @@ let main(): Void = {
     // A failed join (self-join) must not consume the handle: wait() stays
     // retryable instead of the failure being masked as "already waited", and
     // the OS thread resources are still joined or detached afterwards.
-    let pending = List[Thread].new();
+    // Thread-confined state travels by channel (the sendable message
+    // pattern): main hands the worker its own handle after the spawn.
+    let pair = make_channel[Thread](1);
+    let sender = pair.first;
+    let receiver = pair.second;
     let done = AtomicInt.new(0);
     let outcome = AtomicInt.new(0);
     let th = run_task(
         () => {
-            while pending.count() == 0 then {
-                yield_thread_now();
-            };
-            let self_thread = pending[0];
+            let self_thread = receiver.recv().unwrap();
             when self_thread.wait() in {
                 .Ok(_) then {
                     outcome.store(1);
@@ -46,7 +47,7 @@ let main(): Void = {
             done.store(1);
         },
     );
-    pending.push(th);
+    sender.send(th).unwrap();
     while done.load() == 0 then {
         yield_thread_now();
     };

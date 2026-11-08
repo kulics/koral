@@ -1,0 +1,32 @@
+// EXPECT-UNORDERED: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+// EXPECT-UNORDERED: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+// Two threads writing to the same stream: each write is atomic with respect
+// to other writes on the stream (the internal stdio write lock), so the two
+// complete lines appear and no torn line interleaves them.
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let done_a = AtomicInt.new(0);
+    let done_b = AtomicInt.new(0);
+    let line_a = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let line_b = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let t1 = run_task(() => {
+        for _ in 0..<50 then {
+            println(line_a);
+        };
+        done_a.store(1);
+    });
+    let t2 = run_task(() => {
+        for _ in 0..<50 then {
+            println(line_b);
+        };
+        done_b.store(1);
+    });
+    let _ = t1.wait();
+    let _ = t2.wait();
+    while done_a.load() == 0 or done_b.load() == 0 then {
+        yield_thread_now();
+    };
+};

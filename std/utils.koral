@@ -9,7 +9,7 @@
 // ============================================================================
 
 /// A generic tuple-like pair holding a `first` and a `second` value.
-public type Pair[T: Any, U: Any](public first: T, public second: U);
+public type sendable Pair[T: Any, U: Any](public first: T, public second: U);
 
 /// `Eq` for `Pair`: equal when both components are equal.
 given[T: Eq, U: Eq] Pair[T, U]: Eq {
@@ -106,6 +106,42 @@ public let last_error_message(): String = {
     return String.from_cstring_unchecked(msg);
 };
 
+// ============================================================================
+// Process-stream write serialization
+// ============================================================================
+// The `print` family and `Stdout`/`Stderr` (std.io) must serialize their
+// writes against each other ("each write is atomic with respect to other
+// writes on the same stream", closing stdio-design.md's multi-writer loose
+// end). The lock lives in the root module so both sides can share one object
+// per stream -- std.io can import root, but root cannot import std.io. It
+// wraps the same OS mutex as `std.sync.Mutex`.
+
+let foreign __koral_mutex_create(): *UInt8;
+let foreign __koral_mutex_lock(mutex: *UInt8): Void;
+let foreign __koral_mutex_unlock(mutex: *UInt8): Void;
+
+/// A process-stream write lock. Construction-then-immutable: the handle is
+/// created once per stream and never changes or is destroyed.
+protected type unsafe sendable mutable StdioWriteLock(private handle: *UInt8);
+
+/// Locking operations for `StdioWriteLock`.
+given StdioWriteLock {
+
+    /// Take the lock (blocking).
+    protected lock(self): Void = __koral_mutex_lock(self.handle);
+
+    /// Release the lock.
+    protected unlock(self): Void = __koral_mutex_unlock(self.handle);
+};
+
+/// The write-serialization lock for standard output (shared by the `print`
+/// family and every `Stdout` handle).
+protected let stdout_write_lock: StdioWriteLock = StdioWriteLock(__koral_mutex_create());
+
+/// The write-serialization lock for standard error (shared by `panic`, the
+/// `eprint` family, and every `Stderr` handle).
+protected let stderr_write_lock: StdioWriteLock = StdioWriteLock(__koral_mutex_create());
+
 /// Return the command-line arguments, starting with the program name.
 public let args(): List[String] = {
     let mutable result: List[String] = [];
@@ -121,13 +157,12 @@ public let args(): List[String] = {
 // Panic and Assertion
 // ============================================================================
 
-/// Print `Panic: ` and the message to standard error, then abort the process.
+/// Print `Panic: ` and the message to standard error in one locked write,
+/// then abort the process.
 public let panic(message: String): Never = {
-    let prefix = "Panic: ";
-    fwrite(prefix.bytes.data, 1, prefix.len, __koral_stderr());
-    fwrite(message.bytes.data, 1, message.len, __koral_stderr());
-    let newline = "\n";
-    fwrite(newline.bytes.data, 1, newline.len, __koral_stderr());
+    let line = "Panic: " + message + "\n";
+    stderr_write_lock.lock();
+    fwrite(line.bytes.data, 1, line.len, __koral_stderr());
     fflush(__koral_stderr());
     abort();
 };
@@ -143,35 +178,45 @@ public let assert(condition: Bool, message: String): Void = {
 // Standard IO Functions
 // ============================================================================
 
-/// Write `value`'s text to standard output without a newline, then flush.
+/// Write `value`'s text to standard output without a newline in one locked
+/// write, then flush. Atomic with respect to other writes on the stream.
 public let print[T: ToString](value: T): Void = {
     let s = value.to_string();
+    stdout_write_lock.lock();
+    defer stdout_write_lock.unlock();
     fwrite(s.bytes.data, 1, s.len, __koral_stdout());
     fflush(__koral_stdout());
 };
 
-/// Write `value`'s text and a newline to standard output, then flush.
+/// Write `value`'s text and a newline to standard output as ONE locked write
+/// of the fully formatted line, then flush. Atomic with respect to other
+/// writes on the stream: lines never tear.
 public let println[T: ToString](value: T): Void = {
-    let s = value.to_string();
-    fwrite(s.bytes.data, 1, s.len, __koral_stdout());
-    let newline = "\n";
-    fwrite(newline.bytes.data, 1, newline.len, __koral_stdout());
+    let line = value.to_string() + "\n";
+    stdout_write_lock.lock();
+    defer stdout_write_lock.unlock();
+    fwrite(line.bytes.data, 1, line.len, __koral_stdout());
     fflush(__koral_stdout());
 };
 
-/// Write `value`'s text to standard error without a newline, then flush.
+/// Write `value`'s text to standard error without a newline in one locked
+/// write, then flush. Atomic with respect to other writes on the stream.
 public let eprint[T: ToString](value: T): Void = {
     let s = value.to_string();
+    stderr_write_lock.lock();
+    defer stderr_write_lock.unlock();
     fwrite(s.bytes.data, 1, s.len, __koral_stderr());
     fflush(__koral_stderr());
 };
 
-/// Write `value`'s text and a newline to standard error, then flush.
+/// Write `value`'s text and a newline to standard error as ONE locked write
+/// of the fully formatted line, then flush. Atomic with respect to other
+/// writes on the stream: lines never tear.
 public let eprintln[T: ToString](value: T): Void = {
-    let s = value.to_string();
-    fwrite(s.bytes.data, 1, s.len, __koral_stderr());
-    let newline = "\n";
-    fwrite(newline.bytes.data, 1, newline.len, __koral_stderr());
+    let line = value.to_string() + "\n";
+    stderr_write_lock.lock();
+    defer stderr_write_lock.unlock();
+    fwrite(line.bytes.data, 1, line.len, __koral_stderr());
     fflush(__koral_stderr());
 };
 

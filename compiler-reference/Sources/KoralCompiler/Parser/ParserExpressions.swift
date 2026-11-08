@@ -74,7 +74,7 @@ extension Parser {
   /// Whether a type starts at the cursor.
   private func shapeStartsType() -> Bool {
     switch currentToken {
-    case .questionMark, .selfTypeKeyword:
+    case .questionMark, .selfTypeKeyword, .sendableKeyword:
       return true
     case .multiply:
       return isTypeHeadToken(lexer.peekNextToken())
@@ -86,10 +86,11 @@ extension Parser {
   }
 
   /// Whether a token can start a type head (after `*` or at expression start).
-  /// Type heads are `mutable`, uppercase identifiers, and `Self`.
+  /// Type heads are `mutable`, uppercase identifiers, `Self`, and the
+  /// `sendable` qualifier prefix.
   private func isTypeHeadToken(_ token: Token) -> Bool {
     switch token {
-    case .mutableKeyword, .selfTypeKeyword:
+    case .mutableKeyword, .selfTypeKeyword, .sendableKeyword:
       return true
     case .identifier(let name):
       return isValidTypeName(name)
@@ -114,12 +115,15 @@ extension Parser {
   /// false (without promising anything about the cursor) when the run is not
   /// a type -- the caller only reaches this after `scanTypeShape` said yes.
   func scanTypeShapeConsuming() -> Bool {
-    // Prefixes: `?T`, `*T`, `*mutable T`. They nest. A `(` after `*` is a
-    // pointer-to-function type, not a deref -- this is the TYPE shape scan.
+    // Prefixes: `?T`, `*T`, `*mutable T`, `sendable T`. They nest. A `(` after
+    // `*` is a pointer-to-function type, not a deref -- this is the TYPE shape
+    // scan.
     var morePrefixes = true
     while morePrefixes {
       switch currentToken {
       case .questionMark:
+        advanceShape()
+      case .sendableKeyword:
         advanceShape()
       case .multiply where isTypeHeadToken(lexer.peekNextToken()) || lexer.peekNextToken() === .leftParen:
         advanceShape()

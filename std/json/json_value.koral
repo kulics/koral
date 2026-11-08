@@ -29,8 +29,12 @@ let foreign __koral_parse_float64(cstr: *UInt8): Float64;
 // JsonValue Type Definition
 // ============================================================================
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
-/// `Number` holds a `Float64`, `Array` a list of values, and `Object` a string-keyed map.
-public type JsonValue {
+/// `Number` holds a `Float64`, `Array` a frozen list of values, and `Object` a
+/// frozen string-keyed map. A value is construction-then-read-only data that
+/// sits on the `Frozen` tree, so it is safe `sendable` and may cross threads
+/// directly (e.g. through a `Channel[JsonValue]`); parsing and building stay
+/// on the mutable side (`JsonParser` accumulates, then freezes at construction).
+public type sendable JsonValue {
     Null(),
     Bool(value: Bool),
     /// A non-integer number. Integers that fit `Int`/`UInt` are stored
@@ -40,8 +44,8 @@ public type JsonValue {
     Int(value: Int),
     UInt(value: UInt),
     String(value: String),
-    Array(elements: List[JsonValue]),
-    Object(entries: Dict[String, JsonValue]),
+    Array(elements: FrozenList[JsonValue]),
+    Object(entries: FrozenDict[String, JsonValue]),
 };
 
 // ============================================================================
@@ -157,7 +161,7 @@ private let make_indent(level: UInt): String = {
     return out.to_string();
 };
 
-private let to_string_pretty_array(elements: List[JsonValue], level: UInt): String = {
+private let to_string_pretty_array(elements: FrozenList[JsonValue], level: UInt): String = {
     let count = elements.count();
     if count == 0 then {
         return "[]";
@@ -180,7 +184,7 @@ private let to_string_pretty_array(elements: List[JsonValue], level: UInt): Stri
 };
 
 private let to_string_pretty_object(
-    entries: Dict[String, JsonValue],
+    entries: FrozenDict[String, JsonValue],
     level: UInt,
 ): String = {
     if entries.count() == 0 then {
@@ -286,15 +290,17 @@ given JsonValue {
     };
 
     /// Return the `Array` elements, or `None` when this is not an `Array`.
-    public as_array(self): Option[List[JsonValue]] = when self in {
-        .Array(v) then Option[List[JsonValue]].Some(v),
-        _ then Option[List[JsonValue]].None(),
+    /// Zero-copy view: the snapshot handle is shared with the value.
+    public as_array(self): Option[FrozenList[JsonValue]] = when self in {
+        .Array(v) then Option[FrozenList[JsonValue]].Some(v),
+        _ then Option[FrozenList[JsonValue]].None(),
     };
 
     /// Return the `Object` entries, or `None` when this is not an `Object`.
-    public as_object(self): Option[Dict[String, JsonValue]] = when self in {
-        .Object(v) then Option[Dict[String, JsonValue]].Some(v),
-        _ then Option[Dict[String, JsonValue]].None(),
+    /// Zero-copy view: the snapshot handle is shared with the value.
+    public as_object(self): Option[FrozenDict[String, JsonValue]] = when self in {
+        .Object(v) then Option[FrozenDict[String, JsonValue]].Some(v),
+        _ then Option[FrozenDict[String, JsonValue]].None(),
     };
 
     // --- Indexed access methods ---

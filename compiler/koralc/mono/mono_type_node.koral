@@ -137,7 +137,7 @@ public let resolve_type_node(
                 return Type.TraitObject(
                     trait_def_id_from_registry(mono, base),
                     resolved_args,
-                );
+                false);
             };
             when mono.storage.generic_templates.lookup_struct(base) in {
                 .Some(struct_template) then mono.instantiate_struct_impl(
@@ -178,7 +178,7 @@ public let resolve_type_node(
                         let trait_ref_inner = Type.TraitObject(
                             trait_def_id_from_registry(mono, base),
                             resolved_args,
-                        );
+                        false);
                         Option[Type].Some(
                             if is_mutable then Type.MutableReferenceType(
                                 trait_ref_inner,
@@ -236,6 +236,15 @@ public let resolve_type_node(
                 types_to_param_entries(resolved_params),
                 resolve_type_node(mono, return_type, substitution),
             )
+        },
+        // TypeNode.SendableQualified: 按 sema 同规则携带 `sendable` 位
+        // （mono 擦除语义下该位不参与比较与布局）；非法形态 sema 已报。
+        .SendableQualified(inner) then {
+            let resolved_inner = resolve_type_node(mono, inner, substitution);
+            when type_with_sendable_qualifier(resolved_inner) in {
+                .Some(sendable_t) then sendable_t,
+                .None() then resolved_inner,
+            }
         },
     };
 };
@@ -301,7 +310,7 @@ let mono_nominal_from_declared_name(mono: Monomorphizer, name: String): Type = {
     };
     let resolved_trait = mono.storage.generic_templates.resolve_trait_name(name) or else name;
     return when mono.storage.generic_templates.traits.get(resolved_trait) in {
-        .Some(info) then Type.TraitObject(info.def_id, List[Type].new()),
+        .Some(info) then Type.TraitObject(info.def_id, List[Type].new(), false),
         .None() then Type.Unknown(),
     };
 };
@@ -312,7 +321,7 @@ let mono_nominal_decl_def_id(t: Type): DefId = {
     return when t in {
         .StructureType(def_id) or .EnumType(def_id) then def_id,
         .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then template_def_id,
-        .TraitObject(trait_def_id, _) then trait_def_id,
+        .TraitObject(trait_def_id, _, _) then trait_def_id,
         _ then def_id_invalid(),
     };
 };
@@ -339,7 +348,7 @@ public let resolve_type_node_identity(
                 return Type.TraitObject(
                     trait_def_id_from_registry(mono, base),
                     resolved_args,
-                );
+                false);
             };
             when mono.storage.generic_templates.lookup_struct(base) in {
                 .Some(struct_template) then Type.GenericStruct(
@@ -399,6 +408,15 @@ public let resolve_type_node_identity(
                 types_to_param_entries(resolved_params),
                 resolve_type_node_identity(mono, return_type, type_params),
             )
+        },
+        // TypeNode.SendableQualified: 形状同 inner，`sendable` 位按 sema 规则
+        // 携带（擦除语义下不参与身份比较）。
+        .SendableQualified(inner) then {
+            let resolved_inner = resolve_type_node_identity(mono, inner, type_params);
+            when type_with_sendable_qualifier(resolved_inner) in {
+                .Some(sendable_t) then sendable_t,
+                .None() then resolved_inner,
+            }
         },
     };
 };

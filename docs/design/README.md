@@ -39,6 +39,7 @@
 | `thin-pointer-design.md` | 对象/头布局、借用表示、trait object 布局、niche | 语言可见的内存语义 → `type-semantics.md` |
 | `numeric-families-design.md` | 整数家族（常规/回绕/预留饱和）如何划分、为何是内建类型而非包装；转换为何由目标类型决定；字面量为何一律编译期受检；浮点为何不设家族 | 具体写法与规则表 → `guide/document.md` §Numeric Casting；被替换的 `wrapping_*` 方法族 → `git log`；sealed trait → 另行独立交付 |
 | `cffi-design.md` | **CFFI 全集**：过界封闭集合、`type foreign` / `[N]T` / 函数指针、`let foreign` 引用/定义、C 名槽位、`#if`、原生构建集成——规则与取舍 | 用户向镜像 → `guide/document.md` §6（中英两份，改规则三处同批改）；manifest 通用 schema 与模块身份 → `module-design.md`；C mangling 前提 → `name-resolution.md` |
+| `concurrency-design.md` | **并发安全全集**：`sendable` 族声明形态与派生规则、跨界检查、对象锁语义、`unsafe` 契约、RC 分流、Drop 线程亲和、推荐并发模式 | 内存语义契约（`type`/`type mutable`/`Clone`/`Drop`）→ `type-semantics.md`；RC 头与对象布局 → `thin-pointer-design.md`；std 具体 API → `../api/std/`；用户向写法 → `guide/document.md` |
 
 ## 去重铁律
 
@@ -74,6 +75,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`numeric-families-design.md`](numeric-families-design.md) —— 数值类型家族与转换语义 | Implemented（三期已落地；饱和家族仅预留命名与语义空间，落地须单独过闸） | 无单独记录（随两编译器与 `std` 同批） | 2026-10-27 |
 | [`stdio-design.md`](stdio-design.md) —— 标准流句柄 Stdin / Stdout / Stderr | Implemented | 无单独记录（随 `std/io` 落地） | 2026-10-31 |
 | [`cffi-design.md`](cffi-design.md) —— CFFI（外部互操作与构建集成） | Implemented（2026-11-06：P1 声明语法、P2 原生构建、P3 条件编译全部落地） | [`cffi-design-implementation.md`](../implementation/cffi-design-implementation.md) | 2026-11-05 |
+| [`concurrency-design.md`](concurrency-design.md) —— 并发安全（sendable 族与对象锁） | Draft | 无（分期见文内「实施」） | 2026-11-08 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 

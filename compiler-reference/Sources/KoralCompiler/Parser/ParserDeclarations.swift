@@ -272,6 +272,35 @@ extension Parser {
         try match(.string(text))
       }
 
+      // `unsafe`? `sendable`? sit before `mutable`: `type unsafe sendable mutable
+      // X`. `unsafe` must be accompanied by `sendable`; `type foreign` accepts both
+      // (crosses by value), while `type intrinsic` and aliases reject them (each
+      // checked below / in the alias arm).
+      var sendability: TypeSendability = .unmarked
+      var sendabilitySpan = currentSpan
+      if currentToken === .unsafeKeyword {
+        sendabilitySpan = currentSpan
+        try match(.unsafeKeyword)
+        guard currentToken === .sendableKeyword else {
+          throw ParserError.rejectedConstruct(
+            span: sendabilitySpan,
+            message: "'unsafe' must be accompanied by 'sendable'"
+          )
+        }
+        try match(.sendableKeyword)
+        sendability = .unsafeSendable
+      } else if currentToken === .sendableKeyword {
+        sendabilitySpan = currentSpan
+        try match(.sendableKeyword)
+        sendability = .sendable
+      }
+      if isIntrinsic && sendability != .unmarked {
+        throw ParserError.rejectedConstruct(
+          span: sendabilitySpan,
+          message: "intrinsic type cannot be marked \(sendability.modifierLabel)"
+        )
+      }
+
       // New declaration-site mutability: type mutable Name { ... }
       // Only nominal types are mutable; enums and aliases remain non-mutable.
       var isNominalMutable = false
@@ -318,6 +347,12 @@ extension Parser {
       }
       // Check for type alias: type Name = TargetType
       if currentToken === .equal {
+        if sendability != .unmarked {
+          throw ParserError.rejectedConstruct(
+            span: sendabilitySpan,
+            message: "Type alias cannot be marked \(sendability.modifierLabel)"
+          )
+        }
         if isNominalMutable {
           throw ParserError.rejectedConstruct(
             span: currentSpan,
@@ -349,7 +384,7 @@ extension Parser {
         )
       }
       if isForeign {
-        return try foreignTypeDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
+        return try foreignTypeDeclaration(name: name, cname: cname, sendability: sendability, access: access, span: startSpan, nameSpan: nameSpan)
       }
       return try parseStructDeclaration(
         name,
@@ -357,6 +392,7 @@ extension Parser {
         access: access,
         isIntrinsic: isIntrinsic,
         isMutable: isNominalMutable,
+        sendability: sendability,
         span: startSpan,
         nameSpan: nameSpan
       )
@@ -386,6 +422,31 @@ extension Parser {
   
   private func parseTraitDeclaration(access: AccessModifier, span: SourceSpan) throws -> GlobalNode {
     try match(.traitKeyword)
+
+    // `sendable` sits right after `trait`: `trait sendable Name`. The trait
+    // objects of a `sendable` trait are always sendable and every impl type
+    // must itself be sendable (concurrency-design.md). There is no `unsafe`
+    // form: impl types carry their own safe/unsafe distinction.
+    var isSendable = false
+    if currentToken === .unsafeKeyword {
+      let unsafeSpan = currentSpan
+      try match(.unsafeKeyword)
+      if currentToken === .sendableKeyword {
+        try match(.sendableKeyword)
+        throw ParserError.rejectedConstruct(
+          span: unsafeSpan,
+          message: "trait cannot be marked 'unsafe sendable'"
+        )
+      }
+      throw ParserError.rejectedConstruct(
+        span: unsafeSpan,
+        message: "'unsafe' must be accompanied by 'sendable'"
+      )
+    }
+    if currentToken === .sendableKeyword {
+      try match(.sendableKeyword)
+      isSendable = true
+    }
 
     guard case .identifier(let name) = currentToken else {
       throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait declaration")
@@ -529,6 +590,7 @@ extension Parser {
     try match(.rightBrace)
     return .traitDeclaration(
       name: name,
+      isSendable: isSendable,
       typeParameters: typeParams,
       superTraits: superTraits,
       methods: methods,
@@ -1023,6 +1085,14 @@ extension Parser {
       try match(.foreignKeyword)
       return .identifier("foreign", span: keywordSpan)
     }
+    // `sendable` joins the shape-bound slot (`T Reader and sendable`); it must
+    // be caught before the type fallback, which would read it as the `sendable`
+    // type qualifier.
+    if currentToken === .sendableKeyword {
+      let keywordSpan = currentSpan
+      try match(.sendableKeyword)
+      return .identifier("sendable", span: keywordSpan)
+    }
     // Trait constraints now share the full type surface, including postfix generics.
     if canStartTypeSyntax() {
       return try parseType()
@@ -1191,7 +1261,7 @@ extension Parser {
   }
 
   private func foreignTypeDeclaration(
-    name: String, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, cname: String?, sendability: TypeSendability, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     var fields: [(name: String, type: TypeNode)]? = nil
     if currentToken === .leftBrace {
@@ -1224,6 +1294,7 @@ extension Parser {
       name: name,
       fields: fields,
       cname: cname,
+      sendability: sendability,
       access: access,
       span: span,
       nameSpan: nameSpan
@@ -1290,7 +1361,8 @@ extension Parser {
   /// Parse type declaration
   private func parseStructDeclaration(
     _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, isMutable: Bool = false, span: SourceSpan, nameSpan: SourceSpan
+    isIntrinsic: Bool, isMutable: Bool = false, sendability: TypeSendability,
+    span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     if isIntrinsic {
       if currentToken === .leftParen {
@@ -1308,7 +1380,7 @@ extension Parser {
           message: "Enum type cannot be marked mutable"
         )
       }
-      return try parseEnumDeclaration(name, typeParams: typeParams, access: access, span: span, nameSpan: nameSpan)
+      return try parseEnumDeclaration(name, typeParams: typeParams, sendability: sendability, access: access, span: span, nameSpan: nameSpan)
     }
 
     try match(.leftParen)
@@ -1367,6 +1439,7 @@ extension Parser {
       typeParameters: typeParams,
       parameters: parameters,
       isMutable: isMutable,
+      sendability: sendability,
       access: access,
       span: span,
       nameSpan: nameSpan
@@ -1377,7 +1450,7 @@ extension Parser {
   
   /// Parse enum declaration (sum type)
   private func parseEnumDeclaration(
-    _ name: String, typeParams: [TypeParameterDecl], access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    _ name: String, typeParams: [TypeParameterDecl], sendability: TypeSendability, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftBrace)
     var cases: [EnumCaseDeclaration] = []
@@ -1446,6 +1519,7 @@ extension Parser {
       name: name,
       typeParameters: typeParams,
       cases: cases,
+      sendability: sendability,
       access: access,
       span: span,
       nameSpan: nameSpan

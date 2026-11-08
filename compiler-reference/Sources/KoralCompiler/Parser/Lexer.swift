@@ -50,6 +50,7 @@ public enum Token: CustomStringConvertible {
   case identifier(String)  // Identifier, e.g.: variableName, Int, Float64, String
   case letKeyword  // 'let' keyword
   case mutableKeyword  // .mutable. keyword
+  case sendableKeyword  // 'sendable' keyword
   case semicolon  // Semicolon ';'
   case hash  // '#' — compile-time marker of build-conditional declarations (cffi-design.md §D)
   case leftParen  // Left parenthesis '('
@@ -150,7 +151,7 @@ public enum Token: CustomStringConvertible {
       return true
     case (.greater, .greater), (.less, .less), (.greaterEqual, .greaterEqual), (.lessEqual, .lessEqual):
       return true
-    case (.letKeyword, .letKeyword), (.mutableKeyword, .mutableKeyword):
+    case (.letKeyword, .letKeyword), (.mutableKeyword, .mutableKeyword), (.sendableKeyword, .sendableKeyword):
       return true
     case (.semicolon, .semicolon), (.comma, .comma), (.colon, .colon), (.doubleColon, .doubleColon), (.dot, .dot), (.ellipsis, .ellipsis), (.arrow, .arrow), (.fatArrow, .fatArrow), (.hash, .hash):
       return true
@@ -392,6 +393,8 @@ public enum Token: CustomStringConvertible {
       return "defer"
     case .unsafeKeyword:
       return "unsafe"
+    case .sendableKeyword:
+      return "sendable"
     case .whereKeyword:
       return "where"
     }
@@ -1628,6 +1631,7 @@ public class Lexer {
       return switch id {
       case "let": .letKeyword
       case "mutable": .mutableKeyword
+      case "sendable": .sendableKeyword
       case "true": .bool(true)
       case "false": .bool(false)
       case "null": .nullLiteral

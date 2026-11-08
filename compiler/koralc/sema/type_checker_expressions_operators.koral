@@ -11,7 +11,7 @@ given TypeChecker {
         rhs_type: Type,
     ): Bool = {
         return when method_symbol.symbol_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 if params.count() < UInt(2) then {
                     return false;
                 };
@@ -617,7 +617,7 @@ given TypeChecker {
         // default displays and compares as that default (`Int`, `Float64`).
         let target_t = typed_target.expr_type;
         let value_t = typed_value.expr_type;
-        if not self.same_expr_type(target_t, value_t) and not self.is_unresolved_expr_type(
+        if not self.same_expr_type(value_t, target_t) and not self.is_unresolved_expr_type(
             self.concretize_default_literal_type(target_t),
         ) and not self.is_unresolved_expr_type(
             self.concretize_default_literal_type(value_t),
@@ -646,7 +646,7 @@ given TypeChecker {
     ): TypedExpr = {
         let target_t = typed_target.expr_type;
         let value_t = typed_value.expr_type;
-        if not self.same_expr_type(target_t, value_t) and not self.is_unresolved_expr_type(
+        if not self.same_expr_type(value_t, target_t) and not self.is_unresolved_expr_type(
             self.concretize_default_literal_type(target_t),
         ) and not self.is_unresolved_expr_type(
             self.concretize_default_literal_type(value_t),
@@ -670,7 +670,7 @@ given TypeChecker {
         let _ = self;
         return when t in {
             .StructureType(_) or .EnumType(_) or .GenericStruct(_, _) or .GenericEnum(_, _)
-            or .OpaqueType(_) or .GenericParameter(_) or .TraitObject(_, _) then true,
+            or .OpaqueType(_) or .GenericParameter(_) or .TraitObject(_, _, _) then true,
             _ then false,
         };
     };
@@ -831,7 +831,7 @@ given TypeChecker {
         if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
             let params = self.resolve_method_param_types(left_t, method_name);
             let expected_t = if params.is_empty() then left_t else params[UInt(0)];
-            if not self.same_expr_type(expected_t, right_t) then {
+            if not self.same_expr_type(right_t, expected_t) then {
                 // Fatal: the reference compiler's method-call argument
                 // coercion throws here, abandoning the rest of the declaration.
                 self.push_fatal_diagnostic(
@@ -995,7 +995,7 @@ given TypeChecker {
         if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
             let params = self.resolve_method_param_types(left_t, method_name);
             let expected_t = if params.is_empty() then left_t else params[UInt(0)];
-            if not self.same_expr_type(expected_t, right_t) then {
+            if not self.same_expr_type(right_t, expected_t) then {
                 // Fatal: the reference compiler's method-call argument
                 // coercion throws here, abandoning the rest of the declaration.
                 self.push_fatal_diagnostic(
@@ -1231,14 +1231,28 @@ given TypeChecker {
         );
     };
 
-    validate_lambda_captures(self, params: List[TypedParam], body: TypedExpr): Void = {
+    /// 校验 lambda 捕获：非法捕获照报，同时收集捕获集（def_id -> 首个使用
+    /// 点），供 `sendable` 闭包检查用（concurrency-design.md §派生规则 5）。
+    validate_lambda_captures(
+        self,
+        params: List[TypedParam],
+        body: TypedExpr,
+    ): Dict[UInt, Pair[Symbol, SourceSpan]] = {
         let mutable local_names = Set[String].new();
         for p in params then {
             local_names.insert(p.name);
         };
         let mutable local_ids = Set[UInt].new();
         let mutable reported_ids = Set[UInt].new();
-        self.validate_lambda_captures_in_expr(body, local_names, local_ids, reported_ids);
+        let mutable captures = Dict[UInt, Pair[Symbol, SourceSpan]].new();
+        self.validate_lambda_captures_in_expr(
+            body,
+            local_names,
+            local_ids,
+            reported_ids,
+            captures,
+        );
+        return captures;
     };
 
     is_lambda_captured_symbol(
@@ -1326,6 +1340,21 @@ given TypeChecker {
                 self.collect_pattern_binding_names(left, names);
                 self.collect_pattern_binding_names(right, names);
             },
+            .WeakBinding(symbol) then {
+                let symbol_name = self.context().symbol_name(symbol);
+                if not (symbol_name == "_") then {
+                    names.insert(symbol_name);
+                };
+            },
+            .TraitObjectTypeBinding(symbol, _) then {
+                let symbol_name = self.context().symbol_name(symbol);
+                if not (symbol_name == "_") then {
+                    names.insert(symbol_name);
+                };
+            },
+            .NotPattern(inner) then {
+                self.collect_pattern_binding_names(inner, names);
+            },
             _ then {},
         };
     };
@@ -1353,6 +1382,7 @@ given TypeChecker {
         local_names: Set[String],
         local_ids: Set[UInt],
         reported_ids: Set[UInt],
+        captures: Dict[UInt, Pair[Symbol, SourceSpan]],
     ): Void = {
         when stmt in {
             .LetStmt(_, value_ref, _) or .TupleLetStmt(_, _, value_ref, _) then {
@@ -1361,6 +1391,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .AssignmentStmt(target_ref, value_ref, _) then {
@@ -1369,12 +1400,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     value_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .ExprStmt(expr_ref, _) then {
@@ -1383,6 +1416,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .IfStmt(condition_ref, then_ref, else_opt, _) then {
@@ -1391,12 +1425,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     then_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 when else_opt in {
                     .Some(else_ref) then {
@@ -1405,6 +1441,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .None() then {},
@@ -1416,12 +1453,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     body_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .WhenStmt(subject_ref, arms, _) then {
@@ -1430,13 +1469,22 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 for arm in arms then {
+                    // 模式绑定是 arm 内的局部，不是捕获（与 WhenExpr 走法、
+                    // 参考编译器 collectPatternBindingNames 同形）。
+                    let mutable arm_local_names = Set[String].new();
+                    for name in local_names.iterator() then {
+                        arm_local_names.insert(name);
+                    };
+                    self.collect_pattern_binding_names(arm.pattern, arm_local_names);
                     self.validate_lambda_captures_in_expr(
                         arm.body,
-                        local_names,
+                        arm_local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1448,6 +1496,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .None() then {},
@@ -1459,6 +1508,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             _ then {},
@@ -1471,10 +1521,18 @@ given TypeChecker {
         local_names: Set[String],
         local_ids: Set[UInt],
         reported_ids: Set[UInt],
+        captures: Dict[UInt, Pair[Symbol, SourceSpan]],
     ): Void = {
         when expr.expr_kind in {
             .Variable(symbol) then {
                 if self.is_lambda_captured_symbol(symbol, local_names, local_ids) then {
+                    // 收集捕获（按符号去重，保留首个使用点）供 sendable 检查。
+                    if captures.get(symbol.def_id.id) is .None() then {
+                        captures.insert(
+                            symbol.def_id.id,
+                            Pair[Symbol, SourceSpan](symbol, expr.span),
+                        );
+                    };
                     self.report_borrowed_lambda_capture(symbol, reported_ids, expr.span);
                     self.report_mutable_lambda_capture(symbol, reported_ids, expr.span);
                 };
@@ -1490,6 +1548,7 @@ given TypeChecker {
                     nested_local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .Block(statements, tail_expression) then {
@@ -1509,6 +1568,7 @@ given TypeChecker {
                                 block_local_names,
                                 block_local_ids,
                                 reported_ids,
+                                captures,
                             );
                             block_local_names.insert(self.context().symbol_name(symbol));
                             block_local_ids.insert(symbol.def_id.id);
@@ -1519,6 +1579,7 @@ given TypeChecker {
                                 block_local_names,
                                 block_local_ids,
                                 reported_ids,
+                                captures,
                             );
                             for symbol_opt in symbols then {
                                 when symbol_opt in {
@@ -1538,6 +1599,7 @@ given TypeChecker {
                                 block_local_names,
                                 block_local_ids,
                                 reported_ids,
+                                captures,
                             );
                         },
                     };
@@ -1548,6 +1610,7 @@ given TypeChecker {
                         block_local_names,
                         block_local_ids,
                         reported_ids,
+                        captures,
                     ),
                     .None() then {},
                 };
@@ -1558,6 +1621,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(
@@ -1565,6 +1629,7 @@ given TypeChecker {
                         local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1577,6 +1642,7 @@ given TypeChecker {
                                 local_names,
                                 local_ids,
                                 reported_ids,
+                                captures,
                             );
                         };
                     },
@@ -1586,6 +1652,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .UpgradeRef(weak_expr, _) then {
@@ -1594,6 +1661,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .SpawnThread(out_handle, out_tid, closure, stack_size) then {
@@ -1602,24 +1670,28 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             out_tid,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             closure,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             stack_size,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .AllocMemory(count_expr, _) or .AllocString(count_expr, _) then {
@@ -1628,6 +1700,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .DeallocMemory(pointer_expr) then {
@@ -1636,6 +1709,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .CopyMemory(dest_expr, source_expr, count_expr)
@@ -1646,18 +1720,21 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             source_expr,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             count_expr,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .InitMemory(pointer_expr, value_expr) then {
@@ -1666,12 +1743,14 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                         self.validate_lambda_captures_in_expr(
                             value_expr,
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .DeinitMemory(pointer_expr) or .TakeMemory(pointer_expr, _) then {
@@ -1680,6 +1759,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .NullPtr(_) then {},
@@ -1691,6 +1771,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .ArithmeticExpr(left_ref, _, right_ref) or .ComparisonExpr(left_ref, _, right_ref)
@@ -1701,12 +1782,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     right_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .Unary(_, inner_ref) or .RefExpr(inner_ref) or .PtrExpr(inner_ref) or .DerefExpr(inner_ref)
@@ -1716,6 +1799,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .IfExpr(cond_ref, then_ref, else_opt) then {
@@ -1724,12 +1808,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     then_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 when else_opt in {
                     .Some(else_ref) then {
@@ -1738,6 +1824,7 @@ given TypeChecker {
                             local_names,
                             local_ids,
                             reported_ids,
+                            captures,
                         );
                     },
                     .None() then {},
@@ -1749,6 +1836,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .WhenExpr(subject_ref, arms) then {
@@ -1757,6 +1845,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 for arm in arms then {
                     let mutable arm_local_names = Set[String].new();
@@ -1769,6 +1858,7 @@ given TypeChecker {
                         arm_local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1779,6 +1869,7 @@ given TypeChecker {
                         local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1795,6 +1886,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .TraitMethodCall(receiver_ref, _, _, _, args) then {
@@ -1803,6 +1895,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 for arg in args then {
                     self.validate_lambda_captures_in_expr(
@@ -1810,6 +1903,7 @@ given TypeChecker {
                         local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1819,6 +1913,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .TraitObjectConversion(inner_ref, _, _) then {
@@ -1827,6 +1922,7 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             .GenericCall(_, _, args) or .TypeConstruction(_, _, args) or .EnumConstruction(_, _, args) then {
@@ -1836,6 +1932,7 @@ given TypeChecker {
                         local_names,
                         local_ids,
                         reported_ids,
+                        captures,
                     );
                 };
             },
@@ -1845,12 +1942,14 @@ given TypeChecker {
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
                 self.validate_lambda_captures_in_expr(
                     right_ref,
                     local_names,
                     local_ids,
                     reported_ids,
+                    captures,
                 );
             },
             _ then {},

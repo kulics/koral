@@ -17,7 +17,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
             let new_inner = resolve_types_in_expression(mono, inner);
             let mutable new_trait_type = resolve_parameterized_type(mono, trait_type);
             when trait_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, _) then {
                     let mutable resolved_trait_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         resolved_trait_args.push(
@@ -27,7 +27,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                     new_trait_type = Type.TraitObject(
                         original_trait_def_id,
                         resolved_trait_args,
-                    );
+                    false);
                 },
                 _ then {},
             };
@@ -36,7 +36,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 concrete_type,
             );
             when new_trait_type in {
-                .TraitObject(trait_def_id, _) then collect_concrete_vtable_request(
+                .TraitObject(trait_def_id, _, _) then collect_concrete_vtable_request(
                     mono,
                     new_concrete_type,
                     def_id_spelling(trait_def_id),
@@ -141,7 +141,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                         resolve_parameterized_type(mono, receiver.expr_type),
                     ) in {
                         .Some(trait_object_type) then when trait_object_type in {
-                            .TraitObject(trait_def_id, _) then {
+                            .TraitObject(trait_def_id, _, _) then {
                                 let method_name = get_semantic_method_name(mono, method);
                                 // The type carries the trait's DECLARATION; the
                                 // vtable layout is walked by identity.
@@ -208,7 +208,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 declared_return_type,
             ) then declared_return_type
             else when bound_callee.expr_type in {
-                .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then resolve_parameterized_type(
+                .FunctionType(_, return_type_ref, _) or .ForeignFunctionType(_, return_type_ref) then resolve_parameterized_type(
                     mono,
                     return_type_ref,
                 ),
@@ -428,15 +428,15 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 mono,
                 new_base.expr_type,
             ) in {
-                .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
-                    Type.TraitObject(trait_def_id, trait_type_args),
+                .TraitObject(trait_def_id, trait_type_args, is_sendable) then Option[Type].Some(
+                    Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                 ),
                 .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
                     mono,
                     inner_ref,
                 ) in {
-                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
-                        Type.TraitObject(trait_def_id, trait_type_args),
+                    .TraitObject(trait_def_id, trait_type_args, is_sendable) then Option[Type].Some(
+                        Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                     ),
                     _ then Option[Type].None(),
                 },
@@ -611,7 +611,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                 .None() then {
                     if not has_generic_parameter(lookup_base_type) and method_name != "" then {
                         let expected_return_type = when normalized_expected_method_type in {
-                            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
+                            .FunctionType(_, return_type, _) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                                 mono,
                                 return_type,
                             ),
@@ -696,7 +696,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
             let new_receiver = resolve_types_in_expression(mono, receiver);
             let mutable new_trait_type = resolve_parameterized_type(mono, trait_type);
             when trait_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, _) then {
                     let mutable resolved_trait_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         resolved_trait_args.push(
@@ -706,7 +706,7 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                     new_trait_type = Type.TraitObject(
                         original_trait_def_id,
                         resolved_trait_args,
-                    );
+                    false);
                 },
                 _ then {},
             };
@@ -757,12 +757,12 @@ let resolve_expr_kind(mono: Monomorphizer, expr: TypedExpr): TypedExprKind = {
                     empty_method_type_args,
                 );
                 let dispatch_trait_def_id_opt = when new_trait_type in {
-                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
                     _ then Option[DefId].None(),
                 };
                 let mutable witness_method_opt = Option[Symbol].None();
                 when new_trait_type in {
-                    .TraitObject(trait_def_id, trait_type_args) then {
+                    .TraitObject(trait_def_id, trait_type_args, _) then {
                         // `method_index` is the vtable slot the type checker
                         // assigned at definition time; `requirement_slots[index]`
                         // carries the requirement's DECLARATION identity, and the

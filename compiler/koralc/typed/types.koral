@@ -11,7 +11,7 @@ public type DefId(id: UInt);
 ///
 /// Koral has no module-level `mutable` binding, so the mutable state lives
 /// inside an immutable binding.
-public type mutable DisplayContext(mutable map: Option[DefIdMap]);
+public type unsafe sendable mutable DisplayContext(mutable map: Option[DefIdMap]);
 public let display_context = DisplayContext(Option[DefIdMap].None());
 
 public let set_display_context(m: DefIdMap): Void = {
@@ -249,8 +249,158 @@ public let types_to_param_entries(types: List[Type]): List[FunctionParamEntry] =
 };
 
 // Build a FunctionType from bare type mutable lists (backward compat helper).
+// Non-sendable by default; closures carry their capture-derived flag.
 public let make_function_type(param_types: List[Type], return_type: Type): Type = {
-    return Type.FunctionType(types_to_param_entries(param_types), return_type);
+    return Type.FunctionType(types_to_param_entries(param_types), return_type, false);
+};
+
+// Build a FunctionType with an explicit sendable flag (closure typing).
+public let make_function_type_with_flag(
+    param_types: List[Type],
+    return_type: Type,
+    is_sendable: Bool,
+): Type = {
+    return Type.FunctionType(types_to_param_entries(param_types), return_type, is_sendable);
+};
+
+/// 把查询类型的 `sendable` 位带回结果类型（RC 分流的族选择要读这个位，
+/// 见 concurrency-design.md §RC 分流）。
+///
+/// `Type` 的 Eq/Hash **刻意**不比对该位（mono/codegen 的擦除语义），flag
+/// 不同的函数类型 / trait object 会在按值缓存里互相别名——缓存命中后按查询
+/// 侧把位复原（含句柄包装层递归）。比较、布局、实例身份全都不看这个位，所以
+/// 复原不改变任何既有语义，只是让 codegen 看到发射点静态类型上真正的修饰位。
+public let retag_sendable_from(query: Type, result: Type): Type = {
+    return when query in {
+        .FunctionType(_, _, is_sendable) then when result in {
+            .FunctionType(params, return_type, _) then Type.FunctionType(
+                params,
+                return_type,
+                is_sendable,
+            ),
+            _ then result,
+        },
+        .TraitObject(_, _, is_sendable) then when result in {
+            .TraitObject(trait_def_id, type_args, _) then Type.TraitObject(
+                trait_def_id,
+                type_args,
+                is_sendable,
+            ),
+            _ then result,
+        },
+        .ReferenceType(inner_query) then when result in {
+            .ReferenceType(inner_result) then Type.ReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .MutableReferenceType(inner_query) then when result in {
+            .MutableReferenceType(inner_result) then Type.MutableReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .BorrowedReferenceType(inner_query) then when result in {
+            .BorrowedReferenceType(inner_result) then Type.BorrowedReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .MutableBorrowedReferenceType(inner_query) then when result in {
+            .MutableBorrowedReferenceType(inner_result) then Type.MutableBorrowedReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .WeakReferenceType(inner_query) then when result in {
+            .WeakReferenceType(inner_result) then Type.WeakReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .MutableWeakReferenceType(inner_query) then when result in {
+            .MutableWeakReferenceType(inner_result) then Type.MutableWeakReferenceType(
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        .FixedArrayType(len, inner_query) then when result in {
+            .FixedArrayType(_, inner_result) then Type.FixedArrayType(
+                len,
+                retag_sendable_from(inner_query, inner_result),
+            ),
+            _ then result,
+        },
+        _ then result,
+    };
+};
+
+// Mark a trait object (under any reference-family layers) `sendable`,
+// preserving the wrappers. `None` when no trait object is inside -- a
+// function type under a reference is NOT this shape.
+let mark_trait_object_sendable(t: Type): Option[Type] = {
+    return when t in {
+        .TraitObject(trait_def_id, type_args, _) then Option[Type].Some(
+            Type.TraitObject(trait_def_id, type_args, true),
+        ),
+        .ReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.ReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        .MutableReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.MutableReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        .BorrowedReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.BorrowedReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        .MutableBorrowedReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.MutableBorrowedReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        .WeakReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.WeakReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        .MutableWeakReferenceType(inner) then {
+            when mark_trait_object_sendable(inner) in {
+                .Some(marked) then Option[Type].Some(Type.MutableWeakReferenceType(marked)),
+                .None() then Option[Type].None(),
+            }
+        },
+        _ then Option[Type].None(),
+    };
+};
+
+/// The `sendable` qualifier applied to a RESOLVED type: a function type or a
+/// (possibly reference-wrapped) trait object gets its flag set; anything else
+/// has no form to qualify (`None`, and the resolver reports it).
+public let type_with_sendable_qualifier(t: Type): Option[Type] = {
+    return when t in {
+        .FunctionType(params, return_type, _) then Option[Type].Some(
+            Type.FunctionType(params, return_type, true),
+        ),
+        _ then mark_trait_object_sendable(t),
+    };
+};
+
+/// Whether `t` is a trait-object SHAPE (a trait object directly, or under
+/// reference-family wraps). The resolver uses this to tell the two rejected
+/// `sendable` qualifier targets apart: a trait object points the reader at
+/// `trait sendable`, anything else simply cannot carry the qualifier.
+public let is_trait_object_shape(t: Type): Bool = {
+    return mark_trait_object_sendable(t) is .Some(_);
 };
 
 // Extract bare type mutable list from FunctionParamEntry list (backward compat helper).
@@ -330,6 +480,15 @@ public type mutable DefIdMap(
     // "c_name" …`）。与 cname_map 分开：mono 会把派生名也灌进 cname_map，
     // 「名字是什么」和「名字是不是用户拼的」是两件事——导出头只对后者让出声明权。
     mutable declared_cname_ids: Set[UInt],
+
+    // nominal sendability（`sendable` / `unsafe sendable` 声明修饰符，见
+    // concurrency-design.md）。struct / enum / foreign 三类名义声明都登记。
+    mutable type_sendabilities: Dict[UInt, Sendability],
+
+    // C 实体直读的 foreign 变量（`let foreign` 且非宏常量降级形态）。这些绑定
+    // 的存储归 C 侧管，编译器不给每变量锁（concurrency-design.md §对象锁语义
+    // 的全局量落点只覆盖 Koral 的 `let mutable` 全局量）。
+    mutable foreign_globals: Set[UInt],
 );
 
 given DefIdMap {
@@ -368,6 +527,8 @@ given DefIdMap {
             Option[DefId].None(),
             Dict[String, DefId].new(),
             Dict[String, String].new(),
+            Set[UInt].new(),
+            Dict[UInt, Sendability].new(),
             Set[UInt].new(),
         );
     };
@@ -886,6 +1047,16 @@ given DefIdMap {
         return self.foreign_struct_fields.get(id.id) is .Some(_);
     };
 
+    // ── Foreign globals（无编译器管理的每变量锁）─────────────────────────
+
+    public set_foreign_global(self, id: DefId): Void = {
+        self.foreign_globals.insert(id.id);
+    };
+
+    public is_foreign_global(self, id: DefId): Bool = {
+        return self.foreign_globals.contains(id.id);
+    };
+
     // ── C 名称映射 ───────────────────────────────────────────────────────
 
     public set_cname(self, id: DefId, cname: String): Void = {
@@ -925,6 +1096,109 @@ given DefIdMap {
 
     public is_struct_mutable(self, id: DefId): Bool = {
         return self.struct_mutables.get(id.id) or else false;
+    };
+
+    // ── Nominal Sendability（concurrency-design.md）──────────────────────
+
+    public set_type_sendability(self, id: DefId, sendability: Sendability): Void = {
+        self.type_sendabilities.insert(id.id, sendability);
+    };
+
+    public type_sendability(self, id: DefId): Sendability = {
+        return self.type_sendabilities.get(id.id) or else Sendability.Unmarked();
+    };
+
+    /// 派生规则（concurrency-design.md §派生规则）：一个类型能否跨线程共享。
+    ///
+    /// 查询按声明走注册表，不递归名义类型自身的字段（字段约束在声明处由
+    /// 声明检查单独保证）；泛型按实参条件成立（`unsafe` 不豁免这条）；裸泛型
+    /// 参数视为 sendable——实参条件在实例化的形状上收口，声明处字段检查因此
+    /// 不需要「假设模式」。Unknown/TypeVar 按 sendable 算：它们是错误恢复与
+    /// 推断占位，不再级联报错。
+    public is_sendable_type(self, t: Type): Bool = {
+        return when t in {
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type()
+            or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+            or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+            or .WrappingInt32Type() or .WrappingInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type()
+            or .WrappingUInt32Type() or .WrappingUInt64Type()
+            or .Float32Type() or .Float64Type() or .BoolType() or .VoidType() or .NeverType()
+            or .GenericParameter(_) or .Unknown() or .TypeVar(_) then true,
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
+                self.type_sendability(def_id) is not .Unmarked()
+            },
+            .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
+                let declared = self.type_sendability(template_def_id) is not .Unmarked();
+                declared and self.all_sendable(args)
+            },
+            .FixedArrayType(_, inner) then self.is_sendable_type(inner),
+            .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.is_sendable_type(
+                inner,
+            ),
+            // 表层 trait object 带内部 `ReferenceType(TraitObject)` 包裹
+            // （`surface_named_type`）；sendable 位挂在里面的 trait object 上，
+            // 派生查询须穿透包裹读它（concurrency-design.md §派生规则 6）。
+            .ReferenceType(inner) or .MutableReferenceType(inner)
+            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then self.sendable_through_reference_wrap(
+                inner,
+            ),
+            // 函数/闭包类型按形成处留下的修饰位（concurrency-design.md
+            // §派生规则 5）。trait object 的 sendable 来自 trait 声明处的
+            // `trait sendable`——声明处定死，恒成立（§派生规则 6）；存下的
+            // 修饰位只服务诊断渲染，不参与派生。
+            .FunctionType(_, _, is_sendable) then is_sendable,
+            .TraitObject(trait_def_id, _, _) then self.type_sendability(trait_def_id) is not .Unmarked(),
+            _ then false,
+        };
+    };
+
+    private all_sendable(self, types: List[Type]): Bool = {
+        for t in types then {
+            if not self.is_sendable_type(t) then {
+                return false;
+            };
+        };
+        return true;
+    };
+
+    /// 引用层包裹下的 trait object：按其 trait 声明的 sendable 回答；其余被
+    /// 包裹形态维持保守的非 sendable（`&T` 的并发归属不在派生规则清单内）。
+    private sendable_through_reference_wrap(self, t: Type): Bool = {
+        return when t in {
+            .TraitObject(trait_def_id, _, _) then self.type_sendability(trait_def_id) is not .Unmarked(),
+            .ReferenceType(inner) or .MutableReferenceType(inner)
+            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner) then self.sendable_through_reference_wrap(
+                inner,
+            ),
+            _ then false,
+        };
+    };
+
+    // ── Built-in object locks（concurrency-design.md §对象锁语义）────────────
+
+    /// safe `sendable mutable`（`type_sendability == Sendable` 且 `type mutable`）
+    /// 的名义类型带内建对象锁：payload 隐藏首字段 `__lock`，每次字段读写都是
+    /// 该对象锁上的临界区。`unsafe sendable mutable` 同步自管、不带锁；非
+    /// sendable 的可变类型没有跨线程承诺、也不带锁。
+    public is_locked_def(self, id: DefId): Bool = {
+        return self.is_struct_mutable(id) and self.type_sendability(id) is .Sendable();
+    };
+
+    /// 类型是否带内建对象锁。泛型形状按条件 sendability 收口（实参全
+    /// sendable 才成立），与 `is_sendable_type` 的条件规则一致；实例化后的
+    /// `StructureType(instance_def)` 走注册表（mono 已把 mutability 与条件
+    /// sendability 传播到实例 def）。
+    public is_locked_type(self, t: Type): Bool = {
+        return when t in {
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then self.is_locked_def(
+                def_id,
+            ),
+            .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
+                self.is_locked_def(template_def_id) and self.all_sendable(args)
+            },
+            _ then false,
+        };
     };
 
     // ── Explicit Drop Conformance ──────────────────────────────────────
@@ -1032,7 +1306,11 @@ public type Type {
     NeverType(),
 
     // Compound types
-    FunctionType(params: List[FunctionParamEntry], return_type: Type),
+    /// Koral 函数/闭包类型。`is_sendable` 是 `sendable (A) -> R` 修饰位：
+    /// 形成处决定（无捕获函数值 / 全部捕获 sendable 的 lambda 为 true）。
+    /// 转换放宽 `sendable (A) -> R` -> `(A) -> R`，反向拒绝
+    /// （concurrency-design.md §派生规则 5）。
+    FunctionType(params: List[FunctionParamEntry], return_type: Type, is_sendable: Bool),
     /// 定长数组：`[N]Inner`。C 布局（单字段包装 struct），可变值语义；
     /// 元素只能是 foreign 兼容的类型。
     FixedArrayType(len: UInt, inner: Type),
@@ -1057,7 +1335,9 @@ public type Type {
     ModuleType(info: ModuleSymbolInfo),
 
     // Trait object
-    TraitObject(trait_def_id: DefId, type_args: List[Type]),
+    /// `is_sendable` 是 `sendable Trait` 修饰位：装箱处检查具体类型 sendable
+    /// （concurrency-design.md §派生规则 6）。
+    TraitObject(trait_def_id: DefId, type_args: List[Type], is_sendable: Bool),
 
     // Type inference variable
     TypeVar(tv: TypeVariable),
@@ -1238,7 +1518,7 @@ public let stable_type_key(t: Type): String = {
         .BoolType() then "Bool",
         .VoidType() then "Void",
         .NeverType() then "Never",
-        .FunctionType(params, return_type) then {
+        .FunctionType(params, return_type, _) then {
             "Fn(" + join_param_entry_key_list(params) + ")->" + stable_type_key(
                 return_type,
             )
@@ -1258,7 +1538,7 @@ public let stable_type_key(t: Type): String = {
         .GenericStruct(template_def_id, args) then "GS#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
         .GenericEnum(template_def_id, args) then "GE#\(template_def_id.id)[\(join_type_ref_key_list(args))]",
         .ModuleType(info) then "M(\(info.module_path.join_to_string(".")))",
-        .TraitObject(trait_def_id, type_args) then {
+        .TraitObject(trait_def_id, type_args, _) then {
             if type_args.is_empty() then {
                 return "TO#\(trait_def_id.id)";
             };
@@ -1286,7 +1566,14 @@ public let stable_type_key(t: Type): String = {
 };
 
 public let type_to_string(t: Type): String = {
-    return type_to_string_impl(t, UInt(0));
+    return type_to_string_impl(t, UInt(0), false);
+};
+
+/// 诊断专用渲染：`sendable` 函数类型 / trait object 带 `sendable` 前缀。
+/// 普通 `type_to_string` 是 mangling 的输入，必须保持 flag 擦除；报错文本
+/// 反过来必须让读者分清 `() -> Void` 与 `sendable () -> Void`。
+public let type_to_string_diagnostic(t: Type): String = {
+    return type_to_string_impl(t, UInt(0), true);
 };
 
 /// The plain same-width counterpart of an integer type. A wrapping type maps
@@ -1311,7 +1598,12 @@ public let plain_width_counterpart(t: Type): Type = {
 
 // Iterative-safe type_to_string with depth limit to prevent stack overflow
 // on deeply nested generic types in the bootstrap binary.
-private let type_to_string_impl(t: Type, depth: UInt): String = {
+/// 诊断渲染里 `sendable` 限定的前缀文本。
+public let sendable_prefix_text(show: Bool): String = {
+    return if show then "sendable " else "";
+};
+
+private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): String = {
     let chain = split_type_string_wrappers(t);
     let inner = chain.inner;
     let inner_string = when inner in {
@@ -1340,25 +1632,28 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
         .BoolType() then "Bool",
         .VoidType() then "Void",
         .NeverType() then "Never",
-        .FunctionType(params, return_type) then {
+        .FunctionType(params, return_type, is_sendable) then {
             // depth limit to prevent stack overflow on deeply nested types
             if depth > UInt(200) then {
                 return "(...) -> ...";
             };
             let next_depth = depth + UInt(1);
             let mutable out = StringBuilder.new();
+            if show_sendable and is_sendable then {
+                out.push_string("sendable ");
+            };
             out.push_byte('(');
             let mutable first = true;
             for entry in params then {
                 if not first then {
                     out.push_string(", ");
                 };
-                out.push_string(type_to_string_impl(entry.param_type, next_depth));
+                out.push_string(type_to_string_impl(entry.param_type, next_depth, show_sendable));
                 first = false;
             };
             out.push_byte(')');
             out.push_string(" -> ");
-            out.push_string(type_to_string_impl(return_type, next_depth));
+            out.push_string(type_to_string_impl(return_type, next_depth, show_sendable));
             return out.to_string();
         },
         // Declaration names, like the generic and trait-object cases above
@@ -1373,7 +1668,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
                 return "...";
             };
             let mutable out = StringBuilder.new();
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .BorrowedReferenceType(inner) then {
@@ -1382,7 +1677,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             };
             let mutable out = StringBuilder.new();
             out.push_string("ref ");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .MutableBorrowedReferenceType(inner) then {
@@ -1391,7 +1686,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             };
             let mutable out = StringBuilder.new();
             out.push_string("ref mutable ");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .PointerType(inner) then {
@@ -1400,7 +1695,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             };
             let mutable out = StringBuilder.new();
             out.push_string("*");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .MutablePointerType(inner) then {
@@ -1409,7 +1704,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             };
             let mutable out = StringBuilder.new();
             out.push_string("*mutable");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
@@ -1418,7 +1713,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             };
             let mutable out = StringBuilder.new();
             out.push_string("?");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1)));
+            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
             out.to_string()
         },
         .OpaqueType(def_id) then def_id_spelling(def_id),
@@ -1437,7 +1732,7 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
                 if not first then {
                     out.push_string(", ");
                 };
-                out.push_string(type_to_string_impl(item, next_depth));
+                out.push_string(type_to_string_impl(item, next_depth, show_sendable));
                 first = false;
             };
             out.push_byte(']');
@@ -1447,10 +1742,10 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
             if info.module_path.is_empty() then "Module"
             else info.module_path.join_to_string(".")
         },
-        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
+        .TraitObject(trait_def_id, _, is_sendable) then "\(sendable_prefix_text(show_sendable and is_sendable))\(def_id_spelling(trait_def_id))",
         .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
-        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string_impl(inner, depth + UInt(1)))",
+        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string_impl(inner, depth + UInt(1), show_sendable))",
         .ForeignFunctionType(params, return_type) then {
             let mutable out = StringBuilder.new();
             out.push_string("foreign (");
@@ -1459,11 +1754,11 @@ private let type_to_string_impl(t: Type, depth: UInt): String = {
                 if not first then {
                     out.push_string(", ");
                 };
-                out.push_string(type_to_string_impl(p.param_type, depth + UInt(1)));
+                out.push_string(type_to_string_impl(p.param_type, depth + UInt(1), show_sendable));
                 first = false;
             };
             out.push_string(") -> ");
-            out.push_string(type_to_string_impl(return_type, depth + UInt(1)));
+            out.push_string(type_to_string_impl(return_type, depth + UInt(1), show_sendable));
             out.to_string()
         },
     };
@@ -1573,7 +1868,7 @@ public let stable_type_hash(t: Type): UInt = {
         .NeverType() then {
             hash = stable_hash_combine_value(hash, UInt(15));
         },
-        .FunctionType(params, return_type) then {
+        .FunctionType(params, return_type, _) then {
             hash = stable_hash_combine_value(hash, UInt(16));
             hash = stable_hash_combine_value(hash, params.count());
             for entry in params then {
@@ -1662,7 +1957,7 @@ public let stable_type_hash(t: Type): UInt = {
             hash = stable_hash_combine_value(hash, UInt(30));
             hash = stable_hash_combine_value(hash, tv.id);
         },
-        .TraitObject(trait_def_id, type_args) then {
+        .TraitObject(trait_def_id, type_args, _) then {
             hash = stable_hash_combine_value(hash, UInt(31));
             hash = stable_hash_combine_value(
                 hash,
@@ -1971,8 +2266,10 @@ given Type: Eq {
         .BoolType() then other is .BoolType(),
         .VoidType() then other is .VoidType(),
         .NeverType() then other is .NeverType(),
-        .FunctionType(params, return_type) then when other in {
-            .FunctionType(other_params, other_return_type) then params == other_params and return_type == other_return_type,
+        // `is_sendable` 不参与相等判定：表示相同（同 mono/codegen 的擦除
+        // 语义），宽严规则在适配处单独判（same_expr_type 的放宽方向）。
+        .FunctionType(params, return_type, _) then when other in {
+            .FunctionType(other_params, other_return_type, _) then params == other_params and return_type == other_return_type,
             _ then false,
         },
         .StructureType(def_id) then when other in {
@@ -2045,8 +2342,8 @@ given Type: Eq {
             .ModuleType(other_info) then info == other_info,
             _ then false,
         },
-        .TraitObject(trait_def_id, type_args) then when other in {
-            .TraitObject(other_trait_def_id, other_type_args) then {
+        .TraitObject(trait_def_id, type_args, _) then when other in {
+            .TraitObject(other_trait_def_id, other_type_args, _) then {
                 if type_args != other_type_args then {
                     return false;
                 };

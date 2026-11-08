@@ -198,7 +198,7 @@ let method_symbol_matches_expected_return(
         method_symbol.symbol_type,
     );
     return when resolved_method_type in {
-        .FunctionType(_, return_type_ref) then {
+        .FunctionType(_, return_type_ref, _) then {
             let concrete_return = resolve_parameterized_type(mono, return_type_ref);
             mono.storage.context.get_layout_key(concrete_return) == mono.storage.context.get_layout_key(
                 concrete_expected_return,
@@ -429,7 +429,7 @@ let resolve_concrete_method_call(
         let expected_call_type_with_receiver = Type.FunctionType(
             types_to_param_entries(expected_call_param_types),
             resolved_call_type,
-        );
+        false);
         let rebound_method_with_receiver = bind_receiver_method_symbol(
             mono,
             effective_receiver_type,
@@ -829,15 +829,15 @@ let resolve_trait_placeholder_call_callee(
     let mutable trait_object_type_opt: Option[Type] = Option[Type].None();
     let mutable base_type = resolve_parameterized_type(mono, base_expr.expr_type);
     when base_type in {
-        .TraitObject(trait_def_id, trait_type_args) then {
+        .TraitObject(trait_def_id, trait_type_args, is_sendable) then {
             trait_object_type_opt = Option[Type].Some(
-                Type.TraitObject(trait_def_id, trait_type_args),
+                Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
             );
         },
         .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(trait_def_id, trait_type_args) then {
+            .TraitObject(trait_def_id, trait_type_args, is_sendable) then {
                 trait_object_type_opt = Option[Type].Some(
-                    Type.TraitObject(trait_def_id, trait_type_args),
+                    Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                 );
             },
             _ then {},
@@ -846,9 +846,9 @@ let resolve_trait_placeholder_call_callee(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(trait_def_id, trait_type_args) then {
+            .TraitObject(trait_def_id, trait_type_args, is_sendable) then {
                 trait_object_type_opt = Option[Type].Some(
-                    Type.TraitObject(trait_def_id, trait_type_args),
+                    Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                 );
             },
             _ then {},
@@ -903,7 +903,7 @@ let resolve_trait_placeholder_call_callee(
                 // whose `Self` IS the erased receiver, so the call needs no
                 // boxing.
                 let is_requirement_name = when trait_type in {
-                    .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+                    .TraitObject(trait_def_id, _, _) then mono.storage.generic_templates.trait_method_def_id(
                         trait_def_id,
                         logical_method_name,
                     ) is .Some(_),
@@ -911,7 +911,7 @@ let resolve_trait_placeholder_call_callee(
                 };
                 if not is_requirement_name then {
                     let shared_trait_def_id = when trait_object_type in {
-                        .TraitObject(td, _) then td,
+                        .TraitObject(td, _, _) then td,
                         _ then def_id_invalid(),
                     };
                     when select_trait_tool_template_cached(
@@ -980,7 +980,7 @@ let resolve_trait_placeholder_call_callee(
                                 // handle borrows the object's payload and hands
                                 // the callee garbage behind a `TraitRef` cast.
                                 let shared_return = when shared_method_sym.symbol_type in {
-                                    .FunctionType(_, ret) then resolve_parameterized_type(
+                                    .FunctionType(_, ret, _) then resolve_parameterized_type(
                                         mono,
                                         ret,
                                     ),
@@ -1034,7 +1034,7 @@ let resolve_trait_placeholder_call_callee(
                     // The DECLARATION the trait-object type names -- handed
                     // straight through. Spelling it out and resolving it again
                     // downstream is a DefId -> name -> DefId round-trip.
-                    .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+                    .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
                     _ then Option[DefId].None(),
                 };
                 when instantiate_trait_target_static_method(
@@ -1073,7 +1073,7 @@ let resolve_trait_placeholder_call_callee(
                             adapted_base.span,
                         );
                         let call_return_type = when trait_target_method_type in {
-                            .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then resolve_parameterized_type(
+                            .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then resolve_parameterized_type(
                                 mono,
                                 ret,
                             ),
@@ -1099,7 +1099,7 @@ let resolve_trait_placeholder_call_callee(
                 let expected_call_type = Type.FunctionType(
                     types_to_param_entries(expected_call_param_types),
                     resolved_call_type,
-                );
+                false);
                 // TOOL fallback: the call matched a tool method BY THE
                 // CONSTRAINT (see `is_requirement_name`), and the receiver
                 // type may not answer for it at all -- an inherent method that
@@ -1112,7 +1112,7 @@ let resolve_trait_placeholder_call_callee(
                 // method's (`<Type>_<method>`). `trait_method_def_id` carries
                 // the tool's identity, resolved once at check time.
                 let is_requirement_name = when trait_type in {
-                    .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+                    .TraitObject(trait_def_id, _, _) then mono.storage.generic_templates.trait_method_def_id(
                         trait_def_id,
                         method_name,
                     ) is .Some(_),
@@ -1120,7 +1120,7 @@ let resolve_trait_placeholder_call_callee(
                 };
                 if trait_method_def_id.is_valid() and not is_requirement_name then {
                     let tool_trait_def_id = when trait_type in {
-                        .TraitObject(td, _) then td,
+                        .TraitObject(td, _, _) then td,
                         _ then def_id_invalid(),
                     };
                     when select_trait_tool_template_cached(
@@ -1157,7 +1157,7 @@ let resolve_trait_placeholder_call_callee(
                                     adapted_base.span,
                                 );
                                 let tool_return = when tool_method_sym.symbol_type in {
-                                    .FunctionType(_, ret) then resolve_parameterized_type(
+                                    .FunctionType(_, ret, _) then resolve_parameterized_type(
                                         mono,
                                         ret,
                                     ),
@@ -1202,7 +1202,7 @@ let resolve_trait_placeholder_call_callee(
                         expr.span,
                     );
                     let call_return_type = when rebound_method.symbol_type in {
-                        .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then resolve_parameterized_type(mono, ret),
+                        .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then resolve_parameterized_type(mono, ret),
                         _ then resolved_call_type,
                     };
                     return Option[TypedExpr].Some(
@@ -1320,7 +1320,7 @@ let resolve_method_reference_call_callee(
         let expected_call_type_with_receiver = Type.FunctionType(
             types_to_param_entries(expected_call_param_types),
             resolved_call_type,
-        );
+        false);
         let mutable expected_call_arg_types = List[Type].new();
         for arg in new_args then {
             expected_call_arg_types.push(
@@ -1330,7 +1330,7 @@ let resolve_method_reference_call_callee(
         let expected_call_type_without_receiver = Type.FunctionType(
             types_to_param_entries(expected_call_arg_types),
             resolved_call_type,
-        );
+        false);
         let mutable expected_types = List[Type].new();
         expected_types.push(expected_call_type_with_receiver);
         expected_types.push(expected_method_type);
@@ -1347,7 +1347,7 @@ let resolve_method_reference_call_callee(
         let expected_call_type_with_receiver = Type.FunctionType(
             types_to_param_entries(expected_call_param_types),
             resolved_call_type,
-        );
+        false);
         let mutable expected_call_arg_types = List[Type].new();
         for arg in new_args then {
             expected_call_arg_types.push(
@@ -1357,7 +1357,7 @@ let resolve_method_reference_call_callee(
         let expected_call_type_without_receiver = Type.FunctionType(
             types_to_param_entries(expected_call_arg_types),
             resolved_call_type,
-        );
+        false);
         let mutable expected_types = List[Type].new();
         expected_types.push(expected_method_type);
         expected_types.push(expected_call_type_with_receiver);
@@ -1779,9 +1779,9 @@ let resolve_method_reference_call_callee(
         Option[String].Some(mono.storage.context.symbol_name(method)),
     );
     let receiver_trait_def_id_opt = when effective_receiver_type in {
-        .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+        .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
         .ReferenceType(inner_ref) then when resolve_parameterized_type(mono, inner_ref) in {
-            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
             _ then Option[DefId].None(),
         },
         .MutableReferenceType(inner_ref) or .WeakReferenceType(inner_ref)
@@ -1789,7 +1789,7 @@ let resolve_method_reference_call_callee(
             mono,
             inner_ref,
         ) in {
-            .TraitObject(trait_def_id, _) then Option[DefId].Some(trait_def_id),
+            .TraitObject(trait_def_id, _, _) then Option[DefId].Some(trait_def_id),
             _ then Option[DefId].None(),
         },
         _ then Option[DefId].None(),

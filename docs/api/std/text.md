@@ -43,20 +43,23 @@ public trait Formattable: ToString {
 ## Types
 ```koral
 /// Bit flags that control how a regex is compiled and matched.
-public type RegexFlag;
+public type sendable RegexFlag;
 
 /// A compiled regular expression, ready to match text.
 public type Regex;
 
 /// A match result that records only the whole match's span, with no capture groups.
-public type Match;
+public type sendable Match;
 
 /// A match result that also records the span of every capture group. The
 /// slots are an inline value -- zero allocations -- while the pattern fits
 /// (up to 16 capture groups, the common case), and one packed heap block
 /// beyond, the mainstream per-match shape (Go hands back a `[]int`). Either
 /// way a pattern may declare up to 65535 groups.
-public type Captures;
+///
+/// `sendable`: every field is sendable value data (inline `Int32` slots and
+/// `String` spans), so a `Captures` crosses threads by copy.
+public type sendable Captures;
 
 /// Iterator over the successive non-overlapping matches of a regex.
 public type mutable MatchIterator;

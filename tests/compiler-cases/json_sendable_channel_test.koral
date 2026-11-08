@@ -1,0 +1,24 @@
+// EXPECT: worker saw 3 20
+// EXPECT: json channel ok
+// JsonValue sits on the Frozen tree (concurrency-design.md §JsonValue 裁定):
+// it is safe `sendable`, so a parsed document crosses threads directly through
+// a channel without serialization.
+
+using "std/async" { ... };
+using "std/sync" { ... };
+using "std/json" { ... };
+
+let main(): Void = {
+    let doc = JsonValue.parse("[10, 20, 30]").unwrap();
+    let pair = make_channel[JsonValue](1);
+    let sender = pair.first;
+    let receiver = pair.second;
+    let worker = run_task(() => {
+        let got = receiver.recv().unwrap();
+        let elems = got.as_array().unwrap();
+        println("worker saw \(elems.count()) \(elems[1])");
+    });
+    sender.send(doc).unwrap();
+    let _ = worker.wait();
+    println("json channel ok");
+};

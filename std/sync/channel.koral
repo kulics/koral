@@ -19,7 +19,9 @@ using "std" { ... };
 // ============================================================================
 
 // channel internal shared storage
-private type mutable ChannelStorage[T: Any](
+/// Sendable contract: self-synchronized -- the storage mutex/condvars
+/// guard the queue; the conditional rule gates the element type.
+private type unsafe sendable mutable ChannelStorage[T: Any](
     mutex: Mutex,
     not_empty: MutexCondvar, // notify consumer: new message available
     not_full: MutexCondvar, // notify producer: space available (or hand-off done)
@@ -33,7 +35,7 @@ private type mutable ChannelStorage[T: Any](
 );
 
 /// The sending half of a bounded channel; dropping it closes the channel for receivers.
-public type mutable SendChannel[T: Any](private channel: ChannelStorage[T]);
+public type unsafe sendable mutable SendChannel[T: Any](private channel: ChannelStorage[T]);
 
 /// Implements `Drop`, closing the send side and waking waiting receivers.
 given[T: Any] SendChannel[T]: Drop {
@@ -47,7 +49,7 @@ given[T: Any] SendChannel[T]: Drop {
 };
 
 /// The receiving half of a bounded channel; dropping it closes the channel for senders.
-public type mutable RecvChannel[T: Any](private channel: ChannelStorage[T]);
+public type unsafe sendable mutable RecvChannel[T: Any](private channel: ChannelStorage[T]);
 
 /// Implements `Drop`, closing the receive side and waking waiting senders.
 given[T: Any] RecvChannel[T]: Drop {

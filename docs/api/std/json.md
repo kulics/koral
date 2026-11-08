@@ -18,11 +18,15 @@ Import the module with `using "std/json" { ... };`.
 ## Types
 ```koral
 /// JSON parse failure with `msg` and the `position` in the input where parsing stopped.
-public type JsonError(public msg: String, public position: UInt);
+public type sendable JsonError(public msg: String, public position: UInt);
 
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
-/// `Number` holds a `Float64`, `Array` a list of values, and `Object` a string-keyed map.
-public type JsonValue {
+/// `Number` holds a `Float64`, `Array` a frozen list of values, and `Object` a
+/// frozen string-keyed map. A value is construction-then-read-only data that
+/// sits on the `Frozen` tree, so it is safe `sendable` and may cross threads
+/// directly (e.g. through a `Channel[JsonValue]`); parsing and building stay
+/// on the mutable side (`JsonParser` accumulates, then freezes at construction).
+public type sendable JsonValue {
     Null(),
     Bool(value: Bool),
     /// A non-integer number. Integers that fit `Int`/`UInt` are stored
@@ -32,8 +36,8 @@ public type JsonValue {
     Int(value: Int),
     UInt(value: UInt),
     String(value: String),
-    Array(elements: List[JsonValue]),
-    Object(entries: Dict[String, JsonValue]),
+    Array(elements: FrozenList[JsonValue]),
+    Object(entries: FrozenDict[String, JsonValue]),
 };
 ```
 
@@ -78,9 +82,11 @@ given JsonValue {
     /// Return the `String` payload, or `None` when this is not a `String`.
     public as_string(self): Option[String];
     /// Return the `Array` elements, or `None` when this is not an `Array`.
-    public as_array(self): Option[List[JsonValue]];
+    /// Zero-copy view: the snapshot handle is shared with the value.
+    public as_array(self): Option[FrozenList[JsonValue]];
     /// Return the `Object` entries, or `None` when this is not an `Object`.
-    public as_object(self): Option[Dict[String, JsonValue]];
+    /// Zero-copy view: the snapshot handle is shared with the value.
+    public as_object(self): Option[FrozenDict[String, JsonValue]];
     /// Return the value stored under `key`, or `None` when this is not an `Object` or has no such key.
     public get_field(self, key: String): Option[JsonValue];
     /// Return the element at `index`, or `None` when this is not an `Array` or the index is out of range.

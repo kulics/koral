@@ -144,7 +144,7 @@ let decl_is_shown(d: CstDecl, public_types: List[String]): Bool = when d in {
 let target_type_name(t: CstType): Option[String] = when t in {
     .Named(name) then Option[String].Some(name.to_string()),
     .Generic(_, _, _, base) then .Some(base.to_string()),
-    .Mutable(inner, _) or .Paren(_, inner, _) then target_type_name(inner),
+    .Mutable(inner, _) or .Paren(_, inner, _) or .Sendable(_, inner) then target_type_name(inner),
     .Ptr(_, _) or .Weakref(_, _) or .SelfType(_) or .ConstraintKeyword(_) or .Function(_, _, _, _)
     or .ForeignFunction(_, _, _, _, _) or .FixedArray(_, _, _, _) then Option[String].None(),
 };
@@ -158,7 +158,7 @@ let public_type_names(file: CstFile): List[String] = {
         when item in {
             .Decl(d) or .DeclPreSemi(_, d) then {
                 when d in {
-                    .Type(vis, _, _, _, _, _, name, _) or .Trait(vis, _, _, name, _, _, _, _) then {
+                    .Type(vis, _, _, _, _, _, _, _, name, _) or .Trait(vis, _, _, _, name, _, _, _, _) then {
                         if Printer.is_public(vis) then {
                             names.push(name.to_string());
                         };
@@ -208,7 +208,7 @@ let decl_report_name(d: CstDecl): String = when d in {
             .None() then "let",
         }
     },
-    .Type(_, _, _, _, _, _, name, _) or .Trait(_, _, _, name, _, _, _, _) or .Var(_, _, _, name, _)
+    .Type(_, _, _, _, _, _, _, _, name, _) or .Trait(_, _, _, _, name, _, _, _, _) or .Var(_, _, _, name, _)
     or .TraitMethod(_, _, name, _, _, _, _) then name.to_string(),
     .Given(_, _, _, _, target, _, trait_type, _, _, _) then {
         when trait_type in {
@@ -222,7 +222,7 @@ let decl_report_name(d: CstDecl): String = when d in {
 /// The name a missing-doc report hangs `d`'s members on: the trait name, or
 /// the type a `given` extends.
 let member_owner_name(d: CstDecl): String = when d in {
-    .Trait(_, _, _, name, _, _, _, _) then name.to_string(),
+    .Trait(_, _, _, _, name, _, _, _, _) then name.to_string(),
     .Given(_, _, _, _, target, _, _, _, _, _) then {
         when target_type_name(target) in {
             .Some(name) then name,
@@ -278,10 +278,10 @@ let collect_decl(
         or .Var(_, _, _, _, _) then {
             api.free_functions.push(Decl(docs, render_signature(d)));
         },
-        .Type(_, _, _, _, _, _, _, _) then {
+        .Type(_, _, _, _, _, _, _, _, _, _) then {
             api.types.push(Decl(docs, render_signature(d)));
         },
-        .Trait(_, _, _, _, _, _, members, _) then {
+        .Trait(_, _, _, _, _, _, _, members, _) then {
             check_member_docs(missing, member_owner_name(d), members, false);
             api.traits.push(Decl(docs, render_signature(d)));
         },

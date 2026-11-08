@@ -5,6 +5,8 @@ private type BuiltinSubscriptKind {
     List(element: Type),
     Deque(element: Type),
     Dict(key: Type, value: Type),
+    FrozenList(element: Type),
+    FrozenDict(key: Type, value: Type),
     Pointer(element: Type, is_mutable: Bool),
     FixedArray(len: UInt, inner: Type),
 };
@@ -23,14 +25,14 @@ given TypeChecker {
 
     method_param_count(self, method: Symbol): UInt = {
         return when method.symbol_type in {
-            .FunctionType(params, _) or .ForeignFunctionType(params, _) then params.count(),
+            .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then params.count(),
             _ then UInt(0),
         };
     };
 
     method_param_type(self, method: Symbol, index: UInt): Option[Type] = {
         return when method.symbol_type in {
-            .FunctionType(params, _) or .ForeignFunctionType(params, _) then if index < params.count() then Option[Type].Some(
+            .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then if index < params.count() then Option[Type].Some(
                 (params[index]).param_type,
             ) else Option[Type].None(),
             _ then Option[Type].None(),
@@ -39,7 +41,7 @@ given TypeChecker {
 
     method_return_type(self, method: Symbol): Type = {
         return when method.symbol_type in {
-            .FunctionType(_, return_type_ref) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
+            .FunctionType(_, return_type_ref, _) or .ForeignFunctionType(_, return_type_ref) then return_type_ref,
             _ then Type.Unknown(),
         };
     };
@@ -121,7 +123,7 @@ given TypeChecker {
 
     method_param_types(self, method: Symbol): List[Type] = {
         return when method.symbol_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 let mutable out = List[Type].new();
                 for entry in params then {
                     out.push(entry.param_type);
@@ -166,9 +168,12 @@ given TypeChecker {
 
     /// What `base[i]` means for `base`.
     ///
-    /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict` and for
-    /// raw pointers. Which std type is meant is a question about the DECLARATION
-    /// identity -- a user type also named `List` does not get subscripting.
+    /// Subscripting is built in for std's `String`/`List`/`Deque`/`Dict`/
+    /// `FrozenList`/`FrozenDict` and for raw pointers. The frozen forms are
+    /// READ ONLY: they carry no `__index_slot`, so a frozen subscript can
+    /// never become a write target. Which std type is meant is a question
+    /// about the DECLARATION identity -- a user type also named `List` does
+    /// not get subscripting.
     resolve_builtin_subscript_kind(self, base_type: Type): Option[BuiltinSubscriptKind] = {
         let unwrapped = self.builtin_subscript_base_type(base_type);
         // Structural shapes first: `*mutable String` is a POINTER whose
@@ -192,8 +197,8 @@ given TypeChecker {
     };
 
     /// The std-collection half of subscript kind resolution: std's
-    /// `String`/`List`/`Deque`/`Dict`, by DECLARATION identity -- a user
-    /// type also named `List` does not get subscripting.
+    /// `String`/`List`/`Deque`/`Dict`/`FrozenList`/`FrozenDict`, by DECLARATION
+    /// identity -- a user type also named `List` does not get subscripting.
     resolve_builtin_subscript_collection_kind(
         self,
         unwrapped: Type,
@@ -222,6 +227,22 @@ given TypeChecker {
             if args is [key, value] then {
                 return Option[BuiltinSubscriptKind].Some(
                     BuiltinSubscriptKind.Dict(key, value),
+                );
+            };
+        };
+        if self.is_std_type(unwrapped, "FrozenList") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args is [element] then {
+                return Option[BuiltinSubscriptKind].Some(
+                    BuiltinSubscriptKind.FrozenList(element),
+                );
+            };
+        };
+        if self.is_std_type(unwrapped, "FrozenDict") then {
+            let args = self.std_type_arguments(unwrapped);
+            if args is [key, value] then {
+                return Option[BuiltinSubscriptKind].Some(
+                    BuiltinSubscriptKind.FrozenDict(key, value),
                 );
             };
         };
@@ -645,6 +666,22 @@ given TypeChecker {
                     );
                     self.adapt_expr_to_expected_type(slot_place, expected_ref_type)
                 },
+                .FrozenList(_) or .FrozenDict(_, _) then {
+                    // A frozen subscript yields a value copy (the read-only
+                    // `__index_get` path) and is never an addressable place --
+                    // same treatment as `String`, without the borrow.
+                    self.push_diagnostic_at_span(
+                        "Frozen subscript is not addressable",
+                        self.typed_expr_span(base),
+                    );
+                    make_typed_expr(
+                        TypedExprKind.Block(
+                            List[TypedStatement].new(),
+                            Option[TypedExpr].None(),
+                        ),
+                        Type.Unknown(),
+                    )
+                },
                 .Pointer(element_type, _) then {
                     let index_expr = if args.is_empty() then make_typed_expr(
                         TypedExprKind.IntegerLiteral("0"),
@@ -688,7 +725,7 @@ given TypeChecker {
             },
             .None() then {
                 self.push_diagnostic_at_span(
-                    "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types",
+                    "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types",
                     self.typed_expr_span(base),
                 );
                 make_typed_expr(
@@ -1393,9 +1430,9 @@ given TypeChecker {
                     _ then {},
                 };
             },
-            .FunctionType(p_params, p_ret) then {
+            .FunctionType(p_params, p_ret, _) then {
                 when normalized_concrete in {
-                    .FunctionType(c_params, c_ret) then {
+                    .FunctionType(c_params, c_ret, _) then {
                         if p_params.count() == c_params.count() then {
                             for pair in p_params.lazy().zip[
                                 FunctionParamEntry,
@@ -1599,8 +1636,8 @@ given TypeChecker {
                 ),
                 _ then bindings,
             },
-            .FunctionType(p_params, p_ret) then when normalized_concrete in {
-                .FunctionType(c_params, c_ret) then {
+            .FunctionType(p_params, p_ret, _) then when normalized_concrete in {
+                .FunctionType(c_params, c_ret, _) then {
                     if p_params.count() != c_params.count() then {
                         return bindings;
                     };
@@ -1635,7 +1672,7 @@ given TypeChecker {
                 _ then bindings,
             },
             .ForeignFunctionType(p_params, p_ret) then when normalized_concrete in {
-                    .FunctionType(c_params, c_ret) or .ForeignFunctionType(c_params, c_ret) then {
+                    .FunctionType(c_params, c_ret, _) or .ForeignFunctionType(c_params, c_ret) then {
                         if p_params.count() != c_params.count() then {
                             return bindings;
                         };
@@ -1728,7 +1765,7 @@ given TypeChecker {
             .MutablePointerType(inner) then Type.MutablePointerType(
                 self.apply_type_bindings(inner, bindings),
             ),
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable replaced_params = List[Type].new();
                 for param_ref in param_types then {
@@ -1737,6 +1774,7 @@ given TypeChecker {
                 Type.FunctionType(
                     types_to_param_entries(replaced_params),
                     self.apply_type_bindings(return_type, bindings),
+                    self.context().is_sendable_type(t),
                 )
             },
             .ForeignFunctionType(fn_params, return_type) then {
@@ -1764,12 +1802,12 @@ given TypeChecker {
                 };
                 Type.GenericEnum(template_def_id, replaced)
             },
-            .TraitObject(trait_def_id, args) then {
+            .TraitObject(trait_def_id, args, _) then {
                 let mutable replaced = List[Type].new();
                 for arg_ref in args then {
                     replaced.push(self.apply_type_bindings(arg_ref, bindings));
                 };
-                Type.TraitObject(trait_def_id, replaced)
+                Type.TraitObject(trait_def_id, replaced, self.context().is_sendable_type(t))
             },
             _ then t,
         };
@@ -2379,7 +2417,7 @@ given TypeChecker {
                 };
                 Type.GenericEnum(template_def_id, replaced)
             },
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 let mutable replaced_params = List[Type].new();
                 for entry in params then {
                     replaced_params.push(
@@ -2391,7 +2429,11 @@ given TypeChecker {
                     );
                 };
                 let replaced_ret = self.replace_type_occurrence(ret, pattern, replacement);
-                make_function_type(replaced_params, replaced_ret)
+                make_function_type_with_flag(
+                    replaced_params,
+                    replaced_ret,
+                    self.context().is_sendable_type(t),
+                )
             },
             .ForeignFunctionType(params, ret) then {
                 let mutable replaced_params = List[Type].new();
@@ -3166,7 +3208,7 @@ given TypeChecker {
             // must not shadow the requested `trait_def_id` -- when it did, the
             // only way left to ask "is this the same trait?" was to compare the
             // two spellings, which is exactly what identity is not.
-            .TraitObject(receiver_trait_def_id, receiver_trait_args) then {
+            .TraitObject(receiver_trait_def_id, receiver_trait_args, _) then {
                 when self.storage.trait_registry.get_by_def_id(receiver_trait_def_id) in {
                     .Some(info) then {
                         for pair in info.type_params.lazy().zip[
@@ -3393,7 +3435,7 @@ given TypeChecker {
                     self.collect_ancestor_bindings(arg, bindings);
                 };
             },
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 for entry in params then {
                     self.collect_ancestor_bindings(entry.param_type, bindings);
                 };
@@ -3435,7 +3477,7 @@ given TypeChecker {
         };
         return when t in {
             // Identity: the trait's DECLARATION, not its spelling.
-            .TraitObject(trait_def_id, _) then if trait_def_id == bound_trait_def_id then concrete_receiver
+            .TraitObject(trait_def_id, _, _) then if trait_def_id == bound_trait_def_id then concrete_receiver
             else t,
             .MutableReferenceType(inner) then Type.MutableReferenceType(
                 self.bind_conformance_trait_self_type(
@@ -3493,7 +3535,7 @@ given TypeChecker {
                     concrete_receiver,
                 ),
             ),
-            .FunctionType(fn_params, return_type) then {
+            .FunctionType(fn_params, return_type, _) then {
                 let param_types = param_entry_types(fn_params);
                 let mutable replaced_params = List[Type].new();
                 for param_ref in param_types then {
@@ -3512,6 +3554,7 @@ given TypeChecker {
                         bound_trait_def_id,
                         concrete_receiver,
                     ),
+                    self.context().is_sendable_type(t),
                 )
             },
             .ForeignFunctionType(fn_params, return_type) then {
@@ -3821,7 +3864,7 @@ given TypeChecker {
                 ordered,
                 seen,
             ),
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 for entry in params then {
                     self.collect_unbound_method_generic_param_names(
                         entry.param_type,
@@ -4703,7 +4746,7 @@ given TypeChecker {
                 };
             },
             // The spelling is read from the DECLARATION for the trait lookups.
-            .TraitObject(trait_def_id, _) then {
+            .TraitObject(trait_def_id, _, _) then {
                 // The DECLARATION travels; the spelling is display-only. Handing
                 // the spelling on makes the callee look it up in whichever
                 // module is checking -- a trait object's trait need not be named
@@ -5034,7 +5077,7 @@ given TypeChecker {
         // Identity: the trait's DECLARATION, straight off the type when it
         // carries one. The spelling is resolved once only for the bare-name case.
         let entry_def_id = when trait_type in {
-            .TraitObject(trait_def_id, _) then trait_def_id,
+            .TraitObject(trait_def_id, _, _) then trait_def_id,
             _ then self.trait_def_id_of(self.trait_name_from_type(trait_type)) or else def_id_invalid(
             ),
         };
@@ -5330,7 +5373,7 @@ given TypeChecker {
                 };
                 let sym_name = self.context().symbol_name(sym);
                 return when sym.symbol_type in {
-                    .FunctionType(_, ret) or .ForeignFunctionType(_, ret) then ret,
+                    .FunctionType(_, ret, _) or .ForeignFunctionType(_, ret) then ret,
                     .StructureType(_) or .EnumType(_) or .GenericStruct(...) or .GenericEnum(...) then sym.symbol_type,
                     _ then if self.resolve_type_name_binding(sym_name) is .Some(t) then t
                     else Type.Unknown(),
@@ -5342,7 +5385,7 @@ given TypeChecker {
                 // result type is the function's own result type; there is no
                 // method to look up.
                 when callee.expr_type in {
-                    .FunctionType(_, ret) then {
+                    .FunctionType(_, ret, _) then {
                         return ret;
                     },
                     .ForeignFunctionType(_, ret) then {
@@ -5357,7 +5400,7 @@ given TypeChecker {
             },
             .MethodReference(base, _, method, _, _, _) then {
                 when method.symbol_type in {
-                    .FunctionType(_, ret) then {
+                    .FunctionType(_, ret, _) then {
                         return ret;
                     },
                     .ForeignFunctionType(_, ret) then {
@@ -5390,7 +5433,7 @@ given TypeChecker {
             },
             .StaticMethodCall(receiver_type, _, method, _, _, _) then {
                 when method.symbol_type in {
-                    .FunctionType(_, ret) then {
+                    .FunctionType(_, ret, _) then {
                         return ret;
                     },
                     .ForeignFunctionType(_, ret) then {
@@ -5429,7 +5472,7 @@ given TypeChecker {
             _ then {},
         };
         when callee.expr_type in {
-            .FunctionType(_, ret) then {
+            .FunctionType(_, ret, _) then {
                 return ret;
             },
             .ForeignFunctionType(_, ret) then {
@@ -5448,7 +5491,7 @@ given TypeChecker {
                 if self.context().get_function_type(sym.def_id) is .Some(function_type) then {
                     let mutable out = List[Type].new();
                     when function_type in {
-                        .FunctionType(fn_params, _) then {
+                        .FunctionType(fn_params, _, _) then {
                             for parameter in fn_params then {
                                 out.push(parameter.param_type);
                             };
@@ -5473,7 +5516,7 @@ given TypeChecker {
                     return out;
                 };
                 when sym.symbol_type in {
-                    .FunctionType(params, _) then {
+                    .FunctionType(params, _, _) then {
                         let mutable out = List[Type].new();
                         for entry in params then {
                             out.push(entry.param_type);
@@ -5560,7 +5603,7 @@ given TypeChecker {
             _ then {},
         };
         when callee.expr_type in {
-            .FunctionType(params, _) then {
+            .FunctionType(params, _, _) then {
                 let mutable out = List[Type].new();
                 for entry in params then {
                     out.push(entry.param_type);

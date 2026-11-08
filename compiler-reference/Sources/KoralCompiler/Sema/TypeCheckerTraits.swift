@@ -230,6 +230,13 @@ extension TypeChecker {
         type1: "foreign",
         type2: ""
       )
+    case .sendable:
+      // `sendable` is a shape requirement too, with no trait declaration.
+      throw SemanticError.invalidOperation(
+        op: "invalid trait bound",
+        type1: "sendable",
+        type2: ""
+      )
     }
   }
 
@@ -581,7 +588,7 @@ extension TypeChecker {
         )
       }
       let ret = try resolveTypeNode(method.returnType)
-      return Type.function(parameters: params, returns: ret)
+      return Type.function(parameters: params, returns: ret, isSendable: false)
     }
   }
 
@@ -732,10 +739,10 @@ extension TypeChecker {
       return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
     case .fixedArray(_, let element, _):
       return containsSelfType(element)
-    case .fixedArray(_, let element, _):
-      return containsSelfType(element)
     case .foreignFunction(let paramTypes, let returnType, _):
       return paramTypes.contains { containsSelfType($0) } || containsSelfType(returnType)
+    case .sendableQualified(let inner):
+      return containsSelfType(inner)
     }
   }
 
@@ -770,7 +777,7 @@ extension TypeChecker {
   /// the same trait name.
   func traitObjectDeclId(of type: Type) -> DefId? {
     switch type {
-    case .traitObject(let defId, _):
+    case .traitObject(let defId, _, _):
       return defId
     case .reference(let inner),
          .mutableReference(let inner),
@@ -997,7 +1004,7 @@ extension TypeChecker {
         )
       }
       let ret = try resolveTypeNode(method.returnType)
-      return Type.function(parameters: params, returns: ret)
+      return Type.function(parameters: params, returns: ret, isSendable: false)
     }
   }
 }

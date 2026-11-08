@@ -7,12 +7,13 @@ extension Parser {
   private enum TypeModifierPrefix {
     case pointer(mutable: Bool)
     case weakReference
+    case sendableQualifier
   }
 
 
   func isTypeStart(_ token: Token) -> Bool {
     switch token {
-    case .selfTypeKeyword, .multiply, .questionMark, .identifier, .leftParen:
+    case .selfTypeKeyword, .multiply, .questionMark, .identifier, .leftParen, .sendableKeyword:
       return true
     default:
       return false
@@ -24,6 +25,9 @@ extension Parser {
       return .pointer(base, mutable: mutable, span: span)
     case .weakReference:
       return .weakReference(base, mutable: false, span: span)
+    case .sendableQualifier:
+      // No span slot of its own: the anchor follows the qualified type.
+      return .sendableQualified(base)
     }
   }
 
@@ -51,6 +55,14 @@ extension Parser {
           try match(.mutableKeyword)
         }
         prefixes.append(.pointer(mutable: mutable))
+        continue
+      }
+      // `sendable` prefix qualifier: `sendable (A) -> R`, `sendable Trait`.
+      // Nestable: `sendable (A) -> sendable (B) -> R` qualifies again at the
+      // return position (concurrency-design.md).
+      if currentToken === .sendableKeyword {
+        try match(.sendableKeyword)
+        prefixes.append(.sendableQualifier)
         continue
       }
       break
@@ -92,10 +104,10 @@ extension Parser {
       return .inferredSelf(span: span)
     case .functionType(let paramTypes, let returnType, _):
       return .functionType(paramTypes: paramTypes, returnType: returnType, span: span)
-    case .fixedArray(let size, let element, _):
-      return .fixedArray(size: size, element: element, span: span)
     case .foreignFunction(let paramTypes, let returnType, _):
       return .foreignFunction(paramTypes: paramTypes, returnType: returnType, span: span)
+    case .sendableQualified(let inner):
+      return .sendableQualified(typeNodeWithSpan(inner, span))
     }
   }
 

@@ -41,7 +41,7 @@ Koral 的取舍判据有两条腿：**复杂度预算**（默认拒绝的类别�
 | 类别 | Koral 的主流表达 | 依据 |
 |---|---|---|
 | 关联类型 | 「关联物」一律写成类型参数：`Iterator[T]`、`Iterable[T, R]` | 投影归一化让 trait 身份无法在声明处定死，与共同前提「身份是 DefId 含实参」冲突 |
-| 下标语法 trait | `[]` 是内建规则：只覆盖 `String`、`List`、`Deque`、`Dict`、裸指针；用户类型不可实现、泛型约束不可增加 | `[]` 表达 place（读 / 写 / 嵌套更新）；公开 trait 接不住 place 语义，接得住就得把 lvalue 模型公开 |
+| 下标语法 trait | `[]` 是内建规则：只覆盖 `String`、`List`、`Deque`、`Dict`、`FrozenList`、`FrozenDict`、定长数组、裸指针（2026-11-08 增补 Frozen 两型，**只读半部**——冻结快照的下标不可写，见 [`concurrency-design.md`](concurrency-design.md)）；用户类型不可实现、泛型约束不可增加 | `[]` 表达 place（读 / 写 / 嵌套更新）；公开 trait 接不住 place 语义，接得住就得把 lvalue 模型公开 |
 | 函数重载 | 模块级一个名字一个属主；类型上的能力靠 receiver 与 trait 身份区分 | 重载集按调用点实参选型，把「名字→身份」从解析边界拖到调用点，破坏局部可判断 |
 | 高阶类型 | 泛型是单态化模板，类型参数只代入类型 | 单态化没给类型构造器留实例化语义；求解会退化成全局推断 |
 | 双参数错误类型 | `Result[T]` 单参数，错误侧是合成的 `Error` trait object | 双参数引入 `From[E]` 转换格与签名级错误类型推断；`or return` 的统一传播建立在错误侧固定之上 |

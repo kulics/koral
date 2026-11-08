@@ -32,7 +32,7 @@ let bind_generic_function_call_callee(
                             let mutable expected_call_type = Type.FunctionType(
                                 types_to_param_entries(call_param_types),
                                 resolve_parameterized_type(mono, expected_return_type),
-                            );
+                            false);
                             for remapped in remapped_list then {
                                 let candidate_def_id = remapped.first;
                                 let mutable candidate_type = resolve_parameterized_type(
@@ -593,9 +593,9 @@ let collect_generic_bindings_from_shape(
                 _ then {},
             };
         },
-        .FunctionType(pattern_params, pattern_return) then {
+        .FunctionType(pattern_params, pattern_return, _) then {
             when actual in {
-                .FunctionType(fn_params, ret_type) then {
+                .FunctionType(fn_params, ret_type, _) then {
                     let param_types = param_entry_types(fn_params);
                     for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
                         param_types,
@@ -642,7 +642,7 @@ let collect_generic_bindings_from_shape(
         },
         .ForeignFunctionType(pattern_params, pattern_return) then {
             when actual in {
-                .FunctionType(fn_params, ret_type) then {
+                .FunctionType(fn_params, ret_type, _) then {
                     let param_types = param_entry_types(fn_params);
                     for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
                         param_types,
@@ -820,6 +820,10 @@ let type_node_mentions_type_parameter(
             };
             type_node_mentions_type_parameter(return_type, type_param_name)
         },
+        .SendableQualified(inner) then type_node_mentions_type_parameter(
+            inner,
+            type_param_name,
+        ),
     };
 };
 
@@ -978,7 +982,7 @@ let canonical_type_for_generic_binding(mono: Monomorphizer, t: Type): Type = {
         .MutablePointerType(inner_ref) then Type.MutablePointerType(
             canonical_type_for_generic_binding(mono, inner_ref),
         ),
-        .FunctionType(fn_params, return_type_ref) then {
+        .FunctionType(fn_params, return_type_ref, _) then {
             let param_types = param_entry_types(fn_params);
             let mutable new_params = List[Type].new();
             for param_type in param_types then {
@@ -987,7 +991,7 @@ let canonical_type_for_generic_binding(mono: Monomorphizer, t: Type): Type = {
             Type.FunctionType(
                 types_to_param_entries(new_params),
                 canonical_type_for_generic_binding(mono, return_type_ref),
-            )
+            false)
         },
         .ForeignFunctionType(fn_params, return_type_ref) then {
             let param_types = param_entry_types(fn_params);
@@ -1356,9 +1360,9 @@ public let unify_generic_type_pattern(
                 .None() then false,
             }
         },
-        .FunctionType(pattern_params, pattern_return) then {
+        .FunctionType(pattern_params, pattern_return, _) then {
             when normalized_actual in {
-                .FunctionType(actual_params, actual_return) then {
+                .FunctionType(actual_params, actual_return, _) then {
                     if pattern_params.count() != actual_params.count() then {
                         return false;
                     };
@@ -1415,7 +1419,7 @@ public let unify_generic_type_pattern(
         },
         .ForeignFunctionType(pattern_params, pattern_return) then {
             when normalized_actual in {
-                .FunctionType(actual_params, actual_return) then {
+                .FunctionType(actual_params, actual_return, _) then {
                     if pattern_params.count() != actual_params.count() then {
                         return false;
                     };
@@ -1558,9 +1562,9 @@ let collect_generic_type_bindings(
                 _ then {},
             };
         },
-        .FunctionType(exp_params, exp_ret) then {
+        .FunctionType(exp_params, exp_ret, _) then {
             when actual in {
-                .FunctionType(act_params, act_ret) then {
+                .FunctionType(act_params, act_ret, _) then {
                     for pair in exp_params.lazy().zip[
                         FunctionParamEntry,
                         ListIterator[FunctionParamEntry],
@@ -1593,7 +1597,7 @@ let collect_generic_type_bindings(
         },
         .ForeignFunctionType(exp_params, exp_ret) then {
             when actual in {
-                .FunctionType(act_params, act_ret) then {
+                .FunctionType(act_params, act_ret, _) then {
                     for pair in exp_params.lazy().zip[
                         FunctionParamEntry,
                         ListIterator[FunctionParamEntry],

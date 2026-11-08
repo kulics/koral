@@ -36,14 +36,18 @@ public let substitute_types_in_expression(
     };
     let new_type = when expr.expr_kind in {
         .CastExpr(target_type, _) then when target_type in {
-            .TraitObject(original_trait_def_id, original_type_args) then {
+            .TraitObject(original_trait_def_id, original_type_args, is_sendable) then {
                 let mutable substituted_type_args = List[Type].new();
                 for original_type_arg in original_type_args then {
                     substituted_type_args.push(
                         mono.substitute_type_impl(original_type_arg, substitution),
                     );
                 };
-                Type.TraitObject(original_trait_def_id, substituted_type_args)
+                Type.TraitObject(
+                    original_trait_def_id,
+                    substituted_type_args,
+                    is_sendable,
+                )
             },
             _ then mono.substitute_type_impl(expr.expr_type, substitution),
         },
@@ -131,7 +135,7 @@ private let recover_unknown_expr_type(
             _ then fallback,
         },
         .Call(callee, _) then when resolve_parameterized_type(mono, callee.expr_type) in {
-            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
+            .FunctionType(_, return_type, _) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                 mono,
                 return_type,
             ),
@@ -159,7 +163,7 @@ private let recover_unknown_expr_type(
             Type.FunctionType(
                 param_entries,
                 resolve_parameterized_type(mono, return_type),
-            )
+            false)
         },
         .StaticMethodCall(_, _, method, _, _, _) then recover_method_return_type(
             mono,
@@ -389,7 +393,7 @@ private let synthetic_args_from_expected_method_type(
     let mutable args = List[TypedExpr].new();
     let mutable resolved_receiver_type = resolve_parameterized_type(mono, receiver_type);
     when resolve_parameterized_type(mono, expected_method_type) in {
-        .FunctionType(expected_params, _) then {
+        .FunctionType(expected_params, _, _) then {
             let param_types = param_entry_types(expected_params);
             let mutable start_idx: UInt = 0;
             if not param_types.is_empty() then {
@@ -593,7 +597,7 @@ private let bind_receiver_method_symbol_for_expected_type(
         mono,
         expected_method_type,
     ) in {
-        .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        .FunctionType(_, return_type, _) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
         _ then resolve_parameterized_type(mono, method.symbol_type),
     };
     let rebound = try_bind_generic_method_call(
@@ -670,7 +674,7 @@ private let placeholder_method_is_requirement(
     method_name: String,
 ): Bool = {
     return when trait_type in {
-        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.trait_method_def_id(
+        .TraitObject(trait_def_id, _, _) then mono.storage.generic_templates.trait_method_def_id(
             trait_def_id,
             method_name,
         ) is .Some(_),
@@ -680,13 +684,13 @@ private let placeholder_method_is_requirement(
 
 private let substitution_trait_object_type(t: Type): Option[Type] = {
     return when t in {
-        .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-            Type.TraitObject(trait_def_id, type_args),
+        .TraitObject(trait_def_id, type_args, is_sendable) then Option[Type].Some(
+            Type.TraitObject(trait_def_id, type_args, is_sendable),
         ),
         .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
         or .MutableBorrowedReferenceType(inner) then when inner in {
-            .TraitObject(trait_def_id, type_args) then Option[Type].Some(
-                Type.TraitObject(trait_def_id, type_args),
+            .TraitObject(trait_def_id, type_args, is_sendable) then Option[Type].Some(
+                Type.TraitObject(trait_def_id, type_args, is_sendable),
             ),
             _ then Option[Type].None(),
         },
@@ -701,7 +705,7 @@ private let normalize_trait_placeholder_expected_method_type(
 ): Type = {
     let resolved_method_type = resolve_parameterized_type(mono, method_type);
     return when resolved_method_type in {
-        .FunctionType(params, return_type) then {
+        .FunctionType(params, return_type, _) then {
             if params.is_empty() then {
                 return resolved_method_type;
             };
@@ -731,7 +735,7 @@ private let normalize_trait_placeholder_expected_method_type(
             Type.FunctionType(
                 normalized_params,
                 resolve_parameterized_type(mono, return_type),
-            )
+            false)
         },
         .ForeignFunctionType(params, return_type) then {
             if params.is_empty() then {
@@ -786,7 +790,7 @@ private let normalize_method_symbol_type_for_base(
         return resolved_method_type;
     };
     return when resolved_method_type in {
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.is_empty() then {
                 return resolved_method_type;
@@ -821,7 +825,7 @@ private let normalize_method_symbol_type_for_base(
             Type.FunctionType(
                 normalized_params,
                 resolve_parameterized_type(mono, return_type),
-            )
+            false)
         },
         .ForeignFunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params);
@@ -872,7 +876,7 @@ private let substitution_method_has_compatible_ref_like_receiver(
     let mutable resolved_method_type = resolve_parameterized_type(mono, method_type);
     let mutable resolved_base_type = resolve_parameterized_type(mono, base_type);
     return when resolved_method_type in {
-        .FunctionType(fn_params, _) then {
+        .FunctionType(fn_params, _, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.is_empty() then {
                 return false;
@@ -1010,7 +1014,7 @@ private let recover_method_return_type(
     let mutable method_type = resolve_parameterized_type(mono, method.symbol_type);
     let mutable fallback_type = resolve_parameterized_type(mono, fallback);
     return when method_type in {
-        .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
+        .FunctionType(_, return_type, _) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(mono, return_type),
         _ then fallback_type,
     };
 };
@@ -1128,14 +1132,18 @@ private let substitute_expr_kind(
         // CastExpr: substitute target type and inner expression.
         .CastExpr(target_type, e) then {
             let new_target = when target_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, is_sendable) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(
                             mono.substitute_type_impl(original_type_arg, substitution),
                         );
                     };
-                    Type.TraitObject(original_trait_def_id, substituted_type_args)
+                    Type.TraitObject(
+                        original_trait_def_id,
+                        substituted_type_args,
+                        is_sendable,
+                    )
                 },
                 _ then mono.substitute_type_impl(target_type, substitution),
             };
@@ -1156,7 +1164,7 @@ private let substitute_expr_kind(
             );
             let mutable new_trait_type = resolved_substituted_trait_type;
             when trait_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, _) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(
@@ -1166,7 +1174,7 @@ private let substitute_expr_kind(
                     new_trait_type = Type.TraitObject(
                         original_trait_def_id,
                         substituted_type_args,
-                    );
+                    false);
                 },
                 _ then {},
             };
@@ -1175,7 +1183,7 @@ private let substitute_expr_kind(
                 mono.substitute_type_impl(concrete_type, substitution),
             );
             when new_trait_type in {
-                .TraitObject(trait_def_id, _) then collect_concrete_vtable_request(
+                .TraitObject(trait_def_id, _, _) then collect_concrete_vtable_request(
                     mono,
                     new_concrete_type,
                     def_id_spelling(trait_def_id),
@@ -1280,7 +1288,7 @@ private let substitute_expr_kind(
                         let expected_call_type = Type.FunctionType(
                             types_to_param_entries(expected_call_param_types),
                             substituted_expr_type,
-                        );
+                        false);
                         when resolve_standalone_method_function_reference(
                             mono,
                             identifier,
@@ -1330,7 +1338,7 @@ private let substitute_expr_kind(
                         let expected_call_type = Type.FunctionType(
                             types_to_param_entries(expected_call_param_types),
                             substituted_expr_type,
-                        );
+                        false);
                         // Identity-priority (Swift's
                         // `resolveTraitPlaceholderMethodByIdentity`): the trait
                         // method's DefId is the identity, resolved once at
@@ -1496,7 +1504,7 @@ private let substitute_expr_kind(
                         let expected_call_type_with_receiver = Type.FunctionType(
                             types_to_param_entries(expected_call_param_types),
                             substituted_expr_type,
-                        );
+                        false);
                         let mutable expected_call_arg_types = List[Type].new();
                         for arg in new_args then {
                             expected_call_arg_types.push(
@@ -1506,7 +1514,7 @@ private let substitute_expr_kind(
                         let expected_call_type_without_receiver = Type.FunctionType(
                             types_to_param_entries(expected_call_arg_types),
                             substituted_expr_type,
-                        );
+                        false);
                         let preferred_expected_types = if resolved_method_type_args.is_empty(
                         ) and has_generic_parameter(expected_method_type) then {
                             let mutable expected_types = List[Type].new();
@@ -1868,15 +1876,15 @@ private let substitute_expr_kind(
                 mono,
                 new_base.expr_type,
             ) in {
-                .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
-                    Type.TraitObject(trait_def_id, trait_type_args),
+                .TraitObject(trait_def_id, trait_type_args, is_sendable) then Option[Type].Some(
+                    Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                 ),
                 .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref) then when resolve_parameterized_type(
                     mono,
                     inner_ref,
                 ) in {
-                    .TraitObject(trait_def_id, trait_type_args) then Option[Type].Some(
-                        Type.TraitObject(trait_def_id, trait_type_args),
+                    .TraitObject(trait_def_id, trait_type_args, is_sendable) then Option[Type].Some(
+                        Type.TraitObject(trait_def_id, trait_type_args, is_sendable),
                     ),
                     _ then Option[Type].None(),
                 },
@@ -2016,7 +2024,7 @@ private let substitute_expr_kind(
                 substitution,
             );
             when trait_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, _) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(
@@ -2026,7 +2034,7 @@ private let substitute_expr_kind(
                     new_trait_type = Type.TraitObject(
                         original_trait_def_id,
                         substituted_type_args,
-                    );
+                    false);
                 },
                 _ then {},
             };
@@ -2172,7 +2180,7 @@ private let substitute_expr_kind(
                 substitution,
             );
             when trait_type in {
-                .TraitObject(original_trait_def_id, original_type_args) then {
+                .TraitObject(original_trait_def_id, original_type_args, _) then {
                     let mutable substituted_type_args = List[Type].new();
                     for original_type_arg in original_type_args then {
                         substituted_type_args.push(
@@ -2182,7 +2190,7 @@ private let substitute_expr_kind(
                     new_trait_type = Type.TraitObject(
                         original_trait_def_id,
                         substituted_type_args,
-                    );
+                    false);
                 },
                 _ then {},
             };
@@ -2522,7 +2530,7 @@ private let remapped_function_def_id_for_type(
                         resolved_type,
                     );
                     when concrete_type in {
-                        .FunctionType(fn_params, return_type) then {
+                        .FunctionType(fn_params, return_type, _) then {
                             let mutable inferred = Dict[String, Type].new();
                             let param_types = param_entry_types(fn_params);
                             for pair in template.parameters.lazy().zip[
@@ -2760,9 +2768,9 @@ private let bind_generic_function_type_from_shape(
             },
             _ then {},
         },
-        .FunctionType(pattern_params, pattern_return)
+        .FunctionType(pattern_params, pattern_return, _)
         or .ForeignFunctionType(pattern_params, pattern_return) then when actual in {
-            .FunctionType(fn_params, ret_type) or .ForeignFunctionType(fn_params, ret_type) then {
+            .FunctionType(fn_params, ret_type, _) or .ForeignFunctionType(fn_params, ret_type) then {
                 let param_types = param_entry_types(fn_params);
                 for pair in pattern_params.lazy().zip[Type, ListIterator[Type], List[Type]](
                     param_types,
@@ -2928,8 +2936,8 @@ private let method_type_matches_expected_pattern(
     };
     return when normalized_expected in {
         .GenericParameter(_) then true,
-        .FunctionType(expected_params, expected_return) then when normalized_actual in {
-            .FunctionType(actual_params, actual_return) then {
+        .FunctionType(expected_params, expected_return, _) then when normalized_actual in {
+            .FunctionType(actual_params, actual_return, _) then {
                 if actual_params.count() != expected_params.count() then {
                     return false;
                 };
@@ -2978,7 +2986,7 @@ private let method_type_matches_expected_pattern(
             _ then false,
         },
         .ForeignFunctionType(expected_params, expected_return) then when normalized_actual in {
-            .FunctionType(actual_params, actual_return) then {
+            .FunctionType(actual_params, actual_return, _) then {
                 if actual_params.count() != expected_params.count() then {
                     return false;
                 };
@@ -3091,7 +3099,7 @@ private let finalize_direct_method_candidate(
     };
     let resolved_expected = resolve_parameterized_type(mono, expected);
     when resolved_expected in {
-        .FunctionType(expected_params, _) then {
+        .FunctionType(expected_params, _, _) then {
             if expected_params.is_empty() then {
                 return Option[Symbol].Some(resolved_symbol);
             };
@@ -3287,7 +3295,7 @@ private let method_type_matches_expected_for_wrapper_receiver(
 ): Bool = {
     let normalized_candidate = resolve_parameterized_type(mono, candidate);
     return when normalized_candidate in {
-        .FunctionType(candidate_params, candidate_return) then {
+        .FunctionType(candidate_params, candidate_return, _) then {
             if candidate_params.count() == 0 then {
                 return false;
             };
@@ -3301,7 +3309,7 @@ private let method_type_matches_expected_for_wrapper_receiver(
             return when expected_opt in {
                 .None() then true,
                 .Some(expected) then when resolve_parameterized_type(mono, expected) in {
-                    .FunctionType(expected_params, expected_return) then {
+                    .FunctionType(expected_params, expected_return, _) then {
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
@@ -3381,7 +3389,7 @@ private let method_type_matches_expected_for_wrapper_receiver(
             return when expected_opt in {
                 .None() then true,
                 .Some(expected) then when resolve_parameterized_type(mono, expected) in {
-                    .FunctionType(expected_params, expected_return) then {
+                    .FunctionType(expected_params, expected_return, _) then {
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
@@ -3462,7 +3470,7 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
 ): Bool = {
     let normalized_candidate = resolve_parameterized_type(mono, candidate);
     return when normalized_candidate in {
-        .FunctionType(candidate_params, candidate_return) then {
+        .FunctionType(candidate_params, candidate_return, _) then {
             if candidate_params.count() == 0 then {
                 return false;
             };
@@ -3476,7 +3484,7 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
             return when expected_opt in {
                 .None() then true,
                 .Some(expected) then when resolve_parameterized_type(mono, expected) in {
-                    .FunctionType(expected_params, expected_return) then {
+                    .FunctionType(expected_params, expected_return, _) then {
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
@@ -3546,7 +3554,7 @@ private let method_type_matches_expected_for_wrapper_receiver_strict(
             return when expected_opt in {
                 .None() then true,
                 .Some(expected) then when resolve_parameterized_type(mono, expected) in {
-                    .FunctionType(expected_params, expected_return) then {
+                    .FunctionType(expected_params, expected_return, _) then {
                         if candidate_params.count() != expected_params.count() then {
                             return false;
                         };
@@ -4054,7 +4062,7 @@ let bind_receiver_method_symbol(
             mono,
             expected_method_type,
         ) in {
-            .FunctionType(_, return_type) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
+            .FunctionType(_, return_type, _) or .ForeignFunctionType(_, return_type) then resolve_parameterized_type(
                 mono,
                 return_type,
             ),
@@ -4500,11 +4508,11 @@ private let substitution_vtable_method_index(
 ): Int = {
     // Display/resolution handle: the spelling comes from the declaration.
     let trait_name = when trait_type in {
-        .TraitObject(trait_def_id, _) then def_id_spelling(trait_def_id),
+        .TraitObject(trait_def_id, _, _) then def_id_spelling(trait_def_id),
         _ then "",
     };
     let trait_info = when trait_type in {
-        .TraitObject(trait_def_id, _) then mono.storage.generic_templates.lookup_trait_by_def_id(
+        .TraitObject(trait_def_id, _, _) then mono.storage.generic_templates.lookup_trait_by_def_id(
             trait_def_id,
         ),
         _ then Option[TraitDeclInfo].None(),
@@ -4518,7 +4526,7 @@ private let substitution_vtable_method_index(
     };
     // The type already carries the trait's DECLARATION; no name is re-read.
     let entry_def_id = when trait_type in {
-        .TraitObject(trait_def_id, _) then trait_def_id,
+        .TraitObject(trait_def_id, _, _) then trait_def_id,
         _ then def_id_invalid(),
     };
     if entry_def_id.is_valid() then {
@@ -4582,7 +4590,7 @@ let align_method_reference_base_for_bound_method(
         mono,
         method.symbol_type,
     ) in {
-        .FunctionType(fn_params, _) then {
+        .FunctionType(fn_params, _, _) then {
             let param_types = param_entry_types(fn_params);
             if param_types.count() == 0 then {
                 Option[Type].None()

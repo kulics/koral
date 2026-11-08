@@ -1,0 +1,36 @@
+// EXPECT: hits=400000
+
+// Assignment-statement atomicity stress (concurrency-design.md §对象锁语义 3):
+// `c.hits = c.hits + 1` is ONE critical section on the target owner's lock,
+// spanning the RHS evaluation and the write. If the lock only wrapped the
+// final store, concurrent read-modify-writes would lose updates and this
+// count would fall short of 8 * 50000.
+
+using "std/async" { ... };
+
+type sendable mutable Counter(mutable hits: Int);
+
+let main(): Void = {
+    let c = Counter(0);
+    let mutable threads = List[Thread].new();
+    let mutable i = 0;
+    while i < 8 then {
+        let shared = c;
+        threads.push(
+            run_task(
+                () => {
+                    let mutable j = 0;
+                    while j < 50000 then {
+                        shared.hits = shared.hits + 1;
+                        j = j + 1;
+                    };
+                },
+            ),
+        );
+        i = i + 1;
+    };
+    for t in threads then {
+        let _ = t.wait();
+    };
+    println("hits=\(c.hits)");
+};

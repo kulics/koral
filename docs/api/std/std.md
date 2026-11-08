@@ -54,7 +54,7 @@ public let intrinsic take_memory[T: Any](p: *mutable T): T;
 /// A `stack_size` of 0 uses the default stack size.
 /// Returns 0 on success, non-zero on failure.
 /// The closure is passed by value to the C runtime which invokes and releases it.
-public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: () -> Void, stack_size: UInt64): Int32;
+public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: sendable () -> Void, stack_size: UInt64): Int32;
 
 /// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;
@@ -74,22 +74,29 @@ public let last_error_message(): String;
 /// Return the command-line arguments, starting with the program name.
 public let args(): List[String];
 
-/// Print `Panic: ` and the message to standard error, then abort the process.
+/// Print `Panic: ` and the message to standard error in one locked write,
+/// then abort the process.
 public let panic(message: String): Never;
 
 /// Panic with `message` when `condition` is false.
 public let assert(condition: Bool, message: String): Void;
 
-/// Write `value`'s text to standard output without a newline, then flush.
+/// Write `value`'s text to standard output without a newline in one locked
+/// write, then flush. Atomic with respect to other writes on the stream.
 public let print[T: ToString](value: T): Void;
 
-/// Write `value`'s text and a newline to standard output, then flush.
+/// Write `value`'s text and a newline to standard output as ONE locked write
+/// of the fully formatted line, then flush. Atomic with respect to other
+/// writes on the stream: lines never tear.
 public let println[T: ToString](value: T): Void;
 
-/// Write `value`'s text to standard error without a newline, then flush.
+/// Write `value`'s text to standard error without a newline in one locked
+/// write, then flush. Atomic with respect to other writes on the stream.
 public let eprint[T: ToString](value: T): Void;
 
-/// Write `value`'s text and a newline to standard error, then flush.
+/// Write `value`'s text and a newline to standard error as ONE locked write
+/// of the fully formatted line, then flush. Atomic with respect to other
+/// writes on the stream: lines never tear.
 public let eprintln[T: ToString](value: T): Void;
 
 /// Read one line from standard input without its line ending, returning `None`
@@ -239,7 +246,11 @@ public trait Hash: Eq {
 };
 
 /// A failure that can describe itself as text.
-public trait Error {
+///
+/// `sendable`: `Error` trait objects cross threads (they ride inside `Result`),
+/// so every implementing type must itself be sendable (`sendable` /
+/// `unsafe sendable`).
+public trait sendable Error {
     /// Return a human-readable description of the failure.
     message(self): String;
 };
@@ -289,9 +300,27 @@ public type mutable DictKeysIterator[K: Hash, V: Any];
 /// Iterator over just the values of a `Dict`, in unspecified order.
 public type mutable DictValuesIterator[K: Hash, V: Any];
 
+/// An immutable key/value snapshot that may cross threads. Built by
+/// `Dict.to_frozen_dict`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a dict literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`); the conditional rule still applies to
+/// `K` and `V`.
+///
+/// Storage is standalone — it does not embed `Dict`: a compacted hash table
+/// (`HashBucket[K, UInt]` buckets holding entry indexes; no tombstones, built
+/// once) plus a dense entry array walked in insertion order. Probing is the
+/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
+/// the owned buffers' destructor lives; the snapshot is immutable after
+/// construction.
+public type unsafe sendable mutable FrozenDict[K: Hash, V: Any];
+
+/// A one-shot cursor that walks a `FrozenDict[K, V]` in insertion order.
+public type mutable FrozenDictIterator[K: Hash, V: Any];
+
 /// Duration 表示时间间隔
 /// 内部存储与 C timespec 完全对齐
-public type Duration;
+public type sendable Duration;
 
 /// Cursor adapter that keeps only the elements satisfying a predicate.
 public type mutable FilterIterator[T: Any, R: Iterator[T]];
@@ -346,8 +375,26 @@ public type mutable List[T: Any];
 /// A one-shot cursor that walks a `List[T]` from index 0 to the end.
 public type mutable ListIterator[T: Any];
 
+/// An immutable element snapshot that may cross threads. Built by
+/// `List.to_frozen_list`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a list literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`). The conditional rule still applies:
+/// `FrozenList[T]` is sendable only when `T` is, so `FrozenList[List[Int]]`
+/// cannot cross.
+///
+/// Storage is standalone — it does not embed `List`: a `{data, len}` payload
+/// owning one contiguous element buffer outright (elements are shared handles
+/// with their source). The `mutable` form is where the owned buffer's
+/// destructor lives (user destructors are `type mutable` only); the snapshot
+/// itself is immutable after construction.
+public type unsafe sendable mutable FrozenList[T: Any];
+
+/// A one-shot cursor that walks a `FrozenList[T]` from index 0 to the end.
+public type mutable FrozenListIterator[T: Any];
+
 /// An optional value: either `Some` carrying a value or `None` carrying nothing.
-public type Option[T: Any] {
+public type sendable Option[T: Any] {
     None(),
     Some(value: T),
 };
@@ -426,7 +473,7 @@ public type intrinsic Float64;
 
 /// An interval over an `Ord` type: bounded on both sides (`a..b`, `a..<b`,
 /// `a<..b`, `a<..<b`), open-ended (`a...`, `a<...`, `...b`, `...<b`), or full (`...`).
-public type Range[T: Ord] {
+public type sendable Range[T: Ord] {
     // Bound ranges (4 kinds)
     Closed(start: T, end: T), // a..b   : start <= x <= end
     ClosedOpen(start: T, end: T), // a..<b  : start <= x < end
@@ -446,21 +493,21 @@ public type Range[T: Ord] {
 };
 
 /// A slice descriptor: where a slice starts and how many elements it covers.
-public type SliceSpec;
+public type sendable SliceSpec;
 
 /// Iterator that steps a range's values one at a time, from its start bound to
 /// its end bound.
 public type mutable RangeIterator[T: Step];
 
 /// The outcome of a fallible operation: `Ok` carrying a value or `Error` carrying a failure.
-public type Result[T: Any] {
+public type sendable Result[T: Any] {
     Ok(value: T),
     Error(error: Error),
 };
 
 /// A Unicode code point from U+0000 to U+10FFFF, possibly invalid when built
 /// with `from_uint32_unchecked`.
-public type Rune;
+public type sendable Rune;
 
 /// A hash set of `Hash` values; iteration order is unspecified.
 /// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
@@ -470,6 +517,24 @@ public type mutable Set[T: Hash];
 /// Iterator over a `Set`'s elements, in unspecified order.
 public type mutable SetIterator[T: Hash];
 
+/// An immutable element snapshot that may cross threads. Built by
+/// `Set.to_frozen_set`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a set literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`); the conditional rule still applies to
+/// `T`.
+///
+/// Storage is standalone — it does not embed `Set`: a compacted hash table
+/// (`HashBucket[T, UInt]` buckets holding entry indexes; no tombstones, built
+/// once) plus a dense entry array walked in insertion order. Probing is the
+/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
+/// the owned buffers' destructor lives; the snapshot is immutable after
+/// construction.
+public type unsafe sendable mutable FrozenSet[T: Hash];
+
+/// A one-shot cursor that walks a `FrozenSet[T]` in insertion order.
+public type mutable FrozenSetIterator[T: Hash];
+
 /// String is immutable value data with fixed storage length.
 /// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
 ///
@@ -478,7 +543,12 @@ public type mutable SetIterator[T: Hash];
 /// the buffer and not on the string value. `len` is read straight from the
 /// value (no handle chase), and a value owes no user destructor -- dropping it
 /// releases the field, which drives the block's RC to zero.
-public type String;
+///
+/// `unsafe sendable`: the bytes are fixed at construction and never mutated
+/// after the wrap, so string values cross threads freely -- the shared state
+/// is the `Bytes` block, which carries the same promise (and the atomic RC
+/// that makes the shared refcount sound).
+public type unsafe sendable String;
 
 /// Mutable builder for incremental string construction without relying on
 /// String alias mutation. The bytes accumulate inside a `Bytes` block from
@@ -502,7 +572,7 @@ public type mutable StringBytesIterator;
 public type mutable StringRunesIterator;
 
 /// A generic tuple-like pair holding a `first` and a `second` value.
-public type Pair[T: Any, U: Any](public first: T, public second: U);
+public type sendable Pair[T: Any, U: Any](public first: T, public second: U);
 
 /// Closure capture is copy-only, so a `let mutable` local cannot be captured.
 /// To carry mutable state into a closure, hold it in a `Cell` (a shared
@@ -2640,6 +2710,44 @@ given[T: Any] List[T] {
     public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]];
 };
 
+/// `Drop` for `FrozenDict[K, V]`: releases the bucket and entry arrays.
+given[K: Hash, V: Any] FrozenDict[K, V]: Drop {};
+
+/// Read-only access over a `FrozenDict[K, V]`.
+given[K: Hash, V: Any] FrozenDict[K, V] {
+    /// The number of entries in the snapshot.
+    public count(self): UInt;
+    /// Whether the snapshot has no entries.
+    public is_empty(self): Bool;
+    /// The value stored under `key`, or `None` when absent.
+    public get(self, key: K): Option[V];
+    /// Whether `key` has an entry in the snapshot.
+    public contains_key(self, key: K): Bool;
+    /// Copy the snapshot back out as a fresh mutable `Dict[K, V]`.
+    public to_dict(self): Dict[K, V];
+};
+
+/// `Iterator` for `FrozenDictIterator[K, V]`: yields entries in insertion order.
+given[K: Hash, V: Any] FrozenDictIterator[K, V]: Iterator[Pair[K, V]] {
+    /// Yield the next key/value pair, or `None` after the last entry.
+    public next(self): Option[Pair[K, V]];
+};
+
+/// `Iterable` for `FrozenDict[K, V]`: a fresh read cursor over the snapshot.
+given[K: Hash, V: Any] FrozenDict[K, V]: Iterable[Pair[K, V], FrozenDictIterator[K, V]] {
+    /// A fresh cursor over the snapshot's entries in insertion order; the
+    /// snapshot is untouched.
+    public iterator(self): FrozenDictIterator[K, V];
+};
+
+/// Snapshot conversions from the mutable side.
+given[K: Hash, V: Any] Dict[K, V] {
+    /// Copy the dict into an immutable `FrozenDict[K, V]` snapshot that can
+    /// cross threads. The receiver stays usable; the snapshot bulk-copies into
+    /// its own compacted table + entry array of shared key/value handles.
+    public to_frozen_dict(self): FrozenDict[K, V];
+};
+
 /// Constructing and converting time intervals.
 given Duration {
     /// 从秒和纳秒构造 Duration。
@@ -3040,6 +3148,48 @@ given[T: Ord] List[T] {
     /// as the last-resort arm: no scratch buffer, O(log n) stack, O(n log n)
     /// worst case.
     public sort_unstable(self): Void;
+};
+
+/// `Drop` for `FrozenList[T]`: frees every element and the buffer when the
+/// last handle dies.
+given[T: Any] FrozenList[T]: Drop {};
+
+/// Read-only access over a `FrozenList[T]`.
+given[T: Any] FrozenList[T] {
+    /// The number of elements in the snapshot.
+    public count(self): UInt;
+    /// Whether the snapshot has no elements.
+    public is_empty(self): Bool;
+    /// The element at `index`, or `None` when the index is out of range.
+    public get(self, index: UInt): Option[T];
+    /// Copy the snapshot back out as a fresh mutable `List[T]`.
+    public to_list(self): List[T];
+};
+
+/// Membership on a `FrozenList[T]` of `Eq` elements.
+given[T: Eq] FrozenList[T] {
+    /// Whether any element equals `value`. O(n).
+    public contains(self, value: T): Bool;
+};
+
+/// `Iterator` for `FrozenListIterator[T]`: yields elements from index 0 upward.
+given[T: Any] FrozenListIterator[T]: Iterator[T] {
+    /// Yield the next element, or `None` after the last one.
+    public next(self): Option[T];
+};
+
+/// `Iterable` for `FrozenList[T]`: a fresh read cursor over the snapshot.
+given[T: Any] FrozenList[T]: Iterable[T, FrozenListIterator[T]] {
+    /// A fresh cursor from index 0; the snapshot itself is left untouched.
+    public iterator(self): FrozenListIterator[T];
+};
+
+/// Snapshot conversions from the mutable side.
+given[T: Any] List[T] {
+    /// Copy the list into an immutable `FrozenList[T]` snapshot that can cross
+    /// threads. The receiver stays usable; the snapshot owns its own buffer of
+    /// shared element handles.
+    public to_frozen_list(self): FrozenList[T];
 };
 
 /// Querying, extracting, and transforming an optional value.
@@ -3498,6 +3648,42 @@ given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
 given[T: Hash] SetIterator[T]: Iterator[T] {
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T];
+};
+
+/// `Drop` for `FrozenSet[T]`: releases the bucket and entry arrays.
+given[T: Hash] FrozenSet[T]: Drop {};
+
+/// Read-only access over a `FrozenSet[T]`.
+given[T: Hash] FrozenSet[T] {
+    /// The number of elements in the snapshot.
+    public count(self): UInt;
+    /// Whether the snapshot has no elements.
+    public is_empty(self): Bool;
+    /// Whether `value` is in the snapshot.
+    public contains(self, value: T): Bool;
+    /// Copy the snapshot back out as a fresh mutable `Set[T]`.
+    public to_set(self): Set[T];
+};
+
+/// `Iterator` for `FrozenSetIterator[T]`: yields elements in insertion order.
+given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
+    /// Yield the next element, or `None` after the last one.
+    public next(self): Option[T];
+};
+
+/// `Iterable` for `FrozenSet[T]`: a fresh read cursor over the snapshot.
+given[T: Hash] FrozenSet[T]: Iterable[T, FrozenSetIterator[T]] {
+    /// A fresh cursor over the snapshot's elements in insertion order; the
+    /// snapshot is untouched.
+    public iterator(self): FrozenSetIterator[T];
+};
+
+/// Snapshot conversions from the mutable side.
+given[T: Hash] Set[T] {
+    /// Copy the set into an immutable `FrozenSet[T]` snapshot that can cross
+    /// threads. The receiver stays usable; the snapshot bulk-copies into its
+    /// own compacted table + entry array of shared element handles.
+    public to_frozen_set(self): FrozenSet[T];
 };
 
 /// Construction and incremental building of strings.

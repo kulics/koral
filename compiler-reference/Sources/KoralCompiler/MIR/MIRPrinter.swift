@@ -143,12 +143,25 @@ final class MIRPrinter {
       return "release \(renderValue(value))"
     case .evaluate(let value):
       return "evaluate \(renderValue(value))"
+    case .lock(let lock):
+      return "lock \(renderLockTarget(lock))"
+    case .unlock(let lock):
+      return "unlock \(renderLockTarget(lock))"
     case .scopeEnter(let scope):
       return "scope_enter \(scope)"
     case .scopeExit(let scope):
       return "scope_exit \(scope)"
     case .debugSource(let span):
       return "debug_source \(span)"
+    }
+  }
+
+  private func renderLockTarget(_ lock: MIRLockTarget) -> String {
+    switch lock {
+    case .objectLock(let handle):
+      return "object_lock \(handle)"
+    case .globalLock(let defId):
+      return "global_lock def#\(defId.id)"
     }
   }
 

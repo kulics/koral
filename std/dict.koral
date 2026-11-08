@@ -7,32 +7,17 @@
 // ============================================================================
 // Dict Type Definition
 // ============================================================================
-// DictBucket uses a struct+tag layout (not enum) so that key/value fields are
-// directly addressable by pointer — enabling */*subscript helpers.
+// `Dict` stores its entries in `HashBucket` buckets from std/hash_lookup.koral
+// (the shared probing/lookup module): a struct+tag layout whose key/value
+// fields are directly addressable by pointer — enabling */*subscript helpers.
 // Only Occupied buckets have initialized key/value. Empty and Deleted buckets
 // have raw (uninitialized) key/value memory; only the tag is valid.
-type DictBucket[K: Hash, V: Any](tag: UInt, key: K, value: V);
-
-// Bucket tag constants (inlined as UInt(0), UInt(1), UInt(2))
-
-private let bucket_tag_ptr[K: Hash, V: Any](
-    bucket_ptr: *mutable DictBucket[K, V],
-): *mutable UInt =
-    bucket_ptr as *mutable UInt;
-
-private let bucket_set_tag[K: Hash, V: Any](
-    bucket_ptr: *mutable DictBucket[K, V],
-    tag: UInt,
-): Void = {
-    let tag_ptr = bucket_tag_ptr(bucket_ptr);
-    *tag_ptr = tag;
-};
 
 /// A hash map from `Hash` keys to values; iteration order is unspecified.
 /// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
 /// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Dict[K: Hash, V: Any](
-    mutable buckets: *mutable DictBucket[K, V],
+    mutable buckets: *mutable HashBucket[K, V],
     mutable size: UInt,
     mutable capacity: UInt,
     mutable deleted: UInt,
@@ -80,7 +65,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         while cap < requested then {
             cap = cap * UInt(2);
         };
-        let buckets = alloc_memory[DictBucket[K, V]](cap);
+        let buckets = alloc_memory[HashBucket[K, V]](cap);
         for i in 0..<cap then {
             bucket_set_tag(buckets + i, UInt(0));
         };
@@ -90,47 +75,10 @@ given[K: Hash, V: Any] Dict[K, V] {
     /// Return the number of entries in the dict.
     public count(self): UInt = self.size;
 
-    // Using when for bucket handling
-    // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
-    private find_slot(self, key: K): Option[UInt] = {
-        // 尚未分配桶数组（空表）：没有可命中的槽位。
-        if self.capacity == UInt(0) then {
-            return Option[UInt].None();
-        };
-        let mask = self.capacity - 1;
-        let h = hash_mix(key.hash());
-        let mutable idx = h & mask;
-        let mutable first_deleted = Option[UInt].None();
-        let mutable probes: UInt = 0;
-        while probes < self.capacity then {
-            let bucket_tag = (self.buckets + idx).tag;
-            if bucket_tag == UInt(0) then {
-                when first_deleted in {
-                    .Some(_) then {
-                        return first_deleted;
-                    },
-                    .None() then {
-                        return Option[UInt].Some(idx);
-                    },
-                };
-            } else if bucket_tag == UInt(2) then {
-                when first_deleted in {
-                    .None() then {
-                        first_deleted = Option[UInt].Some(idx);
-                    },
-                    _ then {},
-                };
-            } else {
-                // Occupied
-                if (self.buckets + idx).key == key then {
-                    return Option[UInt].Some(idx);
-                };
-            };
-            idx = (idx + 1) & mask;
-            probes += 1;
-        };
-        return first_deleted;
-    };
+    // The shared probe from std/hash_lookup.koral (the one probing algorithm
+    // this container shares with Set/FrozenDict/FrozenSet).
+    private find_slot(self, key: K): Option[UInt] =
+        find_hash_slot(self.buckets, self.capacity, key);
 
     private rehash(self): Void = {
         let old_cap = self.capacity;
@@ -142,7 +90,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         while self.size * 2 >= new_cap then {
             new_cap = new_cap * UInt(2);
         };
-        let new_buckets = alloc_memory[DictBucket[K, V]](new_cap);
+        let new_buckets = alloc_memory[HashBucket[K, V]](new_cap);
         for i in 0..<new_cap then {
             bucket_set_tag(new_buckets + i, UInt(0));
         };
@@ -175,7 +123,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                 if was_occupied then {
                     deinit_memory(bucket_ptr);
                 };
-                init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
+                init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
                 if not was_occupied then {
                     self.size = self.size + 1;
                 };
@@ -202,7 +150,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                 if was_occupied then {
                     deinit_memory(bucket_ptr);
                 };
-                init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
+                init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
                 if old_tag == UInt(2) then {
                     // 复用了一个 tombstone 槽：陈旧桶少一个。
                     self.deleted = self.deleted - 1;
@@ -233,7 +181,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                         // 复用了一个 tombstone 槽：陈旧桶少一个。
                         self.deleted = self.deleted - 1;
                     };
-                    init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
+                    init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
                     self.size = self.size + 1;
                     return true;
                 };
@@ -376,7 +324,7 @@ given[K: Hash, V: Any] Dict[K, V] {
         };
         let bucket_ptr = self.buckets + final_idx;
         deinit_memory(bucket_ptr);
-        init_memory(bucket_ptr, DictBucket[K, V](UInt(1), key, value));
+        init_memory(bucket_ptr, HashBucket[K, V](UInt(1), key, value));
     };
 
     /// 内置下标 `d[key]` 的内部操作：返回桶内 value 字段的槽位指针。读写
@@ -528,5 +476,183 @@ given[T: Any] List[T] {
         };
 
         return groups;
+    };
+};
+
+// ============================================================================
+// FrozenDict - immutable snapshot for cross-thread transfer
+// ============================================================================
+/// One dense (key, value) entry of a `FrozenDict`. The entry array is filled
+/// once at freeze and never touched afterwards. No `Hash` bound on the key
+/// here (see `HashBucket` in std/hash_lookup.koral): the probe enforces it.
+type FrozenDictEntry[K: Any, V: Any](key: K, value: V);
+
+/// An immutable key/value snapshot that may cross threads. Built by
+/// `Dict.to_frozen_dict`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a dict literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`); the conditional rule still applies to
+/// `K` and `V`.
+///
+/// Storage is standalone — it does not embed `Dict`: a compacted hash table
+/// (`HashBucket[K, UInt]` buckets holding entry indexes; no tombstones, built
+/// once) plus a dense entry array walked in insertion order. Probing is the
+/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
+/// the owned buffers' destructor lives; the snapshot is immutable after
+/// construction.
+public type unsafe sendable mutable FrozenDict[K: Hash, V: Any](
+    protected buckets: *mutable HashBucket[K, UInt],
+    protected entries: *mutable FrozenDictEntry[K, V],
+    protected len: UInt,
+    protected capacity: UInt,
+);
+
+/// `Drop` for `FrozenDict[K, V]`: releases the bucket and entry arrays.
+given[K: Hash, V: Any] FrozenDict[K, V]: Drop {
+
+    drop(self): Void = {
+        for i in 0..<self.capacity then {
+            if (self.buckets + i).tag == UInt(1) then {
+                deinit_memory(self.buckets + i);
+            };
+        };
+        dealloc_memory(self.buckets);
+        for i in 0..<self.len then {
+            deinit_memory(self.entries + i);
+        };
+        dealloc_memory(self.entries);
+    };
+};
+
+/// A one-shot cursor that walks a `FrozenDict[K, V]` in insertion order.
+public type mutable FrozenDictIterator[K: Hash, V: Any](
+    source: FrozenDict[K, V],
+    mutable index: UInt,
+);
+
+/// Read-only access over a `FrozenDict[K, V]`.
+given[K: Hash, V: Any] FrozenDict[K, V] {
+
+    /// The number of entries in the snapshot.
+    public count(self): UInt = self.len;
+
+    /// Whether the snapshot has no entries.
+    public is_empty(self): Bool = self.len == 0;
+
+    /// The value stored under `key`, or `None` when absent.
+    public get(self, key: K): Option[V] = {
+        when find_hash_slot(self.buckets, self.capacity, key) in {
+            .None() then {
+                return Option[V].None();
+            },
+            .Some(idx) then {
+                let bucket_ptr = self.buckets + idx;
+                if bucket_ptr.tag == UInt(1) then {
+                    let entry_ptr = self.entries + bucket_ptr.value;
+                    return Option[V].Some(entry_ptr.value);
+                } else {
+                    return Option[V].None();
+                };
+            },
+        };
+    };
+
+    /// Whether `key` has an entry in the snapshot.
+    public contains_key(self, key: K): Bool = when self.get(key) in {
+        .Some(_) then true,
+        .None() then false,
+    };
+
+    /// Copy the snapshot back out as a fresh mutable `Dict[K, V]`.
+    public to_dict(self): Dict[K, V] = {
+        let mutable out = Dict[K, V].new();
+        for i in 0..<self.len then {
+            let entry_ptr = self.entries + i;
+            out.insert(entry_ptr.key, entry_ptr.value);
+        };
+        return out;
+    };
+
+    // Builtin subscript helper for `d[key]` syntax. Read-only: there is no
+    // `__index_slot`, so a frozen subscript can never be a write target.
+    // Missing-key panic matches the mutable `Dict` subscript exactly.
+    private __index_get(self, key: K): V = {
+        when self.get(key) in {
+            .Some(v) then {
+                return v;
+            },
+            .None() then {
+                panic("Dict key not found");
+            },
+        };
+    };
+};
+
+/// `Iterator` for `FrozenDictIterator[K, V]`: yields entries in insertion order.
+given[K: Hash, V: Any] FrozenDictIterator[K, V]: Iterator[Pair[K, V]] {
+
+    /// Yield the next key/value pair, or `None` after the last entry.
+    public next(self): Option[Pair[K, V]] = {
+        if self.index < self.source.len then {
+            let entry_ptr = self.source.entries + self.index;
+            self.index = self.index + 1;
+            return Option[Pair[K, V]].Some(Pair[K, V](entry_ptr.key, entry_ptr.value));
+        };
+        return Option[Pair[K, V]].None();
+    };
+};
+
+/// `Iterable` for `FrozenDict[K, V]`: a fresh read cursor over the snapshot.
+given[K: Hash, V: Any] FrozenDict[K, V]: Iterable[Pair[K, V], FrozenDictIterator[K, V]] {
+
+    /// A fresh cursor over the snapshot's entries in insertion order; the
+    /// snapshot is untouched.
+    public iterator(self): FrozenDictIterator[K, V] = FrozenDictIterator[K, V](self, 0);
+};
+
+/// Snapshot conversions from the mutable side.
+given[K: Hash, V: Any] Dict[K, V] {
+
+    /// Copy the dict into an immutable `FrozenDict[K, V]` snapshot that can
+    /// cross threads. The receiver stays usable; the snapshot bulk-copies into
+    /// its own compacted table + entry array of shared key/value handles.
+    public to_frozen_dict(self): FrozenDict[K, V] = {
+        let len = self.size;
+        // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
+        let mutable capacity: UInt = UInt(0);
+        if len > UInt(0) then {
+            capacity = UInt(4);
+            while len * UInt(2) >= capacity then {
+                capacity = capacity * UInt(2);
+            };
+        };
+        let buckets = alloc_memory[HashBucket[K, UInt]](capacity);
+        for i in 0..<capacity then {
+            bucket_set_tag(buckets + i, UInt(0));
+        };
+        let entries = alloc_memory[FrozenDictEntry[K, V]](len);
+        let mutable next: UInt = UInt(0);
+        for i in 0..<self.capacity then {
+            let bucket_ptr = self.buckets + i;
+            if bucket_ptr.tag == UInt(1) then {
+                init_memory(
+                    entries + next,
+                    FrozenDictEntry[K, V](bucket_ptr.key, bucket_ptr.value),
+                );
+                when find_hash_slot(buckets, capacity, bucket_ptr.key) in {
+                    .Some(slot) then {
+                        init_memory(
+                            buckets + slot,
+                            HashBucket[K, UInt](UInt(1), bucket_ptr.key, next),
+                        );
+                    },
+                    .None() then {
+                        panic("FrozenDict build failed");
+                    },
+                };
+                next = next + UInt(1);
+            };
+        };
+        return FrozenDict[K, V](buckets, entries, len, capacity);
     };
 };

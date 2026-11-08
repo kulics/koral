@@ -611,6 +611,42 @@ private let output_lines_equal(a: String, b: String): Bool = {
     return true;
 };
 
+/// Order-free line comparison for cases that DECLARE unordered expectations:
+/// the verdict semantics say order inside an unordered group is free, so the
+/// two runs' outputs compare as line multisets. Torn or garbled lines still
+/// diverge -- the multisets differ.
+private let output_multisets_equal(a: String, b: String): Bool = {
+    let a_lines = output_lines_trimmed(a);
+    let b_lines = output_lines_trimmed(b);
+    if a_lines.count() != b_lines.count() then {
+        return false;
+    };
+    a_lines.sort_by((s) => s);
+    b_lines.sort_by((s) => s);
+    let mutable i: UInt = 0;
+    while i < a_lines.count() then {
+        if a_lines[i] != b_lines[i] then {
+            return false;
+        };
+        i += 1;
+    };
+    return true;
+};
+
+/// Whether the case's expectations contain an unordered group.
+private let expectations_have_unordered(info: CaseInfo): Bool = {
+    let expectations = parse_expectations(info.absolute_path) or else {
+        return false;
+    };
+    for item in expectations.expect_items then {
+        when item in {
+            .Unordered(_) then return true,
+            .Ordered(_) then {},
+        };
+    };
+    return false;
+};
+
 /// Name the first place two outputs part company, so the report points at a
 /// line rather than at "these are different".
 private let first_output_difference(
@@ -1008,10 +1044,23 @@ private let run_single_case_differential(
                                             duration_ms,
                                         );
                                     };
-                                    if not output_lines_equal(
-                                        swift_program.stdout,
-                                        boot_program.stdout,
+                                    // Unordered-expectation cases declare
+                                    // order-free output; compare those runs as
+                                    // line multisets (diagnostics stay strict).
+                                    let runtime_outputs_match = if expectations_have_unordered(
+                                        info,
                                     ) then {
+                                        output_multisets_equal(
+                                            swift_program.stdout,
+                                            boot_program.stdout,
+                                        )
+                                    } else {
+                                        output_lines_equal(
+                                            swift_program.stdout,
+                                            boot_program.stdout,
+                                        )
+                                    };
+                                    if not runtime_outputs_match then {
                                         return failure_result(
                                             info,
                                             "failed",

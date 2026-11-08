@@ -220,7 +220,7 @@ public trait IntoPath {
 ## Types
 ```koral
 /// Directory entry with type information
-public type DirEntry;
+public type sendable DirEntry;
 
 /// Iterator over the entries of one directory; the OS handle closes when the iterator is dropped.
 public type mutable DirIterator;
@@ -229,7 +229,7 @@ public type mutable DirIterator;
 public type mutable WalkDirIterator;
 
 /// File open mode enumeration
-public type OpenMode {
+public type sendable OpenMode {
     Read(), // O_RDONLY — read-only
     Write(), // O_WRONLY | O_CREAT | O_TRUNC — write-only (overwrite/create)
     Create(), // O_WRONLY | O_CREAT | O_EXCL — create new file (fails if exists)
@@ -242,10 +242,13 @@ public type OpenMode {
 /// The file descriptor is automatically closed when the last reference is released.
 /// Unbuffered design: directly wraps the file descriptor (fd).
 /// For buffered I/O, wrap with std.io BufReader/BufWriter.
-public type mutable File;
+/// Sendable contract: TRANSFER, not SHARE -- a `File` may cross threads by
+/// handoff; concurrent use of one `File` must be externally synchronized (the
+/// seek cursor is shared state).
+public type unsafe sendable mutable File;
 
 /// File type enumeration for distinguishing file system entity types
-public type FileType {
+public type sendable FileType {
     RegularFile(),
     Directory(),
     Symlink(),
@@ -253,14 +256,16 @@ public type FileType {
 };
 
 /// File permission type wrapping Unix-style 9-bit permission bits
-public type Permission;
+public type sendable Permission;
 
 /// File metadata information (all fields private, accessed via methods)
 /// Timestamps use Duration (secs + nanos, aligned with C timespec), preserving nanosecond precision
-public type FileInfo;
+public type sendable FileInfo;
 
 /// A filesystem path manipulated purely as text, without touching the disk.
-public type Path;
+/// Immutable path bytes. `unsafe sendable` promise: no mutation after
+/// construction (the internal store is frozen like `String`'s).
+public type unsafe sendable Path;
 ```
 
 ## Given Implementations

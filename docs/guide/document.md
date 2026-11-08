@@ -18,6 +18,7 @@ This manual is ordered the way the language is learned: **language basics**, the
 
 - Modern, easy-to-scan syntax with explicit semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` all use expression-form surface syntax. `if` and `when` may produce values; `while` and `for` always produce `Void`.
 - Automatic memory management driven by declaration-site type semantics: shallowly immutable `type` versus shared `type mutable` objects. Layout and lifetime details are owned by the compiler.
+- Concurrency safety declared at the type site: the `sendable` family marks which types may cross threads, safe `sendable mutable` objects carry built-in locking, and the checks live at declaration and formation sites.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
 - Trait-based polymorphism with trait objects for runtime dispatch.
@@ -562,25 +563,26 @@ Rune literal typing rules:
 
 #### Collection Literals
 
-Koral supports collection literals for the three built-in collection types: `List[T]`, `Set[T]`, and `Dict[K, V]`.
+Koral supports collection literals for the built-in collection types: `List[T]`, `Set[T]`, `Dict[K, V]`, and the frozen snapshots `FrozenList[T]`, `FrozenSet[T]`, and `FrozenDict[K, V]` (see [Frozen Collections](#frozen-collections)).
 
 ```koral
 let a = [1, 2, 3];                    // inferred as List[Int]
 let b: Set[Int] = [1, 2, 3];           // inferred as Set[Int] from context
 let c = ["x": 1, "y": 2];             // inferred as Dict[String, Int]
+let f: FrozenList[Int] = [1, 2, 3];   // frozen snapshot from context
 let empty: List[Int] = [];             // empty literal requires type context
 ```
 
 Rules:
 
 - `[e1, e2, ...]` is a collection literal. Without type context, it is inferred as `List[T]`.
-- In `Set[T]` context, the same syntax is inferred as Set.
-- `[k1: v1, k2: v2, ...]` is a dict literal and is inferred as `Dict[K, V]`.
+- In `Set[T]` or `FrozenSet[T]` context, the same syntax is inferred as a set; duplicates collapse.
+- `[k1: v1, k2: v2, ...]` is a dict literal and is inferred as `Dict[K, V]` — or `FrozenDict[K, V]` in that context; the last duplicate key wins.
 - `[]` cannot be inferred without type context and must be annotated.
 - Trailing commas are allowed for both collection and dict literals.
-- Collection literals only target built-in `List` / `Set` / `Dict`, not third-party container types.
+- Collection literals only target the built-in containers and their frozen snapshots (`List` / `Set` / `Dict` / `FrozenList` / `FrozenSet` / `FrozenDict`), not third-party container types.
 
-`List`, `Set`, `Dict` and `Deque` are `type mutable` shared objects: they do not use copy-on-write. Mutating a container is visible through every handle, and an independent copy must be made explicitly with `clone()`.
+`List`, `Set`, `Dict` and `Deque` are `type mutable` shared objects: they do not use copy-on-write. Mutating a container is visible through every handle, and an independent copy must be made explicitly with `clone()`. They are thread-confined working state — none of them may cross a thread boundary (see [Frozen Collections](#frozen-collections)).
 
 Iteration order over a `Dict` or `Set` is **unspecified**: it follows the table layout, which is seeded per process (the hash-flooding defence), so it can differ between runs. Code that needs a stable order sorts the keys itself. `List` and `Deque` iterate in storage order.
 
@@ -1666,7 +1668,7 @@ let describe[T: ToString and Hash](value: T): String = value.to_string();
 ```
 
 Constraints can also use generic trait forms (for example `Iterator[T]`), and the
-two **shape constraints**. A shape constraint is a keyword, not a trait: no
+three **shape constraints**. A shape constraint is a keyword, not a trait: no
 declaration can implement it, and the compiler decides whether a type satisfies
 it from the type's own declaration.
 
@@ -1680,15 +1682,24 @@ it from the type's own declaration.
   layout — and neither is std's `Rune`, a nominal like `String` whose
   representation is the compiler's business. This is what `List.borrow_ptr`
   / `borrow_mut_ptr` require.
+- `T: sendable` — the subject may cross a thread boundary: declared `sendable`
+  (safe or `unsafe` form), or derived — scalars qualify, composites follow the
+  derivation rules (see [Concurrency](#concurrency)). This is what shared
+  object fields, globals, and channels demand.
 
 ```koral
 let consume[I: Iterator[Int]](iter: I): Void = {};
 let read_bytes[T: foreign](buf: List[T]): *T = buf.borrow_ptr();
+let drain[T: Reader and sendable](source: T): Int = source.read();
+let bump[T: mutable and sendable](c: T): T = c;
+let pass[T: foreign and sendable](x: T): T = x;
 ```
 
 A generic parameter carries its own bounds into a call: inside `f[T: Any]`, a call
 that needs the `mutable` constraint is rejected, because a bare `T` is not
-declared `mutable`. Inside `g[T: mutable]` the same call is accepted.
+declared `mutable`. Inside `g[T: mutable]` the same call is accepted. The
+`sendable` constraint is just as strict: a bare `T: Any` does not forward into a
+`U: sendable` slot, so the parameter must declare `T: sendable` itself.
 
 A bound-constrained extension block only contributes members where the bound
 actually holds. Given
@@ -1756,6 +1767,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
 - **`type foreign`** (mutable value semantics): a C-layout value. Assignment and argument passing copy; the copy is modified in place through `let mutable`, `mutable` parameters and `*mutable T` links, and `self` is a plain copy — there is no mutable self. Its fields are always-writable C slots, and its contents are limited to types that cross the FFI boundary (see [External Interop](#6-external-interop)).
 - **Raw pointers**: the pointer types are `*T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
+- **Sharing across threads is a declared property too.** The model has a concurrency axis: which types may cross thread boundaries — and who guarantees their safety — is decided at the declaration site by the `sendable` family. See [Concurrency](#concurrency).
 - **Reference counting is an implementation detail.** The compiler may use ARC and hidden storage internally for both forms. The language contract itself is stated under **The Core Idea: `type` / `type mutable`** in this manual.
 
 #### `Drop`
@@ -1882,6 +1894,301 @@ for h in xs then {             // ok: `h` is `?Node`
     };
 };
 ```
+
+### Concurrency
+
+Concurrency safety in Koral is a **declaration-site property**, decided where a type is declared rather than where a value is passed — the same split as `type` versus `type mutable`. The `sendable` family of modifiers says which types may cross thread boundaries and who vouches for their safety: the safe forms are verified by the compiler and guarded by built-in locking, while the `unsafe` forms hand synchronization back to the developer. There is no borrow checker, and no second calling discipline to learn.
+
+#### Declaring Sendable Types
+
+The type-modifier slot takes `unsafe`? `sendable`? `mutable`?, giving six declaration forms:
+
+| Declaration | Fields | Object lock | Meaning |
+|---|---|---|---|
+| `type` | — | none | thread-local value |
+| `type mutable` | only `mutable` fields mutate | none | thread-local shared object |
+| `type sendable` | every field `sendable` | none (shallowly immutable) | frozen data, safe to share |
+| `type sendable mutable` | every field `sendable` | **built in** | shared mutation, compiler-guarded |
+| `type unsafe sendable` | unconstrained | none | developer promises it is shareable |
+| `type unsafe sendable mutable` | unconstrained | none | developer promises; synchronization is its own |
+
+```koral
+type sendable Point(x: Int, y: Int);
+
+type sendable mutable Counter(mutable hits: Int);
+
+type unsafe sendable mutable Mutex(private handle: *UInt8);
+
+type sendable Shape {
+    Circle(r: Float64),
+    Rect(w: Float64, h: Float64),
+};
+```
+
+Rules:
+
+- `unsafe` must accompany `sendable`; `unsafe` alone is refused. The safe forms let the compiler verify the declaration; `unsafe sendable` turns verification off and hands the responsibility to the developer (see [`unsafe sendable`](#unsafe-sendable)).
+- The safe forms **verify** their contents: every field — every enum payload — must itself be `sendable`. A wrong annotation is a compile error, not a hole.
+- Nothing is inferred. A `type mutable` whose fields are all `sendable` is still not `sendable` unless its declaration says so.
+- Enums take the immutable forms, `type sendable` and `type unsafe sendable`; `mutable` remains struct-only.
+- `type foreign` takes sendability as well — `type foreign sendable FX(a: Int32);` — a foreign value copies across a boundary like any `type foreign` value, so nothing is shared. Safe verification walks its fields; raw-pointer fields need `unsafe sendable`.
+- Type aliases and `type intrinsic` cannot be marked. An alias follows the type it names.
+
+#### Derivation Rules
+
+Whether a composite type is `sendable` derives mechanically from its parts — a closed list:
+
+- **Scalars** — `Bool`, the numeric types, `Rune` — are always `sendable`.
+- **Nominal types** are `sendable` exactly as declared.
+- **Generic types**: `X[A, B]` is `sendable` only if `X` is declared `sendable` **and** every type argument is `sendable`. This condition applies to the `unsafe` forms too — otherwise a sendable container could smuggle non-sendable values across a boundary.
+- **Enums**: declared `sendable` and every payload type `sendable` (`unsafe` skips the payload check).
+- **Function types**: `sendable (A) -> R` is a distinct form. A function value with no captures qualifies naturally; a lambda qualifies only when **every** capture is `sendable`. A `sendable` function value converts to the plain form, never the reverse. The qualifier applies only to function types.
+
+```koral
+let run(f: sendable () -> Void): Void = f();
+
+let main(): Void = {
+    let n = 40;
+    run(() => println("plain"));           // no captures
+    run(() => println("capture \(n)"));    // `n` is sendable
+};
+```
+
+- **Trait objects**: a trait object is `sendable` exactly when its trait is declared `trait sendable`; a plain trait's objects are never `sendable`. See [Trait Sendability](#trait-sendability).
+- **Weak references**: `?T` is `sendable` exactly when `T` is.
+- **Fixed-size arrays**: `[N]T` is `sendable` exactly when `T` is.
+- **Never `sendable`**: raw pointers `*T` / `*mutable T` and foreign function pointers `foreign (A) -> R`. Memory shared across the FFI goes through an `unsafe sendable` wrapper instead.
+
+#### Trait Sendability
+
+A trait's sendability is declared on the trait itself: `trait sendable Foo` declares a trait whose objects are **always** `sendable`. The guarantee is paid for at the `given` — **every** implementation must itself be `sendable` (safe or `unsafe` form), checked where the implementation is declared.
+
+```koral
+trait sendable Speak {
+    speak(self): Int;
+};
+
+type sendable Robot(id: Int);
+
+given Robot: Speak {
+    speak(self): Int = self.id;
+};
+
+let greet(s: Speak): Int = s.speak();
+
+let main(): Void = {
+    let obj: Speak = Robot(7);    // `Speak` objects are sendable — they cross
+    println(greet(obj));
+};
+```
+
+An implementation that is not `sendable` is refused at the `given`: `Type 'Human' must be sendable to implement sendable trait 'Speak'`. Inheritance demands the same explicitness — a trait that extends a `sendable` trait must declare `sendable` itself, or the always-sendable object family would grow a non-sendable branch: `Trait 'Child' extends sendable trait 'Base' and must be declared sendable`. Nothing is inferred.
+
+A trait declared without `sendable` keeps non-sendable objects, and there is no type-position qualifier to change that: `sendable Trait` is refused with `'sendable' qualifier applies only to function types; declare the trait 'sendable' instead` — `sendable` in type position qualifies function types only (see [Derivation Rules](#derivation-rules)). There is no `unsafe sendable trait` form either: implementation types carry their own safe / `unsafe` forms, and a `trait sendable`'s objects are `sendable` either way.
+
+**Mixed traits.** When the trait you need is not `sendable`, its objects stay thread-local and the behavior crosses in one of two ways. The mainstream one is generic parameterization — demand the trait and sendability together with the composable kind bound (see [Generic Constraints](#generic-constraints)):
+
+```koral
+trait Reader {
+    read(self): Int;
+};
+
+type sendable Msg(len: Int);
+type Plain(len: Int);          // not sendable
+
+given Msg: Reader {
+    read(self): Int = self.len;
+};
+
+given Plain: Reader {
+    read(self): Int = self.len;
+};
+
+let drain[T: Reader and sendable](source: T): Int = source.read();
+
+let main(): Void = {
+    println("read \(drain(Msg(3)))");
+    // drain(Plain(1));
+    //     error: Type 'Plain' does not satisfy the 'sendable' constraint
+};
+```
+
+The second path wraps the object in an `unsafe sendable` type that vouches for it — the promise is yours, as with every `unsafe` form:
+
+```koral
+type unsafe sendable SharedReader(inner: Reader);
+```
+
+**Errors are one form.** `Error` is declared `trait sendable Error`: every error type must be `sendable`, checked at its `given`, and `Result`'s error side is the plain `Error` trait object — there is no separate sendable spelling. Errors describe failure as values and routinely travel inside `Result` across threads, so their shared nature is declared once, where the error type is declared.
+
+#### Crossing Thread Boundaries
+
+A value crosses threads in only a few ways — it is captured by a spawned closure, stored into a shared object's field, stored into a global, or buffered through a channel. Each route is checked where the value is declared or formed, never in ordinary function signatures:
+
+| Checked at | Rule |
+|---|---|
+| spawn — `run_task` / `Task` | the closure is `sendable () -> Void`; non-`sendable` captures are refused at the call |
+| closure formation | a `sendable` function type accepts only `sendable` captures |
+| shared object fields | safe `sendable` forms verify every field at the declaration |
+| globals | the type must be `sendable`; a `let mutable` global's slot locks per variable (see [Object Locks](#object-locks)) |
+| channel buffers | `Channel[T]` is `sendable` only when `T` is, so a non-sendable message type is refused where the channel is typed |
+| trait declarations / `given` blocks | `trait sendable` makes its objects always `sendable`, and every implementation must be `sendable` (see [Trait Sendability](#trait-sendability)) |
+| method parameters and returns | **not checked** — any type is allowed |
+
+Everything outside that table is unconstrained: an ordinary function may accept and return any type, `sendable` or not, and passing values between ordinary calls on one thread asks nothing of them. A closure that reaches for the wrong capture is refused where the `sendable` function type is formed:
+
+```koral
+type mutable Local(mutable n: Int);
+
+let run(f: sendable () -> Void): Void = f();
+
+let main(): Void = {
+    let v = Local(1);
+    // run(() => println("captured \(v.n)"));
+    //     error: sendable closure cannot capture non-sendable value 'v'
+};
+```
+
+#### Object Locks
+
+A safe `type sendable mutable` object carries a built-in lock, and the compiler takes it for you:
+
+- **Every field read and write locks the object.** Reads lock too — an unsynchronized read is a data race like any other.
+- **An assignment statement is one critical section.** `x.f = expr` holds x's lock across the evaluation of `expr` and the write-back, so the classic read-modify-write loses no updates:
+
+```koral
+type sendable mutable Counter(mutable hits: Int);
+
+let main(): Void = {
+    let c = Counter(0);
+    c.hits = c.hits + 1;   // one critical section — atomic under any number of threads
+};
+```
+
+- **The lock is reentrant.** Field access inside a method, or a right-hand side that calls back into the same object, never deadlocks against itself.
+- **Locks are per object.** A nested path `a.b.c` locks each owner on the way down; a right-hand side that touches *another* object takes that object's lock as well — lock ordering across objects stays yours to design.
+- **Each `let mutable` global has its own lock**, with the same statement rule: `g = g + 1` on a global is one critical section on that variable's lock.
+- Taking the **address of a field** of a locked object is refused — a raw pointer would route around the lock.
+
+What object locks deliberately do **not** promise — the same boundary Rust, Go, and Swift draw:
+
+- **No method-level atomicity.** A critical section is exactly one field access or one whole assignment statement. A compound operation across statements is not atomic — `if c.a < c.b` is two reads in two critical sections. When a wider atomic step is genuinely needed, rewrite it as a single assignment, or keep the state under a `Mutex` of your own in an `unsafe` form.
+- **No explicit lock blocks.** The language offers no second critical-section spelling.
+- **No deadlock freedom.** Object locks nest, and they can deadlock against `std` locks.
+- **No memory-ordering promises** beyond what the atomic APIs state.
+
+#### `unsafe sendable`
+
+The `unsafe` forms are the escape hatch for types the compiler cannot verify: synchronized primitives, FFI handles, lock-free designs.
+
+```koral
+type unsafe sendable mutable Mutex(private handle: *UInt8);
+```
+
+The contract: **the developer promises that the type, and everything reachable from it, is free of data races when shared across threads.** The compiler does no field checking and adds no locks. Atomic reference counting protects only the counters themselves — races on fields, and on the counters of reachable non-`sendable` objects, are part of the promise. **A broken promise is undefined behavior.**
+
+Reach for `unsafe sendable` when the type brings its own synchronization (`Mutex`, atomic cells, thread-safe FFI handles) — not to silence a check that has not actually been satisfied.
+
+#### Frozen Collections
+
+The mutable containers — `List`, `Dict`, `Set`, `Deque`, `StringBuilder`, and the iterators — are `type mutable` thread-confined working state: none of them is `sendable`, and none of them crosses a boundary. The cross-thread story for collection **data** is to build in mutable containers and **freeze at the boundary**: `FrozenList[T]`, `FrozenDict[K, V]`, and `FrozenSet[T]` are immutable snapshots that may cross threads.
+
+A snapshot is carried by a `type unsafe sendable mutable` object — the `mutable` form is where the owned buffer and its destructor live (user destructors are `type mutable` only), and the construction-then-immutable promise keeps the snapshot read-only in practice — with **independent storage** of its own (it does not embed the source container). The conditional rule still applies: `FrozenList[T]` is `sendable` only when `T` is, so `FrozenList[List[Int]]` cannot cross.
+
+```koral
+let source = List[Int].new();
+source.push(2);
+source.push(4);
+source.push(6);
+let frozen = source.to_frozen_list();    // copies into independent storage
+```
+
+- Convert with `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()`; the source stays usable afterwards. Copy back out with `to_list()` / `to_dict()` / `to_set()`.
+- The read halves are `count`, `is_empty`, `get`, `contains` (`contains_key` on dicts), and `iterator`. There are **no mutation methods and no builders** — the snapshot is written once at construction and never touched again.
+- Built-in subscripts read snapshots: `frozen[i]` and `frozen_dict[key]` behave exactly like `List[i]` and `Dict[key]` (same out-of-range / missing-key panics), and assigning to them is a compile error. `FrozenSet` has no subscript.
+- Collection literals target the frozen family through type context, with the mutable rules carried over — set literals dedup, dict literals keep the last duplicate key, `[]` needs context:
+
+```koral
+let f: FrozenList[Int] = [1, 2, 3];
+let d: FrozenDict[String, Int] = ["a": 1];
+let s: FrozenSet[Int] = [1, 2, 2];        // dedup: two elements
+let empty: FrozenList[Int] = [];
+```
+
+A snapshot travels like any other `sendable` value — captured by a spawned closure, stored in a shared field, or sent through a channel:
+
+```koral
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let source = List[Int].new();
+    source.push(10);
+    let frozen = source.to_frozen_list();
+
+    let (sender, receiver) = make_channel[FrozenList[Int]](1);
+    let worker = run_task(() => {
+        let got = receiver.recv().unwrap();
+        println("worker got \(got.count()) \(got[0])");
+    });
+    let _ = sender.send(frozen);
+    let _ = worker.wait();
+};
+```
+
+`JsonValue` sits on the frozen tree: it is a `type sendable` enum whose `Array` and `Object` payloads are `FrozenList[JsonValue]` and `FrozenDict[String, JsonValue]`, so a parsed document crosses threads directly — `Channel[JsonValue]` works. `as_array()` and `as_object()` hand the frozen payloads out as `Option[FrozenList[JsonValue]]` and `Option[FrozenDict[String, JsonValue]]`; parsing and building stay on the mutable side.
+
+#### Workers and Channels
+
+The recommended shape for concurrent code: keep each thread's state **thread-confined** — it may stay plain, even non-`sendable`, since nobody else can see it and it needs no locks — and pass `sendable` messages between threads over channels. Collection data rides along as frozen snapshots (see [Frozen Collections](#frozen-collections)). A channel is conditionally `sendable` in its message type, so a non-sendable message type is refused where the channel is declared, not where messages flow.
+
+```koral
+using "std/async" { ... };
+using "std/sync" { ... };
+
+type sendable Msg {
+    Job(id: Int),
+    Quit(),
+};
+
+let main(): Void = {
+    let (sender, receiver) = make_channel[Msg](16);
+
+    // The tally is thread-confined; only `Msg` crosses threads.
+    let worker = run_task(
+        () => {
+            let mutable total = 0;
+            while true then {
+                when receiver.recv() in {
+                    .Ok(msg) then {
+                        when msg in {
+                            .Job(id) then {
+                                total = total + id;
+                            },
+                            .Quit() then {
+                                break;
+                            },
+                        };
+                    },
+                    .Error(_) then {
+                        break;
+                    },
+                };
+            };
+            println("total \(total)");
+        },
+    );
+
+    let _ = sender.send(Msg.Job(1));
+    let _ = sender.send(Msg.Job(2));
+    let _ = sender.send(Msg.Quit());
+    let _ = worker.wait();
+};
+```
+
+Shared mutable objects with object locks are the second form of concurrency; synchronized primitives you trust are the `unsafe` form. Closing the channel is the other way to end a worker: when the last `SendChannel` handle is dropped, `recv()` reports `.Error` once buffered messages are drained.
+
+**Reference counting follows sendability, but that is not part of the language contract.** `sendable` types use atomic reference counting and non-`sendable` types non-atomic; rely on neither — it is an implementation detail, like layout, and may change.
 
 ## 4. Pattern Matching
 
@@ -2739,9 +3046,11 @@ count takes the binary form (`wide = wide << 1`).
 
 #### Builtin Subscript Rules
 
-- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `*T`, and `*mutable T`.
+- `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `FrozenList[T]`, `FrozenDict[K, V]`, fixed-size arrays `[N]T`, `*T`, and `*mutable T`.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
+- `FrozenList[T]` and `FrozenDict[K, V]` subscripts are read-only: `frozen[i]` and `frozen_dict[key]` read exactly like `List[i]` / `Dict[key]` (same out-of-range / missing-key panics), and assigning to one is a compile error. `FrozenSet[T]` has no subscript.
+- Fixed-size arrays `[N]T` support value reads, assignment, and compound updates, bounds-checked (see [Fixed-Size Arrays](#fixed-size-arrays)).
 - `*T` supports `*expr` reads only. `*mutable T` supports both `*expr` reads and writes.
 - User-defined types cannot implement `[]` through traits, and generic constraints cannot add subscript capability.
 
@@ -2790,7 +3099,7 @@ The most commonly used core traits are:
 - `Clone`: explicit shallow copy (`clone(self): Self`).
 - `Iterator[T]`: iteration protocol — a one-shot cursor (`next(self): Option[T]`), and nothing else.
 - `Iterable[T, R]`: can hand out a fresh cursor on every call (`iterator(self): R`). Enter a lazy pipeline with `lazy()`, which returns a `LazyView`.
-- `Error`: error message interface (`message(self): String`).
+- `Error`: error message interface (`message(self): String`). Declared `trait sendable Error` — every error type must be `sendable`, and `Result`'s error side is the plain `Error` trait object.
 - `Drop`: destructor hook (`drop(self): Void`).
 
 Arithmetic, bitwise, and comparison operators are lowered to trait methods internally (for example `+` to `Add`, `&` to `BitAnd`). Subscripts are resolved by builtin compiler rules instead of public traits.

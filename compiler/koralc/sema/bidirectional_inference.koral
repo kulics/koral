@@ -234,8 +234,11 @@ given TypeChecker {
                     scope,
                     lambda_span,
                 );
-                let lambda_type = self.build_lambda_function_type(bidi_result);
-                make_typed_expr_ref(bidi_result.expr_kind, lambda_type)
+                let lambda_type = self.build_lambda_function_type(
+                    bidi_result.first,
+                    bidi_result.second,
+                );
+                make_typed_expr_ref(bidi_result.first.expr_kind, lambda_type)
             },
             .Block(statements, tail_expression, block_span) then self.typed_block_expr(
                 statements,
@@ -274,7 +277,8 @@ given TypeChecker {
         return checked;
     };
 
-    // Lambda 表达式的双向检查
+    // Lambda 表达式的双向检查。返回 (typed expr, 闭包 sendable 判定)：
+    // 全部捕获 sendable 才为 true（concurrency-design.md §派生规则 5）。
     bidi_check_lambda(
         self,
         params: List[LambdaParam],
@@ -283,9 +287,9 @@ given TypeChecker {
         expected: Type,
         scope: Scope,
         lambda_span: SourceSpan,
-    ): TypedExpr = {
+    ): Pair[TypedExpr, Bool] = {
         let fn_info = when expected in {
-            .FunctionType(fn_params, ret) or .ForeignFunctionType(fn_params, ret) then Option[Pair[List[Type], Type]].Some(
+            .FunctionType(fn_params, ret, _) or .ForeignFunctionType(fn_params, ret) then Option[Pair[List[Type], Type]].Some(
                 Pair[List[Type], Type](param_entry_types(fn_params), ret),
             ),
             _ then Option[Pair[List[Type], Type]].None(),
@@ -356,7 +360,28 @@ given TypeChecker {
         else Option[Type].Some(ret_type);
         let typed_body = self.check_value_body_expr(body, body_expected, lambda_scope);
         let inferred_return_type = self.storage.function_return_context.inferred_return_type;
-        self.validate_lambda_captures(typed_params, typed_body);
+        let captures = self.validate_lambda_captures(typed_params, typed_body);
+        // 闭包 sendable 判定（concurrency-design.md §派生规则 5）：期望是
+        // `sendable` 函数类型时不收非 sendable 捕获；函数类型的修饰位按
+        // 捕获推得，宁可少算不可多算。
+        let expected_sendable = when expected in {
+            .FunctionType(_, _, sendable_expected) then sendable_expected,
+            _ then false,
+        };
+        let mutable captures_sendable = true;
+        for entry in captures.iterator() then {
+            let captured = (entry.second).first;
+            let capture_span = (entry.second).second;
+            if not self.context().is_sendable_type(captured.symbol_type) then {
+                captures_sendable = false;
+                if expected_sendable then {
+                    self.push_diagnostic_at_span(
+                        "sendable closure cannot capture non-sendable value '\(self.context().symbol_name(captured))'",
+                        capture_span,
+                    );
+                };
+            };
+        };
         if not self.is_unresolved_expr_type(ret_type) and not self.contains_generic_parameter(
             ret_type,
         ) then {
@@ -377,24 +402,33 @@ given TypeChecker {
             typed_body.expr_type
         } else ret_type;
 
-        return make_typed_expr(
-            TypedExprKind.LambdaExpr(typed_params, actual_ret, typed_body),
-            Type.Unknown(),
+        return Pair[TypedExpr, Bool](
+            make_typed_expr(
+                TypedExprKind.LambdaExpr(typed_params, actual_ret, typed_body),
+                Type.Unknown(),
+            ),
+            captures_sendable,
         );
     };
 
     // 从 LambdaExpr 的 TypedExprKind 中提取参数类型和返回类型，构造 FunctionType。
-    build_lambda_function_type(self, expr: TypedExpr): Type = {
+    // `is_sendable` 是闭包的捕获判定结果（无环境函数引用传 true）。
+    build_lambda_function_type(self, expr: TypedExpr, is_sendable: Bool): Type = {
         return when expr.expr_kind in {
             .LambdaExpr(params, ret, _) then {
-                self.build_function_type_from_params(params, ret)
+                self.build_function_type_from_params(params, ret, is_sendable)
             },
             _ then expr.expr_type,
         };
     };
 
     // 从 TypedParam 列表和返回类型构造 FunctionType。
-    build_function_type_from_params(self, params: List[TypedParam], ret: Type): Type = {
+    build_function_type_from_params(
+        self,
+        params: List[TypedParam],
+        ret: Type,
+        is_sendable: Bool,
+    ): Type = {
         // 如果任何参数类型或返回类型是 Unknown，则返回 Unknown（无法构造完整的函数类型）
         let mutable has_unknown = false;
         when ret in {
@@ -416,20 +450,24 @@ given TypeChecker {
         if has_unknown then {
             return Type.Unknown();
         };
-        return make_function_type(param_type_refs, ret);
+        return make_function_type_with_flag(param_type_refs, ret, is_sendable);
     };
 
     collection_literal_target_error(self, t: Type): String = {
         return if self.is_std_type(t, "Dict") then "Collection literal without ':' cannot be inferred as Dict"
-        else "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range";
+        else if self.is_std_type(t, "FrozenDict") then "Collection literal without ':' cannot be inferred as FrozenDict"
+        else "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range";
     };
 
     // 从集合类型中提取元素类型。
     // 例如 [T]List -> Some(T), [T]Set -> Some(T)
-    // 身份判定 -- 集合字面量只对 std 的 List/Set 生效，用户自定义的同名类型
-    // 不会被当成集合字面量的目标。
+    // 身份判定 -- 集合字面量只对 std 的 List/Set/FrozenList/FrozenSet 生效，
+    // 用户自定义的同名类型不会被当成集合字面量的目标。
     extract_collection_element_type(self, t: Type): Option[Type] = {
-        if not (self.is_std_type(t, "List") or self.is_std_type(t, "Set")) then {
+        if not (
+            self.is_std_type(t, "List") or self.is_std_type(t, "Set")
+            or self.is_std_type(t, "FrozenList") or self.is_std_type(t, "FrozenSet")
+        ) then {
             return Option[Type].None();
         };
         let args = self.std_type_arguments(t);
@@ -440,7 +478,7 @@ given TypeChecker {
     // 从 Dict 类型中提取 key/value 类型。
     // 例如 [K, V]Dict -> (Some(K), Some(V))。身份判定，同上。
     extract_dict_kv_types(self, t: Type): Pair[Option[Type], Option[Type]] = {
-        if not self.is_std_type(t, "Dict") then {
+        if not (self.is_std_type(t, "Dict") or self.is_std_type(t, "FrozenDict")) then {
             return Pair[Option[Type], Option[Type]](
                 Option[Type].None(),
                 Option[Type].None(),

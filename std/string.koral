@@ -16,7 +16,12 @@
 /// the buffer and not on the string value. `len` is read straight from the
 /// value (no handle chase), and a value owes no user destructor -- dropping it
 /// releases the field, which drives the block's RC to zero.
-public type String(protected bytes: Bytes, protected len: UInt);
+///
+/// `unsafe sendable`: the bytes are fixed at construction and never mutated
+/// after the wrap, so string values cross threads freely -- the shared state
+/// is the `Bytes` block, which carries the same promise (and the atomic RC
+/// that makes the shared refcount sound).
+public type unsafe sendable String(protected bytes: Bytes, protected len: UInt);
 
 /// The managed byte block behind a `String`. The bytes live in the same heap
 /// block as this object -- one allocation -- and `data` points at the inline
@@ -24,7 +29,12 @@ public type String(protected bytes: Bytes, protected len: UInt);
 /// destructor to free (a `type mutable` runs its cleanup at RC-0; `Bytes`
 /// needs none). Made only by `alloc_bytes`; a `String` value wraps one
 /// together with its content length.
-protected type mutable Bytes(protected data: *mutable UInt8, protected len: UInt);
+///
+/// `unsafe sendable mutable`: every `String` copy shares this block, and a
+/// `sendable` `String` crosses threads by copy -- the block's refcount must be
+/// atomic (this mark supplies it; the `mutable` form adds no lock). Promise:
+/// written only while the block is being filled, read-only after the wrap.
+protected type unsafe sendable mutable Bytes(protected data: *mutable UInt8, protected len: UInt);
 
 /// Intrinsic: allocate a single-block `Bytes` of byte length `len` whose
 /// bytes are not yet written (only byte `[len]` is set to 0). The bytes live

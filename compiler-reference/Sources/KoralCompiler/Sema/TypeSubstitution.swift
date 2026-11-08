@@ -48,10 +48,10 @@ public struct TypeSubstitution {
             }
             return type
             
-        case .function(let params, let ret):
+        case .function(let params, let ret, let isSendable):
             let newParams = params.map { Parameter(type: apply($0.type, context: context), kind: $0.kind) }
             let newRet = apply(ret, context: context)
-            return .function(parameters: newParams, returns: newRet)
+            return .function(parameters: newParams, returns: newRet, isSendable: isSendable)
             
         case .genericStruct(let defId, let args):
             return .genericStruct(templateDefId: defId, args: args.map { apply($0, context: context) })
@@ -76,9 +76,9 @@ public struct TypeSubstitution {
         case .mutableWeakReference(let inner):
             return .mutableWeakReference(inner: apply(inner, context: context))
             
-        case .traitObject(let defId, let typeArgs):
+        case .traitObject(let defId, let typeArgs, let isSendable):
             if typeArgs.isEmpty { return type }
-            return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { apply($0, context: context) })
+            return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { apply($0, context: context) }, isSendable: isSendable)
             
         case .structure(let defId):
             guard let members = context.getStructMembers(defId) else {

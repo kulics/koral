@@ -162,7 +162,7 @@ public enum SemaUtils {
         case .mutableWeakReference(let inner):
             return .mutableWeakReference(inner: substituteType(inner, substitution: substitution, context: context))
             
-        case .function(let params, let returns):
+        case .function(let params, let returns, let isSendable):
             let newParams = params.map { param in
                 Parameter(
                     type: substituteType(param.type, substitution: substitution, context: context),
@@ -171,7 +171,8 @@ public enum SemaUtils {
             }
             return .function(
                 parameters: newParams,
-                returns: substituteType(returns, substitution: substitution, context: context)
+                returns: substituteType(returns, substitution: substitution, context: context),
+                isSendable: isSendable
             )
 
         case .fixedArray(let size, let element):
@@ -213,10 +214,10 @@ public enum SemaUtils {
             // They are handled by the constraint solver
             return type
             
-        case .traitObject(let defId, let typeArgs):
+        case .traitObject(let defId, let typeArgs, let isSendable):
             if typeArgs.isEmpty { return type }
             let newArgs = typeArgs.map { substituteType($0, substitution: substitution, context: context) }
-            return .traitObject(traitDefId: defId, typeArgs: newArgs)
+            return .traitObject(traitDefId: defId, typeArgs: newArgs, isSendable: isSendable)
         case .error:
             return type
         case .fixedArray(let size, let element):

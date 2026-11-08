@@ -200,7 +200,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
 
-        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, let access, let span, _):
+        case .globalStructDeclaration(let name, let typeParameters, let parameters, _, _, let access, let span, _):
             try resolveStructSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -210,7 +210,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .globalEnumDeclaration(let name, let typeParameters, let cases, let access, let span, _):
+        case .globalEnumDeclaration(let name, let typeParameters, let cases, _, let access, let span, _):
             try resolveEnumSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -250,7 +250,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignTypeDeclaration(let name, let fields, _, let access, let span, _):
+        case .foreignTypeDeclaration(let name, let fields, _, _, let access, let span, _):
             if fields == nil {
                 try resolveOpaqueTypeSignature(
                     name: name,
@@ -646,7 +646,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalStructDeclaration(let name, let typeParameters, _, _, let access, _, _):
+        case .globalStructDeclaration(let name, let typeParameters, _, _, _, let access, _, _):
             // 跳过泛型结构体
             if !typeParameters.isEmpty { return nil }
             
@@ -658,7 +658,7 @@ public class TypeResolver: CompilerPass {
                 sourceFile: sourceInfo.sourceFile
             )
             
-        case .globalEnumDeclaration(let name, let typeParameters, _, let access, _, _):
+        case .globalEnumDeclaration(let name, let typeParameters, _, _, let access, _, _):
             // 跳过泛型枚举类型
             if !typeParameters.isEmpty { return nil }
             
@@ -669,7 +669,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignTypeDeclaration(let name, _, _, let access, _, _):
+        case .foreignTypeDeclaration(let name, _, _, _, let access, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .type,
@@ -779,10 +779,10 @@ public class TypeResolver: CompilerPass {
             return extractTypeName(from: element)
         case .functionType, .inferredSelf:
             return ""
-        case .fixedArray(_, let element, _):
-            return extractTypeName(from: element)
         case .foreignFunction(_, _, _):
             return ""
+        case .sendableQualified(let inner):
+            return extractTypeName(from: inner)
         }
     }
     

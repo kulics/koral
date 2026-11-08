@@ -239,6 +239,26 @@ given TypeChecker {
         return msg.to_string();
     };
 
+    sendable_constraint_violation_message(
+        self,
+        target_type: Type,
+        context: String,
+    ): String = {
+        let mutable msg = StringBuilder.new();
+        msg.push_string("Type '");
+        msg.push_string(self.context().type_display_name(target_type));
+        msg.push_string("' does not satisfy the 'sendable' constraint");
+        if not context.is_empty() then {
+            msg.push_string(" (");
+            msg.push_string(context);
+            msg.push_string(")");
+        };
+        msg.push_string(
+            ". Only types declared 'sendable' or 'unsafe sendable' can cross thread boundaries.",
+        );
+        return msg.to_string();
+    };
+
     /// Whether the type parameter `name` was itself declared `T mutable`.
     /// A bare `T` gets no free pass -- otherwise `f[T Any]` could satisfy a
     /// `g[T mutable]` requirement by forwarding its own unconstrained `T`.
@@ -270,6 +290,56 @@ given TypeChecker {
             ),
             .GenericParameter(name) then self.generic_param_is_mutable_bounded(name),
             _ then false,
+        };
+    };
+
+    /// Whether the type parameter `name` is KNOWN sendable from its bounds: a
+    /// `T sendable` bound, or a bound to a `trait sendable` trait (every impl
+    /// of one is sendable). A bare `T` gets no free pass -- the mirror of
+    /// `generic_param_is_mutable_bounded`: otherwise `f[T Any]` could satisfy a
+    /// `g[T sendable]` requirement by forwarding its own unconstrained `T`.
+    generic_param_is_sendable_bounded(self, name: String): Bool = {
+        let shape_bounds = self.storage.generic_param_shape_bounds.get(name) or else List[Bound].new();
+        for bound in shape_bounds then {
+            when bound in {
+                .Sendable() then {
+                    return true;
+                },
+                _ then {},
+            };
+        };
+        let trait_bounds = self.storage.generic_param_constraints.get(name) or else List[GenericConstraintBound].new();
+        for bound in trait_bounds then {
+            if self.context().is_sendable_trait(bound.trait_def_id) then {
+                return true;
+            };
+        };
+        return false;
+    };
+
+    /// `sendable` bound satisfaction (concurrency-design.md §派生规则): the
+    /// `is_sendable_type` derivation, except that a bare generic parameter is
+    /// sendable only when its bounds say so (see
+    /// `generic_param_is_sendable_bounded`). Generic shapes recurse the
+    /// conditional rule strictly -- `Box[T]` is only known sendable when every
+    /// argument is.
+    satisfies_sendable_constraint(self, target_type: Type): Bool = {
+        return when target_type in {
+            .GenericParameter(name) then self.generic_param_is_sendable_bounded(name),
+            .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
+                if self.context().type_sendability(template_def_id) is .Unmarked() then {
+                    false
+                } else {
+                    let mutable all = true;
+                    for arg in args then {
+                        if not self.satisfies_sendable_constraint(arg) then {
+                            all = false;
+                        };
+                    };
+                    all
+                }
+            },
+            _ then self.context().is_sendable_type(target_type),
         };
     };
 
@@ -412,7 +482,7 @@ given TypeChecker {
                 inner,
                 required_access,
             ),
-            .FunctionType(params, return_type) then {
+            .FunctionType(params, return_type, _) then {
                 for param in params then {
                     when self.first_signature_visibility_violation(
                         param.param_type,
@@ -451,7 +521,7 @@ given TypeChecker {
                 };
                 Option[Pair[String, AccessModifier]].None()
             },
-            .TraitObject(_, type_args) then {
+            .TraitObject(_, type_args, _) then {
                 for arg in type_args then {
                     when self.first_signature_visibility_violation(arg, required_access) in {
                         .Some(violation) then {
@@ -814,7 +884,7 @@ given TypeChecker {
     /// The same rule for a resolved TYPE's declaration.
     is_foreign_private_type(self, t: Type): Bool = {
         return when t in {
-            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) or .TraitObject(def_id, _) then self.is_foreign_private(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) or .TraitObject(def_id, _, _) then self.is_foreign_private(def_id),
             _ then false,
         };
     };
@@ -849,7 +919,7 @@ given TypeChecker {
                     .Enum() then Option[Type].Some(Type.EnumType(def_id)),
                     .Opaque() then Option[Type].Some(Type.OpaqueType(def_id)),
                     .Trait() then Option[Type].Some(
-                        Type.TraitObject(def_id, List[Type].new()),
+                        Type.TraitObject(def_id, List[Type].new(), false),
                     ),
                 },
                 .GenericTemplate(template_kind) then when template_kind in {
@@ -874,7 +944,7 @@ given TypeChecker {
                         .Trait() then {
                             let trait_name = self.context().get_name(def_id) or else name;
                             Option[Type].Some(
-                                Type.TraitObject(def_id, List[Type].new()),
+                                Type.TraitObject(def_id, List[Type].new(), false),
                             )
                         },
                     },
@@ -903,7 +973,7 @@ given TypeChecker {
                                 .Structure() then Type.StructureType(def_id),
                                 .Enum() then Type.EnumType(def_id),
                                 .Opaque() then Type.OpaqueType(def_id),
-                                .Trait() then Type.TraitObject(def_id, List[Type].new()),
+                                .Trait() then Type.TraitObject(def_id, List[Type].new(), false),
                             },
                             .GenericTemplate(template_kind) then when template_kind in {
                                 .Structure() then Type.StructureType(def_id),
@@ -1255,7 +1325,7 @@ given TypeChecker {
         target_id: DefId,
     ): Bool = {
         when target_type in {
-            .TraitObject(trait_object_def_id, _) then {
+            .TraitObject(trait_object_def_id, _, _) then {
                 return self.storage.trait_registry.has_inheritance(
                     trait_object_def_id,
                     target_id,
@@ -1277,6 +1347,7 @@ given TypeChecker {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
             .Foreign() then self.satisfies_foreign_constraint(subject),
+            .Sendable() then self.satisfies_sendable_constraint(subject),
             .Trait(trait_def_id, trait_name, _) then self.satisfies_trait_requirement_with_args(
                 subject,
                 trait_def_id,
@@ -1294,6 +1365,7 @@ given TypeChecker {
         return when b in {
             .Mutable() then self.satisfies_mutable_constraint(subject),
             .Foreign() then self.satisfies_foreign_constraint(subject),
+            .Sendable() then self.satisfies_sendable_constraint(subject),
             .Trait(trait_def_id, trait_name, _) then self.trait_bound_may_hold(
                 subject,
                 trait_def_id,
@@ -1337,6 +1409,20 @@ given TypeChecker {
                         self.foreign_constraint_violation_message(
                             bound_type,
                             "checking constraint \(param_name): foreign",
+                        ),
+                        span,
+                    );
+                    false
+                }
+            },
+            .Sendable() then {
+                if self.satisfies_sendable_constraint(bound_type) then {
+                    true
+                } else {
+                    self.push_diagnostic_at_span(
+                        self.sendable_constraint_violation_message(
+                            bound_type,
+                            "checking constraint \(param_name): sendable",
                         ),
                         span,
                     );
@@ -1566,7 +1652,7 @@ given TypeChecker {
                             },
                             // Shape bounds (`mutable`, `Deref`) are not trait
                             // conformances, so they are not owner requirements here.
-                            .Mutable() or .Foreign() then {},
+                            .Mutable() or .Foreign() or .Sendable() then {},
                         };
                     };
                 };
@@ -1753,7 +1839,7 @@ given TypeChecker {
                     (pair.first),
                     bindings,
                 );
-                if not self.same_expr_type(expected_arg, (pair.second)) then {
+                if not self.same_expr_type((pair.second), expected_arg) then {
                     trait_args_match = false;
                     break;
                 };
@@ -1813,6 +1899,17 @@ given TypeChecker {
                                     );
                                 };
                             },
+                            .Sendable() then {
+                                if not self.satisfies_sendable_constraint(bound_type) then {
+                                    return Option[GenericTraitConformanceStatus].Some(
+                                        GenericTraitConformanceStatus.MissingConstraint(
+                                            bound_type,
+                                            tp.name,
+                                            "sendable",
+                                        ),
+                                    );
+                                };
+                            },
                         };
                     };
                 };
@@ -1840,7 +1937,7 @@ given TypeChecker {
         return when pattern in {
             .GenericParameter(name) then {
                 return when bindings.get(name) in {
-                    .Some(bound) then self.same_expr_type(bound, actual),
+                    .Some(bound) then self.same_expr_type(actual, bound),
                     .None() then {
                         bindings.insert(name, actual);
                         true
@@ -2009,7 +2106,7 @@ given TypeChecker {
                 },
                 _ then false,
             },
-            _ then self.same_expr_type(pattern, actual),
+            _ then self.same_expr_type(actual, pattern),
         };
     };
 
@@ -2096,7 +2193,7 @@ given TypeChecker {
                     (pair.first),
                     bindings,
                 );
-                if not self.same_expr_type(expected_arg, (pair.second)) then {
+                if not self.same_expr_type((pair.second), expected_arg) then {
                     trait_args_match = false;
                     break;
                 };
@@ -2128,7 +2225,7 @@ given TypeChecker {
                                     return result;
                                 };
                             },
-                            .Mutable() or .Foreign() then {},
+                            .Mutable() or .Foreign() or .Sendable() then {},
                         };
                     };
                 };
@@ -2162,7 +2259,7 @@ given TypeChecker {
         return when pattern in {
             .GenericParameter(name) then {
                 when bindings.get(name) in {
-                    .Some(bound) then if self.same_expr_type(bound, actual) then Option[Dict[String, Type]].Some(
+                    .Some(bound) then if self.same_expr_type(actual, bound) then Option[Dict[String, Type]].Some(
                         bindings,
                     ) else Option[Dict[String, Type]].None(),
                     .None() then {
@@ -2330,7 +2427,7 @@ given TypeChecker {
                 },
                 _ then Option[Dict[String, Type]].None(),
             },
-            _ then if self.same_expr_type(pattern, actual) then Option[Dict[String, Type]].Some(
+            _ then if self.same_expr_type(actual, pattern) then Option[Dict[String, Type]].Some(
                 bindings,
             ) else Option[Dict[String, Type]].None(),
         };

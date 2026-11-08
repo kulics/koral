@@ -32,13 +32,18 @@ public enum Bound: CustomStringConvertible {
     case trait(defId: DefId, name: String, args: [TypeNode])
     case mutable
     case foreign
+    /// `T sendable` -- the subject may cross thread boundaries
+    /// (concurrency-design.md). A shape requirement like `mutable`/`foreign`:
+    /// satisfaction is the `isSendableType` derivation. Composes with trait
+    /// bounds and the other shape bounds (`T Reader and sendable`).
+    case sendable
 
     /// The declaration identity of the required trait, or nil for shape bounds
     /// (which have no declaration).
     public var defId: DefId? {
         switch self {
         case .trait(let defId, _, _): return defId
-        case .mutable, .foreign: return nil
+        case .mutable, .foreign, .sendable: return nil
         }
     }
 
@@ -51,6 +56,7 @@ public enum Bound: CustomStringConvertible {
         case .trait(_, let name, _): return name
         case .mutable: return "mutable"
         case .foreign: return "foreign"
+        case .sendable: return "sendable"
         }
     }
 
@@ -59,7 +65,7 @@ public enum Bound: CustomStringConvertible {
     public var traitName: String? {
         switch self {
         case .trait(_, let name, _): return name
-        case .mutable, .foreign: return nil
+        case .mutable, .foreign, .sendable: return nil
         }
     }
 
@@ -68,7 +74,7 @@ public enum Bound: CustomStringConvertible {
     public var traitArgs: [TypeNode] {
         switch self {
         case .trait(_, _, let args): return args
-        case .mutable, .foreign: return []
+        case .mutable, .foreign, .sendable: return []
         }
     }
 
@@ -80,6 +86,7 @@ public enum Bound: CustomStringConvertible {
         case .trait(_, let name, let args): return .trait(defId: defId, name: name, args: args)
         case .mutable: return .mutable
         case .foreign: return .foreign
+        case .sendable: return .sendable
         }
     }
 
@@ -99,6 +106,8 @@ public enum Bound: CustomStringConvertible {
             return "mutable"
         case .foreign:
             return "foreign"
+        case .sendable:
+            return "sendable"
         }
     }
 }
@@ -124,6 +133,8 @@ public func boundFromTypeNode(_ node: TypeNode) throws -> Bound? {
             return .mutable
         } else if name == "foreign" {
             return .foreign
+        } else if name == "sendable" {
+            return .sendable
         } else {
             return .trait(defId: .invalid, name: name, args: [])
         }

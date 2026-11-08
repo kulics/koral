@@ -1,0 +1,31 @@
+// EXPECT: some=7
+// EXPECT: is_some
+// EXPECT: none_case
+
+// Pattern reads of locked fields (concurrency-design.md §对象锁语义 1):
+// the `when`/`is` subject is copied under the object's lock, and the pattern
+// machinery reads only that private copy — no pointer into the locked
+// payload escapes the critical section.
+
+type sendable Shape {
+    Circle(r: Int),
+    Rect(w: Int),
+};
+
+type sendable mutable Holder(mutable a: Shape, mutable b: Shape);
+
+let main(): Void = {
+    let h = Holder(Shape.Circle(7), Shape.Rect(1));
+    when h.a in {
+        .Circle(r) then println("some=\(r)"),
+        .Rect(w) then println("rect=\(w)"),
+    };
+    if h.a is .Circle(x) then {
+        let _ = x;
+        println("is_some");
+    };
+    when h.b in {
+        .Circle(r) then println("circle=\(r)"),
+        .Rect(w) then println("none_case"),
+    };
+};

@@ -7,17 +7,17 @@
 // ============================================================================
 // Set Type Definition
 // ============================================================================
-type SetBucket[T: Hash] {
-    Empty(),
-    Occupied(value: T),
-    Deleted(),
-};
+// `Set` stores its elements in `HashBucket` buckets from std/hash_lookup.koral
+// (the shared probing/lookup module). The bucket payload is unused for the
+// mutable set; only tag and key are meaningful. Only Occupied buckets have
+// initialized key memory; Empty and Deleted buckets have raw (uninitialized)
+// key memory; only the tag is valid.
 
 /// A hash set of `Hash` values; iteration order is unspecified.
 /// `deleted` counts tombstone (Deleted-tagged) buckets so the table can detect
 /// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Set[T: Hash](
-    mutable buckets: *mutable SetBucket[T],
+    mutable buckets: *mutable HashBucket[T, UInt],
     mutable size: UInt,
     mutable capacity: UInt,
     mutable deleted: UInt,
@@ -28,7 +28,9 @@ given[T: Hash] Set[T]: Drop {
 
     drop(self): Void = {
         for i in 0..<self.capacity then {
-            deinit_memory(self.buckets + i);
+            if (self.buckets + i).tag == UInt(1) then {
+                deinit_memory(self.buckets + i);
+            };
         };
         dealloc_memory(self.buckets);
     };
@@ -58,10 +60,9 @@ given[T: Hash] Set[T] {
         while cap < requested then {
             cap = cap * UInt(2);
         };
-        let buckets = alloc_memory[SetBucket[T]](cap);
+        let buckets = alloc_memory[HashBucket[T, UInt]](cap);
         for i in 0..<cap then {
-            let empty_bucket = SetBucket[T].Empty();
-            init_memory(buckets + i, empty_bucket);
+            bucket_set_tag(buckets + i, UInt(0));
         };
         return Set[T](buckets, 0, cap, 0);
     };
@@ -69,50 +70,10 @@ given[T: Hash] Set[T] {
     /// Return the number of elements in the set.
     public count(self): UInt = self.size;
 
-    // Using when for bucket handling
-    // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
-    private find_slot(self, value: T): Option[UInt] = {
-        // 尚未分配桶数组（空集合）：没有可命中的槽位。
-        if self.capacity == UInt(0) then {
-            return Option[UInt].None();
-        };
-        let mask = self.capacity - 1;
-        let h = hash_mix(value.hash());
-        let mutable idx = h & mask;
-        let mutable first_deleted = Option[UInt].None();
-        let mutable probes: UInt = 0;
-        while probes < self.capacity then {
-            let bucket = self.buckets[idx];
-            when bucket in {
-                .Empty() then {
-                    when first_deleted in {
-                        .Some(_) then {
-                            return first_deleted;
-                        },
-                        .None() then {
-                            return Option[UInt].Some(idx);
-                        },
-                    };
-                },
-                .Deleted() then {
-                    when first_deleted in {
-                        .None() then {
-                            first_deleted = Option[UInt].Some(idx);
-                        },
-                        _ then {},
-                    };
-                },
-                .Occupied(v) then {
-                    if v == value then {
-                        return Option[UInt].Some(idx);
-                    };
-                },
-            };
-            idx = (idx + 1) & mask;
-            probes += 1;
-        };
-        return first_deleted;
-    };
+    // The shared probe from std/hash_lookup.koral (the one probing algorithm
+    // this container shares with Dict/FrozenDict/FrozenSet).
+    private find_slot(self, value: T): Option[UInt] =
+        find_hash_slot(self.buckets, self.capacity, value);
 
     private rehash(self): Void = {
         let old_cap = self.capacity;
@@ -124,10 +85,9 @@ given[T: Hash] Set[T] {
         while self.size * 2 >= new_cap then {
             new_cap = new_cap * UInt(2);
         };
-        let new_buckets = alloc_memory[SetBucket[T]](new_cap);
+        let new_buckets = alloc_memory[HashBucket[T, UInt]](new_cap);
         for i in 0..<new_cap then {
-            let empty_bucket = SetBucket[T].Empty();
-            init_memory(new_buckets + i, empty_bucket);
+            bucket_set_tag(new_buckets + i, UInt(0));
         };
         self.buckets = new_buckets;
         self.capacity = new_cap;
@@ -136,12 +96,13 @@ given[T: Hash] Set[T] {
         // 触发检查也不会递归 rehash（新容量 > 2 * 存活数）。
         self.deleted = 0;
         for i in 0..<old_cap then {
-            let bucket = take_memory(old_buckets + i);
-            when bucket in {
-                .Occupied(v) then {
-                    self.insert(v);
-                },
-                _ then {},
+            let old_tag = (old_buckets + i).tag;
+            if old_tag == UInt(1) then {
+                let moved = take_memory(old_buckets + i);
+                self.insert(moved.key);
+            } else if old_tag == UInt(2) then {
+                // 已删除桶的 key 在 take 标记删除前已由 deinit_memory
+                // 释放；槽里的陈旧位绝不能再 drop 一次（双释放）。
             };
         };
         dealloc_memory(old_buckets);
@@ -165,24 +126,18 @@ given[T: Hash] Set[T] {
                 panic("Set insert failed");
             },
             .Some(idx) then {
-                let bucket = self.buckets[idx];
-                when bucket in {
-                    .Occupied(_) then {
-                        return false;
-                    },
-                    .Empty() then {
-                        self.buckets[idx] = SetBucket[T].Occupied(value);
-                        self.size = self.size + 1;
-                        return true;
-                    },
-                    .Deleted() then {
-                        self.buckets[idx] = SetBucket[T].Occupied(value);
-                        self.size = self.size + 1;
-                        // 复用了一个 tombstone 槽：陈旧桶少一个。
-                        self.deleted = self.deleted - 1;
-                        return true;
-                    },
+                let bucket_ptr = self.buckets + idx;
+                let old_tag = bucket_ptr.tag;
+                if old_tag == UInt(1) then {
+                    return false;
                 };
+                init_memory(bucket_ptr, HashBucket[T, UInt](UInt(1), value, UInt(0)));
+                if old_tag == UInt(2) then {
+                    // 复用了一个 tombstone 槽：陈旧桶少一个。
+                    self.deleted = self.deleted - 1;
+                };
+                self.size = self.size + 1;
+                return true;
             },
         };
     };
@@ -201,11 +156,7 @@ given[T: Hash] Set[T] {
                 return false;
             },
             .Some(idx) then {
-                let bucket = self.buckets[idx];
-                return when bucket in {
-                    .Occupied(_) then true,
-                    _ then false,
-                };
+                return (self.buckets + idx).tag == UInt(1);
             },
         };
     };
@@ -222,15 +173,15 @@ given[T: Hash] Set[T] {
                 return false;
             },
             .Some(idx) then {
-                let bucket = self.buckets[idx];
-                return when bucket in {
-                    .Occupied(_) then {
-                        self.buckets[idx] = SetBucket[T].Deleted();
-                        self.size = self.size - 1;
-                        self.deleted = self.deleted + 1;
-                        return true;
-                    },
-                    _ then false,
+                let bucket_ptr = self.buckets + idx;
+                if bucket_ptr.tag == UInt(1) then {
+                    deinit_memory(bucket_ptr);
+                    bucket_set_tag(bucket_ptr, UInt(2));
+                    self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
+                    return true;
+                } else {
+                    return false;
                 };
             },
         };
@@ -255,7 +206,11 @@ given[T: Hash] Set[T] {
     /// Remove every element from the set.
     public clear(self): Void = {
         for i in 0..<self.capacity then {
-            self.buckets[i] = SetBucket[T].Empty();
+            let bucket_ptr = self.buckets + i;
+            if bucket_ptr.tag == UInt(1) then {
+                deinit_memory(bucket_ptr);
+            };
+            bucket_set_tag(bucket_ptr, UInt(0));
         };
         self.size = 0;
         self.deleted = 0;
@@ -264,16 +219,14 @@ given[T: Hash] Set[T] {
     /// Keep only the elements that satisfy `predicate`; O(n) time.
     public retain(self, predicate: (T) -> Bool): Void = {
         for i in 0..<self.capacity then {
-            let bucket = self.buckets[i];
-            when bucket in {
-                .Occupied(v) then {
-                    if not predicate(v) then {
-                        self.buckets[i] = SetBucket[T].Deleted();
-                        self.size = self.size - 1;
-                        self.deleted = self.deleted + 1;
-                    };
-                },
-                _ then {},
+            let bucket_ptr = self.buckets + i;
+            if bucket_ptr.tag == UInt(1) then {
+                if not predicate(bucket_ptr.key) then {
+                    deinit_memory(bucket_ptr);
+                    bucket_set_tag(bucket_ptr, UInt(2));
+                    self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
+                };
             };
         };
     };
@@ -338,12 +291,9 @@ given[T: Hash] Set[T]: Clone {
     public clone(self): Self = {
         let mutable result = Set[T].with_capacity(self.size);
         for i in 0..<self.capacity then {
-            let bucket = self.buckets[i];
-            when bucket in {
-                .Occupied(v) then {
-                    result.insert(v);
-                },
-                _ then {},
+            let bucket_ptr = self.buckets + i;
+            if bucket_ptr.tag == UInt(1) then {
+                result.insert(bucket_ptr.key);
             };
         };
         return result;
@@ -373,15 +323,155 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T] = {
         while self.index < self.source.capacity then {
-            let bucket = self.source.buckets[self.index];
+            let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
-            when bucket in {
-                .Occupied(v) then {
-                    return Option[T].Some(v);
-                },
-                _ then {},
+            if bucket_ptr.tag == UInt(1) then {
+                return Option[T].Some(bucket_ptr.key);
             };
         };
         return Option[T].None();
+    };
+};
+
+// ============================================================================
+// FrozenSet - immutable snapshot for cross-thread transfer
+// ============================================================================
+/// An immutable element snapshot that may cross threads. Built by
+/// `Set.to_frozen_set`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a set literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`); the conditional rule still applies to
+/// `T`.
+///
+/// Storage is standalone — it does not embed `Set`: a compacted hash table
+/// (`HashBucket[T, UInt]` buckets holding entry indexes; no tombstones, built
+/// once) plus a dense entry array walked in insertion order. Probing is the
+/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
+/// the owned buffers' destructor lives; the snapshot is immutable after
+/// construction.
+public type unsafe sendable mutable FrozenSet[T: Hash](
+    protected buckets: *mutable HashBucket[T, UInt],
+    protected entries: *mutable T,
+    protected len: UInt,
+    protected capacity: UInt,
+);
+
+/// `Drop` for `FrozenSet[T]`: releases the bucket and entry arrays.
+given[T: Hash] FrozenSet[T]: Drop {
+
+    drop(self): Void = {
+        for i in 0..<self.capacity then {
+            if (self.buckets + i).tag == UInt(1) then {
+                deinit_memory(self.buckets + i);
+            };
+        };
+        dealloc_memory(self.buckets);
+        for i in 0..<self.len then {
+            deinit_memory(self.entries + i);
+        };
+        dealloc_memory(self.entries);
+    };
+};
+
+/// A one-shot cursor that walks a `FrozenSet[T]` in insertion order.
+public type mutable FrozenSetIterator[T: Hash](
+    source: FrozenSet[T],
+    mutable index: UInt,
+);
+
+/// Read-only access over a `FrozenSet[T]`.
+given[T: Hash] FrozenSet[T] {
+
+    /// The number of elements in the snapshot.
+    public count(self): UInt = self.len;
+
+    /// Whether the snapshot has no elements.
+    public is_empty(self): Bool = self.len == 0;
+
+    /// Whether `value` is in the snapshot.
+    public contains(self, value: T): Bool = {
+        when find_hash_slot(self.buckets, self.capacity, value) in {
+            .None() then {
+                return false;
+            },
+            .Some(idx) then {
+                return (self.buckets + idx).tag == UInt(1);
+            },
+        };
+    };
+
+    /// Copy the snapshot back out as a fresh mutable `Set[T]`.
+    public to_set(self): Set[T] = {
+        let mutable out = Set[T].new();
+        for e in self then {
+            out.insert(e);
+        };
+        return out;
+    };
+};
+
+/// `Iterator` for `FrozenSetIterator[T]`: yields elements in insertion order.
+given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
+
+    /// Yield the next element, or `None` after the last one.
+    public next(self): Option[T] = {
+        if self.index < self.source.len then {
+            let value = self.source.entries[self.index];
+            self.index = self.index + 1;
+            return Option[T].Some(value);
+        };
+        return Option[T].None();
+    };
+};
+
+/// `Iterable` for `FrozenSet[T]`: a fresh read cursor over the snapshot.
+given[T: Hash] FrozenSet[T]: Iterable[T, FrozenSetIterator[T]] {
+
+    /// A fresh cursor over the snapshot's elements in insertion order; the
+    /// snapshot is untouched.
+    public iterator(self): FrozenSetIterator[T] = FrozenSetIterator[T](self, 0);
+};
+
+/// Snapshot conversions from the mutable side.
+given[T: Hash] Set[T] {
+
+    /// Copy the set into an immutable `FrozenSet[T]` snapshot that can cross
+    /// threads. The receiver stays usable; the snapshot bulk-copies into its
+    /// own compacted table + entry array of shared element handles.
+    public to_frozen_set(self): FrozenSet[T] = {
+        let len = self.size;
+        // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
+        let mutable capacity: UInt = UInt(0);
+        if len > UInt(0) then {
+            capacity = UInt(4);
+            while len * UInt(2) >= capacity then {
+                capacity = capacity * UInt(2);
+            };
+        };
+        let buckets = alloc_memory[HashBucket[T, UInt]](capacity);
+        for i in 0..<capacity then {
+            bucket_set_tag(buckets + i, UInt(0));
+        };
+        let entries = alloc_memory[T](len);
+        let mutable next: UInt = UInt(0);
+        for i in 0..<self.capacity then {
+            let bucket_ptr = self.buckets + i;
+            if bucket_ptr.tag == UInt(1) then {
+                init_memory(entries + next, bucket_ptr.key);
+                when find_hash_slot(buckets, capacity, bucket_ptr.key) in {
+                    .Some(slot) then {
+                        init_memory(
+                            buckets + slot,
+                            HashBucket[T, UInt](UInt(1), bucket_ptr.key, next),
+                        );
+                    },
+                    .None() then {
+                        panic("FrozenSet build failed");
+                    },
+                };
+                next = next + UInt(1);
+            };
+        };
+        return FrozenSet[T](buckets, entries, len, capacity);
     };
 };

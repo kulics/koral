@@ -64,7 +64,7 @@ private let skip_instantiation_with_unsatisfied_constraints(
                         return true;
                     };
                 },
-                .Mutable() or .Foreign() then {},
+                .Mutable() or .Foreign() or .Sendable() then {},
             };
         };
     };
@@ -201,7 +201,7 @@ public let instantiate_function(
             ),
         );
     };
-    let function_type = Type.FunctionType(function_param_entries, concrete_return_type);
+    let function_type = Type.FunctionType(function_param_entries, concrete_return_type, false);
 
     let template_module_path = mono.storage.context.get_module_path(template.def_id) or else List[String].new(
     );
@@ -840,7 +840,7 @@ private let normalize_trait_conformance_actual_type_for_template_binding(
 /// spelling.
 private let type_template_decl(mono: Monomorphizer, t: Type): DefId = {
     return when t in {
-        .GenericStruct(d, _) or .GenericEnum(d, _) or .TraitObject(d, _) then d,
+        .GenericStruct(d, _) or .GenericEnum(d, _) or .TraitObject(d, _, _) then d,
         .StructureType(def_id) or .EnumType(def_id) then mono.storage.context.get_template_def_id(def_id),
         _ then def_id_invalid(),
     };
@@ -1672,7 +1672,7 @@ private let collect_generic_parameter_names_from_type(t: Type): List[String] = {
             .ReferenceType(inner) or .MutableReferenceType(inner) or .BorrowedReferenceType(inner)
             or .MutableBorrowedReferenceType(inner) or .WeakReferenceType(inner)
             or .MutableWeakReferenceType(inner) or .PointerType(inner) or .MutablePointerType(inner) then stack.push(inner),
-            .FunctionType(params, ret) then {
+            .FunctionType(params, ret, _) then {
                 for param in params then {
                     stack.push(param.param_type);
                 };
@@ -1716,7 +1716,7 @@ private let infer_method_type_args_by_signature(
             when checked_returns in {
                 .Some(checked_return) then {
                     when resolved_substituted in {
-                        .FunctionType(expected_params, expected_returns) then {
+                        .FunctionType(expected_params, expected_returns, _) then {
                             let expected_types = param_entry_types(expected_params);
                             let mutable bindings = Dict[String, Type].new();
                             for pair in checked_params.lazy().zip[
@@ -1808,7 +1808,7 @@ public let infer_trait_extension_type_args_by_method_type(
     method_type_args: List[Type],
 ): Option[List[Type]] = {
     let (actual_params, actual_return) = when expected_method_type in {
-        .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
+        .FunctionType(params, ret, _) or .ForeignFunctionType(params, ret) then Pair(params, ret),
         _ then {
             return Option[List[Type]].None();
         },
@@ -1961,9 +1961,9 @@ private let symbol_matches_full_method_type(
                 full_method_type,
             ) then true
             else when resolved_hit_type in {
-                .FunctionType(hit_params, hit_returns) or .ForeignFunctionType(hit_params, hit_returns) then {
+                .FunctionType(hit_params, hit_returns, _) or .ForeignFunctionType(hit_params, hit_returns) then {
                     when full_method_type in {
-                        .FunctionType(expected_params, expected_returns)
+                        .FunctionType(expected_params, expected_returns, _)
                         or .ForeignFunctionType(expected_params, expected_returns) then {
                             let hit_types = param_entry_types(hit_params);
                             let expected_types = param_entry_types(expected_params);
@@ -2001,8 +2001,8 @@ private let symbol_matches_full_method_type_via_trait_receiver(
 ): Bool = {
     return when mono.storage.context.get_symbol_type(hit_def_id) in {
         .Some(hit_type) then when resolve_parameterized_type(mono, hit_type) in {
-            .FunctionType(hit_params, hit_returns) or .ForeignFunctionType(hit_params, hit_returns) then when full_method_type in {
-                .FunctionType(expected_params, expected_returns)
+            .FunctionType(hit_params, hit_returns, _) or .ForeignFunctionType(hit_params, hit_returns) then when full_method_type in {
+                .FunctionType(expected_params, expected_returns, _)
                 or .ForeignFunctionType(expected_params, expected_returns) then {
                     let hit_types = param_entry_types(hit_params);
                     let expected_types = param_entry_types(expected_params);
@@ -2019,7 +2019,7 @@ private let symbol_matches_full_method_type_via_trait_receiver(
                     };
                     let hit_first = resolve_parameterized_type(mono, hit_types[UInt(0)]);
                     let first_is_trait_receiver = when hit_first in {
-                        .TraitObject(hit_trait_def_id, _) then hit_trait_def_id == trait_def_id,
+                        .TraitObject(hit_trait_def_id, _, _) then hit_trait_def_id == trait_def_id,
                         _ then false,
                     };
                     if not first_is_trait_receiver then {
@@ -2575,7 +2575,7 @@ public let resolve_standalone_method_function_reference(
         substituted_function_type,
     );
     let (fn_params, fn_returns) = when resolved_function_type in {
-        .FunctionType(params, ret) or .ForeignFunctionType(params, ret) then Pair(params, ret),
+        .FunctionType(params, ret, _) or .ForeignFunctionType(params, ret) then Pair(params, ret),
         _ then {
             return Option[Symbol].None();
         },
@@ -3129,7 +3129,7 @@ public let instantiate_extension_method_from_entry(
             ),
         );
     };
-    let function_type = Type.FunctionType(method_param_entries, concrete_return_type);
+    let function_type = Type.FunctionType(method_param_entries, concrete_return_type, false);
     let method_span = resolved_template.method.span;
 
     // e. Allocate a new DefId for the concrete method with full metadata so
@@ -3767,9 +3767,9 @@ private let collect_trait_type_args_by_unification(
                 _ then {},
             };
         },
-        .TraitObject(_, req_args) then {
+        .TraitObject(_, req_args, _) then {
             when concrete in {
-                .TraitObject(_, c_args) then collect_trait_type_args_in_list(
+                .TraitObject(_, c_args, _) then collect_trait_type_args_in_list(
                     mono,
                     wanted,
                     req_args,
@@ -4059,7 +4059,16 @@ private let type_satisfies_bound_constraint(
         ),
         .Mutable() then type_satisfies_mutable_bound(mono, actual_type),
         .Foreign() then type_satisfies_foreign_bound(mono, actual_type),
+        .Sendable() then type_satisfies_sendable_bound(mono, actual_type),
     };
+};
+
+/// The derivation `satisfies_sendable_constraint` applies in sema. At mono the
+/// arguments are instantiated shapes, so the conditional rule reduces to the
+/// `is_sendable_type` derivation (concurrency-design.md §派生规则 3).
+private let type_satisfies_sendable_bound(mono: Monomorphizer, actual_type: Type): Bool = {
+    let t = resolve_parameterized_type(mono, actual_type);
+    return mono.storage.context.is_sendable_type(t);
 };
 
 private let type_satisfies_mutable_bound(mono: Monomorphizer, actual_type: Type): Bool = {

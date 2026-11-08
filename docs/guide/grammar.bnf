@@ -181,11 +181,15 @@
 // Type Declarations
 // ============================================================================
 
-<type-decl> ::= "type" "mutable"? <type-identifier> <generic-params>? <type-body> ";"
-              | "type" "foreign" <c-name>? <type-identifier> <foreign-type-body> ";"
+<type-decl> ::= "type" <sendability>? "mutable"? <type-identifier> <generic-params>? <type-body> ";"
+              | "type" "foreign" <c-name>? <sendability>? <type-identifier> <foreign-type-body> ";"
               | "type" "intrinsic" <type-identifier> ";"                // body-less (built into the compiler)
               | "type" <type-identifier> <generic-params>? "=" <type> ";"   // type alias
+<sendability> ::= "unsafe" "sendable" | "sendable"
 // 说明：`mutable` 仅对 struct 有效，枚举和别名不支持。
+// `sendability`（`sendable` / `unsafe sendable`）修饰跨线程共享能力
+// （concurrency-design.md）：`unsafe` 必须伴随 `sendable`；struct、enum 与
+// `type foreign` 收，`type intrinsic` 与别名不收。顺序固定 `unsafe` `sendable` `mutable`。
 // `type foreign` 与 `type mutable` 互斥——外部类型的可变性不属于 Koral 自己的
 // nominal 声明。
 // 类型别名支持泛型参数（如 `type OrdList[T: Ord] = List[T]`）：实例化点检查
@@ -311,9 +315,14 @@
 
 <type-prefix> ::= "*" "mutable"?
                | "?"
+               | "sendable"
 // *T          — read-only pointer
 // *mutable T  — mutable pointer
 // ?T          — weak reference
+// sendable T  — `sendable` 前缀限定（concurrency-design.md）：只对函数类型
+//               （`sendable (A) -> R`）与 trait object（`sendable Trait`）
+//               成立，其余类型报错；转换放宽 `sendable (A) -> R` -> `(A) -> R`
+//               合法，反向拒绝。可嵌套：`sendable (A) -> sendable (B) -> R`。
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
 <function-type> ::= "(" <function-type-param-list>? ")" "->" <type>

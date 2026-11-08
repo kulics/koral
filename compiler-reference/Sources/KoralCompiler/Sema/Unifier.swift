@@ -70,22 +70,29 @@ public class Unifier {
         // 首先解析类型变量
         let resolved1 = resolve(t1)
         let resolved2 = resolve(t2)
-        
+
         // 如果解析后相等，直接返回
         if resolved1 == resolved2 {
+            // `isSendable` is not part of representational equality, but the
+            // unifier is STRICT on the slot: two function types whose slots
+            // differ do not unify (koralc's `types_equal` never deep-compounds
+            // through function shapes, so its strict check always sees them).
+            if let (a, b) = Self.firstFunctionSendableSlotMismatch(resolved1, resolved2) {
+                throw UnificationError.typeMismatch(expected: a, got: b, span: span)
+            }
             return
         }
-        
+
         switch (resolved1, resolved2) {
         // 类型变量与任意类型
         case (.typeVariable(let tv), let t):
             try bindVariable(tv, to: t, span: span)
-            
+
         case (let t, .typeVariable(let tv)):
             try bindVariable(tv, to: t, span: span)
-            
+
         // 函数类型
-        case (.function(let params1, let ret1), .function(let params2, let ret2)):
+        case (.function(let params1, let ret1, let sendable1), .function(let params2, let ret2, let sendable2)):
             if params1.count != params2.count {
                 throw UnificationError.arityMismatch(
                     expected: params1.count,
@@ -93,12 +100,17 @@ public class Unifier {
                     span: span
                 )
             }
-            
+            // 泛型合一对 `sendable` 槽从严：槽不一致不合一
+            // （concurrency-design.md §派生规则 5）。Trait object 的槽位不查。
+            if sendable1 != sendable2 {
+                throw UnificationError.typeMismatch(expected: resolved1, got: resolved2, span: span)
+            }
+
             // 合一参数类型
             for (p1, p2) in zip(params1, params2) {
                 try unify(p1.type, p2.type, span: span)
             }
-            
+
             // 合一返回类型
             try unify(ret1, ret2, span: span)
             
@@ -269,7 +281,7 @@ public class Unifier {
         case .typeVariable(let otherTV):
             return unionFind.find(tv) == unionFind.find(otherTV)
             
-        case .function(let params, let ret):
+        case .function(let params, let ret, _):
             for param in params {
                 if occurs(tv, in: param.type, visited: &visited) {
                     return true
@@ -329,7 +341,7 @@ public class Unifier {
             }
             return false
 
-        case .traitObject(_, let typeArgs):
+        case .traitObject(_, let typeArgs, _):
             for typeArg in typeArgs {
                 if occurs(tv, in: typeArg, visited: &visited) {
                     return true
@@ -356,10 +368,10 @@ public class Unifier {
             // 返回代表元对应的类型变量
             return .typeVariable(root)
             
-        case .function(let params, let ret):
+        case .function(let params, let ret, let isSendable):
             let resolvedParams = params.map { Parameter(type: resolve($0.type), kind: $0.kind) }
             let resolvedRet = resolve(ret)
-            return .function(parameters: resolvedParams, returns: resolvedRet)
+            return .function(parameters: resolvedParams, returns: resolvedRet, isSendable: isSendable)
             
         case .genericStruct(let defId, let args):
             return .genericStruct(templateDefId: defId, args: args.map { resolve($0) })
@@ -379,6 +391,56 @@ public class Unifier {
             
         default:
             return type
+        }
+    }
+
+    /// The first aligned function slot whose `sendable` flags differ. Only
+    /// FUNCTION slots are strict in the unifier (koralc checks
+    /// `is_sendable_type(lhs) != is_sendable_type(rhs)` inside its
+    /// function-shape case alone); trait object slots are not compared here.
+    private static func firstFunctionSendableSlotMismatch(_ lhs: Type, _ rhs: Type) -> (Type, Type)? {
+        switch (lhs, rhs) {
+        case (.function(let p1, let r1, let s1), .function(let p2, let r2, let s2)):
+            if s1 != s2 {
+                return (lhs, rhs)
+            }
+            guard p1.count == p2.count else { return nil }
+            for (a, b) in zip(p1, p2) {
+                if let mismatch = firstFunctionSendableSlotMismatch(a.type, b.type) {
+                    return mismatch
+                }
+            }
+            return firstFunctionSendableSlotMismatch(r1, r2)
+        case (.foreignFunction(let p1, let r1), .foreignFunction(let p2, let r2)):
+            guard p1.count == p2.count else { return nil }
+            for (a, b) in zip(p1, p2) {
+                if let mismatch = firstFunctionSendableSlotMismatch(a.type, b.type) {
+                    return mismatch
+                }
+            }
+            return firstFunctionSendableSlotMismatch(r1, r2)
+        case (.genericStruct(_, let a1), .genericStruct(_, let a2)),
+             (.genericEnum(_, let a1), .genericEnum(_, let a2)),
+             (.traitObject(_, let a1, _), .traitObject(_, let a2, _)):
+            guard a1.count == a2.count else { return nil }
+            for (a, b) in zip(a1, a2) {
+                if let mismatch = firstFunctionSendableSlotMismatch(a, b) {
+                    return mismatch
+                }
+            }
+            return nil
+        case (.reference(let i1), .reference(let i2)),
+             (.mutableReference(let i1), .mutableReference(let i2)),
+             (.borrowedReference(let i1), .borrowedReference(let i2)),
+             (.mutableBorrowedReference(let i1), .mutableBorrowedReference(let i2)),
+             (.weakReference(let i1), .weakReference(let i2)),
+             (.mutableWeakReference(let i1), .mutableWeakReference(let i2)),
+             (.pointer(let i1), .pointer(let i2)),
+             (.mutablePointer(let i1), .mutablePointer(let i2)),
+             (.fixedArray(_, let i1), .fixedArray(_, let i2)):
+            return firstFunctionSendableSlotMismatch(i1, i2)
+        default:
+            return nil
         }
     }
 }

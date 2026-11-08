@@ -77,6 +77,13 @@ extension Monomorphizer {
         // Create placeholder for recursion detection
         let defId = getOrAllocateTypeDefId(name: layoutName, kind: .structure)
         context.updateStructInfo(defId: defId, members: [], isGenericInstantiation: true, typeArguments: args, templateName: templateName, templateDefId: template.defId, isMutable: template.isMutable)
+        // Propagate the template's sendability CONDITIONALLY (concurrency-design.md
+        // §派生规则): the instantiation is sendable only when every type argument is.
+        // `unsafe` does not exempt the argument condition.
+        let templateSendability = context.typeSendability(template.defId)
+        if templateSendability != .unmarked, context.allSendableTypes(args) {
+            context.setTypeSendability(defId, templateSendability)
+        }
         let placeholder = Type.structure(defId: defId)
         instantiatedTypes[key] = placeholder
 

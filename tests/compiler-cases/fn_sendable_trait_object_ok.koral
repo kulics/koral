@@ -1,0 +1,29 @@
+// `trait sendable` trait objects (concurrency-design.md §派生规则 6): the
+// sendability lives on the trait DECLARATION, so a `type sendable` impl
+// boxes into the plain `Speak` spelling and the boxed value crosses threads
+// (capture into a `sendable () -> Void`).
+// EXPECT: speak 7
+// EXPECT: captured 7
+
+using "std/async" { ... };
+
+trait sendable Speak {
+    speak(self): Int;
+};
+
+type sendable Robot(id: Int);
+
+given Robot: Speak {
+    speak(self): Int = self.id;
+};
+
+let main(): Void = {
+    let obj: Speak = Robot(7);
+    println("speak \(obj.speak())");
+
+    // Crossing: the sendable trait object is captured by a sendable closure.
+    let t = run_task(() => {
+        println("captured \(obj.speak())");
+    });
+    let _ = t.wait();
+};

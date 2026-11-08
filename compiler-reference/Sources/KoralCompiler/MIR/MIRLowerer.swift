@@ -57,6 +57,10 @@ final class MIRLowerer {
             .globalVariable(identifier: identifier, initializerFunction: lowered.identifier, kind: .Value))
           functions.append(lowered)
         } else {
+          // A C-entity foreign variable: its storage belongs to C, so the
+          // compiler gives it no per-variable lock (concurrency-design.md's
+          // global-slot lock covers Koral `let mutable` globals only).
+          context.setForeignGlobal(identifier.defId)
           globals.append(
             .foreignGlobalVariable(identifier: identifier, mutable: mutable, initializer: initializer))
         }
@@ -417,7 +421,7 @@ final class MIRLowerer {
         return nil
       }
       return CanonicalTraitRef(traitName: name, traitDefId: defId, traitTypeArgs: resolvedArgs)
-    case .mutable, .foreign:
+    case .mutable, .foreign, .sendable:
       // A shape requirement is not a trait; it has no vtable ref.
       return nil
     }
@@ -494,7 +498,7 @@ final class MIRLowerer {
         return nil
       }
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
-      return .function(parameters: params, returns: resolvedReturn)
+      return .function(parameters: params, returns: resolvedReturn, isSendable: false)
     case .fixedArray(let size, let element, _):
       guard let resolved = resolveVTableTypeNode(element, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
         return nil
@@ -511,6 +515,11 @@ final class MIRLowerer {
         return nil
       }
       return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
+    case .sendableQualified(let inner):
+      guard let resolved = resolveVTableTypeNode(inner, traitTypeParamSubstitution: traitTypeParamSubstitution) else {
+        return nil
+      }
+      return resolved.withSendableQualifier() ?? resolved
     }
   }
 
@@ -609,7 +618,7 @@ final class MIRLowerer {
   }
 
   private func lowerGlobalInitializer(identifier: Symbol, value: TypedExpressionNode) -> MIRFunction {
-    let functionType = Type.function(parameters: [], returns: identifier.type)
+    let functionType = Type.function(parameters: [], returns: identifier.type, isSendable: false)
     let initializer = context.createSymbol(
       name: "__mir_global_init_\(identifier.defId.id)",
       modulePath: context.getModulePath(identifier.defId) ?? [],
@@ -622,7 +631,7 @@ final class MIRLowerer {
   }
 
   private func functionReturnType(_ type: Type) -> Type {
-    guard case .function(_, let returns) = type else {
+    guard case .function(_, let returns, _) = type else {
       return .void
     }
     return returns
@@ -658,7 +667,7 @@ final class MIRLowerer {
   }
 
   private static func standaloneLambdaReturnType(_ type: Type) -> Type {
-    guard case .function(_, let returns) = type else {
+    guard case .function(_, let returns, _) = type else {
       return .void
     }
     return returns
@@ -669,7 +678,7 @@ private func traitObjectTypeArguments(from receiverType: Type) -> [Type] {
   switch receiverType {
   case .reference(let inner), .mutableReference(let inner):
     return traitObjectTypeArguments(from: inner)
-  case .traitObject(_, let typeArgs):
+  case .traitObject(_, let typeArgs, _):
     return typeArgs
   default:
     return []
@@ -702,6 +711,13 @@ private final class MIRFunctionBuilder {
   private var patternPlaceByDefId: [UInt64: MIRPlace] = [:]
   private var loopStack: [(continueBlock: MIRBlockID, breakBlock: MIRBlockID, scopeDepth: Int)] = []
   private var scopeStack: [MIRScopeID] = []
+  // In-flight object-lock critical sections (lock emitted, unlock not yet).
+  // Early exits (return / break / continue) leaving a held section must
+  // release, or the lock stays held forever and other threads deadlock
+  // (concurrency-design.md). loopDepth records the loop depth at acquisition:
+  // break/continue release only the locks taken inside the exited loop body;
+  // outer statement sections stay legitimately held.
+  private var inFlightLocks: [(lock: MIRLockTarget, loopDepth: Int)] = []
   private var deferredExpressionsByScope: [MIRScopeID: [TypedExpressionNode]] = [:]
   // Locals holding POINTERS RETURNED BY CALLS (built-in element slot
   // lookups): loads through them must be materialized eagerly, because a
@@ -794,7 +810,7 @@ private final class MIRFunctionBuilder {
   }
 
   private func lambdaReturnType(_ type: Type) -> Type {
-    guard case .function(_, let returns) = type else {
+    guard case .function(_, let returns, _) = type else {
       return .void
     }
     return returns
@@ -879,10 +895,15 @@ private final class MIRFunctionBuilder {
       return
     }
     if returnType == .void {
+      // Defensive: the implicit return at the end of a function follows the
+      // same release rule (normally nothing is in flight here -- statement
+      // sections close within their statement).
+      releaseInFlightLocksForExit(minLoopDepth: 0)
       terminate(.returnValue(nil))
       return
     }
     if let operand = returnOperand(for: result) {
+      releaseInFlightLocksForExit(minLoopDepth: 0)
       terminate(.returnValue(operand))
       return
     }
@@ -1190,7 +1211,9 @@ private final class MIRFunctionBuilder {
         if let operand = result.operand {
           append(.evaluate(.operand(operand)))
         } else if let place = result.place {
-          append(.evaluate(.placeRead(place, ownership: .borrow)))
+          // A locked read's value load (including the copy-handle retain) runs
+          // inside the owner object's lock (concurrency-design.md).
+          appendLockedPlaceStatement(place, ownership: .borrow, kind: .evaluateStmt)
         }
       }
     case .ifStatement(let condition, let thenBranch, let elseBranch):
@@ -1224,6 +1247,7 @@ private final class MIRFunctionBuilder {
       fatalError("Unsupported when statement reached MIR lowering")
     case .return(let value):
       guard let value else {
+        releaseInFlightLocksForExit(minLoopDepth: 0)
         emitScopeExits(fromDepth: 0)
         terminate(.returnValue(nil))
         return
@@ -1239,6 +1263,7 @@ private final class MIRFunctionBuilder {
           .ref(place, kind: referenceKind(for: type), allocation: .heapOwnedMove),
           type: type
         )
+        releaseInFlightLocksForExit(minLoopDepth: 0)
         emitScopeExits(fromDepth: 0)
         terminate(.returnValue(operand))
         return
@@ -1249,10 +1274,12 @@ private final class MIRFunctionBuilder {
         terminate(.unreachable)
         return
       }
+      releaseInFlightLocksForExit(minLoopDepth: 0)
       emitScopeExits(fromDepth: 0)
       terminate(.returnValue(operand))
     case .break:
       if let loop = loopStack.last {
+        releaseInFlightLocksForExit(minLoopDepth: loopStack.count)
         emitScopeExits(fromDepth: loop.scopeDepth)
         terminate(.goto(loop.breakBlock))
       } else {
@@ -1260,6 +1287,7 @@ private final class MIRFunctionBuilder {
       }
     case .continue:
       if let loop = loopStack.last {
+        releaseInFlightLocksForExit(minLoopDepth: loopStack.count)
         emitScopeExits(fromDepth: loop.scopeDepth)
         terminate(.goto(loop.continueBlock))
       } else {
@@ -1319,6 +1347,23 @@ private final class MIRFunctionBuilder {
     // This avoids copying into a temporary, which would cause double-drop:
     // the temporary is dropped at scope_exit AND the original is dropped later.
     if let place = result.place {
+      if placeLockedRelevant(place) {
+        // A locked field's subject is copied under the owner object's lock
+        // (concurrency-design.md): the pattern machine reads the subject many
+        // times (tag, payload bindings), all through the private copy, which
+        // is released with subjectScope.
+        let subjectScope = makeScopeID()
+        scopeStack.append(subjectScope)
+        append(.scopeEnter(subjectScope))
+        let subjectLocal = makeTemporary(type: subject.type, nameHint: nameHint)
+        append(.declare(subjectLocal.id))
+        appendLockedPlaceStatement(
+          place,
+          ownership: .copy,
+          kind: .assignToLocal(subjectLocal.id)
+        )
+        return (.local(subjectLocal.id), subjectScope)
+      }
       return (place, nil)
     }
 
@@ -1345,7 +1390,9 @@ private final class MIRFunctionBuilder {
     }
 
     if let place = result.place {
-      append(.assign(.local(local), .placeRead(place, ownership: .copy)))
+      // A branch result's value load reads like any other: a locked access
+      // runs inside the owner object's lock (concurrency-design.md).
+      appendLockedPlaceStatement(place, ownership: .copy, kind: .assignToLocal(local))
     }
   }
 
@@ -1355,6 +1402,15 @@ private final class MIRFunctionBuilder {
     value: TypedExpressionNode,
     span: SourceSpan
   ) {
+    // A locked assignment runs as ONE critical section on the target owner's
+    // lock (concurrency-design.md): the lock is taken before the RHS lowering
+    // starts and released after the store, so `x.f = x.f + 1` is atomic. The
+    // target place must lower FIRST (taking the lock needs the owner) -- the
+    // opposite order from the unlocked path below. By design.
+    if targetTouchesLocked(target) {
+      lowerAssignmentLocked(target: target, operatorKind: operatorKind, value: value, span: span)
+      return
+    }
     let loweredValue = lowerValue(value)
     guard let place = lowerPlace(target) else {
       fatalError("Unsupported assignment target reached MIR lowering")
@@ -1541,7 +1597,17 @@ private final class MIRFunctionBuilder {
   ) -> MIRExprResult? {
     let subjectPlace: MIRPlace
     if let place = lowerPlace(subject) {
-      subjectPlace = place
+      if placeLockedRelevant(place) {
+        // A locked field's subject is copied under the owner object's lock
+        // (concurrency-design.md): the pattern machine reads it repeatedly
+        // (tag, payload bindings) through the private copy.
+        let subjectLocal = makeTemporary(type: subject.type, nameHint: "is_test_subject")
+        append(.declare(subjectLocal.id))
+        appendLockedPlaceStatement(place, ownership: .copy, kind: .assignToLocal(subjectLocal.id))
+        subjectPlace = .local(subjectLocal.id)
+      } else {
+        subjectPlace = place
+      }
     } else {
       let subjectValue = lowerValue(subject)
       guard !currentBlockIsTerminated else { return nil }
@@ -1595,7 +1661,17 @@ private final class MIRFunctionBuilder {
   ) -> MIRExprResult? {
     let subjectPlace: MIRPlace
     if let place = lowerPlace(subject) {
-      subjectPlace = place
+      if placeLockedRelevant(place) {
+        // A locked field's subject is copied under the owner object's lock
+        // (concurrency-design.md): the liveness/payload reads all go through
+        // the private copy.
+        let subjectLocal = makeTemporary(type: subject.type, nameHint: "weak_test_subject")
+        append(.declare(subjectLocal.id))
+        appendLockedPlaceStatement(place, ownership: .copy, kind: .assignToLocal(subjectLocal.id))
+        subjectPlace = .local(subjectLocal.id)
+      } else {
+        subjectPlace = place
+      }
     } else {
       let subjectValue = lowerValue(subject)
       guard !currentBlockIsTerminated else { return nil }
@@ -2444,7 +2520,7 @@ private final class MIRFunctionBuilder {
         return nil
       }
       let params = resolvedParams.map { Parameter(type: $0, kind: .byVal) }
-      return .function(parameters: params, returns: resolvedReturn)
+      return .function(parameters: params, returns: resolvedReturn, isSendable: false)
     case .fixedArray(let size, let element, _):
       guard let resolved = resolvePatternTypeNode(element, substitution: substitution) else {
         return nil
@@ -2459,6 +2535,11 @@ private final class MIRFunctionBuilder {
       return .foreignFunction(parameters: ffParams.map { Parameter(type: $0, kind: .byVal) }, returns: ffReturn)
     case .inferredSelf:
       return substitution["Self"]
+    case .sendableQualified(let inner):
+      guard let resolved = resolvePatternTypeNode(inner, substitution: substitution, modulePath: modulePath) else {
+        return nil
+      }
+      return resolved.withSendableQualifier() ?? resolved
     }
   }
 
@@ -2481,11 +2562,11 @@ private final class MIRFunctionBuilder {
     case .identifier(let name, _):
       guard SemaUtils.resolveBuiltinType(name) == nil else { return nil }
       guard resolvePatternTypeNode(node, substitution: substitution, modulePath: modulePath) == nil else { return nil }
-      return .traitObject(traitDefId: traitDefId(named: name) ?? .invalid, typeArgs: [])
+      return .traitObject(traitDefId: traitDefId(named: name) ?? .invalid, typeArgs: [], isSendable: false)
     case .generic(let base, let args, _):
       let resolvedArgs = args.compactMap { resolvePatternTypeNode($0, substitution: substitution, modulePath: modulePath) }
       guard resolvedArgs.count == args.count else { return nil }
-      return .traitObject(traitDefId: traitDefId(named: base) ?? .invalid, typeArgs: resolvedArgs)
+      return .traitObject(traitDefId: traitDefId(named: base) ?? .invalid, typeArgs: resolvedArgs, isSendable: false)
     default:
       return nil
     }
@@ -3168,7 +3249,7 @@ private final class MIRFunctionBuilder {
     subjectType: Type,
     targetType: Type
   ) -> (traitName: String, traitDefId: DefId, traitTypeArguments: [Type], concreteType: Type)? {
-    guard case .traitObject(let traitDefId, let traitTypeArguments) = subjectType else {
+    guard case .traitObject(let traitDefId, let traitTypeArguments, _) = subjectType else {
       return nil
     }
 
@@ -3953,10 +4034,10 @@ private final class MIRFunctionBuilder {
       switch t {
       case .genericParameter(let name):
         if !seen.contains(name) { seen.append(name) }
-      case .function(let params, let returns):
+      case .function(let params, let returns, _):
         for p in params { walk(p.type) }
         walk(returns)
-      case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args):
+      case .genericStruct(_, let args), .genericEnum(_, let args), .traitObject(_, let args, _):
         for arg in args { walk(arg) }
       case .structure, .enum, .opaque:
         // A nominal's members are not part of the type expression; only its
@@ -4018,7 +4099,7 @@ private final class MIRFunctionBuilder {
         methodType = preferredFunctionType(for: callableMethod)
       }
       let methodParameters: [Parameter]
-      if case .function(let parameters, _) = methodType {
+      if case .function(let parameters, _, _) = methodType {
         methodParameters = parameters
       } else {
         methodParameters = []
@@ -4083,7 +4164,7 @@ private final class MIRFunctionBuilder {
     } else {
       methodType = programFunctionType(for: method.defId) ?? receiverAwareFunctionType(for: method)
     }
-    if case .function(let parameters, _) = methodType,
+    if case .function(let parameters, _, _) = methodType,
        let first = parameters.first,
        let borrowed = lowerBorrowedReferenceArgument(base, expectedType: first.type) {
       return borrowed
@@ -4179,7 +4260,7 @@ private final class MIRFunctionBuilder {
     case .constant:
       return []
     }
-    guard case .function(let parameters, _) = calleeType else {
+    guard case .function(let parameters, _, _) = calleeType else {
       return []
     }
     return parameters.map(\.type)
@@ -4204,9 +4285,9 @@ private final class MIRFunctionBuilder {
       return Symbol(defId: method.defId, type: preferredType, kind: method.kind)
     }
 
-    guard case .function(let parameters, _) = calleeType else { return nil }
+    guard case .function(let parameters, _, _) = calleeType else { return nil }
 
-    let concreteType = Type.function(parameters: parameters, returns: resultType)
+    let concreteType = Type.function(parameters: parameters, returns: resultType, isSendable: false)
     guard !context.containsGenericParameter(concreteType) else { return nil }
 
     return Symbol(defId: method.defId, type: concreteType, kind: method.kind)
@@ -4235,21 +4316,19 @@ private final class MIRFunctionBuilder {
       case .globalFunction(let identifier, let parameters, _):
         guard identifier.defId == defId else { continue }
         let returnType: Type
-        if case .function(_, let returns) = identifier.type {
+        if case .function(_, let returns, _) = identifier.type {
           returnType = returns
         } else {
           returnType = .void
         }
         return .function(
           parameters: parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
-          returns: returnType
-        )
+          returns: returnType, isSendable: false)
       case .givenDeclaration(_, _, let methods):
         guard let method = methods.first(where: { $0.identifier.defId == defId }) else { continue }
         return .function(
           parameters: method.parameters.map { Parameter(type: $0.type, kind: passKindForParameterType($0.type)) },
-          returns: method.returnType
-        )
+          returns: method.returnType, isSendable: false)
       default:
         continue
       }
@@ -4260,8 +4339,8 @@ private final class MIRFunctionBuilder {
   private func receiverAwareFunctionType(for symbol: Symbol) -> Type {
     let symbolType = preferredFunctionType(for: symbol)
     guard let contextType = context.getSymbolType(symbol.defId),
-          case .function(let contextParams, let contextReturn) = contextType,
-          case .function(let symbolParams, let symbolReturn) = symbolType,
+          case .function(let contextParams, let contextReturn, _) = contextType,
+          case .function(let symbolParams, let symbolReturn, _) = symbolType,
           let contextReceiver = contextParams.first?.type,
           let symbolReceiver = symbolParams.first?.type else {
       return symbolType
@@ -4270,7 +4349,7 @@ private final class MIRFunctionBuilder {
     if isRefLikeType(contextReceiver) && !isRefLikeType(symbolReceiver) {
       let mergedParams = [Parameter(type: contextReceiver, kind: passKindForType(contextReceiver))]
         + symbolParams.dropFirst()
-      return .function(parameters: mergedParams, returns: context.containsGenericParameter(contextReturn) ? symbolReturn : contextReturn)
+      return .function(parameters: mergedParams, returns: context.containsGenericParameter(contextReturn) ? symbolReturn : contextReturn, isSendable: false)
     }
 
     return symbolType
@@ -4415,6 +4494,13 @@ private final class MIRFunctionBuilder {
         return .operand(operand)
       }
       if let place = result.place {
+        // A locked object's field read / mutable global binding read cannot
+        // defer to the use point (that would move the load out of the lock's
+        // critical section): load here, at the evaluation position, under the
+        // lock (concurrency-design.md).
+        if placeLockedRelevant(place) {
+          return .operand(materialize(.placeRead(place, ownership: .copy), type: result.type))
+        }
         // A load through a call-produced pointer (an element slot) is
         // materialized HERE, at the value's own evaluation position: later
         // instructions in the block can run side effects (a call argument
@@ -4438,6 +4524,17 @@ private final class MIRFunctionBuilder {
 
     if let result = lowerExpression(expression) {
       if let place = result.place {
+        // A locked field's borrowed-position load (including the +0 aliasing
+        // convention's handle-bit copy) is still a read: it must run inside
+        // the owner object's lock (concurrency-design.md). Load into a
+        // temporary under the lock, then hand that to the user with Borrow
+        // semantics -- the call convention's +0 shape is unchanged.
+        if placeLockedRelevant(place) {
+          if let operand = lowerLockedRead(place, ownership: .borrow, resultType: placeType(place)) {
+            return .placeRead(.local(localIDOrZero(operand)), ownership: .borrow)
+          }
+          return .placeRead(place, ownership: .borrow)
+        }
         return .placeRead(place, ownership: .borrow)
       }
       if let operand = result.operand {
@@ -4491,6 +4588,18 @@ private final class MIRFunctionBuilder {
   }
 
   private func materialize(_ value: MIRValue, type: Type) -> MIROperand {
+    // A locked object's field read / mutable global binding read must load
+    // inside the owner's lock (concurrency-design.md). Every load routed
+    // through materialize converges here; lowerLockedRead uses materializeRaw
+    // internally to avoid self-nesting.
+    if case .placeRead(let place, let ownership) = value,
+       let operand = lowerLockedRead(place, ownership: ownership, resultType: type) {
+      return operand
+    }
+    return materializeRaw(value, type: type)
+  }
+
+  private func materializeRaw(_ value: MIRValue, type: Type) -> MIROperand {
     if type == .void {
       append(.evaluate(value))
       return .constant(.void)
@@ -4709,6 +4818,444 @@ private final class MIRFunctionBuilder {
       return true
     default:
       return false
+    }
+  }
+
+  // MARK: - Object locks (concurrency-design.md)
+
+  /// Statement-level "read a place" landing (Evaluate discard / load into an
+  /// if/when result local).
+  private enum LockedPlaceStmtKind {
+    case evaluateStmt
+    case assignToLocal(MIRLocalID)
+  }
+
+  private func localIDOrZero(_ operand: MIROperand) -> MIRLocalID {
+    switch operand {
+    case .local(let localID):
+      return localID
+    default:
+      return MIRLocalID(rawValue: 0)
+    }
+  }
+
+  private func placeType(_ place: MIRPlace) -> Type {
+    switch place {
+    case .local(let localID):
+      return locals.first(where: { $0.id == localID })?.type ?? .error
+    case .global(let defId):
+      return context.getSymbolType(defId) ?? .error
+    case .field(_, let field):
+      return field.type
+    case .enumPayload(_, _, _, _, let fieldType):
+      return fieldType
+    case .deref(_, let pointee), .pointerElement(_, let pointee):
+      return pointee
+    }
+  }
+
+  // ── In-flight lock ledger (early exits must release) ──────────────────
+
+  private func lockTargetsEqual(_ a: MIRLockTarget, _ b: MIRLockTarget) -> Bool {
+    switch (a, b) {
+    case (.objectLock(let handleA), .objectLock(let handleB)):
+      return handleA == handleB
+    case (.globalLock(let defA), .globalLock(let defB)):
+      return defA == defB
+    default:
+      return false
+    }
+  }
+
+  /// Open a critical section: record it in the ledger, then emit Lock.
+  private func enterLockSection(_ lock: MIRLockTarget) {
+    inFlightLocks.append((lock: lock, loopDepth: loopStack.count))
+    append(.lock(lock))
+  }
+
+  /// Close a critical section normally: emit Unlock and settle the ledger.
+  /// If the target is no longer in the ledger, an early-exit path (return /
+  /// break / continue) already released it -- the same lock must not be
+  /// released twice, so skip.
+  private func exitLockSection(_ lock: MIRLockTarget) {
+    var found = false
+    var index = inFlightLocks.count
+    while index > 0 {
+      index -= 1
+      if lockTargetsEqual(inFlightLocks[index].lock, lock) {
+        inFlightLocks.remove(at: index)
+        found = true
+        break
+      }
+    }
+    if found {
+      append(.unlock(lock))
+    }
+  }
+
+  /// Early-exit (return / break / continue) release: unlock every in-flight
+  /// section taken at loop depth >= minLoopDepth, in LIFO order. return
+  /// passes 0 (release all); break/continue pass the current loop depth (only
+  /// the locks taken inside the exited loop body).
+  ///
+  /// Release runs BEFORE the scope exits: an in-flight lock's owner may be a
+  /// local temporary of this function (nested path owner loads), and the
+  /// scope cleanup drops it -- unlock first, so the owner is provably alive.
+  private func releaseInFlightLocksForExit(minLoopDepth: Int) {
+    var index = inFlightLocks.count
+    while index > 0 {
+      index -= 1
+      let entry = inFlightLocks[index]
+      if entry.loopDepth >= minLoopDepth {
+        inFlightLocks.remove(at: index)
+        append(.unlock(entry.lock))
+      }
+    }
+  }
+
+  // ── Lock relevance predicates ─────────────────────────────────────────
+
+  /// A `let mutable` global binding (Koral storage + accessor) has a
+  /// per-variable lock. Foreign variables' storage belongs to C -- no
+  /// compiler lock; immutable `let` has no lock.
+  private func globalSlotIsLocked(_ defId: DefId) -> Bool {
+    if context.isForeignGlobal(defId) {
+      return false
+    }
+    return context.isSymbolMutable(defId)
+  }
+
+  /// Whether evaluating the place walks through a "locked object's field
+  /// read" or a "mutable global binding read". Yes => the load must go
+  /// through the locked load; no => keep the original deferred read shape
+  /// (byte-level invariance constraint).
+  private func placeLockedRelevant(_ place: MIRPlace) -> Bool {
+    switch place {
+    case .local:
+      return false
+    case .global(let defId):
+      return globalSlotIsLocked(defId)
+    case .field(let base, _):
+      return context.isLockedType(placeType(base)) || placeLockedRelevant(base)
+    case .enumPayload(let base, _, _, _, _):
+      return placeLockedRelevant(base)
+    case .deref(let base, _), .pointerElement(let base, _):
+      return valueLockedRelevant(base)
+    }
+  }
+
+  private func valueLockedRelevant(_ value: MIRValue) -> Bool {
+    switch value {
+    case .placeRead(let place, _):
+      return placeLockedRelevant(place)
+    default:
+      return false
+    }
+  }
+
+  /// Whether an assignment target (typed AST) touches locked accesses.
+  /// Prediction only, used to keep the unlocked assignment's original
+  /// "lower the RHS first, then compute the target place" order (including
+  /// subscript stale-buffer protection); a locked assignment must take the
+  /// lock first, so the order flips by design.
+  private func targetTouchesLocked(_ target: TypedExpressionNode) -> Bool {
+    switch target {
+    case .variable(let symbol):
+      return globalSlotIsLocked(symbol.defId)
+    case .memberPath(let base, let path):
+      if path.isEmpty {
+        return false
+      }
+      var ownerType = lockOwnerProbeType(base.type)
+      if context.isLockedType(ownerType) {
+        return true
+      }
+      var index = 0
+      while index + 1 < path.count {
+        ownerType = lockOwnerProbeType(path[index].type)
+        if context.isLockedType(ownerType) {
+          return true
+        }
+        index += 1
+      }
+      return false
+    default:
+      return false
+    }
+  }
+
+  /// Strip reference/pointer shells before probing the owner type: for
+  /// `r.f = v` (r: &Counter) the field's owner is still Counter, a locked
+  /// object.
+  private func lockOwnerProbeType(_ t: Type) -> Type {
+    var current = t
+    while true {
+      switch current {
+      case .reference(let inner), .mutableReference(let inner), .borrowedReference(let inner),
+           .mutableBorrowedReference(let inner), .weakReference(let inner),
+           .mutableWeakReference(let inner), .pointer(let inner), .mutablePointer(let inner):
+        current = inner
+      default:
+        return current
+      }
+    }
+  }
+
+  // ── Owner loading and locked reads ────────────────────────────────────
+
+  /// The place's "owner object handle" operand -- the lock target of field
+  /// reads.
+  ///
+  /// Locked links along the chain (`a.b` in `a.b.c`) load here recursively,
+  /// each link's read wrapped in ITS owner's lock (nested paths lock per
+  /// object); `local` handles are used directly (reading a local is not a
+  /// field access).
+  private func loadPlaceOwner(_ base: MIRPlace) -> MIROperand {
+    if case .local(let localID) = base {
+      return .local(localID)
+    }
+    let baseType = placeType(base)
+    if let operand = lowerLockedRead(base, ownership: .copy, resultType: baseType) {
+      return operand
+    }
+    return materializeRaw(.placeRead(base, ownership: .copy), type: baseType)
+  }
+
+  /// Load the place's value under the lock (including the copy-handle
+  /// retain): the read runs inside the owner object's lock. Returns nil when
+  /// the place touches no locked access -- the caller keeps the original
+  /// deferred-read path.
+  private func lowerLockedRead(
+    _ place: MIRPlace,
+    ownership: MIROwnershipUse,
+    resultType: Type
+  ) -> MIROperand? {
+    guard placeLockedRelevant(place) else {
+      return nil
+    }
+    switch place {
+    case .field(let base, let field):
+      let owner = loadPlaceOwner(base)
+      let handleID = localIDOrZero(owner)
+      let rewritten = MIRPlace.field(base: .local(handleID), field: field)
+      if context.isLockedType(placeType(base)) {
+        let lock = MIRLockTarget.objectLock(handleID)
+        enterLockSection(lock)
+        let result = materializeRaw(.placeRead(rewritten, ownership: ownership), type: resultType)
+        exitLockSection(lock)
+        return result
+      }
+      return materializeRaw(.placeRead(rewritten, ownership: ownership), type: resultType)
+    case .global(let defId):
+      let lock = MIRLockTarget.globalLock(defId)
+      enterLockSection(lock)
+      let result = materializeRaw(.placeRead(place, ownership: ownership), type: resultType)
+      exitLockSection(lock)
+      return result
+    case .enumPayload(let base, let caseName, let fieldName, let fieldIndex, let fieldType):
+      let owner = loadPlaceOwner(base)
+      let rewritten = MIRPlace.enumPayload(
+        base: .local(localIDOrZero(owner)),
+        caseName: caseName,
+        fieldName: fieldName,
+        fieldIndex: fieldIndex,
+        fieldType: fieldType
+      )
+      return materializeRaw(.placeRead(rewritten, ownership: ownership), type: resultType)
+    case .deref(let base, let pointee):
+      let rewritten = MIRPlace.deref(base: rewriteLockedValue(base), pointee: pointee)
+      return materializeRaw(.placeRead(rewritten, ownership: ownership), type: resultType)
+    case .pointerElement(let base, let element):
+      let rewritten = MIRPlace.pointerElement(base: rewriteLockedValue(base), element: element)
+      return materializeRaw(.placeRead(rewritten, ownership: ownership), type: resultType)
+    case .local:
+      return nil
+    }
+  }
+
+  /// Rewrite the locked links of the place's base chain into loaded temporary
+  /// locals (each link loaded under its owner's lock). The final link's field
+  /// read/write is NOT handled here (reads are locked by lowerLockedRead,
+  /// writes by the assignment statement's critical section).
+  private func rewriteLockedPlaceLinks(_ place: MIRPlace) -> MIRPlace {
+    switch place {
+    case .field(let base, let field):
+      return .field(base: .local(localIDOrZero(loadPlaceOwner(base))), field: field)
+    case .enumPayload(let base, let caseName, let fieldName, let fieldIndex, let fieldType):
+      return .enumPayload(
+        base: .local(localIDOrZero(loadPlaceOwner(base))),
+        caseName: caseName,
+        fieldName: fieldName,
+        fieldIndex: fieldIndex,
+        fieldType: fieldType
+      )
+    case .deref(let base, let pointee):
+      return .deref(base: rewriteLockedValue(base), pointee: pointee)
+    case .pointerElement(let base, let element):
+      return .pointerElement(base: rewriteLockedValue(base), element: element)
+    default:
+      return place
+    }
+  }
+
+  private func rewriteLockedValue(_ value: MIRValue) -> MIRValue {
+    switch value {
+    case .placeRead(let place, let ownership):
+      guard placeLockedRelevant(place) else {
+        return value
+      }
+      if let operand = lowerLockedRead(place, ownership: ownership, resultType: placeType(place)) {
+        return .operand(operand)
+      }
+      return value
+    default:
+      return value
+    }
+  }
+
+  // ── Statement-level emission ──────────────────────────────────────────
+
+  private func lockedPlaceStatement(
+    _ kind: LockedPlaceStmtKind,
+    _ place: MIRPlace,
+    _ ownership: MIROwnershipUse
+  ) -> MIRStatement {
+    switch kind {
+    case .evaluateStmt:
+      return .evaluate(.placeRead(place, ownership: ownership))
+    case .assignToLocal(let target):
+      return .assign(.local(target), .placeRead(place, ownership: ownership))
+    }
+  }
+
+  /// "Read a place" statement (Evaluate discard / load into a result local):
+  /// the final field owner's lock spans the whole statement (value load +
+  /// copy-handle retain inside); locked links of the base chain load first,
+  /// each under its owner's lock. No locked access => emit unchanged.
+  private func appendLockedPlaceStatement(
+    _ place: MIRPlace,
+    ownership: MIROwnershipUse,
+    kind: LockedPlaceStmtKind
+  ) {
+    guard placeLockedRelevant(place) else {
+      append(lockedPlaceStatement(kind, place, ownership))
+      return
+    }
+    switch place {
+    case .field(let base, let field):
+      if context.isLockedType(placeType(base)) {
+        let owner = loadPlaceOwner(base)
+        let handleID = localIDOrZero(owner)
+        let lock = MIRLockTarget.objectLock(handleID)
+        let rewritten = MIRPlace.field(base: .local(handleID), field: field)
+        enterLockSection(lock)
+        append(lockedPlaceStatement(kind, rewritten, ownership))
+        exitLockSection(lock)
+        return
+      }
+    case .global(let defId):
+      if globalSlotIsLocked(defId) {
+        let lock = MIRLockTarget.globalLock(defId)
+        enterLockSection(lock)
+        append(lockedPlaceStatement(kind, place, ownership))
+        exitLockSection(lock)
+        return
+      }
+    default:
+      break
+    }
+    let rewritten = rewriteLockedPlaceLinks(place)
+    append(lockedPlaceStatement(kind, rewritten, ownership))
+  }
+
+  // ── Assignment statement critical sections ────────────────────────────
+
+  /// A locked assignment: the final field owner's (or global slot's) lock is
+  /// taken before the RHS lowering starts and released after the store --
+  /// `x.f = x.f + 1` has an atomic read-modify-write. Nested path links load
+  /// briefly under each of their owners' locks.
+  private func lowerAssignmentLocked(
+    target: TypedExpressionNode,
+    operatorKind: CompoundAssignmentOperator?,
+    value: TypedExpressionNode,
+    span: SourceSpan
+  ) {
+    guard let place = lowerPlace(target) else {
+      _ = lowerValue(value)
+      fatalError("Unsupported assignment target reached MIR lowering")
+    }
+    switch place {
+    case .field(let base, let field):
+      if context.isLockedType(placeType(base)) {
+        let owner = loadPlaceOwner(base)
+        let handleID = localIDOrZero(owner)
+        let lock = MIRLockTarget.objectLock(handleID)
+        enterLockSection(lock)
+        let loweredValue = lowerValue(value)
+        appendAssignmentStatement(
+          target: .field(base: .local(handleID), field: field),
+          operatorKind: operatorKind,
+          value: loweredValue,
+          span: span
+        )
+        exitLockSection(lock)
+        return
+      }
+    case .global(let defId):
+      if globalSlotIsLocked(defId) {
+        let lock = MIRLockTarget.globalLock(defId)
+        enterLockSection(lock)
+        let loweredValue = lowerValue(value)
+        appendAssignmentStatement(
+          target: place,
+          operatorKind: operatorKind,
+          value: loweredValue,
+          span: span
+        )
+        exitLockSection(lock)
+        return
+      }
+    default:
+      break
+    }
+    // The final field owner has no lock but the base chain has locked links:
+    // load link by link, then write the rewritten place (no whole-statement
+    // section -- the final owner makes no lock promise).
+    if placeLockedRelevant(place) {
+      let rewritten = rewriteLockedPlaceLinks(place)
+      let loweredValue = lowerValue(value)
+      appendAssignmentStatement(
+        target: rewritten,
+        operatorKind: operatorKind,
+        value: loweredValue,
+        span: span
+      )
+      return
+    }
+    let loweredValue = lowerValue(value)
+    appendAssignmentStatement(
+      target: place,
+      operatorKind: operatorKind,
+      value: loweredValue,
+      span: span
+    )
+  }
+
+  private func appendAssignmentStatement(
+    target: MIRPlace,
+    operatorKind: CompoundAssignmentOperator?,
+    value: MIRValue,
+    span: SourceSpan
+  ) {
+    if let operatorKind {
+      append(.compoundAssign(MIRCompoundAssignment(
+        target: target,
+        operatorKind: operatorKind,
+        value: value,
+        span: span
+      )))
+    } else {
+      append(.assign(target, value))
     }
   }
 

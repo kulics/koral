@@ -91,7 +91,7 @@ let normalize_trait_placeholder_type(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     normalized_args,
-                ),
+                false),
                 .None() then Type.GenericStruct(template_def_id, normalized_args),
             }
         },
@@ -107,11 +107,11 @@ let normalize_trait_placeholder_type(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     normalized_args,
-                ),
+                false),
                 .None() then Type.GenericEnum(template_def_id, normalized_args),
             }
         },
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, is_sendable) then {
             let param_types = param_entry_types(fn_params);
             let mutable normalized_params = List[Type].new();
             for param_type in param_types then {
@@ -120,7 +120,11 @@ let normalize_trait_placeholder_type(mono: Monomorphizer, t: Type): Type = {
                 );
             };
             let normalized_return = normalize_trait_placeholder_type(mono, return_type);
-            make_function_type(normalized_params, normalized_return)
+            make_function_type_with_flag(
+                normalized_params,
+                normalized_return,
+                is_sendable,
+            )
         },
         .ForeignFunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params);
@@ -166,7 +170,7 @@ let trait_object_type_from_registry(
         },
         .None() then {},
     };
-    return Type.TraitObject(trait_def_id, trait_type_args);
+    return Type.TraitObject(trait_def_id, trait_type_args, false);
 };
 
 let resolve_def_id_backed_type(
@@ -402,7 +406,7 @@ let collect_resolve_children(mono: Monomorphizer, t: Type): List[Type] = {
     };
 
     when t in {
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, _) then {
             let param_types = param_entry_types(fn_params);
             for pt in param_types then {
                 children.push(pt);
@@ -489,14 +493,16 @@ let collect_resolve_children(mono: Monomorphizer, t: Type): List[Type] = {
 // Cache-first resolution helper: returns from cache if available, otherwise
 // calls resolve_parameterized_type_single. This avoids re-entering the worklist
 // wrapper in resolve_parameterized_type when children are already cached.
+// 按值缓存对 `sendable` 位不区分（Type 的 Eq/Hash 是擦除语义），命中后按查询
+// 侧复原修饰位（retag_sendable_from），让 codegen 的 RC 族选择读到真值。
 let resolve_parameterized_type_cached(mono: Monomorphizer, t: Type): Type = {
     when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then {
-            return cached;
+            return retag_sendable_from(t, cached);
         },
         .None() then {},
     };
-    return resolve_parameterized_type_single(mono, t);
+    return retag_sendable_from(t, resolve_parameterized_type_single(mono, t));
 };
 
 // resolve_parameterized_type_single: resolves a single type using the original logic.
@@ -537,7 +543,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
     };
 
     when t in {
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, is_sendable) then {
             let param_types = param_entry_types(fn_params);
             let mutable new_param_types = List[Type].with_capacity(param_types.count());
             let mutable changed = false;
@@ -553,7 +559,11 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
                 mono.storage.resolved_parameterized_types.insert(t, t);
                 return t;
             };
-            let result = make_function_type(new_param_types, resolved_return);
+            let result = make_function_type_with_flag(
+                new_param_types,
+                resolved_return,
+                is_sendable,
+            );
             mono.storage.resolved_parameterized_types.insert(t, result);
             return result;
         },
@@ -588,7 +598,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
 
     when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then {
-            return cached;
+            return retag_sendable_from(t, cached);
         },
         .None() then {},
     };
@@ -597,7 +607,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
             when mono.storage.instantiated_types.get(cache_key) in {
                 .Some(cached) then {
                     mono.storage.resolved_parameterized_types.insert(t, cached);
-                    return cached;
+                    return retag_sendable_from(t, cached);
                 },
                 .None() then {},
             };
@@ -636,7 +646,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     resolved_args,
-                ),
+                false),
                 .None() then {
                     if args_have_generic_parameter(resolved_args) then Type.GenericStruct(
                         template_def_id,
@@ -689,7 +699,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     resolved_args,
-                ),
+                false),
                 .None() then {
                     if args_have_generic_parameter(resolved_args) then Type.GenericEnum(
                         template_def_id,
@@ -734,7 +744,7 @@ let resolve_parameterized_type_single(mono: Monomorphizer, t: Type): Type = {
 
     mono.storage.resolving_parameterized_type_keys.remove(t);
     mono.storage.resolved_parameterized_types.insert(t, resolved);
-    return resolved;
+    return retag_sendable_from(t, resolved);
 };
 
 public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
@@ -744,7 +754,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
     // 以及 collect_resolve_children 的一次 List。
     when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then {
-            return cached;
+            return retag_sendable_from(t, cached);
         },
         .None() then {},
     };
@@ -849,7 +859,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
     };
 
     when t in {
-        .FunctionType(fn_params, return_type) then {
+        .FunctionType(fn_params, return_type, is_sendable) then {
             let param_types = param_entry_types(fn_params);
             let mutable new_param_types = List[Type].with_capacity(param_types.count());
             let mutable changed = false;
@@ -864,7 +874,11 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
             if not changed and resolved_return == return_type then {
                 return t;
             };
-            return make_function_type(new_param_types, resolved_return);
+            return make_function_type_with_flag(
+                new_param_types,
+                resolved_return,
+                is_sendable,
+            );
         },
         .ForeignFunctionType(fn_params, return_type) then {
             let param_types = param_entry_types(fn_params);
@@ -893,7 +907,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
 
     when mono.storage.resolved_parameterized_types.get(t) in {
         .Some(cached) then {
-            return cached;
+            return retag_sendable_from(t, cached);
         },
         .None() then {},
     };
@@ -902,7 +916,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
             when mono.storage.instantiated_types.get(cache_key) in {
                 .Some(cached) then {
                     mono.storage.resolved_parameterized_types.insert(t, cached);
-                    return cached;
+                    return retag_sendable_from(t, cached);
                 },
                 .None() then {},
             };
@@ -944,7 +958,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     resolved_args,
-                ),
+                false),
                 .None() then {
                     if args_have_generic_parameter(resolved_args) then Type.GenericStruct(
                         template_def_id,
@@ -997,7 +1011,7 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
                 .Some(trait_name) then Type.TraitObject(
                     trait_def_id_from_registry(mono, trait_name),
                     resolved_args,
-                ),
+                false),
                 .None() then {
                     if args_have_generic_parameter(resolved_args) then Type.GenericEnum(
                         template_def_id,
@@ -1044,6 +1058,6 @@ public let resolve_parameterized_type(mono: Monomorphizer, t: Type): Type = {
 
     mono.storage.resolving_parameterized_type_keys.remove(t);
     mono.storage.resolved_parameterized_types.insert(t, resolved);
-    return resolved;
+    return retag_sendable_from(t, resolved);
 };
 

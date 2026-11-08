@@ -1,0 +1,56 @@
+// EXPECT: frozen literals ok
+// Collection literals target the frozen family through type context: same
+// grammar as `List`/`Set`/`Dict` literals, dedup like Set, last-wins like
+// Dict, empty `[]` with context, and nested literals freeze through the same
+// path.
+
+using "std" { ... };
+
+let main(): Void = {
+    let list: FrozenList[Int] = [1, 2, 3];
+    assert(list.count() == 3, "list count");
+    assert(list[0] == 1 and list[2] == 3, "list values");
+
+    let empty_list: FrozenList[Int] = [];
+    assert(empty_list.count() == 0, "empty list");
+    assert(empty_list.is_empty(), "empty list is_empty");
+
+    let set: FrozenSet[Int] = [1, 2, 2, 3];
+    assert(set.count() == 3, "set dedup");
+    assert(set.contains(2), "set contains");
+    assert(not set.contains(9), "set not contains");
+
+    let empty_set: FrozenSet[String] = [];
+    assert(empty_set.count() == 0, "empty set");
+
+    let dict: FrozenDict[String, Int] = ["a": 1, "b": 2, "a": 3];
+    assert(dict.count() == 2, "dict last-wins count");
+    assert(dict.get("a").unwrap() == 3, "dict last-wins value");
+    assert(dict["b"] == 2, "dict value b");
+
+    let empty_dict: FrozenDict[String, Int] = [];
+    assert(empty_dict.count() == 0, "empty dict");
+
+    // Nested literals freeze through the same path.
+    let nested: FrozenList[FrozenList[Int]] = [[1, 2], [3]];
+    assert(nested.count() == 2, "nested count");
+    assert(nested[0].count() == 2, "nested inner count");
+    assert(nested[1][0] == 3, "nested subscript");
+
+    // Frozen snapshots copy back out to the mutable side.
+    let back = list.to_list();
+    assert(back.count() == 3, "to_list count");
+    let set_back = set.to_set();
+    assert(set_back.count() == 3, "to_set count");
+    let dict_back = dict.to_dict();
+    assert(dict_back.count() == 2, "to_dict count");
+
+    // Iteration walks the snapshot in insertion order.
+    let mutable sum = 0;
+    for v in list then {
+        sum = sum + v;
+    };
+    assert(sum == 6, "iterable sum");
+
+    println("frozen literals ok");
+};

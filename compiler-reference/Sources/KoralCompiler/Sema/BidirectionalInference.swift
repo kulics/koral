@@ -330,7 +330,7 @@ public class BidirectionalInference {
         
         // 构建函数类型
         let parameters = paramTypes.map { Parameter(type: $0, kind: .byVal) }
-        return .function(parameters: parameters, returns: bodyType)
+        return .function(parameters: parameters, returns: bodyType, isSendable: false)
     }
     
     /// 合成函数调用类型
@@ -338,7 +338,7 @@ public class BidirectionalInference {
         let calleeType = synthesize(callee, span: span)
         
         switch calleeType {
-        case .function(let params, let ret):
+        case .function(let params, let ret, _):
             // 检查参数类型
             for (arg, param) in zip(args, params) {
                 let _ = check(arg, expected: param.type, span: span)
@@ -351,7 +351,8 @@ public class BidirectionalInference {
             let argTypes = args.map { synthesize($0, span: span) }
             let funcType = Type.function(
                 parameters: argTypes.map { Parameter(type: $0, kind: .byVal) },
-                returns: retType
+                returns: retType,
+                isSendable: false
             )
             addEqualConstraint(.typeVariable(tv), funcType, span: span)
             return retType
@@ -430,7 +431,7 @@ public class BidirectionalInference {
         expected: Type,
         span: SourceSpan
     ) -> Type {
-        guard case .function(let expectedParams, let expectedRet) = expected else {
+        guard case .function(let expectedParams, let expectedRet, _) = expected else {
             // 期望类型不是函数类型，回退到合成模式
             let synthesized = synthesizeLambda(params: params, returnType: returnType, body: body, span: span)
             addEqualConstraint(synthesized, expected, span: span)
@@ -530,7 +531,8 @@ public class BidirectionalInference {
             let retType = resolveTypeNode(ret)
             return .function(
                 parameters: paramTypes.map { Parameter(type: $0, kind: .byVal) },
-                returns: retType
+                returns: retType,
+                isSendable: false
             )
         case .fixedArray(let size, let element, _):
             return .fixedArray(size: size, element: resolveTypeNode(element))
@@ -555,6 +557,9 @@ public class BidirectionalInference {
                 parameters: paramTypes.map { Parameter(type: resolveTypeNode($0), kind: .byVal) },
                 returns: resolveTypeNode(returnType)
             )
+        case .sendableQualified(let inner):
+            let resolvedInner = resolveTypeNode(inner)
+            return resolvedInner.withSendableQualifier() ?? resolvedInner
         }
     }
     

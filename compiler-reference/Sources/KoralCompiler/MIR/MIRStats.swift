@@ -111,7 +111,7 @@ private final class MIRStatsCounter {
 
   func count(_ statement: MIRStatement) {
     switch statement {
-    case .declare, .scopeEnter, .scopeExit, .debugSource:
+    case .declare, .scopeEnter, .scopeExit, .debugSource, .lock, .unlock:
       break
     case .assign(let place, let value):
       count(place)

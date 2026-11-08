@@ -111,7 +111,7 @@ extension TypeChecker {
 
       for constraint in param.constraints {
         switch constraint {
-        case .mutable, .foreign:
+        case .mutable, .foreign, .sendable:
           // A shape requirement is checked at the generic parameter's own
           // declaration.
           continue
@@ -321,17 +321,18 @@ extension TypeChecker {
       return .weakReference(inner: canonicalizedTypeForComparison(inner))
     case .mutableWeakReference(let inner):
       return .mutableWeakReference(inner: canonicalizedTypeForComparison(inner))
-    case .function(let parameters, let returns):
+    case .function(let parameters, let returns, let isSendable):
       return .function(
         parameters: parameters.map { Parameter(type: canonicalizedTypeForComparison($0.type), kind: $0.kind) },
-        returns: canonicalizedTypeForComparison(returns)
+        returns: canonicalizedTypeForComparison(returns),
+        isSendable: isSendable
       )
     case .genericStruct(let defId, let args):
       return .genericStruct(templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
     case .genericEnum(let defId, let args):
       return .genericEnum(templateDefId: defId, args: args.map { canonicalizedTypeForComparison($0) })
-    case .traitObject(let defId, let typeArgs):
-      return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) })
+    case .traitObject(let defId, let typeArgs, let isSendable):
+      return .traitObject(traitDefId: defId, typeArgs: typeArgs.map { canonicalizedTypeForComparison($0) }, isSendable: isSendable)
     default:
       return type
     }
@@ -372,6 +373,192 @@ extension TypeChecker {
 
     return nominalInstantiationMatchesGeneric(left, genericCandidate: right)
       || nominalInstantiationMatchesGeneric(right, genericCandidate: left)
+  }
+
+  /// koralc `sendable_slots_compatible(actual, expected)`, direction-sensitive:
+  /// a `sendable (A) -> R` value fits where `(A) -> R` is expected; the reverse
+  /// is refused (concurrency-design.md rule 5), and so is a trait object slot.
+  /// Slots are compared node by node -- generic arguments and reference layers
+  /// included -- which is the anti-smuggling rule for `List[sendable () -> V]`.
+  func sendableSlotsCompatible(_ actual: Type, _ expected: Type) -> Bool {
+    switch expected {
+    case .function(let expectedParams, let expectedReturns, _):
+      if context.isSendableType(expected), !context.isSendableType(actual) {
+        return false
+      }
+      if case .function(let actualParams, let actualReturns, _) = actual {
+        guard actualParams.count == expectedParams.count else { return false }
+        for (a, e) in zip(actualParams, expectedParams) {
+          if !sendableSlotsCompatible(a.type, e.type) { return false }
+        }
+        return sendableSlotsCompatible(actualReturns, expectedReturns)
+      }
+      return true
+    case .traitObject(_, let expectedArgs, _):
+      if context.isSendableType(expected), !context.isSendableType(actual) {
+        return false
+      }
+      if case .traitObject(_, let actualArgs, _) = actual {
+        guard actualArgs.count == expectedArgs.count else { return false }
+        for (a, e) in zip(actualArgs, expectedArgs) {
+          if !sendableSlotsCompatible(a, e) { return false }
+        }
+      }
+      return true
+    case .reference(let expectedInner):
+      if case .reference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .mutableReference(let expectedInner):
+      if case .mutableReference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .borrowedReference(let expectedInner):
+      if case .borrowedReference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .mutableBorrowedReference(let expectedInner):
+      if case .mutableBorrowedReference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .weakReference(let expectedInner):
+      if case .weakReference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .mutableWeakReference(let expectedInner):
+      if case .mutableWeakReference(let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .genericStruct(_, let expectedArgs), .genericEnum(_, let expectedArgs):
+      switch actual {
+      case .genericStruct(_, let actualArgs), .genericEnum(_, let actualArgs):
+        guard actualArgs.count == expectedArgs.count else { return false }
+        for (a, e) in zip(actualArgs, expectedArgs) {
+          if !sendableSlotsCompatible(a, e) { return false }
+        }
+        return true
+      default:
+        return true
+      }
+    case .fixedArray(_, let expectedInner):
+      if case .fixedArray(_, let actualInner) = actual {
+        return sendableSlotsCompatible(actualInner, expectedInner)
+      }
+      return true
+    case .foreignFunction(let expectedParams, let expectedReturns):
+      if case .foreignFunction(let actualParams, let actualReturns) = actual {
+        guard actualParams.count == expectedParams.count else { return false }
+        for (a, e) in zip(actualParams, expectedParams) {
+          if !sendableSlotsCompatible(a.type, e.type) { return false }
+        }
+        return sendableSlotsCompatible(actualReturns, expectedReturns)
+      }
+      return true
+    default:
+      return true
+    }
+  }
+
+  /// koralc `type_with_and_sendable_slots`: two same-shape types merged by
+  /// bitwise-AND of the `sendable` slots. A branch join takes the weaker side
+  /// and never amplifies sendability.
+  func typeWithAndSendableSlots(_ a: Type, _ b: Type) -> Type {
+    switch a {
+    case .function(let aParams, let aReturns, _):
+      if case .function(let bParams, let bReturns, _) = b {
+        var mergedParams: [Parameter] = []
+        for (pa, pb) in zip(aParams, bParams) {
+          mergedParams.append(Parameter(type: typeWithAndSendableSlots(pa.type, pb.type), kind: pa.kind))
+        }
+        return .function(
+          parameters: mergedParams,
+          returns: typeWithAndSendableSlots(aReturns, bReturns),
+          isSendable: context.isSendableType(a) && context.isSendableType(b))
+      }
+      return a
+    case .traitObject(let aDefId, let aArgs, _):
+      if case .traitObject(_, let bArgs, _) = b {
+        var mergedArgs: [Type] = []
+        for (ta, tb) in zip(aArgs, bArgs) {
+          mergedArgs.append(typeWithAndSendableSlots(ta, tb))
+        }
+        return .traitObject(
+          traitDefId: aDefId,
+          typeArgs: mergedArgs,
+          isSendable: context.isSendableType(a) && context.isSendableType(b))
+      }
+      return a
+    case .reference(let aInner):
+      if case .reference(let bInner) = b {
+        return .reference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .mutableReference(let aInner):
+      if case .mutableReference(let bInner) = b {
+        return .mutableReference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .borrowedReference(let aInner):
+      if case .borrowedReference(let bInner) = b {
+        return .borrowedReference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .mutableBorrowedReference(let aInner):
+      if case .mutableBorrowedReference(let bInner) = b {
+        return .mutableBorrowedReference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .weakReference(let aInner):
+      if case .weakReference(let bInner) = b {
+        return .weakReference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .mutableWeakReference(let aInner):
+      if case .mutableWeakReference(let bInner) = b {
+        return .mutableWeakReference(inner: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .genericStruct(let aDefId, let aArgs):
+      if case .genericStruct(_, let bArgs) = b {
+        var mergedArgs: [Type] = []
+        for (ta, tb) in zip(aArgs, bArgs) {
+          mergedArgs.append(typeWithAndSendableSlots(ta, tb))
+        }
+        return .genericStruct(templateDefId: aDefId, args: mergedArgs)
+      }
+      return a
+    case .genericEnum(let aDefId, let aArgs):
+      if case .genericEnum(_, let bArgs) = b {
+        var mergedArgs: [Type] = []
+        for (ta, tb) in zip(aArgs, bArgs) {
+          mergedArgs.append(typeWithAndSendableSlots(ta, tb))
+        }
+        return .genericEnum(templateDefId: aDefId, args: mergedArgs)
+      }
+      return a
+    case .fixedArray(let size, let aInner):
+      if case .fixedArray(_, let bInner) = b {
+        return .fixedArray(size: size, element: typeWithAndSendableSlots(aInner, bInner))
+      }
+      return a
+    case .foreignFunction(let aParams, let aReturns):
+      if case .foreignFunction(let bParams, let bReturns) = b {
+        var mergedParams: [Parameter] = []
+        for (pa, pb) in zip(aParams, bParams) {
+          mergedParams.append(Parameter(type: typeWithAndSendableSlots(pa.type, pb.type), kind: pa.kind))
+        }
+        return .foreignFunction(parameters: mergedParams, returns: typeWithAndSendableSlots(aReturns, bReturns))
+      }
+      return a
+    default:
+      return a
+    }
   }
 
   func requireDerefablePointee(
@@ -525,6 +712,10 @@ extension TypeChecker {
   }
 
   func makeImplicitReference(_ expr: TypedExpressionNode, expectedType: Type) throws -> TypedExpressionNode? {
+    // An implicit borrow of a locked field is the same escape hatch as
+    // `&x.f` (concurrency-design.md): banned whether or not the adaptation
+    // goes on to succeed.
+    try reportLockedFieldBorrowOf(expr, expectedType: expectedType, span: typedExprSpan(of: expr))
     guard let (inner, mutable) = referenceTypeComponents(expectedType),
       implicitReferenceInnerMatches(inner, actualType: expr.type) else {
       return nil
@@ -669,10 +860,12 @@ extension TypeChecker {
     if expectedType == .error || typedArg.type == .error {
       return typedArg
     }
-    if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType) {
+    if let flavorConversion = makeReferenceFlavorConversion(typedArg, expectedType: expectedType),
+       sendableSlotsCompatible(typedArg.type, expectedType) {
       return flavorConversion
     }
-    if canWidenMutableReference(typedArg, expectedType: expectedType) {
+    if canWidenMutableReference(typedArg, expectedType: expectedType),
+       sendableSlotsCompatible(typedArg.type, expectedType) {
       return typedArg
     }
     throw SemanticError.typeMismatch(
@@ -693,7 +886,12 @@ extension TypeChecker {
     if expectedType == .error || base.type == .error {
       return base
     }
-    if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType) {
+    // The receiver position's implicit borrow is the same escape hatch as
+    // `&x.f` (concurrency-design.md): the implicit borrow of a locked field
+    // is banned before any adaptation forms it.
+    try reportLockedFieldBorrowOf(base, expectedType: expectedType, span: typedExprSpan(of: base))
+    if let flavorConversion = makeReferenceFlavorConversion(base, expectedType: expectedType),
+       sendableSlotsCompatible(base.type, expectedType) {
       return flavorConversion
     }
     if let expectedInfo = expectedType.indirectionCompatibilityInfo,
@@ -729,7 +927,8 @@ extension TypeChecker {
     if let implicitDeref = makeImplicitDereference(base, expectedType: expectedType) {
       return implicitDeref
     }
-    if canWidenMutableReference(base, expectedType: expectedType) {
+    if canWidenMutableReference(base, expectedType: expectedType),
+       sendableSlotsCompatible(base.type, expectedType) {
       return base
     }
     throw SemanticError.typeMismatch(
@@ -765,7 +964,7 @@ extension TypeChecker {
     if typedArg.type == .never {
       return typedArg
     }
-    if typedArg.type != expectedType {
+    if typedArg.type != expectedType || !sendableSlotsCompatible(typedArg.type, expectedType) {
       typedArg = try coerceArgumentType(typedArg, expectedType: expectedType)
     }
 
@@ -1076,7 +1275,7 @@ extension TypeChecker {
       return incoming
     }
     if current == incoming {
-      return current
+      return typeWithAndSendableSlots(current, incoming)
     }
     if let mergedType = commonBranchSupertype(current, incoming) {
       return mergedType
@@ -1124,7 +1323,8 @@ extension TypeChecker {
     }
     normalized = try coerceLiteral(normalized, to: expectedType)
 
-    if normalized.type == expectedType || canWidenMutableReference(normalized, expectedType: expectedType) {
+    if (normalized.type == expectedType && sendableSlotsCompatible(normalized.type, expectedType))
+      || canWidenMutableReference(normalized, expectedType: expectedType) {
       return normalized
     }
 
@@ -1144,7 +1344,7 @@ extension TypeChecker {
 
   // Pick a read-only common supertype when branches differ only by mutability.
   private func commonBranchSupertype(_ lhs: Type, _ rhs: Type) -> Type? {
-    if typesEquivalentForComparison(lhs, rhs) { return lhs }
+    if typesEquivalentForComparison(lhs, rhs) { return typeWithAndSendableSlots(lhs, rhs) }
     switch (lhs, rhs) {
     case (.reference(let leftInner), .mutableReference(let rightInner)),
          (.mutableReference(let leftInner), .reference(let rightInner)):
@@ -2558,8 +2758,11 @@ extension TypeChecker {
       let refType: Type = mutable ? .mutableReference(inner: typedInner.type) : .reference(inner: typedInner.type)
       return .referenceExpression(expression: typedInner, type: refType)
 
-    case .ptrExpression(let inner, let mutable, _):
+    case .ptrExpression(let inner, let mutable, let span):
       let typedInner = try inferTypedExpression(inner)
+      // `&x.f` would bypass the object lock (concurrency-design.md): taking
+      // the address of a field of a safe `sendable mutable` object is banned.
+      try reportLockedFieldAddressOf(typedInner, span: span)
       let isAddressable = typedInner.valueCategory == .lvalue || isDerefExpression(inner)
       if !isAddressable {
         if isLiteralExpression(inner) {
@@ -3133,6 +3336,9 @@ extension TypeChecker {
     case list(element: Type)
     case set(element: Type)
     case map(key: Type, value: Type)
+    case frozenList(element: Type)
+    case frozenSet(element: Type)
+    case frozenDict(key: Type, value: Type)
     case range(element: Type)
     case fixedArray(size: UInt64, element: Type)
   }
@@ -3186,6 +3392,35 @@ extension TypeChecker {
     switch target {
     case .list, .set, .map:
       return try buildWithCapacityCall(targetType: expectedType, count: 0)
+    case .frozenList(let elementType):
+      return try lowerCollectionLiteral(
+        targetType: expectedType,
+        methodName: "push",
+        elements: [],
+        argumentTypes: [elementType],
+        duplicateWarningKind: nil,
+        freezeMethod: "to_frozen_list",
+        span: span
+      )
+    case .frozenSet(let elementType):
+      return try lowerCollectionLiteral(
+        targetType: expectedType,
+        methodName: "insert",
+        elements: [],
+        argumentTypes: [elementType],
+        duplicateWarningKind: .setElement,
+        freezeMethod: "to_frozen_set",
+        span: span
+      )
+    case .frozenDict(let k, let v):
+      return try lowerDictLiteral(
+        targetType: expectedType,
+        entries: [],
+        keyType: k,
+        valueType: v,
+        freezeMethod: "to_frozen_dict",
+        span: span
+      )
     case .fixedArray:
       // `[]` is the zeroed buffer (the C `{0}` idiom).
       return .intrinsicCall(.fixedArrayLiteral(resultType: expectedType, elements: []))
@@ -3257,9 +3492,42 @@ extension TypeChecker {
         span: span
       )
 
+    case .frozenList(let elementType):
+      // Frozen targets build their storage directly from the literal: a
+      // mutable buffer accumulates the elements, then the buffer freezes in
+      // one bulk copy at the block tail. No intermediate container is visible
+      // to the user.
+      let frozenListType = genericStructType(template: "FrozenList", args: [elementType])
+      return try lowerCollectionLiteral(
+        targetType: frozenListType,
+        methodName: "push",
+        elements: elements,
+        argumentTypes: [elementType],
+        duplicateWarningKind: nil,
+        freezeMethod: "to_frozen_list",
+        span: span
+      )
+
+    case .frozenSet(let elementType):
+      let frozenSetType = genericStructType(template: "FrozenSet", args: [elementType])
+      return try lowerCollectionLiteral(
+        targetType: frozenSetType,
+        methodName: "insert",
+        elements: elements,
+        argumentTypes: [elementType],
+        duplicateWarningKind: .setElement,
+        freezeMethod: "to_frozen_set",
+        span: span
+      )
+
     case .map:
       throw SemanticError(
         .generic("Collection literal without ':' cannot be inferred as Dict"),
+        span: span
+      )
+    case .frozenDict:
+      throw SemanticError(
+        .generic("Collection literal without ':' cannot be inferred as FrozenDict"),
         span: span
       )
     case .range:
@@ -3286,6 +3554,34 @@ extension TypeChecker {
       case .map(let k, let v):
         keyType = k
         valueType = v
+        let dictType = genericStructType(template: "Dict", args: [keyType, valueType])
+        return try lowerDictLiteral(
+          targetType: dictType,
+          entries: entries,
+          keyType: keyType,
+          valueType: valueType,
+          span: span
+        )
+      case .frozenDict(let k, let v):
+        keyType = k
+        valueType = v
+        // Frozen targets build their storage directly from the literal (see
+        // `lowerCollectionLiteral`): last-wins duplicate keys fall out of the
+        // mutable `Dict` buffer that then freezes.
+        let frozenDictType = genericStructType(template: "FrozenDict", args: [keyType, valueType])
+        return try lowerDictLiteral(
+          targetType: frozenDictType,
+          entries: entries,
+          keyType: keyType,
+          valueType: valueType,
+          freezeMethod: "to_frozen_dict",
+          span: span
+        )
+      case .frozenList, .frozenSet:
+        throw SemanticError(
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
+          span: span
+        )
       case .list, .set, .range, .fixedArray:
         throw SemanticError(
           .generic("Dict literal can only be assigned to [K, V]Dict"),
@@ -3328,10 +3624,25 @@ extension TypeChecker {
           throw SemanticError(.generic("[K, V]Dict requires exactly two type arguments"), span: span)
         }
         return .map(key: args[0], value: args[1])
+      case "FrozenList":
+        guard args.count == 1 else {
+          throw SemanticError(.generic("[T]FrozenList requires exactly one type argument"), span: span)
+        }
+        return .frozenList(element: args[0])
+      case "FrozenSet":
+        guard args.count == 1 else {
+          throw SemanticError(.generic("[T]FrozenSet requires exactly one type argument"), span: span)
+        }
+        return .frozenSet(element: args[0])
+      case "FrozenDict":
+        guard args.count == 2 else {
+          throw SemanticError(.generic("[K, V]FrozenDict requires exactly two type arguments"), span: span)
+        }
+        return .frozenDict(key: args[0], value: args[1])
       default:
         try handleError(
           SemanticError(
-            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
             span: span
           ))
         return nil
@@ -3347,7 +3658,7 @@ extension TypeChecker {
       default:
         try handleError(
           SemanticError(
-            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
             span: span
           ))
         return nil
@@ -3356,7 +3667,7 @@ extension TypeChecker {
     default:
       try handleError(
         SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, and [T]Range"),
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
           span: span
         ))
       return nil
@@ -3422,6 +3733,7 @@ extension TypeChecker {
     elements: [ExpressionNode],
     argumentTypes: [Type],
     duplicateWarningKind: DuplicateWarningKind?,
+    freezeMethod: String? = nil,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     // A poisoned element type has already complained; the lowering would
@@ -3429,11 +3741,23 @@ extension TypeChecker {
     if argumentTypes.contains(where: { $0 == .error }) {
       return .blockExpression(statements: [], tailExpression: nil, type: .error)
     }
-    let initializer = try buildWithCapacityCall(targetType: targetType, count: elements.count)
+    // Frozen targets accumulate into a mutable buffer that freezes with one
+    // bulk copy at the block tail (`to_frozen_list` / `to_frozen_set`); the
+    // buffer is the storage the literal builds directly.
+    let storageType: Type
+    switch targetType {
+    case .genericStruct(let defId, let args) where Type.spelling(defId) == "FrozenList":
+      storageType = genericStructType(template: "List", args: args)
+    case .genericStruct(let defId, let args) where Type.spelling(defId) == "FrozenSet":
+      storageType = genericStructType(template: "Set", args: args)
+    default:
+      storageType = targetType
+    }
+    let initializer = try buildWithCapacityCall(targetType: storageType, count: elements.count)
 
     let temp = makeLocalSymbol(
       name: "__collection_literal_\(synthesizedTempIndex)",
-      type: targetType,
+      type: storageType,
       kind: .variable(.MutableValue)
     )
     synthesizedTempIndex += 1
@@ -3444,9 +3768,9 @@ extension TypeChecker {
 
     var seenConstants: Set<String> = []
 
-    guard let methodSym = try lookupDeclaredMethod(on: targetType, name: methodName) else {
+    guard let methodSym = try lookupDeclaredMethod(on: storageType, name: methodName) else {
       throw SemanticError(
-        .generic("Missing method '\(methodName)' for type '\(targetType.description)'"),
+        .generic("Missing method '\(methodName)' for type '\(storageType.description)'"),
         span: span
       )
     }
@@ -3476,6 +3800,21 @@ extension TypeChecker {
     }
 
     let tailExpression = TypedExpressionNode.variable(identifier: temp)
+    if let freezeMethod {
+      guard let freezeSym = try lookupDeclaredMethod(on: storageType, name: freezeMethod) else {
+        throw SemanticError(
+          .generic("Missing method '\(freezeMethod)' for type '\(storageType.description)'"),
+          span: span
+        )
+      }
+      let freezeCall = try inferMethodCall(
+        base: tailExpression,
+        method: freezeSym,
+        methodType: freezeSym.type,
+        callArgs: []
+      )
+      return .blockExpression(statements: statements, tailExpression: freezeCall, type: targetType)
+    }
     return .blockExpression(statements: statements, tailExpression: tailExpression, type: targetType)
   }
 
@@ -3484,15 +3823,26 @@ extension TypeChecker {
     entries: [(key: ExpressionNode, value: ExpressionNode)],
     keyType: Type,
     valueType: Type,
+    freezeMethod: String? = nil,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     _ = keyType
     _ = valueType
 
-    let initializer = try buildWithCapacityCall(targetType: targetType, count: entries.count)
+    // Frozen targets accumulate into a mutable `Dict` buffer that freezes with
+    // one bulk copy at the block tail (`to_frozen_dict`).
+    let storageType: Type
+    switch targetType {
+    case .genericStruct(let defId, let args) where Type.spelling(defId) == "FrozenDict":
+      storageType = genericStructType(template: "Dict", args: args)
+    default:
+      storageType = targetType
+    }
+
+    let initializer = try buildWithCapacityCall(targetType: storageType, count: entries.count)
     let temp = makeLocalSymbol(
       name: "__collection_literal_\(synthesizedTempIndex)",
-      type: targetType,
+      type: storageType,
       kind: .variable(.MutableValue)
     )
     synthesizedTempIndex += 1
@@ -3501,9 +3851,9 @@ extension TypeChecker {
       .variableDeclaration(identifier: temp, value: initializer, mutable: true)
     ]
 
-    guard let methodSym = try lookupDeclaredMethod(on: targetType, name: "insert") else {
+    guard let methodSym = try lookupDeclaredMethod(on: storageType, name: "insert") else {
       throw SemanticError(
-        .generic("Missing method 'insert' for type '\(targetType.description)'"),
+        .generic("Missing method 'insert' for type '\(storageType.description)'"),
         span: span
       )
     }
@@ -3528,6 +3878,21 @@ extension TypeChecker {
     }
 
     let tailExpression = TypedExpressionNode.variable(identifier: temp)
+    if let freezeMethod {
+      guard let freezeSym = try lookupDeclaredMethod(on: storageType, name: freezeMethod) else {
+        throw SemanticError(
+          .generic("Missing method '\(freezeMethod)' for type '\(storageType.description)'"),
+          span: span
+        )
+      }
+      let freezeCall = try inferMethodCall(
+        base: tailExpression,
+        method: freezeSym,
+        methodType: freezeSym.type,
+        callArgs: []
+      )
+      return .blockExpression(statements: statements, tailExpression: freezeCall, type: targetType)
+    }
     return .blockExpression(statements: statements, tailExpression: tailExpression, type: targetType)
   }
 
@@ -3602,12 +3967,12 @@ extension TypeChecker {
         throw SemanticError(.generic("Unable to resolve type node name"), span: currentSpan)
       }
       return .identifier(name, span: .unknown)
-    case .function(let params, let returns):
+    case .function(let params, let returns, _):
       let paramNodes = try params.map { try toTypeNode($0.type) }
       return .functionType(paramTypes: paramNodes, returnType: try toTypeNode(returns), span: .unknown)
     case .fixedArray(let size, let element):
       return .fixedArray(size: size, element: try toTypeNode(element), span: .unknown)
-    case .traitObject(let traitDefId, let traitArgs):
+    case .traitObject(let traitDefId, let traitArgs, _):
       // A trait object is spelled as the trait name (with its arguments, if
       // any); re-encoding through that spelling rebuilds the same trait-object
       // type when the call's type argument is resolved again.
@@ -3799,7 +4164,7 @@ extension TypeChecker {
       }
       
       // Check if it's a static method
-      guard case .function(let params, let returnType) = methodSym.type else {
+      guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
       }
       let isStatic = !isReceiverStyleMethod(methodSym)
@@ -3823,7 +4188,8 @@ extension TypeChecker {
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
         }
@@ -3847,7 +4213,7 @@ extension TypeChecker {
       }
       
       // Check if it's a static method
-      guard case .function(let params, let returnType) = methodSym.type else {
+      guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
       }
       let isStatic = !isReceiverStyleMethod(methodSym)
@@ -3871,7 +4237,8 @@ extension TypeChecker {
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
         }
@@ -3905,7 +4272,7 @@ extension TypeChecker {
         methodInfo: ext
       )
       
-      guard case .function(let params, let returnType) = methodSym.type else {
+      guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
       }
       
@@ -3927,7 +4294,8 @@ extension TypeChecker {
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
         }
@@ -3961,7 +4329,7 @@ extension TypeChecker {
         methodInfo: ext
       )
       
-      guard case .function(let params, let returnType) = methodSym.type else {
+      guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
       }
       
@@ -3983,7 +4351,8 @@ extension TypeChecker {
       for (arg, param) in zip(arguments, params) {
         var typedArg = try inferTypedExpression(arg, expectedType: param.type)
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description, got: typedArg.type.description)
         }
@@ -4031,7 +4400,7 @@ extension TypeChecker {
 
     let traitTypeArgs: [Type]
     switch traitConstraint {
-    case .mutable, .foreign:
+    case .mutable, .foreign, .sendable:
       traitTypeArgs = []
     case .trait(_, _, let args):
       traitTypeArgs = try args.map { try resolveTypeNode($0) }
@@ -4292,7 +4661,7 @@ extension TypeChecker {
       selfType: selfType,
       methodTypeArgs: resolvedMethodTypeArgs
     )
-    guard case .function(let params, let returns) = declared.functionType else {
+    guard case .function(let params, let returns, _) = declared.functionType else {
       throw SemanticError(.generic(
         "Expected function type for qualified method '\(methodName)'"
       ), span: currentSpan)
@@ -4330,7 +4699,8 @@ extension TypeChecker {
         typedArg = try inferTypedExpression(arg)
       }
       typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-      if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+      if typedArg.type != .error && param.type != .error
+        && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
         throw SemanticError.typeMismatch(
           expected: param.type.description,
           got: typedArg.type.description
@@ -4459,7 +4829,7 @@ extension TypeChecker {
               traitTypeArgs: traitTypeArgs
             )
 
-            guard case .function(let params, let returnType) = expectedType else {
+            guard case .function(let params, let returnType, _) = expectedType else {
               throw SemanticError(.generic("Expected function type for static trait method"), span: currentSpan)
             }
 
@@ -4487,7 +4857,8 @@ extension TypeChecker {
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
               typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-              if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+              if typedArg.type != .error && param.type != .error
+                && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
                   got: typedArg.type.description
@@ -4510,7 +4881,7 @@ extension TypeChecker {
           if let entityMethod = toolMethods[methodName],
              entityMethod.parameters.first?.name != "self" {
             let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: baseType)
-            guard case .function(let params, let returnType) = expectedType else {
+            guard case .function(let params, let returnType, _) = expectedType else {
               throw SemanticError(.generic("Expected function type for static trait entity method"), span: currentSpan)
             }
 
@@ -4526,7 +4897,8 @@ extension TypeChecker {
             for (arg, param) in zip(arguments, params) {
               var typedArg = try inferTypedExpression(arg)
               typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-              if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+              if typedArg.type != .error && param.type != .error
+                && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
                   got: typedArg.type.description
@@ -4624,7 +4996,7 @@ extension TypeChecker {
                 methodInfo: ext)
               
               // Get function parameters and return type
-              guard case .function(let params, let returnType) = methodSym.type else {
+              guard case .function(let params, let returnType, _) = methodSym.type else {
                 throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
               
@@ -4642,7 +5014,8 @@ extension TypeChecker {
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
                 typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-                if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+                if typedArg.type != .error && param.type != .error
+                  && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
                     got: typedArg.type.description
@@ -4749,7 +5122,7 @@ extension TypeChecker {
                 baseType: baseType, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
               
-              guard case .function(let params, let returnType) = methodSym.type else {
+              guard case .function(let params, let returnType, _) = methodSym.type else {
                 throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
               
@@ -4765,7 +5138,8 @@ extension TypeChecker {
               for (arg, param) in zip(arguments, params) {
                 var typedArg = try inferTypedExpression(arg)
                 typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-                if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+                if typedArg.type != .error && param.type != .error
+                  && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                   throw SemanticError.typeMismatch(
                     expected: param.type.description,
                     got: typedArg.type.description
@@ -5063,7 +5437,7 @@ extension TypeChecker {
     }
 
     if let resolved = preResolvedCallee, case .variable(let symbol) = resolved {
-      if case .function(_, let returnType) = symbol.type {
+      if case .function(_, let returnType, _) = symbol.type {
         // Check for enum constructor (both concrete and generic)
         var enumName: String? = nil
         if case .`enum`(let defId) = returnType {
@@ -5275,7 +5649,7 @@ extension TypeChecker {
     if case .traitMethodPlaceholder(let traitName, let traitDefId, let traitMethodDefId, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
       // For trait method placeholders, we need to handle the call similarly to method calls
       // The base is already included in the placeholder, so we just need to type-check the arguments
-      guard case .function(let params, let returns) = methodType else {
+      guard case .function(let params, let returns, _) = methodType else {
         throw SemanticError.invalidOperation(op: "call", type1: methodType.description, type2: "")
       }
 
@@ -5344,7 +5718,8 @@ extension TypeChecker {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           throw SemanticError.typeMismatch(
             expected: param.type.description,
             got: typedArg.type.description
@@ -5377,7 +5752,7 @@ extension TypeChecker {
     // positional arguments, a direct C call).
     let callableSignature: ([Parameter], Type)? = {
       switch typedCallee.type {
-      case .function(let params, let returns): return (params, returns)
+      case .function(let params, let returns, _): return (params, returns)
       case .foreignFunction(let params, let returns): return (params, returns)
       default: return nil
       }
@@ -5437,7 +5812,8 @@ extension TypeChecker {
           typedArg = try inferTypedExpression(arg, expectedType: param.type)
         }
         typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-        if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+        if typedArg.type != .error && param.type != .error
+          && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
           typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
         }
         typedArguments.append(typedArg)
@@ -6049,7 +6425,7 @@ extension TypeChecker {
     expectedReturnType: Type? = nil
   ) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
-    if case .function(let params, let returns) = method.type {
+    if case .function(let params, let returns, _) = method.type {
       // Plan call arguments through the unified planner so that labels are
       // matched against the declared parameter labels and omitted named
       // parameters are filled from their declared defaults.
@@ -6065,7 +6441,7 @@ extension TypeChecker {
         switch base.type {
         case .structure(let defId): return context.getName(defId) ?? ""
         case .enum(let defId): return context.getName(defId) ?? ""
-        case .traitObject(let defId, _): return context.getName(defId) ?? ""
+        case .traitObject(let defId, _, _): return context.getName(defId) ?? ""
         default: return ""
         }
       }()
@@ -6092,7 +6468,7 @@ extension TypeChecker {
       // The base type is a trait object (or reference to one) — handle before auto-ref/deref.
       switch base.type {
       case .reference(let inner), .mutableReference(let inner):
-        if case .traitObject(let tplDefId, _) = inner {
+        if case .traitObject(let tplDefId, _, _) = inner {
           return try inferTraitObjectMethodCall(
             base: base,
             traitName: Type.spelling(tplDefId),
@@ -6102,7 +6478,7 @@ extension TypeChecker {
             arguments: arguments
           )
         }
-      case .traitObject(let tplDefId, _):
+      case .traitObject(let tplDefId, _, _):
         return try inferTraitObjectMethodCall(
           base: base,
           traitName: Type.spelling(tplDefId),
@@ -6440,7 +6816,7 @@ extension TypeChecker {
       }
     }
 
-    guard case .function(let params, let returns) = resolvedMethodType else {
+    guard case .function(let params, let returns, _) = resolvedMethodType else {
       throw SemanticError(.generic("Expected function type for method \(methodName)"), span: currentSpan)
     }
 
@@ -6503,7 +6879,8 @@ extension TypeChecker {
         typedArg = try inferTypedExpression(arg, expectedType: param.type)
       }
       typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-      if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+      if typedArg.type != .error && param.type != .error
+        && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
@@ -6922,7 +7299,10 @@ extension TypeChecker {
       parameters: parameterSymbols,
       captures: [],
       body: body(arguments),
-      type: .function(parameters: parameters, returns: returnType)
+      // A callable value's rebuild may carry an environment (a bound receiver,
+      // say) and cannot be proven capture-free: report `sendable` low (koralc
+      // `make_callable_value_lambda`, derivation rule 5).
+      type: .function(parameters: parameters, returns: returnType, isSendable: false)
     )
   }
 
@@ -6990,7 +7370,7 @@ extension TypeChecker {
                 baseType: type, templateName: baseName, typeArgs: resolvedArgs,
                 methodInfo: ext)
               try ensureMethodAccessibleForMemberAccess(methodSym, memberName: memberName)
-              guard case .function(let parameters, let returnType) = methodSym.type else {
+              guard case .function(let parameters, let returnType, _) = methodSym.type else {
                 throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
               }
               return makeStaticMethodValueLambda(
@@ -7277,7 +7657,7 @@ extension TypeChecker {
 
     // Trait object method lookup: when the type is a trait object, look up the method
     // in the trait's method signatures and return a methodReference with Self replaced
-    if case .traitObject(let tplDefId, let traitTypeArgs) = typeToLookup {
+    if case .traitObject(let tplDefId, let traitTypeArgs, _) = typeToLookup {
       let methods = try flattenedTraitMethods(forDefId: tplDefId)
       if let sig = methods[memberName] {
         // Only instance methods (with self parameter)
@@ -7286,7 +7666,9 @@ extension TypeChecker {
         }
 
         let traitInfo = traitDeclsByDefId[tplDefId]
-        let traitObjType: Type = traitObjectType(traitName: Type.spelling(tplDefId), typeArgs: traitTypeArgs)
+        let traitObjType: Type = traitObjectType(
+          traitName: Type.spelling(tplDefId), typeArgs: traitTypeArgs,
+          isSendable: context.isSendableType(typeToLookup))
 
         // Resolve the method type with Self replaced by the trait object type
         let expectedType = try expectedFunctionTypeForTraitMethod(
@@ -7326,7 +7708,9 @@ extension TypeChecker {
       // identity, exactly like the requirement face above.
       let toolEntityMethod = (try? traitToolMethod(forDefId: tplDefId, named: memberName))?.method
       if let entityMethod = toolEntityMethod, entityMethod.parameters.first?.name == "self" {
-        let toolTraitObjType: Type = traitObjectType(traitName: traitName, typeArgs: traitTypeArgs)
+        let toolTraitObjType: Type = traitObjectType(
+          traitName: traitName, typeArgs: traitTypeArgs,
+          isSendable: context.isSendableType(typeToLookup))
         let expectedType = try expectedFunctionTypeForToolMethod(entityMethod, selfType: toolTraitObjType)
         let base: TypedExpressionNode
         if typedPath.isEmpty {
@@ -7523,7 +7907,7 @@ extension TypeChecker {
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
 
-          guard case .function(let params, let returnType) = methodSym.type else {
+          guard case .function(let params, let returnType, _) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
 
@@ -7617,7 +8001,7 @@ extension TypeChecker {
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
           
-          guard case .function(let params, let returnType) = methodSym.type else {
+          guard case .function(let params, let returnType, _) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
 
@@ -7744,7 +8128,7 @@ extension TypeChecker {
                 madeProgress = true
               }
             }
-          case .mutable, .foreign:
+          case .mutable, .foreign, .sendable:
             continue
           }
         }
@@ -7803,7 +8187,7 @@ extension TypeChecker {
           return Parameter(type: resolvedType, kind: .byVal)
         }
         let returnType = try resolveTypeNode(methodSignature.returnType)
-        return .function(parameters: params, returns: returnType)
+        return .function(parameters: params, returns: returnType, isSendable: false)
       }
 
       _ = unifyTypes(expectedMethodType, actualMethod.type, bindings: &traitParamBindings)
@@ -7854,7 +8238,7 @@ extension TypeChecker {
         )
       }
 
-      guard case .function(let params, let returnType) = methodSym.type else {
+      guard case .function(let params, let returnType, _) = methodSym.type else {
         throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
       }
 
@@ -7934,7 +8318,7 @@ extension TypeChecker {
               traitTypeArgs: traitTypeArgs
             )
             
-            guard case .function(let params, let returnType) = expectedType else {
+            guard case .function(let params, let returnType, _) = expectedType else {
               throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
             }
 
@@ -7966,7 +8350,8 @@ extension TypeChecker {
               if context.containsGenericParameter(param.type) {
                 _ = unifyTypes(param.type, typedArg.type, bindings: &methodTypeParamBindings)
               }
-              if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+              if typedArg.type != .error && param.type != .error
+                && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
                 throw SemanticError.typeMismatch(
                   expected: param.type.description,
                   got: typedArg.type.description
@@ -8033,7 +8418,7 @@ extension TypeChecker {
     )
     try ensureMethodAccessibleForMemberAccess(methodResult.methodSymbol, memberName: methodName)
 
-    guard case .function(let params, let returnType) = methodResult.methodType else {
+    guard case .function(let params, let returnType, _) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
     }
 
@@ -8074,7 +8459,8 @@ extension TypeChecker {
       }
 
       typedArg = try coerceLiteral(typedArg, to: param.type, span: arg.span)
-      if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+      if typedArg.type != .error && param.type != .error
+        && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
@@ -8151,7 +8537,7 @@ extension TypeChecker {
           )
         }
         let returns = try resolveTypeNode(methodInfo.method.returnType)
-        return Type.function(parameters: params, returns: returns)
+        return Type.function(parameters: params, returns: returns, isSendable: false)
       }
     } else if let methods = extensionMethods[context.methodOwner(of: baseType)],
               let methodSym = methods[methodName] {
@@ -8164,7 +8550,7 @@ extension TypeChecker {
       throw SemanticError.undefinedMember(methodName, templateName)
     }
 
-    guard case .function(let params, _) = unresolvedFunctionType else {
+    guard case .function(let params, _, _) = unresolvedFunctionType else {
       throw SemanticError(.generic("Expected function type for generic static method"), span: currentSpan)
     }
 
@@ -8185,7 +8571,7 @@ extension TypeChecker {
     // A method type parameter that appears only in the return position
     // (`f[T Any](self) T`) is bound by the expected type, exactly
     // as the instance form binds it.
-    if let expectedType, case .function(_, let returns) = unresolvedFunctionType {
+    if let expectedType, case .function(_, let returns, _) = unresolvedFunctionType {
       _ = unifyTypes(returns, expectedType, bindings: &methodTypeParamBindings)
     }
 
@@ -8385,7 +8771,7 @@ extension TypeChecker {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
-    guard case .function(let params, let returns) = methodSym.type else {
+    guard case .function(let params, let returns, _) = methodSym.type else {
       throw SemanticError.invalidOperation(op: "call", type1: methodSym.type.description, type2: "")
     }
     if params.count != 2 {
@@ -8472,7 +8858,7 @@ extension TypeChecker {
       throw SemanticError.undefinedMember(methodName, receiverType.description)
     }
 
-    guard case .function(let params, let returns) = methodSym.type else {
+    guard case .function(let params, let returns, _) = methodSym.type else {
       throw SemanticError.invalidOperation(op: "call", type1: methodSym.type.description, type2: "")
     }
     if params.count != 2 {
@@ -8867,7 +9253,7 @@ extension TypeChecker {
       type: expectedType
     )
 
-    guard case .function(let params, let returns) = expectedType else {
+    guard case .function(let params, let returns, _) = expectedType else {
       throw SemanticError.invalidOperation(op: "call", type1: expectedType.description, type2: "")
     }
 
@@ -8883,7 +9269,8 @@ extension TypeChecker {
     for (arg, param) in zip(arguments, params.dropFirst()) {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
-      if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+      if typedArg.type != .error && param.type != .error
+        && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
@@ -8897,7 +9284,7 @@ extension TypeChecker {
     method: Symbol,
     arguments: [TypedExpressionNode]
   ) throws -> TypedExpressionNode {
-    guard case .function(let params, let returns) = method.type else {
+    guard case .function(let params, let returns, _) = method.type else {
       throw SemanticError.invalidOperation(op: "call", type1: method.type.description, type2: "")
     }
 
@@ -8929,7 +9316,8 @@ extension TypeChecker {
     for (arg, param) in zip(arguments, params.dropFirst()) {
       var typedArg = arg
       typedArg = try coerceLiteral(typedArg, to: param.type)
-      if typedArg.type != .error && param.type != .error && typedArg.type != param.type {
+      if typedArg.type != .error && param.type != .error
+        && (typedArg.type != param.type || !sendableSlotsCompatible(typedArg.type, param.type)) {
         typedArg = try coerceArgumentType(typedArg, expectedType: param.type)
       }
       typedArguments.append(typedArg)
@@ -8996,6 +9384,12 @@ extension TypeChecker {
           switch resolveBuiltinSubscriptKind(baseType: typedOuterBase.type) {
           case .string:
             throw SemanticError(.generic("String subscript is not addressable"), span: outerBaseExpr.span)
+          case .frozenList, .frozenDict:
+            // Nested write through a frozen subscript is a compile error, same
+            // family as the direct case.
+            throw SemanticError(.generic(
+              "Cannot assign to immutable subscript of type '\(builtinSubscriptBaseType(typedOuterBase.type).description)'"
+            ), span: outerBaseExpr.span)
           case .dict, .list, .deque:
             let subscriptValue = try resolveSubscript(base: typedOuterBase, args: typedOuterArgs, span: outerBaseExpr.span)
             if isMutableNominalReceiverType(subscriptValue.type) {
@@ -9020,7 +9414,7 @@ extension TypeChecker {
               base: resolvedBase, index: typedOuterArgs[0], span: outerBaseExpr.span)
           case .none:
             throw SemanticError(.generic(
-              "subscript is only supported for String, List, Deque, Dict, fixed arrays, and pointer types"
+              "subscript is only supported for String, List, Deque, Dict, FrozenList, FrozenDict, fixed arrays, and pointer types"
             ), span: outerBaseExpr.span)
           }
         }
@@ -9769,7 +10163,7 @@ extension TypeChecker {
     }
 
     // 4. Get the iterator type from the method's return type
-    guard case .function(_, let iteratorType) = iteratorMethod.type else {
+    guard case .function(_, let iteratorType, _) = iteratorMethod.type else {
       throw SemanticError(.generic("iterator() must be a function"), span: currentSpan)
     }
 
@@ -9960,7 +10354,7 @@ extension TypeChecker {
     }
     
     // Verify the return type is [T]Option
-    guard case .function(_, let returnType) = nextMethod.type else {
+    guard case .function(_, let returnType, _) = nextMethod.type else {
       throw SemanticError(.generic("Iterator.next() must be a function"), span: currentSpan)
     }
     
@@ -10403,12 +10797,14 @@ extension TypeChecker {
     }
   }
 
-  /// The fixed error type for Result: `Error ref` (trait object), where `Error`
-  /// is std's trait -- identified by declaration, not spelling.
+  /// The fixed error type for Result: `sendable Error ref` (trait object),
+  /// where `Error` is std's trait -- identified by declaration, not spelling.
+  /// The sendable bit mirrors Result's `Error(error: sendable Error)` payload.
   private var resultErrorType: Type {
     .reference(inner: .traitObject(
       traitDefId: stdErrorTraitDefId ?? .invalid,
-      typeArgs: []))
+      typeArgs: [],
+      isSendable: true))
   }
 
   /// Extracts Option/Result kind from a type, or throws a diagnostic.

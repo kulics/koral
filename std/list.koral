@@ -1200,3 +1200,124 @@ given[T: Ord] List[T] {
         };
     };
 };
+
+// ============================================================================
+// FrozenList - immutable snapshot for cross-thread transfer
+// ============================================================================
+/// An immutable element snapshot that may cross threads. Built by
+/// `List.to_frozen_list`, which bulk-copies straight into this storage (no
+/// intermediate container), or by a list literal targeting the type. The
+/// snapshot is never mutated afterwards (the construction-then-immutable
+/// promise backing `unsafe sendable`). The conditional rule still applies:
+/// `FrozenList[T]` is sendable only when `T` is, so `FrozenList[List[Int]]`
+/// cannot cross.
+///
+/// Storage is standalone — it does not embed `List`: a `{data, len}` payload
+/// owning one contiguous element buffer outright (elements are shared handles
+/// with their source). The `mutable` form is where the owned buffer's
+/// destructor lives (user destructors are `type mutable` only); the snapshot
+/// itself is immutable after construction.
+public type unsafe sendable mutable FrozenList[T: Any](protected data: *mutable T, protected len: UInt);
+
+/// `Drop` for `FrozenList[T]`: frees every element and the buffer when the
+/// last handle dies.
+given[T: Any] FrozenList[T]: Drop {
+
+    drop(self): Void = {
+        for i in 0..<self.len then {
+            deinit_memory(self.data + i);
+        };
+        dealloc_memory(self.data);
+    };
+};
+
+/// A one-shot cursor that walks a `FrozenList[T]` from index 0 to the end.
+public type mutable FrozenListIterator[T: Any](source: FrozenList[T], mutable index: UInt);
+
+/// Read-only access over a `FrozenList[T]`.
+given[T: Any] FrozenList[T] {
+
+    /// The number of elements in the snapshot.
+    public count(self): UInt = self.len;
+
+    /// Whether the snapshot has no elements.
+    public is_empty(self): Bool = self.len == 0;
+
+    /// The element at `index`, or `None` when the index is out of range.
+    public get(self, index: UInt): Option[T] = {
+        if index >= self.len then {
+            return Option[T].None();
+        };
+        return Option[T].Some(self.data[index]);
+    };
+
+    /// Copy the snapshot back out as a fresh mutable `List[T]`.
+    public to_list(self): List[T] = {
+        let mutable out = List[T].with_capacity(self.len);
+        for e in self then {
+            out.push(e);
+        };
+        return out;
+    };
+
+    // Builtin subscript helper for `xs[i]` syntax. Read-only: there is no
+    // `__index_slot`, so a frozen subscript can never be a write target.
+    // Out-of-range panic matches the mutable `List` subscript exactly.
+    private __index_get(self, key: UInt): T = {
+        if key >= self.len then {
+            panic("List index out of bounds");
+        };
+        return self.data[key];
+    };
+};
+
+/// Membership on a `FrozenList[T]` of `Eq` elements.
+given[T: Eq] FrozenList[T] {
+
+    /// Whether any element equals `value`. O(n).
+    public contains(self, value: T): Bool = {
+        for i in 0..<self.len then {
+            if self.data[i] == value then {
+                return true;
+            };
+        };
+        return false;
+    };
+};
+
+/// `Iterator` for `FrozenListIterator[T]`: yields elements from index 0 upward.
+given[T: Any] FrozenListIterator[T]: Iterator[T] {
+
+    /// Yield the next element, or `None` after the last one.
+    public next(self): Option[T] = {
+        if self.index < self.source.len then {
+            let value = self.source.data[self.index];
+            self.index = self.index + 1;
+            return Option[T].Some(value);
+        };
+        return Option[T].None();
+    };
+};
+
+/// `Iterable` for `FrozenList[T]`: a fresh read cursor over the snapshot.
+given[T: Any] FrozenList[T]: Iterable[T, FrozenListIterator[T]] {
+
+    /// A fresh cursor from index 0; the snapshot itself is left untouched.
+    public iterator(self): FrozenListIterator[T] = FrozenListIterator[T](self, 0);
+};
+
+/// Snapshot conversions from the mutable side.
+given[T: Any] List[T] {
+
+    /// Copy the list into an immutable `FrozenList[T]` snapshot that can cross
+    /// threads. The receiver stays usable; the snapshot owns its own buffer of
+    /// shared element handles.
+    public to_frozen_list(self): FrozenList[T] = {
+        let len = self.len;
+        let data = alloc_memory[T](len);
+        for i in 0..<len then {
+            init_memory(data + i, self.source[i]);
+        };
+        return FrozenList[T](data, len);
+    };
+};

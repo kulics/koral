@@ -1,0 +1,26 @@
+// EXPECT-ERROR: Type 'Plain' does not satisfy the 'sendable' constraint (checking constraint T: sendable)
+// Instantiating `T: Reader and sendable` with a type that satisfies the trait
+// but is not sendable fails at the call with the standard bound-satisfaction
+// diagnostic (concurrency-design.md §派生规则).
+
+using "std/io" { ... };
+
+type Plain(len: UInt);
+
+given Plain: Reader {
+    read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = Result[UInt].Ok(
+        UInt(0),
+    );
+};
+
+let drain[T: Reader and sendable](source: T): UInt = {
+    let buf = List[UInt8].new();
+    return when source.read(into = buf, span = ...) in {
+        .Ok(n) then n,
+        .Error(_) then UInt(0),
+    };
+};
+
+let main(): Void = {
+    let _ = drain(Plain(1));
+};

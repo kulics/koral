@@ -1,0 +1,52 @@
+// EXPECT: frozen read 4 6
+// EXPECT: frozen sum 12
+// EXPECT: dict get localhost 2
+// EXPECT: frozen set 3 true
+// EXPECT: worker got 3 2
+// The `Frozen*` family is the sanctioned way to carry collection data across
+// threads: immutable snapshots built by copying the mutable containers, with
+// read-only access afterwards (concurrency-design.md §std落点).
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    // Build a frozen list from a mutable list; read and iterate it.
+    let source = List[Int].new();
+    source.push(2);
+    source.push(4);
+    source.push(6);
+    let frozen = source.to_frozen_list();
+    println("frozen read \(frozen.get(1).unwrap()) \(frozen.get(2).unwrap())");
+
+    let mutable sum = 0;
+    for v in frozen then {
+        sum = sum + v;
+    };
+    println("frozen sum \(sum)");
+
+    // Build a frozen dict from a mutable dict; look keys up.
+    let map_source = Dict[String, String].new();
+    map_source.insert("host", "localhost");
+    map_source.insert("name", "koral");
+    let frozen_map = map_source.to_frozen_dict();
+    let host = frozen_map.get("host").unwrap();
+    println("dict get \(host) \(frozen_map.count())");
+
+    // Build a frozen set from a mutable set; query membership.
+    let set_source: Set[String] = ["go", "rust", "koral"];
+    let frozen_set = set_source.to_frozen_set();
+    let has_koral = frozen_set.contains("koral");
+    println("frozen set \(frozen_set.count()) \(has_koral)");
+
+    // Send the snapshot through a channel to another thread.
+    let pair = make_channel[FrozenList[Int]](1);
+    let sender = pair.first;
+    let receiver = pair.second;
+    let worker = run_task(() => {
+        let got = receiver.recv().unwrap();
+        println("worker got \(got.count()) \(got.get(0).unwrap())");
+    });
+    sender.send(frozen).unwrap();
+    let _ = worker.wait();
+};
