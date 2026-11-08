@@ -151,9 +151,32 @@ final class MIRFunctionCodeEmitter {
     var declarationOrderByLocal: [MIRLocalID: Int] = [:]
     var useScopesByLocal: [MIRLocalID: [Set<MIRScopeID>]] = [:]
     var useBlocksByLocal: [MIRLocalID: Set<MIRBlockID>] = [:]
+    // Locals whose ADDRESS is taken: a derived pointer can outlive the
+    // block the local was declared in, so the local must live at function
+    // scope -- a block-scoped declaration lets the C compiler reuse the
+    // slot and the escaped pointer reads dead stack (seen under -O2).
+    var addressTakenLocals: Set<MIRLocalID> = []
     var activeScopes: [MIRScopeID] = []
     var currentBlock = function.entryBlock
     var position = 0
+
+    func markAddressTaken(_ place: MIRPlace) {
+      var current = place
+      while true {
+        switch current {
+        case .local(let local):
+          addressTakenLocals.insert(local)
+          return
+        case .field(let base, _),
+             .enumPayload(let base, _, _, _, _):
+          current = base
+        case .global,
+             .deref,
+             .pointerElement:
+          return
+        }
+      }
+    }
 
     func recordUse(_ local: MIRLocalID) {
       useScopesByLocal[local, default: []].append(Set(activeScopes))
@@ -220,8 +243,10 @@ final class MIRFunctionCodeEmitter {
       switch value {
       case .operand(let operand):
         walkOperand(operand)
-      case .placeRead(let place, _),
-           .pointer(let place):
+      case .placeRead(let place, _):
+        walkPlace(place)
+      case .pointer(let place):
+        markAddressTaken(place)
         walkPlace(place)
       case .binary(let operation):
         walkOperand(operation.left)
@@ -251,6 +276,7 @@ final class MIRFunctionCodeEmitter {
           walkValue(argument)
         }
       case .ref(let place, _, _):
+        markAddressTaken(place)
         walkPlace(place)
       case .cast(let operand, _, _):
         walkOperand(operand)
@@ -340,6 +366,7 @@ final class MIRFunctionCodeEmitter {
 
     for local in function.locals where local.storage != .parameter && local.storage != .capture && local.type != .void && local.type != .never {
       if !trackedLocalIDs.contains(local.id),
+         !addressTakenLocals.contains(local.id),
          let declarationBlock = declaredBlockByLocal[local.id],
          let useBlocks = useBlocksByLocal[local.id],
          useBlocks.count == 1,

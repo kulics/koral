@@ -1,0 +1,27 @@
+// EXPECT: array_member_copy_ok
+// A method that copies a fixed-array member into a local must read the copy
+// correctly. The local's address escapes its declaring block (the index
+// walks through a pointer to it), so the local-lifetime plan must hoist
+// address-taken locals to function scope: a block-scoped declaration reads
+// dead stack once clang reuses the slot (-O2 silently returns zeros).
+
+type Rec(slots: [4]Int32, n: UInt);
+
+given Rec {
+    via_copy(self, index: UInt): Int32 = {
+        let s = self.slots;
+        return s[index];
+    };
+
+    direct(self, index: UInt): Int32 = {
+        return self.slots[index];
+    };
+};
+
+let main(): Void = {
+    let r = Rec([7, 8, 9, 10], 0);
+    assert(r.via_copy(UInt(0)) == Int32(7), "copy slot 0");
+    assert(r.via_copy(UInt(3)) == Int32(10), "copy slot 3");
+    assert(r.direct(UInt(1)) == Int32(8), "direct slot 1");
+    println("array_member_copy_ok");
+};
