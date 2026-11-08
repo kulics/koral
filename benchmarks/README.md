@@ -55,10 +55,15 @@ that is the comparison being asked about. Specifically:
 - **Sort verification**: the sort cases assert the output really is sorted
   and fold an order-sensitive checksum of the result into the RESULT line,
   so a wrong or partial sort is visible in the cross-language checksum check.
-- **One known work imbalance**, left standing because fixing it would change
-  the workload: Go's `regex_scan` materializes all 250k matches (~24MB of
-  `[][]byte`) while the other three stream them. It inflates Go's row, never
-  Koral's. (The builder cases end with `into_string()` — the zero-copy
+- **Workload parity**: every case uses each language's idiomatic loops and
+  search primitives (`for-in`/`range`/iterators, streaming regex matches),
+  with no form chosen or reverted for performance. Two measured traits of
+  the idioms themselves are worth knowing: Swift's `for i in 0..<n` over
+  `Int64` costs ~29% over a while counter on a trivial body (the
+  `loop_pipeline` row includes that cost), and Swift's `string_find` sits
+  at its standard search API floor — `range(of:options:.literal)` runs the
+  per-call scan at ~128ms where a hand-rolled byte scan reaches ~4ms, but
+  the hand-rolled form is not the idiom being compared. (The builder cases end with `into_string()` — the zero-copy
   hand-over, the same shape as Go's `String()` — so no final-copy tax is
   timed inside the Koral window.)
 - **The `rust` row of `regex_scan` is absent**: the case needs the `regex`
@@ -77,32 +82,32 @@ that is the comparison being asked about. Specifically:
 2026-11-08, this machine (Apple arm64), best of 5 runs, ms. The ratio column
 is koral / best(Go, Swift): below 1.0 means Koral is faster than both.
 
-| case | koral | go | swift | rust (ref) | vs mainstream |
+| case | koral | go | swift | rust (ref) | vs best |
 |---|---|---|---|---|---|
-| sort_ints | 38.24 | 59.69 | 82.80 | 13.74 | **0.64x** |
-| set_membership | 13.21 | 24.18 | 17.01 | 11.03 | **0.78x** |
-| string_find | 11.09 | 14.06 | 277.04 | 10.52 | **0.79x** |
-| string_build | 4.52 | 5.23 | 11.82 | 7.89 | **0.86x** |
-| loop_pipeline | 1.24 | 1.90 | 1.36 | 1.34 | **0.91x** |
-| fib_recursive | 0.41 | 0.44 | 0.41 | 0.36 | 1.00x |
-| list_sum | 4.76 | 4.37 | 5.63 | 3.90 | 1.09x |
-| sort_strings | 32.79 | 27.89 | 38.06 | 16.73 | 1.18x |
-| regex_scan | 61.32 | 202.65 | 50.27 | – | 1.22x |
-| struct_iter | 11.32 | 7.68 | 7.77 | 11.14 | 1.47x |
-| dict_lookup | 81.58 | 66.53 | 53.31 | 69.79 | 1.53x |
+| sort_ints | 37.80 | 60.06 | 82.01 | 13.85 | **0.63x** |
+| loop_pipeline | 1.25 | 1.90 | 1.75 | 1.35 | **0.71x** |
+| string_find | 11.14 | 13.90 | 129.54 | 10.47 | **0.80x** |
+| set_membership | 13.95 | 26.90 | 16.77 | 11.02 | **0.83x** |
+| string_build | 4.55 | 5.14 | 11.80 | 7.83 | **0.89x** |
+| fib_recursive | 0.42 | 0.42 | 0.42 | 0.37 | 1.00x |
+| list_sum | 4.83 | 4.34 | 5.89 | 3.95 | 1.11x |
+| regex_scan | 56.24 | 193.83 | 49.99 | – | 1.13x |
+| sort_strings | 33.46 | 28.60 | 37.88 | 16.53 | 1.17x |
+| struct_iter | 11.76 | 8.00 | 8.14 | 11.53 | 1.47x |
+| dict_lookup | 93.00 | 72.94 | 53.33 | 68.29 | 1.74x |
 
-**Five cases beat both Go and Swift outright** (sort_ints 0.64x,
-set_membership 0.78x, string_find 0.79x, string_build 0.86x,
-loop_pipeline 0.91x) and fib_recursive is at parity. The sub-millisecond
+**Five cases beat both Go and Swift outright** (sort_ints 0.63x,
+loop_pipeline 0.71x, string_find 0.80x, set_membership 0.83x,
+string_build 0.89x) and fib_recursive is at parity. The sub-millisecond
 cases (fib, loop_pipeline) drift noticeably between sessions on this
 machine while the longer cases hold steady — the ratios for those two are
-parity claims, not score. `string_build` climbed from 1.67x to 0.86x on
-this round's builder hot path plus the runtime's small-block string cache
+parity claims, not score. `string_build` climbed from 1.67x to 0.89x on
+the builder hot path plus the runtime's small-block string cache
 (a ~14ns malloc+free pair per small string, taken to ~1ns of slot reuse).
 
 ## Where the remaining gaps come from
 
-- `dict_lookup` (1.53x to Swift): key construction, not the dictionary. The
+- `dict_lookup` (1.74x to Swift): key construction, not the dictionary. The
   case builds `"k\(i)"` per operation — interpolation plumbing plus digit
   fill against Swift's inline-buffered short strings at ~no cost. Measured
   with prebuilt keys, the dict operations themselves run at about Go's
@@ -111,18 +116,23 @@ this round's builder hot path plus the runtime's small-block string cache
   allocation tax out; the deeper fix is a small-string (SSO)
   representation (`{ bytes, len }` is already the shape it needs),
   deferred as a representation project.
-- `regex_scan` (1.22x to ICU): Swift's engine is ICU — a SIMD literal scan
+- `regex_scan` (1.13x to ICU): Swift's engine is ICU — a SIMD literal scan
   over a heavily tuned backtracker. Koral's pure-language engine
   (`std/text/regex_engine.koral`) runs a required-literal prefilter, a
   budgeted backtracker with capture undo and quantified-atom run fusion,
   and a Pike-VM fallback for pathological shapes; it is 3.5x ahead of Go's
   pure-language NFA. The remaining room is per-op constant in the
   backtracker's step loop and a vectorized literal scan.
-- `struct_iter` (1.47x to both): per-element access on small managed
-  records in a tight loop. The call-side RC traffic and the element copies
-  are gone (place semantics); what remains is the loop's load/dispose
-  shape against Go/Rust's flat slices.
-- `sort_strings` (1.18x to Go): the measured phase split puts ~75% of the
+- `struct_iter` (1.47x to both): the case measures construction plus
+  iteration over 5M small records. The iteration form is each language's
+  idiomatic one (Koral `for v in xs`, Go `range`, Swift `for-in`, Rust
+  `for p in &xs`); Koral's for-in and indexed forms measure the same here
+  (~1.7ms both), so the gap is the construction loop: the growth call in
+  the loop body stops the C backend from holding the box fields across
+  iterations and from vectorizing the fill. The fix is a loop-level refill
+  transformation (growth guard hoisted out of the fast loop) -- a codegen
+  project, deferred.
+- `sort_strings` (1.17x to Go): the measured phase split puts ~75% of the
   case in the sort itself, and swapping in `sort_unstable` leaves the case
   unchanged within noise. The gap is per-comparison constant: ~8.6 ns per
   string compare against Go's ~5 ns. Swift, with a stable sort too, is
