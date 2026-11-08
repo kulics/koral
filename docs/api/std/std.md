@@ -3512,9 +3512,13 @@ given StringBuilder {
     public is_empty(self): Bool;
     /// Append one raw byte to the builder.
     /// The caller must keep the accumulated bytes valid UTF-8.
+    /// Every hot field is read before the growth call and re-read only in
+    /// the growth path (same shape as `List.push`, std/list.koral).
     public push_byte(self, value: UInt8): Void;
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
+    /// The default span is the whole string and skips range resolution, bounds
+    /// checks and rune-boundary checks entirely.
     public push_string(self, other: String, span: Range[UInt] = ...): Void;
     /// Encode `rune` in UTF-8 and append it, substituting the replacement
     /// character for an invalid rune.

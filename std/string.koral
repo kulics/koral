@@ -106,14 +106,7 @@ given StringBuilder {
     /// Whether nothing has been pushed yet.
     public is_empty(self): Bool = self.len == 0;
 
-    private ensure_capacity(self, min_cap: UInt): Void = {
-        if self.cap >= min_cap then {
-            return;
-        };
-        self.grow_to(min_cap);
-    };
-
-    /// The growth body behind `ensure_capacity`, kept out of line on purpose --
+    /// The growth body behind the push hot paths, kept out of line on purpose --
     /// same shape and reason as `List.grow_to` (see std/list.koral).
     private grow_to(self, min_cap: UInt): Void = {
         let mutable new_cap = self.cap * 2;
@@ -131,25 +124,48 @@ given StringBuilder {
 
     /// Append one raw byte to the builder.
     /// The caller must keep the accumulated bytes valid UTF-8.
+    /// Every hot field is read before the growth call and re-read only in
+    /// the growth path (same shape as `List.push`, std/list.koral).
     public push_byte(self, value: UInt8): Void = {
-        self.ensure_capacity(self.len + 2);
-        init_memory(self.data + self.len, value);
-        self.len = self.len + 1;
-        self.data[self.len] = 0;
+        let mutable len = self.len;
+        if self.cap < len + 2 then {
+            self.grow_to(len + 2);
+            len = self.len;
+        };
+        let data = self.data;
+        init_memory(data + len, value);
+        len += 1;
+        self.len = len;
+        data[len] = 0;
     };
 
     /// Append `other`, where `span` picks which slice to append, defaulting to
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
+    /// The default span is the whole string and skips range resolution, bounds
+    /// checks and rune-boundary checks entirely.
     public push_string(self, other: String, span: Range[UInt] = ...): Void = {
-        let spec = other.slice_spec(span);
-        let copy_len = spec.len();
+        let mutable start: UInt = 0;
+        let mutable copy_len = other.len;
+        if span is .Full() then {
+            copy_len = other.len;
+        } else {
+            let spec = other.slice_spec(span);
+            start = spec.start();
+            copy_len = spec.len();
+        };
         if copy_len == 0 then {
             return;
         };
-        self.ensure_capacity(self.len + copy_len + 1);
-        copy_memory(self.data + self.len, other.borrow_ptr() + spec.start(), copy_len);
-        self.len = self.len + copy_len;
-        self.data[self.len] = 0;
+        let mutable len = self.len;
+        if self.cap < len + copy_len + 1 then {
+            self.grow_to(len + copy_len + 1);
+            len = self.len;
+        };
+        let data = self.data;
+        copy_memory(data + len, other.borrow_ptr() + start, copy_len);
+        len += copy_len;
+        self.len = len;
+        data[len] = 0;
     };
 
     /// Encode `rune` in UTF-8 and append it, substituting the replacement
