@@ -1,13 +1,14 @@
 // EXPECT: Status.describe called
 // EXPECT: --- Scope 1 ---
-// EXPECT: Status dropped
 // EXPECT: --- Scope 1 End ---
 // EXPECT: Box.is_empty called
 // EXPECT: --- Scope 2 ---
-// EXPECT: Box dropped
 // EXPECT: --- Scope 2 End ---
-// EXPECT: Box dropped
-// EXPECT: Status dropped
+//
+// Enum methods on a value enum. User `drop` bodies are restricted to
+// `type mutable` (a value's cleanup is its synthesized field release), so
+// this type carries no Drop -- the destructor-observability semantics live
+// with the `type mutable` struct tests (drop_observability_test and kin).
 
 type Status {
     Active(),
@@ -19,13 +20,6 @@ given Status {
     describe(self): Int = {
         println("Status.describe called");
         return 0;
-    };
-};
-
-given Status: Drop {
-
-    drop(self): Void = {
-        println("Status dropped");
     };
 };
 
@@ -41,20 +35,15 @@ given[T: Any] Box[T] {
     };
 };
 
-given[T: Any] Box[T]: Drop {
-    drop(self): Void = {
-        println("Box dropped");
-    };
-};
-
 let main(): Int = {
     let s = Status.Active();
     s.describe();
 
     println("--- Scope 1 ---");
     {
+        // A value enum has no destructor to run here.
         let s2 = Status.Inactive(10);
-        // s2 drops here -> "Status dropped"
+        let _ = s2;
     };
     println("--- Scope 1 End ---");
 
@@ -64,10 +53,8 @@ let main(): Int = {
     println("--- Scope 2 ---");
     {
         let b2 = Box[Int].Empty();
-        // b2 drops here -> "Box dropped"
+        let _ = b2;
     };
     println("--- Scope 2 End ---");
-
-    // s and b drop here at end of main
     return 0;
 };

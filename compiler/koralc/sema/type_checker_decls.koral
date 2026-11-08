@@ -288,11 +288,13 @@ let drop_self_escape_in_statements(
 };
 
 given TypeChecker {
+    /// Drop 检查的第一段：目标合法性 + drop 成员签名。任何一段失败都停止
+    /// 后续 Drop 检查（Swift 侧 throw 短路，这里用 Bool 对齐，不再级联）。
     validate_drop_member_signature(
         self,
         target_type: Type,
         members: List[TypedGivenMember],
-    ): Void = {
+    ): Bool = {
         // A `type foreign` value is C's: codegen copies it with plain C
         // assignment and drops it as a no-op, so a `drop` here would silently
         // never run. Refuse it instead of lying. (Opaque foreign handles too.)
@@ -303,7 +305,44 @@ given TypeChecker {
         };
         if is_foreign_target then {
             self.push_diagnostic("Foreign type cannot implement Drop", unknown_span());
-            return;
+            return false;
+        };
+        // Drop 的清理动作只住 ARC 层（2026-11-08 定案）：`type`（值名义）承诺
+        // 无身份、同字段值可互换，用户 drop 体会让构造身份从析构计数里漏出来；
+        // 且真正的值语义（拷贝=字段 retain/release）下 drop 次数会绑定编译器
+        // 的共享/拷贝决策。清理由合成的字段 release 承担，析构只住
+        // `type mutable`。
+        let mutable is_nominal_target = false;
+        let mutable is_mutable_target = true;
+        when target_type in {
+            .StructureType(def_id) then {
+                is_nominal_target = true;
+                is_mutable_target = self.context().is_struct_mutable(def_id);
+            },
+            .EnumType(def_id) then {
+                is_nominal_target = true;
+                is_mutable_target = self.context().is_struct_mutable(def_id);
+            },
+            .GenericStruct(tplDefId, _) then {
+                if tplDefId.is_valid() then {
+                    is_nominal_target = true;
+                    is_mutable_target = self.context().is_struct_mutable(tplDefId);
+                };
+            },
+            .GenericEnum(tplDefId, _) then {
+                if tplDefId.is_valid() then {
+                    is_nominal_target = true;
+                    is_mutable_target = self.context().is_struct_mutable(tplDefId);
+                };
+            },
+            _ then {},
+        };
+        if is_nominal_target and not is_mutable_target then {
+            self.push_diagnostic(
+                "Only a 'type mutable' can implement Drop",
+                unknown_span(),
+            );
+            return false;
         };
         // In the simplified type system, drop(self) is the accepted signature.
         // The parameter type is Self (the type itself), not *mutable Self.
@@ -318,7 +357,7 @@ given TypeChecker {
                     "drop must have exactly one parameter",
                     unknown_span(),
                 );
-                return;
+                return false;
             };
             let param = member.params[UInt(0)];
             if param.name != "self" then {
@@ -326,7 +365,7 @@ given TypeChecker {
                     "drop parameter must be named 'self', got '\(param.name)'",
                     unknown_span(),
                 );
-                return;
+                return false;
             };
             let actual_param_type = param.param_type;
             if not self.same_expr_type(actual_param_type, expected_param_type) then {
@@ -334,20 +373,22 @@ given TypeChecker {
                     "drop parameter must have type '\(self.context().type_display_name(expected_param_type))', got '\(self.context().type_display_name(actual_param_type))'",
                     unknown_span(),
                 );
-                return;
+                return false;
             };
             if member.return_type is not .VoidType() then {
                 self.push_diagnostic("drop must return Void", unknown_span());
+                return false;
             };
-            return;
+            return true;
         };
+        return true;
     };
 
     /// `self` in a `drop` body may only be the receiver of a field access or a
     /// method call. Everything else -- returning it, binding it, storing it,
     /// passing it on, capturing it -- would let a dying object outlive its own
     /// destructor. See `docs/guide/document.md` "Drop".
-    validate_drop_member_body_escape(self, members: List[GivenMember]): Void = {
+    validate_drop_member_body_escape(self, members: List[GivenMember]): Bool = {
         for member in members then {
             if member.name != "drop" then {
                 continue;
@@ -361,11 +402,13 @@ given TypeChecker {
                         "'self' cannot escape a drop body: it may only be the receiver of a field access or a method call",
                         span,
                     );
+                    return false;
                 },
                 .None() then {},
             };
-            return;
+            return true;
         };
+        return true;
     };
 
     /// Mark the target type as having explicit Drop conformance.
@@ -1696,15 +1739,16 @@ given TypeChecker {
                         List[TypeParameterDecl].new(),
                     );
                     if self.is_std_drop_trait(trait_name) then {
-                        self.validate_drop_member_signature(
-                            resolved_target,
-                            typed_members,
-                        );
-                        self.validate_drop_member_body_escape(members);
-                        // Mark the target type as having explicit Drop conformance.
-                        // This is needed for nominal layout analysis: types with explicit Drop
-                        // must use managed nominal representation (ARC-backed).
-                        self.mark_explicit_drop_conformance(resolved_target);
+                        // 三段检查任一段失败即止（Swift 侧 throw 短路，这里对齐
+                        // 不级联）；全过才打 managed 布局标记。
+                        if self.validate_drop_member_signature(resolved_target, typed_members) then {
+                            if self.validate_drop_member_body_escape(members) then {
+                                // Mark the target type as having explicit Drop conformance.
+                                // This is needed for nominal layout analysis: types with explicit Drop
+                                // must use managed nominal representation (ARC-backed).
+                                self.mark_explicit_drop_conformance(resolved_target);
+                            };
+                        };
                     };
                     // 检查 Trait 一致性
                     let checker = TraitChecker.new(

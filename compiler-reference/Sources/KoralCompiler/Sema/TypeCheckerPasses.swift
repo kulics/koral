@@ -82,6 +82,7 @@ extension TypeChecker {
     default:
       break
     }
+    try validateDropTargetLayout(selfType)
     // Only accept: drop(self) — self is the receiver, type is SelfType.
     // Each part of that signature is a separate requirement, so each gets its
     // own sentence. Routing these through `invalidOperation` rendered them as
@@ -116,6 +117,41 @@ extension TypeChecker {
         .generic(
           "'self' cannot escape a drop body: it may only be the receiver of a field access or a method call"
         ), span: span)
+    }
+  }
+
+  /// Drop 的清理动作只住 ARC 层（2026-11-08 定案）：`type`（值名义）承诺
+  /// 无身份、同字段值可互换，用户 drop 体会让构造身份从析构计数里漏出来；
+  /// 且真正的值语义（拷贝=字段 retain/release）下 drop 次数会绑定编译器
+  /// 的共享/拷贝决策。清理由合成的字段 release 承担，析构只住
+  /// `type mutable`。
+  private func validateDropTargetLayout(_ selfType: Type) throws {
+    // foreign / opaque 由 "Foreign type cannot implement Drop" 诊断负责，
+    // 这里只管名义类型的布局规则。
+    switch selfType {
+    case .structure(let defId):
+      if context.isForeignStruct(defId) { return }
+    case .opaque:
+      return
+    default:
+      break
+    }
+    var isNominalTarget = false
+    var isMutableTarget = true
+    switch selfType {
+    case .structure(let defId), .`enum`(let defId):
+      isNominalTarget = true
+      isMutableTarget = context.isTypeMutable(defId)
+    case .genericStruct(let tplDefId, _), .genericEnum(let tplDefId, _):
+      if tplDefId.isValid {
+        isNominalTarget = true
+        isMutableTarget = context.isGenericStructTemplateMutable(tplDefId)
+      }
+    default:
+      break
+    }
+    if isNominalTarget && !isMutableTarget {
+      throw SemanticError(.generic("Only a 'type mutable' can implement Drop"), span: currentSpan)
     }
   }
 
@@ -2316,6 +2352,8 @@ extension TypeChecker {
       }
 
       if isStdDropTrait(resolveBound(traitConstraint).defId) {
+        // 没有 drop 成员的 impl 走不到方法级校验，布局拒收也要在这里挡。
+        try validateDropTargetLayout(selfType)
         markExplicitDropConformanceTarget(selfType)
       }
       

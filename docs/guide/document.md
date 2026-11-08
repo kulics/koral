@@ -37,7 +37,7 @@ Koral's nominal types come in exactly two forms, chosen at the declaration site.
 - Values have **no identity**: two values with equal fields are interchangeable.
 - The **layout is chosen by the compiler**. Inline storage, hidden indirection and shared backing are all implementation details and may differ from release to release.
 - **Value semantics is not part of the language contract.** Copying, argument passing and storage may share backing storage. That sharing is unobservable precisely because the type is shallowly immutable — so the compiler is free to optimize it away.
-- **A type that implements `Drop` is the exception.** Its destructor runs once, when the last owning handle dies, so how many handles exist *is* observable. Such a type sits in the same class as `type mutable`: identity is part of its semantics, and the compiler must not optimize the sharing away. It is still declared `type` — it still cannot declare `mutable` fields.
+- **A `type` cannot implement `Drop`.** A `type` promises no identity — same-field values are interchangeable — and a destructor would leak construction identity through the drop count. Cleanup is the synthesized field release instead; types that need a destructor declare `type mutable`; see [`Drop`](#drop).
 
 **`type mutable` — a shared object type.**
 
@@ -57,7 +57,7 @@ c.value = 5;      // ok: Counter is `type mutable` and `value` is a mutable fiel
 // c.id = 2;     // error: `id` is not a mutable field
 ```
 
-The compiler may use reference counting and hidden storage internally for either form. Those choices are not user-visible semantics: the language contract is `type` versus `type mutable`, never a managed-reference syntax. The one thing that crosses the line is `Drop` — see above.
+The compiler may use reference counting and hidden storage internally for either form. Those choices are not user-visible semantics: the language contract is `type` versus `type mutable`, never a managed-reference syntax. Cleanup follows the same line — a `type` is cleaned up by its synthesized field release, and only a `type mutable` may implement `Drop`.
 
 ### Installation and Usage
 
@@ -1406,7 +1406,7 @@ Koral provides a powerful type system that allows you to define your own data st
 
 ### `type`: Shallowly Immutable Nominals
 
-A `type` declaration introduces a nominal type whose fields are all immutable. Values of a `type` have **no identity**, and the compiler decides the layout — inline, hidden indirection, or shared backing. Value semantics is not promised: copies may share storage, which is unobservable precisely because the type is shallowly immutable. **A type that implements `Drop` is the exception** — its destructor runs once per object, so the sharing is observable and must not be optimized away; see [Memory Model](#memory-model).
+A `type` declaration introduces a nominal type whose fields are all immutable. Values of a `type` have **no identity**, and the compiler decides the layout — inline, hidden indirection, or shared backing. Value semantics is not promised: copies may share storage, which is unobservable precisely because the type is shallowly immutable. A `type` **cannot implement `Drop`**: its cleanup is the synthesized field release, and only a `type mutable` carries a destructor — see [`Drop`](#drop).
 
 Struct fields can be positional or named. A positional field is `name: Type`; a named field is marked with `=` — `width: Int =` (the caller must pass it) or `height: Int = 600` (with a default).
 
@@ -1752,7 +1752,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 #### Memory Model
 
-- **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. **A type that implements `Drop` is the exception**: its destructor runs once per object, so the sharing is observable and such a type is treated like `type mutable` here.
+- **`type`** (shallowly immutable): no identity, and no promise of value semantics. The compiler may use stack slots, registers, inline storage, hidden heap blocks or reference counting — whichever it can prove correct — because the sharing it introduces cannot be observed. Its cleanup is the synthesized field release; it cannot implement `Drop`.
 - **`type mutable`** (shared object): identity is part of the semantics. Assignment and argument passing share the same object. Only explicitly declared `mutable` fields can be modified in place.
 - **`type foreign`** (mutable value semantics): a C-layout value. Assignment and argument passing copy; the copy is modified in place through `let mutable`, `mutable` parameters and `*mutable T` links, and `self` is a plain copy — there is no mutable self. Its fields are always-writable C slots, and its contents are limited to types that cross the FFI boundary (see [External Interop](#6-external-interop)).
 - **Raw pointers**: the pointer types are `*T` / `*mutable T`; `&` / `&mutable` are the address-of operators that form them, and only from addressable storage. They are low-level memory access for FFI and remain subject to address-stability and layout constraints (see [External Interop](#6-external-interop)).
@@ -1760,7 +1760,7 @@ Koral provides efficient and safe memory management through declaration-site typ
 
 #### `Drop`
 
-Types that need a cleanup step implement the `Drop` trait:
+Types that need a cleanup step declare `type mutable` and implement the `Drop` trait:
 
 ```koral
 trait Drop {
@@ -1768,9 +1768,11 @@ trait Drop {
 };
 ```
 
-`Drop.drop` is a compiler-only destructor entry point running in a finalization context. It is not called as an ordinary user method. A type that implements `Drop` is always reference-counted, and its `drop` runs when the last owning handle dies.
+`Drop.drop` is a compiler-only destructor entry point running in a finalization context. It is not called as an ordinary user method. **Only a `type mutable` can implement `Drop`**: the destructor runs once when the last owning handle dies, so it belongs to the shared-object layer. A `type` promises no identity — same-field values are interchangeable — and a destructor would leak construction identity through the drop count.
 
-Because the destructor runs exactly once per object, a `Drop` type's sharing is **observable** — see [Memory Model](#memory-model). It is treated like `type mutable` on that axis.
+A `type` is instead cleaned up by its **synthesized field release** — the fields' own releases drive inner managed values to their final release, so a resource wrapped in a `type mutable` field still comes free with no user destructor (the Swift struct-around-class shape, e.g. `type File(inner: FileBox)`).
+
+Because the destructor runs exactly once per object, a `Drop` type's sharing is **observable** — see [Memory Model](#memory-model). That is exactly why `Drop` is reserved for `type mutable`.
 
 **`self` does not escape a `drop` body.** The object is being destroyed; letting it out would resurrect a dying value or move fields out from under the destructor. Inside `drop`, `self` may appear **only as the receiver** of a field read/write (`self.x`, `self.x = v`) or a method call (`self.close()`). It may not be returned, bound to a new name, stored into a field, collection or global, passed as an ordinary argument, or captured by a lambda.
 
