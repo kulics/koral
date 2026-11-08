@@ -177,84 +177,13 @@ extension CodeGen {
     appendToBuffer("struct \(name) __koral_\(name)_copy(const struct \(name) *self) {\n")
     withIndent {
       appendToBuffer("    struct \(name) result;\n")
-      if isStringLikeStorage(name: name, parameters: parameters) {
-        let dataField = sanitizeCIdentifier(context.getName(parameters.first(where: { context.getName($0.defId) == "data" })?.defId ?? parameters[0].defId) ?? "data")
-        let lenField = sanitizeCIdentifier(context.getName(parameters.first(where: { context.getName($0.defId) == "len" })?.defId ?? parameters[1].defId) ?? "len")
-        appendToBuffer("    size_t __koral_copy_len = self->\(lenField);\n")
-        appendToBuffer("    result.\(dataField) = malloc(__koral_copy_len + 1);\n")
-        appendToBuffer("    memcpy(result.\(dataField), self->\(dataField), __koral_copy_len);\n")
-        appendToBuffer("    result.\(dataField)[__koral_copy_len] = 0;\n")
-        appendToBuffer("    result.\(lenField) = self->\(lenField);\n")
-      } else if isRawArrayLikeStorage(name: name, parameters: parameters) {
-        let sourceField = sanitizeCIdentifier(context.getName(parameters.first(where: { context.getName($0.defId) == "source" })?.defId ?? parameters[0].defId) ?? "source")
-        let lenField = sanitizeCIdentifier(context.getName(parameters.first(where: { context.getName($0.defId) == "len" })?.defId ?? parameters[1].defId) ?? "len")
-        let capField = sanitizeCIdentifier(context.getName(parameters.first(where: { context.getName($0.defId) == "cap" })?.defId ?? parameters[2].defId) ?? "cap")
-        let sourceParam = parameters.first(where: { context.getName($0.defId) == "source" })
-        let sourceType = sourceParam?.type ?? .void
-        let elementType: Type = {
-          switch sourceType {
-          case .pointer(let inner), .mutablePointer(let inner):
-            return inner
-          default:
-            return sourceType
-          }
-        }()
-        let elementTypeName: String
-        switch elementType {
-        case .structure(let defId):
-          elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "T_\(defId.id)"
-        case .`enum`(let defId):
-          elementTypeName = cIdentifierByDefId[defIdKey(defId)] ?? context.getCIdentifier(defId) ?? "U_\(defId.id)"
-        case .genericStruct(let tplDefId, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
-        case .genericEnum(let tplDefId, let args):
-          elementTypeName = SemaUtils.makeLayoutName(baseName: Type.spelling(tplDefId), args: args, context: context, templateDefId: tplDefId)
-        default:
-          elementTypeName = cTypeName(elementType)
-        }
-        let mayUseCopyFunc: Bool = {
-          switch elementType {
-          case .structure, .`enum`, .genericStruct, .genericEnum:
-            return true
-          default:
-            return false
-          }
-        }()
-        if mayUseCopyFunc {
-          let elementStorageType: String = {
-            switch elementType {
-            case .structure, .`enum`, .genericStruct, .genericEnum:
-              return "struct \(elementTypeName)"
-            default:
-              return elementTypeName
-            }
-          }()
-          appendToBuffer("    result.\(sourceField) = malloc(self->\(lenField) * sizeof(\(elementStorageType)));\n")
-          appendToBuffer("    for (uintptr_t __koral_i = 0; __koral_i < self->\(lenField); ++__koral_i) {\n")
-          withIndent {
-            let copyPrefix = "__koral_\(nominalTypeCName(elementType))_copy"
-            appendToBuffer("        result.\(sourceField)[__koral_i] = \(copyPrefix)(&(self->\(sourceField)[__koral_i]));\n")
-          }
-          appendToBuffer("    }\n")
-        } else {
-          appendToBuffer("    result.\(sourceField) = malloc(self->\(lenField) * sizeof(\(elementTypeName)));\n")
-          appendToBuffer("    for (uintptr_t __koral_i = 0; __koral_i < self->\(lenField); ++__koral_i) {\n")
-          withIndent {
-            appendToBuffer("        result.\(sourceField)[__koral_i] = self->\(sourceField)[__koral_i];\n")
-          }
-          appendToBuffer("    }\n")
-        }
-        appendToBuffer("    result.\(lenField) = self->\(lenField);\n")
-        appendToBuffer("    result.\(capField) = self->\(capField);\n")
-      } else {
-        for param in parameters {
-          let fieldName = sanitizeCIdentifier(context.getName(param.defId) ?? "<unknown>")
-          appendCopyAssignment(
-            for: param.type,
-            source: "self->\(fieldName)",
-            dest: "result.\(fieldName)"
-          )
-        }
+      for param in parameters {
+        let fieldName = sanitizeCIdentifier(context.getName(param.defId) ?? "<unknown>")
+        appendCopyAssignment(
+          for: param.type,
+          source: "self->\(fieldName)",
+          dest: "result.\(fieldName)"
+        )
       }
       appendToBuffer("    return result;\n")
     }
@@ -277,19 +206,6 @@ extension CodeGen {
       }
     }
     appendToBuffer("}\n\n")
-  }
-
-  private func isStringLikeStorage(name: String, parameters: [Symbol]) -> Bool {
-    let names = parameters.map { context.getName($0.defId) ?? "" }
-    return names.contains("data") && names.contains("len") && (name.contains("String") || name.contains("_String"))
-  }
-
-  private func isRawArrayLikeStorage(name: String, parameters: [Symbol]) -> Bool {
-    let names = parameters.map { context.getName($0.defId) ?? "" }
-    let hasSource = names.contains("source")
-    let hasLen = names.contains("len")
-    let hasCap = names.contains("cap")
-    return hasSource && hasLen && hasCap && (name.contains("List_") || name.contains("Deque_") || name.contains("StringBuilder") || name.contains("Set_") || name.contains("Dict_"))
   }
 
   /// Generate enum type declaration with copy and drop functions
