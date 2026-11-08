@@ -22,8 +22,12 @@ public type String(protected data: *mutable UInt8, protected len: UInt);
 /// for the ABI note).
 let intrinsic alloc_string(len: UInt): String;
 
-/// Mutable builder for incremental string construction without relying on String alias mutation.
+/// Mutable builder for incremental string construction without relying on
+/// String alias mutation. The bytes accumulate inside a `String` block from
+/// the start, so `into_string` hands the finished string over without a copy.
+/// `data` caches the block's byte pointer for the append hot paths.
 public type mutable StringBuilder(
+    mutable buf: String,
     mutable data: *mutable UInt8,
     mutable len: UInt,
     mutable cap: UInt,
@@ -60,14 +64,10 @@ given String: Drop {
     public drop(self): Void = {};
 };
 
-/// `Drop` for `StringBuilder`: frees the builder's buffer.
-given StringBuilder: Drop {
-
-    /// Release the buffer owned by the builder.
-    public drop(self): Void = {
-        dealloc_memory(self.data);
-    };
-};
+// No explicit `Drop` for `StringBuilder`: the buffer is a `String` block and
+// the synthesized field release frees it through the RC. (The old explicit
+// drop freed the raw byte pointer, which now aliases the block's interior --
+// freeing that would be an interior-pointer free.)
 
 /// Construction and incremental building of strings.
 given StringBuilder {
@@ -78,9 +78,11 @@ given StringBuilder {
     /// Create an empty builder with room for at least `capacity` bytes.
     public with_capacity(capacity: UInt): StringBuilder = {
         let cap = if capacity < 1 then 1 else capacity + 1;
-        let data = alloc_memory[UInt8](cap);
-        init_memory(data, 0);
-        return StringBuilder(data, 0, cap);
+        // One `String` block of `cap` allocated bytes (content `cap - 1`):
+        // the block is what `into_string` hands over.
+        let buf = alloc_string(cap - 1);
+        buf.data[0] = 0;
+        return StringBuilder(buf, buf.data, 0, cap);
     };
 
     /// The number of bytes pushed so far.
@@ -103,10 +105,12 @@ given StringBuilder {
         if new_cap < min_cap then {
             new_cap = min_cap;
         };
-        let new_data = alloc_memory[UInt8](new_cap);
-        copy_memory(new_data, self.data, self.len + 1);
-        dealloc_memory(self.data);
-        self.data = new_data;
+        // A fresh `String` block; assigning it over `self.buf` releases the
+        // old block through the RC.
+        let new_buf = alloc_string(new_cap - 1);
+        copy_memory(new_buf.data, self.data, self.len + 1);
+        self.buf = new_buf;
+        self.data = new_buf.data;
         self.cap = new_cap;
     };
 
@@ -177,6 +181,23 @@ given StringBuilder {
 
     /// Return a stable snapshot that does not alias future builder mutations.
     public to_string(self): String = String.from_utf8_ptr_unchecked(self.data, self.len);
+
+    /// Hand the accumulated bytes to a `String` without copying them.
+    /// Afterwards the builder is empty again, holding a fresh empty buffer.
+    public into_string(self): String = {
+        self.data[self.len] = 0;
+        // Publish the true length into the block (`alloc_string` stamped the
+        // capacity there). Koral's view of the field is immutable; the write
+        // goes through a field pointer, the shape std/dict.koral uses.
+        let lenp = (&self.buf.len) as *mutable UInt;
+        lenp[0] = self.len;
+        let result = self.buf;
+        self.buf = alloc_string(0);
+        self.data = self.buf.data;
+        self.len = 0;
+        self.cap = 1;
+        return result;
+    };
 };
 
 // ============================================================================

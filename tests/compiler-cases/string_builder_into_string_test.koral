@@ -1,0 +1,45 @@
+// EXPECT: into_string_ok
+// Zero-copy handover: `into_string` moves the builder's block out as the
+// result, drains the builder, and every path (empty, snapshot-then-handover,
+// grown buffer) keeps the byte content and the RC accounting intact.
+
+let main(): Void = {
+    let mutable b = StringBuilder.with_capacity(16);
+    b.push_string("hello");
+    b.push_byte(' ');
+    b.push_string("world");
+    let s = b.into_string();
+    assert(s == "hello world", "into_string content");
+    assert(b.is_empty(), "builder drained");
+
+    // The builder stays usable after the handover.
+    b.push_string("again");
+    assert(b.to_string() == "again", "builder reused");
+    let s2 = b.into_string();
+    assert(s2 == "again", "second into_string");
+
+    // Snapshot first, then hand over: the snapshot must survive.
+    b.push_string("snap");
+    let snap = b.to_string();
+    let s3 = b.into_string();
+    assert(snap == "snap", "snapshot");
+    assert(s3 == "snap", "handover after snapshot");
+
+    // Empty handover.
+    let s4 = b.into_string();
+    assert(s4 == "", "empty into_string");
+
+    // Growth path: past the initial capacity, so the block moved at least once.
+    let mutable g = StringBuilder.new();
+    let mutable i = 0;
+    while i < 200 then {
+        g.push_byte('x');
+        i = i + 1;
+    };
+    let long = g.into_string();
+    assert(long.count() == 200, "grown into_string length");
+    assert(long[0] == 'x', "grown into_string first byte");
+    assert(long[199] == 'x', "grown into_string last byte");
+
+    println("into_string_ok");
+};
