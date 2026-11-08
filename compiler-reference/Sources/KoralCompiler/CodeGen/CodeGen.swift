@@ -1147,16 +1147,17 @@ public class CodeGen {
 
     let globalVarStart = DispatchTime.now()
     if !foreignGlobals.isEmpty {
-      for (identifier, mutable, initializer) in foreignGlobals {
+      for (identifier, _, initializer) in foreignGlobals {
         let cType = cTypeName(identifier.type)
         let cName = cIdentifier(for: identifier)
         if let initializer {
           // 有初值 = C 变量定义（静态初始化器，cffi-design.md §B）。
           buffer += "\(cType) \(cName) = \(foreignStaticInitializerText(initializer));\n"
-        } else if mutable {
-          buffer += "extern \(cType) \(cName);\n"
         } else {
-          buffer += "extern const \(cType) \(cName);\n"
+          // Koral 侧的可变性是语言层检查，不进入 C 链接签名：一律裸
+          // `extern`。`extern const` 会与运行时的非 const 定义相撞
+          // （conflicting types）——运行时变量自己可能是可写的。
+          buffer += "extern \(cType) \(cName);\n"
         }
       }
     }
