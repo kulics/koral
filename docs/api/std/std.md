@@ -3664,6 +3664,8 @@ given String: Eq {
 /// `Ord` for `String`: byte-wise lexicographic order over the UTF-8 bytes.
 given String: Ord {
     /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
+    /// Flattened for the sort's hot loop: direct data reads (no method hops),
+    /// one exit per branch shape, so the C body stays inlinable.
     public compare(self, other: String): Int;
 };
 

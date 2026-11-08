@@ -948,17 +948,20 @@ given String: Eq {
 given String: Ord {
 
     /// Compare byte-wise, returning -1, 0, or 1; a prefix sorts before its extension.
+    /// Flattened for the sort's hot loop: direct data reads (no method hops),
+    /// one exit per branch shape, so the C body stays inlinable.
     public compare(self, other: String): Int = {
-        let min = if self.len < other.len then self.len else other.len;
-        let c = compare_memory(self.borrow_ptr(), other.borrow_ptr(), min);
-        if c < 0 then {
-            return 0 - 1;
+        let self_len = self.len;
+        let other_len = other.len;
+        let min = if self_len < other_len then self_len else other_len;
+        let c = compare_memory(self.bytes.data, other.bytes.data, min);
+        if c != 0 then {
+            return if c < 0 then 0 - 1 else 1;
         };
-        if c > 0 then {
-            return 1;
+        if self_len == other_len then {
+            return 0;
         };
-        return if self.len < other.len then 0 - 1
-        else if self.len > other.len then 1 else 0;
+        return if self_len < other_len then 0 - 1 else 1;
     };
 };
 
