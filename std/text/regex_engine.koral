@@ -345,8 +345,8 @@ given ReParser {
         let c = self.peek();
         if c == '(' then {
             self.pos += 1;
-            if self.ngroups >= 16 then {
-                return self.fail("Too many capture groups (at most 16)");
+            if self.ngroups >= 65535 then {
+                return self.fail("Too many capture groups (at most 65535)");
             };
             self.ngroups += 1;
             let g = self.ngroups;
@@ -552,76 +552,140 @@ given ReParser {
 // Compilation
 // ----------------------------------------------------------------------------
 
-/// Scratch-owned capture storage. A row is 34 `Int32`s -- one thread's whole
-/// capture-slot state -- identified by its index in the pool; seeds and
-/// threads carry the index (two words of transport) instead of a row VALUE
-/// (34 ints).
+/// Scratch-owned capture storage. A row is one thread's whole capture-slot
+/// state -- `width` `Int32`s (`2 * groups + 2`) -- identified by its index in
+/// the pool; seeds and threads carry the index (two words of transport)
+/// instead of a row VALUE.
+///
+/// Rows are lazily allocated, one block each, and recycled through the free
+/// stack: memory is proportional to the live rows a run actually touches, so
+/// a many-group pattern pays for its threads and not for a pre-sized worst
+/// case (a flat pre-sized arena would be rows x width -- quadratic in the
+/// group count before the first match).
 ///
 /// Lifetimes are explicit because rows outlive positions: a thread without an
 /// intervening `Save` keeps one row across many input bytes, so nothing is
 /// ever reclaimed by position. A thread's row is ITS OWN copy -- taken at
-/// spawn, returned at death -- and a `Save` copies-on-write into a
-/// CALL-SCOPED temp row (`take_temp` / `end_call`): the seed's row may be
-/// shared with sibling branches or belong to the thread being consumed, and
-/// neither may see the write. Since every thread copies its row out at spawn,
-/// no live thread references a temp when the call ends.
+/// spawn, returned at death -- and a `Save` copies-on-write into a temp row
+/// (`take_temp` / `end_call`): the seed's row may be shared with sibling
+/// branches or belong to the thread being consumed, and neither may see the
+/// write. Since every thread copies its row out at spawn, no live thread
+/// references a temp when the call ends.
 ///
 /// Row 0 is the permanent all-unset row threads start from; `take` hands out
-/// rows 1..cap. Live rows are bounded by the marks (threads per list <= one
-/// per program counter, two lists) plus one call's temps; if that bound is
-/// ever wrong, `take` panics instead of scribbling past the buffer.
+/// recycled rows and grows the pool on first touch.
 type mutable ReRowPool(
-    buf: *mutable Int32,
-    free: List[UInt],
-    mutable temp_top: UInt,
-    thread_cap: UInt,
-    cap: UInt,
+    rows: List[*mutable Int32],
+    mutable free_buf: *mutable UInt,
+    mutable free_len: UInt,
+    mutable free_cap: UInt,
+    temp_buf: *mutable UInt,
+    mutable temp_len: UInt,
+    temp_cap: UInt,
+    width: UInt,
 );
 
 given ReRowPool {
-    /// Address of row `i`.
+    /// Address of row `i` -- a raw-pointer table walk, no bounds check: the
+    /// step loop's Save/spawn paths hit this per byte.
     at(self, i: UInt): *mutable Int32 = {
-        return self.buf + i * UInt(34);
+        let base = self.rows.borrow_ptr();
+        return base[i];
     };
 
-    /// A thread's fresh row, from the free stack. The stack is pre-filled
-    /// with every thread row at build, so this never allocates; the marks
-    /// bound the live threads and `give` returns each row at thread death.
-    take(self): UInt = {
-        if self.free.is_empty() then {
-            panic("regex: capture row pool exhausted");
+    /// Copy row `src` into row `dst` -- the copy-on-write half of a `Save`
+    /// and the copy every spawn takes. This width-sized copy is the ONLY row
+    /// copy in the step loop; everything else passes row indices.
+    copy_row(self, src: UInt, dst: UInt): Void = {
+        let sp = self.at(src);
+        let dp = self.at(dst);
+        let mutable i = UInt(0);
+        while i < self.width then {
+            dp[i] = sp[i];
+            i += UInt(1);
         };
-        return self.free.take_at(self.free.count() - 1);
+    };
+
+    /// Load a row into the match result: an inline value copy for patterns
+    /// that fit the inline slots (zero allocations -- the common case), one
+    /// packed heap block beyond.
+    load_row(self, i: UInt): ReSlots = {
+        let src = self.at(i);
+        if self.width <= UInt(34) then {
+            let mutable slots: [34]Int32 = [];
+            let mutable k = UInt(0);
+            while k < self.width then {
+                slots[k] = src[k];
+                k += UInt(1);
+            };
+            return ReSlots(slots, "");
+        };
+        return ReSlots(
+            re_blank_slots(),
+            String.from_utf8_ptr_unchecked(src as *UInt8, self.width * UInt(4)),
+        );
+    };
+
+    /// A row for a thread: recycled from the free stack, or a fresh block on
+    /// first touch. The spawn fills it with `copy_row` immediately. The free
+    /// stack is a raw array -- this runs per spawn in the step loop.
+    take(self): UInt = {
+        if self.free_len == UInt(0) then {
+            self.rows.push(alloc_memory[Int32](self.width));
+            return self.rows.count() - UInt(1);
+        };
+        self.free_len = self.free_len - UInt(1);
+        return self.free_buf[self.free_len];
     };
 
     /// Return a row to the pool -- a thread's death.
     give(self, i: UInt): Void = {
-        self.free.push(i);
+        if self.free_len == self.free_cap then {
+            let new_cap = self.free_cap * UInt(2) + UInt(8);
+            let grown = alloc_memory[UInt](new_cap);
+            copy_memory(grown, self.free_buf, self.free_len);
+            dealloc_memory(self.free_buf);
+            self.free_buf = grown;
+            self.free_cap = new_cap;
+        };
+        self.free_buf[self.free_len] = i;
+        self.free_len = self.free_len + UInt(1);
     };
 
-    /// A fresh row for a `Save`'s copy-on-write, bumped from the call-scoped
-    /// temp region. The thread that survives this call has copied the row
-    /// out at spawn, so `end_call` can reclaim the region unconditionally.
+    /// A row for a `Save`'s copy-on-write. The thread that survives this call
+    /// has copied the row out at spawn, so `end_call` returns every temp
+    /// unconditionally. The temp stack is a raw bump -- this runs per `Save`.
     take_temp(self): UInt = {
-        if self.temp_top >= self.cap then {
+        if self.temp_len >= self.temp_cap then {
             panic("regex: capture row pool exhausted");
         };
-        let i = self.temp_top;
-        self.temp_top = self.temp_top + UInt(1);
+        let i = self.take();
+        self.temp_buf[self.temp_len] = i;
+        self.temp_len = self.temp_len + UInt(1);
         return i;
     };
 
-    /// Reclaim every temp taken during the closure call: one store, the
-    /// region is a bump allocator by construction.
+    /// Return every temp taken during the closure call to the free stack.
     end_call(self): Void = {
-        self.temp_top = self.thread_cap;
+        let mutable k = UInt(0);
+        while k < self.temp_len then {
+            self.give(self.temp_buf[k]);
+            k += UInt(1);
+        };
+        self.temp_len = UInt(0);
     };
 };
 
 given ReRowPool: Drop {
-    /// Release the row buffer owned by the pool.
+    /// Release every row block and the two stacks owned by the pool.
     drop(self): Void = {
-        dealloc_memory(self.buf);
+        let mutable k = UInt(0);
+        while k < self.rows.count() then {
+            dealloc_memory(self.rows[k]);
+            k += UInt(1);
+        };
+        dealloc_memory(self.free_buf);
+        dealloc_memory(self.temp_buf);
     };
 };
 
@@ -666,37 +730,34 @@ given ReScratch: Drop {
     };
 };
 
-let re_new_scratch(inst_count: UInt): ReScratch = {
+let re_new_scratch(inst_count: UInt, width: UInt): ReScratch = {
     let cm = List[Int32].with_capacity(inst_count);
     let nm = List[Int32].with_capacity(inst_count);
     for _ in 0..<inst_count then cm.push(0);
     for _ in 0..<inst_count then nm.push(0);
-    // Row 0 is the permanent all-unset row. Thread rows (one per live
-    // thread; the marks cap those at two lists x one thread per program
-    // counter) are pre-filled into the free stack at build; the temp region
-    // (one call's copy-on-writes; the marks cap those at one per Save
-    // instruction) is a bump allocator reset at every call end.
-    let thread_cap = inst_count * UInt(2) + UInt(8);
-    let cap = thread_cap + inst_count + UInt(8);
-    let free = List[UInt].new();
-    let mutable fi = thread_cap;
-    while fi > UInt(1) then {
-        fi -= UInt(1);
-        free.push(fi);
-    };
-    let pool = ReRowPool(
-        alloc_memory[Int32](cap * UInt(34)),
-        free,
-        thread_cap,
-        thread_cap,
-        cap,
-    );
-    let blankp = pool.at(UInt(0));
+    // Row 0 is the permanent all-unset row; thread and temp rows are
+    // allocated on first touch and recycled through the pool's free stack,
+    // so the pool's memory follows the live rows a run actually uses.
+    let rows = List[*mutable Int32].new();
+    rows.push(alloc_memory[Int32](width));
+    let blankp = rows[UInt(0)];
     let mutable bi = UInt(0);
-    while bi < UInt(34) then {
+    while bi < width then {
         blankp[bi] = Int32(0) - Int32(1);
         bi += UInt(1);
     };
+    let free_cap = inst_count * UInt(2) + UInt(16);
+    let temp_cap = inst_count + UInt(8);
+    let pool = ReRowPool(
+        rows,
+        alloc_memory[UInt](free_cap),
+        UInt(0),
+        free_cap,
+        alloc_memory[UInt](temp_cap),
+        UInt(0),
+        temp_cap,
+        width,
+    );
     // Backward-scan buffers: the marks set, the two frontiers (at most one
     // entry per program counter) and the closure stack (at most every
     // epsilon edge in one position).
@@ -837,6 +898,75 @@ let re_build_code(insts: List[ReInst]): ReCode = {
             },
         };
     };
+    // Quantifier fusion: the `atom*` and `atom+` wrappers expand to a
+    // Split/Consume/Jump loop -- two steps and a thread fork per byte at
+    // match time. Where the loop's consumer is a single byte or class
+    // instruction, one Run instruction takes over the Split's slot (star
+    // semantics -- the plus shape keeps its mandatory first atom): the
+    // greedy scan is one compare per byte, and the boundary alternatives
+    // are the run's exit at every shorter end. The expanded instructions
+    // stay in place and keep their bytes: the analysis and the backward
+    // prefilter walk the expanded graph, where a loop step is one byte --
+    // exactly what their model assumes.
+    let mutable pc2 = UInt(0);
+    while pc2 < n then {
+        let mutable loop_consumer = UInt(0);
+        let mutable run_pc = UInt(0);
+        let mutable exit_pc = UInt(0);
+        let mutable star = false;
+        when insts[pc2] in {
+            .Split(x, y) then {
+                // star: split at s, consume at s+1, jump(s) at s+2, exit s+3.
+                if x == pc2 + UInt(1) and y == pc2 + UInt(3) and pc2 + UInt(3) <= n then {
+                    when insts[pc2 + UInt(2)] in {
+                        .Jump(t) then {
+                            if t == pc2 then {
+                                when insts[pc2 + UInt(1)] in {
+                                    .Byte(_, _) or .Class(_) then {
+                                        run_pc = pc2;
+                                        loop_consumer = pc2 + UInt(1);
+                                        exit_pc = y;
+                                        star = true;
+                                    },
+                                    _ then {},
+                                };
+                            };
+                        },
+                        _ then {},
+                    };
+                };
+            },
+            .Byte(_, _) or .Class(_) then {
+                // plus: consume at s, split(s, s+2) at s+1. The mandatory
+                // first consume stays; the Split becomes the run.
+                if pc2 + UInt(2) <= n then {
+                    when insts[pc2 + UInt(1)] in {
+                        .Split(x, y) then {
+                            if x == pc2 and y == pc2 + UInt(2) then {
+                                run_pc = pc2 + UInt(1);
+                                loop_consumer = pc2;
+                                exit_pc = y;
+                                star = true;
+                            };
+                        },
+                        _ then {},
+                    };
+                };
+            },
+            _ then {},
+        };
+        if star then {
+            // The run reads its byte set through `aux2` -- the loop
+            // consumer's pc. It must NOT copy the bytes onto its own pc:
+            // the backward prefilter models every instruction as a
+            // one-byte consumer and would read a fused run as a spurious
+            // one-byte step at the Split's slot.
+            op[run_pc] = UInt8(7);
+            aux1[run_pc] = UInt32(exit_pc);
+            aux2[run_pc] = UInt32(loop_consumer);
+        };
+        pc2 += UInt(1);
+    };
     return ReCode(op, aux1, aux2, match_bits, n);
 };
 
@@ -913,7 +1043,7 @@ let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
         bits,
         code,
         re_analyze_required(insts, code.match_bits),
-        re_new_scratch(insts.count()),
+        re_new_scratch(insts.count(), ngroups * UInt(2) + UInt(2)),
     );
 };
 
@@ -1178,41 +1308,39 @@ let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[RePr
 
 /// A thread's capture slots live in a pool row (see `ReRowPool`) and the
 /// thread value carries only the row's index: pushing, popping and iterating
-/// threads moves two words, not 34 ints. The whole match occupies slots 0
-/// and 1; capture group `k` (1-based) occupies slots `2k` and `2k + 1`; a
-/// slot of `0 - 1` means "did not take part in this match". The row carries
-/// at most 16 capture groups (34 slots); patterns with more are refused at
-/// compile.
+/// threads moves two words. The whole match occupies slots 0 and 1; capture
+/// group `k` (1-based) occupies slots `2k` and `2k + 1`; a slot of `0 - 1`
+/// means "did not take part in this match". A row carries the pattern's
+/// groups; up to 65535 capture groups are accepted at compile.
 type ReThread(pc: UInt, row: UInt);
 
 /// A pending epsilon-closure step: same transport as a thread.
 type ReSeed(pc: UInt, row: UInt);
 
-/// Copy one capture row into another -- the copy-on-write half of a `Save`.
-/// This 34-int copy is the ONLY row copy in the step loop; everything else
-/// passes row pointers.
-let re_copy_caps(src: *Int32, dst: *mutable Int32): Void = {
-    let mutable i = UInt(0);
-    while i < UInt(34) then {
-        dst[i] = src[i];
-        i += UInt(1);
+/// One match's capture slots -- the hybrid result shape: an inline value
+/// copy (zero allocations) while the pattern fits the inline slots (up to
+/// 16 capture groups, the common case), one packed heap block beyond (the
+/// mainstream per-match shape, Go's `[]int`). Either way exactly one
+/// construction step at the winning match.
+type ReSlots(slots: [34]Int32, spill: String);
+
+given ReSlots {
+    /// One slot from either storage shape. The inline slots land in a local
+    /// first -- indexing the member array in place would take `&self.slots`
+    /// and disqualify the borrowed-self convention (see `Captures.slot_at`).
+    slot(self, index: UInt): Int32 = {
+        if self.spill.count() > UInt(0) then {
+            let p = self.spill.borrow_ptr() as *Int32;
+            return p[index];
+        };
+        let s = self.slots;
+        return s[index];
     };
 };
 
-/// Load a capture row into a value -- the winning match's one copy out of
-/// the arena, taken before the arena is reused.
-let re_load_caps(src: *Int32): [34]Int32 = {
-    let mutable caps = re_blank_caps();
-    let mutable i = UInt(0);
-    while i < UInt(34) then {
-        caps[i] = src[i];
-        i += UInt(1);
-    };
-    return caps;
-};
-
-/// All-`-1` capture slots: the state of a thread that has matched nothing.
-let re_blank_caps(): [34]Int32 = {
+/// All-`-1` capture slots: the inline half of a result whose pattern fit,
+/// and the placeholder half of a spilled one.
+let re_blank_slots(): [34]Int32 = {
     let unset = Int32(0) - Int32(1);
     let mutable a: [34]Int32 = [];
     for i in UInt(0)..<UInt(34) then {
@@ -1220,11 +1348,6 @@ let re_blank_caps(): [34]Int32 = {
     };
     return a;
 };
-
-/// One match's capture slots as a VALUE: a run hands its result back without
-/// building a list, so `matches`/`find` allocate nothing at all and
-/// `captures` builds its lists once, at the very end.
-type ReSlots(slots: [34]Int32);
 
 /// Search `text` from `offset` for the leftmost-first match. Returns the
 /// flat capture-slot list of the winning thread: `[s0, e0, s1, e1, ...]`,
@@ -1267,7 +1390,9 @@ let re_run_scan(
     // callback) falls back to a fresh one and stays correct.
     let shared = prog.scratch;
     let reuse = not shared.in_use;
-    let scratch = if reuse then shared else re_new_scratch(insts.count());
+    let scratch = if reuse
+        then shared
+        else re_new_scratch(insts.count(), prog.ngroups * UInt(2) + UInt(2));
     // Each thread list is built against its own marks set: a program counter
     // may appear at most once per list, and the first thread to reach it
     // (highest priority) keeps the slot. The sets travel with the lists when
@@ -1303,7 +1428,7 @@ let re_run_scan(
     let pool = scratch.pool;
     clist.clear();
     nlist.clear();
-    let mutable best_caps = re_blank_caps();
+    let mutable best_caps = ReSlots(re_blank_slots(), "");
     let mutable matched = false;
 
     let mutable anchor_i = UInt(0);
@@ -1362,7 +1487,7 @@ let re_run_scan(
             } else {
                 let opc = code.op[t.pc];
                 if opc == UInt8(6) then {
-                    best_caps = re_load_caps(pool.at(t.row));
+                    best_caps = pool.load_row(t.row);
                     matched = true;
                     cut = true;
                 } else if opc == UInt8(0) and pos < text_len then {
@@ -1376,6 +1501,25 @@ let re_run_scan(
                             pos + 1,
                             nlist,
                             t.pc + 1,
+                            t.row,
+                            track_groups,
+                            pool,
+                            work,
+                        );
+                    };
+                } else if opc == UInt8(7) and pos < text_len then {
+                    // The run consumes one byte and stays; its closure
+                    // re-forks the exit at the next boundary.
+                    if re_bits_match(code.match_bits, UInt(code.aux2[t.pc]), bp[pos]) then {
+                        re_add(
+                            code,
+                            nmp,
+                            ng,
+                            bp,
+                            text_len,
+                            pos + 1,
+                            nlist,
+                            t.pc,
                             t.row,
                             track_groups,
                             pool,
@@ -1421,7 +1565,7 @@ let re_run_scan(
     if not matched then {
         return Option[ReSlots].None();
     };
-    return Option[ReSlots].Some(ReSlots(best_caps));
+    return Option[ReSlots].Some(best_caps);
 };
 
 // ----------------------------------------------------------------------------
@@ -1466,7 +1610,7 @@ let re_backtrack(
     let alt = scratch.alt_buf;
     let undo = scratch.undo_buf;
     let row = pool.take_temp();
-    re_copy_caps(pool.at(UInt(0)), pool.at(row));
+    pool.copy_row(UInt(0), row);
     let caps = pool.at(row);
     let mutable alt_len = UInt(0);
     let mutable undo_len = UInt(0);
@@ -1509,6 +1653,33 @@ let re_backtrack(
                 caps[slot] = Int32(pos);
             };
             pc = pc + UInt(1);
+        } else if opc == UInt8(7) then {
+            // A fused greedy run: consume as many matching bytes as
+            // possible, then continue at the exit. The alternatives are the
+            // exit at every shorter end -- pushed short-to-long so the LIFO
+            // pops the next-shortest first -- bounded by the budget, whose
+            // overrun hands the whole search to the Pike-VM.
+            let exit_pc = UInt(code.aux1[pc]);
+            let bits_pc = UInt(code.aux2[pc]);
+            let start = pos;
+            while pos < text_len and re_bits_match(code.match_bits, bits_pc, bp[pos]) then {
+                pos = pos + UInt(1);
+            };
+            let limit = start;
+            if UInt(alt_len) + (pos - limit) > re_bt_budget() then {
+                pool.end_call();
+                return ReBt.Budget();
+            };
+            let mutable k = limit;
+            while k < pos then {
+                let f = alt_len * UInt(3);
+                alt[f] = UInt32(exit_pc);
+                alt[f + UInt(1)] = UInt32(k);
+                alt[f + UInt(2)] = UInt32(undo_len);
+                alt_len = alt_len + UInt(1);
+                k = k + UInt(1);
+            };
+            pc = exit_pc;
         } else if opc == UInt8(4) then {
             let multiline = code.aux1[pc] == UInt32(1);
             if pos == UInt(0) or (multiline and pos > UInt(0) and bp[pos - UInt(1)] == '\n') then {
@@ -1524,9 +1695,9 @@ let re_backtrack(
                 failed = true;
             };
         } else {
-            let out = re_load_caps(caps);
+            let out = pool.load_row(row);
             pool.end_call();
-            return ReBt.Found(ReSlots(out));
+            return ReBt.Found(out);
         };
         if failed then {
             if alt_len == UInt(0) then {
@@ -1803,6 +1974,17 @@ let re_add(
             // Pushed in reverse: the stack pops `x` first.
             work.push(ReSeed(UInt(code.aux2[seed.pc]), seed.row));
             work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+        } else if opc == UInt8(7) then {
+            // A fused run forks in the closure exactly like its Split did:
+            // the run's own continuation consumes at this pc (greedy, higher
+            // priority) and the exit branch walks to its consumers. The run
+            // thread outlives this call, so it takes its own row copy --
+            // sharing the seed's row would alias the consumed thread's,
+            // which is recycled the moment this call returns.
+            let row = pool.take();
+            pool.copy_row(seed.row, row);
+            list.push(ReThread(seed.pc, row));
+            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
         } else if opc == UInt8(3) then {
             let slot = UInt(code.aux1[seed.pc]);
             if track_groups or slot < 2 then {
@@ -1811,7 +1993,7 @@ let re_add(
                 // thread being consumed, neither of which this write may
                 // disturb. `end_call` reclaims the temp.
                 let row = pool.take_temp();
-                re_copy_caps(pool.at(seed.row), pool.at(row));
+                pool.copy_row(seed.row, row);
                 pool.at(row)[slot] = Int32(pos);
                 work.push(ReSeed(seed.pc + 1, row));
             } else {
@@ -1832,7 +2014,7 @@ let re_add(
             // call, so it takes its own copy of the row -- no live thread
             // ever references a call-scoped temp.
             let row = pool.take();
-            re_copy_caps(pool.at(seed.row), pool.at(row));
+            pool.copy_row(seed.row, row);
             list.push(ReThread(seed.pc, row));
         };
     };

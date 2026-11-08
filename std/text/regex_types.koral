@@ -61,29 +61,49 @@ given Match {
 };
 
 /// A match result that also records the span of every capture group. The
-/// slots ride in the value itself (34 ints, one copy at construction): the
-/// previous shape built two public lists per match -- two allocations and
-/// two dozen pushes in the iterator's inner loop, measured at ~80ns per
-/// match on the capturing-scan benchmark.
+/// slots are an inline value -- zero allocations -- while the pattern fits
+/// (up to 16 capture groups, the common case), and one packed heap block
+/// beyond, the mainstream per-match shape (Go hands back a `[]int`). Either
+/// way a pattern may declare up to 65535 groups.
 public type Captures(
     source: String, // 原始文本
-    slots: [34]Int32, // 扁平捕获槽 [s0, e0, s1, e1, ...]（-1 = 未匹配）
+    slots: [34]Int32, // 内联捕获槽 [s0, e0, s1, e1, ...]（-1 = 未匹配）
+    spill: String, // 超出内联容量时的小端 Int32 打包块
     groups: UInt, // 模式中的捕获组数
 );
 
 /// Accessors for the overall match and its capturing groups.
 given Captures {
 
+    /// One slot from either storage shape: the inline value while the
+    /// pattern fit it, the packed block beyond. The dispatch reads the
+    /// storage itself, so it can never disagree with how the result was
+    /// built. The inline slots land in a local first: indexing the member
+    /// array in place would take `&self.slots`, and a self-rooted reference
+    /// disqualifies the borrowed-self convention for the whole accessor
+    /// family (the local copy is dead-except-one-load, which clang folds
+    /// back to the load).
+    private slot_at(self, index: UInt): Int32 = {
+        if self.spill.count() > UInt(0) then {
+            let p = self.spill.borrow_ptr() as *Int32;
+            return p[index];
+        };
+        let s = self.slots;
+        return s[index];
+    };
+
     /// Return the substring matched by the whole pattern.
     public text(self): String = {
-        return self.source.substring(UInt(self.slots[0])..<UInt(self.slots[1]));
+        return self.source.substring(
+            UInt(self.slot_at(UInt(0)))..<UInt(self.slot_at(UInt(1))),
+        );
     };
 
     /// Return the byte offset where the overall match starts.
-    public start(self): UInt = UInt(self.slots[0]);
+    public start(self): UInt = UInt(self.slot_at(UInt(0)));
 
     /// Return the byte offset just past the overall match's end.
-    public end(self): UInt = UInt(self.slots[1]);
+    public end(self): UInt = UInt(self.slot_at(UInt(1)));
 
     /// Return the number of capture slots, counting the whole match as group 0.
     public group_count(self): UInt = self.groups + UInt(1);
@@ -94,8 +114,8 @@ given Captures {
         if index > self.groups then {
             return Option[String].None();
         };
-        let s = self.slots[index * UInt(2)];
-        let e = self.slots[index * UInt(2) + UInt(1)];
+        let s = self.slot_at(index * UInt(2));
+        let e = self.slot_at(index * UInt(2) + UInt(1));
         if s < 0 or e < 0 then {
             return Option[String].None();
         };
@@ -107,7 +127,7 @@ given Captures {
         if index > self.groups then {
             return Option[UInt].None();
         };
-        let s = self.slots[index * UInt(2)];
+        let s = self.slot_at(index * UInt(2));
         if s < 0 then {
             return Option[UInt].None();
         };
@@ -119,7 +139,7 @@ given Captures {
         if index > self.groups then {
             return Option[UInt].None();
         };
-        let e = self.slots[index * UInt(2) + UInt(1)];
+        let e = self.slot_at(index * UInt(2) + UInt(1));
         if e < 0 then {
             return Option[UInt].None();
         };

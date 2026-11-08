@@ -1,0 +1,51 @@
+// EXPECT: many_groups_ok
+// Mainstream capture-group capacity: patterns far past the old 16-group
+// ceiling compile, match and report every slot (rows are per-program width,
+// the result is one heap array per match), and the ceiling itself sits at
+// 65535 like PCRE2/Rust -- 65536 groups are refused at compile.
+
+using "std/text" { Regex };
+
+let main(): Void = {
+    // 24 groups: one `(.)(.)...` per byte of a 24-byte input.
+    let re = Regex.compile(
+        "(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)(.)"
+    ).expect("24-group pattern must compile");
+    assert(re.group_count() == 24, "group count");
+    let text = "abcdefghijklmnopqrstuvwx";
+    when re.captures(text) in {
+        .Some(c) then {
+            assert(c.start() == 0 and c.end() == 24, "whole span");
+            assert(c.group_count() == 25, "slots count");
+            when c.group(1) in {
+                .Some(g) then assert(g == "a", "group 1"),
+                .None() then assert(false, "group 1 missing"),
+            };
+            when c.group(16) in {
+                .Some(g) then assert(g == "p", "group 16"),
+                .None() then assert(false, "group 16 missing"),
+            };
+            when c.group(24) in {
+                .Some(g) then assert(g == "x", "group 24"),
+                .None() then assert(false, "group 24 missing"),
+            };
+        },
+        .None() then assert(false, "24-group pattern must match"),
+    };
+
+    // Past the ceiling: 65536 groups must be refused at compile.
+    let builder = StringBuilder.new();
+    let mutable i = UInt(0);
+    while i < UInt(65536) then {
+        builder.push_string("()");
+        i += UInt(1);
+    };
+    builder.push_string("x");
+    let too_many = builder.into_string();
+    when Regex.compile(too_many) in {
+        .Ok(_) then assert(false, "65536 groups must be refused"),
+        .Error(_) then assert(true, "refused"),
+    };
+
+    println("many_groups_ok");
+};
