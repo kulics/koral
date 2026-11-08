@@ -55,12 +55,12 @@ that is the comparison being asked about. Specifically:
 - **Sort verification**: the sort cases assert the output really is sorted
   and fold an order-sensitive checksum of the result into the RESULT line,
   so a wrong or partial sort is visible in the cross-language checksum check.
-- **Two known work imbalances**, both left standing because fixing them would
-  change the workload: Go's `regex_scan` materializes all 250k matches
-  (~24MB of `[][]byte`) while the other three stream them, and
-  `string_find`/`string_build` time Koral's final `to_string()` copy inside
-  the window (Go's builder hands its buffer over copy-free). Both inflate
-  the *other* language's row, never Koral's.
+- **One known work imbalance**, left standing because fixing it would change
+  the workload: Go's `regex_scan` materializes all 250k matches (~24MB of
+  `[][]byte`) while the other three stream them. It inflates Go's row, never
+  Koral's. (The builder cases end with `into_string()` — the zero-copy
+  hand-over, the same shape as Go's `String()` — so no final-copy tax is
+  timed inside the Koral window.)
 - **The `rust` row of `regex_scan` is absent**: the case needs the `regex`
   crate and a bare `rustc` cannot resolve it.
 - **Hash seeding**: Koral's table hashing draws a per-process seed (hash
@@ -79,52 +79,57 @@ is koral / best(Go, Swift): below 1.0 means Koral is faster than both.
 
 | case | koral | go | swift | rust (ref) | vs mainstream |
 |---|---|---|---|---|---|
-| loop_pipeline | 1.24 | 1.90 | 1.36 | 1.34 | **0.91x** |
-| set_membership | 13.97 | 26.73 | 16.72 | 10.79 | **0.84x** |
-| string_find | 11.99 | 13.90 | 274.75 | 10.51 | **0.86x** |
-| sort_ints | 38.36 | 59.82 | 82.84 | 13.79 | **0.64x** |
-| fib_recursive | 0.42 | 0.44 | 0.42 | 0.35 | 1.00x |
-| list_sum | 4.73 | 4.33 | 5.86 | 3.89 | 1.09x |
-| sort_strings | 35.68 | 27.90 | 38.10 | 16.49 | 1.28x |
-| struct_iter | 11.80 | 7.73 | 7.76 | 11.08 | 1.53x |
-| regex_scan | 80.98 | 203.37 | 49.50 | – | 1.64x |
-| string_build | 8.99 | 5.13 | 12.03 | 7.78 | 1.75x |
-| dict_lookup | 100.38 | 75.24 | 56.91 | 74.39 | 1.76x |
+| loop_pipeline | 1.23 | 1.78 | 1.37 | 1.35 | **0.90x** |
+| set_membership | 13.85 | 24.20 | 16.96 | 11.04 | **0.82x** |
+| string_find | 11.01 | 14.50 | 280.43 | 10.45 | **0.76x** |
+| sort_ints | 38.88 | 60.43 | 83.87 | 13.91 | **0.64x** |
+| fib_recursive | 0.42 | 0.43 | 0.42 | 0.36 | 1.00x |
+| list_sum | 4.89 | 4.53 | 6.07 | 4.08 | 1.08x |
+| sort_strings | 36.45 | 28.34 | 38.36 | 16.84 | 1.29x |
+| struct_iter | 11.92 | 8.01 | 8.13 | 11.74 | 1.49x |
+| regex_scan | 106.00 | 205.54 | 50.70 | – | 2.09x |
+| string_build | 8.79 | 5.28 | 11.83 | 7.93 | 1.66x |
+| dict_lookup | 124.26 | 96.38 | 63.58 | 85.86 | 1.95x |
 
-**Six of eleven cases are at or ahead of both Go and Swift** (loop_pipeline,
-set_membership, string_find and sort_ints outright; fib at parity; list_sum
-1.09x behind Go with Swift beaten). Raw compute is at parity or better; the
-integer and container throughput cases hold their own against both
-mainstream implementations.
+**Four cases beat both Go and Swift outright** (sort_ints 0.64x,
+string_find 0.76x, set_membership 0.82x, loop_pipeline 0.90x) and fib_recursive
+is at parity. The sub-millisecond cases (fib, loop_pipeline) drift noticeably
+between sessions on this machine while the longer cases hold steady — the
+ratios for those two are parity claims, not score.
 
 ## Where the remaining gaps come from
 
-- `dict_lookup` (1.76x to Swift): key construction, not the dictionary. The
+- `dict_lookup` (1.95x to Swift): key construction, not the dictionary. The
   case builds `"k\(i)"` per operation — one short-string allocation plus
   digit fill, measured at 35ns per key against ~3ns to hash one — while
   Swift's interpolated short strings live in inline buffers at ~no cost.
   Koral's dict operations alone are already faster than Swift's. The fix is
   a small-string (SSO) representation for `String`; single-block allocation
   was chosen over SSO and the swap is a representation project.
-- `string_build` (1.75x to Go): the append-growth policy is the case (all
-  four start from a 16-byte seed), and Go's builder benefits from its
-  zero-copy `String()` hand-off while Koral's window includes a final
-  `to_string()` copy. Growth accounting and the copy together are the gap.
-- `regex_scan` (1.64x to ICU): Swift's engine is ICU — a SIMD literal scan
+- `string_build` (1.66x to Go): the append-growth policy is the case (all
+  four start from a 16-byte seed), and the builders hand their buffers over
+  copy-free (`into_string()` / Go's `String()`). The gap is the growth
+  accounting and the per-append constant.
+- `regex_scan` (2.09x to ICU): Swift's engine is ICU — a SIMD literal scan
   over a heavily tuned backtracker. Koral's pure-language engine
   (`std/text/regex_engine.koral`) runs a required-literal prefilter, a
-  budgeted backtracker with capture undo, and a Pike-VM fallback for
-  pathological shapes; it is 2.5x ahead of Go's pure-language NFA. The
-  remaining room is per-op constant in the backtracker's step loop and a
-  vectorized literal scan; a lazy DFA would close the unanchored scan phase.
-- `struct_iter` (1.53x to both): per-element access on small managed
+  budgeted backtracker with capture undo and quantified-atom run fusion,
+  and a Pike-VM fallback for pathological shapes; it is 2.7x ahead of Go's
+  pure-language NFA. Against ICU the remaining room is per-op constant in
+  the backtracker plus the capture-result shape: the hybrid result (inline
+  slots for ≤16 groups, one heap block beyond) rides an extra handle through
+  the iterator's value copies, a cost the compiler can still remove
+  (copy-elision for the option/iterator protocol, borrowed-self for
+  address-taken locals).
+- `struct_iter` (1.49x to both): per-element access on small managed
   records in a tight loop. The call-side RC traffic and the element copies
   are gone (place semantics); what remains is the loop's load/dispose
   shape against Go/Rust's flat slices.
-- `sort_strings` (1.28x to Go): Go's `sort.Strings` is an unstable
-  pattern-defeating quicksort; Koral's sort is stable (like Swift's and
-  Rust's), and Swift's is slower than Koral's here. The gap to Go is
-  partly the stability guarantee Go does not make.
+- `sort_strings` (1.29x to Go): measured phase split puts ~75% of the case
+  in the sort itself (generation ~9.5 ms, sort ~30.7 ms, verify ~1.4 ms) —
+  and swapping in `sort_unstable` leaves the case unchanged within noise.
+  The gap is per-comparison constant: ~8.6 ns per string compare against
+  Go's ~5 ns. Swift, with a stable sort too, is slower than Koral's.
 - The sort pair versus Rust (2.2x–2.8x) is the reference ceiling showing:
   driftsort's SIMD merge networks are vectorization beyond std-level code.
   Against the mainstream bar both sort cases are at or ahead.
