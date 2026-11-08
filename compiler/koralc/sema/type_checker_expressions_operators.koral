@@ -2847,13 +2847,33 @@ given TypeChecker {
             TypedExprKind.Variable(total_symbol),
             total_symbol.symbol_type,
         );
-        // 单块 String：对象与字节一次分配，部件直接写进块内字节尾部。
-        // 旧路径是 staging 缓冲 + 收养构造（两次分配）。
+        // 单块分配：Bytes 块一次分配，收成 String 值后部件直接写进块内
+        // 字节尾部。旧路径是 staging 缓冲 + 收养构造（两次分配）。
+        let bytes_type = self.builtin_bytes_type();
         let alloc_expr = make_typed_expr(
             TypedExprKind.IntrinsicCall(
-                TypedIntrinsic.AllocString(total_var, string_type),
+                TypedIntrinsic.AllocString(total_var, bytes_type),
             ),
-            string_type,
+            bytes_type,
+        );
+        let bytes_symbol = self.make_expr_temp_symbol(
+            "__interp_bytes",
+            bytes_type,
+            VariableKind.Value(),
+        );
+        block_statements.push(
+            TypedStatement.LetStmt(bytes_symbol, alloc_expr, unknown_span()),
+        );
+        let bytes_var = make_typed_expr(
+            TypedExprKind.Variable(bytes_symbol),
+            bytes_symbol.symbol_type,
+        );
+        let mutable wrap_args = List[TypedExpr].new();
+        wrap_args.push(total_var);
+        let wrap_expr = self.lower_receiver_method_call_expr(
+            bytes_var,
+            "wrap",
+            wrap_args,
         );
         let str_symbol = self.make_expr_temp_symbol(
             "__interp_str",
@@ -2861,7 +2881,7 @@ given TypeChecker {
             VariableKind.Value(),
         );
         block_statements.push(
-            TypedStatement.LetStmt(str_symbol, alloc_expr, unknown_span()),
+            TypedStatement.LetStmt(str_symbol, wrap_expr, unknown_span()),
         );
         let str_var = make_typed_expr(
             TypedExprKind.Variable(str_symbol),
@@ -2954,7 +2974,7 @@ given TypeChecker {
             );
         };
 
-        // alloc_string 已置好 [len] 处的 0，无需再写终止字节。
+        // alloc_bytes 已置好 [len] 处的 0，无需再写终止字节。
         let str_result = make_typed_expr(
             TypedExprKind.Variable(str_symbol),
             str_symbol.symbol_type,

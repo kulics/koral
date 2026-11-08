@@ -34,24 +34,24 @@ given CodeGen {
             "static const uint8_t \(bytes_var_name.to_string())[] = { \(byte_literals.to_string()) };\n",
         );
 
-        // In the simplified type system, String is a managed nominal type.
-        // The payload is __koral_payload_Std_String with {data, len} fields.
-        let storage_c_type = self.managed_payload_type_name(str_type);
         let byte_count = utf8_bytes.count();
         // Immortal 头（Swift 的 immortal object 做法）：静态字面量的 control 块
         // strong_count = -1，retain/release 直接早退，永不释放。
         // weak_count 同为 -1 哨兵：weak 操作读到 strong == -1 早退（见
         // __koral_weak_retain），所以 downgrade/release 不会把静态块送进 free。
         // 布局仍是 [Control | payload]，所以 __koral_control_of(ptr) 能反推回来。
+        // 载荷是 __koral_StringPayload——Bytes 托管块的 {data, len} 布局
+        // （见 std/koral_runtime.h 的 ABI 注）。
         self.add_indent();
         self.buffer.push_string(
-            "static const struct { struct __koral_Control ctrl; struct \(storage_c_type) payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
+            "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
         );
 
         let c_type = self.c_type_name(str_type);
+        // 字面量的值形：String = { bytes: 句柄, len: 内容长 }（std/string.koral）。
         return self.next_temp_with_init(
             c_type,
-            "(\(c_type)){ .ptr = (void*)&\(storage_var_name)_block.payload }",
+            "(\(c_type)){ .bytes = { .ptr = (void*)&\(storage_var_name)_block.payload }, .len = \(byte_count) }",
         );
     };
 
@@ -77,12 +77,12 @@ given CodeGen {
             "static const uint8_t \(bytes_var_name)[] = { \(byte_literals.to_string()) };\n",
         );
 
-        let storage_c_type = self.managed_payload_type_name(str_type);
         let byte_count = utf8_bytes.count();
         self.buffer.push_string(
-            "static const struct { struct __koral_Control ctrl; struct \(storage_c_type) payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
+            "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storage_var_name)_block = { { \(immortal_refcount()), -1 }, { (uint8_t*)\(bytes_var_name), \(byte_count) } };\n",
         );
-        return "{ .ptr = (void*)&\(storage_var_name)_block.payload }";
+        // 值形初始化（地址常量，C 静态初始化合法）：String = { bytes, len }。
+        return "{ .bytes = { .ptr = (void*)&\(storage_var_name)_block.payload }, .len = \(byte_count) }";
     };
 
     sanitize_c_numeric_literal(self, value: String): String = {

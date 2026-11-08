@@ -1757,12 +1757,12 @@ extension TypeChecker {
       let count = try inferTypedExpression(arguments[2])
       return .intrinsicCall(.compareMemory(a: a, b: b, count: count))
 
-    case "alloc_string":
+    case "alloc_bytes":
       guard arguments.count == 1 else {
         throw SemanticError.invalidArgumentCount(function: name, expected: 1, got: arguments.count)
       }
       let len = try inferTypedExpression(arguments[0])
-      return .intrinsicCall(.allocString(len: len, resultType: builtinStringType()))
+      return .intrinsicCall(.allocString(len: len, resultType: builtinBytesType()))
 
     case "init_memory":
       guard arguments.count == 2 else {

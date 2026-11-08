@@ -51,7 +51,11 @@ public type Regex;
 /// A match result that records only the whole match's span, with no capture groups.
 public type Match;
 
-/// A match result that also records the span of every capture group.
+/// A match result that also records the span of every capture group. The
+/// slots are an inline value -- zero allocations -- while the pattern fits
+/// (up to 16 capture groups, the common case), and one packed heap block
+/// beyond, the mainstream per-match shape (Go hands back a `[]int`). Either
+/// way a pattern may declare up to 65535 groups.
 public type Captures;
 
 /// Iterator over the successive non-overlapping matches of a regex.

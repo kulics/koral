@@ -9449,15 +9449,29 @@ extension TypeChecker {
     )
 
     let totalVar = TypedExpressionNode.variable(identifier: totalSymbol)
-    // Single-block String: object and bytes in one allocation, parts written
-    // straight into the in-block tail (isomorphic to koralc's
-    // lower_interpolated_string).
-    let strAlloc = TypedExpressionNode.intrinsicCall(
-      .allocString(len: totalVar, resultType: stringType)
+    // Single-block allocation: one `Bytes` block adopted into the String
+    // value, parts written straight into the in-block tail (isomorphic to
+    // koralc's lower_interpolated_string).
+    let bytesType = builtinBytesType()
+    guard let wrapMethod = try lookupDeclaredMethod(on: bytesType, name: "wrap") else {
+      throw SemanticError(.generic("Missing method 'wrap' for type 'Bytes'"), span: span)
+    }
+    let bytesAlloc = TypedExpressionNode.intrinsicCall(
+      .allocString(len: totalVar, resultType: bytesType)
+    )
+    let bytesSymbol = nextInterpSymbol("bytes", type: bytesType)
+    statements.append(
+      .variableDeclaration(identifier: bytesSymbol, value: bytesAlloc, mutable: false)
+    )
+    let bytesVar = TypedExpressionNode.variable(identifier: bytesSymbol)
+    let strWrap = try buildConcreteMethodCall(
+      base: bytesVar,
+      method: wrapMethod,
+      arguments: [totalVar]
     )
     let strSymbol = nextInterpSymbol("str", type: stringType)
     statements.append(
-      .variableDeclaration(identifier: strSymbol, value: strAlloc, mutable: false)
+      .variableDeclaration(identifier: strSymbol, value: strWrap, mutable: false)
     )
     let strVar = TypedExpressionNode.variable(identifier: strSymbol)
     let dataExpr = try buildConcreteMethodCall(
@@ -9525,7 +9539,7 @@ extension TypeChecker {
       )
     }
 
-    // alloc_string already zeroes byte [len]; no terminator store needed.
+    // alloc_bytes already zeroes byte [len]; no terminator store needed.
     let strResult = TypedExpressionNode.variable(identifier: strSymbol)
     return .blockExpression(statements: statements, tailExpression: strResult, type: stringType)
   }

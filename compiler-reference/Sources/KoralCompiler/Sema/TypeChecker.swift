@@ -1475,6 +1475,21 @@ public class TypeChecker {
     return .structure(defId: defId)
   }
 
+  func builtinBytesType() -> Type {
+    if let bytesType = currentScope.lookupType("Bytes") {
+      return bytesType
+    }
+    // Fallback: std should normally define `type mutable Bytes(...)`.
+    let defId = getOrAllocateTypeDefId(
+      name: "Bytes",
+      kind: .structure,
+      access: .internal,
+      modulePath: [],
+      sourceFile: ""
+    )
+    return .structure(defId: defId)
+  }
+
   /// Infer the type of a rune literal. Default is Rune; coercion to UInt8 happens in coerceLiteral.
   func inferRuneLiteral(value: String) throws -> TypedExpressionNode {
     guard let runeType = currentScope.lookupType("Rune") else {

@@ -570,9 +570,9 @@ public class CodeGen {
 
   /// The static-initializer side of `generateStringLiteral`: hoists an
   /// immortal storage block into the current buffer (file scope) and
-  /// returns the brace initializer that points a handle at it. A literal
-  /// string global is then `T name = { .ptr = (void*)&block.payload };` --
-  /// an address constant, so the C initializer is valid.
+  /// returns the brace initializer for the String value around it. A literal
+  /// string global is then `T name = { .bytes = { .ptr = ... }, .len = N };`
+  /// -- address constants only, so the C initializer is valid.
   func stringLiteralStaticInitializer(_ value: String, type: Type) -> String {
     let bytesVar = nextTemp() + "_bytes"
     let storageVar = nextTemp() + "_storage"
@@ -583,9 +583,10 @@ public class CodeGen {
     }
     byteLiterals += "0x00"
     buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
-    let payloadType = managedPayloadTypeName(for: type)
-    buffer += "static const struct { struct __koral_Control ctrl; struct \(payloadType) payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
-    return "{ .ptr = (void*)&\(storageVar)_block.payload }"
+    // The payload is `__koral_StringPayload` -- the `Bytes` managed-block
+    // layout (see std/koral_runtime.h).
+    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
+    return "{ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .len = \(utf8Bytes.count) }"
   }
 
   func cIdentifier(for symbol: Symbol) -> String {
@@ -1824,6 +1825,7 @@ public class CodeGen {
 
   func generateStringLiteral(_ value: String, type: Type) -> String {
     let bytesVar = nextTemp() + "_bytes"
+    let storageVar = nextTemp() + "_storage"
     let utf8Bytes = Array(value.utf8)
     var byteLiterals = utf8Bytes.map { String(format: "0x%02X", $0) }.joined(separator: ", ")
     if !byteLiterals.isEmpty {
@@ -1833,41 +1835,19 @@ public class CodeGen {
     addIndent()
     buffer += "static const uint8_t \(bytesVar)[] = { \(byteLiterals) };\n"
 
-    guard case .structure(let stringDefId) = type,
-          let stringMembers = context.getStructMembers(stringDefId) else {
-      fatalError("String literal requires flattened String(data, len) layout")
-    }
-    let hasData = stringMembers.contains(where: { $0.name == "data" })
-    let hasLen = stringMembers.contains(where: { $0.name == "len" })
-    guard hasData, hasLen else {
-      fatalError("String literal requires flattened String(data, len) layout")
-    }
-
-    let dataVar = nextTemp() + "_data"
+    // Immortal header (the immortal-object trick): strong = -1 makes
+    // retain/release bail out, weak = -1 is the sentinel the weak ops check.
+    // The payload is `__koral_StringPayload` -- the `Bytes` managed-block
+    // layout (see std/koral_runtime.h). A literal block is never freed, so
+    // there is no per-eval allocation at all.
     addIndent()
-    buffer += "uint8_t* \(dataVar) = (uint8_t*)malloc(\(utf8Bytes.count + 1));\n"
-    addIndent()
-    buffer += "memcpy(\(dataVar), \(bytesVar), \(utf8Bytes.count + 1));\n"
+    buffer += "static const struct { struct __koral_Control ctrl; struct __koral_StringPayload payload; } \(storageVar)_block = { { -1, -1 }, { (uint8_t*)\(bytesVar), \(utf8Bytes.count) } };\n"
 
     let cType = cTypeName(type)
-    if usesManagedNominalRepresentation(type) {
-      let resultVar = nextTemp()
-      let payloadType = managedPayloadTypeName(for: type)
-      addIndent()
-      buffer += "\(cType) \(resultVar);\n"
-      addIndent()
-      buffer += "\(resultVar).ptr = __koral_payload_of(malloc(sizeof(struct __koral_Control) + sizeof(struct \(payloadType))));\n"
-      addIndent()
-      buffer += "__koral_control_of(\(resultVar).ptr)->strong_count = 1;\n"
-      addIndent()
-      buffer += "__koral_control_of(\(resultVar).ptr)->weak_count = 1;\n"
-      addIndent()
-      buffer += "((struct \(payloadType)*)\(resultVar).ptr)->data = \(dataVar);\n"
-      addIndent()
-      buffer += "((struct \(payloadType)*)\(resultVar).ptr)->len = \(utf8Bytes.count);\n"
-      return resultVar
-    }
-    return nextTempWithInit(cType: cType, initExpr: "(\(cType)){ \(dataVar), \(utf8Bytes.count) }")
+    // The value shape: String = { bytes: handle, len: content length }.
+    return nextTempWithInit(
+      cType: cType,
+      initExpr: "(\(cType)){ .bytes = { .ptr = (void*)&\(storageVar)_block.payload }, .len = \(utf8Bytes.count) }")
   }
 
   // MARK: - Unified Copy/Move Helpers

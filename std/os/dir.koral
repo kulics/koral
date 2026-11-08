@@ -185,7 +185,7 @@ given WalkDirIterator: Iterator[DirEntry] {
 /// Create single directory (parent must exist)
 public let create_dir[T: IntoPath](path: T): Result[Void] = {
     let s = path.into_path().to_string();
-    return if __koral_mkdir(s.data, 493) == 0 then .Ok({})
+    return if __koral_mkdir(s.bytes.data, 493) == 0 then .Ok({})
     else .Error(last_error_message());
 };
 
@@ -273,7 +273,7 @@ public let create_dir_all[T: IntoPath](path: T): Result[Void] = {
 
         let current_path = current_text.into_path();
         if not path_exist(current_path) then {
-            if __koral_mkdir(current_text.data, 493) != 0 then {
+            if __koral_mkdir(current_text.bytes.data, 493) != 0 then {
                 // Another process/thread may have created the directory concurrently.
                 if not path_exist(current_path) then {
                     return Result[Void].Error(last_error_message());
@@ -300,7 +300,7 @@ private let dir_all_final_check(target: Path): Result[Void] = when file_info(tar
 /// Remove empty directory
 public let remove_dir[T: IntoPath](path: T): Result[Void] = {
     let s = path.into_path().to_string();
-    return if __koral_rmdir(s.data) == 0 then .Ok({}) else .Error(last_error_message());
+    return if __koral_rmdir(s.bytes.data) == 0 then .Ok({}) else .Error(last_error_message());
 };
 
 /// Remove directory recursively (removes all contents first).
@@ -345,7 +345,7 @@ public let remove_dir_all[T: IntoPath](path: T): Result[Void] = {
     // The tree walk lives in the runtime: handle-relative, no-follow, and
     // identity-checked per child, so races cannot move deletion out of the
     // tree. `-2` is the root changing shape after the checks above.
-    let rc = __koral_remove_dir_all(s.data);
+    let rc = __koral_remove_dir_all(s.bytes.data);
     return if rc == 0 then Result[Void].Ok({})
     else if rc == -2 then Result[Void].Error("remove_dir_all: not a directory")
     else Result[Void].Error(last_error_message());
@@ -356,7 +356,7 @@ public let remove_dir_all[T: IntoPath](path: T): Result[Void] = {
 public let read_dir[T: IntoPath](path: T): Result[DirIterator] = {
     let p = path.into_path();
     let s = p.to_string();
-    let dir = __koral_opendir(s.data);
+    let dir = __koral_opendir(s.bytes.data);
     if dir == null then {
         return Result[DirIterator].Error(last_error_message());
     };
@@ -394,7 +394,7 @@ public let create_temp_dir[T: IntoPath](dir: T, prefix: String =): Result[Path] 
     template.push_string("XXXXXX");
     // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
     let mutable template_text = template.to_string();
-    let result = __koral_mkdtemp(template_text.data);
+    let result = __koral_mkdtemp(template_text.bytes.data);
     if result == null then {
         return .Error(last_error_message());
     };

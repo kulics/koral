@@ -95,9 +95,9 @@ struct __koral_Control {
 #define __koral_control_of(payload) \
     ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
 
-// String 的堆载荷布局。与 std/string.koral 的 `type String(data, len)` 字段序
-// 耦合，字面量发射（generate_string_literal）同样按 {data, len} 组织——三处
-// 一致是 ABI，改动要同步。
+// String 字节块的堆载荷布局。与 std/string.koral 的 `type mutable Bytes(data,
+// len)` 字段序耦合，字面量发射（generate_string_literal）同样按 {data, len}
+// 组织静态块——三处一致是 ABI，改动要同步。
 struct __koral_StringPayload {
     void* data;
     uintptr_t len;
@@ -106,7 +106,7 @@ struct __koral_StringPayload {
 // 单块 String 对象：一次分配 [Control | payload | bytes(len + 1)]，字节未
 // 初始化、仅 [len] 置 0，data 指向块内字节尾部（不是独立缓冲）。返回
 // payload 地址（即句柄里的 ptr）。strong=1 / weak=1 与 codegen 的受管构造
-// 一致。alloc_string intrinsic 的运行时侧。
+// 一致。alloc_bytes intrinsic 的运行时侧。
 void* __koral_string_alloc(uintptr_t len);
 
 // memcmp 垫片：签名必须与 codegen 按 `let foreign` 声明生成的原型逐字一致

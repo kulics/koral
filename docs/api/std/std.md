@@ -472,9 +472,18 @@ public type mutable SetIterator[T: Hash];
 
 /// String is immutable value data with fixed storage length.
 /// The contents are UTF-8 bytes, so `count` measures bytes and not runes.
+///
+/// Swift-struct shaped: the value is an unboxed `{bytes, len}` pair whose
+/// copies retain and release the inner `Bytes` block, so the refcount lives on
+/// the buffer and not on the string value. `len` is read straight from the
+/// value (no handle chase), and a value owes no user destructor -- dropping it
+/// releases the field, which drives the block's RC to zero.
 public type String;
 
-/// Mutable builder for incremental string construction without relying on String alias mutation.
+/// Mutable builder for incremental string construction without relying on
+/// String alias mutation. The bytes accumulate inside a `Bytes` block from
+/// the start, so `into_string` hands the finished string over without a copy.
+/// `data` caches the block's byte pointer for the append hot paths.
 public type mutable StringBuilder;
 
 /// Iterator over the whitespace-separated words of a string.
@@ -2893,6 +2902,10 @@ given[T: Any] List[T] {
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
     public reserve(self, additional: UInt): Void;
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
+    /// Every hot field is read before the growth call and re-read only in
+    /// the growth path: an opaque call in the loop forces the C backend to
+    /// reload whatever sits after it, per element. `len` flushes before
+    /// `grow_to` because growth moves exactly `len` elements.
     public push(self, value: T): Void;
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
@@ -3019,6 +3032,14 @@ given[T: Ord] List[T] {
     /// Sort in place in ascending order using the `Ord` trait.
     /// Stable: equal elements keep their relative order.
     public sort(self): Void;
+    /// Sort in place in ascending order using the `Ord` trait.
+    /// Unstable: equal elements may come out in any order. Pattern-defeating
+    /// quicksort (pdqsort) -- median-of-3 / ninther pivots, insertion sort on
+    /// small and nearly-sorted blocks, equal-key runs skipped by the
+    /// partition, a deterministic scramble on degenerate shapes, heap sort
+    /// as the last-resort arm: no scratch buffer, O(log n) stack, O(n log n)
+    /// worst case.
+    public sort_unstable(self): Void;
 };
 
 /// Querying, extracting, and transforming an optional value.
@@ -3479,23 +3500,6 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
     public next(self): Option[T];
 };
 
-/// `Drop` for `String`: nothing to free. The bytes live in the same heap block
-/// as the object (`alloc_string`, see above), and the RC release frees the
-/// whole block after the destructor runs. `Drop` is kept to pin the managed
-/// layout -- a bare `type String` would be an unboxed {data, len} whose copies
-/// double-free the shared buffer.
-given String: Drop {
-    /// Nothing to free here: the bytes live in the object's own heap block,
-    /// which the RC release frees whole. See the note above.
-    public drop(self): Void;
-};
-
-/// `Drop` for `StringBuilder`: frees the builder's buffer.
-given StringBuilder: Drop {
-    /// Release the buffer owned by the builder.
-    public drop(self): Void;
-};
-
 /// Construction and incremental building of strings.
 given StringBuilder {
     /// Create an empty builder with a small initial capacity.
@@ -3519,6 +3523,9 @@ given StringBuilder {
     public clear(self): Void;
     /// Return a stable snapshot that does not alias future builder mutations.
     public to_string(self): String;
+    /// Hand the accumulated bytes to a `String` without copying them.
+    /// Afterwards the builder is empty again, holding a fresh empty buffer.
+    public into_string(self): String;
 };
 
 /// Construction, inspection, searching, and transformation of `String` values.

@@ -169,7 +169,7 @@ public let copy_file[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void
 /// Remove (delete) a file
 public let remove_file[T: IntoPath](path: T): Result[Void] = {
     let s = path.into_path().to_string();
-    return if __koral_remove(s.data) == 0 then Result[Void].Ok({})
+    return if __koral_remove(s.bytes.data) == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
 
@@ -177,7 +177,7 @@ public let remove_file[T: IntoPath](path: T): Result[Void] = {
 public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void] = {
     let src_s = src.into_path().to_string();
     let to_s = to.into_path().to_string();
-    return if __koral_rename(src_s.data, to_s.data) == 0 then Result[Void].Ok({})
+    return if __koral_rename(src_s.bytes.data, to_s.bytes.data) == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
 
@@ -188,7 +188,7 @@ public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Vo
 /// Check if path exists on disk.
 public let path_exist[T: IntoPath](path: T): Bool = {
     let s = path.into_path().to_string();
-    return __koral_path_exists(s.data) != 0;
+    return __koral_path_exists(s.bytes.data) != 0;
 };
 
 /// Convert to absolute path (does not resolve symlinks)
@@ -219,7 +219,7 @@ public let canonicalize_path[T: IntoPath](path: T): Result[Path] = {
     let s = path.into_path().to_string();
     let buf = alloc_memory[UInt8](4096);
     defer dealloc_memory(buf);
-    let result = __koral_realpath(s.data, buf, 4096);
+    let result = __koral_realpath(s.bytes.data, buf, 4096);
     if result != 0 then {
         return Result[Path].Error(last_error_message());
     };
@@ -264,7 +264,7 @@ public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File] = {
             perm = 0;
         },
     };
-    let fd = __koral_open(s.data, open_mode, perm);
+    let fd = __koral_open(s.bytes.data, open_mode, perm);
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };
@@ -282,7 +282,7 @@ public let create_file[T: IntoPath](path: T): Result[File] = open_file(path, .Cr
 public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
     let s = path.into_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    let result = __koral_stat(s.data, &stat_buf);
+    let result = __koral_stat(s.bytes.data, &stat_buf);
     if result != 0 then {
         return Result[FileInfo].Error(last_error_message());
     };
@@ -308,7 +308,7 @@ public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
 public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
     let s = path.into_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    let result = __koral_lstat(s.data, &stat_buf);
+    let result = __koral_lstat(s.bytes.data, &stat_buf);
     if result != 0 then {
         return Result[FileInfo].Error(last_error_message());
     };
@@ -337,7 +337,7 @@ public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
 /// Set file permissions
 public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void] = {
     let s = path.into_path().to_string();
-    let result = __koral_chmod(s.data, perm.mode());
+    let result = __koral_chmod(s.bytes.data, perm.mode());
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -351,7 +351,7 @@ public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void]
 public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
     let target_s = to.into_path().to_string();
     let link_s = link.into_path().to_string();
-    let result = __koral_link(target_s.data, link_s.data);
+    let result = __koral_link(target_s.bytes.data, link_s.bytes.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -365,7 +365,7 @@ public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Res
 public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
     let target_s = to.into_path().to_string();
     let link_s = link.into_path().to_string();
-    let result = __koral_symlink(target_s.data, link_s.data);
+    let result = __koral_symlink(target_s.bytes.data, link_s.bytes.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -382,7 +382,7 @@ public let read_symlink[T: IntoPath](path: T): Result[Path] = {
     let mutable buf_size: UInt = 4096;
     while buf_size <= 1048576 then {
         let buf = alloc_memory[UInt8](buf_size);
-        let result = __koral_readlink(s.data, buf, buf_size);
+        let result = __koral_readlink(s.bytes.data, buf, buf_size);
         if result < 0 then {
             dealloc_memory(buf);
             return Result[Path].Error(last_error_message());
@@ -402,7 +402,7 @@ public let read_symlink[T: IntoPath](path: T): Result[Path] = {
 /// Truncate a file to the specified size
 public let truncate_file[T: IntoPath](path: T, size: UInt64): Result[Void] = {
     let s = path.into_path().to_string();
-    let result = __koral_truncate(s.data, Int64(size));
+    let result = __koral_truncate(s.bytes.data, Int64(size));
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -428,10 +428,10 @@ public let create_temp_file[T: IntoPath](dir: T, prefix: String =): Result[File]
     template.push_string(prefix);
     template.push_string("XXXXXX");
     let mutable template_text = template.to_string();
-    let fd = __koral_mkstemp(template_text.data);
+    let fd = __koral_mkstemp(template_text.bytes.data);
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };
-    let file_path = String.from_cstring_unchecked(template_text.data);
+    let file_path = String.from_cstring_unchecked(template_text.bytes.data);
     return Result[File].Ok(File(FileStorage(fd, file_path.into_path())));
 };
