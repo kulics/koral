@@ -1,0 +1,103 @@
+// EXPECT: sort_unstable_ok
+// Unstable introsort: same multiset and ordering contract as `sort`, minus
+// the stability guarantee. Covers the three arms (insertion for short runs,
+// quick sort, heap-sort depth fallback) and the equal-key degenerate shape.
+
+let check_sorted(xs: List[Int], label: String): Void = {
+    let mutable i: UInt = 1;
+    while i < xs.count() then {
+        assert(xs[i - 1] <= xs[i], label + ": must be sorted");
+        i = i + 1;
+    };
+};
+
+let main(): Void = {
+    // Empty and tiny lists.
+    let mutable empty = List[Int].new();
+    empty.sort_unstable();
+    assert(empty.count() == 0, "empty");
+
+    let mutable one = List[Int].new();
+    one.push(42);
+    one.sort_unstable();
+    assert(one[0] == 42, "single");
+
+    let mutable two = List[Int].new();
+    two.push(5);
+    two.push(3);
+    two.sort_unstable();
+    assert(two[0] == 3 and two[1] == 5, "pair");
+
+    // Sorted and reverse-sorted inputs.
+    let mutable sorted = List[Int].new();
+    let mutable i = 0;
+    while i < 100 then {
+        sorted.push(i);
+        i = i + 1;
+    };
+    sorted.sort_unstable();
+    check_sorted(sorted, "already sorted");
+
+    let mutable reverse = List[Int].new();
+    let mutable j = 0;
+    while j < 100 then {
+        reverse.push(100 - j);
+        j = j + 1;
+    };
+    reverse.sort_unstable();
+    check_sorted(reverse, "reverse sorted");
+
+    // All-equal keys: the quicksort degenerates and the depth limit must
+    // keep it O(n log n) while preserving every element.
+    let mutable all_equal = List[Int].new();
+    let mutable k = 0;
+    while k < 500 then {
+        all_equal.push(7);
+        k = k + 1;
+    };
+    all_equal.sort_unstable();
+    check_sorted(all_equal, "all equal");
+    assert(all_equal.count() == 500, "all equal count");
+    assert(all_equal[0] == 7 and all_equal[499] == 7, "all equal values");
+
+    // LCG-random 20k with duplicates: the result must match the stable
+    // sort's values element-for-element.
+    let mutable lcg = 12345;
+    let mutable xs = List[Int].new();
+    let mutable ys = List[Int].new();
+    let mutable n = 0;
+    while n < 20000 then {
+        lcg = (lcg * 1103515245 + 12345) % 2147483647;
+        let v = lcg % 1000;
+        xs.push(v);
+        ys.push(v);
+        n = n + 1;
+    };
+    xs.sort_unstable();
+    ys.sort();
+    check_sorted(xs, "random 20k");
+    assert(xs.count() == ys.count(), "random count");
+    let mutable m: UInt = 0;
+    while m < xs.count() then {
+        assert(xs[m] == ys[m], "unstable result matches stable values");
+        m = m + 1;
+    };
+
+    // Managed elements (String keys): the RC accounting of take/init swaps
+    // must survive the unstable path.
+    let mutable names = List[String].new();
+    names.push("pear");
+    names.push("apple");
+    names.push("fig");
+    names.push("apple");
+    names.push("date");
+    names.push("cherry");
+    names.push("banana");
+    names.sort_unstable();
+    assert(names[0] == "apple" and names[1] == "apple", "strings 0/1");
+    assert(names[2] == "banana" and names[3] == "cherry", "strings 2/3");
+    assert(names[4] == "date" and names[5] == "fig", "strings 4/5");
+    assert(names[6] == "pear", "strings 6");
+
+    println("sort_unstable_ok");
+};

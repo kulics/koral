@@ -857,6 +857,283 @@ given[T: Ord] List[T] {
         };
     };
 
+    /// Sort in place in ascending order using the `Ord` trait.
+    /// Unstable: equal elements may come out in any order. Pattern-defeating
+    /// quicksort (pdqsort) -- median-of-3 / ninther pivots, insertion sort on
+    /// small and nearly-sorted blocks, equal-key runs skipped by the
+    /// partition, a deterministic scramble on degenerate shapes, heap sort
+    /// as the last-resort arm: no scratch buffer, O(log n) stack, O(n log n)
+    /// worst case.
+    public sort_unstable(self): Void = {
+        let len = self.len;
+        if len <= 1 then {
+            return;
+        };
+        // Recursion budget: 2 * floor(log2(len)).
+        let mutable depth: UInt = 0;
+        let mutable p: UInt = 1;
+        while p < len then {
+            p = p * 2;
+            depth = depth + 1;
+        };
+        self.pdqsort_comparable(0, len, depth * 2);
+    };
+
+    /// Exchange two slots; RC-neutral (two takes, two inits). A self-swap is
+    /// a no-op -- taking one slot twice would read its own vacancy.
+    private swap_at(self, a: UInt, b: UInt): Void = {
+        if a == b then {
+            return;
+        };
+        let source = self.source;
+        let pa = source + a;
+        let pb = source + b;
+        let ta = take_memory(pa);
+        let tb = take_memory(pb);
+        init_memory(pa, tb);
+        init_memory(pb, ta);
+    };
+
+    /// The pdqsort loop over [start, end): partition, recurse into the
+    /// smaller side and iterate on the larger -- the stack stays O(log n).
+    /// `depth` is the remaining bad-partition budget before heap sort takes
+    /// over the rest of the range.
+    private pdqsort_comparable(self, start: UInt, end: UInt, depth: UInt): Void = {
+        let mutable s = start;
+        let mutable e = end;
+        let mutable bad = depth;
+        let mutable scramble = false;
+        while e - s > 16 then {
+            if bad == 0 then {
+                self.heap_sort_comparable(s, e);
+                return;
+            };
+            bad = bad - 1;
+
+            // The previous partition was lopsided: scramble this range
+            // BEFORE it is partitioned (scrambling a partitioned range
+            // would mix elements across the region seams) so the shape
+            // that defeated the last pivot cannot defeat this one.
+            if scramble then {
+                self.break_patterns(s, e);
+                scramble = false;
+            };
+
+            // A nearly-sorted block finishes here: at most a handful of
+            // out-of-order elements, settled by insertion.
+            if self.partial_insertion_sort(s, e) then {
+                return;
+            };
+
+            // Pivot value: median-of-3 on narrow blocks, the ninther on
+            // wide ones. It rides in a local copy so the slots can move
+            // under it.
+            let n = e - s;
+            let pivot_val = if n > 50 then {
+                self.ninther_val(s, e)
+            } else {
+                self.median3_val(s, s + n / 2, e - 1)
+            };
+
+            let out = self.partition_le(s, e, pivot_val);
+            let left_n = out - s;
+            let right_n = e - out;
+
+            // Everything landed on one side (every key equal to the pivot):
+            // heap sort the block -- the recursion would not shrink.
+            if left_n == UInt(0) or right_n == UInt(0) then {
+                self.heap_sort_comparable(s, e);
+                return;
+            };
+
+            // Recurse into the smaller side and iterate on the larger. A
+            // lopsided split (under an eighth) burns an extra budget unit
+            // and arms the scramble for the side we keep.
+            scramble = left_n * 8 < n or right_n * 8 < n;
+            if scramble and bad > 0 then {
+                bad = bad - 1;
+            };
+            if left_n < right_n then {
+                self.pdqsort_comparable(s, out, bad);
+                s = out;
+            } else {
+                self.pdqsort_comparable(out, e, bad);
+                e = out;
+            };
+        };
+        self.insertion_sort_comparable(s, e);
+    };
+
+    /// Insert-sort the block, giving up once it is clearly not nearly
+    /// sorted -- pdqsort's fast path. `true` = the block comes out sorted;
+    /// `false` = it needs a real partition (the prefix is still valid).
+    private partial_insertion_sort(self, start: UInt, end: UInt): Bool = {
+        let source = self.source;
+        let startp = source + start;
+        let mutable moves: UInt = 0;
+        let mutable ip = source + start + 1;
+        let lastp = source + end;
+        while ip != lastp then {
+            if (ip - 1)[0] > ip[0] then {
+                let key_val = take_memory(ip);
+                let mutable hole = ip;
+                while hole != startp and (hole - 1)[0] > key_val then {
+                    let prev = hole - 1;
+                    let moved = take_memory(prev);
+                    init_memory(hole, moved);
+                    hole = prev;
+                    moves = moves + 1;
+                };
+                init_memory(hole, key_val);
+                if moves > 8 then {
+                    return false;
+                };
+            };
+            ip = ip + 1;
+        };
+        return true;
+    };
+
+    /// Two-way partition of [s, e) around the pivot value: [s, out) <= the
+    /// pivot, [out, e) > it. Hoare with skip runs -- a stretch already in
+    /// partition order advances without swapping, so the predictor sees
+    /// streaks and only inversions pay a swap.
+    private partition_le(self, s: UInt, e: UInt, pivot_val: T): UInt = {
+        let source = self.source;
+        let mutable lo = s;
+        let mutable hi = e - 1;
+        while lo < hi then {
+            while lo < hi and (source + lo)[0] <= pivot_val then {
+                lo = lo + 1;
+            };
+            while lo < hi and (source + hi)[0] > pivot_val then {
+                hi = hi - 1;
+            };
+            if lo < hi then {
+                self.swap_at(lo, hi);
+                lo = lo + 1;
+                hi = hi - 1;
+            };
+        };
+        if lo < e and (source + lo)[0] > pivot_val then {
+            return lo;
+        };
+        return lo + 1;
+    };
+
+    /// The median of three slot values, moving nothing.
+    private median3_val(self, a: UInt, b: UInt, c: UInt): T = {
+        let source = self.source;
+        let va = (source + a)[0];
+        let vb = (source + b)[0];
+        let vc = (source + c)[0];
+        if va < vb then {
+            if vb < vc then {
+                return vb;
+            };
+            if va < vc then {
+                return vc;
+            };
+            return va;
+        };
+        if va < vc then {
+            return va;
+        };
+        if vb < vc then {
+            return vc;
+        };
+        return vb;
+    };
+
+    /// The ninther: the median of three medians spread across a wide block.
+    private ninther_val(self, s: UInt, e: UInt): T = {
+        let n = e - s;
+        let eighth = n / 8;
+        let mid = s + n / 2;
+        let m1 = self.median3_val(s, s + eighth, s + eighth * 2);
+        let m2 = self.median3_val(mid - eighth, mid, mid + eighth);
+        let m3 = self.median3_val(e - 1 - eighth * 2, e - 1 - eighth, e - 1);
+        if m1 < m2 then {
+            if m2 < m3 then {
+                return m2;
+            };
+            if m1 < m3 then {
+                return m3;
+            };
+            return m1;
+        };
+        if m1 < m3 then {
+            return m1;
+        };
+        if m2 < m3 then {
+            return m3;
+        };
+        return m2;
+    };
+
+    /// Scramble a few slots so adversary shapes (organ pipes, saw teeth)
+    /// stop defeating the pivot choice. Deterministic and overflow-safe: the
+    /// small-stride recurrence keeps every value below `n`.
+    private break_patterns(self, s: UInt, e: UInt): Void = {
+        let n = e - s;
+        if n <= 16 then {
+            return;
+        };
+        let modulus = n - 1;
+        let mutable r = n % 97 + 13;
+        let mutable k: UInt = 0;
+        while k < 3 then {
+            r = (r * 7 + 3) % modulus;
+            self.swap_at(s + (k * 5 + 1), s + r);
+            k = k + 1;
+        };
+    };
+
+    /// In-place heap sort over [start, end): the O(n log n) worst-case arm.
+    private heap_sort_comparable(self, start: UInt, end: UInt): Void = {
+        let count = end - start;
+        if count <= 1 then {
+            return;
+        };
+        // Sift the range into a max-heap rooted at slot `start`.
+        let mutable i = count / 2;
+        while i > 0 then {
+            i = i - 1;
+            self.sift_down_comparable(start, i, count);
+        };
+        // Repeatedly move the max into the shrinking tail of the range.
+        let mutable last = count - 1;
+        while last > 0 then {
+            self.swap_at(start, start + last);
+            self.sift_down_comparable(start, 0, last);
+            last = last - 1;
+        };
+    };
+
+    /// Sift slot `start + root` down through the first `count` slots.
+    private sift_down_comparable(self, start: UInt, root: UInt, count: UInt): Void = {
+        let source = self.source;
+        let mutable r = root;
+        while true then {
+            let left = r * 2 + 1;
+            if left >= count then {
+                return;
+            };
+            let right = left + 1;
+            let mutable child = left;
+            if right < count
+                and (source + (start + left))[0] < (source + (start + right))[0]
+            then {
+                child = right;
+            };
+            if (source + (start + r))[0] >= (source + (start + child))[0] then {
+                return;
+            };
+            self.swap_at(start + r, start + child);
+            r = child;
+        };
+    };
+
     // Recursive merge sort over [start, end). `buf` is one scratch buffer of
     // `self.len` slots shared by every merge level; each merge vacates the
     // slots it uses before returning, so the reuse is safe.
