@@ -40,11 +40,104 @@ uint8_t** __koral_argv(void) {
     return __koral_argv_storage;
 }
 
+// ── 小块 String 缓存 ──────────────────────────────────────────────────────
+// malloc+free 一对 ≈14ns，是小串（to_string、字典键、插值）的成本大头。
+// __koral_string_alloc 的小块（64B 槽 = Control + StringPayload + ≤39B 尾巴）
+// 改从一块预留区分槽复用；回收判定 = 地址区间成员（O(1) 免查表），RC 协议、
+// 块布局与 ABI 全部原样。区外块（大字符串、其它受管类型）照旧 malloc/free。
+// 槽分配：线程本地 freelist（单线程访问，无 ABA）+ 线程本地 slab（slab 从区
+// 内全局 bump 原子划取）；死块头 8 字节（strong/weak 槽已死）串 freelist。
+// 区是一次性 malloc（POSIX 上大块 mmap 按需分页，未触碰页不占 RSS）；耗尽
+// 后回落 malloc。
+#define KORAL_STR_SLOT 64
+#define KORAL_STR_SLAB_BYTES ((uintptr_t)256 * KORAL_STR_SLOT)
+#define KORAL_STR_REGION_BYTES ((uintptr_t)32 * 1024 * 1024)
+
+static char* __koral_str_region = NULL;
+static uintptr_t __koral_str_region_end = 0;
+static _Atomic(uintptr_t) __koral_str_region_top = 0;
+
+static _Thread_local void* __koral_str_freelist = NULL;
+static _Thread_local char* __koral_str_slab_next = NULL;
+static _Thread_local char* __koral_str_slab_end = NULL;
+
+// 惰性建区：CAS 竞争者自旋等发布。发布序（top/end 先于 region 指针）保证
+// 看见 region 的线程一定看得见区界。
+static void __koral_str_region_init(void) {
+    static _Atomic int state = 0;
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&state, &expected, 1)) {
+        char* region = (char*)malloc(KORAL_STR_REGION_BYTES);
+        if (region) {
+            __koral_str_region_end = (uintptr_t)region + KORAL_STR_REGION_BYTES;
+            atomic_store(&__koral_str_region_top, (uintptr_t)region);
+            atomic_thread_fence(memory_order_release);
+            __koral_str_region = region;
+        } else {
+            atomic_store(&state, 2);
+        }
+    } else {
+        while (atomic_load(&state) == 1 && !__koral_str_region) {
+            /* spin until the winner publishes (or fails) */
+        }
+    }
+}
+
+static inline int __koral_str_in_region(const void* p) {
+    return __koral_str_region
+        && (const char*)p >= __koral_str_region
+        && (const char*)p < (const char*)__koral_str_region_end;
+}
+
+static void* __koral_str_slot_alloc(void) {
+    if (__koral_str_freelist) {
+        void* slot = __koral_str_freelist;
+        __koral_str_freelist = *(void**)slot;
+        return slot;
+    }
+    if (__koral_str_slab_next == __koral_str_slab_end) {
+        uintptr_t base = atomic_fetch_add(&__koral_str_region_top, KORAL_STR_SLAB_BYTES);
+        if (base == 0 || base + KORAL_STR_SLAB_BYTES > __koral_str_region_end) {
+            return NULL; /* 区耗尽/未建：回落 malloc */
+        }
+        __koral_str_slab_next = (char*)base;
+        __koral_str_slab_end = (char*)base + KORAL_STR_SLAB_BYTES;
+    }
+    void* slot = __koral_str_slab_next;
+    __koral_str_slab_next += KORAL_STR_SLOT;
+    return slot;
+}
+
+// RC 协议的唯一 free 接缝（release_slow 与 weak_release 共用）：区内的块回
+// 线程本地 freelist，其余照旧 free。
+static void __koral_control_free(struct __koral_Control* control) {
+    if (__koral_str_in_region(control)) {
+        *(void**)control = __koral_str_freelist;
+        __koral_str_freelist = control;
+        return;
+    }
+    free(control);
+}
+
 // 单块 String 分配（见 koral_runtime.h 的声明注释）。计数初始化与 codegen 的
 // 受管构造一致（strong=1 / weak=1，含隐式 weak）。
 void* __koral_string_alloc(uintptr_t len) {
-    struct __koral_Control* control = (struct __koral_Control*)malloc(
-        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + len + 1);
+    uintptr_t need =
+        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + len + 1;
+    struct __koral_Control* control = NULL;
+    if (need <= KORAL_STR_SLOT) {
+        if (!__koral_str_region) {
+            __koral_str_region_init();
+        }
+        if (__koral_str_region) {
+            control = (struct __koral_Control*)__koral_str_slot_alloc();
+        }
+    }
+    if (control) {
+        /* 区槽：零初始化计数由下面的显式赋值覆盖，字节尾不保证为零。 */
+    } else {
+        control = (struct __koral_Control*)malloc(need);
+    }
     control->strong_count = 1;
     control->weak_count = 1;
     struct __koral_StringPayload* payload =
@@ -85,7 +178,7 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     // release 减量：发布 dtor 的写。胜者是本线程时直接 free；胜者是别的
     // weak_release 时，对方的 acquire fence 与这里同步（见 __koral_weak_release）。
     if (atomic_fetch_sub_explicit(&control->weak_count, 1, memory_order_release) == 1) {
-        free(control);
+        __koral_control_free(control);
     }
 }
 
@@ -107,7 +200,7 @@ void __koral_weak_release(void* raw_control) {
         // dtor 对 payload 的全部写。RMW 链构成 release sequence，这一道
         // acquire fence 把析构线程的写并入本线程。
         atomic_thread_fence(memory_order_acquire);
-        free(control);
+        __koral_control_free(control);
     }
 }
 
