@@ -104,11 +104,13 @@ this round's builder hot path plus the runtime's small-block string cache
 
 - `dict_lookup` (1.53x to Swift): key construction, not the dictionary. The
   case builds `"k\(i)"` per operation — interpolation plumbing plus digit
-  fill against Swift's inline-buffered short strings at ~no cost — while
-  Koral's dict operations alone are already faster than Swift's. The
-  small-block cache took the allocation tax out; the deeper fix is a
-  small-string (SSO) representation (`{ bytes, len }` is already the shape
-  it needs), deferred as a representation project.
+  fill against Swift's inline-buffered short strings at ~no cost. Measured
+  with prebuilt keys, the dict operations themselves run at about Go's
+  level (insert ~50ns, lookup ~60ns per op) but not Swift's (~50ns): Swift
+  keeps keys inline in its entries. The small-block cache took the
+  allocation tax out; the deeper fix is a small-string (SSO)
+  representation (`{ bytes, len }` is already the shape it needs),
+  deferred as a representation project.
 - `regex_scan` (1.22x to ICU): Swift's engine is ICU — a SIMD literal scan
   over a heavily tuned backtracker. Koral's pure-language engine
   (`std/text/regex_engine.koral`) runs a required-literal prefilter, a
