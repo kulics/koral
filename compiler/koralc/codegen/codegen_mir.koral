@@ -18,6 +18,7 @@ type MIRFunctionEmitPlan(
     non_owning_local_ids: Dict[UInt, Bool],
     tracked_init_locals: Dict[UInt, Bool],
     lifetime_plan: MIRLocalLifetimePlan,
+    address_taken_local_ids: Set[UInt],
 );
 
 /// 一个 MIR 函数发射出的 C 函数体，以及该函数体是否含 alloc_memory。
@@ -640,6 +641,7 @@ type mutable MIRFunctionCodeEmitter(
     mutable non_owning_local_ids: Dict[UInt, Bool],
     mutable tracked_init_locals: Dict[UInt, Bool],
     mutable lifetime_plan: MIRLocalLifetimePlan,
+    mutable address_taken_local_ids: Set[UInt],
     mutable lambda_counter: UInt,
     mutable nested_definitions: StringBuilder,
     mutable current_owner_callable_name_cache_prefix: Option[String],
@@ -711,6 +713,7 @@ private let build_mir_function_emit_plan(
         non_owning_local_ids,
         tracked_init_locals,
         lifetime_plan,
+        mir_address_taken_locals(function),
     );
 };
 
@@ -728,6 +731,7 @@ given MIRFunctionCodeEmitter {
             plan.non_owning_local_ids,
             plan.tracked_init_locals,
             plan.lifetime_plan,
+            plan.address_taken_local_ids,
             UInt(0),
             StringBuilder.new(),
             when codegen.current_function_owner_type in {
@@ -1717,6 +1721,7 @@ given MIRFunctionCodeEmitter {
                     let emission = self.emit_direct_call_argument(
                         call.arguments[UInt(0)],
                         ownership,
+                        self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
@@ -1765,10 +1770,12 @@ given MIRFunctionCodeEmitter {
                     let first_emission = self.emit_direct_call_argument(
                         call.arguments[UInt(0)],
                         first_ownership,
+                        self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     let second_emission = self.emit_direct_call_argument(
                         call.arguments[UInt(1)],
                         second_ownership,
+                        self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     // Auto-wrap borrowed reference parameters.
                     let mutable first_type = self.type_of_value(call.arguments[UInt(0)]);
@@ -1860,6 +1867,12 @@ given MIRFunctionCodeEmitter {
             },
             _ then List[Type].new(),
         };
+        let callee_pure = when call.callee in {
+            .Function(sym) then {
+                self.codegen.impure_function_ids.get(sym.def_id.id) is .None()
+            },
+            _ then false,
+        };
         let mutable arg_values = List[String].new();
         let mutable emissions = List[MIRValueEmission].new();
         let mutable ownerships = List[MIROwnershipUse].new();
@@ -1869,7 +1882,11 @@ given MIRFunctionCodeEmitter {
             let ownership = if has_ownerships then call.argument_ownerships[arg_i]
             else MIROwnershipUse.Move();
             ownerships.push(ownership);
-            let emission = self.emit_direct_call_argument(arg, ownership);
+            let emission = self.emit_direct_call_argument(
+                arg,
+                ownership,
+                callee_pure,
+            );
             // Auto-wrap: if the function parameter expects a borrowed reference
             // but the argument is a raw value, wrap it in a stack borrow.
             let mutable arg_type = self.type_of_value(arg);
@@ -1950,10 +1967,73 @@ given MIRFunctionCodeEmitter {
         );
     };
 
+    /// Whether `t` is a nominal whose slots are rewritable through any alias
+    /// of the object (`type mutable`) -- the layout question, not syntax.
+    type_is_mutable_nominal(self, t: Type): Bool = {
+        return when t in {
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
+                self.codegen.context.is_struct_mutable(def_id)
+            },
+            .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then {
+                template_def_id.is_valid()
+                    and self.codegen.context.is_struct_mutable(template_def_id)
+            },
+            _ then false,
+        };
+    };
+
+    /// Can an impure callee borrow this place's read +0, with no retained
+    /// temp? The value must survive the call untouched:
+    ///
+    /// * A **bare local read** is always safe: the binding owns the value, so
+    ///   it cannot die mid-call, and there is no intermediate slot whose
+    ///   rewrite could invalidate the read. (A chain of such borrows bottoms
+    ///   out at a real owner in some caller frame.)
+    /// * A **projected read** loads out of a slot that code with an alias to
+    ///   the container can rewrite (`type mutable` fields are rewritable
+    ///   through any handle), so every container along the chain must be
+    ///   immutable -- `observe(h, h.box)` rewrites `h.box` mid-call and frees
+    ///   the borrowed box behind the argument's back. The root-local gates
+    ///   still apply: an escaped `&local` can overwrite the binding itself,
+    ///   and a reference-like local points into someone else's slot.
+    /// * Anything else (global/deref/pointer-element roots) is never stable.
+    ///
+    /// A pure callee rewrites nothing reachable, so it needs no stability at
+    /// all -- the caller checks that first.
+    borrowed_place_is_stable(self, place: MIRPlace): Bool = {
+        let mutable current = place;
+        while true then {
+            when current in {
+                .Local(local) then {
+                    if self.address_taken_local_ids.contains(local.raw_value) then {
+                        return false;
+                    };
+                    return when self.local_info(local) in {
+                        .Some(info) then not is_reference_like_type(info.local_type),
+                        .None() then false,
+                    };
+                },
+                .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                    let container_t = self.type_of_place(base);
+                    if is_reference_like_type(container_t)
+                        or self.type_is_mutable_nominal(container_t) then {
+                        return false;
+                    };
+                    current = base;
+                },
+                _ then {
+                    return false;
+                },
+            };
+        };
+        return false;
+    };
+
     emit_direct_call_argument(
         self,
         value: MIRValue,
         ownership: MIROwnershipUse,
+        callee_pure: Bool,
     ): MIRValueEmission = {
         let mutable value_type = self.type_of_value(value);
         return when ownership in {
@@ -2013,18 +2093,16 @@ given MIRFunctionCodeEmitter {
                 }
             },
             .Borrow() then {
-                // A projection read (field/global/deref) can be overwritten
-                // during the call: the callee rewrites the holder, the old
-                // object dies, and this +0 handle dangles. Retain a temp for
-                // the call's duration -- its cleanup drops right after the
-                // call. A bare local is stable: the callee cannot release
-                // the caller's binding, so the convention keeps passing it
-                // +0 untouched.
+                // A borrowed read goes over +0 only when it is stable for the
+                // call's duration (see `borrowed_place_is_stable`) or the
+                // callee is a pure reader (see `compute_impure_function_ids`)
+                // and can rewrite nothing reachable. Everything else keeps a
+                // retained temp that drops right after the call.
                 let emission = when value in {
                     .PlaceRead(place, _) then {
-                        if not (place is .Local(_)) and self.codegen.needs_drop(
-                            value_type,
-                        ) then {
+                        let stable = callee_pure
+                            or self.borrowed_place_is_stable(place);
+                        if not stable and self.codegen.needs_drop(value_type) then {
                             self.emit_place_read(place, MIROwnershipUse.Copy(), false)
                         } else {
                             self.emit_value_source(value)

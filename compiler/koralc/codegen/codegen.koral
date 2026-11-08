@@ -111,6 +111,9 @@ public type mutable CodeGen(
     // 传 +0、被调方不释放该参数，每层调用省掉一对 retain/release。`self` 即
     // 参数 0。分析与配平规则见 codegen_borrowed_self.koral。
     mutable borrowed_param_slots: Dict[String, Bool],
+    // 纯读体的补集：能改写「参数/全局可达状态」的函数集合（def_id 键）。
+    // 对纯被调的借用槽，投影读可以安全 +0（调用内无人能清空持有槽）。
+    mutable impure_function_ids: Dict[UInt, Bool],
 );
 
 given CodeGen {
@@ -166,9 +169,12 @@ given CodeGen {
             Dict[String, List[UInt]].new(),
             // borrowed_param_slots
             Dict[String, Bool].new(),
+            // impure_function_ids
+            Dict[UInt, Bool].new(),
         );
         cg.build_def_id_indices();
         cg.borrowed_param_slots = compute_borrowed_param_slots(program);
+        cg.impure_function_ids = compute_impure_function_ids(program);
         return cg;
     };
 

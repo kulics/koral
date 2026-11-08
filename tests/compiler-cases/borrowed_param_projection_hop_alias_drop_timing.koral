@@ -1,0 +1,43 @@
+// EXPECT: Drop Box 7
+// EXPECT: observe 7
+// EXPECT: Drop Box 0
+// EXPECT: done
+// EXPECT: Drop Box 1
+// The borrowed-parameter convention must not outlive the object -- even when
+// the projection runs through a VALUE root. `o.h` is an immutable field of an
+// unboxed `Outer`, but `o.h.box` is read out of a `type mutable` Holder's
+// rewritable slot: the callee rewrites that slot mid-call (`h.box = Box(0)`),
+// which drops the slot's handle while the borrowed parameter still points at
+// the old box. Every container along the projection chain must be immutable
+// for the read to go over +0; here the Holder hop is not, so the call site
+// retains the projection for the call's duration and the old box dies on the
+// caller's side of the return.
+
+type mutable Box(value: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        print("Drop Box ");
+        println(self.value);
+    };
+};
+
+type mutable Holder(mutable box: Box);
+
+type Outer(h: Holder);
+
+/// Observational in `b` (the slot is borrowed), but rewrites the holder
+/// that also owns `b`'s object during the call.
+let observe(h: Holder, b: Box): Int = {
+    h.box = Box(0);
+    return b.value;
+};
+
+let main(): Int = {
+    let o = Outer(Holder(Box(7)));
+    let v = observe(o.h, o.h.box);
+    println("observe \(v)");
+    o.h.box = Box(1);
+    println("done");
+    return 0;
+};

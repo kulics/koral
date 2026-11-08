@@ -101,6 +101,11 @@ type mutable BorrowedSelfWalk(
     unsafe_callees: Dict[UInt, Bool],
     unsafe_slots: Dict[String, Bool],
     receiver_deps: Dict[String, Bool],
+    // Locals whose ADDRESS is taken anywhere in the walked body (a Ref /
+    // Pointer rooted at them). A projection read rooted at any other local
+    // cannot be rewritten during a call -- no alias into its storage exists
+    // -- so the borrowed convention may pass it +0 without a protective copy.
+    address_taken: Set[UInt],
     mutable escaped: Bool,
 );
 
@@ -129,14 +134,35 @@ let borrowed_self_type_is_candidate(t: Type): Bool = {
     };
 };
 
+/// The local a place ultimately roots at, walking Field/EnumPayload
+/// projections: taking a reference to a projection takes a reference to the
+/// root's storage. Deref/PointerElement bases are value bases and root at
+/// nothing here.
+let borrowed_self_place_root_local(place: MIRPlace): Option[UInt] = {
+    let mutable current = place;
+    while true then {
+        when current in {
+            .Local(local) then {
+                return Option[UInt].Some(local.raw_value);
+            },
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                current = base;
+            },
+            .Global(_) or .Deref(_, _) or .PointerElement(_, _) then {
+                return Option[UInt].None();
+            },
+        };
+    };
+    return Option[UInt].None();
+};
+
 /// Root classification of a place relative to the self local:
 /// 0 = not self-rooted, 1 = self-rooted projection (Field/EnumPayload chain),
 /// 2 = the bare self local. Deref/PointerElement bases are VALUE bases and are
 /// walked separately; codegen's `root_local_of_place` treats them the same way
 /// (a Move read through them is already forced to a retained copy, so their
 /// behavior cannot change under the borrowed convention).
-let borrowed_self_place_root_kind(place: MIRPlace, root_local_id: UInt): UInt = {
-    let mutable current = place;
+let borrowed_self_place_root_kind(place: MIRPlace, root_local_id: UInt): UInt = {    let mutable current = place;
     let mutable via_projection = false;
     while true then {
         when current in {
@@ -383,6 +409,9 @@ let borrowed_self_walk_value(
                     w.escaped = true;
                 };
             };
+            if borrowed_self_place_root_local(place) is .Some(root) then {
+                w.address_taken.insert(root);
+            };
             borrowed_self_walk_place(w, place);
         },
         .Cast(operand, _, _) then borrowed_self_walk_operand(w, operand),
@@ -538,6 +567,26 @@ let borrowed_self_walk_function(w: BorrowedSelfWalk, function: MIRFunction): Voi
     };
 };
 
+/// Locals whose address is taken anywhere in the function -- the roots of
+/// `.Ref` / `.Pointer` places. A projection read rooted at any other local
+/// cannot be rewritten during a call (no alias into its storage exists), so
+/// the borrowed convention may pass it +0 without a protective copy.
+let mir_address_taken_locals(function: MIRFunction): Set[UInt] = {
+    let walk = BorrowedSelfWalk(
+        BorrowedSelfWalkMode.GlobalUsage(),
+        UInt(0),
+        UInt(0),
+        Dict[String, Bool].new(),
+        Dict[UInt, Bool].new(),
+        Dict[String, Bool].new(),
+        Dict[String, Bool].new(),
+        Set[UInt].new(),
+        false,
+    );
+    borrowed_self_walk_function(walk, function);
+    return walk.address_taken;
+};
+
 /// Compute the set of (function instance, parameter) slots that run the
 /// borrowed convention. Keys are `borrowed_slot_key(def_id, index)` -- the
 /// ABI unit is the slot: `f(a, b)` may borrow `a` while owning `b`. `self` is
@@ -560,6 +609,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
         Dict[UInt, Bool].new(),
         Dict[String, Bool].new(),
         Dict[String, Bool].new(),
+        Set[UInt].new(),
         false,
     );
     for function in program.functions then {
@@ -636,6 +686,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
                         global_walk.unsafe_callees,
                         global_walk.unsafe_slots,
                         Dict[String, Bool].new(),
+                        Set[UInt].new(),
                         false,
                     );
                     borrowed_self_walk_function(walk, function);
@@ -687,4 +738,266 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
         };
     };
     return result;
+};
+
+// ── Purity: which functions can rewrite parameter-/global-reachable state ────
+
+/// Mutable state of one function's purity walk. The roots are the function's
+/// parameter and capture locals plus every global: a write through one of
+/// them rewrites the CALLER's state (or state reachable from anywhere).
+type mutable PurityWalk(
+    root_ids: Set[UInt],
+    // Locals whose type carries drop glue: their values can hold handles
+    // into caller-reachable object graphs, so writes through them may
+    // rewrite the caller's state even though the local itself is fresh.
+    drop_local_ids: Set[UInt],
+    callees: Dict[UInt, Bool],
+    mutable impure: Bool,
+);
+
+/// Whether writing through a place can rewrite caller-owned state: rooted
+/// at a parameter / capture local (the caller's own slots), at a global, at
+/// a drop-glue local (its value can hold handles into caller-reachable
+/// graphs), or through an unknown pointer.
+let purity_place_reaches_caller_state(
+    place: MIRPlace,
+    roots: Set[UInt],
+    drop_ids: Set[UInt],
+): Bool = {
+    let mutable current = place;
+    while true then {
+        when current in {
+            .Local(local) then {
+                return roots.contains(local.raw_value) or drop_ids.contains(
+                    local.raw_value,
+                );
+            },
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                current = base;
+            },
+            .Global(_) then {
+                return true;
+            },
+            .Deref(_, _) or .PointerElement(_, _) then {
+                return true;
+            },
+        };
+    };
+    return true;
+};
+
+let purity_walk_operand(w: PurityWalk, operand: MIROperand): Void = {
+    when operand in {
+        .Local(_) or .Function(_) or .Constant(_) then {},
+    };
+};
+
+let purity_walk_intrinsic(w: PurityWalk, node: MIRIntrinsic): Void = {
+    when node in {
+        .AllocMemory(count, _) or .AllocString(count, _) then {
+            purity_walk_value(w, count);
+        },
+        .NullPtr(_) then {},
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                purity_walk_value(w, element);
+            };
+        },
+        .DeallocMemory(_) or .DeinitMemory(_) or .TakeMemory(_, _)
+        or .DowngradeRef(_, _) or .UpgradeRef(_, _)
+        or .TraitObjectMatches(_, _, _, _, _) or .TraitObjectDowncast(_, _)
+        or .CopyMemory(_, _, _) or .MoveMemory(_, _, _) or .CompareMemory(_, _, _)
+        or .InitMemory(_, _) or .SpawnThread(_, _, _, _) then {
+            // Memory-writing or pointer-taking: conservative.
+            w.impure = true;
+        },
+    };
+};
+
+let purity_walk_call(w: PurityWalk, call: MIRCall): Void = {
+    when call.callee in {
+        .Function(symbol) then {
+            w.callees.insert(symbol.def_id.id, true);
+        },
+        _ then {
+            // Dynamic dispatch / function value: unknown target.
+            w.impure = true;
+        },
+    };
+    if call.argument_ownerships.count() == call.arguments.count() then {
+        for pair in call.arguments.lazy().enumerate() then {
+            if call.argument_ownerships[pair.first] is .Move() or is .Take() then {
+                when pair.second in {
+                    .PlaceRead(place, _) then {
+                        if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                            // Consuming a caller-rooted slot empties it.
+                            w.impure = true;
+                        };
+                    },
+                    _ then {},
+                };
+            };
+            purity_walk_value(w, pair.second);
+        };
+    } else {
+        w.impure = true;
+        for argument in call.arguments then {
+            purity_walk_value(w, argument);
+        };
+    };
+};
+
+let purity_walk_value(w: PurityWalk, value: MIRValue): Void = {
+    when value in {
+        .Operand(operand) then purity_walk_operand(w, operand),
+        .PlaceRead(place, ownership) then {
+            if ownership is .Move() or is .Take() then {
+                if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                    w.impure = true;
+                };
+            };
+        },
+        .Ref(place, _, _) or .Pointer(place) then {
+            // A reference into caller state: any later write through it
+            // counts against purity.
+            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                w.impure = true;
+            };
+        },
+        .Binary(operation) then {
+            purity_walk_operand(w, operation.left);
+            purity_walk_operand(w, operation.right);
+        },
+        .Unary(operation) then purity_walk_operand(w, operation.operand),
+        .Call(call) then purity_walk_call(w, call),
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                purity_walk_value(w, field);
+            };
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                purity_walk_value(w, argument);
+            };
+        },
+        .EnumTag(tag) then purity_walk_value(w, tag.subject),
+        .TraitObjectConversion(conversion) then purity_walk_value(w, conversion.inner),
+        .TraitMethodCall(call) then {
+            // Unknown target: conservative.
+            w.impure = true;
+            purity_walk_value(w, call.receiver);
+            for argument in call.arguments then {
+                purity_walk_value(w, argument);
+            };
+        },
+        .Cast(operand, _, _) then purity_walk_operand(w, operand),
+        .Intrinsic(node) then purity_walk_intrinsic(w, node),
+        .Lambda(lambda) then {
+            // A closure body may run later against captured state.
+            w.impure = true;
+        },
+    };
+};
+
+let purity_walk_statement(w: PurityWalk, statement: MIRStatement): Void = {
+    when statement in {
+        .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
+        .Assign(place, value) then {
+            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                w.impure = true;
+            };
+            purity_walk_value(w, value);
+        },
+        .CompoundAssign(assignment) then {
+            if purity_place_reaches_caller_state(assignment.target, w.root_ids, w.drop_local_ids) then {
+                w.impure = true;
+            };
+            purity_walk_value(w, assignment.value);
+        },
+        .Drop(place) then {
+            // Dropping a caller-rooted slot releases its value.
+            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                w.impure = true;
+            };
+        },
+        .Retain(value) or .Release(value) then {
+            w.impure = true;
+            purity_walk_value(w, value);
+        },
+        .Evaluate(value) then purity_walk_value(w, value),
+    };
+};
+
+/// The impure complement of the pure-reader convention: a function is impure
+/// when it can rewrite state reachable from its parameters or the globals --
+/// a direct caller-rooted write (including moves-out, drops and references),
+/// dynamic dispatch, a closure, or a call to an impure function. The borrowed
+/// convention may pass projection reads +0 to a PURE callee: with nothing in
+/// the call able to empty the holder's slot, the old value cannot die
+/// mid-call and the drop timing is unchanged.
+let compute_impure_function_ids(program: MIRProgram): Dict[UInt, Bool] = {
+    let mutable direct = Dict[UInt, Bool].new();
+    let mutable callees_by_def = Dict[UInt, Dict[UInt, Bool]].new();
+    for function in program.functions then {
+        let def_id = function.identifier.def_id.id;
+        let roots = Set[UInt].new();
+        for local in function.locals then {
+            if local.storage is .Parameter() or local.storage is .Capture() then {
+                roots.insert(local.id.raw_value);
+            };
+        };
+        let drop_ids = Set[UInt].new();
+        for local in function.locals then {
+            if type_needs_drop(local.local_type) then {
+                drop_ids.insert(local.id.raw_value);
+            };
+        };
+        let walk = PurityWalk(roots, drop_ids, Dict[UInt, Bool].new(), false);
+        for block in function.blocks then {
+            for statement in block.statements then {
+                purity_walk_statement(walk, statement);
+            };
+            when block.terminator in {
+                .Goto(_) or .Unreachable() then {},
+                .Branch(condition, _, _) or .SwitchValue(condition, _, _) then {
+                    purity_walk_operand(walk, condition);
+                },
+                .ReturnValue(operand) then when operand in {
+                    .Some(op) then purity_walk_operand(walk, op),
+                    .None() then {},
+                },
+            };
+        };
+        if walk.impure then {
+            direct.insert(def_id, true);
+        };
+        callees_by_def.insert(def_id, walk.callees);
+    };
+    let mutable impure = Dict[UInt, Bool].new();
+    for pair in direct.iterator() then {
+        impure.insert(pair.first, true);
+    };
+    let mutable changed = true;
+    while changed then {
+        changed = false;
+        for function in program.functions then {
+            let def_id = function.identifier.def_id.id;
+            if impure.get(def_id) is .Some(_) then {
+                continue;
+            };
+            when callees_by_def.get(def_id) in {
+                .Some(callees) then {
+                    for callee in callees.iterator() then {
+                        if impure.get(callee.first) is .Some(_) then {
+                            impure.insert(def_id, true);
+                            changed = true;
+                            break;
+                        };
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    return impure;
 };
