@@ -18,7 +18,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 - 现代、易扫读的语法：显式分号 + 表达式化的控制流，`if`、`when`、`while`、`for` 都使用表达式形态的表层语法。`if` 与 `when` 可以产生值；`while` 与 `for` 总是产生 `Void`。
 - 由声明处类型语义驱动的自动内存管理：浅层不可变的 `type` 与共享的 `type mutable` 对象。布局与生命周期细节由编译器负责。
-- 并发安全在类型声明处决定：`sendable` 族标明哪些类型能跨线程共享，安全的 `sendable mutable` 对象自带对象锁，检查全部落在声明处与形成处。
+- 并发安全在类型声明处决定：`sendable` 族标明哪些类型能跨线程共享，安全的 `sendable mutable` 对象自带可重入对象锁，检查全部落在声明处与形成处。跨线程的集合数据以不可变冻结快照传递。
 - 带 trait 约束的泛型与单态化，实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷举性模式匹配。
 - 基于 trait 的多态，trait object 提供运行期分发。
@@ -30,7 +30,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 ### 核心理念：`type` / `type mutable`
 
-Koral 的 nominal 类型只有两种形态，在声明处决定。语言里的其他一切——别名、可变性与布局——都由这一个决定推导而来。
+Koral 的 nominal 类型有两种可变性形态，在声明处决定。语言里的其他一切——别名、可变性与布局——都由这一个决定推导而来。另有一条独立的 `sendable` 轴管理跨线程共享（见[并发](#并发)）——它与两种形态组合，不改变它们。
 
 **`type` —— 浅层不可变的 nominal 类型。**
 
@@ -1919,7 +1919,7 @@ let main(): Void = {
 };
 ```
 
-不是 `sendable` 的实现在 `given` 处被拒绝：`Type 'Human' must be sendable to implement sendable trait 'Speak'`。继承同样要求显式声明——扩展了 `sendable` trait 的 trait 必须自己声明 `sendable`，否则永远 sendable 的对象族会长出一个非 sendable 的分支：`Trait 'Child' extends sendable trait 'Base' and must be declared sendable`。不做推断。
+不是 `sendable` 的实现在 `given` 处被拒绝：`Type 'Human' must be sendable to implement sendable trait 'Speak'`。泛型实现必须同样证明每个被接纳的实例——把证明写进约束位：`given[T: sendable] Box[T]: Speak`，否则 `given` 被拒绝：`Type 'Box[T]' must be sendable to implement sendable trait 'Speak'; give its generic parameters 'sendable' bounds`。声明处是唯一的证明点：装箱处不再复查 `Speak` 对象，因为每个实现都已知是 `sendable` 的。继承同样要求显式声明——扩展了 `sendable` trait 的 trait 必须自己声明 `sendable`，否则永远 sendable 的对象族会长出一个非 sendable 的分支：`Trait 'Child' extends sendable trait 'Base' and must be declared sendable`。不做推断。
 
 不带 `sendable` 的 trait 的对象保持非 sendable，而且没有类型位置限定词能改变这一点：`sendable Trait` 会被拒绝——`'sendable' qualifier applies only to function types; declare the trait 'sendable' instead`——类型位置的 `sendable` 只限定函数类型（见[派生规则](#派生规则)）。也不存在 `unsafe sendable trait` 形态：实现类型自己带 safe / `unsafe` 形态，而 `trait sendable` 的对象无论哪种实现都是 `sendable` 的。
 

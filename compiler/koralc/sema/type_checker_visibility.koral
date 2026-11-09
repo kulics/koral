@@ -295,7 +295,8 @@ given TypeChecker {
 
     /// Whether the type parameter `name` is KNOWN sendable from its bounds: a
     /// `T sendable` bound, or a bound to a `trait sendable` trait (every impl
-    /// of one is sendable). A bare `T` gets no free pass -- the mirror of
+    /// of one is sendable -- guaranteed by the given-side check in
+    /// type_checker_decls). A bare `T` gets no free pass -- the mirror of
     /// `generic_param_is_mutable_bounded`: otherwise `f[T Any]` could satisfy a
     /// `g[T sendable]` requirement by forwarding its own unconstrained `T`.
     generic_param_is_sendable_bounded(self, name: String): Bool = {
@@ -1650,9 +1651,28 @@ given TypeChecker {
                                     satisfies_owner_constraints = false;
                                 };
                             },
-                            // Shape bounds (`mutable`, `Deref`) are not trait
-                            // conformances, so they are not owner requirements here.
-                            .Mutable() or .Foreign() or .Sendable() then {},
+                            // Shape bounds are real requirements on the
+                            // binding, not formality (mirror of
+                            // generic_trait_conformance_status): `given[T:
+                            // sendable] Box[T]` does not match `Box[Unmarked]`,
+                            // or a non-sendable payload would launder through
+                            // the conformance (concurrency-design.md §trait
+                            // sendability).
+                            .Mutable() then {
+                                if not self.satisfies_mutable_constraint(bound_type) then {
+                                    satisfies_owner_constraints = false;
+                                };
+                            },
+                            .Foreign() then {
+                                if not self.satisfies_foreign_constraint(bound_type) then {
+                                    satisfies_owner_constraints = false;
+                                };
+                            },
+                            .Sendable() then {
+                                if not self.satisfies_sendable_constraint(bound_type) then {
+                                    satisfies_owner_constraints = false;
+                                };
+                            },
                         };
                     };
                 };
@@ -2225,7 +2245,42 @@ given TypeChecker {
                                     return result;
                                 };
                             },
-                            .Mutable() or .Foreign() or .Sendable() then {},
+                            // 形状约束是绑定上的真要求（镜像
+                            // modifier_blanket_trait_conformance_status）：
+                            // `given[T: sendable] Box[T]` 不匹配
+                            // `Box[Unmarked]`，否则非 sendable 载荷经
+                            // conform 洗白（concurrency-design.md §trait
+                            // sendability）。
+                            .Mutable() then {
+                                if not self.satisfies_mutable_constraint(bound_type) then {
+                                    result = GenericTraitConformanceStatus.MissingConstraint(
+                                        bound_type,
+                                        tp.name,
+                                        "mutable",
+                                    );
+                                    return result;
+                                };
+                            },
+                            .Foreign() then {
+                                if not self.satisfies_foreign_constraint(bound_type) then {
+                                    result = GenericTraitConformanceStatus.MissingConstraint(
+                                        bound_type,
+                                        tp.name,
+                                        "foreign",
+                                    );
+                                    return result;
+                                };
+                            },
+                            .Sendable() then {
+                                if not self.satisfies_sendable_constraint(bound_type) then {
+                                    result = GenericTraitConformanceStatus.MissingConstraint(
+                                        bound_type,
+                                        tp.name,
+                                        "sendable",
+                                    );
+                                    return result;
+                                };
+                            },
                         };
                     };
                 };

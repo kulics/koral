@@ -1,0 +1,26 @@
+// EXPECT-ERROR: does not satisfy trait 'Ping' because inner type 'Unmarked' does not implement 'sendable'
+// The laundering attempt the strict given closes at the front door: with
+// `given[T: sendable] Box[T]: Ping`, `Box[Unmarked]` has no `Ping` conformance
+// at all, so the relay call is refused instead of smuggling a non-sendable
+// payload into an always-sendable trait object (concurrency-design.md
+// §trait sendability).
+
+trait sendable Ping {
+    ping(self): Int;
+};
+
+type sendable Box[T: Any](value: T);
+type Unmarked(n: Int);
+
+given[T: sendable] Box[T]: Ping {
+    ping(self): Int = 1;
+};
+
+let relay[P: Ping](p: P): Int = {
+    let obj: Ping = p;
+    return obj.ping();
+};
+
+let main(): Void = {
+    let _ = relay(Box[Unmarked](Unmarked(1)));
+};

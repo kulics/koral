@@ -1802,15 +1802,26 @@ given TypeChecker {
                     );
                     // sendable trait 的实现类型必须自身 sendable（safe /
                     // unsafe 形态都算），trait object 才能恒 sendable
-                    // （concurrency-design.md）。泛型实现按条件规则（实参全
-                    // sendable）判定。
-                    if self.context().is_sendable_trait(trait_def_id) and not self.context().is_sendable_type(
+                    // （concurrency-design.md §trait sendability）。泛型实现
+                    // 必须**证明**每个实参 sendable——约束位收口（`given[T:
+                    // sendable] Box[T]: Ping`）；宽松读法会让「X: sendable
+                    // trait ⟹ X sendable」的约束转发为假，非 sendable 载荷
+                    // 可经泛型中继洗进恒 sendable 的对象（2026-11-09 裁定）。
+                    if self.context().is_sendable_trait(trait_def_id) and not self.satisfies_sendable_constraint(
                         resolved_target,
                     ) then {
-                        self.push_diagnostic(
-                            "Type '\(self.context().type_display_name(resolved_target))' must be sendable to implement sendable trait '\(trait_name)'",
-                            type_node_span(target_type),
-                        );
+                        if self.context().is_sendable_type(resolved_target) then {
+                            // 声明是 sendable、缺的是泛型参数的约束位。
+                            self.push_diagnostic(
+                                "Type '\(self.context().type_display_name(resolved_target))' must be sendable to implement sendable trait '\(trait_name)'; give its generic parameters 'sendable' bounds",
+                                type_node_span(target_type),
+                            );
+                        } else {
+                            self.push_diagnostic(
+                                "Type '\(self.context().type_display_name(resolved_target))' must be sendable to implement sendable trait '\(trait_name)'",
+                                type_node_span(target_type),
+                            );
+                        };
                     };
                     let mutable typed_members = self.check_given_members_for_type(
                         members,

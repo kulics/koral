@@ -2244,17 +2244,38 @@ extension TypeChecker {
       recordedConformances.append(RecordedConformance(
         selfType: selfType,
         typeParamNames: typeParams.map { $0.name },
+        ownerConstraints: Dictionary(typeParams.map { ($0.name, $0.constraints) }, uniquingKeysWith: { first, _ in first }),
         traitDefId: key.traitDefId,
         traitTypeArgs: traitArgTypes
       ))
 
       // sendable trait 的实现类型必须自身 sendable（safe / unsafe 形态都
-      // 算），trait object 才能恒 sendable（concurrency-design.md）。泛型实
-      // 现按条件规则（实参全 sendable）判定。
-      if context.isSendableTrait(key.traitDefId), !context.isSendableType(selfType) {
-        recordError(
-          "Type '\(selfType)' must be sendable to implement sendable trait '\(traitName)'",
-          at: typeNode.span)
+      // 算），trait object 才能恒 sendable（concurrency-design.md §trait
+      // sendability）。泛型实现必须**证明**每个实参 sendable——约束位收口
+      // （`given[T: sendable] Box[T]: Ping`）；宽松读法会让「X: sendable
+      // trait ⟹ X sendable」的约束转发为假（2026-11-09 裁定）。
+      //
+      // The verdict must run with the given's own bounds live: they are
+      // registered per scope, so re-enter one for the check.
+      if context.isSendableTrait(key.traitDefId) {
+        try withNewScope {
+          for typeParam in typeParams {
+            currentScope.defineGenericParameter(
+              typeParam.name, type: .genericParameter(name: typeParam.name))
+          }
+          try recordGenericTraitBounds(typeParams)
+          if !satisfiesSendableConstraint(selfType) {
+            if context.isSendableType(selfType) {
+              recordError(
+                "Type '\(selfType)' must be sendable to implement sendable trait '\(traitName)'; give its generic parameters 'sendable' bounds",
+                at: typeNode.span)
+            } else {
+              recordError(
+                "Type '\(selfType)' must be sendable to implement sendable trait '\(traitName)'",
+                at: typeNode.span)
+            }
+          }
+        }
       }
 
       // Populate blanketGivenConstraints cache for type modifier given declarations.
@@ -4731,6 +4752,7 @@ extension TypeChecker {
       recordedConformances.append(RecordedConformance(
         selfType: selfType,
         typeParamNames: typeParams.map { $0.name },
+        ownerConstraints: Dictionary(typeParams.map { ($0.name, $0.constraints) }, uniquingKeysWith: { first, _ in first }),
         traitDefId: conformanceKey.traitDefId,
         traitTypeArgs: traitArgTypes
       ))

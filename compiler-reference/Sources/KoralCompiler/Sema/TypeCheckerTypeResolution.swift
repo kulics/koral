@@ -1065,16 +1065,34 @@ extension TypeChecker {
       }
     }
 
-    if !hasNominalConformance(selfType: selfType, traitRef: traitRef) {
+    if let failure = nominalConformanceFailure(selfType: selfType, traitRef: traitRef) {
       traitConformanceCache[cacheKey] = false
-      var msg = "Type \(selfType) does not explicitly implement trait \(traitRef)"
-      if let context {
-        msg += " (\(context))"
+      switch failure {
+      case .missingConstraint(let boundType, let constraint, let paramName):
+        // 消息按消费器分形，镜像 koralc：无 trait 参数走
+        // trait_requirement_missing_constraint_message（引号形），带参数走
+        // trait_missing_constraint_message（constraint 形）——两条路径对同一
+        // 失败的措辞相同，收集器的去重让它们合并成一条
+        // （concurrency-design.md §trait sendability）。
+        if traitRef.traitTypeArgs.isEmpty {
+          try handleError(SemanticError(.generic(
+            "Type '\(selfType)' does not satisfy trait '\(traitRef)' because inner type '\(boundType)' does not implement '\(constraint.baseName)'"
+          ), span: currentSpan))
+        } else {
+          try handleError(SemanticError(.generic(
+            "Type \(boundType) does not explicitly implement trait \(constraint.baseName) (checking constraint \(paramName): \(constraint.baseName))"
+          ), span: currentSpan))
+        }
+      case .missingConformance:
+        var msg = "Type \(selfType) does not explicitly implement trait \(traitRef)"
+        if let context {
+          msg += " (\(context))"
+        }
+        // A missing conformance is one problem among several a program may have.
+        // Recording it keeps checking the rest -- a `for` loop whose iterator and
+        // iterable are both unqualified has two of them.
+        try handleError(SemanticError(.generic(msg), span: currentSpan))
       }
-      // A missing conformance is one problem among several a program may have.
-      // Recording it keeps checking the rest -- a `for` loop whose iterator and
-      // iterable are both unqualified has two of them.
-      try handleError(SemanticError(.generic(msg), span: currentSpan))
     }
 
     traitConformanceCache[cacheKey] = true
@@ -1480,26 +1498,9 @@ extension TypeChecker {
     // can be erased to trait objects without user-facing managed ref syntax.
     let concreteType: Type
     let sourceForConversion: TypedExpressionNode
-    // Boxing check (concurrency-design.md rule 6): a `sendable Trait` object
-    // only boxes a sendable concrete type; boxing into the plain form is
-    // unchecked. The blame anchor follows the coerced expression, falling back
-    // to the enclosing construct's cursor like koralc's `push_diagnostic`.
-    func checkSendableBoxing(_ concrete: Type) {
-      let erasedTraitType: Type
-      switch expected {
-      case .reference(let inner), .mutableReference(let inner),
-           .borrowedReference(let inner), .mutableBorrowedReference(let inner),
-           .weakReference(let inner), .mutableWeakReference(let inner):
-        erasedTraitType = inner
-      default:
-        erasedTraitType = expected
-      }
-      if context.isSendableType(erasedTraitType), !context.isSendableType(concrete) {
-        recordError(
-          "Cannot form 'sendable' trait object from non-sendable type '\(concrete.description)'",
-          at: expr.span.isKnown ? expr.span : currentSpan)
-      }
-    }
+    // 装箱处不做第二种 sendable 判定：`trait sendable` 的实现已在 `given`
+    // 处被要求证明 sendable（约束位收口），「X: sendable trait ⟹ X
+    // sendable」恒真（concurrency-design.md §trait sendability）。
     switch expr.type {
     case .reference(let inner):
       if expectsMutableReference {
@@ -1547,14 +1548,12 @@ extension TypeChecker {
           concreteType: expr.type,
           type: expected
         )
-        checkSendableBoxing(expr.type)
         return .makeLetBlock(identifier: tempSymbol, value: expr, body: conversion, type: expected)
       }
     }
 
     try enforceConformance(concreteType)
 
-    checkSendableBoxing(concreteType)
     return .traitObjectConversion(
       inner: sourceForConversion,
       traitName: traitName,

@@ -1,0 +1,24 @@
+// EXPECT-ERROR: must be sendable to implement sendable trait 'Ping'; give its generic parameters 'sendable' bounds
+// A generic impl of a `trait sendable` must PROVE every admitted instantiation
+// sendable: the fix is a `sendable` bound on `T` (`given[T: sendable] Box[T]:
+// Ping`, pinned by given_sendable_bound_ok.koral). A bare `T: Any` is refused
+// here rather than at each boxing -- the box-site check is gone, because the
+// declaration is now the single proof point (concurrency-design.md
+// §trait sendability). The lenient form used to launder non-sendable payloads
+// through generic relays (`fn relay[P: Ping](p: P)`), where the bound-forwarding
+// rule vouches for `P` and nothing could object.
+
+trait sendable Ping {
+    ping(self): Int;
+};
+
+type sendable Box[T: Any](value: T);
+type Unmarked(n: Int);
+
+given[T: Any] Box[T]: Ping {
+    ping(self): Int = 1;
+};
+
+let main(): Void = {
+    let _ = Box[Unmarked](Unmarked(1));
+};

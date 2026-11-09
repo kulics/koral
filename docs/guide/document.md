@@ -18,7 +18,7 @@ This manual is ordered the way the language is learned: **language basics**, the
 
 - Modern, easy-to-scan syntax with explicit semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` all use expression-form surface syntax. `if` and `when` may produce values; `while` and `for` always produce `Void`.
 - Automatic memory management driven by declaration-site type semantics: shallowly immutable `type` versus shared `type mutable` objects. Layout and lifetime details are owned by the compiler.
-- Concurrency safety declared at the type site: the `sendable` family marks which types may cross threads, safe `sendable mutable` objects carry built-in locking, and the checks live at declaration and formation sites.
+- Concurrency safety declared at the type site: the `sendable` family marks which types may cross threads, safe `sendable mutable` objects carry built-in reentrant locking, and the checks live at declaration and formation sites. Cross-thread collection data moves as immutable frozen snapshots.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
 - Trait-based polymorphism with trait objects for runtime dispatch.
@@ -30,7 +30,7 @@ This manual is ordered the way the language is learned: **language basics**, the
 
 ### The Core Idea: `type` / `type mutable`
 
-Koral's nominal types come in exactly two forms, chosen at the declaration site. Everything else in the language — aliasing, mutation and layout — follows from this one decision.
+Koral's nominal types come in two mutability forms, chosen at the declaration site. Everything else in the language — aliasing, mutation and layout — follows from this one decision. A separate `sendable` axis governs cross-thread sharing (see [Concurrency](#concurrency)) — it composes with both forms and never alters them.
 
 **`type` — a shallowly immutable nominal type.**
 
@@ -1982,7 +1982,7 @@ let main(): Void = {
 };
 ```
 
-An implementation that is not `sendable` is refused at the `given`: `Type 'Human' must be sendable to implement sendable trait 'Speak'`. Inheritance demands the same explicitness — a trait that extends a `sendable` trait must declare `sendable` itself, or the always-sendable object family would grow a non-sendable branch: `Trait 'Child' extends sendable trait 'Base' and must be declared sendable`. Nothing is inferred.
+An implementation that is not `sendable` is refused at the `given`: `Type 'Human' must be sendable to implement sendable trait 'Speak'`. A generic implementation must prove every admitted instantiation the same way — spell the proof in the bounds, `given[T: sendable] Box[T]: Speak`, or the `given` is refused with `Type 'Box[T]' must be sendable to implement sendable trait 'Speak'; give its generic parameters 'sendable' bounds`. The declaration is the single proof point: a `Speak` object is never re-checked at the boxing site, because every implementation is already known to be `sendable`. Inheritance demands the same explicitness — a trait that extends a `sendable` trait must declare `sendable` itself, or the always-sendable object family would grow a non-sendable branch: `Trait 'Child' extends sendable trait 'Base' and must be declared sendable`. Nothing is inferred.
 
 A trait declared without `sendable` keeps non-sendable objects, and there is no type-position qualifier to change that: `sendable Trait` is refused with `'sendable' qualifier applies only to function types; declare the trait 'sendable' instead` — `sendable` in type position qualifies function types only (see [Derivation Rules](#derivation-rules)). There is no `unsafe sendable trait` form either: implementation types carry their own safe / `unsafe` forms, and a `trait sendable`'s objects are `sendable` either way.
 

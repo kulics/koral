@@ -480,6 +480,77 @@ extension TypeChecker {
     }
   }
 
+  /// The owner's type-param constraints (`given[T: sendable] Box[T]: Trait`)
+  /// are requirements on the BINDING, not formality: `Box[Unmarked]` must not
+  /// match the template, or a non-sendable payload would launder through the
+  /// conformance. Mirror of the bootstrap's owner-constraint loop in
+  /// `compute_generic_trait_conformance_status` (concurrency-design.md
+  /// §trait sendability). Shape bounds count alongside trait bounds.
+  ///
+  /// `nil` means the constraints hold. The bindings come from the recorded
+  /// given's original `Type` (the conformance KEY erases parameter names into
+  /// `anyGeneric`), matched against the actual receiver.
+  func ownerConstraintStatus(matching pattern: ConformanceKey, actualSelfType: Type) -> NominalConformanceFailure? {
+    for rec in recordedConformances where rec.traitDefId == pattern.traitDefId {
+      guard !rec.ownerConstraints.isEmpty else { continue }
+      var bindings: [String: Type] = [:]
+      let names = Set(rec.typeParamNames)
+      guard unifyGenericTypePattern(
+        pattern: rec.selfType, actual: actualSelfType,
+        typeParamNames: names, inferred: &bindings) else {
+        continue
+      }
+      for name in rec.typeParamNames {
+        guard let boundType = bindings[name],
+              let constraints = rec.ownerConstraints[name] else { continue }
+        for constraint in constraints {
+          switch constraint {
+          case .sendable:
+            if !satisfiesSendableConstraint(boundType) {
+              return .missingConstraint(boundType: boundType, constraint: constraint, paramName: name)
+            }
+          case .foreign:
+            if !satisfiesForeignConstraint(boundType) {
+              return .missingConstraint(boundType: boundType, constraint: constraint, paramName: name)
+            }
+          case .mutable:
+            let mutable: Bool
+            switch boundType {
+            case .structure(let defId):
+              mutable = context.isTypeMutable(defId) || context.isGenericStructTemplateMutable(defId)
+            case .genericStruct(let templateDefId, _):
+              mutable = templateDefId.isValid
+                && (context.isTypeMutable(templateDefId) || context.isGenericStructTemplateMutable(templateDefId))
+            default:
+              mutable = false
+            }
+            if !mutable {
+              return .missingConstraint(boundType: boundType, constraint: constraint, paramName: name)
+            }
+          case .trait(let defId, let traitName, let args):
+            guard let resolvedArgs = try? args.map({
+              try resolveTypeNodeWithSubstitution($0, substitution: bindings)
+            }) else {
+              continue
+            }
+            if case .genericParameter(let traitParamName) = boundType {
+              if !hasTraitBound(traitParamName, traitName: traitName, traitTypeArgs: resolvedArgs) {
+                return .missingConstraint(boundType: boundType, constraint: constraint, paramName: name)
+              }
+            } else if !hasNominalConformance(
+              selfType: boundType,
+              traitRef: canonicalTraitRef(traitName: traitName, traitDefId: defId, traitTypeArgs: resolvedArgs)
+            ) {
+              return .missingConstraint(boundType: boundType, constraint: constraint, paramName: name)
+            }
+          }
+        }
+      }
+      return nil
+    }
+    return nil
+  }
+
   private func unifyGenericTypePattern(
     pattern: Type,
     actual: Type,

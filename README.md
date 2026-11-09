@@ -1,8 +1,8 @@
 # The Koral Programming Language
 
-Koral is a compiled language built for the way code is written now: much of it is produced by AI agents, and all of it is read by people. Its rules are shaped to give a generator few ways to go wrong and a reviewer few places to look — statement boundaries are explicit, mutability is declared once, a module-level name has one owner, and error flow is spelled inside the expression. The compiler audits the rest.
+Koral is a compiled language built for the way code is written now: much of it is produced by AI agents, and all of it is read by people. Its rules are shaped to give a generator few ways to go wrong and a reviewer few places to look — statement boundaries are explicit, mutability is declared once, concurrency safety is declared once, a module-level name has one owner, and error flow is spelled inside the expression. The compiler audits the rest.
 
-There is no garbage collector and no manual `free`. Nominal types come in exactly two forms, chosen at the declaration site — shallowly immutable `type` and shared `type mutable` — and memory management follows from that one decision. Koral compiles to C for broad platform compatibility.
+There is no garbage collector and no manual `free`. Nominal types are fixed at the declaration site along two axes — mutability (`type` values are shallowly immutable, `type mutable` values are shared objects) and thread sharing (the `sendable` family) — and memory management and concurrency safety both follow from those decisions. Koral compiles to C for broad platform compatibility.
 
 > Status: Koral is experimental and not yet production-ready.
 
@@ -16,6 +16,7 @@ There is no garbage collector and no manual `free`. Nominal types come in exactl
 - **One shape for control flow.** `if`, `when`, `while` and `for` are all expressions, and their branches read the same `... then ...` shape — `if` and `when` produce branch values, loops produce `Void`.
 - **The compiler audits generated code.** `when` must be exhaustive, a `for` pattern may not fail, the rest pattern `...` never binds, and evaluation order is fully specified. Partial output fails to compile instead of compiling and misbehaving.
 - **Mutability is declared once, at the type.** `type` values are shallowly immutable and have no identity; `type mutable` values are shared objects whose `mutable` fields change in place. Layout is the compiler's business — there is no managed-reference syntax to invent.
+- **Concurrency safety is declared once, at the type.** The `sendable` family says what may cross threads; a safe `sendable mutable` object carries a reentrant lock the compiler holds across every field access and each assignment, non-`sendable` state stays thread-confined and pays no lock cost, and cross-thread collection data moves as frozen snapshots. Race freedom is a typing decision, not a review checklist.
 
 ## A taste of Koral
 
@@ -75,6 +76,7 @@ let main(): Void = {
 ## Language highlights
 
 - Automatic memory management without a GC or manual `free`, driven by `type` / `type mutable`
+- Concurrency safety at the declaration site: `sendable` types with compiler-managed reentrant locks, thread-confined containers, and frozen snapshots for cross-thread data
 - Expression-oriented control flow with exhaustive pattern matching
 - Algebraic data types, generics with trait constraints, monomorphized zero-cost abstraction
 - Trait objects for runtime polymorphism; `given` blocks for implementations

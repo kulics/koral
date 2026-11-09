@@ -79,7 +79,7 @@ safe `sendable` 承诺**数据竞争自由**：跨线程共享该类型（及其
 **`trait sendable Foo`**——修饰符跟在关键字后（镜像 `type sendable` 槽位）。三条规则：
 
 1. **对象恒 sendable**：`trait sendable` 的 trait object 按声明即 `sendable`，无需逐点限定、无需装箱检查。
-2. **实现必须 sendable**：`given Bar: Foo` 处检查 `Bar` 是 `sendable`（safe 或 unsafe 均可——形态承诺由实现类型自己携带）；不满足 → `Type 'Bar' must be sendable to implement sendable trait 'Foo'`（锚 given 目标类型）。泛型 `given` 走条件规则。
+2. **实现必须 sendable**：`given Bar: Foo` 处检查 `Bar` 是 `sendable`（safe 或 unsafe 均可——形态承诺由实现类型自己携带）；不满足 → `Type 'Bar' must be sendable to implement sendable trait 'Foo'`（锚 given 目标类型）。泛型 `given` **必须证明**每个实参 sendable——约束位收口（`given[T: sendable] Box[T]: Foo`），缺位报同族错误并点名补 bound（严格形态的健全性理由见「可组合种类约束」）。
 3. **继承显式**：`trait A: B` 且 `B` 是 `sendable` 时 `A` 必须显式声明 `sendable`，否则 `Trait 'A' extends sendable trait 'B' and must be declared sendable`（锚 trait 名）。不推断。
 
 没有 `unsafe sendable trait` 形态——trait 只收"是否 sendable"一个轴。**混合 trait**（部分实现线程内）不声明 `sendable`，跨界出路是泛型参数化（下节）或 `unsafe sendable` 包装。`Error` 即 `trait sendable Error`（单一形态，与 Swift `Error: Sendable` 对齐）：所有错误类型必须 sendable，`Result` 的错误载荷就是普通 `Error`。
@@ -94,6 +94,10 @@ type sendable Box[T: mutable and sendable](inner: T);
 ```
 
 满足判定 = `is_sendable_type`；裸泛型参数**不免费**（`T: Any` 不向 `U: sendable` 转发——`generic_param_is_sendable_bounded` 只认 `sendable` 约束或 `trait sendable` 约束）。这与条件规则并存：约束位管"参数在此处必须可跨"，条件规则管"容器自身何时可跨"。
+
+**泛型参数约束必填（2026-11-09 裁定）**：每个泛型参数必须显式带约束，下限 `T: Any`（`Any` 语义上即无约束位）——裸 `[T]` / `given[T]` 是解析错（"expected ':' after generic parameter name" / "Type parameter 'T' requires a constraint"），koralc / Swift 参照 / koralfmt 三侧解析器一致强制。
+
+**泛型 `given` 实现 `trait sendable` 必须证明（2026-11-09 裁定，严格形态）**：约束位收口——`given[T: sendable] Box[T]: Ping`，缺位即错（`Type 'Box[T]' must be sendable to implement sendable trait 'Ping'; give its generic parameters 'sendable' bounds`，锚 given 目标类型）。**装箱检查已随之删除**——声明处是唯一证明点。理由是健全性而不仅是偏好：派生查询对裸泛型参数按 sendable 算（`is_sendable_type`，服务字段检查的"无假设模式"），约束转发又规定"`P: Ping`（`trait sendable`）即 P sendable"——宽松读法让这条蕴含为假，非 sendable 载荷可经泛型中继（`fn relay[P: Ping](p: P)`）或 `sendable` 闭包捕获洗进恒 sendable 的对象，而装箱/捕获检查看到的只是"已通过"的抽象 `P`。严格形态使「X: sendable trait ⟹ X sendable」恒真，两条洗白路径同时关闭；与 Swift 的 `extension Box: Ping where T: Sendable` 同形。
 
 ### 跨界检查
 
@@ -145,7 +149,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 | 子系统 | 标注 |
 |---|---|
 | `Option` / `Result` / `Pair` / `Range` / `Duration`、纯标量枚举 | `sendable`（safe）+ 条件规则 |
-| `String` 等内部裸存储但契约不可变的类型 | `unsafe sendable`，承诺「构造后不可变」（编译器无法验证行为不可变，逃生舱是诚实形态） |
+| 内部裸存储、构造后不变的内部块（`Bytes` 类） | `unsafe sendable`（持析构则 `unsafe sendable mutable`），承诺「构造后不可变」（编译器无法验证行为不可变，逃生舱是诚实形态）。`String` 自值类型重塑后字段可验证（`Bytes`+标量），升 safe `sendable`——不可验证的部分随 `Bytes` 的 unsafe 标下沉（2026-11-09 裁定） |
 | `List` / `Dict` / `Set` / `Deque` / `StringBuilder` / 迭代器 | **不标记（线程内工作状态）**——不跨线程；顺带保留非原子 RC |
 | `FrozenList` / `FrozenDict` / `FrozenSet`（新增） | `unsafe sendable mutable` + 条件规则：对象形态承载自有缓冲的析构（用户析构仅 `type mutable`，2026-11-09 随值类型禁 Drop 裁定转入）；独立存储、只读快照、构造时拷贝、无写能力；内建**下标只读**（`FrozenList`/`FrozenDict`）、集合字面量可作目标类型；构造=可变侧 `to_frozen_*` + 字面量——**跨线程携带集合数据的唯一形态**（2026-11-08 裁定：可变容器不跨线程，传数据走 Frozen 系） |
 | `Channel` / `SendChannel` / `RecvChannel` / `ChannelStorage` | `unsafe sendable mutable`（条件于 `T`；环形缓冲 + 自管 Mutex/Condvar，条件规则看住跨界） |
@@ -157,7 +161,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 **错误侧裁定（2026-11-08，随 trait 重设计收编）**：`Error` 是 `trait sendable`——错误类型**单一形态**，必须自行声明 `sendable` / `unsafe sendable` 才能实现它（`given` 处检查，与 Swift `Error: Sendable` 对齐）。`Result[T]` 的错误载荷是普通 `Error`（声明已携带共享性），Result 因此是 safe `sendable`。
 
 **std 分类判定框架（2026-11-08，四档）**：新 std 类型按此入档，不按"领域"批量贴标——
-**A 纯值数据**（字段是标量/类型参数）→ `sendable`（safe）；**B 契约不可变**（内部裸存储、构造后不变，String 类）→ `unsafe sendable`+不可变承诺；**C 句柄/自管同步且跨线程交接或共用是惯用形态** → `unsafe sendable mutable`+逐类型一行契约（交接型写明"转移而非共用"，如 `File`；共用型写明内部串行化，如 `Stdout` 单次 write 原子）；**D 工作状态**（构建器/游标/迭代器/解析器/可变树）→ **不标记**。C 档准入判据是"交接出现在惯用程序里"，不是"理论上能传"。
+**A 纯值数据**（字段是标量/类型参数/可验证的 sendable 字段）→ `sendable`（safe）；**B 契约不可变**（内部裸存储、构造后不变的内部块，`Bytes` 类）→ `unsafe sendable`+不可变承诺（String 自重塑后其值归 A 档）；**C 句柄/自管同步且跨线程交接或共用是惯用形态** → `unsafe sendable mutable`+逐类型一行契约（交接型写明"转移而非共用"，如 `File`；共用型写明内部串行化，如 `Stdout` 单次 write 原子）；**D 工作状态**（构建器/游标/迭代器/解析器/可变树）→ **不标记**。C 档准入判据是"交接出现在惯用程序里"，不是"理论上能传"。
 
 **JsonValue 裁定（2026-11-08）**：JsonValue 改坐 **Frozen 树**（载荷 `FrozenList[JsonValue]` / `FrozenDict[String, JsonValue]`），归 A 档 **safe `sendable`**（自引用递归与 `Node(children: List[Node])` 同款成立）；解析/构建留在 D 档（`JsonParser` + builder，累积可变缓冲、`build()` 冻结）。原地修改 API 移除——JSON 值天然是构造后只读的数据，`Channel[JsonValue]` 由此直接可用。
 
@@ -189,7 +193,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 1. **`ChannelStorage` 内部复核**：环形缓冲的字段访问在 `unsafe` 下自管同步，条件规则看住 `T`；实现时复核边界协议。
 2. **trait object 运行时侧**：RC 分流的擦除侧保守原子；若将来 vtable 带标志再议。
 
-**已裁定（原未决项）**：函数类型限定拼写定为 `sendable (A) -> R`（前缀位，类型位仅存此形）；trait 共享性走 `trait sendable` 声明（2026-11-08）；全局 `let mutable` 每变量一锁；`Lazy` 用 `unsafe sendable mutable`。
+**已裁定（原未决项）**：函数类型限定拼写定为 `sendable (A) -> R`（前缀位，类型位仅存此形）；trait 共享性走 `trait sendable` 声明（2026-11-08）；全局 `let mutable` 每变量一锁；`Lazy` 用 `unsafe sendable mutable`；泛型参数约束必填（下限 `T: Any`，裸参数解析错）；泛型 `given` 实现 `trait sendable` 严格证明（`given[T: sendable]`，装箱检查删除，2026-11-09）。
 
 ## 实施
 

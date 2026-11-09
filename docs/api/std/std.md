@@ -544,11 +544,11 @@ public type mutable FrozenSetIterator[T: Hash];
 /// value (no handle chase), and a value owes no user destructor -- dropping it
 /// releases the field, which drives the block's RC to zero.
 ///
-/// `unsafe sendable`: the bytes are fixed at construction and never mutated
-/// after the wrap, so string values cross threads freely -- the shared state
-/// is the `Bytes` block, which carries the same promise (and the atomic RC
-/// that makes the shared refcount sound).
-public type unsafe sendable String;
+/// `sendable` (safe): the field check verifies the declaration -- `Bytes`
+/// carries the construction-then-immutable promise (and the atomic RC) for
+/// the shared block, `len` is a scalar -- so string values cross threads
+/// freely.
+public type sendable String;
 
 /// Mutable builder for incremental string construction without relying on
 /// String alias mutation. The bytes accumulate inside a `Bytes` block from

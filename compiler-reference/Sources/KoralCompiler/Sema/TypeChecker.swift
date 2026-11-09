@@ -87,6 +87,15 @@ final class PendingGlobalInit {
   }
 }
 
+/// Why a `given` does not apply to a receiver it structurally matches.
+enum NominalConformanceFailure {
+  /// The template matched, but an owner type-param constraint is unmet
+  /// (`given[T: sendable] Box[T]` vs `Box[Unmarked]`).
+  case missingConstraint(boundType: Type, constraint: Bound, paramName: String)
+  /// No conformance exists at all.
+  case missingConformance
+}
+
 struct ConformanceKey: Hashable {
   let selfType: ConformanceTypeKey
   /// Identity of the conformed trait's declaration. `traitName` is display-only.
@@ -270,6 +279,10 @@ public class TypeChecker {
   struct RecordedConformance {
     let selfType: Type
     let typeParamNames: [String]
+    /// The owner type params' bounds, keyed by param name: matching must bind
+    /// the arguments and prove every constraint against the binding (shape
+    /// bounds included).
+    let ownerConstraints: [String: [Bound]]
     let traitDefId: DefId
     let traitTypeArgs: [Type]
   }
@@ -1332,14 +1345,28 @@ public class TypeChecker {
   }
 
   func hasNominalConformance(selfType: Type, traitRef: CanonicalTraitRef) -> Bool {
+    nominalConformanceFailure(selfType: selfType, traitRef: traitRef) == nil
+  }
+
+  /// Why a structurally matching `given` still does not apply to the receiver:
+  /// an owner type-param constraint is unmet (`.missingConstraint`), or no
+  /// conformance exists at all (`.missingConformance`). `nil` = it applies.
+  /// The first structural match decides, mirroring the bootstrap's
+  /// `compute_generic_trait_conformance_status`.
+  func nominalConformanceFailure(selfType: Type, traitRef: CanonicalTraitRef) -> NominalConformanceFailure? {
     let actual = conformanceKey(
       selfType: selfType,
       traitName: traitRef.traitName,
       traitDefId: traitRef.traitDefId,
       traitTypeArgs: traitRef.traitTypeArgs
     )
-    return explicitConformances.contains(where: { conformanceKeyMatches($0, actual) })
-      || declaredConformances.contains(where: { conformanceKeyMatches($0, actual) })
+    for pattern in explicitConformances where conformanceKeyMatches(pattern, actual) {
+      return ownerConstraintStatus(matching: pattern, actualSelfType: selfType)
+    }
+    for pattern in declaredConformances where conformanceKeyMatches(pattern, actual) {
+      return ownerConstraintStatus(matching: pattern, actualSelfType: selfType)
+    }
+    return .missingConformance
   }
 
   func hasNominalConformance(selfType: Type, traitName: String, traitTypeArgs: [Type]) -> Bool {
