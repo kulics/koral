@@ -3,7 +3,7 @@
 > **Status**：Implemented · 2026-11-08 · 对应实现：P1–P4 已落地（见文内「实施」）
 > **范围**：跨线程共享的类型约束（`sendable` 族）、对象锁语义、跨界检查、RC 分流
 > **体裁**：设计文档 —— 记决定与取舍，不记执行过程。
-> **用法**（用户向）待随实施补进 [`../guide/document.md`](../guide/document.md) 并保持镜像；写法细则以 koralfmt 为准。
+> **用法**（用户向）见 [`../guide/document.md`](../guide/document.md) §Concurrency 与 [`../guide/document-zh.md`](../guide/document-zh.md) §并发（中英镜像）；写法细则以 koralfmt 为准。
 
 ## 摘要
 
@@ -67,11 +67,11 @@ safe `sendable` 承诺**数据竞争自由**：跨线程共享该类型（及其
 2. **名义类型**：按声明。safe 形态编译器**验证**字段全部 `sendable`——标注写错是编译错，不是洞。`type mutable` 不标 `sendable` 即非 `sendable`，即便字段全 `sendable`：声明处定，不做推断。
 3. **泛型（条件 sendable）**：`X[A, B]` 是 `sendable` ⟺ `X` 声明了 `sendable`（含 `unsafe`）**且**全部实参 `sendable`。**这条对 safe/unsafe 统一执行**——`unsafe` 只免字段/payload 检查，不免实参条件，否则 `Channel[非sendable]` 能把非 sendable 值夹带走私（见「跨界检查」）。注意与 `Mutable` / `Foreign` 的恒等判定不同，本条需要对实参结构递归。
 4. **枚举**：`sendable` ⟺ 声明 + 全部 payload 类型 `sendable`（`unsafe` 免检查）。
-5. **函数/闭包类型**：`sendable (A) -> R` 是独立形态。**形成处**检查：无捕获的函数值自然满足；lambda 只有全部捕获 `sendable` 才得 `sendable` 函数类型。放宽转换 `sendable (A) -> R` → `(A) -> R` 合法，反向拒绝。
+5. **函数/闭包类型**：`sendable (A) -> R` 是独立形态。**形成处**检查：无捕获的函数值自然满足；lambda 只有全部捕获 `sendable` 才得 `sendable` 函数类型。放宽转换 `sendable (A) -> R` → `(A) -> R` 合法，反向拒绝。捕获判定走**约束查询**（`satisfies_sendable_constraint`）：裸泛型参数不免费——`f[T: Any]` 里 `run_task` 捕获 `T` 被拒，`T: sendable` / `T: P`（`trait sendable`）才过；数组/弱引用等结构同样严格递归，不再穿透自由通行证（2026-11-09 裁定，堵泛型捕获洗白）。
 6. **trait object**：共享性**跟 trait 声明走**（2026-11-08 重设计）——`trait sendable Foo` 的对象恒 `sendable`，其余 trait 的对象不跨界。类型位的 `sendable Trait` 限定**已删除**（见「替代方案」）。
 7. **`?T` 弱句柄**：`sendable` ⟺ `T` 是 `sendable`。升级走强计数 CAS，原子 RC 下跨线程升级安全。
 8. **裸指针** `*T` / `*mutable T`、`foreign (A) -> R` 函数指针：**非 `sendable`**。跨 FFI 的共享内存由 `unsafe` 形态覆盖。
-9. **`type foreign` / `[N]T`**（可变值语义，按值拷贝）：允许声明 `sendable`（拷贝跨界无共享），safe 校验按字段走——字段含裸指针则不过，用 `unsafe sendable`。
+9. **`type foreign`**（可变值语义，按值拷贝）：**不可声明任何 sendable 形态**（2026-11-09 裁定）——布局是 C 的，共享性不可验证，`foreign sendable` / `foreign unsafe sendable` 皆解析错（"foreign type cannot be marked …"）。foreign 复合值与 `foreign (A) -> R` 只活在 `type unsafe sendable` 的**受信内部**（字段检查对 `unsafe` 免检）或线程内状态；safe `sendable` 的字段检查天然拒绝它们（foreign 恒非 sendable）。**`[N]T`** 仍按元素条件成立（`[4]Int32` 可入 safe `sendable`）。
 10. 其余复合（元组、可选等）走 3 / 4 的条件规则。
 
 ### trait sendability（声明侧，2026-11-08 裁定）
@@ -106,7 +106,7 @@ type sendable Box[T: mutable and sendable](inner: T);
 | 检查点 | 规则 | 时机 |
 |---|---|---|
 | spawn / `run_task` / `Task` | 参数类型写成 `sendable () -> Void`（`spawn_thread` intrinsic 签名改造） | 调用处 |
-| 闭包 | `sendable` 函数类型只收 `sendable` 捕获 | lambda 形成处 |
+| 闭包 | `sendable` 函数类型只收 `sendable` 捕获（判定走约束查询：裸泛型参数须带 `sendable` 约束才过） | lambda 形成处 |
 | 共享对象字段 | 字段类型必须 `sendable`（safe 形态） | 类型声明处 |
 | 全局量 / 静态量 | 类型必须 `sendable`；`let mutable` 全局的**绑定槽**按「单槽 `sendable mutable`」处理（**每变量一锁**、赋值整句临界区） | 声明处 |
 | trait object | 共享性由 trait 声明携带（`trait sendable`）；非 sendable trait 的对象不跨界 | `given` 处 |
@@ -193,7 +193,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 1. **`ChannelStorage` 内部复核**：环形缓冲的字段访问在 `unsafe` 下自管同步，条件规则看住 `T`；实现时复核边界协议。
 2. **trait object 运行时侧**：RC 分流的擦除侧保守原子；若将来 vtable 带标志再议。
 
-**已裁定（原未决项）**：函数类型限定拼写定为 `sendable (A) -> R`（前缀位，类型位仅存此形）；trait 共享性走 `trait sendable` 声明（2026-11-08）；全局 `let mutable` 每变量一锁；`Lazy` 用 `unsafe sendable mutable`；泛型参数约束必填（下限 `T: Any`，裸参数解析错）；泛型 `given` 实现 `trait sendable` 严格证明（`given[T: sendable]`，装箱检查删除，2026-11-09）。
+**已裁定（原未决项）**：函数类型限定拼写定为 `sendable (A) -> R`（前缀位，类型位仅存此形）；trait 共享性走 `trait sendable` 声明（2026-11-08）；全局 `let mutable` 每变量一锁；`Lazy` 用 `unsafe sendable mutable`；泛型参数约束必填（下限 `T: Any`，裸参数解析错）；泛型 `given` 实现 `trait sendable` 严格证明（`given[T: sendable]`，装箱检查删除，2026-11-09）；闭包捕获的跨界判定改走约束查询——裸泛型参数与嵌套形状都不再免费（2026-11-09）；`type foreign` 禁止一切 sendable 形态、foreign 值只活在 `type unsafe sendable` 受信内部或线程内（2026-11-09）。
 
 ## 实施
 

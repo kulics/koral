@@ -137,7 +137,10 @@ extension TypeChecker {
       var capturesSendable = true
       if case .function(_, _, let expectedSendable)? = expectedType, expectedSendable {
         for capture in captures {
-          if !context.isSendableType(capture.symbol.type) {
+          // Boundary verdicts use the bound-aware query: a bare generic
+          // parameter is not sendable by default, so `run_task` inside
+          // `f[T: Any]` refuses the capture (concurrency-design.md rule (a)).
+          if !satisfiesSendableConstraint(capture.symbol.type) {
             capturesSendable = false
             try handleError(SemanticError(.generic(
               "sendable closure cannot capture non-sendable value '\(context.getName(capture.symbol.defId) ?? "?")'"
@@ -146,7 +149,7 @@ extension TypeChecker {
         }
       } else {
         for capture in captures {
-          if !context.isSendableType(capture.symbol.type) {
+          if !satisfiesSendableConstraint(capture.symbol.type) {
             capturesSendable = false
           }
         }

@@ -3,15 +3,15 @@ using "std" { ... };
 // std.text - Regular expression engine (pure Koral)
 // ============================================================================
 //
-// The pattern compiles to a small instruction program and a Pike-VM
-// simulates every thread of that program in lockstep, one input byte at a
-// time. Nothing recurses at match time and there is no backtracking stack:
-// a `*` over a long input is one loop iteration per byte, not one call
-// frame per repetition, so matching is linear in the text length and
-// cannot exhaust the stack. Thread priority order reproduces the
-// leftmost-first, greedy semantics a backtracking search would give -- the
-// match found is exactly the one backtracking would have returned, without
-// its worst-case exponential blowup.
+// The pattern compiles to a small instruction program. Matching tries a
+// budgeted backtracking fast path first -- one greedy, first-alternative-
+// first exploration per candidate start, captures undoing on backtrack --
+// and falls back to a Pike-VM that simulates every thread of the program in
+// lockstep, one input byte at a time, when the step budget runs out. The
+// budget is what bounds the worst case: a pathological pattern costs only
+// the budget before the Pike-VM takes over, and thread priority order there
+// reproduces the same leftmost-first, greedy semantics -- the match found is
+// the one the backtracking search would have returned.
 //
 // Semantics (the single definition for every platform):
 //   * byte-oriented matching and byte offsets, UTF-8 opaque;

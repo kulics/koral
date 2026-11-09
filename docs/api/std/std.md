@@ -68,7 +68,9 @@ public let foreign exit(code: Int): Never;
 /// Terminate the process immediately.
 public let foreign abort(): Never;
 
-/// Get the last OS error (errno) as a human-readable String.
+/// Get the last OS error as a human-readable String. Windows failure paths
+/// record the Win32 error at the failing call and this renders it
+/// (FormatMessage text); otherwise the text is `strerror(errno)`.
 public let last_error_message(): String;
 
 /// Return the command-line arguments, starting with the program name.

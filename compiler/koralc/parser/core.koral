@@ -2232,8 +2232,10 @@ given Parser {
         };
 
         // `unsafe`? `sendable`? sit before `mutable`: `type unsafe sendable
-        // mutable X`。`unsafe` 必须伴随 `sendable`；`type foreign` 也收这两个
-        // 修饰符（按值拷贝跨界），`type intrinsic` 与别名不收（下方各自拒绝）。
+        // mutable X`。`unsafe` 必须伴随 `sendable`；`type foreign` 与
+        // `type intrinsic`、别名都不收这两个修饰符（下方各自拒绝）——foreign
+        // 的布局是 C 的，不能认领跨线程共享；foreign 值只活在 `type unsafe
+        // sendable` 的受信内部或线程内状态（2026-11-09 裁定）。
         let mutable sendability = Sendability.Unmarked();
         let mutable sendability_token = self.current();
         if self.current().kind is .KwUnsafe() then {
@@ -2258,6 +2260,14 @@ given Parser {
             return .Error(
                 self.parser_error_at(
                     "intrinsic type cannot be marked \(sendability_label(sendability))",
+                    sendability_token,
+                ),
+            );
+        };
+        if decl_is_foreign and sendability is not .Unmarked() then {
+            return .Error(
+                self.parser_error_at(
+                    "foreign type cannot be marked \(sendability_label(sendability))",
                     sendability_token,
                 ),
             );

@@ -273,9 +273,11 @@ extension Parser {
       }
 
       // `unsafe`? `sendable`? sit before `mutable`: `type unsafe sendable mutable
-      // X`. `unsafe` must be accompanied by `sendable`; `type foreign` accepts both
-      // (crosses by value), while `type intrinsic` and aliases reject them (each
-      // checked below / in the alias arm).
+      // X`. `unsafe` must be accompanied by `sendable`; `type foreign` joins
+      // `type intrinsic` and aliases in rejecting both (each checked below / in
+      // the alias arm) -- a foreign layout is C's and cannot claim cross-thread
+      // sharing; foreign values live inside `type unsafe sendable` trusted
+      // interiors or thread-local state (2026-11-09 ruling).
       var sendability: TypeSendability = .unmarked
       var sendabilitySpan = currentSpan
       if currentToken === .unsafeKeyword {
@@ -298,6 +300,12 @@ extension Parser {
         throw ParserError.rejectedConstruct(
           span: sendabilitySpan,
           message: "intrinsic type cannot be marked \(sendability.modifierLabel)"
+        )
+      }
+      if isForeign && sendability != .unmarked {
+        throw ParserError.rejectedConstruct(
+          span: sendabilitySpan,
+          message: "foreign type cannot be marked \(sendability.modifierLabel)"
         )
       }
 

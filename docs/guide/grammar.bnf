@@ -182,14 +182,15 @@
 // ============================================================================
 
 <type-decl> ::= "type" <sendability>? "mutable"? <type-identifier> <generic-params>? <type-body> ";"
-              | "type" "foreign" <c-name>? <sendability>? <type-identifier> <foreign-type-body> ";"
+              | "type" "foreign" <c-name>? <type-identifier> <foreign-type-body> ";"
               | "type" "intrinsic" <type-identifier> ";"                // body-less (built into the compiler)
               | "type" <type-identifier> <generic-params>? "=" <type> ";"   // type alias
 <sendability> ::= "unsafe" "sendable" | "sendable"
 // 说明：`mutable` 仅对 struct 有效，枚举和别名不支持。
 // `sendability`（`sendable` / `unsafe sendable`）修饰跨线程共享能力
-// （concurrency-design.md）：`unsafe` 必须伴随 `sendable`；struct、enum 与
-// `type foreign` 收，`type intrinsic` 与别名不收。顺序固定 `unsafe` `sendable` `mutable`。
+// （concurrency-design.md）：`unsafe` 必须伴随 `sendable`；struct、enum 收，
+// `type foreign`、`type intrinsic` 与别名不收——foreign 布局是 C 的，不能认领
+// 共享（`foreign type cannot be marked …`，2026-11-09）。顺序固定 `unsafe` `sendable` `mutable`。
 // `type foreign` 与 `type mutable` 互斥——外部类型的可变性不属于 Koral 自己的
 // nominal 声明。
 // 类型别名支持泛型参数（如 `type OrdList[T: Ord] = List[T]`）：实例化点检查
@@ -229,8 +230,11 @@
 // Trait Declarations
 // ============================================================================
 
-<trait-decl> ::= "trait" <type-identifier> <generic-params>? <trait-parents>? "{" <trait-member>* "}" ";"
+<trait-decl> ::= "trait" "sendable"? <type-identifier> <generic-params>? <trait-parents>? "{" <trait-member>* "}" ";"
 <trait-parents> ::= ":" <type> ("and" <type>)*
+// `trait sendable Name`：修饰符跟在关键字后（concurrency-design.md）。对象恒
+// sendable、实现类型必须 sendable。没有 `trait unsafe sendable` 形态——trait
+// 只收"是否 sendable"一个轴。
 // 父 trait 列表由 `:` 引入：`trait Numeric: Add[Self] and Sub[Self] and Ord {`。
 <trait-member> ::= <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"
 // Trait 需求不接受访问修饰符（`Access modifier on trait method is not supported`）；
@@ -273,9 +277,10 @@
 <trait-constraints> ::= <trait-constraint> ("and" <trait-constraint>)*
 <trait-constraint> ::= "mutable"
                      | "foreign"
+                     | "sendable"
                      | <type-identifier>
                      | <generic-type>
-// 说明：当前 parser 约束里支持四类：
+// 说明：当前 parser 约束里支持五类：
 // 1) 类型种类约束关键字 `mutable`（不是 trait 名，是词法关键字）——
 //    主体必须声明为 `type mutable`
 // 2) 类型种类约束关键字 `foreign`（同样不是 trait 名）——主体的表示由
@@ -283,8 +288,10 @@
 //    在集合内，`*Void` 即 C 的 `void*` 例外放行）、`type foreign` 声明，
 //    以及 std 的 `Rune`。这是**封闭集合**，由编译器判定，
 //    用户声明不能认领（`type` 的布局由编译器选，不在其中）
-// 3) 简单 trait 名（如 Eq）
-// 4) 泛型 trait（如 Iterator[T]）
+// 3) 类型种类约束关键字 `sendable`（concurrency-design.md）——主体必须
+//    可跨线程共享（`T: sendable` 直接证明，或经 `trait sendable` 约束转发）
+// 4) 简单 trait 名（如 Eq）
+// 5) 泛型 trait（如 Iterator[T]）
 // 约束是必填的：`[T]` 报 `Type parameter 'T' requires a constraint`；
 // 不加约束就写 `[T: Any]`。`Any` 特殊——它**不是**一种约束，是「无约束」的写法。
 
@@ -320,9 +327,10 @@
 // *mutable T  — mutable pointer
 // ?T          — weak reference
 // sendable T  — `sendable` 前缀限定（concurrency-design.md）：只对函数类型
-//               （`sendable (A) -> R`）与 trait object（`sendable Trait`）
-//               成立，其余类型报错；转换放宽 `sendable (A) -> R` -> `(A) -> R`
-//               合法，反向拒绝。可嵌套：`sendable (A) -> sendable (B) -> R`。
+//               （`sendable (A) -> R`）成立，其余类型报错（`sendable Trait`
+//               已删除——trait 共享性由 `trait sendable` 声明携带）；转换放宽
+//               `sendable (A) -> R` -> `(A) -> R` 合法，反向拒绝。可嵌套：
+//               `sendable (A) -> sendable (B) -> R`。
 
 <generic-type> ::= <type-identifier> "[" <type-list> "]"
 <function-type> ::= "(" <function-type-param-list>? ")" "->" <type>
@@ -1163,7 +1171,7 @@
 // ============================================================================
 
 // Reserved keywords:
-//   let, mutable, type, trait, given, intrinsic, foreign
+//   let, mutable, unsafe, sendable, type, trait, given, intrinsic, foreign
 //   using, self, Self, as
 //   if, then, else, while, for, when, is, in, where
 //   and, or, not

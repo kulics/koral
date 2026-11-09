@@ -323,7 +323,9 @@ given TypeChecker {
     /// sendable only when its bounds say so (see
     /// `generic_param_is_sendable_bounded`). Generic shapes recurse the
     /// conditional rule strictly -- `Box[T]` is only known sendable when every
-    /// argument is.
+    /// argument is -- as do arrays and weak references: their inner recursion in
+    /// `is_sendable_type` free-passes bare parameters, which would smuggle a
+    /// `T: Any` capture past a `sendable` boundary.
     satisfies_sendable_constraint(self, target_type: Type): Bool = {
         return when target_type in {
             .GenericParameter(name) then self.generic_param_is_sendable_bounded(name),
@@ -340,6 +342,10 @@ given TypeChecker {
                     all
                 }
             },
+            .FixedArrayType(_, inner) then self.satisfies_sendable_constraint(inner),
+            .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.satisfies_sendable_constraint(
+                inner,
+            ),
             _ then self.context().is_sendable_type(target_type),
         };
     };

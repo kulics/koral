@@ -13,19 +13,19 @@ using "std/os" { ... };
 
 // ── ModuleError ───────────────────────────────────────────────────────────────
 
-// `unsafe sendable`: the payloads carry `List[String]` / `SourceSpan`, and the
-// error boxes into `Error` (a `trait sendable`), so the type must claim
-// sendability itself.
-public type unsafe sendable ModuleError {
+// `sendable` (safe form): the payloads are strings, `SourceSpan`, and
+// `FrozenList[String]` snapshots -- every field is compiler-verified sendable,
+// so the error can box into `Error` (a `trait sendable`) without a promise.
+public type sendable ModuleError {
     FileNotFound(file: String, search_path: String),
-    CircularDependency(path: List[String]),
+    CircularDependency(path: FrozenList[String]),
     InvalidModulePath(path: String),
     DuplicateUsing(name: String, span: SourceSpan),
     ParseError(file: String, message: String),
     InvalidEntryFileName(filename: String, reason: String),
-    UnknownPackageName(name: String, known: List[String], span: SourceSpan),
-    UnknownModule(name: String, package_name: String, declared: List[String], span: SourceSpan),
-    NoMainModule(package_name: String, declared: List[String], span: SourceSpan),
+    UnknownPackageName(name: String, known: FrozenList[String], span: SourceSpan),
+    UnknownModule(name: String, package_name: String, declared: FrozenList[String], span: SourceSpan),
+    NoMainModule(package_name: String, declared: FrozenList[String], span: SourceSpan),
     InvalidModuleSpecifier(specifier: String, span: SourceSpan),
     CrossPackageMerge(specifier: String, span: SourceSpan),
     FileClaimedTwice(file: String, owner: String, claimant: String),
@@ -66,7 +66,7 @@ given ModuleError: Error {
         return when self in {
             .FileNotFound(file, search_path) then "File '\(file)' not found in '\(search_path)'",
             .CircularDependency(path) then {
-                let path_text = join_path(path, " -> ");
+                let path_text = join_path(path.to_list(), " -> ");
                 "Circular dependency detected: \(path_text)"
             },
             .InvalidModulePath(path) then "Invalid module path: '\(path)'",
@@ -74,7 +74,7 @@ given ModuleError: Error {
             .ParseError(file, message) then "\(file): \(message)",
             .InvalidEntryFileName(filename, reason) then "Invalid entry file name '\(filename)': \(reason)",
             .UnknownPackageName(name, known, _) then {
-                let known_list = join_sorted(known);
+                let known_list = join_sorted(known.to_list());
                 let mutable text = "Unknown package name \"\(name)\"\nA name in 'using' is a package name: this package's 'package', one of its 'dependencies' keys, or the reserved \"std\".";
                 // The old spelling for merging a file was a bare name. It now
                 // reads as a package name that does not exist, so say what each
@@ -85,11 +85,11 @@ given ModuleError: Error {
                 text + "\nKnown package names: \(known_list)"
             },
             .UnknownModule(name, package_name, declared, _) then {
-                let declared_list = join_sorted(declared);
+                let declared_list = join_sorted(declared.to_list());
                 "Module '\(name)' does not exist in package '\(package_name)'; declared modules: \(declared_list)"
             },
             .NoMainModule(package_name, declared, _) then {
-                let declared_list = join_sorted(declared);
+                let declared_list = join_sorted(declared.to_list());
                 "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared_list)"
             },
             .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
@@ -425,7 +425,7 @@ given ModuleResolver {
             return Result[ResolvedModuleSpec].Error(
                 ModuleError.UnknownPackageName(
                     head_name,
-                    registry.known_names(owner),
+                    registry.known_names(owner).to_frozen_list(),
                     specifier_span,
                 ).render(module.entry_file()),
             );
@@ -440,7 +440,7 @@ given ModuleResolver {
                 return Result[ResolvedModuleSpec].Error(
                     ModuleError.NoMainModule(
                         target_package.self_name,
-                        declared_module_keys(target_package.manifest),
+                        declared_module_keys(target_package.manifest).to_frozen_list(),
                         specifier_span,
                     ).render(module.entry_file()),
                 );
@@ -449,7 +449,7 @@ given ModuleResolver {
                 ModuleError.UnknownModule(
                     head_name + "/" + tail_segments.join_to_string("/"),
                     target_package.self_name,
-                    declared_module_keys(target_package.manifest),
+                    declared_module_keys(target_package.manifest).to_frozen_list(),
                     specifier_span,
                 ).render(module.entry_file()),
             );
@@ -472,7 +472,7 @@ given ModuleResolver {
                 };
                 cycle.push(spec.full_name);
                 return Result[ResolvedModuleSpec].Error(
-                    ModuleError.CircularDependency(cycle).render(module.entry_file()),
+                    ModuleError.CircularDependency(cycle.to_frozen_list()).render(module.entry_file()),
                 );
             };
         };
@@ -881,7 +881,7 @@ given ModuleResolver {
                 };
                 cycle.push(file_path);
                 return Result[Void].Error(
-                    ModuleError.CircularDependency(cycle).render(module.entry_file()),
+                    ModuleError.CircularDependency(cycle.to_frozen_list()).render(module.entry_file()),
                 );
             };
         };

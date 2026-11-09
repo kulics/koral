@@ -38,7 +38,7 @@ Koral 的 nominal 类型有两种可变性形态，在声明处决定。语言�
 - **没有 identity**：字段相同的两个值可以互换。
 - **内存布局由编译器决定**。内联存储、隐藏间接层、共享 backing 都是实现细节，版本之间可能不同。
 - **值语义不属于语言契约**。复制、传参与存储可以共享 backing。正因该类型浅层不可变，这种共享不可观察——所以编译器可以自由地把它优化掉。
-- **实现 `Drop` 的类型是例外**。析构只在最后一个持有句柄消亡时跑一次，因此「有几个句柄」是可观察的。这样的类型与 `type mutable` 同档：identity 是语义的一部分，编译器不许把共享优化掉。它仍然声明为 `type`——仍然不能声明 `mutable` 字段。
+- **`type` 不能实现 `Drop`。** `type` 承诺没有 identity——同字段的值可以互换——析构会经由 drop 计数把构造身份泄漏出来。清理走合成的字段释放；需要析构的类型声明 `type mutable`，见 [`Drop`](#drop)。
 
 **`type mutable` —— 共享对象类型。**
 
@@ -58,7 +58,7 @@ c.value = 5;      // ok: Counter 是 `type mutable` 且 `value` 是 mutable 字�
 // c.id = 2;     // error: `id` 不是 mutable 字段
 ```
 
-编译器可能在内部对两种形态使用引用计数与隐藏存储。这些都不是用户可见语义：语言契约是 `type` 与 `type mutable` 之分，绝不是某种托管引用语法。唯一跨越这条线的是 `Drop`——见上文。
+编译器可能在内部对两种形态使用引用计数与隐藏存储。这些都不是用户可见语义：语言契约是 `type` 与 `type mutable` 之分，绝不是某种托管引用语法。清理也循同一条线——`type` 由合成的字段释放清理，只有 `type mutable` 才能实现 `Drop`。
 
 ### 安装与使用
 
@@ -325,7 +325,7 @@ let d: UInt8 = UInt8(255);      // Int -> UInt8
 指针重解释与弱句柄构造换一套拼写：`expr as Type`（见「指针类型」）——`p as *T`、
 `u as *Int`、`p as UInt`、`b as ?T`，`as` 的目标只允许指针与弱引用。
 `Type(expr)` 做数值转换，外加构造（`Point(1, 2)`）与 trait object upcast
-（`Drawable(c)`）；`Bool(x)`、`String(x)` 是错误（"该类型不支持转型"），
+（`Drawable(c)`）；`Bool(x)`、`String(x)` 是错误（`Type does not support cast`），
 数值目标的 `x as Int` 同样拒绝（`Numeric conversion is written 'Type(expr)', not 'expr as Type'`），
 其它 `as` 目标一律拒绝（`'as' casts to pointer or weak types`）。
 
@@ -640,7 +640,7 @@ a = 2;  // 合法
 块规则：
 
 - 块包含零条或多条语句。
-- `Result` 不允许被静默丢弃：语句位置上的 `Result` 必须被使用，或显式丢弃——`let _ = expr;` 表示"有意丢掉"。被静默丢弃的 `Result` 就是丢失的错误，这条规则正是为堵住它。其它语句值照常静默丢弃（`Void`、`Never`，以及 `advance()` 这类"交回一个观察值、调用方照常忽略"的辅助函数）。
+- `Result` 不允许被静默丢弃：语句位置上的 `Result` 必须被使用，或显式丢弃——`let _ = expr;` 表示"有意丢掉"。被静默丢弃的 `Result` 就是丢失的错误，这条规则正是为堵住它。其它语句值照常静默丢弃（`Void`、`Never`，以及"交回一个观察值、调用方照常忽略"的有副作用辅助函数）。
 - 块可以在末尾带一个不写分号的尾表达式。
 - 如果块带有尾表达式，块的类型和值就是该表达式的类型和值。
 - 如果块没有尾表达式，或最后一个表达式写了分号，块的类型是 `Void`。
@@ -759,11 +759,11 @@ println( a >> b );   // 右移
 ...;      // 全范围
 ```
 
-这些范围操作符构造 `Range` 值。它们不同于 `1 < x < 5` 这类链式比较谓词，后者产生 `Bool`。
-
 `..` 族是连接符：两端都写出来，总是二元。`...` 族标记被省略的那一端——它站在
 缺掉的界的位子上，所以 `...` 范围至多一端有界（`1...` 是从 1 到无穷，`...5`
 是从负无穷到 5，`...` 是全范围）。`<` 永远夹在点与被排除的界之间。
+
+这些范围操作符构造 `Range` 值。它们不同于 `1 < x < 5` 这类链式比较谓词，后者产生 `Bool`。
 
 #### 复合赋值
 
@@ -1384,7 +1384,7 @@ Koral 提供强大的类型系统，允许你定义自己的数据结构。用 `
 
 ### `type`：浅层不可变的 Nominal
 
-`type` 声明引入字段全部不可变的 nominal 类型。`type` 的值**没有 identity**，布局由编译器决定——内联、隐藏间接层或共享 backing 均可。不承诺值语义：拷贝可以共享存储，正因该类型浅层不可变，这种共享不可观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察。
+`type` 声明引入字段全部不可变的 nominal 类型。`type` 的值**没有 identity**，布局由编译器决定——内联、隐藏间接层或共享 backing 均可。不承诺值语义：拷贝可以共享存储，正因该类型浅层不可变，这种共享不可观察。它**不能实现 `Drop`**：清理是合成的字段释放，只有 `type mutable` 才携带析构——见 [`Drop`](#drop)。
 
 结构体字段可以是位置字段或命名字段。位置字段写作 `name: Type`；命名字段带 `=` 标记——`width: Int =`（调用方必须传入）或 `height: Int = 600`（带默认值）。
 
@@ -1585,7 +1585,7 @@ private type InternalId = Int;  // 仅文件内
 
 #### 泛型数据类型
 
-泛型数据类型用 `TypeName[T Constraint]` 语法定义泛型参数：
+泛型数据类型用 `TypeName[T: Constraint]` 语法定义泛型参数：
 
 ```koral
 type Pair[T1: Any, T2: Any](left: T1, right: T2);
@@ -1713,7 +1713,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 #### 内存模型
 
-- **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。**实现 `Drop` 的类型是例外**：析构每个对象只跑一次，共享因此可观察，这里按 `type mutable` 对待。
+- **`type`**（浅层不可变）：没有 identity，也不承诺值语义。编译器可以使用栈槽、寄存器、内联存储、隐藏堆块或引用计数——任何它能证明正确的方式——因为它引入的共享无法被观察。它的清理是合成的字段释放；不能实现 `Drop`。
 - **`type mutable`**（共享对象）：identity 是语义的一部分。赋值与传参共享同一个对象。只有显式声明为 `mutable` 的字段才能原地修改。
 - **`type foreign`**（可变值语义）：C 布局的值。赋值与传参按值拷贝；拷贝经 `let mutable`、`mutable` 参数、`*mutable T` 链接就地修改，`self` 是普通拷贝——没有可变 self。字段是恒可写的 C 槽位，内容限于能过 FFI 边界的类型（见[外部互操作](#6-外部互操作)）。
 - **raw pointer**：指针类型是 `*T` / `*mutable T`；`&` / `&mutable` 是把它们构造出来的取址操作符，且只从可取地址的存储形成。它们是面向 FFI 的低层内存访问，仍受地址稳定性与布局稳定性约束（见[外部互操作](#6-外部互操作)）。
@@ -1722,7 +1722,7 @@ Koral 通过声明处类型语义与编译器管理的布局，提供高效且�
 
 #### `Drop`
 
-需要清理步骤的类型实现 `Drop` trait：
+需要清理步骤的类型声明 `type mutable` 并实现 `Drop` trait：
 
 ```koral
 trait Drop {
@@ -1730,9 +1730,11 @@ trait Drop {
 };
 ```
 
-`Drop.drop` 是仅由编译器调用的析构入口，运行在 finalization 上下文中。它不能作为普通用户方法调用。实现 `Drop` 的类型必然是引用计数的，其 `drop` 在最后一个持有句柄消亡时触发。
+`Drop.drop` 是仅由编译器调用的析构入口，运行在 finalization 上下文中。它不能作为普通用户方法调用。**只有 `type mutable` 才能实现 `Drop`**：析构在最后一个持有句柄消亡时只跑一次，属于共享对象层。`type` 承诺没有 identity——同字段的值可以互换——析构会经由 drop 计数把构造身份泄漏出来。
 
-由于析构对每个对象只跑一次，`Drop` 类型的共享是**可观察的**——见[内存模型](#内存模型)。在这一点上它与 `type mutable` 同档。
+`type` 的清理是**合成的字段释放**——各字段自身的 release 把内层受管值推到最终释放，因此包在 `type mutable` 字段里的资源照样随合成释放归还，无需用户析构（Swift struct-around-class 的形态，例如 `type File(inner: FileBox)`）。
+
+由于析构对每个对象只跑一次，`Drop` 类型的共享是**可观察的**——见[内存模型](#内存模型)。这正是 `Drop` 保留给 `type mutable` 的原因。
 
 **`self` 不许逃出 `drop` 体。** 对象正在被销毁；让它跑出去等于复活垂死的值，或把字段从析构过程里搬走。在 `drop` 里，`self` **只能作为接收者**出现：字段读写（`self.x`、`self.x = v`）或方法调用（`self.close()`）。它不能被返回、绑定到新名字、存进字段/集合/全局、作为普通实参传给函数，也不能被 lambda 捕获。
 
@@ -1868,7 +1870,7 @@ type sendable Shape {
 - 安全形态**验证**内容：所有字段——枚举的所有载荷——本身必须是 `sendable`。标注写错是编译错，不是洞。
 - 不做推断。字段全部 `sendable` 的 `type mutable` 仍然不是 `sendable`，除非声明写明。
 - 枚举只收 immutable 形态：`type sendable` 与 `type unsafe sendable`；`mutable` 仍然仅限结构体。
-- `type foreign` 同样收 sendability —— `type foreign sendable FX(a: Int32);` —— foreign 值与任何 `type foreign` 值一样按值拷贝跨界，没有共享。安全校验按字段走；字段含裸指针要用 `unsafe sendable`。
+- `type foreign` 完全不收修饰 —— `type foreign sendable FX(a: Int32);` 报 `foreign type cannot be marked sendable`。foreign 布局是 C 的，不能承诺线程共享。foreign 值只活在 `type unsafe sendable` 的受信内部或线程内状态（见 [`unsafe sendable`](#unsafe-sendable)）。
 - 类型别名与 `type intrinsic` 不能带这些修饰符。别名跟随它命名的类型。
 
 #### 派生规则
@@ -1879,7 +1881,7 @@ type sendable Shape {
 - **名义类型**按声明成立。
 - **泛型**：`X[A, B]` 是 `sendable` 当且仅当 `X` 声明了 `sendable`，**且**全部类型实参都是 `sendable`。这一条对 `unsafe` 形态同样执行——否则一个可共享的容器能把非 sendable 的值夹带走私过界。
 - **枚举**：声明 `sendable` 且全部载荷类型 `sendable`（`unsafe` 免载荷检查）。
-- **函数类型**：`sendable (A) -> R` 是独立形态。无捕获的函数值天然满足；lambda 只有**全部**捕获是 `sendable` 才成立。`sendable` 函数值可以放宽转换为普通形态，反向不行。限定词只对函数类型成立。
+- **函数类型**：`sendable (A) -> R` 是独立形态。无捕获的函数值天然满足；lambda 只有**全部**捕获是 `sendable` 才成立。裸泛型参数不是当然 `sendable`——`f[T: Any]` 里把 `x: T` 捕获进 `sendable` 闭包会被拒绝（`sendable closure cannot capture non-sendable value 'x'`），`T: sendable` 约束（或 `trait sendable` 约束）才放行。`sendable` 函数值可以放宽转换为普通形态，反向不行。限定词只对函数类型成立。
 
 ```koral
 let run(f: sendable () -> Void): Void = f();
@@ -1894,7 +1896,7 @@ let main(): Void = {
 - **Trait object**：trait object 是否 `sendable`，由 trait 声明本身决定——声明为 `trait sendable` 的对象永远 `sendable`，普通 trait 的对象永远不是。见 [Trait 的 Sendability](#trait-的-sendability)。
 - **弱引用**：`?T` 是 `sendable` 当且仅当 `T` 是。
 - **定长数组**：`[N]T` 是 `sendable` 当且仅当 `T` 是。
-- **永非 `sendable`**：裸指针 `*T` / `*mutable T` 与 foreign 函数指针 `foreign (A) -> R`。跨 FFI 共享的内存改走 `unsafe sendable` 包装。
+- **永非 `sendable`**：裸指针 `*T` / `*mutable T`、foreign 函数指针 `foreign (A) -> R` 与 `type foreign` 值。跨 FFI 共享的内存改走 `unsafe sendable` 包装。
 
 #### Trait 的 Sendability
 
@@ -2145,6 +2147,7 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 - 剩余模式：`...`——忽略槽位（列表里吞掉中间，结构体/枚举变体里整段省略）；见下文
 - 枚举变体模式：`.Some(v)`、`.None()`
 - trait object 精确类型模式：`IoError`、`err: IoError`
+- （已移除：弱绑定模式 `?v` / `?Node(v)`——取 `Option[T]` 用 `?expr`；构造是 `x as ?T`）
 - 逻辑模式：`pattern and pattern`、`pattern or pattern`、`not pattern`
 - `is` 链：`x is A or is B`、`x is A and is not B`——同一主体上的多个测试，用连接词 `or is` / `and is` 串起
 
@@ -2155,6 +2158,8 @@ Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 
 接住），`0.0` 与 `-0.0` 互匹配。比较模式的界遵循同一条种类规则：`> 1` 是整数界，
 `> 1.0` 是浮点界，`> 'a'` 是 rune 界（按码点比较）。比较界可以落在主体的域外
 （`UInt8` 上的 `>= -1` 匹配一切）。
+
+解构遵循与调用完全相同的标签规则：声明为命名的字段必须带标签匹配，声明为位置的字段绝不能带标签。
 
 #### 列表模式与剩余模式
 
@@ -2192,8 +2197,6 @@ Button(...)     // 命名字段一样可以：等价于 Button(_, height = _, la
 完整覆盖某个长度：因此 `[]` 与 `[x, ...]` 合起来覆盖所有列表，而 `[1, ...]` 不行
 （它漏掉首元素不是 1 的列表）。在结构体、枚举变体模式里剩余标记不改变穷举性：
 字段数固定，它就是整段 `_`。
-
-解构遵循与调用完全相同的标签规则：声明为命名的字段必须带标签匹配，声明为位置的字段绝不能带标签。
 
 ```koral
 when s in {
@@ -2404,16 +2407,17 @@ if score is >= 60 then {
 };
 
 // `is` 链：一个主体，多个模式
-if x is 0 or is 1 then {
-    println("small");
-};
-
 if argv is [] or is [_, ...] then {
     println("没有参数，或者只有程序名");
 };
 
+let p = Point(1, 2);
 if p is Point(_, _) and is not Point(0, 0) then {
     println("是点，但不是原点");
+};
+
+if x is 0 or is 1 then {
+    println("small");
 };
 
 // 条件中仍可使用标准布尔组合
@@ -3185,6 +3189,8 @@ read_file("/etc/hosts");
 
 方法存在但它的 trait 不在作用域时，诊断会直说，并写出该补的那一行 `using`。
 
+#### 解析
+
 `using "X"` 切在第一个 `/`：
 
 ```
@@ -3192,7 +3198,7 @@ head = 第一段      （无 "/" 时 head = 整串）
 tail = 其余        （无 "/" 时 tail = ""）
 ```
 
-`head` 必须是已注册包名——**本包的 `package`、各依赖的源码名、保留名 `std`**；
+`head` 必须是已注册包名——**本包的 `package`、某个 `dependencies` 的键名、保留名 `std`**；
 否则报「未知包名」。然后在该包的 `modules` 里查**包内名**：`tail` 为空查 `"."`，否则查 `tail`。
 
 > **每个包用自己的表解析自己的源码**：编译 `httpr` 的文件时用 `httpr` 自己的 `package`
@@ -3383,13 +3389,13 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 
 编译器从解析出的 manifest 图添加链接参数。`libc` 默认隐式链接，无需声明。
 
-#### Foreign 函数
-
 > **限定词写在哪。** `foreign` 与 `intrinsic` 写在**关键字紧后**——`let foreign`、
 > `type foreign`、`type intrinsic`、`given intrinsic`——也就是 `type mutable` 与
 > `let mutable` 已经占住的那个位置。访问修饰符是唯一的**前缀**修饰符：它们说的是
 > 「谁看得见这个声明」，不是「声明的是个什么东西」。两者互斥，且排在 `mutable` 之前
 > （`mutable` 描述绑定）：`let foreign mutable errno: Int32;`。
+
+#### Foreign 函数
 
 声明外部 C 函数。foreign 函数只使用位置参数；不支持命名参数（`=` 标记）。
 **体的存在性定方向**：无体是引用（extern 链接），有体是定义——C ABI 导出函数。

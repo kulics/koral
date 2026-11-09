@@ -12,16 +12,6 @@
 #include <ctype.h>
 #include "koral_runtime.h"
 
-#if !defined(_WIN32) && !defined(_WIN64)
-
-#include <regex.h>
-
-typedef struct {
-    regex_t compiled;
-    int32_t flags;
-} KoralPosixRegex;
-#endif
-
 typedef struct CFile CFile;
 
 static int32_t __koral_argc_storage = 0;
@@ -119,6 +109,10 @@ static void __koral_control_free(struct __koral_Control* control) {
     free(control);
 }
 
+// Defined further down with the other panic surfaces; declared here so the
+// allocation paths can fail cleanly instead of dereferencing NULL.
+static KORAL_NORETURN void __koral_panic_print(const char* msg, const char* loc);
+
 // 单块 String 分配（见 koral_runtime.h 的声明注释）。计数初始化与 codegen 的
 // 受管构造一致（strong=1 / weak=1，含隐式 weak）。
 void* __koral_string_alloc(uintptr_t len) {
@@ -137,6 +131,9 @@ void* __koral_string_alloc(uintptr_t len) {
         /* 区槽：零初始化计数由下面的显式赋值覆盖，字节尾不保证为零。 */
     } else {
         control = (struct __koral_Control*)malloc(need);
+        if (control == NULL) {
+            __koral_panic_print("out of memory while allocating a string block", NULL);
+        }
     }
     control->strong_count = 1;
     control->weak_count = 1;
@@ -609,6 +606,15 @@ static void normalize_path_internal(const char* src, char* dst, size_t size) {
 }
 
 #ifdef _WIN32
+// The Win32 side of `last_error_message()`: a failing Win32 call records its
+// code HERE, before any later Win32 call can clobber the thread's last-error
+// slot; `__koral_last_error_text` (error-helpers section) renders it as text.
+static _Thread_local DWORD s_win32_last_error = 0;
+
+static void __koral_win_record_error(DWORD code) {
+    if (code != 0) s_win32_last_error = code;
+}
+
 // Koral strings are UTF-8; the ANSI Win32/CRT entry points interpret bytes in
 // the system codepage, so any non-ASCII path (CJK user profile, CJK project
 // name) silently resolves to the wrong file. Every path-bearing call below goes
@@ -616,10 +622,14 @@ static void normalize_path_internal(const char* src, char* dst, size_t size) {
 static wchar_t* __koral_utf8_to_wide(const char* s) {
     if (!s) return NULL;
     int n = MultiByteToWideChar(CP_UTF8, 0, s, -1, NULL, 0);
-    if (n <= 0) return NULL;
+    if (n <= 0) {
+        __koral_win_record_error(GetLastError());
+        return NULL;
+    }
     wchar_t* w = (wchar_t*)malloc((size_t)n * sizeof(wchar_t));
     if (!w) return NULL;
     if (MultiByteToWideChar(CP_UTF8, 0, s, -1, w, n) <= 0) {
+        __koral_win_record_error(GetLastError());
         free(w);
         return NULL;
     }
@@ -629,10 +639,14 @@ static wchar_t* __koral_utf8_to_wide(const char* s) {
 static char* __koral_wide_to_utf8(const wchar_t* w) {
     if (!w) return NULL;
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, NULL, 0, NULL, NULL);
-    if (n <= 0) return NULL;
+    if (n <= 0) {
+        __koral_win_record_error(GetLastError());
+        return NULL;
+    }
     char* s = (char*)malloc((size_t)n);
     if (!s) return NULL;
     if (WideCharToMultiByte(CP_UTF8, 0, w, -1, s, n, NULL, NULL) <= 0) {
+        __koral_win_record_error(GetLastError());
         free(s);
         return NULL;
     }
@@ -996,6 +1010,38 @@ int* __koral_errno_ptr(void) {
 const char* __koral_strerror(int errnum) {
     return strerror(errnum);
 }
+
+// The `last_error_message()` surface. Windows: prefer the recorded Win32 error
+// rendered as text (the spawn/fs paths record it at the failing call); fall
+// back to `strerror(errno)` for CRT failures. POSIX: errno is the only source.
+// The record is one-shot -- after a read it clears, so a later read cannot
+// repeat a stale Win32 story over a fresh errno.
+#ifdef _WIN32
+const uint8_t* __koral_last_error_text(void) {
+    if (s_win32_last_error != 0) {
+        DWORD code = s_win32_last_error;
+        s_win32_last_error = 0;
+        static _Thread_local char text[512];
+        wchar_t wtext[256];
+        DWORD n = FormatMessageW(
+            FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+            NULL, code, 0, wtext, (DWORD)(sizeof(wtext) / sizeof(wtext[0])), NULL);
+        while (n > 0 && (wtext[n - 1] == L'\r' || wtext[n - 1] == L'\n')) {
+            wtext[--n] = L'\0';
+        }
+        if (n > 0) {
+            WideCharToMultiByte(CP_UTF8, 0, wtext, -1, text, (int)sizeof(text), NULL, NULL);
+            text[sizeof(text) - 1] = '\0';
+            return (const uint8_t*)text;
+        }
+    }
+    return (const uint8_t*)strerror(errno);
+}
+#else
+const uint8_t* __koral_last_error_text(void) {
+    return (const uint8_t*)strerror(errno);
+}
+#endif
 
 // ============================================================================
 // Float bit conversions
@@ -3306,15 +3352,24 @@ int32_t __koral_spawn(
 
     // Create pipes as needed
     if (stdin_mode == 1) {
-        if (!CreatePipe(&stdin_read, &stdin_write, &sa, 0)) return -1;
+        if (!CreatePipe(&stdin_read, &stdin_write, &sa, 0)) {
+            __koral_win_record_error(GetLastError());
+            return -1;
+        }
         SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0);
     }
     if (stdout_mode == 1) {
-        if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) goto fail;
+        if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) {
+            __koral_win_record_error(GetLastError());
+            goto fail;
+        }
         SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
     }
     if (stderr_mode == 1) {
-        if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) goto fail;
+        if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) {
+            __koral_win_record_error(GetLastError());
+            goto fail;
+        }
         SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
     }
     // Mode 3: DuplicateHandle from the caller-provided CRT fd (inheritable copy)
@@ -3323,21 +3378,30 @@ int32_t __koral_spawn(
         if (src == INVALID_HANDLE_VALUE) goto fail;
         if (!DuplicateHandle(GetCurrentProcess(), src,
                              GetCurrentProcess(), &stdin_file,
-                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) {
+            __koral_win_record_error(GetLastError());
+            goto fail;
+        }
     }
     if (stdout_mode == 3) {
         HANDLE src = (HANDLE)_get_osfhandle(stdout_fd_in);
         if (src == INVALID_HANDLE_VALUE) goto fail;
         if (!DuplicateHandle(GetCurrentProcess(), src,
                              GetCurrentProcess(), &stdout_file,
-                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) {
+            __koral_win_record_error(GetLastError());
+            goto fail;
+        }
     }
     if (stderr_mode == 3) {
         HANDLE src = (HANDLE)_get_osfhandle(stderr_fd_in);
         if (src == INVALID_HANDLE_VALUE) goto fail;
         if (!DuplicateHandle(GetCurrentProcess(), src,
                              GetCurrentProcess(), &stderr_file,
-                             0, TRUE, DUPLICATE_SAME_ACCESS)) goto fail;
+                             0, TRUE, DUPLICATE_SAME_ACCESS)) {
+            __koral_win_record_error(GetLastError());
+            goto fail;
+        }
     }
 
     // Build command line string as UTF-8 first, then widen it for
@@ -3481,13 +3545,18 @@ int32_t __koral_spawn(
         env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
         env_block, wwork_dir, &si, &pi
     );
+    // Read the thread's last-error slot before the frees below can spend it.
+    DWORD spawn_err = ok ? 0 : GetLastError();
 
     free(wcmdline);
     free(wprogram);
     free(wwork_dir);
     if (env_block) free(env_block);
 
-    if (!ok) goto fail;
+    if (!ok) {
+        __koral_win_record_error(spawn_err);
+        goto fail;
+    }
 
     // Close child-side handles
     if (stdin_read != INVALID_HANDLE_VALUE) CloseHandle(stdin_read);

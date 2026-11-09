@@ -2,18 +2,18 @@
 // 对应 Swift 实现中的 ConstraintSolver。
 
 // 约束求解错误类型。
-// Rich compiler-internal error: payloads reference type-checker state (`Type`,
-// `TypeVariable`), so the safe form cannot apply. The `unsafe sendable`
-// promise: error values are constructed and consumed within one compilation
-// (effectively thread-confined) and their payloads are never mutated after
-// construction. Flows through `Result`, which requires a sendable error side.
-public type unsafe sendable ConstraintSolverError {
+// Rich compiler-internal error, in the safe form: `TypeVariable` and
+// `SourceSpan` are sendable values, and the `Type` payload renders to text at
+// construction (`Type` itself is not sendable; the `Error` trait only ever
+// exposes `message()` -- the `DiagnosticError` model). Flows through `Result`,
+// which requires a sendable error side.
+public type sendable ConstraintSolverError {
     // 合一失败
     UnificationFailed(message: String, span: SourceSpan),
     // 类型变量未被解析
     UnsolvedTypeVariable(tv: TypeVariable, span: SourceSpan),
-    // Trait 约束未满足
-    TraitNotSatisfied(target: Type, trait_name: String, span: SourceSpan),
+    // Trait 约束未满足（预渲染的目标类型）
+    TraitNotSatisfied(target: String, trait_name: String, span: SourceSpan),
     // 约束冲突
     ConflictingConstraints(message: String, span: SourceSpan),
 };
@@ -24,7 +24,7 @@ given ConstraintSolverError: Error {
         return when self in {
             .UnificationFailed(message, _) then message,
             .UnsolvedTypeVariable(tv, _) then "Unsolved type variable: \(tv.display())",
-            .TraitNotSatisfied(target, trait_name, _) then "Type '\(type_to_string(target))' does not satisfy trait '\(trait_name)'",
+            .TraitNotSatisfied(target, trait_name, _) then "Type '\(target)' does not satisfy trait '\(trait_name)'",
             .ConflictingConstraints(message, _) then "Conflicting constraints: \(message)",
         };
     };

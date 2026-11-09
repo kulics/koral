@@ -383,7 +383,7 @@ extension TypeChecker {
   func sendableSlotsCompatible(_ actual: Type, _ expected: Type) -> Bool {
     switch expected {
     case .function(let expectedParams, let expectedReturns, _):
-      if context.isSendableType(expected), !context.isSendableType(actual) {
+      if context.isSendableType(expected), !satisfiesSendableConstraint(actual) {
         return false
       }
       if case .function(let actualParams, let actualReturns, _) = actual {
@@ -395,7 +395,7 @@ extension TypeChecker {
       }
       return true
     case .traitObject(_, let expectedArgs, _):
-      if context.isSendableType(expected), !context.isSendableType(actual) {
+      if context.isSendableType(expected), !satisfiesSendableConstraint(actual) {
         return false
       }
       if case .traitObject(_, let actualArgs, _) = actual {

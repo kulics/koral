@@ -959,7 +959,10 @@ extension TypeChecker {
   /// `isSendableType` derivation, except that a bare generic parameter is
   /// sendable only when its bounds say so (see
   /// `genericParamIsSendableBounded`). Generic shapes recurse the conditional
-  /// rule strictly -- `Box[T]` is only known sendable when every argument is.
+  /// rule strictly -- `Box[T]` is only known sendable when every argument is --
+  /// as do arrays and weak references: their inner recursion in `isSendableType`
+  /// free-passes bare parameters, which would smuggle a `T: Any` capture past a
+  /// `sendable` boundary.
   func satisfiesSendableConstraint(_ type: Type) -> Bool {
     switch type {
     case .genericParameter(let name):
@@ -969,6 +972,10 @@ extension TypeChecker {
         return false
       }
       return args.allSatisfy { satisfiesSendableConstraint($0) }
+    case .fixedArray(_, let inner):
+      return satisfiesSendableConstraint(inner)
+    case .weakReference(let inner), .mutableWeakReference(let inner):
+      return satisfiesSendableConstraint(inner)
     default:
       return context.isSendableType(type)
     }

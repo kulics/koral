@@ -12,14 +12,16 @@ using "std/os" { ... };
 
 // ── errors ────────────────────────────────────────────────────────────────────
 
-public type ManifestError {
+// `sendable` (safe form): strings and `FrozenList[String]` snapshots only --
+// same payload shape as `ModuleError`, kept spell-compatible with it.
+public type sendable ManifestError {
     FileNotFound(path: String),
     InvalidField(path: String, message: String),
     MissingTargetModule(module: String),
     DuplicateModuleEntry(entry: String),
-    UnknownPackageName(name: String, context: String, known: List[String]),
-    UnknownModule(name: String, package_name: String, declared: List[String]),
-    NoMainModule(package_name: String, declared: List[String]),
+    UnknownPackageName(name: String, context: String, known: FrozenList[String]),
+    UnknownModule(name: String, package_name: String, declared: FrozenList[String]),
+    NoMainModule(package_name: String, declared: FrozenList[String]),
     ReservedName(name: String),
     UnsupportedSource(source: String),
     Message(text: String),
@@ -30,11 +32,11 @@ private let manifest_error_detail(err: ManifestError): String = when err in {
     .InvalidField(path, message) then "Invalid manifest field '\(path)': \(message)",
     .MissingTargetModule(module) then "Target module '\(module)' not found in resolved module graph",
     .DuplicateModuleEntry(entry) then "entry file '\(entry)' is declared by two modules",
-    .UnknownPackageName(name, context, known) then "Unknown package name \"\(name)\"\n  referenced from \(context)\n  known package names: \(known.join_to_string(", "))",
+    .UnknownPackageName(name, context, known) then "Unknown package name \"\(name)\"\n  referenced from \(context)\n  known package names: \(known.to_list().join_to_string(", "))",
     .UnknownModule(name, package_name, declared) then // One condition, one spelling: the `using` path reports these through
     // `ModuleError`, and the two must not grow apart.
-    "Module '\(name)' does not exist in package '\(package_name)'; declared modules: \(declared.join_to_string(", "))",
-    .NoMainModule(package_name, declared) then "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared.join_to_string(", "))",
+    "Module '\(name)' does not exist in package '\(package_name)'; declared modules: \(declared.to_list().join_to_string(", "))",
+    .NoMainModule(package_name, declared) then "Package '\(package_name)' has no main module; write a module subpath like 'pkg/name' instead; declared modules: \(declared.to_list().join_to_string(", "))",
     .ReservedName(name) then "Package name '\(name)' is reserved",
     .UnsupportedSource(source) then "Cannot locate package source '\(source)'\n  only 'path:' sources are resolvable without a fetch step",
     .Message(text) then text,

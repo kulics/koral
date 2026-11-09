@@ -1861,15 +1861,6 @@ let value = when ?weak in {
 };
 ```
 
-Match on the upgrade result with `when`:
-
-```koral
-let value = when ?weak in {
-    .Some(v) then v.value,
-    .None() then 0,
-};
-```
-
 **A weak reference is a handle, not a value.** Until it is upgraded it carries
 no fields, no cases and no payload of the referent, so anything that tests or
 exploits the referent's *shape* is refused against a `?T`:
@@ -1931,7 +1922,7 @@ Rules:
 - The safe forms **verify** their contents: every field — every enum payload — must itself be `sendable`. A wrong annotation is a compile error, not a hole.
 - Nothing is inferred. A `type mutable` whose fields are all `sendable` is still not `sendable` unless its declaration says so.
 - Enums take the immutable forms, `type sendable` and `type unsafe sendable`; `mutable` remains struct-only.
-- `type foreign` takes sendability as well — `type foreign sendable FX(a: Int32);` — a foreign value copies across a boundary like any `type foreign` value, so nothing is shared. Safe verification walks its fields; raw-pointer fields need `unsafe sendable`.
+- `type foreign` cannot be marked at all — `type foreign sendable FX(a: Int32);` is refused with `foreign type cannot be marked sendable`. A foreign layout is C's and cannot promise thread sharing. Foreign values live inside `type unsafe sendable` trusted interiors or thread-local state (see [`unsafe sendable`](#unsafe-sendable)).
 - Type aliases and `type intrinsic` cannot be marked. An alias follows the type it names.
 
 #### Derivation Rules
@@ -1942,7 +1933,7 @@ Whether a composite type is `sendable` derives mechanically from its parts — a
 - **Nominal types** are `sendable` exactly as declared.
 - **Generic types**: `X[A, B]` is `sendable` only if `X` is declared `sendable` **and** every type argument is `sendable`. This condition applies to the `unsafe` forms too — otherwise a sendable container could smuggle non-sendable values across a boundary.
 - **Enums**: declared `sendable` and every payload type `sendable` (`unsafe` skips the payload check).
-- **Function types**: `sendable (A) -> R` is a distinct form. A function value with no captures qualifies naturally; a lambda qualifies only when **every** capture is `sendable`. A `sendable` function value converts to the plain form, never the reverse. The qualifier applies only to function types.
+- **Function types**: `sendable (A) -> R` is a distinct form. A function value with no captures qualifies naturally; a lambda qualifies only when **every** capture is `sendable`. A bare generic parameter is not `sendable` by default — capturing `x: T` of `f[T: Any]` in a `sendable` closure is refused (`sendable closure cannot capture non-sendable value 'x'`), and a `T: sendable` bound (or a `trait sendable` bound) is what admits it. A `sendable` function value converts to the plain form, never the reverse. The qualifier applies only to function types.
 
 ```koral
 let run(f: sendable () -> Void): Void = f();
@@ -1957,7 +1948,7 @@ let main(): Void = {
 - **Trait objects**: a trait object is `sendable` exactly when its trait is declared `trait sendable`; a plain trait's objects are never `sendable`. See [Trait Sendability](#trait-sendability).
 - **Weak references**: `?T` is `sendable` exactly when `T` is.
 - **Fixed-size arrays**: `[N]T` is `sendable` exactly when `T` is.
-- **Never `sendable`**: raw pointers `*T` / `*mutable T` and foreign function pointers `foreign (A) -> R`. Memory shared across the FFI goes through an `unsafe sendable` wrapper instead.
+- **Never `sendable`**: raw pointers `*T` / `*mutable T`, foreign function pointers `foreign (A) -> R`, and `type foreign` values. Memory shared across the FFI goes through an `unsafe sendable` wrapper instead.
 
 #### Trait Sendability
 
@@ -2216,7 +2207,7 @@ A literal matches exactly the types its `==` would accept: integers against
 integer types (`-5` never matches an unsigned type), floats against `Float32` /
 `Float64`, `true` against `Bool`, strings against `String`, runes against
 `Rune` (or an ASCII `UInt8`). A float literal matches under IEEE equality at
-the subject's width (`1.1` against `Float32` is `Float32(1.1)`), so NaN matches
+the subject's width (`1.1` against `Float32` is `Float32(1.1)`), so `NaN` matches
 no literal -- catch it with a guard such as `v where v != v` -- and `0.0` matches
 `-0.0`. A comparison bound follows the same kind rule: `> 1` is an integer
 bound, `> 1.0` a float one, `> 'a'` a rune one (compared by code point). A
@@ -2968,7 +2959,7 @@ Exact implementation-type tests on trait objects are described under [Exact Type
 
 ### Operator Overloading
 
-Koral supports trait-based operator overloading for arithmetic and comparison operations. Subscripts are built in and are not user-overloadable.
+Koral supports trait-based operator overloading for arithmetic, bitwise, and comparison operations. Subscripts are built in and are not user-overloadable.
 
 The built-in operator mappings are:
 
@@ -2990,6 +2981,8 @@ The built-in operator mappings are:
 Same-direction chained ordering comparisons such as `a < b < c` are syntax sugar over these existing comparison operators. The compiler lowers them into pairwise comparisons with single-evaluation and short-circuit semantics; they do not introduce a separate trait or dispatch mechanism.
 
 A pair of same-width integer operands (the `Wrapping` family included) takes the built-in path for the arithmetic and bitwise operators -- checked arithmetic and shifts for the regular family, modular arithmetic and masked shift amounts for `Wrapping` -- and everything else dispatches through the traits above.
+
+The bitwise operators (`&`, `|`, `^`, `~`, `<<`, `>>`) dispatch through `BitAnd` / `BitOr` / `BitXor` / `BitNot` / `ShiftLeft` / `ShiftRight`, under the same rules as arithmetic.
 
 ```koral
 type Vec2(x: Int, y: Int);

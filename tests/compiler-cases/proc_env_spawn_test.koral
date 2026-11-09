@@ -5,14 +5,36 @@
 // Env actions must not disable PATH search (a bare program name keeps
 // working), and the documented edit model must hold: Set overrides in place,
 // Remove drops one name, Clear drops everything, last Set wins.
+//
+// Windows has no portable `sh` (it is an msys tool), so the Windows branch
+// drives `cmd`: the inner command is one argument and a trailing `& rem `
+// absorbs the stray closing quote cmd's `/c` quote-stripping leaves behind.
+// Env presence is probed with `set NAME` (empty output = absent), because
+// `echo %VAR%` prints an undefined variable's name literally.
 using "std/os" { ... };
 using "std/proc" { ... };
+
+let sh_echo(expr: String): Command = {
+    if is_windows_host() then {
+        return Command.new("cmd").arg("/c " + expr + " & rem ");
+    };
+    return Command.new("sh").arg("-c").arg(expr);
+};
+
+/// Windows: `set NAME` lists the matching entry (`NAME=value`), empty when the
+/// name is absent. POSIX: the caller's shell expansion.
+let env_probe(win_expr: String, posix_expr: String): Command = {
+    if is_windows_host() then {
+        return Command.new("cmd").arg("/c " + win_expr + " & rem ");
+    };
+    return Command.new("sh").arg("-c").arg(posix_expr);
+};
 
 let main(): Void = {
     // ========================================================================
     // Bare program name + env actions: PATH search still applies.
     // ========================================================================
-    let r1 = Command.new("sh").arg("-c").arg("echo hi").set_env("X", "1").run_output();
+    let r1 = sh_echo("echo hi").set_env("X", "1").run_output();
     when r1 in {
         .Ok(o) then {
             assert(o.is_success(), "path search exit");
@@ -25,29 +47,47 @@ let main(): Void = {
     // ========================================================================
     // Edit model: set/remove/clear/last-wins against the inherited environment.
     // ========================================================================
-    // Set keeps the inherited variables (HOME must survive).
-    let r2 = Command.new("sh").arg("-c").arg("echo $KORAL_PVAR:$HOME").set_env(
+    // Set keeps the inherited variables (HOME on POSIX, USERNAME on Windows
+    // must survive).
+    let r2 = env_probe("set KORAL_PVAR", "echo $KORAL_PVAR:$HOME").set_env(
         "KORAL_PVAR",
         "v",
     ).run_output();
     when r2 in {
         .Ok(o) then {
             let s = o.stdout.trim_ascii();
-            assert(s.starts_with("v:"), "set_env applies");
-            assert(s.count() > 2, "set_env keeps inherited env");
+            if is_windows_host() then {
+                assert(s == "KORAL_PVAR=v", "set_env applies");
+            } else {
+                assert(s.starts_with("v:"), "set_env applies");
+                assert(s.count() > 2, "set_env keeps inherited env");
+            };
         },
         .Error(e) then panic("set_env spawn failed: " + e.message()),
     };
+    let r2b = env_probe("set USERNAME", "echo [$HOME]").run_output();
+    when r2b in {
+        .Ok(o) then {
+            if is_windows_host() then {
+                assert(o.stdout.trim_ascii().starts_with("USERNAME="), "set_env keeps inherited env");
+            };
+        },
+        .Error(e) then panic("set_env inherit probe failed: " + e.message()),
+    };
 
     // Remove drops exactly one name.
-    let r3 = Command.new("sh").arg("-c").arg("echo [$KORAL_PVAR]:$HOME").remove_env(
+    let r3 = env_probe("set KORAL_PVAR", "echo [$KORAL_PVAR]:$HOME").remove_env(
         "KORAL_PVAR",
     ).run_output();
     when r3 in {
         .Ok(o) then {
             let s = o.stdout.trim_ascii();
-            assert(s.starts_with("[]:"), "remove_env drops the name");
-            assert(s.count() > 3, "remove_env keeps inherited env");
+            if is_windows_host() then {
+                assert(s == "", "remove_env drops the name");
+            } else {
+                assert(s.starts_with("[]:"), "remove_env drops the name");
+                assert(s.count() > 3, "remove_env keeps inherited env");
+            };
         },
         .Error(e) then panic("remove_env spawn failed: " + e.message()),
     };
@@ -55,20 +95,36 @@ let main(): Void = {
     // Clear empties the inherited environment. The probed name is USERNAME,
     // not HOME: some shells (msys bash on Windows) synthesize HOME into a
     // freshly cleared environment, while USERNAME is inherited-or-absent on
-    // every platform -- so `[]` means "cleared" everywhere.
-    let r4 = Command.new("sh").arg("-c").arg("echo [$USERNAME]").clear_env().run_output();
+    // every platform -- so an empty answer means "cleared" everywhere. (cmd
+    // synthesizes COMSPEC/PATHEXT/PROMPT of its own into a cleared env, which
+    // is why the probe names a variable instead of listing everything.)
+    let r4 = env_probe("set USERNAME", "echo [$USERNAME]").clear_env().run_output();
     when r4 in {
-        .Ok(o) then assert(o.stdout.trim_ascii() == "[]", "clear_env empties the env"),
+        .Ok(o) then {
+            let s = o.stdout.trim_ascii();
+            if is_windows_host() then {
+                assert(s == "", "clear_env empties the env");
+            } else {
+                assert(s == "[]", "clear_env empties the env");
+            };
+        },
         .Error(e) then panic("clear_env spawn failed: " + e.message()),
     };
 
     // Last Set on one name wins.
-    let r5 = Command.new("sh").arg("-c").arg("echo $KORAL_PVAR").set_env(
+    let r5 = env_probe("set KORAL_PVAR", "echo $KORAL_PVAR").set_env(
         "KORAL_PVAR",
         "first",
     ).set_env("KORAL_PVAR", "second").run_output();
     when r5 in {
-        .Ok(o) then assert(o.stdout.trim_ascii() == "second", "last set_env wins"),
+        .Ok(o) then {
+            let s = o.stdout.trim_ascii();
+            if is_windows_host() then {
+                assert(s == "KORAL_PVAR=second", "last set_env wins");
+            } else {
+                assert(s == "second", "last set_env wins");
+            };
+        },
         .Error(e) then panic("set_env order spawn failed: " + e.message()),
     };
     println("proc_env_edit_model_ok");
@@ -78,7 +134,7 @@ let main(): Void = {
     // ========================================================================
     let mutable i = 0;
     while i < 30 then {
-        let rr = Command.new("sh").arg("-c").arg("echo x").set_env("KORAL_LOOP", "1").run_output();
+        let rr = sh_echo("echo x").set_env("KORAL_LOOP", "1").run_output();
         when rr in {
             .Ok(o) then assert(o.stdout.trim_ascii() == "x", "loop spawn output"),
             .Error(e) then panic("loop spawn failed: " + e.message()),
