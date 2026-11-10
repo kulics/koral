@@ -200,7 +200,7 @@ given TypeChecker {
 
     /// The generic type alias template a name resolves to, if any.
     generic_alias_template_for_name(self, base: String): Option[GenericAliasTemplate] = {
-        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+        let raw_base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
             base,
         ) in {
             .Some(t) then Option[Type].Some(t),
@@ -208,6 +208,17 @@ given TypeChecker {
                 .Some(t) then Option[Type].Some(t),
                 .None() then self.storage.global_scope.lookup_type(base),
             },
+        };
+        // A hidden type is undeclared here (§3.3).
+        let base_type_opt = when raw_base_type_opt in {
+            .Some(hidden_check) then {
+                if self.is_hidden_type(hidden_check) then {
+                    Option[Type].None()
+                } else {
+                    raw_base_type_opt
+                }
+            },
+            .None() then Option[Type].None(),
         };
         return when base_type_opt in {
             .Some(base_type) then when self.canonicalize_alias_type(base_type) in {
@@ -229,7 +240,7 @@ given TypeChecker {
         span: SourceSpan,
         check_conformance: Bool,
     ): Option[Type] = {
-        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+        let raw_base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
             base,
         ) in {
             .Some(t) then Option[Type].Some(t),
@@ -237,6 +248,17 @@ given TypeChecker {
                 .Some(t) then Option[Type].Some(t),
                 .None() then self.storage.global_scope.lookup_type(base),
             },
+        };
+        // A hidden type is undeclared here (§3.3).
+        let base_type_opt = when raw_base_type_opt in {
+            .Some(hidden_check) then {
+                if self.is_hidden_type(hidden_check) then {
+                    Option[Type].None()
+                } else {
+                    raw_base_type_opt
+                }
+            },
+            .None() then Option[Type].None(),
         };
         return when base_type_opt in {
             .Some(base_type) then self.try_expand_generic_alias_ref(
@@ -761,7 +783,7 @@ given TypeChecker {
         // (§3.3) -- see `is_foreign_private`.
         when resolved in {
             .Some(t) then {
-                if self.is_foreign_private_type(t) then {
+                if self.is_hidden_type(t) then {
                     return Option[Type].None();
                 };
                 return Option[Type].Some(t);
@@ -799,7 +821,7 @@ given TypeChecker {
             .Some(t) then {
                 // A `private` declaration of another file is not nameable
                 // here (§3.3) -- see `is_foreign_private`.
-                if not self.is_foreign_private_type(t) then {
+                if not self.is_hidden_type(t) then {
                     return Option[Type].Some(t);
                 };
             },
@@ -1009,7 +1031,7 @@ given TypeChecker {
         let resolved = self.try_resolve_named_type_unchecked(name);
         when resolved in {
             .Some(t) then {
-                if self.is_foreign_private_type(t) then {
+                if self.is_hidden_type(t) then {
                     return Option[Type].None();
                 };
                 return Option[Type].Some(t);

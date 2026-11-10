@@ -1700,6 +1700,17 @@ given TypeChecker {
         return self.empty_typed_block(Type.Unknown());
     };
 
+    /// The intrinsics whose DECLARATIONS hide them from code outside the std
+    /// package (`spawn_thread` is `protected`; `alloc_bytes` is module-internal
+    /// to `std/string`): raw-name dispatch must not hand them out where their
+    /// declarations would not resolve -- as if undeclared, the §3.3 rule
+    /// ordinary lookup enforces. Public intrinsics are user API and dispatch
+    /// for everyone. Mirrored in the Swift reference's
+    /// `nonpublicIntrinsicNames`.
+    private nonpublic_intrinsic_names_contain(self, name: String): Bool = {
+        return name == "alloc_bytes" or name == "spawn_thread";
+    };
+
     check_intrinsic_call_ref(
         self,
         callee: Expr,
@@ -1729,10 +1740,15 @@ given TypeChecker {
             return Option[TypedExpr].None();
         };
 
-        if intrinsic_name == "downgrade" or intrinsic_name == "upgrade" then {
-            if self.storage.generic_templates.lookup_function(intrinsic_name) is .None() then {
-                return Option[TypedExpr].None();
-            };
+        // Visibility gate: a non-public intrinsic's declaration does not
+        // resolve outside the std package, so the raw-name dispatch must not
+        // hand it out either. Falling through to ordinary resolution produces
+        // exactly the undeclared-name diagnostic ("Undefined variable: x") --
+        // invisible is undeclared (§3.3) -- and still finds a caller's OWN
+        // same-named declaration, which the dispatch must not hijack.
+        if not is_std_package_id(self.storage.package_id)
+            and self.nonpublic_intrinsic_names_contain(intrinsic_name) then {
+            return Option[TypedExpr].None();
         };
 
         if intrinsic_name == "alloc_memory" then {
@@ -1745,80 +1761,6 @@ given TypeChecker {
 
         if intrinsic_name == "compare_memory" then {
             return self.check_compare_memory_intrinsic(args, scope);
-        };
-
-        if intrinsic_name == "downgrade" then {
-            if args.count() != 1 then {
-                return Option[TypedExpr].None();
-            };
-            let arg_expr = (args[UInt(0)]);
-            let inner = self.check_expr_scoped_ref(arg_expr, .None(), scope);
-            if not self.enforce_mutable_constraint_for_call(
-                inner.expr_type,
-                "downgrade",
-                expr_span(arg_expr),
-            ) then {
-                return Option[TypedExpr].Some(
-                    make_typed_expr(
-                        TypedExprKind.IntrinsicCall(
-                            TypedIntrinsic.DowngradeRef(inner, Type.Unknown()),
-                        ),
-                        Type.Unknown(),
-                    ),
-                );
-            };
-            let weak_type = Type.WeakReferenceType(inner.expr_type);
-            let result = Option[TypedExpr].Some(
-                make_typed_expr(
-                    TypedExprKind.IntrinsicCall(
-                        TypedIntrinsic.DowngradeRef(inner, weak_type),
-                    ),
-                    weak_type,
-                ),
-            );
-            return result;
-        };
-
-        if intrinsic_name == "upgrade" then {
-            if args.count() != 1 then {
-                return Option[TypedExpr].None();
-            };
-            let arg_expr = (args[UInt(0)]);
-            let inner = self.check_expr_scoped_ref(arg_expr, .None(), scope);
-            let result = when inner.expr_type in {
-                .WeakReferenceType(inner_ref) then {
-                    let mutable opt_args = List[Type].new();
-                    opt_args.push(inner_ref);
-                    // Std's `Option` is a LANG ITEM, reached by declaration.
-                    let mutable result_type = Type.GenericEnum(
-                        self.context().std_type_def_id("Option") or else def_id_invalid(),
-                        opt_args,
-                    );
-                    Option[TypedExpr].Some(
-                        make_typed_expr(
-                            TypedExprKind.IntrinsicCall(
-                                TypedIntrinsic.UpgradeRef(inner, result_type),
-                            ),
-                            result_type,
-                        ),
-                    )
-                },
-                _ then {
-                    self.push_expr_diagnostic(
-                        arg_expr,
-                        "'upgrade' expects a weak reference (?T), got \(self.display_type_name(inner.expr_type))",
-                    );
-                    Option[TypedExpr].Some(
-                        make_typed_expr(
-                            TypedExprKind.IntrinsicCall(
-                                TypedIntrinsic.UpgradeRef(inner, Type.Unknown()),
-                            ),
-                            Type.Unknown(),
-                        ),
-                    )
-                },
-            };
-            return result;
         };
 
         if intrinsic_name == "spawn_thread" then {

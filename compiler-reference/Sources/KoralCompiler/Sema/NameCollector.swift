@@ -324,10 +324,11 @@ public class NameCollector: CompilerPass {
                 cname: cname
             )
             
-        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span, let nameSpan):
+        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, let access, let span, let nameSpan):
             try collectIntrinsicFunctionDeclaration(
                 name: name,
                 typeParameters: typeParameters,
+                access: access,
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
@@ -870,6 +871,7 @@ public class NameCollector: CompilerPass {
     private func collectIntrinsicFunctionDeclaration(
         name: String,
         typeParameters: [TypeParameterDecl],
+        access: AccessModifier,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
@@ -877,7 +879,7 @@ public class NameCollector: CompilerPass {
         if !isStdLib {
             throw SemanticError(.generic("'intrinsic' declarations are only allowed in the standard library"), span: span)
         }
-        
+
         // 确定定义类型
         let defKind: DefKind
         if !typeParameters.isEmpty {
@@ -885,14 +887,14 @@ public class NameCollector: CompilerPass {
         } else {
             defKind = .function
         }
-        
+
         // 分配 DefId
         let defId = defIdMap.allocate(
             modulePath: currentModulePath,
             name: name,
             kind: defKind,
             sourceFile: currentSourceFile,
-            access: .internal,
+            access: access,
             packageID: currentPackageID,
             span: span
         )

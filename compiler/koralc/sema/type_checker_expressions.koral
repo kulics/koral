@@ -447,8 +447,27 @@ given TypeChecker {
         else if alias_sym_opt is .Some(s) then s
         else if global_sym_opt is .Some(s) then s
         else {
-            let fallback_type_opt = self.storage.global_scope.lookup_type(name);
-            let resolved_named_type_opt = self.try_resolve_named_type_without_diag(name);
+            let mutable fallback_type_opt = self.storage.global_scope.lookup_type(name);
+            let mutable resolved_named_type_opt = self.try_resolve_named_type_without_diag(name);
+            // A type the current file cannot see is undeclared here (§3.3):
+            // drop it before the spelling can answer as a type name, so it
+            // falls to the ordinary "Undefined variable" complaint below.
+            when fallback_type_opt in {
+                .Some(hidden_check) then {
+                    if self.is_hidden_type(hidden_check) then {
+                        fallback_type_opt = Option[Type].None();
+                    };
+                },
+                .None() then {},
+            };
+            when resolved_named_type_opt in {
+                .Some(hidden_check) then {
+                    if self.is_hidden_type(hidden_check) then {
+                        resolved_named_type_opt = Option[Type].None();
+                    };
+                },
+                .None() then {},
+            };
             let mutable resolved_named_is_type = resolved_named_type_opt is .Some(_);
             let is_type_name = fallback_type_opt is .Some(_) or resolved_named_is_type;
             let mutable fallback_type = if resolved_named_type_opt is .Some(t) then t

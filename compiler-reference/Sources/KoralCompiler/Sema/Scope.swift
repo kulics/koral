@@ -296,7 +296,7 @@ public class UnifiedScope {
     if let defId = bindingViaImport(name, sourceFile: sourceFile) {
       return defId
     }
-    if let defId = names[name] {
+    if let defId = names[name], visibleBinding(defId) {
       return defId
     }
     return parent?.lookup(name, sourceFile: sourceFile)
@@ -328,6 +328,14 @@ public class UnifiedScope {
     return names[map.symbolKey(modulePath: map.currentModulePath, name: name)]
   }
 
+  /// Whether `defId` is a binding the file being checked may name (§3.3
+  /// Access Modifiers). A hidden name resolves as if undeclared -- see
+  /// `DefIdMap.isDefHidden`.
+  private func visibleBinding(_ defId: DefId) -> Bool {
+    guard let map = defIdMap else { return true }
+    return !map.isDefHidden(defId)
+  }
+
   /// `bindingViaImport` for TYPE names: the unqualified `typeNames[name]` is
   /// last-wins across modules, so a spelling this module imports must be
   /// resolved through the import before it is consulted.
@@ -339,13 +347,15 @@ public class UnifiedScope {
       alias: name,
       inModule: map.currentModulePath,
       inSourceFile: sourceFile
-    ), let defId = typeNames[map.symbolKey(modulePath: target, name: original)] {
+    ), let defId = typeNames[map.symbolKey(modulePath: target, name: original)],
+       visibleBinding(defId) {
       return defId
     }
     for edge in graph.edges
     where edge.source == map.currentModulePath
       && (edge.sourceFile == nil || edge.sourceFile == sourceFile) {
-      if let defId = typeNames[map.symbolKey(modulePath: edge.target, name: name)] {
+      if let defId = typeNames[map.symbolKey(modulePath: edge.target, name: name)],
+         visibleBinding(defId) {
         return defId
       }
     }
@@ -378,13 +388,15 @@ public class UnifiedScope {
       alias: name,
       inModule: map.currentModulePath,
       inSourceFile: sourceFile
-    ), let defId = names[map.symbolKey(modulePath: target, name: original)] {
+    ), let defId = names[map.symbolKey(modulePath: target, name: original)],
+       visibleBinding(defId) {
       return defId
     }
     // A batch/module import (`using "m";`) creates no symbol
     // edge, so the spelling is the same in the imported module.
     for edge in graph.edges where edge.source == map.currentModulePath && visible(edgeSourceFile: edge.sourceFile) {
-      if let defId = names[map.symbolKey(modulePath: edge.target, name: name)] {
+      if let defId = names[map.symbolKey(modulePath: edge.target, name: name)],
+         visibleBinding(defId) {
         return defId
       }
     }
@@ -481,7 +493,17 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile) ?? names[name] ?? names[DefIdMap.bareKey(name)],
+    // A hidden bare-slot entry is undeclared here (§3.3): fall through the
+    // key spaces instead of answering with it.
+    var resolvedDefId = bindingInCurrentModule(name) ?? bindingViaImport(name, sourceFile: sourceFile)
+    if resolvedDefId == nil {
+      if let defId = names[name], visibleBinding(defId) {
+        resolvedDefId = defId
+      } else if let defId = names[DefIdMap.bareKey(name)], visibleBinding(defId) {
+        resolvedDefId = defId
+      }
+    }
+    if let defId = resolvedDefId,
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         defId: defId,
@@ -517,7 +539,15 @@ public class UnifiedScope {
       }
     }
 
-    if let defId = bindingInCurrentModule(name) ?? names[name] ?? names[DefIdMap.bareKey(name)],
+    var resolvedDefId = bindingInCurrentModule(name)
+    if resolvedDefId == nil {
+      if let defId = names[name], visibleBinding(defId) {
+        resolvedDefId = defId
+      } else if let defId = names[DefIdMap.bareKey(name)], visibleBinding(defId) {
+        resolvedDefId = defId
+      }
+    }
+    if let defId = resolvedDefId,
        let map = defIdMap, let type = map.getSymbolType(defId) {
       return (
         type: type,
@@ -538,7 +568,15 @@ public class UnifiedScope {
   // (`defIdMap.isSymbolMutable(defId)`), queried at the resolution site.
 
   public func hasFunctionDefinition(_ name: String) -> Bool {
-    return names[name] != nil || names[DefIdMap.bareKey(name)] != nil || defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
+    // A hidden declaration is undeclared here (§3.3): it must not answer the
+    // "is there a function of this name?" question either.
+    if let defId = names[name], visibleBinding(defId) {
+      return true
+    }
+    if let defId = names[DefIdMap.bareKey(name)], visibleBinding(defId) {
+      return true
+    }
+    return defIdMap?.lookupGenericFunctionTemplateDefId(name) != nil
   }
 
   public func defineType(_ name: String, type: Type, span: SourceSpan = .unknown) throws {
@@ -732,11 +770,34 @@ public class UnifiedScope {
       return map.getSymbolType(defId)
     }
 
-    if let defId = typeNames[name] ?? typeNames[DefIdMap.bareKey(name)], let map = defIdMap {
+    // A hidden bare-slot entry is undeclared here (§3.3): fall through the
+    // key spaces instead of answering with it.
+    var resolvedTypeDefId: DefId? = nil
+    if let defId = typeNames[name], visibleBinding(defId) {
+      resolvedTypeDefId = defId
+    } else if let defId = typeNames[DefIdMap.bareKey(name)], visibleBinding(defId) {
+      resolvedTypeDefId = defId
+    }
+    if let defId = resolvedTypeDefId, let map = defIdMap {
       return map.getSymbolType(defId)
     }
 
     return parent?.lookupTypeInternal(name, sourceFile: sourceFile, visited: &visited)
+  }
+
+  /// The type `name` denotes, ignoring the access-level filter (§3.3).
+  ///
+  /// For compiler-synthesized handles -- the interpolation lowering's `Bytes`
+  /// and kin -- which the standard library serves regardless of the user
+  /// file's view. `Bytes` is `protected`; the lowering is std's own code.
+  public func lookupTypeIgnoringAccess(_ name: String) -> Type? {
+    if let defId = typeInCurrentModule(name), let map = defIdMap {
+      return map.getSymbolType(defId)
+    }
+    if let defId = typeNames[name] ?? typeNames[DefIdMap.bareKey(name)], let map = defIdMap {
+      return map.getSymbolType(defId)
+    }
+    return parent?.lookupTypeIgnoringAccess(name)
   }
 
   public func resolveType(_ name: String) -> Type? {

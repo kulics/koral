@@ -1819,9 +1819,24 @@ extension TypeChecker {
     return wrapReceiverMaterialization(materializedReceiver, body: call, type: returns)
   }
 
+  // The intrinsics whose DECLARATIONS hide them from code outside the std
+  // package (`spawn_thread` is `protected`; `alloc_bytes` is module-internal
+  // to `std/string`): raw-name dispatch must not hand them out where their
+  // declarations would not resolve -- as if undeclared, the §3.3 rule the
+  // access filter enforces for ordinary lookup. Falling through produces
+  // exactly the undeclared-name diagnostic and still finds a caller's OWN
+  // same-named declaration, which the dispatch must not hijack. Mirrored in
+  // koralc's `nonpublic_intrinsic_names_contain`.
+  private static let nonpublicIntrinsicNames: Set<String> = [
+    "alloc_bytes", "spawn_thread",
+  ]
+
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws
     -> TypedExpressionNode?
   {
+    if !isStdPackageID(currentPackageID), Self.nonpublicIntrinsicNames.contains(name) {
+      return nil
+    }
     switch name {
     case "alloc_memory":
       guard arguments.count == 1 else {

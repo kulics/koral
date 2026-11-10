@@ -34,7 +34,12 @@ extension TypeChecker {
       return template
     }
 
-    return currentScope.lookupGenericFunctionTemplate(name)
+    // A hidden template is undeclared here (§3.3).
+    if let template = currentScope.lookupGenericFunctionTemplate(name),
+       !defIdMap.isDefHidden(template.defId) {
+      return template
+    }
+    return nil
   }
 
   private func isASCIITypeStyleIdentifier(_ name: String) -> Bool {
@@ -2887,9 +2892,17 @@ extension TypeChecker {
       // bare spelling gets -- and the message names the resolved type. A
       // generic FUNCTION instantiation (`let f = wrap[String];`) is not a
       // type standing in for a value and keeps its own objection.
-      if currentScope.lookupGenericStructTemplate(base) != nil
-        || currentScope.lookupGenericEnumTemplate(base) != nil
-        || currentScope.lookupGenericAliasTemplate(base) != nil
+      // A hidden template is undeclared here (§3.3): it must take the
+      // generic-instantiation objection below, exactly as a spelling that
+      // names nothing does.
+      let visibleStructTemplate = currentScope.lookupGenericStructTemplate(base)
+        .map { !defIdMap.isDefHidden($0.defId) } ?? false
+      let visibleEnumTemplate = currentScope.lookupGenericEnumTemplate(base)
+        .map { !defIdMap.isDefHidden($0.defId) } ?? false
+      let visibleAliasTemplate = currentScope.lookupGenericAliasTemplate(base) != nil
+      if visibleStructTemplate
+        || visibleEnumTemplate
+        || visibleAliasTemplate
         || visibleTraitInfo(base) != nil {
         let resolvedType = try resolveTypeNode(.generic(base: base, args: typeArgs, span: span))
         throw SemanticError(.generic(
@@ -5838,7 +5851,11 @@ extension TypeChecker {
   
   /// Infers the type of a generic instantiation call (e.g., [Int]List(...) or [T]func(...))
   func inferGenericInstantiationCall(base: String, args: [TypeNode], arguments: [ExpressionNode], callArgs: [CallArg]? = nil, span: SourceSpan = .unknown) throws -> TypedExpressionNode {
-    if let template = currentScope.lookupGenericStructTemplate(base) {
+    // A hidden template is undeclared here (§3.3): it must take the
+    // undeclared-name complaint at the end of this function, exactly as a
+    // spelling that names nothing does.
+    if let template = currentScope.lookupGenericStructTemplate(base),
+       !defIdMap.isDefHidden(template.defId) {
       try ensureStructConstructionAccess(
         typeName: base,
         defId: template.defId,
@@ -6185,7 +6202,11 @@ extension TypeChecker {
           callArgs: callArgs ?? arguments.map { CallArg(expression: $0) },
           span: span)
       }
-      throw SemanticError.functionNotFound(base)
+      // The generic callee's undeclared-name complaint, matching the plain
+      // spelling's "Undefined variable" family: this base is resolved in the
+      // type namespace (it names the parameters a construction or generic call
+      // is checked against). Invisible names land here too (§3.3).
+      throw SemanticError(.generic("Undefined type: \(base)"), span: span)
     }
   }
   

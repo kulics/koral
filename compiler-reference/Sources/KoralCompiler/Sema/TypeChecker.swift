@@ -1456,7 +1456,13 @@ public class TypeChecker {
   }
 
   /// 当前正在处理的节点所属 package。
-  var currentPackageID: String = ""
+  var currentPackageID: String = "" {
+    didSet {
+      // The access-level rule (`DefIdMap.isDefHidden`) compares declarations
+      // against the checking context's package.
+      defIdMap.currentPackageID = currentPackageID
+    }
+  }
   
   /// 模块导入图（用于可见性检查）
   var importGraph: ImportGraph? = nil {
@@ -1682,7 +1688,10 @@ public class TypeChecker {
   }
 
   func builtinBytesType() -> Type {
-    if let bytesType = currentScope.lookupType("Bytes") {
+    // A compiler-synthesized handle: the interpolation lowering names `Bytes`
+    // like the standard library's own code. `Bytes` is `protected`, so the
+    // user file's access filter (§3.3) hides it -- resolve past the filter.
+    if let bytesType = currentScope.lookupTypeIgnoringAccess("Bytes") {
       return bytesType
     }
     // Fallback: std should normally define `type mutable Bytes(...)`.

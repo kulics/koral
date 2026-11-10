@@ -1488,13 +1488,18 @@ given TypeChecker {
             .None() then {},
         };
         when self.storage.global_scope.lookup_type(trait_name) in {
-            .Some(resolved_type) then when resolved_type in {
-                .TraitObject(trait_object_def_id, _, _) then {
-                    if trait_object_def_id.is_valid() then {
-                        return trait_object_def_id;
+            .Some(resolved_type) then {
+                // A hidden trait is undeclared here (§3.3).
+                if not self.is_hidden_type(resolved_type) then {
+                    when resolved_type in {
+                        .TraitObject(trait_object_def_id, _, _) then {
+                            if trait_object_def_id.is_valid() then {
+                                return trait_object_def_id;
+                            };
+                        },
+                        _ then {},
                     };
-                },
-                _ then {},
+                };
             },
             _ then {},
         };
@@ -1532,15 +1537,22 @@ given TypeChecker {
         };
         let requested_trait_id = self.trait_def_id_by_name(trait_name);
         return when self.storage.global_scope.lookup_type(trait_name) in {
-            .Some(resolved_type) then when resolved_type in {
-                .TraitObject(trait_def_id, existing_args, _) then {
-                    if trait_def_id == requested_trait_id then Type.TraitObject(
-                        trait_def_id,
-                        existing_args,
-                        self.context().is_sendable_type(resolved_type),
-                    ) else self.make_trait_object_type(trait_name, List[Type].new())
-                },
-                _ then self.make_trait_object_type(trait_name, List[Type].new()),
+            .Some(resolved_type) then {
+                // A hidden trait is undeclared here (§3.3).
+                if self.is_hidden_type(resolved_type) then {
+                    self.make_trait_object_type(trait_name, List[Type].new())
+                } else {
+                    when resolved_type in {
+                        .TraitObject(trait_def_id, existing_args, _) then {
+                            if trait_def_id == requested_trait_id then Type.TraitObject(
+                                trait_def_id,
+                                existing_args,
+                                self.context().is_sendable_type(resolved_type),
+                            ) else self.make_trait_object_type(trait_name, List[Type].new())
+                        },
+                        _ then self.make_trait_object_type(trait_name, List[Type].new()),
+                    }
+                }
             },
             _ then self.make_trait_object_type(trait_name, List[Type].new()),
         };

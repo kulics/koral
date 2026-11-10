@@ -888,19 +888,59 @@ given TypeChecker {
         return decl_file != self.storage.file_path;
     };
 
-    /// The same rule for a resolved TYPE's declaration.
-    is_foreign_private_type(self, t: Type): Bool = {
+    /// Whether `def_id` is hidden from the current file by its ACCESS LEVEL
+    /// (§3.3 Access Modifiers): `private` belongs to its declaring file alone,
+    /// `internal` its logical module, `protected` its package. A hidden name
+    /// resolves as if undeclared ("Undefined ...") -- the convention the
+    /// `private` rule above began, completed for every level so the compiler
+    /// never answers about a symbol the reader cannot see.
+    is_def_hidden_by_access(self, def_id: DefId): Bool = {
+        let access = self.context().get_access(def_id) or else {
+            return false;
+        };
+        return when access in {
+            .Private() then self.is_foreign_private(def_id),
+            .Internal() then {
+                not self.def_in_own_package(def_id) or not self.def_in_own_module(def_id)
+            },
+            .Protected() then {
+                not self.def_in_own_package(def_id)
+            },
+            .Public() then false,
+        };
+    };
+
+    /// Whether `def_id` was declared in the current file's package.
+    def_in_own_package(self, def_id: DefId): Bool = {
+        return when self.context().get_package_id(def_id) in {
+            .Some(package_id) then package_id == self.storage.package_id,
+            .None() then true,
+        };
+    };
+
+    /// Whether `def_id` was declared in the current file's logical module.
+    def_in_own_module(self, def_id: DefId): Bool = {
+        return when self.context().get_module_path(def_id) in {
+            .Some(module_path) then string_list_eq(module_path, self.storage.module_path),
+            .None() then true,
+        };
+    };
+
+    /// The access rule for a resolved TYPE's declaration.
+    is_hidden_type(self, t: Type): Bool = {
         return when t in {
-            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) or .TraitObject(def_id, _, _) then self.is_foreign_private(def_id),
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) or .TraitObject(def_id, _, _) then self.is_def_hidden_by_access(def_id),
             _ then false,
         };
     };
 
-    /// `global_scope.lookup`, minus declarations that belong to another file.
+    /// `global_scope.lookup`, minus declarations the current file cannot see:
+    /// another file's `private`, another module's `internal`, another
+    /// package's `protected` -- all resolve as if undeclared.
     lookup_shared_symbol(self, name: String): Option[Symbol] = {
         when self.storage.global_scope.lookup(name) in {
             .Some(sym) then {
-                if self.is_foreign_private(sym.def_id) then {
+                if self.is_def_hidden_by_access(sym.def_id) then {
                     return Option[Symbol].None();
                 };
                 return Option[Symbol].Some(sym);
@@ -1063,7 +1103,17 @@ given TypeChecker {
                                     entry.original_symbol,
                                     Option[String].None(),
                                 ) in {
-                                    .Some(def_id) then self.context().get_symbol(def_id),
+                                    .Some(def_id) then {
+                                        // An import cannot conjure a name the
+                                        // target hides from this file: an
+                                        // invisible target resolves as if
+                                        // undeclared here too.
+                                        if self.is_def_hidden_by_access(def_id) then {
+                                            Option[Symbol].None()
+                                        } else {
+                                            self.context().get_symbol(def_id)
+                                        }
+                                    },
                                     .None() then Option[Symbol].None(),
                                 };
                             };
@@ -1097,9 +1147,13 @@ given TypeChecker {
                                     entry.original_symbol,
                                     Option[String].None(),
                                 ) in {
-                                    .Some(def_id) then self.type_for_declared_def_id(
-                                        def_id,
-                                    ),
+                                    .Some(def_id) then {
+                                        if self.is_def_hidden_by_access(def_id) then {
+                                            Option[Type].None()
+                                        } else {
+                                            self.type_for_declared_def_id(def_id)
+                                        }
+                                    },
                                     .None() then Option[Type].None(),
                                 };
                             };

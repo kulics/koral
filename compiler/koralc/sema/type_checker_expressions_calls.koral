@@ -44,7 +44,7 @@ given TypeChecker {
         // A type parameter first: `T.zero()` inside `[T Zero]` names the
         // parameter, not a global that happens to be called `T`. Module
         // names still resolve through the qualified tables below.
-        let base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
+        let raw_base_type_opt = when self.storage.current_scope.lookup_generic_param_type(
             base,
         ) in {
             .Some(t) then Option[Type].Some(t),
@@ -52,6 +52,18 @@ given TypeChecker {
                 .Some(t) then Option[Type].Some(t),
                 .None() then self.storage.global_scope.lookup_type(base),
             },
+        };
+        // A hidden type is undeclared here (§3.3) -- the bare table's last-wins
+        // entry must not answer for another module's or package's internals.
+        let base_type_opt = when raw_base_type_opt in {
+            .Some(hidden_check) then {
+                if self.is_hidden_type(hidden_check) then {
+                    Option[Type].None()
+                } else {
+                    raw_base_type_opt
+                }
+            },
+            .None() then Option[Type].None(),
         };
         if base_type_opt is .Some(base_type) then {
             when self.try_expand_generic_alias_ref(
@@ -130,9 +142,18 @@ given TypeChecker {
             );
         };
 
-        if self.lookup_current_file_symbol(base) is .Some(_) or self.storage.global_scope.lookup(
-            base,
-        ) is .Some(_) then {
+        let names_a_visible_value = if self.lookup_current_file_symbol(base) is .Some(_) then {
+            true
+        } else {
+            // A hidden value is undeclared here (§3.3): it must take the
+            // generic callee's undeclared-name complaint below, exactly as a
+            // spelling that names nothing does.
+            when self.storage.global_scope.lookup(base) in {
+                .Some(sym) then not self.is_def_hidden_by_access(sym.def_id),
+                .None() then false,
+            }
+        };
+        if names_a_visible_value then {
             self.push_diagnostic(
                 "Invalid operation use type as value between types \(base) and ",
                 inst_span,

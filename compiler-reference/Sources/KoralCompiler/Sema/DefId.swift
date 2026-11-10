@@ -726,6 +726,40 @@ public class DefIdMap {
         return idToMetadata[defId.id]?.access
     }
 
+    /// Whether `defId` is hidden from the current file by its ACCESS LEVEL
+    /// (§3.3 Access Modifiers): `private` belongs to its declaring file alone,
+    /// `internal` its logical module, `protected` its package. A hidden name
+    /// resolves as if undeclared -- the rule the file-keyed `privateNames`
+    /// mechanism began, completed for every level so the compiler never
+    /// answers about a symbol the reader cannot see.
+    public func isDefHidden(_ defId: DefId) -> Bool {
+        guard let access = getAccess(defId) else { return false }
+        // A context-synthesized binding (`defineType("Self", ...)` and kin)
+        // carries an empty source file: lexical context, not a declaration,
+        // and no access level hides it.
+        guard let declFile = getSourceFile(defId), !declFile.isEmpty else { return false }
+        switch access {
+        case .private:
+            return declFile != (currentSourceFile ?? "")
+        case .internal:
+            return !defInOwnPackage(defId) || !defInOwnModule(defId)
+        case .protected:
+            return !defInOwnPackage(defId)
+        case .public:
+            return false
+        }
+    }
+
+    private func defInOwnPackage(_ defId: DefId) -> Bool {
+        guard let packageID = getPackageID(defId) else { return true }
+        return packageID == currentPackageID
+    }
+
+    private func defInOwnModule(_ defId: DefId) -> Bool {
+        guard let modulePath = getModulePath(defId) else { return true }
+        return modulePath == currentModulePath
+    }
+
     public func getPackageID(_ defId: DefId) -> String? {
         return idToMetadata[defId.id]?.packageID
     }
@@ -1150,6 +1184,11 @@ public class DefIdMap {
     /// the same rule `ImportGraph.getImportKind` applies.
     public var currentSourceFile: String? = nil
 
+    /// Package of the declaration currently being checked. `isDefHidden`
+    /// compares a declaration's package against this one: `protected` is
+    /// package-visible, `internal` nothing wider.
+    public var currentPackageID: String = ""
+
     /// The import graph of the whole compilation.
     ///
     /// SHARED ambient, installed once by the driver when the merged graph is
@@ -1272,9 +1311,13 @@ public class DefIdMap {
             name,
             DefIdMap.bareKey(name),
         ]
-        for key in candidates {
+        for (index, key) in candidates.enumerated() {
             if let defId = genericAliasTemplates[key], let info = genericAliasTemplateInfo[defId.id] {
-                return info
+                // A hidden template is undeclared here (§3.3) outside its own
+                // module's qualified key.
+                if index == 0 || !isDefHidden(defId) {
+                    return info
+                }
             }
         }
         return nil
@@ -1321,17 +1364,24 @@ public class DefIdMap {
         let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
         if let defId = genericStructTemplates[qualified] { return defId }
         // 2./3. whatever this module imports under this spelling
-        if let defId = importedTemplateDefId(name, table: genericStructTemplates) { return defId }
+        if let defId = importedTemplateDefId(name, table: genericStructTemplates),
+           !isDefHidden(defId) { return defId }
         // 4. declared somewhere but not imported here -- only so the caller can
-        //    name the module in "Import it explicitly".
-        return unimportedTemplateDefId(name, table: genericStructTemplates)
+        //    name the module in "Import it explicitly". A hidden declaration is
+        //    undeclared here (§3.3) and must not surface in that hint either.
+        if let defId = unimportedTemplateDefId(name, table: genericStructTemplates),
+           !isDefHidden(defId) { return defId }
+        return nil
     }
 
     public func lookupGenericEnumTemplateDefId(_ name: String) -> DefId? {
         let qualified = makeKey(modulePath: currentModulePath, name: name, sourceFile: nil)
         if let defId = genericEnumTemplates[qualified] { return defId }
-        if let defId = importedTemplateDefId(name, table: genericEnumTemplates) { return defId }
-        return unimportedTemplateDefId(name, table: genericEnumTemplates)
+        if let defId = importedTemplateDefId(name, table: genericEnumTemplates),
+           !isDefHidden(defId) { return defId }
+        if let defId = unimportedTemplateDefId(name, table: genericEnumTemplates),
+           !isDefHidden(defId) { return defId }
+        return nil
     }
 
     /// The generic enum template named `name` declared in a SPECIFIC module.
@@ -1373,7 +1423,13 @@ public class DefIdMap {
 
 
     public func lookupGenericFunctionTemplateDefId(_ name: String) -> DefId? {
-        return genericFunctionTemplates[name] ?? genericFunctionTemplates[DefIdMap.bareKey(name)]
+        // A hidden template is undeclared here (§3.3): neither key space may
+        // answer with one.
+        if let defId = genericFunctionTemplates[name], !isDefHidden(defId) { return defId }
+        if let defId = genericFunctionTemplates[DefIdMap.bareKey(name)], !isDefHidden(defId) {
+            return defId
+        }
+        return nil
     }
 
     public func getGenericStructTemplateInfo(_ defId: DefId) -> GenericStructTemplateInfo? {
