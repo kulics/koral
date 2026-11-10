@@ -19,7 +19,8 @@ type MIRFunctionEmitPlan(
     tracked_init_locals: Dict[UInt, Bool],
     lifetime_plan: MIRLocalLifetimePlan,
     address_taken_local_ids: Set[UInt],
-    moveable_locals: Dict[UInt, Bool],
+    move_designations: Dict[UInt, MoveBlockPos],
+    alias_locals: Dict[UInt, Bool],
 );
 
 /// 一个 MIR 函数发射出的 C 函数体，以及该函数体是否含 alloc_memory。
@@ -643,8 +644,13 @@ type mutable MIRFunctionCodeEmitter(
     mutable tracked_init_locals: Dict[UInt, Bool],
     mutable lifetime_plan: MIRLocalLifetimePlan,
     mutable address_taken_local_ids: Set[UInt],
-    // P5 末次使用移动的预计算放行表（见 codegen_borrowed_self.koral）。
-    mutable moveable_locals: Dict[UInt, Bool],
+    // P5 末次使用移动的指定点表（见 codegen_borrowed_self.koral）。
+    mutable move_designations: Dict[UInt, MoveBlockPos],
+    // WP-2 借用型绑定（成对消除）：绑定读不复制、作用域尾不释放。
+    mutable alias_locals: Dict[UInt, Bool],
+    // 发射游标：当前 (块,语句) —— 移动指定点按它命中。
+    mutable current_block_index: UInt,
+    mutable current_statement_index: UInt,
     mutable lambda_counter: UInt,
     mutable nested_definitions: StringBuilder,
     mutable current_owner_callable_name_cache_prefix: Option[String],
@@ -710,6 +716,27 @@ private let build_mir_function_emit_plan(
     };
 
     let lifetime_plan = build_mir_lifetime_plan(function, codegen, tracked_init_locals);
+    let move_table = build_move_use_table(codegen, function);
+    let move_designations = compute_move_designations(
+        codegen,
+        function,
+        move_table,
+        tracked_init_locals,
+        non_owning_local_ids,
+    );
+    // WP-2 借用型绑定：不持 +1 —— 摘掉 init flag、并入非持有集后再出发射计划。
+    let alias_locals = compute_alias_locals(
+        codegen,
+        function,
+        move_table,
+        tracked_init_locals,
+        non_owning_local_ids,
+        move_designations,
+    );
+    for pair in alias_locals.iterator() then {
+        tracked_init_locals.try_remove(pair.first);
+        non_owning_local_ids.insert(pair.first, true);
+    };
     return MIRFunctionEmitPlan(
         local_names,
         local_names_by_id,
@@ -717,7 +744,8 @@ private let build_mir_function_emit_plan(
         tracked_init_locals,
         lifetime_plan,
         mir_address_taken_locals(function),
-        compute_moveable_locals(codegen, function, tracked_init_locals, non_owning_local_ids),
+        move_designations,
+        alias_locals,
     );
 };
 
@@ -736,7 +764,10 @@ given MIRFunctionCodeEmitter {
             plan.tracked_init_locals,
             plan.lifetime_plan,
             plan.address_taken_local_ids,
-            plan.moveable_locals,
+            plan.move_designations,
+            plan.alias_locals,
+            UInt(0),
+            UInt(0),
             UInt(0),
             StringBuilder.new(),
             when codegen.current_function_owner_type in {
@@ -753,8 +784,11 @@ given MIRFunctionCodeEmitter {
 
     public emit_body(self): Void = {
         self.emit_local_declarations();
+        let mutable block_index = UInt(0);
         for block in self.function.blocks then {
+            self.current_block_index = block_index;
             self.emit_block(block);
+            block_index += UInt(1);
         };
     };
 
@@ -869,11 +903,13 @@ given MIRFunctionCodeEmitter {
             .None() then false,
         };
         self.codegen.add_indent();
+        let mutable statement_index = UInt(0);
         if wraps_block then {
             self.codegen.buffer.push_string(self.block_label(block.id));
             self.codegen.buffer.push_string(": {\n");
             self.codegen.push_indent_level();
             for statement in block.statements then {
+                self.current_statement_index = statement_index;
                 when statement in {
                     .ScopeExit(scope) then self.emit_scope_cleanup_preserving(
                         scope,
@@ -881,7 +917,9 @@ given MIRFunctionCodeEmitter {
                     ),
                     _ then self.emit_statement(statement),
                 };
+                statement_index += UInt(1);
             };
+            self.current_statement_index = statement_index;
             self.emit_terminator(block.terminator);
             self.codegen.pop_indent_level();
             self.codegen.add_indent();
@@ -891,6 +929,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(self.block_label(block.id));
         self.codegen.buffer.push_string(":;\n");
         for statement in block.statements then {
+            self.current_statement_index = statement_index;
             when statement in {
                 .ScopeExit(scope) then self.emit_scope_cleanup_preserving(
                     scope,
@@ -898,7 +937,9 @@ given MIRFunctionCodeEmitter {
                 ),
                 _ then self.emit_statement(statement),
             };
+            statement_index += UInt(1);
         };
+        self.current_statement_index = statement_index;
         self.emit_terminator(block.terminator);
     };
 
@@ -1039,7 +1080,11 @@ given MIRFunctionCodeEmitter {
         let emission = if self.consume_last_use_source(value) then {
             self.emit_value_source(value)
         } else {
-            self.emit_value(value)
+            if self.consume_alias_binding(place, value) then {
+                self.emit_value_source(value)
+            } else {
+                self.emit_value(value)
+            }
         };
         let target_type = self.type_of_place(place);
         let source_type = self.type_of_value(value);
@@ -2079,13 +2124,11 @@ given MIRFunctionCodeEmitter {
     };
 
     /// P5 末次使用移动（concurrency-design.md · codegen_borrowed_self.koral）：
-    /// 值源是裸局部的复制读且预计算放行表命中（单次值读、同块有定义、拥有
-    /// init flag、析构不可观察）时，复制读改走移动路径。
-    /// P5 末次使用移动（concurrency-design.md · codegen_borrowed_self.koral）：
-    /// 值源是裸局部的复制读且预计算放行表命中（单次值读、同块有定义、拥有
-    /// init flag、析构不可观察）时，就地消费源（清 init flag）并放行移动语义
-    /// ——省一对 retain/release。消费必须在这里做：值的 Copy 标签不会让
-    /// `consume_moved_source` 记账，不清 flag 就会在作用域尾二次释放。
+    /// 值源是裸局部的复制读、且当前 (块,语句) 命中预计算的移动指定点时，
+    /// 就地消费源（清 init flag）并放行移动语义——省一对 retain/release。
+    /// 消费必须在这里做：值的 Copy 标签不会让 `consume_moved_source` 记账，
+    /// 不清 flag 就会在作用域尾二次释放。指定点是判 G 放行的末次使用，
+    /// 清掉的 flag 又是运行时判据，路径敏感天然成立。
     consume_last_use_source(self, value: MIRValue): Bool = {
         return when value in {
             .PlaceRead(place, ownership) then {
@@ -2094,14 +2137,37 @@ given MIRFunctionCodeEmitter {
                 };
                 when place in {
                     .Local(local_id) then {
-                        if self.moveable_locals.get(local_id.raw_value) is .Some(_) then {
-                            self.set_init_flag(local_id, false);
-                            true
-                        } else {
-                            false
+                        when self.move_designations.get(local_id.raw_value) in {
+                            .Some(site) then {
+                                if site.block_index == self.current_block_index
+                                    and site.statement_index == self.current_statement_index then {
+                                    self.set_init_flag(local_id, false);
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
+                            .None() then false,
                         }
                     },
                     _ then false,
+                }
+            },
+            _ then false,
+        };
+    };
+
+    /// WP-2 借用型绑定（concurrency-design.md · codegen_borrowed_self.koral）：
+    /// 目标是别名局部时，绑定只是句柄借用——源读不复制（不 retain），目标
+    /// 非持有（作用域尾不 release），正好省掉一对；源不被消费。
+    consume_alias_binding(self, place: MIRPlace, value: MIRValue): Bool = {
+        return when place in {
+            .Local(local_id) then {
+                if self.alias_locals.get(local_id.raw_value) is .Some(_)
+                    and value is .PlaceRead(...) then {
+                    true
+                } else {
+                    false
                 }
             },
             _ then false,

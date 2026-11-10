@@ -1,0 +1,29 @@
+// EXPECT: value=hello
+// EXPECT: length=5
+// EXPECT: done
+
+// Borrow-projection pin (concurrency-design.md P6 · 判 G 的投影风险面): a +0
+// read whose result points INTO the object (e.g. `bytes.borrow_ptr()`) can
+// outlive the object's +1, so the local must never be moved -- moving would
+// shrink the +1 lifetime to the final read and leave the projection reading
+// freed memory. The `from_bytes` shape (borrow_ptr then count then use the
+// pointer) is the canonical case: it returned a bogus UTF-8 error before the
+// projection-risk rule.
+
+using "std" { ... };
+
+let project_and_count(bytes: List[UInt8]): UInt = {
+    let raw = bytes.borrow_ptr();
+    let n = bytes.count();
+    return UInt(raw[0]) + n;
+};
+
+let main(): Void = {
+    let s = "hello".to_bytes();
+    let total = project_and_count(s);
+    assert(total == UInt(104) + 5, "projection survived");
+    let back = String.from_bytes(s).unwrap();
+    println("value=\(back)");
+    println("length=\(s.count())");
+    println("done");
+};

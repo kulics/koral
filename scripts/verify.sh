@@ -183,6 +183,35 @@ if grep -q 'weak_count = 0' "$probe_c"; then
 fi
 echo "weak init contract OK"
 
+# WP-3 RC count pins (concurrency-design.md P6): the ARC optimizations are
+# koralc-side -- the frozen seed is the semantic referee and carries none --
+# so the exact retain/release counts are pinned here against a bootstrap
+# build, not in the shared suite (which needs identical output either way).
+# The instrumentation is compiled out of every normal build (KORAL_RC_STATS),
+# so this stage builds its own runtime with the define: emit the C and link it
+# here, exactly like the runtime-stress cases above. Release-surface negative
+# pin first: a normal runtime build must carry NO stats symbols at all.
+clang -c -I std std/koral_runtime.c -o "$WORK/rt_release_check.o" -Wno-everything -O1
+if grep -a -q '__koral_rc_stats' "$WORK/rt_release_check.o"; then
+  echo "release surface leak: rc stats must not exist outside KORAL_RC_STATS" >&2
+  exit 1
+fi
+echo "release surface OK"
+"$BOOTSTRAP" emit-c tests/runtime-cases/rc_counter_pin.koral -o "$WORK/rc_counter_pin"
+clang -I std -DKORAL_RC_STATS "$WORK/rc_counter_pin/rc_counter_pin.c" std/koral_runtime.c   -o "$WORK/rc_counter_pin/rc_counter_pin$EXE" -Wno-everything -O1 $RT_LIBS
+"$WORK/rc_counter_pin/rc_counter_pin$EXE" > "$WORK/rc_counter_pin.out"
+grep -q 'w1_alias_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: alias pair elimination" >&2; exit 1; }
+grep -q 'w2_move_chain_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: move chain" >&2; exit 1; }
+grep -q 'w3_multiread_retains=1' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: multi-read last move" >&2; exit 1; }
+grep -q 'w5_probe_move_releases=1' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: move release side" >&2; exit 1; }
+grep -q 'w6_probe_alias_releases=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: alias release side" >&2; exit 1; }
+echo "rc counter pins OK"
+
 # ── samples ───────────────────────────────────────────────────────────────────
 say "samples"
 mkdir -p bin/samples

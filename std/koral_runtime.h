@@ -250,16 +250,37 @@ static inline void __koral_release(void* raw_control, __koral_Dtor dtor) {
     }
 }
 
+// ---- RC 观测（测试用：钉精确 retain/release 数）--------------------------
+// **发布面剔除**：整块包在 KORAL_RC_STATS 里——普通构建（koralc build 与
+// 一切发布产物）零痕迹：四个值层 RC 入口不加分支、无全局量、无符号。测试
+// 面由 verify.sh 的 "rc counter pins" 站用 -DKORAL_RC_STATS 单独编出（emit-c
+// 后手动链接），同站的 "release surface OK" 反钉保证普通构建搜不到这块。
+// 打开后四个值层 RC 入口的调用计入两个计数器（单线程精度），测试用例据此
+// 把「一次复制一对 retain/release」「末次移动省一对」钉成精确数字。
+#ifdef KORAL_RC_STATS
+extern int __koral_rc_stats_enabled;
+extern uint64_t __koral_rc_stats_retain_total;
+extern uint64_t __koral_rc_stats_release_total;
+void __koral_rc_stats_enable(void);
+uint64_t __koral_rc_stats_retains(void);
+uint64_t __koral_rc_stats_releases(void);
+#define __KORAL_RC_COUNT(field)     do { if (__koral_rc_stats_enabled) __koral_rc_stats_##field++; } while (0)
+#else
+#define __KORAL_RC_COUNT(field) ((void)0)
+#endif
+
 // ---- 值层 API（生成代码用这一对）----
 // 入参是 payload 指针，引用计数块固定在 ptr - 1。
 // release 的 dtor 是「原地销毁该 payload」的 drop glue，在释放调用点单态化；
 // 没有 drop glue 的类型传 NULL。trait object 传 vtable 的 base.destroy。
 static inline void __koral_retain_value(void* payload) {
     if (!payload) return;
+    __KORAL_RC_COUNT(retain_total);
     __koral_retain(__koral_control_of(payload));
 }
 static inline void __koral_release_value(void* payload, __koral_Dtor dtor) {
     if (!payload) return;
+    __KORAL_RC_COUNT(release_total);
     __koral_release(__koral_control_of(payload), dtor);
 }
 
@@ -323,10 +344,12 @@ static inline void __koral_release_nonatomic(void* raw_control, __koral_Dtor dto
 // 入参与原子族一致：payload 指针，计数块固定在 ptr - 1。
 static inline void __koral_retain_value_nonatomic(void* payload) {
     if (!payload) return;
+    __KORAL_RC_COUNT(retain_total);
     __koral_retain_nonatomic(__koral_control_of(payload));
 }
 static inline void __koral_release_value_nonatomic(void* payload, __koral_Dtor dtor) {
     if (!payload) return;
+    __KORAL_RC_COUNT(release_total);
     __koral_release_nonatomic(__koral_control_of(payload), dtor);
 }
 

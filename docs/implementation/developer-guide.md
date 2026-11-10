@@ -263,6 +263,27 @@ bin/compiler-test-runner/compiler_runner --compiler bootstrap   --bootstrap-kora
 不能把任一侧当长期临时兼容层。改一侧时先看参照侧对应实现是什么形状；
 照抄参照的机制（键形状、双 key、守卫位置）比自己发明一套更不容易偏。
 
+**4. 机制钉与行为钉分居两层，谁也不能替谁。**
+
+行为钉（双编译器套件 `tests/compiler-cases/`）管「算得对不对」——不变量是
+**两编译器输出逐字一致**。机制钉管「优化还在不在、契约有没有漂」：ARC 计数
+（`tests/runtime-cases/rc_counter_pin.koral`，verify.sh 的 "rc counter pins" 站）、
+emitted-C 探针（weak_init_probe）、C 协议压测（runtime stress）——它们钉的是
+实现侧事实，**按设计就与种子不同**（种子是语义裁判，不带 koralc 侧的 ARC 优化），
+所以绝不能进套件：进了差分预言机会当场 `diverge_runtime`（踩过）。反向同理：
+行为全绿挡不住「优化悄悄失效」——退回全复制时程序一个错都不报，只有计数钉会叫。
+
+每个优化落地**必带一对钉**：正钉（精确计数：省了几对）+ 反钉（该动的不动：
+用户 `Drop` 类型、外层 def 的循环、借用投影局部——ARC 三轮里的三个洞全是反面）。
+钉子站的失败信息报**机制名**（`rc counter pin failed: alias pair elimination`），
+红了直接指认哪个优化坏了，不让人从用例名猜。钉子站成本秒级，永驻 verify.sh，
+不放可选工具——会漂走的钉子等于没有。
+
+测试面**不进发布产物**：`__koral_rc_stats_*` 整块包在 `KORAL_RC_STATS` 里，普通
+构建零痕迹（无分支、无全局量、无符号）；钉子站 emit-c 后用 `-DKORAL_RC_STATS`
+单独编运行时链接（与 runtime-stress 站同姿势）。同站的 "release surface OK" 是
+这块的反钉——普通构建的运行时对象里搜到任何 `__koral_rc_stats` 当场红。
+
 配套：**一次一个子步骤，独立过验证再进下一步。** 想「在旧路径上再加 fallback」时先停下，
 读 [`identity-matching-tracking.md`](identity-matching-tracking.md) §2 的硬性约束。
 

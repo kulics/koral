@@ -1,0 +1,77 @@
+// RC traffic measurement (concurrency-design.md P6). The EXACT numbers are a
+// koralc-only pin -- the ARC optimizations (borrowed params, last-use moves,
+// alias pair elimination) are implementation-side and the frozen seed is the
+// semantic referee, deliberately carrying none -- so scripts/verify.sh greps
+// the expected counts out of a bootstrap-built run (the "rc counter pins"
+// stage). This file therefore lives in tests/runtime-cases (like
+// weak_init_probe.koral) and is NOT a suite case: the shared suite and the
+// differential oracle require identical output under both compilers, and the
+// numbers are exactly what differs.
+//
+// Alias windows take a borrowed PARAMETER as the source: alias sources are
+// non-owning by construction (their +1 is owned outside the function and
+// outlives any binding window).
+
+let foreign __koral_rc_stats_enable(): Void;
+let foreign __koral_rc_stats_retains(): UInt64;
+let foreign __koral_rc_stats_releases(): UInt64;
+
+type mutable Box(mutable n: Int);
+
+let read(b: Box): Int = b.n;
+
+let alias_window(b: Box): String = {
+    let r0 = __koral_rc_stats_retains();
+    let alias = b;
+    let _ = read(alias);
+    let _ = read(b);
+    let r1 = __koral_rc_stats_retains();
+    return "w1_alias_retains=\(r1 - r0)";
+};
+
+let probe_move(): Void = {
+    let a = Box(10);
+    let x = a;
+    let _ = read(x);
+};
+
+let probe_alias(b: Box): Void = {
+    let alias = b;
+    let _ = read(alias);
+    let _ = read(b);
+};
+
+let main(): Void = {
+    __koral_rc_stats_enable();
+
+    let b1 = Box(1);
+    println(alias_window(b1));
+
+    let c1 = Box(2);
+    let r2 = __koral_rc_stats_retains();
+    let c2 = c1;
+    let c3 = c2;
+    let _ = read(c3);
+    let r3 = __koral_rc_stats_retains();
+    println("w2_move_chain_retains=\(r3 - r2)");
+
+    let d1 = Box(3);
+    let r4 = __koral_rc_stats_retains();
+    let d2 = d1;
+    let _ = read(d2);
+    let d3 = d1;
+    let _ = read(d3);
+    let r5 = __koral_rc_stats_retains();
+    println("w3_multiread_retains=\(r5 - r4)");
+
+    let d0 = __koral_rc_stats_releases();
+    probe_move();
+    let d1b = __koral_rc_stats_releases();
+    println("w5_probe_move_releases=\(d1b - d0)");
+
+    let bx = Box(11);
+    let d2b = __koral_rc_stats_releases();
+    probe_alias(bx);
+    let d3b = __koral_rc_stats_releases();
+    println("w6_probe_alias_releases=\(d3b - d2b)");
+};

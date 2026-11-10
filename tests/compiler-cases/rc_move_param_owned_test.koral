@@ -1,0 +1,51 @@
+// EXPECT: n=7
+// EXPECT: side=7
+// EXPECT: before
+// EXPECT: after
+// EXPECT: done
+// EXPECT: Drop Box
+
+// Owned-parameter last-use move (concurrency-design.md P5): a parameter on the
+// owned (+1) convention -- one whose value escapes, e.g. returned -- forwards
+// its +1 at the final read instead of copying. A Drop-typed parameter is
+// never moved: the destructor must fire where the copy contract puts it.
+
+type mutable Box(mutable n: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        println("Drop Box");
+    };
+};
+
+// `x` escapes through the return -> owned convention.
+let forward(x: Box): Box = {
+    let y = x;
+    return y;
+};
+
+// `b` escapes via the global holder -> owned convention; its last read is
+// the stored copy, which must stay a copy for the Drop-typed Box.
+type unsafe sendable mutable HolderRoot(mutable box: Box);
+
+let mutable root = HolderRoot(Box(0));
+
+let stash(b: Box): Int = {
+    let taken = b;
+    root.box = taken;
+    return taken.n;
+};
+
+let main(): Void = {
+    let b = Box(7);
+    let c = forward(b);
+    println("n=\(c.n)");
+
+    let side = Box(7);
+    let n = stash(side);
+    assert(n == 7, "stash");
+    println("side=\(root.box.n)");
+    println("before");
+    println("after");
+    println("done");
+};

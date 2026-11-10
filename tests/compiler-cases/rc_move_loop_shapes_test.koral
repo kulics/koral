@@ -1,0 +1,54 @@
+// EXPECT: acc=abcabcabc
+// EXPECT: loop=012
+// EXPECT: before
+// EXPECT: after
+// EXPECT: done
+// EXPECT: Drop Box
+
+// Loop shapes of the last-use move (concurrency-design.md P5 · 判 G): a use
+// inside a loop body with the definition OUTSIDE must NOT move -- every
+// iteration re-reads the same +1, and moving would hand the same ownership
+// away per iteration. A per-iteration definition in the same block DOES move
+// (each iteration's fresh +1 feeds its own final read). A Drop-typed value is
+// never moved either way: its destructor timing is contract.
+
+type mutable Box(mutable n: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        println("Drop Box");
+    };
+};
+
+let push(s: String, piece: String): String = s + piece;
+
+let main(): Void = {
+    let a = "abc";
+    let mutable acc = "";
+    let mutable i = 0;
+    while i < 3 then {
+        acc = push(acc, a);
+        i += 1;
+    };
+    println("acc=\(acc)");
+
+    let mutable loop = "";
+    let mutable j = 0;
+    while j < 3 then {
+        let piece = j.to_string();
+        loop = push(loop, piece);
+        j += 1;
+    };
+    println("loop=\(loop)");
+
+    let box = Box(1);
+    let mutable k = 0;
+    while k < 2 then {
+        box.n += k;
+        k += 1;
+    };
+    println("before");
+    assert(box.n == 2, "box");
+    println("after");
+    println("done");
+};

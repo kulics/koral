@@ -1,0 +1,50 @@
+// EXPECT: num=big:x
+// EXPECT: before
+// EXPECT: after
+// EXPECT: done
+// EXPECT: Drop Box
+
+// Enum payload refinement of the move taint (concurrency-design.md P5): an
+// enum whose payloads cannot run user destructors is movable like any other
+// unobservable-destructor type; an enum carrying a user `Drop` payload is
+// NOT -- the payload's destructor timing is contract and must stay at scope
+// exit, never inside the consuming read.
+
+type Num {
+    Small(n: Int),
+    Big(s: String),
+};
+
+type mutable Box(mutable n: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        println("Drop Box");
+    };
+};
+
+type Holder {
+    Keep(b: Box),
+};
+
+let show(v: Num): String = when v in {
+    .Small(n) then "small:\(n)",
+    .Big(s) then "big:\(s)",
+};
+
+let unwrap(h: Holder): Int = when h in {
+    .Keep(b) then b.n,
+};
+
+let main(): Void = {
+    let v = Num.Big("x");
+    let w = v;
+    println("num=\(show(w))");
+
+    let h = Holder.Keep(Box(1));
+    let n = unwrap(h);
+    assert(n == 1, "unwrap");
+    println("before");
+    println("after");
+    println("done");
+};

@@ -152,6 +152,27 @@ int32_t __koral_memcmp(uint8_t* a, uint8_t* b, uintptr_t n) {
 
 // 慢路径：强引用归零后的析构与释放。快路径在 koral_runtime.h 里内联。
 // dtor 由释放调用点单态化后传进来，头里不再存析构函数。
+// ---- RC 观测计数（见 koral_runtime.h 的说明；发布面剔除）----
+#ifdef KORAL_RC_STATS
+int __koral_rc_stats_enabled = 0;
+uint64_t __koral_rc_stats_retain_total = 0;
+uint64_t __koral_rc_stats_release_total = 0;
+
+void __koral_rc_stats_enable(void) {
+    __koral_rc_stats_enabled = 1;
+    __koral_rc_stats_retain_total = 0;
+    __koral_rc_stats_release_total = 0;
+}
+
+uint64_t __koral_rc_stats_retains(void) {
+    return __koral_rc_stats_retain_total;
+}
+
+uint64_t __koral_rc_stats_releases(void) {
+    return __koral_rc_stats_release_total;
+}
+#endif
+
 void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     if (dtor) {
         // 析构期间对象处于「不可复活」状态：`drop(self)` 里的 `self` 是同一个

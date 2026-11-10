@@ -1035,11 +1035,13 @@ let compute_impure_function_ids(program: MIRProgram): Dict[UInt, Bool] = {
 /// 与标量的释放只动内存；枚举保守按可观察处理（载荷析构可能跑用户码）。
 private let move_type_drop_observable(tainted: Dict[UInt, Bool], t: Type): Bool = {
     return when t in {
-        .FunctionType(_, _, _) or .TraitObject(_, _, _) or .EnumType(_) or .GenericEnum(_, _) then {
+        .FunctionType(_, _, _) or .TraitObject(_, _, _) then {
             true
         },
-        .StructureType(def_id) or .OpaqueType(def_id) then tainted.get(def_id.id) is .Some(_),
-        .GenericStruct(template_def_id, args) then {
+        .StructureType(def_id) or .OpaqueType(def_id) or .EnumType(def_id) then {
+            tainted.get(def_id.id) is .Some(_)
+        },
+        .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
             if tainted.get(template_def_id.id) is .Some(_) then {
                 true
             } else {
@@ -1097,43 +1099,175 @@ let compute_observable_drop_defs(codegen: CodeGen): Dict[UInt, Bool] = {
                 };
             };
         };
+        // 枚举载荷同构参与污染：载荷类型不可观察析构 → 枚举本身可移动。
+        for entry in codegen.context.def_id_map.enum_cases.iterator() then {
+            let def_key = entry.first;
+            if tainted.get(def_key) is .Some(_) then {
+            } else {
+                let mutable found = false;
+                for case_info in entry.second then {
+                    for param in case_info.params then {
+                        if move_type_drop_observable(tainted, param.param_type) then {
+                            found = true;
+                        };
+                    };
+                };
+                if found then {
+                    tainted.insert(def_key, true);
+                    again = true;
+                };
+            };
+        };
+        // 单态化实例的泛型实参参与污染：容器把元素藏在裸缓冲后，字段走查看
+        // 不见它们——`List[Element]` 实例的字段只有指针和长度，可观察性全在
+        // 实参里。漏掉它就会把持有用户 `Drop` 值的容器当可移动的。
+        for entry in codegen.context.def_id_map.struct_type_arguments.iterator() then {
+            let def_key = entry.first;
+            if tainted.get(def_key) is .Some(_) then {
+            } else {
+                for arg in entry.second then {
+                    if move_type_drop_observable(tainted, arg) then {
+                        tainted.insert(def_key, true);
+                        again = true;
+                        break;
+                    };
+                };
+            };
+        };
+        for entry in codegen.context.def_id_map.enum_type_arguments.iterator() then {
+            let def_key = entry.first;
+            if tainted.get(def_key) is .Some(_) then {
+            } else {
+                for arg in entry.second then {
+                    if move_type_drop_observable(tainted, arg) then {
+                        tainted.insert(def_key, true);
+                        again = true;
+                        break;
+                    };
+                };
+            };
+        };
     };
     return tainted;
 };
+/// 使用点位置：块号 + 语句号（终结子占用「语句数」这个号）。
+type MoveBlockPos(block_index: UInt, statement_index: UInt);
 
-/// 值读/定义位置表：`uses` 计数每次值读（取址/投影基读同计；写入与 Drop
-/// 不算），`use_blocks` 记录局部被读的块集合，`def_blocks` 记录值写入
-/// （Assign 目标 / AtomicLoad 目标 / Exchange 旧值目标）所在块集合。
+/// 判 G 扫描队列项：从块内某语句号起向后扫描。
+type mutable MoveScanEntry(block_index: UInt, start_statement: UInt);
+
+/// 值读/定义位置表。逐局部记 (块,语句) → 标志——bit0 值读 / bit1 定义 /
+/// bit2 复制读（移动候选形态）/ bit3 同语句多读（保守拒绝）；`copy_sites`
+/// 是复制读位置（走查序，供倒序找末次候选），`consumed_elsewhere` 标记被
+/// MIR 自带 Move/Take/HeapOwnedMove 消费过的局部——消费点与末次移动的消费
+/// 会打架，整局部排除。`block_successors` 是 CFG 后继（块下标），`i` 处是
+/// 第 i 块的后继；`block_statements[i]` 是第 i 块的语句数（终结子的语句号）。
 type mutable MoveUseTable(
-    mutable uses: Dict[UInt, UInt],
-    mutable use_blocks: Dict[UInt, Set[UInt]],
-    mutable def_blocks: Dict[UInt, Set[UInt]],
+    mutable flags: Dict[UInt, Dict[UInt, Dict[UInt, UInt]]],
+    mutable copy_sites: Dict[UInt, List[MoveBlockPos]],
+    mutable consumed_elsewhere: Dict[UInt, Bool],
+    mutable block_successors: List[List[UInt]],
+    mutable block_statements: List[UInt],
+    // 借用参数槽（`borrowed_param_slots` 快照）：发射期实参会把这些槽的实参
+    // 改写成 `.Borrow()`（`apply_borrowed_self_receiver_convention`），走查
+    // 必须用同一有效所有权分类——借用实参读不是移动候选（发射点不会消费）。
+    mutable borrowed_slots: Dict[String, Bool],
+    // 借用投影风险：+0 读（借用实参/借用接收者/借用 PlaceRead）、取址
+    //（`Ref`/`Pointer`）都可能把指向对象内部的裸引用送出去并活得比 +1 长
+    //（`bytes.borrow_ptr()` 的指针在 from_bytes 里活过了载荷释放）。带任何
+    // 一处的局部不得移动——移动会把 +1 生命周期缩短到最后一个读。
+    mutable projection_risks: Dict[UInt, Bool],
     mutable block_index: UInt,
+    mutable statement_index: UInt,
 );
 
-private let move_table_note_use(table: MoveUseTable, local_id: MIRLocalID): Void = {
+private let move_table_note(
+    table: MoveUseTable,
+    local_id: MIRLocalID,
+    bits: UInt,
+): Void = {
     let key = local_id.raw_value;
-    let next = when table.uses.get(key) in {
-        .Some(n) then n + UInt(1),
-        .None() then UInt(1),
-    };
-    table.uses.insert(key, next);
-    let mutable blocks = when table.use_blocks.get(key) in {
+    let mutable by_block = when table.flags.get(key) in {
         .Some(existing) then existing,
-        .None() then Set[UInt].new(),
+        .None() then Dict[UInt, Dict[UInt, UInt]].new(),
     };
-    blocks.insert(table.block_index);
-    table.use_blocks.insert(key, blocks);
+    let mutable by_stmt = when by_block.get(table.block_index) in {
+        .Some(existing) then existing,
+        .None() then Dict[UInt, UInt].new(),
+    };
+    let prev = when by_stmt.get(table.statement_index) in {
+        .Some(existing) then existing,
+        .None() then UInt(0),
+    };
+    let mutable next = prev | bits;
+    // 同一 (块,语句) 内第二次记值读 → 多读标记。
+    if (prev & UInt(1)) != UInt(0) and (bits & UInt(1)) != UInt(0) then {
+        next = next | UInt(8);
+    };
+    by_stmt.insert(table.statement_index, next);
+    by_block.insert(table.block_index, by_stmt);
+    table.flags.insert(key, by_block);
+};
+
+private let move_table_note_use(table: MoveUseTable, local_id: MIRLocalID): Void = {
+    move_table_note(table, local_id, UInt(1));
+};
+
+private let move_table_note_copy_read(
+    table: MoveUseTable,
+    local_id: MIRLocalID,
+): Void = {
+    move_table_note(table, local_id, UInt(5));
+    let key = local_id.raw_value;
+    let mutable sites = when table.copy_sites.get(key) in {
+        .Some(existing) then existing,
+        .None() then List[MoveBlockPos].new(),
+    };
+    sites.push(MoveBlockPos(table.block_index, table.statement_index));
+    table.copy_sites.insert(key, sites);
 };
 
 private let move_table_note_def(table: MoveUseTable, local_id: MIRLocalID): Void = {
-    let key = local_id.raw_value;
-    let mutable blocks = when table.def_blocks.get(key) in {
-        .Some(existing) then existing,
-        .None() then Set[UInt].new(),
+    move_table_note(table, local_id, UInt(2));
+};
+
+private let move_table_note_consumed(
+    table: MoveUseTable,
+    local_id: MIRLocalID,
+): Void = {
+    table.consumed_elsewhere.insert(local_id.raw_value, true);
+    move_table_note(table, local_id, UInt(1));
+};
+
+/// Place 的根局部（用于 HeapOwnedMove 消费标记）。
+private let move_place_root_local(place: MIRPlace): Option[MIRLocalID] = {
+    return when place in {
+        .Local(local_id) then Option[MIRLocalID].Some(local_id),
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then move_place_root_local(base),
+        .Global(_) or .Deref(_, _) or .PointerElement(_, _) then Option[MIRLocalID].None(),
     };
-    blocks.insert(table.block_index);
-    table.def_blocks.insert(key, blocks);
+};
+
+private let move_table_note_projection(
+    table: MoveUseTable,
+    local_id: MIRLocalID,
+): Void = {
+    table.projection_risks.insert(local_id.raw_value, true);
+};
+
+/// 借用实参的顶层读：不复制、不消费——按普通值读计（不是移动候选）。
+/// 被借用的句柄可能被投影出指向内部的裸引用（借用投影风险）。
+private let move_walk_value_as_borrow(value: MIRValue, table: MoveUseTable): Void = {
+    when value in {
+        .PlaceRead(place, _) then {
+            when move_place_root_local(place) in {
+                .Some(root) then move_table_note_projection(table, root),
+                .None() then {},
+            };
+            move_walk_place(place, table);
+        },
+        _ then move_walk_value(value, table),
+    };
 };
 
 private let move_walk_operand(operand: MIROperand, table: MoveUseTable): Void = {
@@ -1191,10 +1325,47 @@ private let move_walk_intrinsic(node: MIRIntrinsic, table: MoveUseTable): Void =
 private let move_walk_value(value: MIRValue, table: MoveUseTable): Void = {
     when value in {
         .Operand(operand) then move_walk_operand(operand, table),
-        .PlaceRead(place, _) or .Ref(place, _, _) or .Pointer(place) then move_walk_place(
-            place,
-            table,
-        ),
+        // 裸局部的 Copy 复制读是移动候选；Move/Take 读是 MIR 自带消费点
+        //（与末次移动冲突，整局部排除）；其余所有权形态按普通值读计。
+        .PlaceRead(place, ownership) then {
+            when place in {
+                .Local(local_id) then {
+                    if ownership is .Copy() then {
+                        move_table_note_copy_read(table, local_id);
+                    } else {
+                        if ownership is .Move() or ownership is .Take() then {
+                            move_table_note_consumed(table, local_id);
+                        } else {
+                            move_table_note_projection(table, local_id);
+                            move_table_note_use(table, local_id);
+                        };
+                    };
+                },
+                _ then move_walk_place(place, table),
+            }
+        },
+        .Ref(place, _, allocation) then {
+            when move_place_root_local(place) in {
+                .Some(root) then move_table_note_projection(table, root),
+                .None() then {},
+            };
+            if allocation is .HeapOwnedMove() then {
+                when move_place_root_local(place) in {
+                    .Some(local_id) then move_table_note_consumed(table, local_id),
+                    .None() then {},
+                };
+                move_walk_place(place, table);
+            } else {
+                move_walk_place(place, table);
+            };
+        },
+        .Pointer(place) then {
+            when move_place_root_local(place) in {
+                .Some(root) then move_table_note_projection(table, root),
+                .None() then {},
+            };
+            move_walk_place(place, table);
+        },
         .Binary(operation) then {
             move_walk_operand(operation.left, table);
             move_walk_operand(operation.right, table);
@@ -1202,8 +1373,31 @@ private let move_walk_value(value: MIRValue, table: MoveUseTable): Void = {
         .Unary(operation) then move_walk_operand(operation.operand, table),
         .Call(call) then {
             move_walk_operand(call.callee, table);
-            for argument in call.arguments then {
-                move_walk_value(argument, table);
+            let mutable callee_def_id = UInt(0);
+            when call.callee in {
+                .Function(symbol) then {
+                    callee_def_id = symbol.def_id.id;
+                },
+                _ then {},
+            };
+            let owners_match = call.argument_ownerships.count() == call.arguments.count();
+            for pair in call.arguments.lazy().enumerate() then {
+                let slot_key = borrowed_slot_key(callee_def_id, pair.first);
+                if table.borrowed_slots.get(slot_key) is .Some(_) then {
+                    move_walk_value_as_borrow(pair.second, table);
+                } else {
+                    if owners_match then {
+                        move_walk_value(pair.second, table);
+                    } else {
+                        // 缺所有权表时发射侧按 `.Move()` 兜底——实参会被消费。
+                        when pair.second in {
+                            .PlaceRead(.Local(local_id), _) then {
+                                move_table_note_consumed(table, local_id);
+                            },
+                            _ then move_walk_value(pair.second, table),
+                        };
+                    };
+                };
             };
         },
         .Aggregate(aggregate) then {
@@ -1234,15 +1428,54 @@ private let move_walk_value(value: MIRValue, table: MoveUseTable): Void = {
     };
 };
 
-/// 构建整函数的值读/定义位置表。
-let build_move_use_table(function: MIRFunction): MoveUseTable = {
+/// 构建整函数的值读/定义位置表 + CFG 后继表。
+let build_move_use_table(codegen: CodeGen, function: MIRFunction): MoveUseTable = {
+    let mutable borrowed_slots = Dict[String, Bool].new();
+    for pair in codegen.borrowed_param_slots.iterator() then {
+        borrowed_slots.insert(pair.first, pair.second);
+    };
     let table = MoveUseTable(
-        Dict[UInt, UInt].new(),
-        Dict[UInt, Set[UInt]].new(),
-        Dict[UInt, Set[UInt]].new(),
+        Dict[UInt, Dict[UInt, Dict[UInt, UInt]]].new(),
+        Dict[UInt, List[MoveBlockPos]].new(),
+        Dict[UInt, Bool].new(),
+        List[List[UInt]].new(),
+        List[UInt].new(),
+        borrowed_slots,
+        Dict[UInt, Bool].new(),
+        UInt(0),
         UInt(0),
     );
+    // 块 id → 数组下标；后继边按下标存。
+    let mutable id_to_index = Dict[UInt, UInt].new();
+    let mutable index = UInt(0);
     for block in function.blocks then {
+        id_to_index.insert(block.id.raw_value, index);
+        index += UInt(1);
+    };
+    for block in function.blocks then {
+        let mutable targets = List[UInt].new();
+        when block.terminator in {
+            .Goto(target) then targets.push(id_to_index.get(target.raw_value) or else target.raw_value),
+            .Branch(_, then_block, else_block) then {
+                targets.push(id_to_index.get(then_block.raw_value) or else then_block.raw_value);
+                targets.push(id_to_index.get(else_block.raw_value) or else else_block.raw_value);
+            },
+            .SwitchValue(_, cases, default_block) then {
+                for case in cases then {
+                    targets.push(id_to_index.get(case.target.raw_value) or else case.target.raw_value);
+                };
+                when default_block in {
+                    .Some(target) then targets.push(id_to_index.get(target.raw_value) or else target.raw_value),
+                    .None() then {},
+                };
+            },
+            .ReturnValue(_) or .Unreachable() then {},
+        };
+        table.block_successors.push(targets);
+        table.block_statements.push(UInt(block.statements.count()));
+    };
+    for block in function.blocks then {
+        table.statement_index = UInt(0);
         for statement in block.statements then {
             when statement in {
                 .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
@@ -1283,7 +1516,9 @@ let build_move_use_table(function: MIRFunction): MoveUseTable = {
                 .Retain(value) or .Release(value) then move_walk_value(value, table),
                 .Evaluate(value) then move_walk_value(value, table),
             };
+            table.statement_index += UInt(1);
         };
+        // 终结子占用「语句数」这个语句号。
         when block.terminator in {
             .Goto(_) or .Unreachable() then {},
             .Branch(condition, _, _) then move_walk_operand(condition, table),
@@ -1298,51 +1533,296 @@ let build_move_use_table(function: MIRFunction): MoveUseTable = {
     return table;
 };
 
-/// 可移动局部集合：单次值读 + 使用所在块内有定义 + 拥有 init flag + 析构不
-/// 可观察。判定全部预计算——发射点只查表，不需要动态簿记。
-///
-/// 「同块有定义」是循环安全的关键：块内必然重定义后才（可能再次）使用，
-/// 每次动态使用消费的都是当次的新值；外层定义、内层使用的形状被排除。
-let compute_moveable_locals(
-    codegen: CodeGen,
-    function: MIRFunction,
-    tracked_init_locals: Dict[UInt, Bool],
-    non_owning_local_ids: Dict[UInt, Bool],
-): Dict[UInt, Bool] = {
-    let table = build_move_use_table(function);
-    let mutable moveable = Dict[UInt, Bool].new();
-    for local in function.locals then {
-        let key = local.id.raw_value;
-        if local.storage is .Parameter() or is .Capture() then {
-        } else {
-            let use_count = when table.uses.get(key) in {
-                .Some(n) then n,
+private let move_flags_at(
+    table: MoveUseTable,
+    local_key: UInt,
+    block_index: UInt,
+    statement_index: UInt,
+): UInt = {
+    return when table.flags.get(local_key) in {
+        .Some(by_block) then when by_block.get(block_index) in {
+            .Some(by_stmt) then when by_stmt.get(statement_index) in {
+                .Some(bits) then bits,
                 .None() then UInt(0),
+            },
+            .None() then UInt(0),
+        },
+        .None() then UInt(0),
+    };
+};
+
+/// 判 G（末次使用）：从使用点 U 出发的每条执行路径（含回边，语句粒度）在
+/// 碰到该局部的下一次值读（含 U 自身的动态重入）之前必然经过一次定义——
+/// 于是每次动态执行的 U 消费的都是「最近一次定义」给出的 +1，静态移动
+/// （清 init flag + 复制读改移交）不会重复消费同一份所有权。
+///
+/// 同语句出现第二次读保守拒绝（写协议的语句内求值细节不进判定）；同语句
+/// 的定义是写协议的最后一步（左路径 → RHS → 写入），在读之后执行，对后续
+/// 语句与后继块构成截断。
+private let move_site_is_last_use(
+    table: MoveUseTable,
+    local_key: UInt,
+    site: MoveBlockPos,
+): Bool = {
+    let own_bits = move_flags_at(table, local_key, site.block_index, site.statement_index);
+    if (own_bits & UInt(8)) != UInt(0) then {
+        return false;
+    };
+    if (own_bits & UInt(1)) == UInt(0) or (own_bits & UInt(4)) == UInt(0) then {
+        return false;
+    };
+    if (own_bits & UInt(2)) != UInt(0) then {
+        return true;
+    };
+    let mutable work = List[MoveScanEntry].new();
+    work.push(MoveScanEntry(site.block_index, site.statement_index + UInt(1)));
+    let mutable visited = Dict[UInt, Dict[UInt, Bool]].new();
+    let start_key = site.block_index;
+    let mutable start_seen = Dict[UInt, Bool].new();
+    start_seen.insert(UInt(1), true);
+    visited.insert(start_key, start_seen);
+    let mutable cursor = UInt(0);
+    while cursor < work.count() then {
+        let entry = work[cursor];
+        cursor += UInt(1);
+        let stmt_count = table.block_statements[entry.block_index];
+        let mutable s = entry.start_statement;
+        let mutable cut = false;
+        while s <= stmt_count then {
+            let bits = move_flags_at(table, local_key, entry.block_index, s);
+            if (bits & UInt(1)) != UInt(0) then {
+                return false;
             };
-            if use_count == UInt(1) and tracked_init_locals.get(key) is .Some(_)
-                and non_owning_local_ids.get(key) is .None()
-                and not move_type_drop_observable(codegen.observable_drop_defs, local.local_type) then {
-                let mutable ok = false;
-                when table.use_blocks.get(key) in {
-                    .Some(used) then {
-                        when table.def_blocks.get(key) in {
-                            .Some(defned) then {
-                                for block_id in used then {
-                                    if defned.contains(block_id) then {
-                                        ok = true;
-                                    };
-                                };
-                            },
-                            .None() then {},
-                        };
-                    },
-                    .None() then {},
+            if (bits & UInt(2)) != UInt(0) then {
+                cut = true;
+                break;
+            };
+            s += UInt(1);
+        };
+        if not cut then {
+            let successors = table.block_successors[entry.block_index];
+            for succ in successors then {
+                let mutable seen = when visited.get(succ) in {
+                    .Some(existing) then existing,
+                    .None() then Dict[UInt, Bool].new(),
                 };
-                if ok then {
-                    moveable.insert(key, true);
+                if seen.get(UInt(0)) is .None() then {
+                    seen.insert(UInt(0), true);
+                    visited.insert(succ, seen);
+                    work.push(MoveScanEntry(succ, UInt(0)));
                 };
             };
         };
     };
-    return moveable;
+    return true;
+};
+
+/// 末次使用移动的指定点（P5 · concurrency-design.md）：每个可移动局部恰好
+/// 指定一个使用点（判 G 放行的最后复制读），发射点按 (块,语句) 命中即消费。
+/// 判据：拥有 init flag（非持有/借用参数/捕获都不是）、非 MIR 消费点、
+/// 析构不可观察（用户 `Drop` 的析构时序是契约，绝不移动）。
+let compute_move_designations(
+    codegen: CodeGen,
+    function: MIRFunction,
+    table: MoveUseTable,
+    tracked_init_locals: Dict[UInt, Bool],
+    non_owning_local_ids: Dict[UInt, Bool],
+): Dict[UInt, MoveBlockPos] = {
+    let mutable designations = Dict[UInt, MoveBlockPos].new();
+    for local in function.locals then {
+        let key = local.id.raw_value;
+        if local.storage is .Capture() then {
+        } else {
+            if tracked_init_locals.get(key) is .Some(_)
+                and non_owning_local_ids.get(key) is .None()
+                and table.consumed_elsewhere.get(key) is .None()
+                and table.projection_risks.get(key) is .None()
+                and not move_type_drop_observable(codegen.observable_drop_defs, local.local_type) then {
+                when table.copy_sites.get(key) in {
+                    .Some(sites) then {
+                        // 倒序找第一个过判 G 的复制读——它就是语义上的末次使用。
+                        let mutable i = sites.count();
+                        while i > 0 then {
+                            i -= 1;
+                            let site = sites[i];
+                            if move_site_is_last_use(table, key, site) then {
+                                designations.insert(key, site);
+                                break;
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+            };
+        };
+    };
+    return designations;
+};
+
+private let alias_note_def(
+    def_counts: Dict[UInt, UInt],
+    target: MIRLocalID,
+): Void = {
+    let key = target.raw_value;
+    let next = when def_counts.get(key) in {
+        .Some(n) then n + UInt(1),
+        .None() then UInt(1),
+    };
+    def_counts.insert(key, next);
+};
+
+/// 源合格：不被消费、不被中途释放、且其 +1 在 b 的窗口内不会死去——
+/// 非持有（借用参数/捕获/先建别名）恒活到调用结束；tracked 源要求单定义
+/// 且无移动指定点（有指定点的源已被自己的移动优化，别名会双重记账）。
+private let alias_source_is_sound(
+    table: MoveUseTable,
+    non_owning_local_ids: Dict[UInt, Bool],
+    tracked_init_locals: Dict[UInt, Bool],
+    designations: Dict[UInt, MoveBlockPos],
+    def_counts: Dict[UInt, UInt],
+    disqualified: Dict[UInt, Bool],
+    source_key: UInt,
+): Bool = {
+    if disqualified.get(source_key) is .Some(_) then {
+        return false;
+    };
+    if table.consumed_elsewhere.get(source_key) is .Some(_) then {
+        return false;
+    };
+    // 源必须是**非持有**（借用参数/捕获/先建别名）：其 +1 的所有权在函数体
+    // 之外，生命周期覆盖整个函数体，必活过 b 的任何窗口。tracked 局部源的
+    // +1 可能死在作用域尾或循环重定义的写协议里（静态 def 计数看不见动态
+    // 重定义），别名窗口内提前死就悬垂——那需要源生死点的可达性分析，留作
+    // 后续；此刻只放行构造上安全的源。
+    return non_owning_local_ids.get(source_key) is .Some(_);
+};
+
+/// 借用型绑定（WP-2 · ARC 成对消除，Swift 的 retain/release pair elimination
+/// 同形）：`let b = <局部/参数/捕获>` 这样的复制绑定，若 b 的全部使用都不消
+/// 费、且源在 b 的窗口内既不被消费也不重定义、不中途释放，则 b 只是别名——
+/// 省掉绑定处的 retain 与作用域尾的 release 一对。析构时序不变：对象仍死在
+/// 源的 +1 死去的时刻（源的释放点）。b 因而不持 +1，走既有非持有机制
+/// （返回处复制、Move 读强制复制），只是把「绑定读不复制」这一半补上。
+///
+/// 消费面全覆盖：移动指定点、MIR Move/Take/HeapOwnedMove（`consumed_elsewhere`）、
+/// `Drop` 语句、`Exchange` 槽位换出、`return` 转发（tracked 局部的返回即消费）。
+/// 源的重定义会走写协议释放旧值——恰是别名所指的对象——故源同样要求单定义。
+let compute_alias_locals(
+    codegen: CodeGen,
+    function: MIRFunction,
+    table: MoveUseTable,
+    tracked_init_locals: Dict[UInt, Bool],
+    non_owning_local_ids: Dict[UInt, Bool],
+    designations: Dict[UInt, MoveBlockPos],
+): Dict[UInt, Bool] = {
+    let _ = codegen;
+    let mutable candidates = Dict[UInt, UInt].new();
+    let mutable def_counts = Dict[UInt, UInt].new();
+    let mutable disqualified = Dict[UInt, Bool].new();
+
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(place, value) then {
+                    when place in {
+                        .Local(target) then {
+                            alias_note_def(def_counts, target);
+                            when value in {
+                                .PlaceRead(source_place, ownership) then {
+                                    if ownership is .Copy() then {
+                                        when source_place in {
+                                            .Local(source_id) then {
+                                                candidates.insert(
+                                                    target.raw_value,
+                                                    source_id.raw_value,
+                                                );
+                                            },
+                                            _ then {},
+                                        };
+                                    };
+                                },
+                                _ then {},
+                            };
+                        },
+                        _ then {
+                            when move_place_root_local(place) in {
+                                .Some(root) then disqualified.insert(root.raw_value, true),
+                                .None() then {},
+                            };
+                        },
+                    };
+                },
+                .AtomicLoad(target, place) then {
+                    alias_note_def(def_counts, target);
+                    when move_place_root_local(place) in {
+                        .Some(root) then disqualified.insert(root.raw_value, true),
+                        .None() then {},
+                    };
+                },
+                .Exchange(place, old_target, _) then {
+                    alias_note_def(def_counts, old_target);
+                    when move_place_root_local(place) in {
+                        .Some(root) then disqualified.insert(root.raw_value, true),
+                        .None() then {},
+                    };
+                },
+                .Drop(place) then {
+                    when move_place_root_local(place) in {
+                        .Some(root) then disqualified.insert(root.raw_value, true),
+                        .None() then {},
+                    };
+                },
+                _ then {},
+            };
+        };
+        when block.terminator in {
+            .ReturnValue(some_op) then {
+                when some_op in {
+                    .Some(op) then {
+                        when op in {
+                            .Local(local_id) then disqualified.insert(local_id.raw_value, true),
+                            .Constant(_) or .Function(_) then {},
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            _ then {},
+        };
+    };
+
+    let mutable aliases = Dict[UInt, Bool].new();
+    for local in function.locals then {
+        let key = local.id.raw_value;
+        if local.storage is .Parameter() or local.storage is .Capture() then {
+        } else {
+            when candidates.get(key) in {
+                .Some(source_key) then {
+                    let def_once = when def_counts.get(key) in {
+                        .Some(n) then n == UInt(1),
+                        .None() then false,
+                    };
+                    if tracked_init_locals.get(key) is .Some(_)
+                        and designations.get(key) is .None()
+                        and table.consumed_elsewhere.get(key) is .None()
+                        and disqualified.get(key) is .None()
+                        and def_once
+                        and source_key != key
+                        and alias_source_is_sound(
+                            table,
+                            non_owning_local_ids,
+                            tracked_init_locals,
+                            designations,
+                            def_counts,
+                            disqualified,
+                            source_key,
+                        ) then {
+                        aliases.insert(key, true);
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    return aliases;
 };
