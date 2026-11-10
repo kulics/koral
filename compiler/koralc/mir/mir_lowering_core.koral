@@ -661,25 +661,21 @@ given MIRFunctionBuilder {
     };
 
     private lower_assignment(self, target: TypedExpr, value: TypedExpr): Void = {
-        // 锁定赋值走整句临界区（concurrency-design.md §对象锁语义 3）：目标
-        // 所属对象的锁在 RHS 降级开始前获取、写入后释放，`x.f = x.f + 1` 的
-        // 读-改-写因此是原子的。这类赋值的目标 place 必须先降（取锁需要
-        // owner），与下面非锁定路径的次序相反——设计如此。
-        if self.target_touches_locked(target) then {
-            self.lower_assignment_locked(target, value);
-            return;
-        };
-        // The value lands before the target place is computed, matching Swift
-        // MIRLowerer's lowerAssignment order. A place can carry a
-        // side-effecting address computation -- a built-in subscript slot
-        // lookup -- and computing it first would let a value that grows the
-        // container leave the store writing through a stale buffer.
-        let lowered_value = self.lower_value(value);
+        // 赋值求值顺序统一（concurrency-design.md §赋值求值顺序）：先左边
+        // 路径与下标，再 RHS，最后写入——全类型一致。基链 owner 装载在
+        // rewrite_locked_place_links 里先发射（各自按所属对象协议取放）；
+        // 下标目标由 sema 解糖成「槽位后取」的临时块，写入时刻重查槽位，
+        // RHS 令容器重分配也不会写进陈旧缓冲。
         when self.lower_place(target) in {
-            .Some(place) then self.append_statement(
-                MIRStatement.Assign(place, lowered_value),
-            ),
+            .Some(place) then {
+                let prepared = if self.place_locked_relevant(place) then self.rewrite_locked_place_links(
+                    place,
+                ) else place;
+                let lowered_value = self.lower_value(value);
+                self.lower_assignment_write(prepared, lowered_value);
+            },
             .None() then {
+                let _ = self.lower_value(value);
                 // Swift MIRLowerer never reaches this: a member path whose base is a
                 // call falls back to lowerMaterializedMemberPathPlace. Report instead of
                 // silently discarding the store, which is how `pairs[0].x = 200` lost its write.
@@ -713,8 +709,7 @@ given MIRFunctionBuilder {
                                 ),
                                 expr.expr_type,
                             );
-                            self.release_in_flight_locks_for_exit(UInt(0));
-                            self.emit_scope_exits(UInt(0));
+                                                        self.emit_scope_exits(UInt(0));
                             self.terminate(
                                 MIRTerminator.ReturnValue(
                                     Option[MIROperand].Some(operand),
@@ -732,8 +727,7 @@ given MIRFunctionBuilder {
                 };
                 when self.return_operand(result) in {
                     .Some(operand) then {
-                        self.release_in_flight_locks_for_exit(UInt(0));
-                        self.emit_scope_exits(UInt(0));
+                                                self.emit_scope_exits(UInt(0));
                         self.terminate(
                             MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
                         );
@@ -742,8 +736,7 @@ given MIRFunctionBuilder {
                 };
             },
             .None() then {
-                self.release_in_flight_locks_for_exit(UInt(0));
-                self.emit_scope_exits(UInt(0));
+                                self.emit_scope_exits(UInt(0));
                 self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
             },
         };
@@ -754,8 +747,7 @@ given MIRFunctionBuilder {
             return;
         };
         let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
-        self.release_in_flight_locks_for_exit(self.loop_stack.count());
-        self.emit_scope_exits(loop.scope_depth);
+                self.emit_scope_exits(loop.scope_depth);
         self.terminate(MIRTerminator.Goto(loop.break_block));
     };
 
@@ -764,8 +756,7 @@ given MIRFunctionBuilder {
             return;
         };
         let loop = self.loop_stack[self.loop_stack.count() - UInt(1)];
-        self.release_in_flight_locks_for_exit(self.loop_stack.count());
-        self.emit_scope_exits(loop.scope_depth);
+                self.emit_scope_exits(loop.scope_depth);
         self.terminate(MIRTerminator.Goto(loop.continue_block));
     };
 

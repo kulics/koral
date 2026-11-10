@@ -4319,41 +4319,56 @@ uint32_t __koral_hardware_concurrency(void) {
 #endif
 
 // ============================================================================
-// Reentrant object lock (concurrency-design.md §对象锁语义)
+// Short object lock (concurrency-design.md §对象锁语义)
 // ============================================================================
 
 void __koral_lock_init(struct __koral_Lock* lock) {
-    atomic_store_explicit(&lock->owner, 0, memory_order_relaxed);
-    lock->recursion = 0;
+    atomic_store_explicit(&lock->held, 0, memory_order_relaxed);
     lock->reserved = 0;
 }
 
 void __koral_lock_acquire(struct __koral_Lock* lock) {
-    uint64_t self = __koral_thread_current_id();
-    // Reentrant fast path: relaxed load is advisory -- a stale miss falls
-    // through to the CAS, which is the authoritative owner test.
-    if (atomic_load_explicit(&lock->owner, memory_order_relaxed) == self) {
-        lock->recursion++;
-        return;
-    }
     for (;;) {
-        uint64_t expected = 0;
-        if (atomic_compare_exchange_weak_explicit(&lock->owner, &expected, self,
+        uint32_t expected = 0;
+        if (atomic_compare_exchange_weak_explicit(&lock->held, &expected, 1,
                 memory_order_acquire, memory_order_relaxed)) {
-            break;
+            return;
         }
-        // Contended: critical sections are one field access or one assignment
-        // statement, so yielding out is cheaper than a futex round-trip here.
+        // Contended: the critical section is one machine-level access, so
+        // yielding out is cheaper than a futex round-trip here.
         __koral_thread_yield();
     }
-    lock->recursion = 1;
 }
 
 void __koral_lock_release(struct __koral_Lock* lock) {
-    // Owner-only contract (codegen pairs acquire/release); the recursion count
-    // therefore needs no atomics of its own.
-    if (--lock->recursion == 0) {
-        atomic_store_explicit(&lock->owner, 0, memory_order_release);
+    atomic_store_explicit(&lock->held, 0, memory_order_release);
+}
+
+// ============================================================================
+// Scalar slot atomics (concurrency-design.md §对象锁语义)
+// ============================================================================
+// Sequential-consistency bit-copy load/store for the scalar-field protocol.
+// The generated code passes `sizeof(slot)`; widths 1/2/4/8 are the scalar
+// field shapes. C11 __atomic_* works on every toolchain this file already
+// targets (the file uses _Thread_local unconditionally).
+
+void __koral_atomic_load_n(void* dst, const void* src, uintptr_t size) {
+    switch (size) {
+        case 1: *(uint8_t*)dst = __atomic_load_n((const uint8_t*)src, __ATOMIC_SEQ_CST); break;
+        case 2: *(uint16_t*)dst = __atomic_load_n((const uint16_t*)src, __ATOMIC_SEQ_CST); break;
+        case 4: *(uint32_t*)dst = __atomic_load_n((const uint32_t*)src, __ATOMIC_SEQ_CST); break;
+        case 8: *(uint64_t*)dst = __atomic_load_n((const uint64_t*)src, __ATOMIC_SEQ_CST); break;
+        default: memcpy(dst, src, (size_t)size); break;
+    }
+}
+
+void __koral_atomic_store_n(void* dst, const void* src, uintptr_t size) {
+    switch (size) {
+        case 1: __atomic_store_n((uint8_t*)dst, *(const uint8_t*)src, __ATOMIC_SEQ_CST); break;
+        case 2: __atomic_store_n((uint16_t*)dst, *(const uint16_t*)src, __ATOMIC_SEQ_CST); break;
+        case 4: __atomic_store_n((uint32_t*)dst, *(const uint32_t*)src, __ATOMIC_SEQ_CST); break;
+        case 8: __atomic_store_n((uint64_t*)dst, *(const uint64_t*)src, __ATOMIC_SEQ_CST); break;
+        default: memcpy(dst, src, (size_t)size); break;
     }
 }
 

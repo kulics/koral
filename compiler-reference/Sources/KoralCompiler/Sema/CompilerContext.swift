@@ -246,6 +246,12 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isLockedType(t)
     }
 
+    /// Scalar-slot verdict (concurrency-design.md §对象锁语义): `mutable`
+    /// scalar slots take atomic load/store, everything else the short lock.
+    public func isAtomicScalarType(_ t: Type) -> Bool {
+        defIdMap.isAtomicScalarType(t)
+    }
+
     public func isLockedDef(_ defId: DefId) -> Bool {
         defIdMap.isLockedDef(defId)
     }

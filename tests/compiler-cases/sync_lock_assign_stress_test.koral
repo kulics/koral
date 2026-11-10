@@ -1,0 +1,41 @@
+// EXPECT: lock_assign_stress_ok
+
+// Assignment stress on a safe `sendable mutable` field
+// (concurrency-design.md §对象锁语义): each access of `c.hits = c.hits + 1`
+// is individually synchronized -- the read takes the field's protocol (the
+// scalar's atomic load), the write takes it again -- so the hammering is
+// race-free and bounded. The two accesses are NOT one atomic step: concurrent
+// increments lose updates by design, and `AtomicCell.update_and_get` is the atomic
+// read-modify-write. (This replaces the old whole-statement critical
+// section.)
+
+using "std/async" { ... };
+
+type sendable mutable Counter(mutable hits: Int);
+
+let main(): Void = {
+    let c = Counter(0);
+    let mutable threads = List[Thread].new();
+    let mutable i = 0;
+    while i < 8 then {
+        let shared = c;
+        threads.push(
+            run_task(
+                () => {
+                    let mutable j = 0;
+                    while j < 50000 then {
+                        shared.hits = shared.hits + 1;
+                        j = j + 1;
+                    };
+                },
+            ),
+        );
+        i = i + 1;
+    };
+    for t in threads then {
+        let _ = t.wait();
+    };
+    assert(c.hits >= 1, "counter made progress");
+    assert(c.hits <= 400000, "no value past the naive sum");
+    println("lock_assign_stress_ok");
+};

@@ -75,7 +75,13 @@ that is the comparison being asked about. Specifically:
   feature being paid for, not a benchmark defect.
 - **Day-to-day variance** on this machine reaches ~25% (core scheduling,
   thermals) with no code change. Cross-day readings need a same-session
-  anchor; only same-day A/B comparisons should be read as deltas.
+  anchor; only same-day A/B comparisons should be read as deltas. **Cross-machine
+  readings are not comparable at all** — a 2026-11-10 same-machine A/B of the
+  ARC optimization round (pre/post worktrees, same toolchain, same session)
+  moved every koral row within ±5% (fib −6%, dict_lookup −4%, string_find
+  −5%), while the same code measured on a Windows x86 box reports entirely
+  different ratios against Go/Swift than this table. The table is this
+  machine's; treat the ratio column as machine-specific.
 
 ## Results
 

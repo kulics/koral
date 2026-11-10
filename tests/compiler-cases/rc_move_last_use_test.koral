@@ -1,0 +1,49 @@
+// EXPECT: value=hello!
+// EXPECT: value=xyxy
+// EXPECT: before
+// EXPECT: after
+// EXPECT: done
+// EXPECT: Drop Box
+
+// Last-use move (concurrency-design.md P5 · ARC 优化): a bare local at its
+// final value read moves instead of copying -- one less retain/release pair
+// (`a` moves into `b`, `b` moves into the call). A local read twice is copied
+// on both reads, never moved. The move is restricted to types whose
+// destruction cannot run user code, so a `Drop` type's destructor timing is
+// EXACTLY unchanged: `Drop Box` prints at scope exit (after "done"), never
+// inside the consuming call.
+
+type mutable Box(mutable n: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        println("Drop Box");
+    };
+};
+
+let append_bang(s: String): String = {
+    return s + "!";
+};
+
+let observe(b: Box): Int = {
+    return b.n;
+};
+
+let main(): Void = {
+    let a = "hello";
+    let b = a;
+    let c = append_bang(b);
+    println("value=\(c)");
+
+    let x = "xy";
+    let y = x;
+    let z = x;
+    println("value=\(y)\(z)");
+
+    let box = Box(1);
+    let n = observe(box);
+    println("before");
+    println("after");
+    assert(n == 1, "observe");
+    println("done");
+};

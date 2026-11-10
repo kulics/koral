@@ -1,0 +1,38 @@
+// EXPECT: add_calls=2
+// EXPECT: op_assign_ok
+
+// `op=` is two steps routed through the operator -- built-in arithmetic or
+// trait overloading -- so generic code and ordinary types share one
+// implementation (concurrency-design.md §赋值求值顺序). Nothing pretends the
+// combined read-modify-write is atomic.
+
+type sendable mutable Num(mutable v: Int);
+
+let mutable add_calls = 0;
+
+given Num: Add[Int] {
+    add(self, other: Int): Num = {
+        add_calls = add_calls + 1;
+        return Num(self.v + other);
+    };
+};
+
+let bump[T: Add[Int]](x: T, d: Int): T = {
+    let mutable r = x;
+    r += d;
+    return r;
+};
+
+type sendable mutable Holder(mutable n: Num);
+
+let main(): Void = {
+    let n = Num(1);
+    let r = bump[Num](n, 2);
+    assert(r.v == 3, "generic bump routes through Add");
+    let h = Holder(Num(10));
+    h.n += 5;
+    assert(h.n.v == 15, "field compound routes through Add");
+    assert(add_calls == 2, "both compounds routed through Add");
+    println("add_calls=2");
+    println("op_assign_ok");
+};

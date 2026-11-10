@@ -1108,6 +1108,24 @@ given DefIdMap {
         return self.type_sendabilities.get(id.id) or else Sendability.Unmarked();
     };
 
+    /// 标量槽判定（concurrency-design.md §对象锁语义）：单字 POD——整数族/
+    /// 浮点/Bool/裸指针。safe `sendable mutable` 里这类 `mutable` 字段与全局
+    /// 标量槽走原子 load/store（顺序一致）；其余（引用类型、多字长值）走短锁。
+    /// 枚举一律按多字长对待（保守，含无载荷枚举）。
+    public is_atomic_scalar_type(self, t: Type): Bool = {
+        return when t in {
+            .IntType() or .Int8Type() or .Int16Type() or .Int32Type() or .Int64Type()
+            or .UIntType() or .UInt8Type() or .UInt16Type() or .UInt32Type() or .UInt64Type()
+            or .WrappingIntType() or .WrappingInt8Type() or .WrappingInt16Type()
+            or .WrappingInt32Type() or .WrappingInt64Type()
+            or .WrappingUIntType() or .WrappingUInt8Type() or .WrappingUInt16Type()
+            or .WrappingUInt32Type() or .WrappingUInt64Type()
+            or .Float32Type() or .Float64Type() or .BoolType()
+            or .PointerType(_) or .MutablePointerType(_) then true,
+            _ then false,
+        };
+    };
+
     /// 派生规则（concurrency-design.md §派生规则）：一个类型能否跨线程共享。
     ///
     /// 查询按声明走注册表，不递归名义类型自身的字段（字段约束在声明处由

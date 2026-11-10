@@ -592,10 +592,6 @@ extension TypeChecker {
 
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
-            if typedRhs.type != .never && typedRhs.type != .error && element != .error && typedRhs.type != element {
-              throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
-            }
-
             if let arithmeticOp = compoundOpToArithmeticOp(op) {
               let newValue = try buildArithmeticExpression(op: arithmeticOp, lhs: derefTarget, rhs: typedRhs, span: span)
               return .assignment(target: derefTarget, operator: nil, value: newValue, span: span)
@@ -603,9 +599,6 @@ extension TypeChecker {
               // The bitwise family rides the same dispatch the binary
               // operator does; a same-width integer pair keeps the built-in
               // compound-assign lowering.
-              if isIntegerScalarType(element) && element == typedRhs.type {
-                return .assignment(target: derefTarget, operator: op, value: typedRhs, span: span)
-              }
               let newValue = try buildBitwiseExpression(op: bitwiseOp, lhs: derefTarget, rhs: typedRhs, span: span)
               return .assignment(target: derefTarget, operator: nil, value: newValue, span: span)
             } else {
@@ -644,18 +637,11 @@ extension TypeChecker {
               base: resolvedBase, index: typedArgs[0], span: span)
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
-            if typedRhs.type != .never && typedRhs.type != .error && element != .error
-              && typedRhs.type != element {
-              throw SemanticError.typeMismatch(expected: element.description, got: typedRhs.type.description)
-            }
             if let arithmeticOp = compoundOpToArithmeticOp(op) {
               let newValue = try buildArithmeticExpression(
                 op: arithmeticOp, lhs: elementPlace, rhs: typedRhs, span: span)
               return .assignment(target: elementPlace, operator: nil, value: newValue, span: span)
             } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
-              if isIntegerScalarType(element) && element == typedRhs.type {
-                return .assignment(target: elementPlace, operator: op, value: typedRhs, span: span)
-              }
               let newValue = try buildBitwiseExpression(
                 op: bitwiseOp, lhs: elementPlace, rhs: typedRhs, span: span)
               return .assignment(target: elementPlace, operator: nil, value: newValue, span: span)
@@ -707,11 +693,6 @@ extension TypeChecker {
 
           var typedRhs = try inferTypedExpression(value)
           typedRhs = try coerceLiteral(typedRhs, to: elementType)
-          if typedRhs.type != .never && typedRhs.type != .error && elementType != .error && typedRhs.type != elementType {
-            throw SemanticError.typeMismatch(
-              expected: elementType.description, got: typedRhs.type.description)
-          }
-
           let rhsSym = nextSynthSymbol(prefix: "sub_rhs", type: typedRhs.type)
           stmts.append(.variableDeclaration(identifier: rhsSym, value: typedRhs, mutable: false))
 
@@ -728,25 +709,15 @@ extension TypeChecker {
                 expected: elementType.description, got: newValueExpr.type.description)
             }
           } else if let bitwiseOp = compoundOpToBitwiseOp(op) {
-            if isIntegerScalarType(elementType) && elementType == typedRhs.type {
-              newValueExpr = .bitwiseExpression(
-                left: .variable(identifier: oldSym),
-                op: bitwiseOp,
-                right: .variable(identifier: rhsSym),
-                type: elementType,
-                span: span
-              )
-            } else {
-              newValueExpr = try buildBitwiseExpression(
-                op: bitwiseOp,
-                lhs: .variable(identifier: oldSym),
-                rhs: .variable(identifier: rhsSym),
-                span: span
-              )
-              if newValueExpr.type != .error && elementType != .error && newValueExpr.type != elementType {
-                throw SemanticError.typeMismatch(
-                  expected: elementType.description, got: newValueExpr.type.description)
-              }
+            newValueExpr = try buildBitwiseExpression(
+              op: bitwiseOp,
+              lhs: .variable(identifier: oldSym),
+              rhs: .variable(identifier: rhsSym),
+              span: span
+            )
+            if newValueExpr.type != .error && elementType != .error && newValueExpr.type != elementType {
+              throw SemanticError.typeMismatch(
+                expected: elementType.description, got: newValueExpr.type.description)
             }
           } else {
             fatalError("Unknown compound assignment operator")
@@ -768,12 +739,6 @@ extension TypeChecker {
         var typedValue = try inferTypedExpression(value, expectedType: typedTarget.type)
         typedValue = try coerceLiteral(typedValue, to: typedTarget.type)
 
-        if typedValue.type != .never && typedValue.type != .error && typedTarget.type != .error
-          && (typedTarget.type != typedValue.type || !sendableSlotsCompatible(typedValue.type, typedTarget.type)) {
-          throw SemanticError.typeMismatch(
-            expected: typedTarget.type.description, got: typedValue.type.description)
-        }
-
         if let arithmeticOp = compoundOpToArithmeticOp(op) {
           let newValueExpr = try buildArithmeticExpression(
             op: arithmeticOp,
@@ -790,9 +755,6 @@ extension TypeChecker {
           // The bitwise family rides the same dispatch the binary operator
           // does; a same-width integer pair keeps the built-in compound-assign
           // lowering.
-          if isIntegerScalarType(typedTarget.type) && typedTarget.type == typedValue.type {
-            return .assignment(target: typedTarget, operator: op, value: typedValue, span: span)
-          }
           let newValueExpr = try buildBitwiseExpression(
             op: bitwiseOp,
             lhs: typedTarget,
@@ -807,8 +769,6 @@ extension TypeChecker {
         } else {
           fatalError("Unknown compound assignment operator")
         }
-
-        return .assignment(target: typedTarget, operator: op, value: typedValue, span: span)
       }
 
       // Simple assignment

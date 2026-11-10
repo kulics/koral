@@ -133,8 +133,12 @@ final class MIRPrinter {
       return "declare \(local)"
     case .assign(let place, let value):
       return "assign \(renderPlace(place)), \(renderValue(value))"
-    case .compoundAssign(let assignment):
-      return "compound_assign[\(renderCompoundAssignmentOperator(assignment.operatorKind))] \(renderPlace(assignment.target)), \(renderValue(assignment.value))"
+    case .atomicLoad(let target, let place):
+      return "atomic_load \(target), \(renderPlace(place))"
+    case .atomicStore(let place, let value):
+      return "atomic_store \(renderPlace(place)), \(renderValue(value))"
+    case .exchange(let place, let oldTarget, let value):
+      return "exchange \(renderPlace(place)) -> \(oldTarget), \(renderValue(value))"
     case .drop(let place):
       return "drop \(renderPlace(place))"
     case .retain(let value):

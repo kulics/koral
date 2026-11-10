@@ -204,7 +204,13 @@ public type mutable MIRBasicBlock(
 public type MIRStatement {
     Declare(local: MIRLocalID),
     Assign(place: MIRPlace, value: MIRValue),
-    CompoundAssign(assignment: MIRCompoundAssignment),
+    // 标量槽原子访问（concurrency-design.md §对象锁语义）：`mutable` 标量字段
+    // 与全局标量槽的顺序一致 load/store，不走对象锁。
+    AtomicLoad(target: MIRLocalID, place: MIRPlace),
+    AtomicStore(place: MIRPlace, value: MIRValue),
+    // 句柄换写：槽位旧值按位转入 `old_target`（无 retain，所有权转移），再
+    // 写入新值。旧值的释放在调用方的 `Unlock` 之后发射——析构绝不进锁。
+    Exchange(place: MIRPlace, old_target: MIRLocalID, value: MIRValue),
     Drop(place: MIRPlace),
     Retain(value: MIRValue),
     Release(value: MIRValue),
@@ -212,6 +218,7 @@ public type MIRStatement {
     // 对象锁临界区边界（concurrency-design.md §对象锁语义）。由 lowerer 成对
     // 放置：锁地址要么是 safe `sendable mutable` 对象 payload 的隐藏首字段
     // （`handle.ptr` 即锁地址），要么是 `let mutable` 全局量的每变量静态锁。
+    // 临界区只有一处机器级访问，锁内不跑用户代码（不需要可重入）。
     Lock(lock: MIRLockTarget),
     Unlock(lock: MIRLockTarget),
     ScopeEnter(scope: MIRScopeID),
@@ -328,13 +335,6 @@ public type MIRReferenceAllocation {
     HeapOwned(),
     HeapOwnedMove(),
 };
-
-public type MIRCompoundAssignment(
-    target: MIRPlace,
-    operator_kind: CompoundAssignmentOperator,
-    value: MIRValue,
-    span: SourceSpan,
-);
 
 public type MIRCall(
     callee: MIROperand,

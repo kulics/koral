@@ -1,0 +1,33 @@
+// EXPECT: drop_runs
+// EXPECT: release_after_unlock_ok
+
+// The old value's release happens AFTER the unlock
+// (concurrency-design.md §对象锁语义): a destructor runs user code -- here it
+// reads a reference field of the very host object being assigned to -- and
+// must never run inside the lock. Fold the release into the critical section
+// and the drop's handle read takes the same NON-reentrant lock it would be
+// held: this test would time out instead of passing.
+
+type sendable mutable Payload(mutable n: Int);
+
+type sendable mutable Host(mutable v: Payload, mutable tag: Int);
+
+let mutable host_ref = Host(Payload(0), 0);
+
+given Payload: Drop {
+    drop(self): Void = {
+        // Re-enter the host from its own field's destructor: legal only
+        // because the release runs outside the lock. The read is a HANDLE
+        // read (host_ref.v), which takes the host's short lock.
+        let cur = host_ref.v;
+        if self.n == 0 and cur.n == 1 then {
+            println("drop_runs");
+        };
+    };
+};
+
+let main(): Void = {
+    host_ref.tag = 7;
+    host_ref.v = Payload(1);
+    println("release_after_unlock_ok");
+};

@@ -809,6 +809,15 @@ y <<= 1;     // y = y << 1
 y >>= 2;     // y = y >> 2
 ```
 
+Each `op=` **is** its spelled desugaring — two steps, not one atomic step. The
+target is evaluated first (left path and subscripts), then the current value is
+read, then the operator runs — built-in arithmetic or trait overloading, so a
+generic `T` with an `Add` implementation behaves exactly like the built-ins —
+and the result is written back. On a `type sendable mutable` field each step
+takes its own short lock or atomic access (see [Object Locks](#object-locks)),
+so `x.f += 1` is **not** atomic across threads; a concurrent increment belongs
+to `AtomicCell.update_and_get` or a `Mutex`.
+
 #### Operator Precedence
 
 Operator precedence from high to low:
@@ -871,6 +880,7 @@ Koral evaluates expressions **strictly left-to-right**. Wherever operands are se
 4. **`and then` / `or else` / `or return`** evaluate the left operand first and short-circuit: the transform / default is skipped when the left side is `None` / `Error` (for `and then`) or `Some` / `Ok` (for `or else`).
 5. **Collection and dict literals** evaluate elements in source order; for a dict entry the key is evaluated before its value.
 6. **Constructor fields** evaluate in source order, not in declaration order.
+7. **Assignments** evaluate the left path and its subscripts first, then the right-hand side, then perform the write — the same order for every type. `xs[f()] = g()` runs `f()`, then `g()`, then writes the slot.
 
 ```koral
 // Each trace prints its argument; the printed order is the evaluation order.
@@ -2042,31 +2052,39 @@ let main(): Void = {
 
 #### Object Locks
 
-A safe `type sendable mutable` object carries a built-in lock, and the compiler takes it for you:
+A safe `type sendable mutable` object carries built-in synchronization, applied **per access** by field kind. All of it is sequentially consistent:
 
-- **Every field read and write locks the object.** Reads lock too — an unsynchronized read is a data race like any other.
-- **An assignment statement is one critical section.** `x.f = expr` holds x's lock across the evaluation of `expr` and the write-back, so the classic read-modify-write loses no updates:
+| Access | Field kind | Protocol |
+|---|---|---|
+| read | non-`mutable` field | plain read (immutable after construction) |
+| read | `mutable` scalar field (integers, floats, `Bool`, raw pointers, payload-free enums) | atomic load |
+| read | reference-typed or multi-word field | read under a short lock (the handle copy's `retain` stays inside) |
+| write | scalar field | atomic store |
+| write | reference-typed or multi-word field | write under a short lock; the old value is released **after** the unlock |
+
+- **Assignments evaluate left to right: the left path and subscripts first, then the right-hand side, then the write.** The right-hand side runs outside every lock; the lock (or atomic store) covers only the final write. This order is the same for ordinary `type mutable` values.
 
 ```koral
 type sendable mutable Counter(mutable hits: Int);
 
 let main(): Void = {
     let c = Counter(0);
-    c.hits = c.hits + 1;   // one critical section — atomic under any number of threads
+    c.hits = c.hits + 1;   // a read, then a write — NOT atomic across threads
 };
 ```
 
-- **The lock is reentrant.** Field access inside a method, or a right-hand side that calls back into the same object, never deadlocks against itself.
-- **Locks are per object.** A nested path `a.b.c` locks each owner on the way down; a right-hand side that touches *another* object takes that object's lock as well — lock ordering across objects stays yours to design.
-- **Each `let mutable` global has its own lock**, with the same statement rule: `g = g + 1` on a global is one critical section on that variable's lock.
-- Taking the **address of a field** of a locked object is refused — a raw pointer would route around the lock.
+- **`op=` is two steps, not atomic.** `x.f += e` reads `x.f` (per the read protocol), applies `+` through the operator — built-in arithmetic or trait overloading, so generic code sees the same implementation — and writes back (per the write protocol). A concurrent increment belongs to `AtomicCell.update_and_get` or a `Mutex`, not to `+=`.
+- **The lock is not reentrant — it never needs to be.** At most one short lock is held at a time: intermediate path reads take and release their own locks, the right-hand side holds nothing, and the old value is released after the unlock, so a destructor calling back into the host object cannot deadlock.
+- **Locks are per object.** A nested path `a.b.c` locks each owner separately on the way down; a right-hand side that touches *another* object takes that object's lock as well — lock ordering across objects stays yours to design.
+- **Each `let mutable` global follows the field rules**: atomic load/store for a scalar slot, a short lock for a reference or multi-word slot, right-hand side outside, old value released after the unlock.
+- Taking the **address of a field** of a locked object is refused — a raw pointer would route around the protocol.
 
 What object locks deliberately do **not** promise — the same boundary Rust, Go, and Swift draw:
 
-- **No method-level atomicity.** A critical section is exactly one field access or one whole assignment statement. A compound operation across statements is not atomic — `if c.a < c.b` is two reads in two critical sections. When a wider atomic step is genuinely needed, rewrite it as a single assignment, or keep the state under a `Mutex` of your own in an `unsafe` form.
+- **No cross-access atomicity.** One access — one read or one write — is the atomicity unit. A compound operation across accesses is not atomic: `x.f = x.f + 1` is a read and a write. When a wider atomic step is genuinely needed, use `AtomicCell.update_and_get`, or keep the state under a `Mutex` of your own in an `unsafe` form.
 - **No explicit lock blocks.** The language offers no second critical-section spelling.
-- **No deadlock freedom.** Object locks nest, and they can deadlock against `std` locks.
-- **No memory-ordering promises** beyond what the atomic APIs state.
+- **No deadlock freedom.** Short locks can still deadlock against `std` locks through user code.
+- **No memory-ordering promises** beyond sequential consistency for these accesses and what the atomic APIs state.
 
 #### `unsafe sendable`
 

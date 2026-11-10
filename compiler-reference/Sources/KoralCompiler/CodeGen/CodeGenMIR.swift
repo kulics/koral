@@ -313,9 +313,16 @@ final class MIRFunctionCodeEmitter {
         case .assign(let place, let value):
           walkPlace(place)
           walkValue(value)
-        case .compoundAssign(let assignment):
-          walkPlace(assignment.target)
-          walkValue(assignment.value)
+        case .atomicLoad(let target, let place):
+          recordUse(target)
+          walkPlace(place)
+        case .atomicStore(let place, let value):
+          walkPlace(place)
+          walkValue(value)
+        case .exchange(let place, let oldTarget, let value):
+          recordUse(oldTarget)
+          walkPlace(place)
+          walkValue(value)
         case .drop(let place):
           walkPlace(place)
         case .retain(let value),
@@ -587,9 +594,16 @@ final class MIRFunctionCodeEmitter {
             continue
           }
           walkValue(value)
-        case .compoundAssign(let assignment):
-          walkPlace(assignment.target)
-          walkValue(assignment.value)
+        case .atomicLoad(let target, let place):
+          recordUse(target)
+          walkPlace(place)
+        case .atomicStore(let place, let value):
+          walkPlace(place)
+          walkValue(value)
+        case .exchange(let place, let oldTarget, let value):
+          recordUse(oldTarget)
+          walkPlace(place)
+          walkValue(value)
         case .evaluate(let value),
              .retain(let value),
              .release(let value):
@@ -794,8 +808,12 @@ final class MIRFunctionCodeEmitter {
       codeGen.appendToBuffer("\(codeGen.cTypeName(info.type)) \(name);\n")
     case .assign(let place, let value):
       emitAssign(place: place, value: value)
-    case .compoundAssign(let assignment):
-      emitCompoundAssign(assignment)
+    case .atomicLoad(let target, let place):
+      emitAtomicLoad(target: target, place: place)
+    case .atomicStore(let place, let value):
+      emitAtomicStore(place: place, value: value)
+    case .exchange(let place, let oldTarget, let value):
+      emitExchange(place: place, oldTarget: oldTarget, value: value)
     case .drop(let place):
       emitDrop(place)
     case .retain(let value):
@@ -939,23 +957,45 @@ final class MIRFunctionCodeEmitter {
     }
   }
 
-  private func emitCompoundAssign(_ assignment: MIRCompoundAssignment) {
-    let access = emitPlaceAccess(assignment.target)
-    let valueEmission = emitValue(assignment.value)
-    let targetType = resolver.type(of: assignment.target) ?? .void
+  /// Scalar-slot atomic load (concurrency-design.md §对象锁语义).
+  private func emitAtomicLoad(target: MIRLocalID, place: MIRPlace) {
+    let access = emitPlaceAccess(place)
+    let name = localName(for: target)
+    codeGen.addIndent()
+    codeGen.appendToBuffer("__koral_atomic_load_n(&\(name), &\(access.path), sizeof(\(name)));\n")
+    emitCleanups(access.cleanups)
+  }
 
-    if (assignment.operatorKind == .shiftLeft || assignment.operatorKind == .shiftRight) && targetType.isIntegerType {
-      let op: BitwiseOperator = assignment.operatorKind == .shiftLeft ? .shiftLeft : .shiftRight
-      let functionName = codeGen.shiftFuncName(op: op, type: targetType)
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(access.path) = \(functionName)(\(access.path), \(valueEmission.expression), \(codeGen.panicLocLiteral(assignment.span)));\n")
-    } else {
-      let op = codeGen.compoundOpToC(assignment.operatorKind)
-      codeGen.addIndent()
-      codeGen.appendToBuffer("\(access.path) \(op) \(valueEmission.expression);\n")
+  /// Scalar-slot atomic store (sequential consistency). The value binds to a
+  /// temp first (`&` is only legal on an lvalue).
+  private func emitAtomicStore(place: MIRPlace, value: MIRValue) {
+    let access = emitPlaceAccess(place)
+    let valueEmission = emitValue(value)
+    let temp = codeGen.nextTempWithDecl(cType: codeGen.cTypeName(resolver.type(of: place) ?? .void))
+    codeGen.addIndent()
+    codeGen.appendToBuffer("\(temp) = \(valueEmission.expression);\n")
+    codeGen.addIndent()
+    codeGen.appendToBuffer("__koral_atomic_store_n(&\(access.path), &\(temp), sizeof(\(access.path)));\n")
+    consumeMovedSource(value)
+    emitCleanups(access.cleanups)
+    emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
+  }
+
+  /// Handle swap: the old value moves into `old_target` (bit-copy, no retain),
+  /// then the new value is written. The old value is released AFTER the
+  /// caller's unlock -- a destructor never runs inside the lock.
+  private func emitExchange(place: MIRPlace, oldTarget: MIRLocalID, value: MIRValue) {
+    let access = emitPlaceAccess(place)
+    let valueEmission = emitValue(value)
+    let name = localName(for: oldTarget)
+    codeGen.addIndent()
+    codeGen.appendToBuffer("\(name) = \(access.path);\n")
+    if initFlagByLocalID[oldTarget] != nil {
+      setInitFlag(oldTarget, to: true)
     }
-
-    consumeMovedSource(assignment.value)
+    codeGen.addIndent()
+    codeGen.appendToBuffer("\(access.path) = \(valueEmission.expression);\n")
+    consumeMovedSource(value)
     emitCleanups(access.cleanups)
     emitCleanups(residualCleanups(for: valueEmission, consumedExpression: true))
   }

@@ -233,9 +233,12 @@ extension CodeGen {
     case .assign(let place, let value):
       collectPlaceRefs(place, &out)
       collectValueRefs(value, &out)
-    case .compoundAssign(let assignment):
-      collectPlaceRefs(assignment.target, &out)
-      collectValueRefs(assignment.value, &out)
+    case .atomicLoad(_, let place):
+      collectPlaceRefs(place, &out)
+    case .atomicStore(let place, let value),
+         .exchange(let place, _, let value):
+      collectPlaceRefs(place, &out)
+      collectValueRefs(value, &out)
     case .drop(let place):
       collectPlaceRefs(place, &out)
     case .retain(let value), .release(let value), .evaluate(let value):

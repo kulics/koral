@@ -164,8 +164,10 @@ clang -I std tests/runtime-cases/nonatomic_refcount_stress.c "$WORK/rt_track.o" 
 "$WORK/nonatomic_refcount_stress$EXE"
 echo "nonatomic refcount protocol OK"
 
-# The reentrant object lock of safe `type sendable mutable` objects
-# (concurrency-design.md §对象锁语义): mutual exclusion, owner reentry, hand-off.
+# The non-reentrant short object lock of safe `type sendable mutable` objects
+# (concurrency-design.md §对象锁语义, 2026-11-09 redesign): mutual exclusion
+# across threads and a clean hand-off; the short-lock discipline never holds
+# two locks, so there is no owner reentry to exercise.
 clang -c -I std std/koral_runtime.c -o "$WORK/rt_plain.o" -Wno-everything -O1
 clang -I std tests/runtime-cases/object_lock_stress.c "$WORK/rt_plain.o" \
   -o "$WORK/object_lock_stress$EXE" -Wno-everything -O1 $RT_LIBS

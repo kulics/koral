@@ -1428,21 +1428,6 @@ public class CodeGen {
     }
   }
 
-  func compoundOpToC(_ op: CompoundAssignmentOperator) -> String {
-    switch op {
-    case .plus: return "+="
-    case .minus: return "-="
-    case .multiply: return "*="
-    case .divide: return "/="
-    case .remainder: return "%="
-    case .bitwiseAnd: return "&="
-    case .bitwiseOr: return "|="
-    case .bitwiseXor: return "^="
-    case .shiftLeft: return "<<="
-    case .shiftRight: return ">>="
-    }
-  }
-
   func checkedArithmeticFuncName(op: ArithmeticOperator, type: Type) -> String {
     let opName: String
     switch op {

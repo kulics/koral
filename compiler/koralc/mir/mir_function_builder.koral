@@ -60,7 +60,6 @@ type mutable MIRFunctionBuilder(
     // （concurrency-design.md §对象锁语义）。loop_depth 记获取时的循环深度：
     // break/continue 只释放「被退出的循环体内」取得的锁，外层语句临界区
     // 仍然合法持有。
-    mutable in_flight_locks: List[InFlightLockSection],
     mutable diagnostics: DiagnosticCollector,
 );
 
@@ -104,7 +103,6 @@ given MIRFunctionBuilder {
             Dict[UInt, MIRTemporaryValueSourceLocation].new(),
             Set[UInt].new(),
             Set[UInt].new(),
-            List[InFlightLockSection].new(),
             DiagnosticCollector.new(),
         );
     };
@@ -337,14 +335,12 @@ given MIRFunctionBuilder {
         if self.type_is_void(self.return_type) then {
             // 防御性：函数末的隐式返回也走同一释放规则（正常情况下此处无
             // 在飞锁——语句临界区都在语句内闭合）。
-            self.release_in_flight_locks_for_exit(UInt(0));
-            self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
+                        self.terminate(MIRTerminator.ReturnValue(Option[MIROperand].None()));
             return;
         };
         when self.return_operand(result) in {
             .Some(operand) then {
-                self.release_in_flight_locks_for_exit(UInt(0));
-                self.terminate(
+                                self.terminate(
                     MIRTerminator.ReturnValue(Option[MIROperand].Some(operand)),
                 );
             },

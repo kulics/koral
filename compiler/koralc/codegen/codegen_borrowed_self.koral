@@ -502,19 +502,24 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
                 borrowed_self_walk_value(w, value, false);
             };
         },
-        .CompoundAssign(assignment) then {
+        .AtomicLoad(_, place) then {
+            borrowed_self_walk_place(w, place);
+        },
+        .AtomicStore(place, value) then {
+            borrowed_self_walk_place(w, place);
+            borrowed_self_walk_value(w, value, false);
+        },
+        .Exchange(place, _, value) then {
             if w.mode is .SelfEscape() then {
-                when assignment.target in {
-                    .Local(local) then {
-                        if local.raw_value == w.root_local_id then {
-                            w.escaped = true;
-                        };
-                    },
-                    _ then {},
+                // The old value MOVES out of the slot into a temp (rule 2: a
+                // move-read of a self-rooted place would steal a reference out
+                // of a borrowed object).
+                if borrowed_self_place_root_kind(place, w.root_local_id) != UInt(0) then {
+                    w.escaped = true;
                 };
             };
-            borrowed_self_walk_place(w, assignment.target);
-            borrowed_self_walk_value(w, assignment.value, false);
+            borrowed_self_walk_place(w, place);
+            borrowed_self_walk_value(w, value, false);
         },
         .Drop(place) then {
             if w.mode is .SelfEscape() then {
@@ -911,11 +916,23 @@ let purity_walk_statement(w: PurityWalk, statement: MIRStatement): Void = {
             };
             purity_walk_value(w, value);
         },
-        .CompoundAssign(assignment) then {
-            if purity_place_reaches_caller_state(assignment.target, w.root_ids, w.drop_local_ids) then {
+        .AtomicLoad(_, place) then {
+            // A scalar copy-read: pure. (Moves-out would be impure; this is not one.)
+            purity_walk_value(w, MIRValue.PlaceRead(place, MIROwnershipUse.Copy()));
+        },
+        .AtomicStore(place, value) then {
+            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
                 w.impure = true;
             };
-            purity_walk_value(w, assignment.value);
+            purity_walk_value(w, value);
+        },
+        .Exchange(place, _, value) then {
+            // The old value moves out of the slot into a temp dropped later:
+            // a caller-rooted slot's contents leave it (moves-out).
+            if purity_place_reaches_caller_state(place, w.root_ids, w.drop_local_ids) then {
+                w.impure = true;
+            };
+            purity_walk_value(w, value);
         },
         .Drop(place) then {
             // Dropping a caller-rooted slot releases its value.
@@ -1003,4 +1020,329 @@ let compute_impure_function_ids(program: MIRProgram): Dict[UInt, Bool] = {
         };
     };
     return impure;
+};
+
+// ── Last-use move (concurrency-design.md P5 · ARC 优化) ─────────────────────
+//
+// 末次使用移动：值源是**裸局部**、全函数只有这一次值读、使用所在块内有该局部
+// 的定义（循环里逐迭代重定义因此天然安全；外层定义、内层使用的形状被排除）、
+// 局部拥有 init flag（参数/捕获除外——借用约定已单独覆盖）、且类型闭包内没有
+// 用户 `Drop`（析构时序完全不可观察）时，复制读改走移动路径——省一对
+// retain/release，正确性与析构时序都不变。`self` 借用是同族的既有先例。
+
+/// 析构是否可观察：名义类型带用户 `Drop`，或字段/实参闭包能到达这样的类型。
+/// 函数类型（捕获未知）与 trait object（动态析构）保守视为可观察；弱句柄
+/// 与标量的释放只动内存；枚举保守按可观察处理（载荷析构可能跑用户码）。
+private let move_type_drop_observable(tainted: Dict[UInt, Bool], t: Type): Bool = {
+    return when t in {
+        .FunctionType(_, _, _) or .TraitObject(_, _, _) or .EnumType(_) or .GenericEnum(_, _) then {
+            true
+        },
+        .StructureType(def_id) or .OpaqueType(def_id) then tainted.get(def_id.id) is .Some(_),
+        .GenericStruct(template_def_id, args) then {
+            if tainted.get(template_def_id.id) is .Some(_) then {
+                true
+            } else {
+                let mutable found = false;
+                for arg in args then {
+                    if move_type_drop_observable(tainted, arg) then {
+                        found = true;
+                    };
+                };
+                found
+            }
+        },
+        .ReferenceType(inner) or .MutableReferenceType(inner)
+        or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
+        or .FixedArrayType(_, inner) then move_type_drop_observable(tainted, inner),
+        _ then false,
+    };
+};
+
+/// 「析构跑用户码」的名义类型闭包（不动点）：用户 `Drop` 目标为根，字段类型
+/// 向上污染容器。`type mutable` 的析构钩子只能写在 `Drop` 实现里，判据就是
+/// given 的 trait 身份（`is_std_drop_impl`）。
+let compute_observable_drop_defs(codegen: CodeGen): Dict[UInt, Bool] = {
+    let mutable tainted = Dict[UInt, Bool].new();
+    for global in codegen.program.globals then {
+        when global in {
+            .Given(target_type, _, _, _, trait_def_id) then {
+                if codegen.is_std_drop_impl(trait_def_id) then {
+                    when target_type in {
+                        .StructureType(def_id) then tainted.insert(def_id.id, true),
+                        .GenericStruct(template_def_id, _) then tainted.insert(
+                            template_def_id.id,
+                            true,
+                        ),
+                        _ then {},
+                    };
+                };
+            },
+            _ then {},
+        };
+    };
+    let mutable again = true;
+    while again then {
+        again = false;
+        for entry in codegen.context.def_id_map.struct_fields.iterator() then {
+            let def_key = entry.first;
+            if tainted.get(def_key) is .Some(_) then {
+            } else {
+                for field in entry.second then {
+                    if move_type_drop_observable(tainted, field.field_type) then {
+                        tainted.insert(def_key, true);
+                        again = true;
+                        break;
+                    };
+                };
+            };
+        };
+    };
+    return tainted;
+};
+
+/// 值读/定义位置表：`uses` 计数每次值读（取址/投影基读同计；写入与 Drop
+/// 不算），`use_blocks` 记录局部被读的块集合，`def_blocks` 记录值写入
+/// （Assign 目标 / AtomicLoad 目标 / Exchange 旧值目标）所在块集合。
+type mutable MoveUseTable(
+    mutable uses: Dict[UInt, UInt],
+    mutable use_blocks: Dict[UInt, Set[UInt]],
+    mutable def_blocks: Dict[UInt, Set[UInt]],
+    mutable block_index: UInt,
+);
+
+private let move_table_note_use(table: MoveUseTable, local_id: MIRLocalID): Void = {
+    let key = local_id.raw_value;
+    let next = when table.uses.get(key) in {
+        .Some(n) then n + UInt(1),
+        .None() then UInt(1),
+    };
+    table.uses.insert(key, next);
+    let mutable blocks = when table.use_blocks.get(key) in {
+        .Some(existing) then existing,
+        .None() then Set[UInt].new(),
+    };
+    blocks.insert(table.block_index);
+    table.use_blocks.insert(key, blocks);
+};
+
+private let move_table_note_def(table: MoveUseTable, local_id: MIRLocalID): Void = {
+    let key = local_id.raw_value;
+    let mutable blocks = when table.def_blocks.get(key) in {
+        .Some(existing) then existing,
+        .None() then Set[UInt].new(),
+    };
+    blocks.insert(table.block_index);
+    table.def_blocks.insert(key, blocks);
+};
+
+private let move_walk_operand(operand: MIROperand, table: MoveUseTable): Void = {
+    when operand in {
+        .Local(local_id) then move_table_note_use(table, local_id),
+        .Constant(_) or .Function(_) then {},
+    };
+};
+
+private let move_walk_place(place: MIRPlace, table: MoveUseTable): Void = {
+    when place in {
+        .Local(local_id) then move_table_note_use(table, local_id),
+        .Global(_) then {},
+        .Field(base, _) then move_walk_place(base, table),
+        .EnumPayload(base, _, _, _, _) then move_walk_place(base, table),
+        .Deref(value, _) or .PointerElement(value, _) then move_walk_value(value, table),
+    };
+};
+
+private let move_walk_intrinsic(node: MIRIntrinsic, table: MoveUseTable): Void = {
+    when node in {
+        .AllocMemory(count, _) or .AllocString(count, _) then move_walk_value(count, table),
+        .DeallocMemory(pointer) or .DeinitMemory(pointer) or .TakeMemory(pointer, _) then {
+            move_walk_value(pointer, table)
+        },
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)
+        or .CompareMemory(dest, source, count) then {
+            move_walk_value(dest, table);
+            move_walk_value(source, table);
+            move_walk_value(count, table);
+        },
+        .DowngradeRef(value, _) or .UpgradeRef(value, _)
+        or .TraitObjectMatches(value, _, _, _, _) or .TraitObjectDowncast(value, _) then {
+            move_walk_value(value, table)
+        },
+        .InitMemory(pointer, value) then {
+            move_walk_value(pointer, table);
+            move_walk_value(value, table);
+        },
+        .NullPtr(_) then {},
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                move_walk_value(element, table);
+            };
+        },
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            move_walk_value(out_handle, table);
+            move_walk_value(out_tid, table);
+            move_walk_value(closure, table);
+            move_walk_value(stack_size, table);
+        },
+    };
+};
+
+private let move_walk_value(value: MIRValue, table: MoveUseTable): Void = {
+    when value in {
+        .Operand(operand) then move_walk_operand(operand, table),
+        .PlaceRead(place, _) or .Ref(place, _, _) or .Pointer(place) then move_walk_place(
+            place,
+            table,
+        ),
+        .Binary(operation) then {
+            move_walk_operand(operation.left, table);
+            move_walk_operand(operation.right, table);
+        },
+        .Unary(operation) then move_walk_operand(operation.operand, table),
+        .Call(call) then {
+            move_walk_operand(call.callee, table);
+            for argument in call.arguments then {
+                move_walk_value(argument, table);
+            };
+        },
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                move_walk_value(field, table);
+            };
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                move_walk_value(argument, table);
+            };
+        },
+        .EnumTag(tag) then move_walk_value(tag.subject, table),
+        .TraitObjectConversion(conversion) then move_walk_value(conversion.inner, table),
+        .TraitMethodCall(call) then {
+            move_walk_value(call.receiver, table);
+            for argument in call.arguments then {
+                move_walk_value(argument, table);
+            };
+        },
+        .Cast(operand, _, _) then move_walk_operand(operand, table),
+        .Intrinsic(node) then move_walk_intrinsic(node, table),
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                move_walk_place(source, table);
+            };
+        },
+    };
+};
+
+/// 构建整函数的值读/定义位置表。
+let build_move_use_table(function: MIRFunction): MoveUseTable = {
+    let table = MoveUseTable(
+        Dict[UInt, UInt].new(),
+        Dict[UInt, Set[UInt]].new(),
+        Dict[UInt, Set[UInt]].new(),
+        UInt(0),
+    );
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
+                // Place roots are VALUE USES wherever the place is read for
+                // addressing (a field write, an atomic slot, a drop path, a
+                // lock target's handle). Undercounting these mis-marks a local
+                // moveable and a later access reads a moved-from handle.
+                .Lock(lock) or .Unlock(lock) then {
+                    when lock in {
+                        .ObjectLock(handle) then move_walk_operand(
+                            MIROperand.Local(handle),
+                            table,
+                        ),
+                        .GlobalLock(_) then {},
+                    };
+                },
+                .Assign(place, value) then {
+                    move_walk_value(value, table);
+                    when place in {
+                        .Local(local_id) then move_table_note_def(table, local_id),
+                        _ then move_walk_place(place, table),
+                    };
+                },
+                .AtomicStore(place, value) then {
+                    move_walk_place(place, table);
+                    move_walk_value(value, table);
+                },
+                .Exchange(place, old_target, value) then {
+                    move_walk_place(place, table);
+                    move_walk_value(value, table);
+                    move_table_note_def(table, old_target);
+                },
+                .AtomicLoad(local_id, place) then {
+                    move_walk_place(place, table);
+                    move_table_note_def(table, local_id);
+                },
+                .Drop(place) then move_walk_place(place, table),
+                .Retain(value) or .Release(value) then move_walk_value(value, table),
+                .Evaluate(value) then move_walk_value(value, table),
+            };
+        };
+        when block.terminator in {
+            .Goto(_) or .Unreachable() then {},
+            .Branch(condition, _, _) then move_walk_operand(condition, table),
+            .SwitchValue(operand, _, _) then move_walk_operand(operand, table),
+            .ReturnValue(operand) then when operand in {
+                .Some(op) then move_walk_operand(op, table),
+                .None() then {},
+            },
+        };
+        table.block_index += UInt(1);
+    };
+    return table;
+};
+
+/// 可移动局部集合：单次值读 + 使用所在块内有定义 + 拥有 init flag + 析构不
+/// 可观察。判定全部预计算——发射点只查表，不需要动态簿记。
+///
+/// 「同块有定义」是循环安全的关键：块内必然重定义后才（可能再次）使用，
+/// 每次动态使用消费的都是当次的新值；外层定义、内层使用的形状被排除。
+let compute_moveable_locals(
+    codegen: CodeGen,
+    function: MIRFunction,
+    tracked_init_locals: Dict[UInt, Bool],
+    non_owning_local_ids: Dict[UInt, Bool],
+): Dict[UInt, Bool] = {
+    let table = build_move_use_table(function);
+    let mutable moveable = Dict[UInt, Bool].new();
+    for local in function.locals then {
+        let key = local.id.raw_value;
+        if local.storage is .Parameter() or is .Capture() then {
+        } else {
+            let use_count = when table.uses.get(key) in {
+                .Some(n) then n,
+                .None() then UInt(0),
+            };
+            if use_count == UInt(1) and tracked_init_locals.get(key) is .Some(_)
+                and non_owning_local_ids.get(key) is .None()
+                and not move_type_drop_observable(codegen.observable_drop_defs, local.local_type) then {
+                let mutable ok = false;
+                when table.use_blocks.get(key) in {
+                    .Some(used) then {
+                        when table.def_blocks.get(key) in {
+                            .Some(defned) then {
+                                for block_id in used then {
+                                    if defned.contains(block_id) then {
+                                        ok = true;
+                                    };
+                                };
+                            },
+                            .None() then {},
+                        };
+                    },
+                    .None() then {},
+                };
+                if ok then {
+                    moveable.insert(key, true);
+                };
+            };
+        };
+    };
+    return moveable;
 };

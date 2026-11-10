@@ -19,6 +19,7 @@ type MIRFunctionEmitPlan(
     tracked_init_locals: Dict[UInt, Bool],
     lifetime_plan: MIRLocalLifetimePlan,
     address_taken_local_ids: Set[UInt],
+    moveable_locals: Dict[UInt, Bool],
 );
 
 /// 一个 MIR 函数发射出的 C 函数体，以及该函数体是否含 alloc_memory。
@@ -642,6 +643,8 @@ type mutable MIRFunctionCodeEmitter(
     mutable tracked_init_locals: Dict[UInt, Bool],
     mutable lifetime_plan: MIRLocalLifetimePlan,
     mutable address_taken_local_ids: Set[UInt],
+    // P5 末次使用移动的预计算放行表（见 codegen_borrowed_self.koral）。
+    mutable moveable_locals: Dict[UInt, Bool],
     mutable lambda_counter: UInt,
     mutable nested_definitions: StringBuilder,
     mutable current_owner_callable_name_cache_prefix: Option[String],
@@ -714,6 +717,7 @@ private let build_mir_function_emit_plan(
         tracked_init_locals,
         lifetime_plan,
         mir_address_taken_locals(function),
+        compute_moveable_locals(codegen, function, tracked_init_locals, non_owning_local_ids),
     );
 };
 
@@ -732,6 +736,7 @@ given MIRFunctionCodeEmitter {
             plan.tracked_init_locals,
             plan.lifetime_plan,
             plan.address_taken_local_ids,
+            plan.moveable_locals,
             UInt(0),
             StringBuilder.new(),
             when codegen.current_function_owner_type in {
@@ -901,7 +906,9 @@ given MIRFunctionCodeEmitter {
         when statement in {
             .Declare(_) then {},
             .Assign(place, value) then self.emit_assign(place, value),
-            .CompoundAssign(assignment) then self.emit_compound_assign(assignment),
+            .AtomicLoad(target, place) then self.emit_atomic_load(target, place),
+            .AtomicStore(place, value) then self.emit_atomic_store(place, value),
+            .Exchange(place, old_target, value) then self.emit_exchange(place, old_target, value),
             .Drop(place) then self.emit_drop(place),
             .Retain(value) then self.emit_retain(value),
             .Release(value) then self.emit_release(value),
@@ -912,6 +919,52 @@ given MIRFunctionCodeEmitter {
             .ScopeExit(scope) then self.emit_scope_cleanup(scope),
             .DebugSource(_) then {},
         };
+    };
+
+    /// 标量槽原子读（concurrency-design.md §对象锁语义）：`__koral_atomic_load_n`
+    /// 按位取入目标局部，顺序一致。
+    emit_atomic_load(self, target: MIRLocalID, place: MIRPlace): Void = {
+        let access = self.emit_place_access(place);
+        let target_name = self.local_name(target);
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "__koral_atomic_load_n(&\(target_name), &\(access.path), sizeof(\(target_name)));\n",
+        );
+        self.emit_cleanup(access.cleanup);
+    };
+
+    /// 标量槽原子写（顺序一致）。值先绑定临时（`&` 只对左值合法）。
+    emit_atomic_store(self, place: MIRPlace, value: MIRValue): Void = {
+        let access = self.emit_place_access(place);
+        let emission = self.emit_value(value);
+        let temp = self.codegen.next_temp_with_decl(
+            self.codegen.c_type_name(self.type_of_place(place)),
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("\(temp) = \(emission.expression);\n");
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "__koral_atomic_store_n(&\(access.path), &\(temp), sizeof(\(access.path)));\n",
+        );
+        self.consume_moved_source(value);
+        self.emit_cleanup(access.cleanup);
+        self.emit_residual_cleanups(emission, true);
+    };
+
+    /// 句柄换写：旧值按位转入 `old_target`（所有权转移，无 retain），再写入
+    /// 新值。`old_target` 的释放由调用方在 `Unlock` 之后发射（析构绝不进锁）。
+    emit_exchange(self, place: MIRPlace, old_target: MIRLocalID, value: MIRValue): Void = {
+        let access = self.emit_place_access(place);
+        let emission = self.emit_value(value);
+        let target_name = self.local_name(old_target);
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("\(target_name) = \(access.path);\n");
+        self.set_init_flag(old_target, true);
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("\(access.path) = \(emission.expression);\n");
+        self.consume_moved_source(value);
+        self.emit_cleanup(access.cleanup);
+        self.emit_residual_cleanups(emission, true);
     };
 
     emit_terminator(self, terminator: MIRTerminator): Void = {
@@ -981,7 +1034,13 @@ given MIRFunctionCodeEmitter {
 
     emit_assign(self, place: MIRPlace, value: MIRValue): Void = {
         let access = self.emit_place_access(place);
-        let emission = self.emit_value(value);
+        // P5 末次使用移动（concurrency-design.md）：放行表命中的裸局部复制读
+        // 直接以移动语义入槽——省一对 retain/release，析构时序不变。
+        let emission = if self.consume_last_use_source(value) then {
+            self.emit_value_source(value)
+        } else {
+            self.emit_value(value)
+        };
         let target_type = self.type_of_place(place);
         let source_type = self.type_of_value(value);
         // When MIR assigns a void constant to a struct/enum result (dead branch of when/if),
@@ -1094,59 +1153,6 @@ given MIRFunctionCodeEmitter {
             .Deref(_, _) then true,
             .Field(base, _) or .EnumPayload(base, _, _, _, _) then self.is_deref_place(base),
             .Local(_) or .Global(_) or .PointerElement(_, _) then false,
-        };
-    };
-
-    emit_compound_assign(self, assignment: MIRCompoundAssignment): Void = {
-        let access = self.emit_place_access(assignment.target);
-        let emission = self.emit_value(assignment.value);
-        let mutable target_type = self.type_of_place(assignment.target);
-        // Use checked shift for integer types to avoid C undefined behavior
-        // when shift amount >= bit width.
-        if (assignment.operator_kind is .LeftShiftAssign() or is .RightShiftAssign()) and self.codegen.is_integer_type(
-            target_type,
-        ) then {
-            let shift_op = if assignment.operator_kind is .LeftShiftAssign() then BitwiseOperator.LeftShift(
-            ) else BitwiseOperator.RightShift();
-            let func_name = self.codegen.shift_func_name(shift_op, target_type);
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string(access.path);
-            self.codegen.buffer.push_string(" = ");
-            self.codegen.buffer.push_string(func_name);
-            self.codegen.buffer.push_string("(");
-            self.codegen.buffer.push_string(access.path);
-            self.codegen.buffer.push_string(", ");
-            self.codegen.buffer.push_string(emission.expression);
-            self.codegen.buffer.push_string(", ");
-            self.codegen.buffer.push_string(self.codegen.panic_loc_literal(assignment.span));
-            self.codegen.buffer.push_string(");\n");
-        } else {
-            let op = self.compound_op_to_c(assignment.operator_kind);
-            self.codegen.add_indent();
-            self.codegen.buffer.push_string(access.path);
-            self.codegen.buffer.push_string(" ");
-            self.codegen.buffer.push_string(op);
-            self.codegen.buffer.push_string(" ");
-            self.codegen.buffer.push_string(emission.expression);
-            self.codegen.buffer.push_string(";\n");
-        };
-        self.consume_moved_source(assignment.value);
-        self.emit_cleanup(access.cleanup);
-        self.emit_residual_cleanups(emission, true);
-    };
-
-    compound_op_to_c(self, op: CompoundAssignmentOperator): String = {
-        return when op in {
-            .AddAssign() then "+=",
-            .SubtractAssign() then "-=",
-            .MultiplyAssign() then "*=",
-            .DivideAssign() then "/=",
-            .RemainderAssign() then "%=",
-            .BitAndAssign() then "&=",
-            .BitOrAssign() then "|=",
-            .BitXorAssign() then "^=",
-            .LeftShiftAssign() then "<<=",
-            .RightShiftAssign() then ">>=",
         };
     };
 
@@ -2072,6 +2078,36 @@ given MIRFunctionCodeEmitter {
         return false;
     };
 
+    /// P5 末次使用移动（concurrency-design.md · codegen_borrowed_self.koral）：
+    /// 值源是裸局部的复制读且预计算放行表命中（单次值读、同块有定义、拥有
+    /// init flag、析构不可观察）时，复制读改走移动路径。
+    /// P5 末次使用移动（concurrency-design.md · codegen_borrowed_self.koral）：
+    /// 值源是裸局部的复制读且预计算放行表命中（单次值读、同块有定义、拥有
+    /// init flag、析构不可观察）时，就地消费源（清 init flag）并放行移动语义
+    /// ——省一对 retain/release。消费必须在这里做：值的 Copy 标签不会让
+    /// `consume_moved_source` 记账，不清 flag 就会在作用域尾二次释放。
+    consume_last_use_source(self, value: MIRValue): Bool = {
+        return when value in {
+            .PlaceRead(place, ownership) then {
+                if not (ownership is .Copy()) then {
+                    return false;
+                };
+                when place in {
+                    .Local(local_id) then {
+                        if self.moveable_locals.get(local_id.raw_value) is .Some(_) then {
+                            self.set_init_flag(local_id, false);
+                            true
+                        } else {
+                            false
+                        }
+                    },
+                    _ then false,
+                }
+            },
+            _ then false,
+        };
+    };
+
     emit_direct_call_argument(
         self,
         value: MIRValue,
@@ -2081,6 +2117,15 @@ given MIRFunctionCodeEmitter {
         let mutable value_type = self.type_of_value(value);
         return when ownership in {
             .Copy() then {
+                // P5 末次使用移动（concurrency-design.md）：预计算放行表命中
+                // 的裸局部复制读改走移动路径——省一对 retain/release。
+                if self.consume_last_use_source(value) then {
+                    return self.emit_direct_call_argument(
+                        value,
+                        MIROwnershipUse.Move(),
+                        callee_pure,
+                    );
+                };
                 let emission = self.emit_value(value);
                 // A bare function operand has to be boxed into a `__koral_Closure`
                 // before it lands in one: `emit_value` hands back the C function
@@ -4985,14 +5030,36 @@ private let build_mir_lifetime_plan(
                         active_scopes,
                     );
                 },
-                .CompoundAssign(assignment) then {
+                .AtomicLoad(target, place) then {
+                    mir_record_local_use(
+                        shared_use_scope_by_local,
+                        first_use_block_by_local,
+                        multiple_use_blocks_by_local,
+                        tracked_drop_local_ids,
+                        parent_scope_by_scope,
+                        target,
+                        block.id,
+                        active_scopes,
+                    );
                     mir_walk_place_uses(
                         shared_use_scope_by_local,
                         first_use_block_by_local,
                         multiple_use_blocks_by_local,
                         tracked_drop_local_ids,
                         parent_scope_by_scope,
-                        assignment.target,
+                        place,
+                        block.id,
+                        active_scopes,
+                    );
+                },
+                .AtomicStore(place, value) then {
+                    mir_walk_place_uses(
+                        shared_use_scope_by_local,
+                        first_use_block_by_local,
+                        multiple_use_blocks_by_local,
+                        tracked_drop_local_ids,
+                        parent_scope_by_scope,
+                        place,
                         block.id,
                         active_scopes,
                     );
@@ -5002,7 +5069,39 @@ private let build_mir_lifetime_plan(
                         multiple_use_blocks_by_local,
                         tracked_drop_local_ids,
                         parent_scope_by_scope,
-                        assignment.value,
+                        value,
+                        block.id,
+                        active_scopes,
+                    );
+                },
+                .Exchange(place, old_target, value) then {
+                    mir_record_local_use(
+                        shared_use_scope_by_local,
+                        first_use_block_by_local,
+                        multiple_use_blocks_by_local,
+                        tracked_drop_local_ids,
+                        parent_scope_by_scope,
+                        old_target,
+                        block.id,
+                        active_scopes,
+                    );
+                    mir_walk_place_uses(
+                        shared_use_scope_by_local,
+                        first_use_block_by_local,
+                        multiple_use_blocks_by_local,
+                        tracked_drop_local_ids,
+                        parent_scope_by_scope,
+                        place,
+                        block.id,
+                        active_scopes,
+                    );
+                    mir_walk_value_uses(
+                        shared_use_scope_by_local,
+                        first_use_block_by_local,
+                        multiple_use_blocks_by_local,
+                        tracked_drop_local_ids,
+                        parent_scope_by_scope,
+                        value,
                         block.id,
                         active_scopes,
                     );

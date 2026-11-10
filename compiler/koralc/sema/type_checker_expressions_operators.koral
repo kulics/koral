@@ -600,11 +600,13 @@ given TypeChecker {
         return result;
     };
 
-    /// Compound assignment (`x op= v`) combines like the binary operator, but
-    /// the seed checks the VALUE against the TARGET'S type first and stops
-    /// there when they differ: `p += 1` is `Type mismatch: expected *Int, got
-    /// Int` at the statement, not pointer-offset arithmetic. Only a value that
-    /// already has the target's type reaches the operator.
+    /// Compound assignment (`x op= v`) IS its spelled desugaring `x = x op v`
+    /// (concurrency-design.md §赋值求值顺序): the combination dispatches exactly
+    /// the way the binary operator does -- built-in arithmetic or the operator
+    /// trait, with whatever right-hand type that operator accepts. Generic
+    /// sites and ordinary types therefore share one implementation. The old
+    /// same-type guard (`p += 1` refused before pointer-offset arithmetic)
+    /// made `+=` stricter than `+`; the two-step form inherits `+`'s rules.
     combine_compound_arithmetic_operands(
         self,
         typed_target: TypedExpr,
@@ -612,31 +614,11 @@ given TypeChecker {
         typed_value: TypedExpr,
         blame_span: SourceSpan,
     ): TypedExpr = {
-        // A literal neighbour joins the target's integer width through the
-        // expected type at the operand check; whatever is still a bare literal
-        // default displays and compares as that default (`Int`, `Float64`).
-        let target_t = typed_target.expr_type;
-        let value_t = typed_value.expr_type;
-        if not self.same_expr_type(value_t, target_t) and not self.is_unresolved_expr_type(
-            self.concretize_default_literal_type(target_t),
-        ) and not self.is_unresolved_expr_type(
-            self.concretize_default_literal_type(value_t),
-        ) and target_t is not .NeverType() and value_t is not .NeverType() then {
-            self.push_diagnostic(
-                "Type mismatch: expected \(self.display_type_name(target_t)), got \(self.display_type_name(value_t))",
-                blame_span,
-            );
-            return make_typed_expr(
-                TypedExprKind.ArithmeticExpr(typed_target, op, typed_value),
-                Type.Unknown(),
-            );
-        };
         return self.combine_arithmetic_operands(typed_target, op, typed_value, blame_span);
     };
 
-    /// Compound assignment (`x op= v`) for the bitwise family: the value must
-    /// already have the target's type, exactly like `combine_compound_arithmetic_operands`,
-    /// then the combination dispatches the same way the binary operator does.
+    /// Compound assignment for the bitwise family: same two-step rule, the
+    /// combination dispatches exactly like the binary operator.
     combine_compound_bitwise_operands(
         self,
         typed_target: TypedExpr,
@@ -644,22 +626,6 @@ given TypeChecker {
         typed_value: TypedExpr,
         blame_span: SourceSpan,
     ): TypedExpr = {
-        let target_t = typed_target.expr_type;
-        let value_t = typed_value.expr_type;
-        if not self.same_expr_type(value_t, target_t) and not self.is_unresolved_expr_type(
-            self.concretize_default_literal_type(target_t),
-        ) and not self.is_unresolved_expr_type(
-            self.concretize_default_literal_type(value_t),
-        ) and target_t is not .NeverType() and value_t is not .NeverType() then {
-            self.push_diagnostic(
-                "Type mismatch: expected \(self.display_type_name(target_t)), got \(self.display_type_name(value_t))",
-                blame_span,
-            );
-            return make_typed_expr(
-                TypedExprKind.BitwiseExpr(typed_target, op, typed_value),
-                Type.Unknown(),
-            );
-        };
         return self.combine_bitwise_operands(typed_target, op, typed_value, blame_span);
     };
 

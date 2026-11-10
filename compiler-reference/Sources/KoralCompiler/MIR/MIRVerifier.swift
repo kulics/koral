@@ -167,9 +167,16 @@ final class MIRVerifier {
     case .assign(let place, let value):
       try verifyPlace(place, in: function, localIDs: localIDs)
       try verifyValue(value, in: function, localIDs: localIDs)
-    case .compoundAssign(let assignment):
-      try verifyPlace(assignment.target, in: function, localIDs: localIDs)
-      try verifyValue(assignment.value, in: function, localIDs: localIDs)
+    case .atomicLoad(let target, let place):
+      try verifyLocal(target, in: function, localIDs: localIDs)
+      try verifyPlace(place, in: function, localIDs: localIDs)
+    case .atomicStore(let place, let value):
+      try verifyPlace(place, in: function, localIDs: localIDs)
+      try verifyValue(value, in: function, localIDs: localIDs)
+    case .exchange(let place, let oldTarget, let value):
+      try verifyPlace(place, in: function, localIDs: localIDs)
+      try verifyLocal(oldTarget, in: function, localIDs: localIDs)
+      try verifyValue(value, in: function, localIDs: localIDs)
     case .drop(let place):
       try verifyPlace(place, in: function, localIDs: localIDs)
     case .retain(let value),

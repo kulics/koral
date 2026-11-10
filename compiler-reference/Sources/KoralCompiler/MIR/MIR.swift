@@ -156,7 +156,14 @@ struct MIRBasicBlock {
 enum MIRStatement {
   case declare(MIRLocalID)
   case assign(MIRPlace, MIRValue)
-  case compoundAssign(MIRCompoundAssignment)
+  // Scalar-slot atomic access (concurrency-design.md §对象锁语义): sequential-
+  // consistency load/store for `mutable` scalar fields and global scalar slots.
+  case atomicLoad(MIRLocalID, MIRPlace)
+  case atomicStore(MIRPlace, MIRValue)
+  // Handle swap: the slot's old value moves into `old_target` (bit-copy, no
+  // retain), then the new value is written. The old value is released AFTER
+  // the caller's `unlock` -- a destructor never runs inside the lock.
+  case exchange(MIRPlace, MIRLocalID, MIRValue)
   case drop(MIRPlace)
   case retain(MIRValue)
   case release(MIRValue)
@@ -165,7 +172,8 @@ enum MIRStatement {
   // lowerer places them in pairs: the lock address is either the hidden first
   // field of a safe `sendable mutable` object's managed payload (`handle.ptr`
   // is the payload pointer) or a per-variable static lock for a `let mutable`
-  // global.
+  // global. A critical section is one machine-level access; no user code runs
+  // inside (the lock needs no reentrancy).
   case lock(MIRLockTarget)
   case unlock(MIRLockTarget)
   case scopeEnter(MIRScopeID)
@@ -283,14 +291,6 @@ enum MIRReferenceAllocation {
   case stackBorrow
   case heapOwned
   case heapOwnedMove
-}
-
-struct MIRCompoundAssignment {
-  let target: MIRPlace
-  let operatorKind: CompoundAssignmentOperator
-  let value: MIRValue
-  /// The panic anchor of a checked shift (see `TypedStatementNode.assignment`).
-  var span: SourceSpan = .unknown
 }
 
 struct MIRCall {

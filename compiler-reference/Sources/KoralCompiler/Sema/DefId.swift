@@ -1040,6 +1040,25 @@ public class DefIdMap {
         }
     }
 
+    /// Scalar-slot verdict (concurrency-design.md §对象锁语义): single-word
+    /// POD -- the integer families, floats, Bool, raw pointers. A `mutable`
+    /// field or global slot of one of these takes atomic load/store
+    /// (sequential consistency); everything else (references, multi-word
+    /// values) takes the short lock. Enums are conservatively multi-word.
+    public func isAtomicScalarType(_ t: Type) -> Bool {
+        switch t {
+        case .int, .int8, .int16, .int32, .int64,
+             .uint, .uint8, .uint16, .uint32, .uint64,
+             .wrappingInt, .wrappingInt8, .wrappingInt16, .wrappingInt32, .wrappingInt64,
+             .wrappingUInt, .wrappingUInt8, .wrappingUInt16, .wrappingUInt32, .wrappingUInt64,
+             .float32, .float64, .bool,
+             .pointer, .mutablePointer:
+            return true
+        default:
+            return false
+        }
+    }
+
     public func getTypeArguments(_ defId: DefId) -> [Type]? {
         if let info = structInfoMap[defId.id] {
             return info.typeArguments

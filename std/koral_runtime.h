@@ -97,23 +97,32 @@ struct __koral_Control {
 #define __koral_control_of(payload) \
     ((struct __koral_Control*)((char*)(payload) - sizeof(struct __koral_Control)))
 
-// ── Reentrant object lock (concurrency-design.md §对象锁语义) ────────────────
+// ── Short object lock (concurrency-design.md §对象锁语义) ───────────────────
 //
-// 紧凑可重入互斥，作为 safe `type sendable mutable` 对象 payload 的隐藏首字段
-// 与 `let mutable` 全局槽的保护锁。临界区只有一处字段访问或一条赋值语句，所以
-// 快路径是一次 CAS；慢路径平台 yield 退避（临界区短，不引 futex 依赖）。
+// 紧凑非重入互斥，作为 safe `type sendable mutable` 对象 payload 的隐藏首字段
+// 与 `let mutable` 全局槽的保护锁。临界区只有一处机器级访问（一次字段读、
+// 一次句柄换写）：RHS 在锁外求值、旧值在解锁后释放，任何时刻至多持一把锁，
+// 所以**不需要可重入**（同线程重取即死锁 = 协议违约的响亮信号）。快路径一次
+// CAS；慢路径平台 yield 退避（临界区短，不引 futex 依赖）。
 //
 // 契约：持锁者必须在退出临界区前释放（codegen 的 lock/unlock 成对发射保证）；
-// 不得在持锁期间退出线程。owner 记 __koral_thread_current_id()，0 为空闲。
+// 不得在持锁期间退出线程；锁内不跑用户代码（析构在解锁之后）。
 struct __koral_Lock {
-    _Atomic uint64_t owner;
-    uint32_t recursion;
+    _Atomic uint32_t held;
     uint32_t reserved;
 };
 
 void __koral_lock_init(struct __koral_Lock* lock);
 void __koral_lock_acquire(struct __koral_Lock* lock);
 void __koral_lock_release(struct __koral_Lock* lock);
+
+// ── Scalar slot atomics (concurrency-design.md §对象锁语义) ──────────────────
+//
+// safe `type sendable mutable` 的 `mutable` 标量字段（整数族/浮点/Bool/裸指针）
+// 用这些做原子 load/store，顺序一致性。generated code 传 `sizeof(slot)`；
+// 1/2/4/8 字节是全部标量字段形状，值按位拷贝（浮点与指针同样适用）。
+void __koral_atomic_load_n(void* dst, const void* src, uintptr_t size);
+void __koral_atomic_store_n(void* dst, const void* src, uintptr_t size);
 
 // String 字节块的堆载荷布局。与 std/string.koral 的 `type mutable Bytes(data,
 // len)` 字段序耦合，字面量发射（generate_string_literal）同样按 {data, len}

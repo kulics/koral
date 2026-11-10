@@ -1,0 +1,43 @@
+// EXPECT: get ok
+// EXPECT: set ok
+// EXPECT: swap ok
+// EXPECT: update ok
+// EXPECT: cas true ok
+// EXPECT: cas false ok
+
+// AtomicCell single-threaded API semantics (std.sync AtomicCell): get/set
+// round-trip, swap returns the previous value, update combines and returns
+// the NEW value, compare_exchange replaces on match and leaves the value on
+// mismatch. The counter guarantee lives in sync_atomic_cell_update_counter.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let cell = AtomicCell[Int].new(1);
+    assert(cell.get() == 1, "initial value");
+    println("get ok");
+
+    cell.set(2);
+    assert(cell.get() == 2, "set applies");
+    println("set ok");
+
+    let old = cell.swap(5);
+    assert(old == 2, "swap returns old");
+    assert(cell.get() == 5, "swap stores new");
+    println("swap ok");
+
+    let next = cell.update_and_get((v: Int): Int => v + 6);
+    assert(next == 11, "update returns new");
+    assert(cell.get() == 11, "update stores result");
+    println("update ok");
+
+    let replaced = cell.compare_exchange(11, 20);
+    assert(replaced, "compare_exchange matches");
+    assert(cell.get() == 20, "compare_exchange replaces");
+    println("cas true ok");
+
+    let missed = cell.compare_exchange(11, 30);
+    assert(not missed, "compare_exchange mismatch");
+    assert(cell.get() == 20, "mismatch leaves value");
+    println("cas false ok");
+};

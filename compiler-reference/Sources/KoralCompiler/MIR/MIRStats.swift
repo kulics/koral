@@ -116,9 +116,16 @@ private final class MIRStatsCounter {
     case .assign(let place, let value):
       count(place)
       count(value)
-    case .compoundAssign(let assignment):
-      count(assignment.target)
-      count(assignment.value)
+    case .atomicLoad(let target, let place):
+      count(place)
+      _ = target
+    case .atomicStore(let place, let value):
+      count(place)
+      count(value)
+    case .exchange(let place, let oldTarget, let value):
+      count(place)
+      count(value)
+      _ = oldTarget
     case .drop(let place):
       count(place)
     case .retain(let value),

@@ -38,6 +38,13 @@ public type unsafe sendable mutable AtomicInt;
 /// 所有操作使用顺序一致性内存序
 public type unsafe sendable mutable AtomicUInt;
 
+/// One shared `sendable` value with atomic access: every operation is a
+/// single linearizable step (sequential consistency by serialization over
+/// the cell's own mutex). `update_and_get` runs a combining lambda atomically,
+/// which is where cross-thread read-modify-write belongs now that `+=` is two
+/// non-atomic steps. Sendable contract: self-synchronized.
+public type unsafe sendable mutable AtomicCell[T: sendable];
+
 /// The sending half of a bounded channel; dropping it closes the channel for receivers.
 public type unsafe sendable mutable SendChannel[T: Any];
 
@@ -143,6 +150,38 @@ given AtomicUInt {
 given AtomicUInt: ToString {
     /// Return the current value as a decimal string.
     public to_string(self): String;
+};
+
+/// The cell's linearizable operations: construction, atomic read/write,
+/// swap, and the combining `update_and_get`.
+given[T: sendable] AtomicCell[T] {
+    /// Create a cell holding `initial`.
+    public new(initial: T): AtomicCell[T];
+    /// Atomically read the current value.
+    public get(self): T;
+    /// Atomically replace the stored value. The old value is released after
+    /// the unlock.
+    public set(self, value: T): Void;
+    /// Atomically replace the stored value and return the previous one. The
+    /// old value is released after the unlock.
+    public swap(self, value: T): T;
+    /// Atomically read-modify-write: apply `f` to the current value, store
+    /// the result, and return the NEW value. The whole step is one
+    /// linearizable operation -- this is the home of
+    /// `counter.update_and_get(n => n + 1)`. `f` runs under the cell's lock
+    /// and must not touch the same cell (that panics instead of deadlocking);
+    /// the old value is released after the unlock.
+    public update_and_get(self, f: (T) -> T): T;
+};
+
+/// Equality-gated operations: `compare_exchange` compares by `Eq` value
+/// equality (not pointer identity).
+given[T: Eq and sendable] AtomicCell[T] {
+    /// Atomically replace the value with `desired` when it currently equals
+    /// `expected`; report whether the exchange happened. Equality is `Eq`
+    /// value equality, not pointer identity. The old value is released after
+    /// the unlock.
+    public compare_exchange(self, expected: T, desired: T): Bool;
 };
 
 /// Implements `Drop`, closing the send side and waking waiting receivers.

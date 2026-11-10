@@ -1,0 +1,114 @@
+using "std" { ... };
+// ============================================================================
+// std.sync - AtomicCell (Atomic Read-Modify-Write Cell)
+// ============================================================================
+// Provides: AtomicCell (one shared value with atomic get/set/swap/update_and_get/CAS)
+// Access via: using "std/sync" { ... };
+// ============================================================================
+// Design: pure Koral on Mutex. Every operation is one linearizable step --
+// the whole operation runs under the cell's own non-recursive mutex, which
+// gives sequential consistency by serialization. `update_and_get` is the
+// explicit home of read-modify-write (`counter.update_and_get(n => n + 1)`): `+=` and
+// `x.f = x.f + 1` are two separate steps and are NOT atomic across threads.
+// The old value is released only after the unlock, so a destructor never
+// runs inside the critical section.
+// ============================================================================
+
+/// One shared `sendable` value with atomic access: every operation is a
+/// single linearizable step (sequential consistency by serialization over
+/// the cell's own mutex). `update_and_get` runs a combining lambda atomically,
+/// which is where cross-thread read-modify-write belongs now that `+=` is two
+/// non-atomic steps. Sendable contract: self-synchronized.
+public type unsafe sendable mutable AtomicCell[T: sendable](
+    private mutex: Mutex,
+    private mutable value: T,
+    private mutable busy_owner: UInt64,
+);
+
+/// The cell's linearizable operations: construction, atomic read/write,
+/// swap, and the combining `update_and_get`.
+given[T: sendable] AtomicCell[T] {
+    /// Create a cell holding `initial`.
+    public new(initial: T): AtomicCell[T] =
+        AtomicCell[T](Mutex.new(), initial, UInt64(0));
+
+    /// Atomically read the current value.
+    public get(self): T = {
+        if self.busy_owner == __koral_thread_current_id() then {
+            panic("AtomicCell: re-entrant access from inside update_and_get");
+        };
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        return self.value;
+    };
+
+    /// Atomically replace the stored value. The old value is released after
+    /// the unlock.
+    public set(self, value: T): Void = {
+        if self.busy_owner == __koral_thread_current_id() then {
+            panic("AtomicCell: re-entrant access from inside update_and_get");
+        };
+        self.mutex.lock();
+        let old = self.value;
+        self.value = value;
+        self.mutex.unlock();
+        let _ = old;
+    };
+
+    /// Atomically replace the stored value and return the previous one. The
+    /// old value is released after the unlock.
+    public swap(self, value: T): T = {
+        if self.busy_owner == __koral_thread_current_id() then {
+            panic("AtomicCell: re-entrant access from inside update_and_get");
+        };
+        self.mutex.lock();
+        let old = self.value;
+        self.value = value;
+        self.mutex.unlock();
+        return old;
+    };
+
+    /// Atomically read-modify-write: apply `f` to the current value, store
+    /// the result, and return the NEW value. The whole step is one
+    /// linearizable operation -- this is the home of
+    /// `counter.update_and_get(n => n + 1)`. `f` runs under the cell's lock
+    /// and must not touch the same cell (that panics instead of deadlocking);
+    /// the old value is released after the unlock.
+    public update_and_get(self, f: (T) -> T): T = {
+        if self.busy_owner == __koral_thread_current_id() then {
+            panic("AtomicCell: re-entrant access from inside update_and_get");
+        };
+        self.mutex.lock();
+        let old = self.value;
+        self.busy_owner = __koral_thread_current_id();
+        let next = f(old);
+        self.busy_owner = UInt64(0);
+        self.value = next;
+        self.mutex.unlock();
+        return next;
+    };
+};
+
+/// Equality-gated operations: `compare_exchange` compares by `Eq` value
+/// equality (not pointer identity).
+given[T: Eq and sendable] AtomicCell[T] {
+    /// Atomically replace the value with `desired` when it currently equals
+    /// `expected`; report whether the exchange happened. Equality is `Eq`
+    /// value equality, not pointer identity. The old value is released after
+    /// the unlock.
+    public compare_exchange(self, expected: T, desired: T): Bool = {
+        if self.busy_owner == __koral_thread_current_id() then {
+            panic("AtomicCell: re-entrant access from inside update_and_get");
+        };
+        self.mutex.lock();
+        if self.value == expected then {
+            let old = self.value;
+            self.value = desired;
+            self.mutex.unlock();
+            let _ = old;
+            return true;
+        };
+        self.mutex.unlock();
+        return false;
+    };
+};
