@@ -87,9 +87,13 @@ opt and then as v in v == 1 and false      拒绝
 
 <layer-operand> ::= <not-expression>
 
-<flow-expression>    ::= <and-then-expression>
-                       (("or" "else" <and-then-expression>) | ("or" "return"))*
-<and-then-expression> ::= <layer-operand> ("and" "then" <layer-operand>)*
+<flow-expression>    ::= <flow-operand>
+                       (("or" "else" <flow-operand>) | ("or" "return"))*
+<flow-operand>       ::= <layer-operand> <and-then-link>*
+<and-then-link>      ::= "and" "then" <and-then-operand>
+<and-then-operand>   ::= <flow-receiver-chain>
+                       | "as" <identifier> "in" <layer-operand>
+<flow-receiver-chain> ::= "." <member-access> <postfix-continuation>*
 
 <logical-expression>     ::= <logical-and-expression> ("or" <logical-and-expression>)*
 <logical-and-expression> ::= <layer-operand> ("and" <layer-operand>)*
@@ -117,8 +121,10 @@ opt and then as v in v == 1 and false      拒绝
 ```
 parse_expression  := 操作数 层尾
 层尾              := 流程链 | 逻辑链      // 由首运算符定层
-流程链            := and-then 链 (("or" "else" and-then 链) | ("or" "return"))*
-and-then 链       := 操作数 ("and" "then" 操作数)*
+流程链            := 流程操作数 (("or" "else" 流程操作数) | ("or" "return"))*
+流程操作数        := 操作数 ("and" "then" and-then 操作数)*   // 后缀链
+and-then 操作数   := "." 成员访问 后缀续* | "as" 名 "in" 操作数
+                    // 裸操作数不是 and-then 形态（解包值没有隐式名字）
 逻辑链            := 逻辑-and 链 ("or" 逻辑-and 链)*
 逻辑-and 链       := 操作数 ("and" 操作数)*
 操作数            := <not-expression>

@@ -39,10 +39,10 @@ public type unsafe sendable mutable AtomicInt;
 public type unsafe sendable mutable AtomicUInt;
 
 /// One shared `sendable` value with atomic access: every operation is a
-/// single linearizable step (sequential consistency by serialization over
-/// the cell's own mutex). `update_and_get` runs a combining lambda atomically,
-/// which is where cross-thread read-modify-write belongs now that `+=` is two
-/// non-atomic steps. Sendable contract: self-synchronized.
+/// single linearizable step. `update_and_get` runs a combining lambda
+/// optimistically (no lock across the lambda), which is where cross-thread
+/// read-modify-write belongs now that `+=` is two non-atomic steps. Sendable
+/// contract: self-synchronized.
 public type unsafe sendable mutable AtomicCell[T: sendable];
 
 /// The sending half of a bounded channel; dropping it closes the channel for receivers.
@@ -55,7 +55,7 @@ public type unsafe sendable mutable RecvChannel[T: Any];
 public type unsafe sendable mutable LatchGate;
 
 /// Thread-safe lazy value whose initializer runs at most once.
-/// Sendable contract: self-synchronized -- double-checked locking runs the
+/// Sendable contract: self-synchronized -- the state machine runs the
 /// initializer at most once; `get` from any thread is safe.
 public type unsafe sendable mutable Lazy[T: Any];
 
@@ -168,9 +168,15 @@ given[T: sendable] AtomicCell[T] {
     /// Atomically read-modify-write: apply `f` to the current value, store
     /// the result, and return the NEW value. The whole step is one
     /// linearizable operation -- this is the home of
-    /// `counter.update_and_get(n => n + 1)`. `f` runs under the cell's lock
-    /// and must not touch the same cell (that panics instead of deadlocking);
-    /// the old value is released after the unlock.
+    /// `counter.update_and_get(n => n + 1)`.
+    ///
+    /// Optimistic: `f` runs with NO lock held, against a snapshot. The result
+    /// is committed only when nobody else wrote in between; otherwise the
+    /// snapshot is taken again and `f` runs again. `f` may therefore run more
+    /// than once and must not have side effects outside the cell. `f` must not
+    /// write the cell it updates -- every attempt would be invalidated and the
+    /// loop would give up with a panic instead of spinning forever. Reading the
+    /// cell inside `f` is fine.
     public update_and_get(self, f: (T) -> T): T;
 };
 
@@ -226,9 +232,11 @@ given[T: Any] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`.
     public new(f: sendable () -> T): Lazy[T];
     /// Return the value, running and caching the initializer on first use.
-    /// The initializer must not call `get()` on the same `Lazy`: the guard
-    /// mutex is non-recursive, so the re-entrant call would deadlock holding
-    /// it. That mistake panics with a diagnostic instead of hanging.
+    ///
+    /// The initializer runs with no lock held, so it may call other lazy
+    /// values, globals and locks without lock-ordering deadlocks. It must not
+    /// call `get()` on the same `Lazy`: there is no value to return yet, and
+    /// that mistake panics with a diagnostic instead of hanging.
     public get(self): T;
     /// Check whether the initializer has already run.
     public is_initialized(self): Bool;

@@ -116,8 +116,15 @@ static KORAL_NORETURN void __koral_panic_print(const char* msg, const char* loc)
 // 单块 String 分配（见 koral_runtime.h 的声明注释）。计数初始化与 codegen 的
 // 受管构造一致（strong=1 / weak=1，含隐式 weak）。
 void* __koral_string_alloc(uintptr_t len) {
-    uintptr_t need =
-        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + len + 1;
+    // 长度溢出闸：`len` 走 unchecked 路径（foreign / unchecked 算术）进来时，
+    // `overhead + len` 会回绕成小 need，随后 `tail[len] = 0` 越界写。先按最大
+    // 开销收口再算 need——Koral 层的 `+` 自带溢出 panic，这里是 C 侧最后一道。
+    const uintptr_t overhead =
+        sizeof(struct __koral_Control) + sizeof(struct __koral_StringPayload) + 1;
+    if (len > UINTPTR_MAX - overhead) {
+        __koral_panic_print("string length overflow while allocating a string block", NULL);
+    }
+    uintptr_t need = overhead + len;
     struct __koral_Control* control = NULL;
     if (need <= KORAL_STR_SLOT) {
         if (!__koral_str_region) {
@@ -177,14 +184,19 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     if (dtor) {
         // 析构期间对象处于「不可复活」状态：`drop(self)` 里的 `self` 是同一个
         // payload 的句柄，方法调用按值传接收者就会 retain 一次、在方法结束时
-        // release 一次。若不早退，retain 会把 0 抬回 1，随后的 release
+        // release 一次。若走正常计数，retain 会把 0 抬回 1，随后的 release
         // 又会以 prev == 1 重新进入本函数——析构递归。
-        // `strong_count = -2`（destroying）：retain/release 读到负数直接返回，
-        // weak 的 upgrade 也要求 > 0，所以析构期间既不能复活也不能重入。
-        // 析构结束后恢复 0。注意 immortal 哨兵是 -1，两个哨兵不共享：
-        // weak 操作只对 -1 早退，析构期间 weak 递减必须照常进行。
+        // `strong_count = -2`（destroying）：retain/release 不改符号（不会复活、
+        // 不会重入），但**朝 -2 记账**（retain 减、release 加），weak 的 upgrade
+        // 也要求 > 0。析构体结束后计数若不再是 -2，就是有句柄净逃出了 drop 体
+        // （`self` 被存进别处）——报错，而不是放它变成悬垂指针。随后恢复 0。
+        // 注意 immortal 哨兵是 -1，两个哨兵不共享：weak 操作只对 -1 早退，
+        // 析构期间 weak 递减必须照常进行。
         atomic_store(&control->strong_count, KORAL_DESTROYING_REFCOUNT);
         dtor(__koral_payload_of(control));
+        if (atomic_load(&control->strong_count) != KORAL_DESTROYING_REFCOUNT) {
+            __koral_panic_print("self escaped a drop body", NULL);
+        }
         atomic_store(&control->strong_count, 0);
     }
     // Merged layout: control block and payload are in the same allocation.
@@ -317,6 +329,9 @@ void __koral_release_slow_nonatomic(struct __koral_Control* control, __koral_Dto
         int* strong = (int*)&control->strong_count;
         *strong = KORAL_DESTROYING_REFCOUNT;
         dtor(__koral_payload_of(control));
+        if (*strong != KORAL_DESTROYING_REFCOUNT) {
+            __koral_panic_print("self escaped a drop body", NULL);
+        }
         *strong = 0;
     }
     int* weak = (int*)&control->weak_count;
@@ -4368,32 +4383,6 @@ void __koral_lock_release(struct __koral_Lock* lock) {
 // ============================================================================
 // Scalar slot atomics (concurrency-design.md §对象锁语义)
 // ============================================================================
-// Sequential-consistency bit-copy load/store for the scalar-field protocol.
-// The generated code passes `sizeof(slot)`; widths 1/2/4/8 are the scalar
-// field shapes. C11 __atomic_* works on every toolchain this file already
-// targets (the file uses _Thread_local unconditionally).
-
-void __koral_atomic_load_n(void* dst, const void* src, uintptr_t size) {
-    switch (size) {
-        case 1: *(uint8_t*)dst = __atomic_load_n((const uint8_t*)src, __ATOMIC_SEQ_CST); break;
-        case 2: *(uint16_t*)dst = __atomic_load_n((const uint16_t*)src, __ATOMIC_SEQ_CST); break;
-        case 4: *(uint32_t*)dst = __atomic_load_n((const uint32_t*)src, __ATOMIC_SEQ_CST); break;
-        case 8: *(uint64_t*)dst = __atomic_load_n((const uint64_t*)src, __ATOMIC_SEQ_CST); break;
-        default: memcpy(dst, src, (size_t)size); break;
-    }
-}
-
-void __koral_atomic_store_n(void* dst, const void* src, uintptr_t size) {
-    switch (size) {
-        case 1: __atomic_store_n((uint8_t*)dst, *(const uint8_t*)src, __ATOMIC_SEQ_CST); break;
-        case 2: __atomic_store_n((uint16_t*)dst, *(const uint16_t*)src, __ATOMIC_SEQ_CST); break;
-        case 4: __atomic_store_n((uint32_t*)dst, *(const uint32_t*)src, __ATOMIC_SEQ_CST); break;
-        case 8: __atomic_store_n((uint64_t*)dst, *(const uint64_t*)src, __ATOMIC_SEQ_CST); break;
-        default: memcpy(dst, src, (size_t)size); break;
-    }
-}
-
-// ============================================================================
 // Timer context management (std.task)
 // ============================================================================
 
@@ -4808,220 +4797,6 @@ void __koral_condvar_wait_shared_mutex(void* raw, void* shared_mutex) {
     pthread_mutex_unlock(&cv->internal_mutex);
     // Re-acquire the write lock
     pthread_rwlock_wrlock((pthread_rwlock_t*)shared_mutex);
-}
-
-#endif
-
-
-// ============================================================================
-// Atomic Operations
-// ============================================================================
-
-// --- i32 atomics (used by AtomicBool) ---
-
-#if defined(_WIN32) || defined(_WIN64)
-
-int32_t __koral_atomic_load_i32(int32_t* ptr) {
-    // Read via InterlockedCompareExchange to get a seq_cst load
-    return InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
-}
-
-void __koral_atomic_store_i32(int32_t* ptr, int32_t value) {
-    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-}
-
-int32_t __koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
-    return (int32_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-}
-
-int32_t __koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
-    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
-    return old == (LONG)expected ? 1 : 0;
-}
-
-#else
-
-int32_t __koral_atomic_load_i32(int32_t* ptr) {
-    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
-}
-
-void __koral_atomic_store_i32(int32_t* ptr, int32_t value) {
-    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-int32_t __koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
-    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-int32_t __koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
-    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
-                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
-}
-
-#endif
-
-// --- intptr_t atomics (used by AtomicInt) ---
-
-#if defined(_WIN32) || defined(_WIN64)
-
-intptr_t __koral_atomic_load_iptr(intptr_t* ptr) {
-#ifdef _WIN64
-    return (intptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
-#else
-    return (intptr_t)InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
-#endif
-}
-
-void __koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
-#ifdef _WIN64
-    InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
-#else
-    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-#endif
-}
-
-intptr_t __koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
-#ifdef _WIN64
-    return (intptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
-#else
-    return (intptr_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-#endif
-}
-
-int32_t __koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
-#ifdef _WIN64
-    LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
-    return old == (LONG64)expected ? 1 : 0;
-#else
-    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
-    return old == (LONG)expected ? 1 : 0;
-#endif
-}
-
-intptr_t __koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
-#ifdef _WIN64
-    return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
-#else
-    return (intptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, (LONG)delta);
-#endif
-}
-
-intptr_t __koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
-#ifdef _WIN64
-    return (intptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
-#else
-    return (intptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, -(LONG)delta);
-#endif
-}
-
-#else
-
-intptr_t __koral_atomic_load_iptr(intptr_t* ptr) {
-    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
-}
-
-void __koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
-    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-intptr_t __koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
-    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-int32_t __koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
-    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
-                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
-}
-
-intptr_t __koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
-    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
-}
-
-intptr_t __koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
-    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
-}
-
-#endif
-
-// --- uintptr_t atomics (used by AtomicUInt) ---
-
-#if defined(_WIN32) || defined(_WIN64)
-
-uintptr_t __koral_atomic_load_uptr(uintptr_t* ptr) {
-#ifdef _WIN64
-    return (uintptr_t)InterlockedCompareExchange64((volatile LONG64*)ptr, 0, 0);
-#else
-    return (uintptr_t)InterlockedCompareExchange((volatile LONG*)ptr, 0, 0);
-#endif
-}
-
-void __koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
-#ifdef _WIN64
-    InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
-#else
-    InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-#endif
-}
-
-uintptr_t __koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
-#ifdef _WIN64
-    return (uintptr_t)InterlockedExchange64((volatile LONG64*)ptr, (LONG64)value);
-#else
-    return (uintptr_t)InterlockedExchange((volatile LONG*)ptr, (LONG)value);
-#endif
-}
-
-int32_t __koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
-#ifdef _WIN64
-    LONG64 old = InterlockedCompareExchange64((volatile LONG64*)ptr, (LONG64)desired, (LONG64)expected);
-    return old == (LONG64)expected ? 1 : 0;
-#else
-    LONG old = InterlockedCompareExchange((volatile LONG*)ptr, (LONG)desired, (LONG)expected);
-    return old == (LONG)expected ? 1 : 0;
-#endif
-}
-
-uintptr_t __koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
-#ifdef _WIN64
-    return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, (LONG64)delta);
-#else
-    return (uintptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, (LONG)delta);
-#endif
-}
-
-uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
-#ifdef _WIN64
-    return (uintptr_t)InterlockedExchangeAdd64((volatile LONG64*)ptr, -(LONG64)delta);
-#else
-    return (uintptr_t)InterlockedExchangeAdd((volatile LONG*)ptr, -(LONG)delta);
-#endif
-}
-
-#else
-
-uintptr_t __koral_atomic_load_uptr(uintptr_t* ptr) {
-    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
-}
-
-void __koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
-    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-uintptr_t __koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
-    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
-}
-
-int32_t __koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
-    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
-                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
-}
-
-uintptr_t __koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
-    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
-}
-
-uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
-    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
 }
 
 #endif
@@ -5594,13 +5369,22 @@ int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr
 // ============================================================================
 // Global-initializer support (accessor + state model)
 // ============================================================================
-// A generated global accessor serializes its slow path through the recursive
-// lock below: same-thread re-entrance passes the lock and is caught by the
-// state value (1 = initializing => cycle), another thread waits until the
-// initializer has finished (state 2 is published with release ordering).
+// 每个全局自带动一次初始化（per-variable once），不再共用一把进程锁：认领走
+// 状态字节的 CAS（0 -> 1），认领者跑初始化器，跑完以 release 发布 2。初始化器
+// 跑在**无锁**状态下，所以它去碰别的全局、拿别的锁都不会形成锁序死锁。
+// 同线程再入 = 初始化环：本线程的初始化栈认出名字，报
+// `global initialization cycle: a -> b -> a`；他线程只是等发布，自旋让步
+// （急切序在 main 体之前已把每个全局跑过一遍，这条等待路径基本不触发）。
 
 void __koral_global_state_finish(uint8_t* state) {
     __atomic_store_n(state, 2, __ATOMIC_RELEASE);
+}
+
+// 认领初始化权：恰好一个调用者把 0 变成 1，输家走等待/环判定。
+int32_t __koral_global_init_claim(uint8_t* state) {
+    uint8_t expected = 0;
+    return __atomic_compare_exchange_n(state, &expected, 1, 0, __ATOMIC_ACQ_REL,
+                                       __ATOMIC_ACQUIRE) ? 1 : 0;
 }
 
 // The per-process hash seed. KORAL_HASH_SEED pins it (reproducible runs);
@@ -5643,53 +5427,24 @@ uintptr_t __koral_hash_seed(void) {
     return expected;
 }
 
-#if defined(_WIN32) || defined(_WIN64)
+// 初始化链是**线程局部**的：初始化环是本线程的再入性质，跟别的线程无关。
+// 旧实现把它挂在进程锁后面共享，锁去掉后必须随线程走。
+static _Thread_local const char** __koral_global_init_stack = NULL;
+static _Thread_local size_t __koral_global_init_depth = 0;
+static _Thread_local size_t __koral_global_init_capacity = 0;
 
-static CRITICAL_SECTION __koral_global_init_mutex;
-static INIT_ONCE __koral_global_init_once = INIT_ONCE_STATIC_INIT;
-
-static BOOL CALLBACK __koral_global_init_mutex_boot(PINIT_ONCE once, PVOID param, PVOID* ctx) {
-    (void)once; (void)param; (void)ctx;
-    InitializeCriticalSection(&__koral_global_init_mutex);
-    return TRUE;
+// 没抢到初始化权：本线程的初始化链里已有这个名字 => 环，报路径；
+// 否则是别的线程在跑，自旋让步等它发布（state == 2，release）。
+void __koral_global_init_wait_or_cycle(uint8_t* state, const char* name) {
+    for (size_t i = 0; i < __koral_global_init_depth; i++) {
+        if (strcmp(__koral_global_init_stack[i], name) == 0) {
+            __koral_global_init_cycle(name);
+        }
+    }
+    while (__atomic_load_n(state, __ATOMIC_ACQUIRE) != 2) {
+        __koral_thread_yield();
+    }
 }
-
-void __koral_global_init_lock(void) {
-    InitOnceExecuteOnce(&__koral_global_init_once, __koral_global_init_mutex_boot, NULL, NULL);
-    EnterCriticalSection(&__koral_global_init_mutex);
-}
-
-void __koral_global_init_unlock(void) {
-    LeaveCriticalSection(&__koral_global_init_mutex);
-}
-
-#else
-
-static pthread_mutex_t __koral_global_init_mutex;
-static pthread_once_t __koral_global_init_once = PTHREAD_ONCE_INIT;
-
-static void __koral_global_init_mutex_boot(void) {
-    pthread_mutexattr_t attr;
-    pthread_mutexattr_init(&attr);
-    pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE);
-    pthread_mutex_init(&__koral_global_init_mutex, &attr);
-    pthread_mutexattr_destroy(&attr);
-}
-
-void __koral_global_init_lock(void) {
-    pthread_once(&__koral_global_init_once, __koral_global_init_mutex_boot);
-    pthread_mutex_lock(&__koral_global_init_mutex);
-}
-
-void __koral_global_init_unlock(void) {
-    pthread_mutex_unlock(&__koral_global_init_mutex);
-}
-
-#endif
-
-static const char** __koral_global_init_stack = NULL;
-static size_t __koral_global_init_depth = 0;
-static size_t __koral_global_init_capacity = 0;
 
 void __koral_global_init_push(const char* name) {
     if (__koral_global_init_depth == __koral_global_init_capacity) {

@@ -76,8 +76,11 @@ let drop_self_escape_span_in(e: Expr, in_lambda: Bool): Option[SourceSpan] = {
         },
         // A closure captures whatever it mentions; `self` may not be captured.
         .LambdaExpr(_, _, body, _) then drop_self_escape_span_in(body, true),
-        .CastExpr(_, inner, _) or .Unary(_, inner, _) or .RefExpr(inner, _, _) or .WeakrefExpr(inner, _)
-        or .PtrExpr(inner, _, _) or .DerefExpr(inner, _) or .UnsafeDerefExpr(inner, _)
+        // `&self.x` 与 `*T` / `*mutable T` 成形给出指向**垂死对象内部**的裸指针，
+        // 无论函数体拿它做什么，指针都活得比析构体长——按 lambda 形态严格扫。
+        .RefExpr(inner, _, _) or .PtrExpr(inner, _, _) then drop_self_escape_span_in(inner, true),
+        .CastExpr(_, inner, _) or .Unary(_, inner, _) or .WeakrefExpr(inner, _)
+        or .DerefExpr(inner, _) or .UnsafeDerefExpr(inner, _)
         or .NamedArgument(_, inner, _) then drop_self_escape_span_in(inner, in_lambda),
         .TraitQualificationExpr(base, _, _) then drop_self_escape_span_in(
             base,

@@ -18,7 +18,7 @@ Koral 是一个专注于性能、可读性和实用跨平台开发的开源编�
 
 - 现代、易扫读的语法：显式分号 + 表达式化的控制流，`if`、`when`、`while`、`for` 都使用表达式形态的表层语法。`if` 与 `when` 可以产生值；`while` 与 `for` 总是产生 `Void`。
 - 由声明处类型语义驱动的自动内存管理：浅层不可变的 `type` 与共享的 `type mutable` 对象。布局与生命周期细节由编译器负责。
-- 并发安全在类型声明处决定：`sendable` 族标明哪些类型能跨线程共享，安全的 `sendable mutable` 对象自带可重入对象锁，检查全部落在声明处与形成处。跨线程的集合数据以不可变冻结快照传递。
+- 并发安全在类型声明处决定：`sendable` 族标明哪些类型能跨线程共享，安全的 `sendable mutable` 对象自带对象锁——每次字段访问取一把短锁，不可重入也永远不需要——检查全部落在声明处与形成处。跨线程的集合数据是复制不是移动：`to_frozen_list()` 等整体复制进独立的 `type unsafe sendable mutable` 快照存储（承诺「构造后只读」），源保持可用，`to_list()` 复制回来。
 - 带 trait 约束的泛型与单态化，实现零成本抽象。
 - 代数数据类型（结构体与枚举）配合穷举性模式匹配。
 - 基于 trait 的多态，trait object 提供运行期分发。
@@ -1581,7 +1581,7 @@ private type InternalId = Int;  // 仅文件内
 
 限制：
 
-- 类型别名不支持泛型参数（如 `type Alias[T] = List[T]` 无效），但目标类型可以是泛型实例（如 `type IntList = List[Int]`）。
+- 类型别名支持泛型参数（如 `type OrdList[T: Ord] = List[T];`）：实例化点检查元数与约束，目标类型在实例化时按绑定展开。直接自引用是拼写错误；展开环报 `Circular type alias`。泛型别名不带类型参数不指称任何类型。类型别名在语义检查阶段被完全消除。
 - 不允许循环引用（如 `type A = A`）。
 - 类型别名必须以大写字母开头。
 - 类型别名不能声明为 `mutable`——可变性属于 nominal 声明，而不属于别名。
@@ -2968,8 +2968,10 @@ let complement = ~both;
 let wide = Bits(1) << 8;
 ```
 
-复合赋值（`&=`、`|=`、`^=`、`<<=`、`>>=`）与 `+=` 规则相同：值必须已经具有目标类型，
-因此按普通计数移位用二元形式（`wide = wide << 1`）。
+复合赋值（`&=`、`|=`、`^=`、`<<=`、`>>=`）与[复合赋值](#复合赋值)一节写明的两步解糖形相同：每个
+`op=` 读目标、经**运算符**求值——内建算术或 trait（`Add`、`ShiftLeft` 等）——再写回，
+右操作数取运算符自己的操作数类型。所以 `ShiftLeft[Int]` 实现让 `m <<= 2` 收 `Int`
+计数，泛型 `T` 与内建类型表现一致。该步骤跨线程不原子。
 
 #### 内建下标规则
 
@@ -3336,7 +3338,7 @@ raw pointer 是面向 FFI 与系统编程的低层内存访问：
 let p: *Int = null;
 let m: *mutable Int = null;
 if p == null then { ... };
-if p != null then { *p = 42; };
+if m != null then { *m = 42; };
 ```
 
 `null` 也可以作为字面量模式匹配——`p is null`、`p is not null`，或 `when` 分支
@@ -3438,7 +3440,7 @@ let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
 
 ```koral
 let foreign mutable errno: Int32;            // 引用：extern 可变量
-let foreign stdin: *CFile;                   // 引用：extern 只读量（const）
+let foreign stdin: *CFile;                   // 引用：裸 `extern`（Koral 侧可变性是语言层检查，不写 `const`）
 let foreign mutable counter: Int32 = 0;      // 定义：C 变量（静态初始化器）
 let foreign "AF_INET6" af_inet6: Int32 = 10; // 宏常量：值绑定，无存储、无符号
 ```

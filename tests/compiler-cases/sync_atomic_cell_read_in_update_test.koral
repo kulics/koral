@@ -1,0 +1,21 @@
+// EXPECT: 2
+// EXPECT: read_in_update_ok
+
+// The updater of `update_and_get` runs with no lock held, so it may read the
+// same cell without deadlocking: the snapshot is taken first, the read sees
+// the current value, and the commit still lands because the read does not
+// change the version. (Writing the same cell from the updater invalidates
+// every attempt -- see sync_atomic_cell_reentrant_update_panic.)
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let cell = AtomicCell[Int].new(1);
+    let n = cell.update_and_get((v: Int): Int => v + cell.get());
+    println(n.to_string());
+    if n == 2 and cell.get() == 2 then {
+        println("read_in_update_ok");
+    } else {
+        println("FAIL read_in_update");
+    };
+};

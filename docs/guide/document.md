@@ -18,7 +18,7 @@ This manual is ordered the way the language is learned: **language basics**, the
 
 - Modern, easy-to-scan syntax with explicit semicolons and expression-oriented control flow: `if`, `when`, `while`, and `for` all use expression-form surface syntax. `if` and `when` may produce values; `while` and `for` always produce `Void`.
 - Automatic memory management driven by declaration-site type semantics: shallowly immutable `type` versus shared `type mutable` objects. Layout and lifetime details are owned by the compiler.
-- Concurrency safety declared at the type site: the `sendable` family marks which types may cross threads, safe `sendable mutable` objects carry built-in reentrant locking, and the checks live at declaration and formation sites. Cross-thread collection data moves as immutable frozen snapshots.
+- Concurrency safety declared at the type site: the `sendable` family marks which types may cross threads, safe `sendable mutable` objects carry built-in locking — one short lock per field access, not reentrant and never needing to be — and the checks live at declaration and formation sites. Cross-thread collection data is copied, not moved: `to_frozen_list()` and friends bulk-copy into independent `type unsafe sendable mutable` snapshot storage with a construction-then-read-only promise; the source stays usable, and `to_list()` copies back.
 - Generics with trait constraints and monomorphization for zero-cost abstraction.
 - Algebraic data types (structs and enums) with exhaustive pattern matching.
 - Trait-based polymorphism with trait objects for runtime dispatch.
@@ -1608,7 +1608,7 @@ private type InternalId = Int;  // File-scoped only
 
 Restrictions:
 
-- Type aliases do not support generic parameters (e.g., `type Alias[T] = List[T]` is invalid), but the target type can be a generic instantiation (e.g., `type IntList = List[Int]`).
+- Generic type aliases are supported (e.g., `type OrdList[T: Ord] = List[T];`): arity and bounds are checked at the instantiation point, and the target type is expanded with the bindings at instantiation. A direct self-reference is a misspelling; an expansion cycle reports `Circular type alias`. A generic alias without its type arguments names no type. Type aliases are fully erased at semantic checking.
 - Circular references are not allowed (e.g., `type A = A`).
 - Type alias names must start with an uppercase letter (leading `_` is allowed).
 - A type alias cannot be declared `mutable` — mutability is a property of the nominal declaration, not of an alias.
@@ -3051,9 +3051,13 @@ let complement = ~both;
 let wide = Bits(1) << 8;
 ```
 
-Compound assignment (`&=`, `|=`, `^=`, `<<=`, `>>=`) follows the same rule as
-`+=`: the value must already have the target's type, so a shift by a plain
-count takes the binary form (`wide = wide << 1`).
+Compound assignment (`&=`, `|=`, `^=`, `<<=`, `>>=`) is the same two-step
+desugaring spelled out in [Compound Assignment](#compound-assignment): each
+`op=` reads the target, runs the operator — built-in arithmetic or the trait
+(`Add`, `ShiftLeft`, …) — and writes back, so the right-hand side takes the
+operator's own operand type. A `ShiftLeft[Int]` implementation therefore makes
+`m <<= 2` take an `Int` count, and a generic `T` behaves exactly like the
+built-ins. The step is not atomic across threads.
 
 #### Builtin Subscript Rules
 
@@ -3464,7 +3468,7 @@ The null pointer is the literal `null`. It joins an expected `*T` or
 let p: *Int = null;
 let m: *mutable Int = null;
 if p == null then { ... };
-if p != null then { *p = 42; };
+if m != null then { *m = 42; };
 ```
 
 `null` also matches as a literal pattern — `p is null`, `p is not null`, or a
@@ -3586,7 +3590,7 @@ The value's presence and `mutable` pick the form:
 
 ```koral
 let foreign mutable errno: Int32;            // reference: extern mutable variable
-let foreign stdin: *CFile;                   // reference: extern read-only (const)
+let foreign stdin: *CFile;                   // reference: bare `extern` (Koral-side mutability is a language check, not `const`)
 let foreign mutable counter: Int32 = 0;      // definition: C variable (static init)
 let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
 ```

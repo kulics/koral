@@ -115,6 +115,11 @@ public type MethodInstanceKey(
 「现在成立」的检查点不只函数调用：泛型**类型**实例化时也要检查
 （裸类型结点、`GenericInstantiation`、静态方法调用），调用点实参的具体类型此时已知。
 
+捕获检查是这套机器的第三个消费方（除物化决策与调用点外）：`sendable` 闭包只能捕获
+`sendable` 值，而约束查询对裸泛型参数**没有免费通行证**——`f[T: Any]` 捕获 `x: T`
+被拒，只有 `T: sendable` 或 `T: P`（`P` 是 `trait sendable`）放行；数组、weak 引用这类
+形状递归同样严格，不让非 sendable 载荷经泛型中继或闭包捕获洗过 `sendable` 边界。
+
 ### 新增一个 `Type` 的契约
 
 出处：`../implementation/developer-guide.md`「Adding a New Type」。原文只给了清单：

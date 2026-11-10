@@ -1,0 +1,32 @@
+// EXPECT-ERROR: Panic: self escaped a drop body
+
+// `self` must not outlive the drop body. The direct shapes are refused at
+// compile time (`'self' cannot escape a drop body`); an INDIRECT escape -- a
+// method on `self` that stashes its receiver -- is invisible to that check, so
+// the runtime counts net retains across the destructor window and reports the
+// escape instead of letting the stashed handle dangle.
+
+type mutable Res(mutable v: Int);
+type unsafe sendable mutable Holder(items: List[Res]);
+
+let mutable registry: Holder = Holder(List[Res].new());
+
+given Res {
+    stash(self, h: Holder): Void = {
+        h.items.push(self);
+    };
+};
+
+given Res: Drop {
+    drop(self): Void = {
+        self.stash(registry);
+    };
+};
+
+let main(): Void = {
+    {
+        let r = Res(5);
+        println("alive");
+    };
+    println("registry=" + registry.items.count().to_string());
+};

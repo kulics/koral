@@ -7,7 +7,7 @@
 
 ## 摘要
 
-`std/io` 提供三个专用的零字段句柄类型 `Stdin` / `Stdout` / `Stderr`，以自由函数
+`std/io` 提供三个专用的句柄类型 `Stdin` / `Stdout` / `Stderr`，以自由函数
 `stdin()` / `stdout()` / `stderr()` 取用；句柄是**无缓冲、字节保真**的字节流，
 按流挂 `Reader` / `Writer` 面，缓冲与行式消费归 `BufReader` / `BufWriter` 组合。
 
@@ -34,8 +34,9 @@
 
 ## 非目标
 
-- **锁守卫 / 多写原子性**（Rust 的 `StdoutLock`）——Koral 的并发安全整体压在
-  `Send` / `Sync` 缺口上，随那个议题一起定。
+- **显式锁守卫**（Rust 的 `StdoutLock`）——多写原子性已由句柄内置写锁裁定
+  （见契约表「并发」行）：每次 `write` / `flush` 横跨整个调用持锁，不需要
+  第二种锁拼法。
 - **改变 `print` 家族的既有契约**——它们保持逐次 flush 的现状。
 - **TTY 面除 `is_terminal` 之外的一切**（着色、ANSI、终端尺寸）归调用方。
 - **`Seeker`、`close` / 重开**——管道与终端不可寻址；三流是进程级生命周期。
@@ -45,9 +46,9 @@
 ## 方案
 
 ```koral
-public type mutable Stdin(private handle: Int32);    // fd 0，只挂 Reader
-public type mutable Stdout(private handle: Int32);   // fd 1，只挂 Writer
-public type mutable Stderr(private handle: Int32);   // fd 2，只挂 Writer
+public type unsafe sendable mutable Stdin(private handle: Int32);    // fd 0，只挂 Reader
+public type unsafe sendable mutable Stdout(private handle: Int32, private write_lock: StdioWriteLock);   // fd 1，只挂 Writer
+public type unsafe sendable mutable Stderr(private handle: Int32, private write_lock: StdioWriteLock);   // fd 2，只挂 Writer
 
 public let stdin(): Stdin = ...;
 public let stdout(): Stdout = ...;
@@ -62,7 +63,7 @@ public let stderr(): Stderr = ...;
 | EOF / 错误 | `Ok(0)` = EOF（不是错误）；错误走 `Result` + `last_error_message()` |
 | 互操作 | `fd()` 暴露 0/1/2，契约同 `File.fd`；`is_terminal()` 回答「是不是控制台」 |
 | 取用 | 自由函数 `stdin()` / `stdout()` / `stderr()`，每次返回新句柄（多份共享同一条流）；`private` 句柄字段让**字面量构造被语言规则拒绝**，取用函数是唯一入口 |
-| 并发 | 无承诺：单次 `write` 是交错粒度，行级原子性不保证 |
+| 并发 | 每次 `write` / `flush` 对同一条流上的其他写原子——内置写锁（与 `print` 家族共用）横跨整个调用；`Stdin` 单读者，并发读的分帧归调用方 |
 
 `print` / `println` / `eprint` / `eprintln` / `scanln` 保持现状——便利层与句柄层
 共用同一条流、同一套不缓冲策略，混用天然有序。
@@ -98,4 +99,6 @@ public let stderr(): Stderr = ...;
 2. **测试覆盖的形状。** 编译器用例不读 stdin（测试进程继承 stdin，消费会破坏
    差分对拍的确定性）；stdin 读路径由 `samples/grep` 的测试用
    `IoRedirect.File` 喂入覆盖。
-3. **并发写交错**——见「非目标」的锁守卫；`Send` / `Sync` 落地时一并看。
+3. **并发写交错。已裁定**——内置写锁（与 `print` 家族共用）横跨每次
+   `write` / `flush` 调用，单次调用对同流的其他写原子；`Stdin` 是单读者，
+   并发读的分帧归调用方。

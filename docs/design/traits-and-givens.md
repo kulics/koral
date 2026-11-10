@@ -83,8 +83,10 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 ### 导入别名必须也能命名 trait
 
 `using "m" { Tag as AlphaTag }` 里的 `AlphaTag` 要能当**约束**和**trait object 类型**用。
-**别名只进名字表、不进类型表**：给 trait 再加一条类型绑定，会让
+**导入别名只进名字表、不进类型表**：给 trait 再加一条类型绑定，会让
 `Result[T].Error(...)` 里的 `Error` 解析到一个合成的 trait object，`String` 传不进去。
+这条只管导入别名；**泛型类型别名**（`type OrdList[T: Ord] = List[T];`）是真模板，进类型表：
+元数与约束在实例化点检查，目标随绑定展开。
 
 没改名的 `using` 同样是绑定，键是 (导入方模块, 本地拼写)——正本见
 [`name-resolution.md`](name-resolution.md)「trait 的 `using` 也是绑定」。
@@ -134,6 +136,8 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 `Drop` 同理：`set_std_drop_trait_def_id` 在**首次识别时**解析一次声明身份，
 之后所有「这是不是 Drop 协议？」都比这个身份——**用户自定义的 `trait Drop` 不得被当成 std 的**
 （记录 §16.3、§22.4）。身份铸造点只有一个（`is_std_drop_trait("Drop")`），下游全比 DefId。
+用户析构只住 `type mutable`：普通 `type`（含任何 enum）实现 `Drop` 一律拒绝
+（`Only a 'type mutable' can implement Drop`），普通 `type` 的清理是合成的逐字段 release。
 
 ### `Any` 是两个东西
 
@@ -146,10 +150,17 @@ vtable 的身份是 **(具体类型, trait 声明, trait 类型实参)**，三�
 /// -- it is the absence of a bound, not a bound.
 ```
 
-`Bound` 有三种：`Trait(def_id, name, args)`、`Mutable()`（`mutable` 约束）与
+`Bound` 有四种：`Trait(def_id, name, args)`、`Mutable()`（`mutable` 约束）、
 `Foreign()`（`foreign` 类型种类约束，见 [`type-semantics.md`](type-semantics.md)
-「`foreign` 是 FFI 边界」）。`Any` 与「不是 bound 的形状」
+「`foreign` 是 FFI 边界」）与 `Sendable()`（`T sendable` 形状要求「可跨线程边界」，
+满足性是 `is_sendable_type` 推导，可与 trait bound 及另两个形状约束组合，如
+`T Reader and sendable`）。`Any` 与「不是 bound 的形状」
 一并返回 `None`——它们以前会退化成 `"?"` 哨兵，每个消费方都要特判。
+
+捕获检查问的就是这个 `Sendable()` bound：`sendable` 闭包只能捕获 `sendable` 值，
+裸泛型参数不获免费通行证（`f[T: Any]` 捕获 `x: T` 一律拒绝，只有 `T: sendable` 或
+`T: P`（`P` 是 `trait sendable`）放行）。严格形态才保得住「满足 `trait sendable`
+bound ⟹ sendable」不被泛型中继或闭包捕获洗白。
 
 **trait 位**（`trait Any { ... }` 或把它当 trait 名引用）：`Any` 是**普通 trait 名**，没有特权：
 

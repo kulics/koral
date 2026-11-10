@@ -8,8 +8,8 @@
 
 托管对象是一个 `[Control | payload]` 块，句柄是**一个字**，存 payload 地址；
 control 由 `payload - sizeof(Control)` 反推。ARC 头是 8 B、两个引用计数；
-`dtor` 不在头里，在释放调用点单态化。`Option[T]` 在 `T` 是单个可空指针字时用 niche，
-不设 tag。
+`dtor` 不在头里，在释放调用点单态化。`Option[T]` 在 `T` 是单个可空指针字（托管句柄 /
+弱句柄这类 NULL 不是活值）时用 niche、不设 tag；其余保留显式 tag。
 
 ## 背景
 
@@ -58,12 +58,18 @@ struct __koral_Control {
 
 ### 值 / 句柄
 
-托管值、owning 引用、借用，**统一是 `void*`（payload 地址）**。
+托管值、owning 引用、借用，**统一是 `void*`（payload 地址）**。值形名义类型不带对象句柄，
+按字段展开，托管字段占一个句柄字：
 
 ```c
-struct Koralc_Type { void* ptr; };        // 8 B
-struct Std_String  { void* ptr; };        // 8 B
+struct Koralc_Type { void* ptr; };             // 8 B 托管句柄
+struct Std_String  { struct Std_Bytes bytes;   // 句柄字（Bytes 块的 payload 地址）
+                     uintptr_t len; };         // 16 B 值形：句柄字 + len 字
 ```
+
+`String` 的字节是 `Bytes` 托管块，**一次分配** `[Control | payload {data, len} | bytes(len + 1)]`，
+`data` 指向块内字节尾部（`__koral_string_alloc`，`alloc_bytes` intrinsic 的运行时侧，
+见 `std/koral_runtime.h`）。
 
 | 操作 | 发什么 |
 |---|---|
@@ -154,9 +160,13 @@ static const struct {
 字符串字面量已按此发出（`compiler/koralc/codegen/codegen_expressions_literals.koral`
 的 `generate_string_literal`）。
 
-同一个哨兵也用在**析构期间**：`__koral_release_slow` 在跑析构函数体前后把
-`strong_count` 置 -1 / 恢复 0，让 `drop` 里的 `self.m()`（按值接收者会 retain）不复活
-对象、不重入析构。理由见 [`type-semantics.md`](type-semantics.md)「析构期间对象不可复活」。
+**析构期间用的是另一个哨兵，不与 immortal 共享**：`__koral_release_slow` 在跑析构函数体
+前后把 `strong_count` 置 **-2**（`KORAL_DESTROYING_REFCOUNT`）/ 恢复 0，让 `drop` 里的
+`self.m()`（按值接收者会 retain）不复活对象、不重入析构——析构窗口里 retain/release
+不改符号、只朝 -2 记账，析构体结束后计数若不再是 -2 就是 `self` 净逃出 drop 体，运行时
+报错。两个哨兵不共享的理由：weak 操作只对 -1 早退，**-2 析构窗口里 weak 递减必须照常
+进行**；内存的释放判定点是隐式 weak 的零穿越。理由见
+[`type-semantics.md`](type-semantics.md)「析构期间对象不可复活」。
 
 ### 尺寸与设计收益
 
@@ -165,13 +175,14 @@ static const struct {
 | `__koral_Control` | **8 B** |
 | 托管句柄 / `Ref` | **8 B** |
 | `__koral_TraitRef` | **16 B** |
-| `String` 堆块 | **24 B + len + 1**（单块：`alloc_string` 把字节尾随在 payload 之后，一次分配；旧形是 24 B 对象块 + 独立字节缓冲两次分配） |
+| `String` 值 | **16 B**（`bytes` 句柄字 + `len` 字） |
+| `String` 字节块（`Bytes`） | **24 B + len + 1**（单块 `[Control | payload | bytes(len + 1)]`：`__koral_string_alloc` 把字节尾随在 payload 之后，一次分配；旧形是 24 B 对象块 + 独立字节缓冲两次分配） |
 | `List` 堆块 | **32 B** |
-| `Option[String]` | **8 B**（niche） |
-| `Option[Int]` | **16 B**（无 niche，保留 tag） |
+| `Option[T]`，`T` = 单个可空指针字（托管句柄 / 弱句柄） | **8 B**（niche，无 tag） |
+| `Option[T]`，`T` = 其余（`Int`、值形 `String`、`TraitRef`、闭包……） | 保留显式 tag（如 `Option[Int]` = **16 B**） |
 
-句柄宽度沿「容器元素 → 结构体字段」传导：`List[Managed]` / `Dict[String, Type]`
-这些容器的底层数组元素跟着句柄走。
+句柄宽度沿「容器元素 → 结构体字段」传导：托管元素跟着句柄字走（`List[Managed]`），
+值形元素按值形展开（`List[String]` 的元素是句柄字 + `len` 字）。
 
 设计层收益（比字节更重要）：
 
@@ -209,11 +220,13 @@ static const struct {
 ### Swift 的扁平 existentials 布局
 
 **否掉。** `{ 3-word inline buffer | value metadata | witness tables }` 是为「小值免装箱」
-服务的。Koral 的 trait object 永远来自一个 owning 托管引用，payload 本来就在
-`[Control | payload]` 堆块里；内联缓冲区里能放下的永远只是那个指针，等于白付
-value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在**类型层**
-（`type mutable` / `Drop` / 递归 → Managed），不在 existential 边界，两套装箱机制
-叠加没有收益。
+服务的。Koral 的 trait object 来源不止 owning 托管引用：任何符合的值都能转换（`type` 一样
+可以 `given String: ToString`），值源在**转换边界装箱**——vtable 包装器把值拷出来、调用、
+release（`__koral_wrapper_*`）；托管引用则以 owning 句柄直接过桥。两条路的 payload 都在
+`[Control | payload]` 块里，内联缓冲区里能放下的永远只是那个指针，等于白付
+value-metadata 与 value-witness-table 的成本。装箱点有两处——**类型层**
+（`type mutable` / `Drop` / 递归 → Managed）与**转换边界**（值源）——再叠一套
+existential 内联缓冲没有收益。
 
 ### `dtor` 留在头里 / 改成 vtable 索引
 
@@ -240,7 +253,7 @@ value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在*
 | weak | 侧表 / 头内 weak 计数 | `Control.weak_count` | ✅ |
 | 派发信息 | metadata / isa 在对象头 | **独立 vtable 字在 trait object 上** | ❌ 不用 |
 | existentials | 3 字内联缓冲 + value metadata + witness tables | `{ptr, vtable}` 两字 | ❌ 不用 |
-| 小值免装箱 | value witness / 内联缓冲 | 不做（装箱在类型层已决定） | ❌ |
+| 小值免装箱 | value witness / 内联缓冲 | 不做（值源已在转换边界装箱，缓冲区只会装那个指针） | ❌ |
 
 ## 风险与未决
 
@@ -248,7 +261,7 @@ value-metadata 与 value-witness-table 的成本。而且 Koral 的装箱点在*
 |---|---|---|
 | 析构顺序可观察 | 与 move 优化同一敏感区 | 每步单独跑全量，不叠加未验证改动 |
 | 静态字面量体积 | 每个静态字面量多 8 B 常量数据 | 实测字面量数量后评估；必要时按内容去重 |
-| `-1` refcount 与原子操作 | `atomic_fetch_add` 对 `-1` 的行为要验证 | 运行时单测；或 `retain`/`release` 首行判 `-1` |
+| 哨兵 refcount 与原子操作 | `atomic_fetch_add` 对 `-1`（immortal）/ `-2`（destroying）的行为要验证；两哨兵语义不同（weak 只对 -1 早退） | 运行时单测；`retain`/`release` 首行已判哨兵（-1 空操作、-2 朝哨兵记账） |
 | 借用逃逸 | 靠「借用只是 `void*` 局部量/参数」这条约定 | 保留「不可返回 / 不可存储」的检查，检查目标是传参约定而非类型 |
 
 **未决（不阻塞）**

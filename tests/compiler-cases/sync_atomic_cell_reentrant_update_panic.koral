@@ -1,13 +1,14 @@
-// EXPECT-ERROR: Panic: AtomicCell: re-entrant access from inside update_and_get
+// EXPECT-ERROR: Panic: AtomicCell.update_and_get: too many retries -- the updater must not modify the same cell
 
-// The update_and_get lambda runs under the cell's lock, and the lock is
-// non-recursive: a lambda that touches the same cell would deadlock holding
-// it. The mistake panics with a diagnostic instead of hanging (the Lazy
-// re-entrancy discipline).
+// `update_and_get` is optimistic: the updater runs with no lock held and its
+// result is committed only when the cell is unchanged, so an updater that
+// writes the cell it updates invalidates every attempt and the loop gives up
+// with a diagnostic instead of spinning forever. (An updater that only READS
+// the cell is fine -- see sync_atomic_cell_test.)
 
 using "std/sync" { ... };
 
 let main(): Void = {
     let cell = AtomicCell[Int].new(1);
-    let _ = cell.update_and_get((v: Int): Int => v + cell.get());
+    let _ = cell.update_and_get((v: Int): Int => cell.update_and_get((w: Int): Int => w + 1));
 };

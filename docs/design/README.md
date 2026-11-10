@@ -75,7 +75,7 @@ field-level；为何 `Clone` 浅不深；weak 为何不用 marker trait）。这
 | [`numeric-families-design.md`](numeric-families-design.md) —— 数值类型家族与转换语义 | Implemented（三期已落地；饱和家族仅预留命名与语义空间，落地须单独过闸） | 无单独记录（随两编译器与 `std` 同批） | 2026-10-27 |
 | [`stdio-design.md`](stdio-design.md) —— 标准流句柄 Stdin / Stdout / Stderr | Implemented | 无单独记录（随 `std/io` 落地） | 2026-10-31 |
 | [`cffi-design.md`](cffi-design.md) —— CFFI（外部互操作与构建集成） | Implemented（2026-11-06：P1 声明语法、P2 原生构建、P3 条件编译全部落地） | [`cffi-design-implementation.md`](../implementation/cffi-design-implementation.md) | 2026-11-05 |
-| [`concurrency-design.md`](concurrency-design.md) —— 并发安全（sendable 族与对象锁） | Draft | 无（分期见文内「实施」） | 2026-11-08 |
+| [`concurrency-design.md`](concurrency-design.md) —— 并发安全（sendable 族与对象锁） | Implemented（2026-11-10：P1–P6 全部落地，含对象锁重设计与 ARC 优化） | 文内 `## 实施` 一节（未单独拆出） | 2026-11-10 |
 
 新的设计落地后，把状态从 Draft 改成 Implemented，并在「对应实现记录」一栏补上链接。
 

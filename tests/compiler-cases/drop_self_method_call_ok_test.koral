@@ -1,0 +1,41 @@
+// EXPECT: recorded
+// EXPECT: dropped
+// EXPECT: self_method_call_ok
+
+// A method call whose receiver is `self` stays legal in a drop body: the
+// call-convention retain/release pair balances across the destructor window,
+// so nothing escapes and the runtime's escape accounting stays at zero. (A
+// method that STASHES its receiver trips `self escaped a drop body` -- see
+// drop_self_indirect_escape_panic_test.)
+
+type unsafe sendable mutable Recorder(mutable count: Int);
+
+let mutable recorder: Recorder = Recorder(0);
+
+type mutable Res(mutable v: Int);
+
+given Res {
+    record(self): Void = {
+        recorder.count = recorder.count + 1;
+        println("recorded");
+    };
+};
+
+given Res: Drop {
+    drop(self): Void = {
+        self.record();
+        println("dropped");
+    };
+};
+
+let main(): Void = {
+    {
+        let r = Res(5);
+        println("alive");
+    };
+    if recorder.count == 1 then {
+        println("self_method_call_ok");
+    } else {
+        println("FAIL self_method_call");
+    };
+};

@@ -1,6 +1,6 @@
 # 并发安全：`sendable` 族 · 对象锁 · 跨界检查
 
-> **Status**：Implemented · 2026-11-08 · 对应实现：P1–P4 已落地（见文内「实施」）；P5 对象锁重设计 + ARC 优化进行中（2026-11-09）
+> **Status**：Implemented · 2026-11-10 · 对应实现：P1–P6 全部落地（见文内「实施」）——含对象锁重设计（访问点短锁、赋值求值顺序统一「左路径与下标→RHS→写入」、`op=` 两步解糖、旧值解锁后放、锁去可重入）、同步原语定形（全局量初始化 / `AtomicCell` / `Lazy`，见「同步原语的形状」）与 ARC 优化（参数借用、末次使用移动、借用型绑定成对消除）
 > **范围**：跨线程共享的类型约束（`sendable` 族）、对象锁语义、跨界检查、RC 分流
 > **体裁**：设计文档 —— 记决定与取舍，不记执行过程。
 > **用法**（用户向）见 [`../guide/document.md`](../guide/document.md) §Concurrency 与 [`../guide/document-zh.md`](../guide/document-zh.md) §并发（中英镜像）；写法细则以 koralfmt 为准。
@@ -67,7 +67,7 @@ safe `sendable` 承诺**数据竞争自由**：跨线程共享该类型（及其
 2. **名义类型**：按声明。safe 形态编译器**验证**字段全部 `sendable`——标注写错是编译错，不是洞。`type mutable` 不标 `sendable` 即非 `sendable`，即便字段全 `sendable`：声明处定，不做推断。
 3. **泛型（条件 sendable）**：`X[A, B]` 是 `sendable` ⟺ `X` 声明了 `sendable`（含 `unsafe`）**且**全部实参 `sendable`。**这条对 safe/unsafe 统一执行**——`unsafe` 只免字段/payload 检查，不免实参条件，否则 `Channel[非sendable]` 能把非 sendable 值夹带走私（见「跨界检查」）。注意与 `Mutable` / `Foreign` 的恒等判定不同，本条需要对实参结构递归。
 4. **枚举**：`sendable` ⟺ 声明 + 全部 payload 类型 `sendable`（`unsafe` 免检查）。
-5. **函数/闭包类型**：`sendable (A) -> R` 是独立形态。**形成处**检查：无捕获的函数值自然满足；lambda 只有全部捕获 `sendable` 才得 `sendable` 函数类型。放宽转换 `sendable (A) -> R` → `(A) -> R` 合法，反向拒绝。捕获判定走**约束查询**（`satisfies_sendable_constraint`）：裸泛型参数不免费——`f[T: Any]` 里 `run_task` 捕获 `T` 被拒，`T: sendable` / `T: P`（`trait sendable`）才过；数组/弱引用等结构同样严格递归，不再穿透自由通行证（2026-11-09 裁定，堵泛型捕获洗白）。
+5. **函数/闭包类型**：`sendable (A) -> R` 是独立形态（前缀位，类型位仅存此形）。**形成处**检查：无捕获的函数值自然满足；lambda 只有全部捕获 `sendable` 才得 `sendable` 函数类型。放宽转换 `sendable (A) -> R` → `(A) -> R` 合法，反向拒绝。捕获判定走**约束查询**（`satisfies_sendable_constraint`）：裸泛型参数不免费——`f[T: Any]` 里 `run_task` 捕获 `T` 被拒，`T: sendable` / `T: P`（`trait sendable`）才过；数组/弱引用等结构同样严格递归，不再穿透自由通行证（2026-11-09 裁定，堵泛型捕获洗白）。
 6. **trait object**：共享性**跟 trait 声明走**（2026-11-08 重设计）——`trait sendable Foo` 的对象恒 `sendable`，其余 trait 的对象不跨界。类型位的 `sendable Trait` 限定**已删除**（见「替代方案」）。
 7. **`?T` 弱句柄**：`sendable` ⟺ `T` 是 `sendable`。升级走强计数 CAS，原子 RC 下跨线程升级安全。
 8. **裸指针** `*T` / `*mutable T`、`foreign (A) -> R` 函数指针：**非 `sendable`**。跨 FFI 的共享内存由 `unsafe` 形态覆盖。
@@ -114,16 +114,17 @@ type sendable Box[T: mutable and sendable](inner: T);
 
 std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task.new(f)` 的检查自然发生在实参位，`Task` 本身可为 safe 形态；真正需要 `unsafe` 的只剩自带同步的受信基座（`Mutex` / `Thread` / `Atomic*`，裸指针或自带原子操作）。
 
-### 赋值求值顺序（2026-11-09 裁定，全类型统一）
+### 赋值求值顺序（全类型统一）
 
-赋值 `place = expr` 的求值顺序**统一为从左到右**，对所有类型一致（普通 `type mutable`
-此前是「先 RHS 后算目标」，与锁定路径相反——已对齐）：
+赋值 `place = expr` 的求值顺序**统一为从左到右**，对所有类型一致：
 
 1. **先求左边路径与下标**：按书写顺序求值基表达式与下标表达式（副作用各一次），
-   得到**借出的 lvalue**（槽位配方：owner 句柄 + 字段号 / 下标值）。
+   得到**借出的 lvalue**——**owner 句柄 + 字段号**。owner 句柄在 **RHS 之前**就抓住，
+   这对**每一类 place 都成立**，不只锁定相关的：锁相关性只决定读/写**协议**，
+   从不决定求值顺序。
 2. **再求右边**：RHS 完整求值，**不持任何锁**。
-3. **最后写入**：经借出的 lvalue 走写协议；下标写入在写入时刻**重查槽位**
-   （RHS 若令容器重分配，写入落新缓冲，无陈旧指针）。
+3. **最后写入**：经借出的 lvalue 走写协议；下标槽位**始终在写入时刻重查**
+   （RHS 若令容器重分配，写入落新缓冲，绝不落陈旧缓冲）。
 4. **写入之后**：先解锁（若有），再释放槽位旧值——析构绝不进锁。
 
 `op= ` 一律解糖成**两步操作**（读 + 算 + 写，整体**不原子**）：lvalue 求值一次，
@@ -131,9 +132,9 @@ std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task
 再走写协议——泛型处与普通类型的运算符重载实现完全兼容。跨线程原子递增请用
 `AtomicCell.update_and_get` 或 `Mutex`，语言不再假装 `+=` 原子。
 
-### 对象锁语义（safe `sendable mutable`，2026-11-09 重设计）
+### 对象锁语义（safe `sendable mutable`）
 
-锁从「可重入、贯穿整句」的大锁改为**访问点短锁**，按字段种类分协议（顺序一致性）：
+锁是**访问点短锁**——每次字段访问一把，按字段种类分协议（顺序一致性）：
 
 | 访问 | 种类 | 协议 |
 |---|---|---|
@@ -145,13 +146,31 @@ std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task
 
 1. **RHS 在锁外求值**，锁只包住最后一次读取或写入：`x.f = x.f + 1` 是两次独立
    访问（读 + 写），**不是原子**。跨访问的原子性必须显式声明（`Mutex` / `AtomicCell`）。
-2. **不需要可重入锁**（2026-11-09 裁定）：任何时刻至多持一把短锁——路径中间的
+2. **锁不需要可重入**：任何时刻至多持一把短锁——路径中间的
    读各取各放，RHS 不持锁，旧值释放在解锁之后。析构里回调宿主对象不会死锁。
-3. **锁按对象划**；嵌套路径 `a.b.c` 逐对象取放，不同时持。跨对象锁序由人管（不变）；
-   方法体不是整段临界区（不变）。
+3. **锁按对象划**；嵌套路径 `a.b.c` 逐对象取放，不同时持。跨对象锁序由程序员负责，
+   死锁不承诺（见「风险与未决」）；方法体不是整段临界区。
 4. **全局 `let mutable` 与字段同规则**：标量槽原子读写、引用/多字长短锁、RHS 锁外、
    旧值解锁后放；不可变 `let` 全局直接读。
-5. **不提供显式锁块**（不变）。
+5. **不提供显式锁块**。
+
+### 同步原语的形状（全局量 · `AtomicCell` · `Lazy`）
+
+自带同步的三件工具同形：**状态机认领初始化/提交，被认领的代码在无锁状态下运行**。
+
+- **全局量**：每个全局的初始化器**至多运行一次**，由对自己**状态字节**的 CAS 认领
+  （0 = 未初始化、1 = 初始化中、2 = 完成）。**没有进程级初始化锁**——初始化一个全局
+  从不串行化另一个；初始化器**不持任何锁**运行，因此可以访问别的全局、拿别的锁而无
+  锁序死锁。初始化器内部重入自己就是初始化环，按 `global initialization cycle: a -> b -> a`
+  panic（链是线程局部的）；输掉认领的线程等发布。全局仍在主函数体之前急切运行：
+  模块内按声明序，跨模块按 `using` 拓扑序。
+- **`AtomicCell[T]`**：`get` / `set` / `swap` / `compare_exchange` 都是**格自身 Mutex 上的
+  单步线性化**。`update_and_get` 是**乐观**的：锁内取快照，updater **不持锁**运行，
+  仅当格未变才提交，否则重试。updater 因此**可能跑多次**、不得有副作用；它可以**读**格
+  但**不得写**（每次尝试都被作废，循环直接 panic 放弃而不是空转）。旧值一律在解锁之后释放。
+- **`Lazy[T]`**：逐值状态机（0/1/2）认领唯一一次初始化，初始化器**不持锁**运行
+  （可以调别的 lazy、全局与锁）。同一值的初始化器里 `get()` 不死锁，而是 panic
+  `Lazy.get: the initializer called get() on the same Lazy`；其余线程在条件变量上等值发布。
 
 ### `unsafe` 契约
 
@@ -186,8 +205,8 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 | `Channel` / `SendChannel` / `RecvChannel` / `ChannelStorage` | `unsafe sendable mutable`（条件于 `T`；环形缓冲 + 自管 Mutex/Condvar，条件规则看住跨界） |
 | `Mutex` / `SharedMutex` / `Thread` | `unsafe sendable mutable`（裸指针 handle，受信基座） |
 | `Atomic*` | `unsafe sendable mutable`（自带原子操作，FFI 内变路径不走对象锁） |
-| `AtomicCell[T]`（新增，2026-11-09） | `unsafe sendable mutable`（条件于 `T: sendable`；内部短锁串行化 `get` / `set` / `swap` / `update_and_get(f)`（组合 lambda 的原子读-改-写）/ `compare_exchange`）——`op=` 不再假装原子后，跨访问原子递增等场景的显式工具 |
-| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T`；内部双检锁自管） |
+| `AtomicCell[T]` | `unsafe sendable mutable`（条件于 `T: sendable`；单步线性化 + 乐观 `update_and_get`，形态见「同步原语的形状」）——`op=` 两步解糖之后，跨访问原子递增等场景的显式工具 |
+| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T`；状态机 + 条件变量自管，形态见「同步原语的形状」） |
 | `Task` / `run_task` / `spawn_thread` | `sendable () -> Void` 参数位 |
 
 **错误侧裁定（2026-11-08，随 trait 重设计收编）**：`Error` 是 `trait sendable`——错误类型**单一形态**，必须自行声明 `sendable` / `unsafe sendable` 才能实现它（`given` 处检查，与 Swift `Error: Sendable` 对齐）。`Result[T]` 的错误载荷是普通 `Error`（声明已携带共享性），Result 因此是 safe `sendable`。
@@ -217,25 +236,22 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 | 项 | 说明 | 对策 |
 |---|---|---|
 | 每访问上锁的性能 | 单线程代码也付；热点路径可能可感 | 先立语义后实测；锁消除 / 单线程构建留作未决 |
-| 跨对象锁序 | 整句临界区持锁调他对象方法会嵌套锁；死锁不承诺 | 文档警示；显式锁块的用法引导 |
-| safe `sendable mutable` 的逃生舱 | 字段取址会绕开锁承诺 | 已裁定禁止；实施时落在「取址仅限 `foreign`」的检查上 |
+| 跨对象锁序 | 嵌套路径逐对象取放、不同时持锁；但一次操作先后访问多个对象，加锁次序仍可能与别的线程相反 | 加锁次序由程序员负责；死锁不承诺，文档警示 |
+| safe `sendable mutable` 的逃生舱 | 字段取址会绕开锁承诺 | 已禁止并落地检查（「取址仅限 `foreign`」，覆盖整条取址路径的 owner 链） |
 
 **未决（不阻塞）**
 
 1. **`ChannelStorage` 内部复核**：环形缓冲的字段访问在 `unsafe` 下自管同步，条件规则看住 `T`；实现时复核边界协议。
 2. **trait object 运行时侧**：RC 分流的擦除侧保守原子；若将来 vtable 带标志再议。
 
-**已裁定（原未决项）**：函数类型限定拼写定为 `sendable (A) -> R`（前缀位，类型位仅存此形）；trait 共享性走 `trait sendable` 声明（2026-11-08）；全局 `let mutable` 每变量一锁（2026-11-09 随对象锁重设计改为与字段同协议）；`Lazy` 用 `unsafe sendable mutable`；泛型参数约束必填（下限 `T: Any`，裸参数解析错）；泛型 `given` 实现 `trait sendable` 严格证明（`given[T: sendable]`，装箱检查删除，2026-11-09）；闭包捕获的跨界判定改走约束查询——裸泛型参数与嵌套形状都不再免费（2026-11-09）；`type foreign` 禁止一切 sendable 形态、foreign 值只活在 `type unsafe sendable` 受信内部或线程内（2026-11-09）；**对象锁重设计**（2026-11-09）：赋值求值顺序统一「左路径→RHS→写入」、`op=` 两步解糖走运算符重载、RHS 锁外、旧值解锁后放、锁去可重入、字段按种类分协议（标量原子 / 引用与多字长短锁）、全局同协议、`AtomicCell` 补原子组合场景。
-
 ## 实施
 
-分期（每期状态记这里）：
+已全部落地（P1–P6，`compiler/` 与 `compiler-reference/` 双编译器同步）：
 
-1. **P1 语义与检查**：语法 + `Bound.Sendable`（`compiler/koralc/ast/nodes.koral` 的 `Bound` 枚举挂点）+ 声明/字段校验 + 泛型条件递归 + 派生闭合 + 跨界检查（spawn 签名、全局量、装箱）。sem / mono 双侧。
-2. **P2 锁语义**：对象锁（读写覆盖、可重入、赋值整句临界区、提前退出按账本放锁）；无显式锁块（已裁定，见「替代方案」）。**P2 落地前 safe `sendable mutable` 不放行使用**——否则承诺了没兑现的保证。
-3. **P3 非原子 RC 分流** + 基准复测。
-4. **P4 std 迁移 + 用户文档**：guide「Memory Model」增并发节（中英镜像），本文档 Status 改 Implemented。
-5. **P5 对象锁重设计 + ARC 优化（2026-11-09）**：赋值求值顺序统一「左路径→RHS→写入」、`op=` 两步解糖走运算符重载；字段按种类分协议（标量原子 load/store、引用与多字长字段短锁）、锁去可重入、旧值解锁后放、全局 `let mutable` 同协议；`AtomicCell` 补原子组合场景；ARC 补**参数借用**（受管参数按 +0 借用传入，逃逸点才 retain；koralc 已有按（函数实例, 参数槽）的逃逸分析，`self` 即参数 0）与**末次使用移动**——裸局部的单次值读、且使用所在块内有定义（循环逐迭代重定义天然安全）、且**析构闭包内无用户 `Drop`**（析构时序零变化；枚举保守排除）时，复制读改走移交，省一对 retain/release。两项都是时序不可见的优化，只落在 koralc 实现侧，Swift 参照保持语义裁判。
-6. **P6 ARC 优化补完（2026-11-10，koralc 实现侧，时序不可见）**：末次使用移动升级为**判 G**（从使用点出发的每条执行路径含回边在碰到下一次值读前必经一次定义；同语句多读保守拒绝）——覆盖多读局部的最后复制读、跨块汇合点、owned 参数与 `self`，循环形状按「定义截断」放行或拒绝；析构可观察性污染补上**单态化实例的泛型实参**与**枚举载荷**（容器把元素藏在裸缓冲后，字段走查看不见，漏了就会把持有用户 `Drop` 值的容器当可移动的——for_loop_drop 的时序钉抓的就是它）；**借用投影风险面**（判 G 的补丁）：+0 借用读（借用实参/借用接收者/借用 PlaceRead）与取址（`Ref`/`Pointer`）会把指向对象内部的裸引用送出去并活得比 +1 长（`bytes.borrow_ptr()` 的指针活过了载荷释放），带任何一处的局部整体禁移；**借用型绑定成对消除**（Swift retain/release pair elimination 同形，源收窄到**非持有**：借用参数/捕获/链式别名——其 +1 的所有权在函数体之外，必活过任何绑定窗口）：`let b = <非持有源>` 的全部使用都不消费时，b 即别名——绑定不 retain、作用域尾不 release，析构时序不变。tracked 局部源的 +1 可能死在作用域尾/循环重定义的写协议里（静态 def 计数看不见动态重定义），需要源生死点可达性分析，留作后续；运行时 **RC 计数器**（`__koral_rc_stats_*`，包在 `KORAL_RC_STATS` 里——**发布面剔除**，普通构建零痕迹，钉子站用该宏单独编出）把每种形状的收益钉成精确数字（`rc_counter_pin`：别名 0、移动链 0、多读末移恰 1、释放侧逐一相符），verify.sh 另以 "release surface OK" 反钉保证测试面不漏进发布产物。用户 `Drop` 类型仍不移动、闭包捕获仍不作移动源（多发射闭包与 Swift 同判）；与 Swift 的差别只在析构时序契约这一处，是有意分歧。
+1. **语义与检查**（P1）：`sendable` 六形态语法 + `Bound.Sendable` 约束位（`compiler/koralc/ast/nodes.koral` 的 `Bound` 枚举挂点）+ 声明/字段校验 + 泛型条件递归 + 派生闭合 + 跨界检查（spawn 签名、全局量、装箱）；sem / mono 双侧。
+2. **锁语义**（P2/P5）：即「对象锁语义」的访问点短锁形态——赋值统一「左路径与下标 → RHS → 写入 → 解锁 → 释放旧值」，`op=` 两步解糖走运算符重载，字段按种类分协议，全局 `let mutable` 同协议；`AtomicCell` / `Lazy` / 全局量按「同步原语的形状」落地；无显式锁块，safe `sendable mutable` 已放行使用。
+3. **非原子 RC 分流**（P3）+ 基准复测。
+4. **std 迁移 + 用户文档**（P4）：guide「Memory Model」增并发节（中英镜像）。
+5. **ARC 优化**（P5/P6，koralc 实现侧、时序不可见，Swift 参照保持语义裁判）：受管参数按 **+0 借用**传入、逃逸点才 retain（逃逸分析按「函数实例, 参数槽」，`self` 即参数 0）；**末次使用移动**按**判 G**放行——从使用点出发的每条执行路径（含回边）在碰到下一次值读前必经一次定义，同语句多读保守拒绝，覆盖多读局部的最后复制读、跨块汇合点、owned 参数与 `self`，循环形状按「定义截断」放行或拒绝，析构时序零变化；析构可观察性污染覆盖**单态化实例的泛型实参**与**枚举载荷**（`for_loop_drop` 时序钉看住）；**借用投影风险面**：+0 借用读（借用实参/借用接收者/借用 PlaceRead）与取址（`Ref`/`Pointer`）会把指向对象内部的裸引用送出去并活得比 +1 长（`bytes.borrow_ptr()` 的指针活过载荷释放），带任何一处的局部整体禁移；**借用型绑定成对消除**（Swift retain/release pair elimination 同形）限**非持有源**（借用参数/捕获/链式别名，其 +1 的所有权在函数体之外）：`let b = <非持有源>` 的全部使用都不消费时 b 即别名，绑定不 retain、作用域尾不 release；tracked 局部源的 +1 可能死在作用域尾/循环重定义的写协议里，需源生死点可达性分析，留作后续。用户 `Drop` 类型不移动、闭包捕获不作移动源（多发射闭包与 Swift 同判）。运行时 **RC 计数器**（`__koral_rc_stats_*`，包在 `KORAL_RC_STATS` 里——**发布面剔除**，普通构建零痕迹，钉子站用该宏单独编出）把每种形状的收益钉成精确数字（`rc_counter_pin`：别名 0、移动链 0、多读末移恰 1、释放侧逐一相符），verify.sh 另以 "release surface OK" 反钉保证测试面不漏进发布产物。与 Swift 的差别只在析构时序契约这一处，是有意分歧。
 
 验证：**双编译器同步**（`compiler/` 与 `compiler-reference/`），差分对齐的已知坑（typed span、多错误收集、span 锚点、符号名、literal range 循环变量）在 sema 改动中会全踩一遍；[`../implementation/samples-capability.md`](../implementation/samples-capability.md) 押着的 grep-j 并行样例当验收用例。

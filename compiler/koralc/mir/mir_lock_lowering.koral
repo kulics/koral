@@ -205,32 +205,84 @@ given MIRFunctionBuilder {
         return Option[MIROperand].None();
     };
 
-    /// 重写 place 基链上的锁定链接为已装载的临时局部（每个链接按所属对象
-    /// 协议取放）。最终链接的访问不在此处理（读由 lower_locked_read 走协议，
-    /// 写由 lower_assignment_write 走协议）。
-    rewrite_locked_place_links(self, place: MIRPlace): MIRPlace = {
-        return when place in {
-            .Field(base, field) then MIRPlace.Field(
-                MIRPlace.Local(self.load_place_owner(base).local_id_or_zero()),
-                field,
-            ),
-            .EnumPayload(base, case_name, field_name, field_index, field_type) then MIRPlace.EnumPayload(
-                MIRPlace.Local(self.load_place_owner(base).local_id_or_zero()),
-                case_name,
-                field_name,
-                field_index,
-                field_type,
-            ),
-            .Deref(value, pointee) then MIRPlace.Deref(
-                self.rewrite_locked_value(value),
-                pointee,
-            ),
-            .PointerElement(value, element) then MIRPlace.PointerElement(
-                self.rewrite_locked_value(value),
-                element,
-            ),
-            _ then place,
+    /// place 的 owner 句柄，保证落在局部里。非局部操作数（常量指针、已
+    /// 物化的读）先停进临时——`local_id_or_zero` 会把它们悄悄折成 local 0。
+    place_owner_local(self, base: MIRPlace): MIRLocalID = {
+        let owner = self.load_place_owner(base);
+        when owner in {
+            .Local(local_id) then { return local_id; },
+            _ then {},
         };
+        let parked = self.make_temporary(self.place_type(base), "owner");
+        self.append_statement(MIRStatement.Declare(parked.id));
+        self.append_statement(
+            MIRStatement.Assign(MIRPlace.Local(parked.id), MIRValue.Operand(owner)),
+        );
+        return parked.id;
+    };
+
+    /// 重写 place 基链上的链接为已装载的临时局部（每个链接按所属对象协议
+    /// 取放）。最终链接的访问不在此处理（读由 lower_locked_read 走协议，
+    /// 写由 lower_assignment_write 走协议）。
+    ///
+    /// 赋值求值顺序（concurrency-design.md §赋值求值顺序）对**每一种** place
+    /// 都需要这一步，不只锁定相关的：借出的 lvalue 是「owner 句柄 + 字段号」，
+    /// owner 句柄必须在 RHS 之前就抓住。否则普通 `type mutable` 的嵌套路径会
+    /// 在写入时刻重走 `o.inner`，落到 RHS 留下的那个对象上。
+    /// 读出的 owner 是不是指向共享对象的独立**句柄**（`type mutable` 名义，
+    /// 拷贝一份就把路径指名的那个对象钉住）。普通值 owner（`type`、`type
+    /// foreign` 值、标量）不抓：拷它等于复制值，写入会落到副本上
+    /// （`nested_tuple_binding_mutable_test`、`foreign_value_mutation_ok`）。
+    is_handle_backed_place(self, base: MIRPlace): Bool = {
+        when self.lock_owner_probe_type(self.place_type(base)) in {
+            .StructureType(def_id) or .EnumType(def_id) or .OpaqueType(def_id) then {
+                return self.context.is_struct_mutable(def_id)
+                    and not self.context.is_foreign_struct(def_id);
+            },
+            .GenericStruct(template_def_id, _) or .GenericEnum(template_def_id, _) then {
+                return template_def_id.is_valid()
+                    and self.context.is_struct_mutable(template_def_id);
+            },
+            _ then {},
+        };
+        return false;
+    };
+
+    rewrite_locked_place_links(self, place: MIRPlace): MIRPlace = {
+        when place in {
+            .Field(base, field) then {
+                if self.is_handle_backed_place(base) then {
+                    return MIRPlace.Field(MIRPlace.Local(self.place_owner_local(base)), field);
+                };
+                return MIRPlace.Field(self.rewrite_locked_place_links(base), field);
+            },
+            .EnumPayload(base, case_name, field_name, field_index, field_type) then {
+                if self.is_handle_backed_place(base) then {
+                    return MIRPlace.EnumPayload(
+                        MIRPlace.Local(self.place_owner_local(base)),
+                        case_name,
+                        field_name,
+                        field_index,
+                        field_type,
+                    );
+                };
+                return MIRPlace.EnumPayload(
+                    self.rewrite_locked_place_links(base),
+                    case_name,
+                    field_name,
+                    field_index,
+                    field_type,
+                );
+            },
+            .Deref(value, pointee) then {
+                return MIRPlace.Deref(self.rewrite_locked_value(value), pointee);
+            },
+            .PointerElement(value, element) then {
+                return MIRPlace.PointerElement(self.rewrite_locked_value(value), element);
+            },
+            _ then {},
+        };
+        return place;
     };
 
     rewrite_locked_value(self, value: MIRValue): MIRValue = {

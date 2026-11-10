@@ -11,8 +11,16 @@
 //
 // "Escape" is structural, decided by the shape of the AST and never by a name
 // lookup: `self` is legal as the base of a `memberPath`, illegal as a bare
-// identifier. A lambda body is a special case -- anything the lambda mentions
-// it captures, so ANY `self` there escapes.
+// identifier. Two other positions are also escapes: a lambda body (anything
+// the lambda mentions it captures), and anything under an address-of / pointer
+// forming operator (`&self.x` hands out a raw pointer into the dying object
+// that outlives the destructor).
+//
+// The one shape that stays legal is `self.m(...)` -- a method call whose
+// receiver is `self`. A callee CAN stash its receiver (that is an indirect
+// escape no AST check can see), so the runtime closes it: a net retain of the
+// object that outlives the drop body trips `self escaped a drop body` in
+// `__koral_release_slow`.
 //
 // `Type(Trait).method(recv, ...)` puts the receiver in the argument list, so
 // every part of it is an ordinary use: only `self.m(...)` makes `self` a
@@ -76,14 +84,20 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
   case .lambdaExpression(_, _, let body, _):
     return dropSelfEscapeSpanIn(body, inLambda: true)
 
+  // `&self.x` (and the `*T` / `*mutable T` forming operators) hand out a raw
+  // pointer INTO the dying object. The pointer outlives the destructor no
+  // matter what the body does with it, so any `self` under one of these is an
+  // escape -- scanned in lambda mode, where a receiver position buys nothing.
+  case .addressOfExpression(let inner, _, _),
+       .ptrExpression(let inner, _, _):
+    return dropSelfEscapeSpanIn(inner, inLambda: true)
+
   case .castExpression(_, let inner, _),
        .unaryMinusExpression(let inner, _),
        .notExpression(let inner, _),
        .bitwiseNotExpression(let inner, _),
-       .addressOfExpression(let inner, _, _),
        .derefExpression(let inner, _),
-       .unsafeDerefExpression(let inner, _),
-       .ptrExpression(let inner, _, _):
+       .unsafeDerefExpression(let inner, _):
     return dropSelfEscapeSpanIn(inner, inLambda: inLambda)
 
   case .orReturnExpression(let operand, _):

@@ -53,24 +53,26 @@ Koral 的取舍判据有两条腿：**复杂度预算**（默认拒绝的类别�
 
 冲突时按序号排优先；同号内按「摘要」里的目标权衡。
 
-1. **可读性优于抽象完备性。** 缺抽象手段可以是故意的。声明处可变性让审阅者一眼可判
-   「谁能改什么」（[`type-semantics.md`](type-semantics.md)）；`Clone` 明定浅拷贝，不提供
-   深拷贝抽象。宁可少一层抽象，不少一处可读。
+1. **可读性优于抽象完备性。** 缺抽象手段可以是故意的。可变性写在每字段、每绑定的声明上，
+   审阅者一眼可判「谁能改什么」（[`type-semantics.md`](type-semantics.md)）；`Clone`
+   明定浅拷贝，不提供深拷贝抽象。宁可少一层抽象，不少一处可读。
 2. **局部可判断优于全局推断。** 工具在局部就能判：名字解析一次定身份、裸名不是解析、
-   prelude 是显式绑定（[`name-resolution.md`](name-resolution.md)）；可变性在声明处；
-   `Self` 不出现在方法参数与返回类型，object safety 局部可判。需要全程序求解才能
-   判定的规则，不进语言。
+   prelude 是显式绑定（[`name-resolution.md`](name-resolution.md)）；可变性看每字段、
+   每绑定的声明即可判；`Self` 不出现在方法参数与返回类型，object safety 局部可判。
+   需要全程序求解才能判定的规则，不进语言。
 3. **显式优于隐式引用转换。** managed-ref 语义整体删除；`&` / `&mutable` 是显式取址，
    `*T` / `*mutable T` 是显式裸指针拼写，`clone` 显式（[`type-semantics.md`](type-semantics.md)）。
    不引入隐式引用转换层级。
-4. **库作者复杂换取用户简单。** 用户只有一个 receiver 形态 `self`，可变性差异全部由
-   类型声明吸收（[`std-api-design.md`](std-api-design.md)）；消耗 / 观察的细则是 std
+4. **库作者复杂换取用户简单。** 用户只有一个 receiver 形态 `self`，身份 / 所有权的差异
+   全部由 `type` / `type mutable` 声明吸收（[`std-api-design.md`](std-api-design.md)）；
+   消耗 / 观察的细则是 std
    作者的负担，不是用户的。下标 place 规则、链式比较降级、`and then` / `or else` /
    `or return` 由编译器承接。复杂度往作者侧和编译器侧收，不往用户侧摊。
-5. **不追求语法 trait 化。** 语法能不能定制，按「是不是值代数」判：算术与比较是值代数，
-   走 trait；下标是 place、位运算是内建位语义，都不走公开 trait（`guide`「运算符重载」）。
+5. **不追求语法 trait 化。** 语法能不能定制，按「是不是值代数」判：算术、位运算与比较
+   都是值代数，走公开 trait；下标是 place，不走公开 trait（`guide`「运算符重载」）。
    语法糖降级为既有机制，不为它新增 trait。
-6. **一个问题原则上只提供一种主流表达。** 可变性只有声明处；receiver 只有 `self`；
+6. **一个问题原则上只提供一种主流表达。** 可变性只出自声明（每字段、每绑定）；
+   receiver 只有 `self`；
    错误传播只有 `or return`（无 `throw` / `try` / `catch`，也没有第二种传播运算符）；
    `using` 一种拼写；控制流一种分支形状。例外必须登记在案（[`std-api-design.md`](std-api-design.md)
    的遗留例外即此用途）。

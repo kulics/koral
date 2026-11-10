@@ -8,6 +8,8 @@
 #include <stdatomic.h>
 #include <stdint.h>
 #include <limits.h>
+#include <stddef.h>
+#include <string.h>
 
 // 含 alloc_memory 的函数（缓冲增长、创建辅助）由 codegen 发这个属性：
 // 内联进调用方后，冷路径（增长/创建）会把调用方撑过 C 内联器的阈值——热
@@ -121,8 +123,103 @@ void __koral_lock_release(struct __koral_Lock* lock);
 // safe `type sendable mutable` 的 `mutable` 标量字段（整数族/浮点/Bool/裸指针）
 // 用这些做原子 load/store，顺序一致性。generated code 传 `sizeof(slot)`；
 // 1/2/4/8 字节是全部标量字段形状，值按位拷贝（浮点与指针同样适用）。
-void __koral_atomic_load_n(void* dst, const void* src, uintptr_t size);
-void __koral_atomic_store_n(void* dst, const void* src, uintptr_t size);
+//
+// 这一族与下面的 atomic 整数族都是 `static inline` 住在头里：它们是每次
+// 字段访问/计数器操作的全部成本，跨翻译单元的外联调用让优化器看不见这一层。
+// 运行时只用 C11 `__atomic_*`（本文件的其余部分同样无条件依赖它，见
+// `__koral_global_state_ready`），所以头里不需要平台分支。
+static inline void __koral_atomic_load_n(void* dst, const void* src, uintptr_t size) {
+    switch (size) {
+        case 1: *(uint8_t*)dst = __atomic_load_n((const uint8_t*)src, __ATOMIC_SEQ_CST); break;
+        case 2: *(uint16_t*)dst = __atomic_load_n((const uint16_t*)src, __ATOMIC_SEQ_CST); break;
+        case 4: *(uint32_t*)dst = __atomic_load_n((const uint32_t*)src, __ATOMIC_SEQ_CST); break;
+        case 8: *(uint64_t*)dst = __atomic_load_n((const uint64_t*)src, __ATOMIC_SEQ_CST); break;
+        default: memcpy(dst, src, (size_t)size); break;
+    }
+}
+
+static inline void __koral_atomic_store_n(void* dst, const void* src, uintptr_t size) {
+    switch (size) {
+        case 1: __atomic_store_n((uint8_t*)dst, *(const uint8_t*)src, __ATOMIC_SEQ_CST); break;
+        case 2: __atomic_store_n((uint16_t*)dst, *(const uint16_t*)src, __ATOMIC_SEQ_CST); break;
+        case 4: __atomic_store_n((uint32_t*)dst, *(const uint32_t*)src, __ATOMIC_SEQ_CST); break;
+        case 8: __atomic_store_n((uint64_t*)dst, *(const uint64_t*)src, __ATOMIC_SEQ_CST); break;
+        default: memcpy(dst, src, (size_t)size); break;
+    }
+}
+
+// ── Atomic integer family (std/sync/atomic.koral) ───────────────────────────
+//
+// AtomicBool / AtomicInt / AtomicUInt 的 load/store/swap/CAS/fetch_add/fetch_sub，
+// 顺序一致性。同样 `static inline` 住头里；Koral 侧是 `let foreign`，生成代码
+// 会再发一份 `extern` 原型——C11 6.2.2p4：后一个 `extern` 声明沿用先前可见的
+// `static` 声明的内部链接，两份声明共存且调用一律走这里的内联体。
+static inline int32_t __koral_atomic_load_i32(int32_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+static inline void __koral_atomic_store_i32(int32_t* ptr, int32_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline int32_t __koral_atomic_swap_i32(int32_t* ptr, int32_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline int32_t __koral_atomic_cas_i32(int32_t* ptr, int32_t expected, int32_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+static inline intptr_t __koral_atomic_load_iptr(intptr_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+static inline void __koral_atomic_store_iptr(intptr_t* ptr, intptr_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline intptr_t __koral_atomic_swap_iptr(intptr_t* ptr, intptr_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline int32_t __koral_atomic_cas_iptr(intptr_t* ptr, intptr_t expected, intptr_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+static inline intptr_t __koral_atomic_fetch_add_iptr(intptr_t* ptr, intptr_t delta) {
+    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+static inline intptr_t __koral_atomic_fetch_sub_iptr(intptr_t* ptr, intptr_t delta) {
+    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+static inline uintptr_t __koral_atomic_load_uptr(uintptr_t* ptr) {
+    return __atomic_load_n(ptr, __ATOMIC_SEQ_CST);
+}
+
+static inline void __koral_atomic_store_uptr(uintptr_t* ptr, uintptr_t value) {
+    __atomic_store_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline uintptr_t __koral_atomic_swap_uptr(uintptr_t* ptr, uintptr_t value) {
+    return __atomic_exchange_n(ptr, value, __ATOMIC_SEQ_CST);
+}
+
+static inline int32_t __koral_atomic_cas_uptr(uintptr_t* ptr, uintptr_t expected, uintptr_t desired) {
+    return __atomic_compare_exchange_n(ptr, &expected, desired, 0,
+                                       __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST) ? 1 : 0;
+}
+
+static inline uintptr_t __koral_atomic_fetch_add_uptr(uintptr_t* ptr, uintptr_t delta) {
+    return __atomic_fetch_add(ptr, delta, __ATOMIC_SEQ_CST);
+}
+
+static inline uintptr_t __koral_atomic_fetch_sub_uptr(uintptr_t* ptr, uintptr_t delta) {
+    return __atomic_fetch_sub(ptr, delta, __ATOMIC_SEQ_CST);
+}
 
 // String 字节块的堆载荷布局。与 std/string.koral 的 `type mutable Bytes(data,
 // len)` 字段序耦合，字面量发射（generate_string_literal）同样按 {data, len}
@@ -153,10 +250,11 @@ KORAL_COLD KORAL_NORETURN void __koral_panic_numeric_conversion_overflow(const c
 KORAL_COLD KORAL_NORETURN void __koral_panic_division_by_zero(const char* loc);
 KORAL_COLD KORAL_NORETURN void __koral_panic_remainder_by_zero(const char* loc);
 
-// Global-initializer support (accessor + state model): the generated accessor
-// of a global serializes its slow path through a recursive lock, tracks the
-// chain of initializers currently running, and panics on re-entrance with the
-// cycle path. State values: 0 = uninitialized, 1 = initializing, 2 = done.
+// Global-initializer support (accessor + state model): every global runs its
+// initializer at most once, claimed by a CAS on its OWN state byte -- there is
+// no process-wide init lock, so initializing one global never serializes
+// another. The initializer runs with no lock held. State values:
+// 0 = uninitialized, 1 = initializing, 2 = done.
 // The ready check is inline: it is the hot half of every global read.
 static inline uint8_t __koral_global_state_ready(uint8_t* state) {
     return __atomic_load_n(state, __ATOMIC_ACQUIRE) == 2;
@@ -179,8 +277,11 @@ extern uintptr_t __koral_hash_seed_value;
 uintptr_t __koral_hash_seed(void);
 void __koral_hash_seed_pin(uintptr_t v);
 void __koral_global_state_finish(uint8_t* state);
-void __koral_global_init_lock(void);
-void __koral_global_init_unlock(void);
+// Claim the init slot (0 -> 1); 1 = this caller runs the initializer.
+int32_t __koral_global_init_claim(uint8_t* state);
+// Lost the claim: a re-entrant access from inside the current initializer is a
+// cycle (reports the path and panics); otherwise wait for the publish.
+void __koral_global_init_wait_or_cycle(uint8_t* state, const char* name);
 void __koral_global_init_push(const char* name);
 void __koral_global_init_pop(void);
 void __koral_global_init_cycle(const char* name);
@@ -235,19 +336,33 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor);
 static inline void __koral_retain(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
-    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
-    atomic_fetch_add_explicit(&control->strong_count, 1, memory_order_relaxed);
+    int count = atomic_load_explicit(&control->strong_count, memory_order_relaxed);
+    if (count >= 0) {
+        atomic_fetch_add_explicit(&control->strong_count, 1, memory_order_relaxed);
+        return;
+    }
+    if (count == KORAL_IMMORTAL_REFCOUNT) return;  // 静态字面量：无操作
+    // 析构窗口：不许复活，但**要记账**。计数朝 -2 以下走，析构体结束后
+    // strong_count 不再是 -2 就说明有句柄逃出了 drop 体（`self` 被存进
+    // 别处），__koral_release_slow 据此报错而不是让那个句柄变成悬垂指针。
+    atomic_fetch_add_explicit(&control->strong_count, -1, memory_order_relaxed);
 }
 
 static inline void __koral_release(void* raw_control, __koral_Dtor dtor) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
-    if (atomic_load_explicit(&control->strong_count, memory_order_relaxed) < 0) return;
-    int prev = atomic_fetch_sub_explicit(&control->strong_count, 1, memory_order_release);
-    if (prev == 1) {
-        atomic_thread_fence(memory_order_acquire);
-        __koral_release_slow(control, dtor);
+    int count = atomic_load_explicit(&control->strong_count, memory_order_relaxed);
+    if (count >= 0) {
+        int prev = atomic_fetch_sub_explicit(&control->strong_count, 1, memory_order_release);
+        if (prev == 1) {
+            atomic_thread_fence(memory_order_acquire);
+            __koral_release_slow(control, dtor);
+        }
+        return;
     }
+    if (count == KORAL_IMMORTAL_REFCOUNT) return;
+    // 析构窗口：与 retain 的记账对称，把计数收回 -2。
+    atomic_fetch_add_explicit(&control->strong_count, 1, memory_order_relaxed);
 }
 
 // ---- RC 观测（测试用：钉精确 retain/release 数）--------------------------
@@ -315,8 +430,9 @@ void __koral_closure_drop(void* raw_closure);
 // 哨兵语义与原子族逐一相同：
 //   - immortal（strong = -1）：retain/release 早退，weak 操作读到 -1 早退，
 //     downgrade/upgrade 不碰哨兵（upgrade 对 -1 一律失败）；
-//   - 析构窗口（strong = -2）：retain/release 读到任何负数早退（防
-//     `drop(self)` 复活与析构递归），weak 计数照常递减；
+//   - 析构窗口（strong = -2）：retain/release 不改符号（防 `drop(self)` 复活
+//     与析构递归）但朝 -2 记账（retain 减、release 加），析构体结束后计数
+//     不是 -2 就是 `self` 净逃出了 drop 体，慢路径据此报错；weak 计数照常递减；
 //   - free 唯一判定点仍是 weak_count 到 0 的那次递减（RcBox 协议）。
 void __koral_release_slow_nonatomic(struct __koral_Control* control, __koral_Dtor dtor);
 
@@ -324,20 +440,28 @@ static inline void __koral_retain_nonatomic(void* raw_control) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     int* strong = (int*)&control->strong_count;
-    if (*strong < 0) return;
-    *strong += 1;
+    if (*strong >= 0) {
+        *strong += 1;
+        return;
+    }
+    if (*strong == KORAL_IMMORTAL_REFCOUNT) return;
+    *strong -= 1;  // 析构窗口记账
 }
 
 static inline void __koral_release_nonatomic(void* raw_control, __koral_Dtor dtor) {
     if (!raw_control) return;
     struct __koral_Control* control = (struct __koral_Control*)raw_control;
     int* strong = (int*)&control->strong_count;
-    if (*strong < 0) return;
-    int prev = *strong;
-    *strong = prev - 1;
-    if (prev == 1) {
-        __koral_release_slow_nonatomic(control, dtor);
+    if (*strong >= 0) {
+        int prev = *strong;
+        *strong = prev - 1;
+        if (prev == 1) {
+            __koral_release_slow_nonatomic(control, dtor);
+        }
+        return;
     }
+    if (*strong == KORAL_IMMORTAL_REFCOUNT) return;
+    *strong += 1;  // 析构窗口记账
 }
 
 // ---- 非原子族的值层 API（生成代码用这一对）----

@@ -92,6 +92,7 @@ given JsonValue {
     /// Return the element at `index`, or `None` when this is not an `Array` or the index is out of range.
     public get_element(self, index: UInt): Option[JsonValue];
     /// Format as JSON indented two spaces per level, with each array element and object entry on its own line.
+    /// Panics with `JSON error: maximum nesting depth exceeded` past `max_json_depth`.
     public to_string_pretty(self): String;
 };
 

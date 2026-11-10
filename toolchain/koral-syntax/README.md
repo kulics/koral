@@ -47,7 +47,6 @@ verbatim, so a toolchain error and a compiler error say the same thing:
 
 | rejected form | message |
 |---|---|
-| `*T`, `*mutable T` | `managed refs are removed; raw pointers must be '*unsafe T' or '*unsafe mutable T'` |
 | `?*T` | `Weak reference syntax is '?T', not legacy '?*T'` |
 | `<>` | `'<>' is not supported; use '!='` |
 | `pat if cond then` (guard) | `Pattern guards use 'where', not 'if'` |

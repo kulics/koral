@@ -148,9 +148,10 @@ let format_json_number(f: Float64): String = {
 
 // Maximum nesting depth for recursive traversal (parsing, printing,
 // comparison). Deeply nested input is rejected with a `JsonError`, and
-// programmatically built trees past the cap render as `null` (the same
-// fallback non-finite numbers use) and compare unequal, so no traversal
-// can overflow the call stack.
+// printing a programmatically built tree past the cap is a formatting error
+// that panics with the same `maximum nesting depth exceeded` diagnostic --
+// the parser's error, not a truncated document. Comparison past the cap
+// reports unequal, so no traversal can overflow the call stack.
 let max_json_depth: UInt = UInt(256);
 
 private let make_indent(level: UInt): String = {
@@ -213,7 +214,7 @@ private let to_string_pretty_object(
 
 private let to_string_pretty_impl(value: JsonValue, level: UInt): String = {
     if level > max_json_depth then {
-        return "null";
+        panic("JSON error: maximum nesting depth exceeded");
     };
     return when value in {
         .Null() then "null",
@@ -318,6 +319,7 @@ given JsonValue {
     };
 
     /// Format as JSON indented two spaces per level, with each array element and object entry on its own line.
+    /// Panics with `JSON error: maximum nesting depth exceeded` past `max_json_depth`.
     public to_string_pretty(self): String = to_string_pretty_impl(self, 0);
 };
 

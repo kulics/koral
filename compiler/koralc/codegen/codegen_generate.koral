@@ -1116,21 +1116,18 @@ given CodeGen {
                         self.buffer.push_string(
                             "KORAL_COLD \(c_type)* __koral_gptr_\(c_name)_cold(void) {\n",
                         );
-                        self.buffer.push_string("    __koral_global_init_lock();\n");
+                        self.buffer.push_string("    if (__koral_global_init_claim(&__koral_gstate_\(c_name))) {\n");
+                        self.buffer.push_string("        __koral_global_init_push(\"\(display_name)\");\n");
+                        self.buffer.push_string("        \(c_name) = \(init_name)();\n");
+                        self.buffer.push_string("        __koral_global_init_pop();\n");
                         self.buffer.push_string(
-                            "    if (__koral_gstate_\(c_name) == 2) { __koral_global_init_unlock(); return &\(c_name); }\n",
+                            "        __koral_global_state_finish(&__koral_gstate_\(c_name));\n",
                         );
+                        self.buffer.push_string("        return &\(c_name);\n");
+                        self.buffer.push_string("    }\n");
                         self.buffer.push_string(
-                            "    if (__koral_gstate_\(c_name) == 1) { __koral_global_init_cycle(\"\(display_name)\"); }\n",
+                            "    __koral_global_init_wait_or_cycle(&__koral_gstate_\(c_name), \"\(display_name)\");\n",
                         );
-                        self.buffer.push_string("    __koral_gstate_\(c_name) = 1;\n");
-                        self.buffer.push_string("    __koral_global_init_push(\"\(display_name)\");\n");
-                        self.buffer.push_string("    \(c_name) = \(init_name)();\n");
-                        self.buffer.push_string("    __koral_global_init_pop();\n");
-                        self.buffer.push_string(
-                            "    __koral_global_state_finish(&__koral_gstate_\(c_name));\n",
-                        );
-                        self.buffer.push_string("    __koral_global_init_unlock();\n");
                         self.buffer.push_string("    return &\(c_name);\n");
                         self.buffer.push_string("}\n");
                     };

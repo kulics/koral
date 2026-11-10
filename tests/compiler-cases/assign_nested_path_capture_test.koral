@@ -1,0 +1,28 @@
+// EXPECT: 100
+// EXPECT: nested_path_capture_ok
+
+// Assignment evaluation order (concurrency-design.md §赋值求值顺序): the left
+// path is captured BEFORE the right-hand side for every kind of place, so a
+// nested member path writes through the owner handle the path named -- not
+// through whatever the RHS left behind. Here the RHS replaces `o.inner`; the
+// write must land on the OLD Inner the path resolved to, so the new one keeps
+// its own `v`.
+
+type mutable Inner(mutable v: Int);
+type mutable Outer(mutable inner: Inner);
+
+let swap(o: Outer): Int = {
+    o.inner = Inner(100);
+    return 7;
+};
+
+let main(): Void = {
+    let o = Outer(Inner(0));
+    o.inner.v = swap(o);
+    println(o.inner.v.to_string());
+    if o.inner.v == 100 then {
+        println("nested_path_capture_ok");
+    } else {
+        println("FAIL nested_path_capture");
+    };
+};

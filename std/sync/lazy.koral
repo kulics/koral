@@ -5,57 +5,82 @@ using "std" { ... };
 // Provides: [T]Lazy (thread-safe lazy initialization with cached result)
 // Access via: using "std/sync" { ... };
 // ============================================================================
-// Design: Pure Koral implementation using AtomicInt + Mutex.
-// Uses double-checked locking: fast path reads AtomicInt state without
-// locking, slow path acquires Mutex to initialize exactly once.
-// The closure is executed at most once; subsequent get() calls return
-// the cached value.
+// Design: Pure Koral implementation on AtomicInt + Mutex + MutexCondvar, in
+// the same shape as the global initializer and AtomicCell's optimistic update:
+// the state machine decides who runs the initializer, and the initializer
+// itself runs with NO lock held. A `get()` from inside the initializer can
+// therefore never deadlock against this value's guard -- it either sees the
+// cached result or is refused with a diagnostic.
 // ============================================================================
 
 let foreign __koral_thread_current_id(): UInt64;
 
+/// Lazy value states: 0 = uninitialized, 1 = initializing, 2 = done.
+private let lazy_state_uninitialized: Int = 0;
+private let lazy_state_initializing: Int = 1;
+private let lazy_state_done: Int = 2;
+
 /// Thread-safe lazy value whose initializer runs at most once.
-/// Sendable contract: self-synchronized -- double-checked locking runs the
+/// Sendable contract: self-synchronized -- the state machine runs the
 /// initializer at most once; `get` from any thread is safe.
 public type unsafe sendable mutable Lazy[T: Any](
     private state: AtomicInt,
     private mutex: Mutex,
+    private condvar: MutexCondvar,
     private func: sendable () -> T,
     private mutable value: Option[T],
     private mutable init_owner: UInt64,
-    private mutable initializing: Bool,
 );
 
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`.
-    public new(f: sendable () -> T): Lazy[T] =
-        Lazy[T](AtomicInt.new(0), Mutex.new(), f, Option[T].None(), UInt64(0), false);
+    public new(f: sendable () -> T): Lazy[T] = {
+        let mutex = Mutex.new();
+        let condvar = mutex.condvar();
+        return Lazy[T](
+            AtomicInt.new(lazy_state_uninitialized),
+            mutex,
+            condvar,
+            f,
+            Option[T].None(),
+            UInt64(0),
+        );
+    };
 
     /// Return the value, running and caching the initializer on first use.
-    /// The initializer must not call `get()` on the same `Lazy`: the guard
-    /// mutex is non-recursive, so the re-entrant call would deadlock holding
-    /// it. That mistake panics with a diagnostic instead of hanging.
+    ///
+    /// The initializer runs with no lock held, so it may call other lazy
+    /// values, globals and locks without lock-ordering deadlocks. It must not
+    /// call `get()` on the same `Lazy`: there is no value to return yet, and
+    /// that mistake panics with a diagnostic instead of hanging.
     public get(self): T = {
-        if self.state.load() == 1 then {
+        if self.state.load() == lazy_state_done then {
             return self.value.unwrap();
         };
-        if self.initializing and self.init_owner == __koral_thread_current_id() then {
+        if self.state.compare_exchange(expected = lazy_state_uninitialized, desired = lazy_state_initializing) then {
+            self.init_owner = __koral_thread_current_id();
+            let result = self.func();
+            self.value = Option[T].Some(result);
+            self.state.store(lazy_state_done);
+            self.mutex.lock();
+            self.condvar.notify_all();
+            self.mutex.unlock();
+            return self.value.unwrap();
+        };
+        // Someone else claimed initialization (or has just finished).
+        if self.state.load() == lazy_state_initializing
+            and self.init_owner == __koral_thread_current_id() then {
             panic("Lazy.get: the initializer called get() on the same Lazy");
         };
         self.mutex.lock();
-        defer self.mutex.unlock();
-        if self.state.load() == 0 then {
-            self.initializing = true;
-            self.init_owner = __koral_thread_current_id();
-            let result = self.func();
-            self.initializing = false;
-            self.value = Option[T].Some(result);
-            self.state.store(1);
+        while self.state.load() != lazy_state_done then {
+            self.condvar.wait();
         };
+        self.mutex.unlock();
         return self.value.unwrap();
     };
 
     /// Check whether the initializer has already run.
-    public is_initialized(self): Bool = self.state.load() == 1;
+    public is_initialized(self): Bool = self.state.load() == lazy_state_done;
 };

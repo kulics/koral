@@ -1406,7 +1406,11 @@ private final class MIRFunctionBuilder {
       _ = lowerValue(value)
       fatalError("Unsupported assignment target reached MIR lowering")
     }
-    let prepared = placeLockedRelevant(place) ? rewriteLockedPlaceLinks(place) : place
+    // The borrowed lvalue is captured before the RHS for every kind of place:
+    // "left path and its subscripts first, then the right-hand side, then the
+    // write" is only observable if the path's owner handles are held across the
+    // RHS. Lock relevance decides the read/write PROTOCOL, not the ordering.
+    let prepared = rewriteLockedPlaceLinks(place)
     let loweredValue = lowerValue(value)
     lowerAssignmentWrite(prepared, value: loweredValue)
   }
@@ -4996,17 +5000,66 @@ private final class MIRFunctionBuilder {
     }
   }
 
-  /// Rewrite the locked links of the place's base chain into loaded temporary
-  /// locals (each link loaded under its owner's protocol). The final link's
-  /// access is NOT handled here (reads go through lowerLockedRead, writes
-  /// through lowerAssignmentWrite).
+  /// Whether reading the place yields an independent HANDLE to a shared object
+  /// -- a `type mutable` nominal, whose copy pins the object the path named.
+  /// A plain value owner (a `type`, a `type foreign` value, a scalar) is NOT
+  /// captured: copying it would duplicate the value and send the write to the
+  /// copy (`nested_tuple_binding_mutable_test`, `foreign_value_mutation_ok`).
+  private func isHandleBackedPlace(_ base: MIRPlace) -> Bool {
+    switch lockOwnerProbeType(placeType(base)) {
+    case .structure(let defId), .enum(let defId), .opaque(let defId):
+      return context.isTypeMutable(defId) && !context.isForeignStruct(defId)
+    case .genericStruct(let templateDefId, _), .genericEnum(let templateDefId, _):
+      return templateDefId.isValid && context.isTypeMutable(templateDefId)
+    default:
+      return false
+    }
+  }
+
+  /// The place's owner handle, guaranteed to be a local. A non-local operand
+  /// (a constant pointer, a materialized read) is parked in a temp first --
+  /// `localIDOrZero` used to silently fold those to local 0.
+  private func placeOwnerLocal(_ base: MIRPlace) -> MIRLocalID {
+    let owner = loadPlaceOwner(base)
+    if case .local(let localID) = owner {
+      return localID
+    }
+    let parked = makeTemporary(type: placeType(base), nameHint: "owner")
+    append(.declare(parked.id))
+    append(.assign(.local(parked.id), .operand(owner)))
+    return parked.id
+  }
+
+  /// Rewrite the links of the place's base chain into loaded temporary locals
+  /// (each link loaded under its owner's protocol). The final link's access is
+  /// NOT handled here (reads go through lowerLockedRead, writes through
+  /// lowerAssignmentWrite).
+  ///
+  /// Assignment evaluation order (concurrency-design.md §赋值求值顺序) needs
+  /// this for EVERY place, not just lock-relevant ones: the borrowed lvalue is
+  /// "owner handle + field number", so the owner handles have to be captured
+  /// BEFORE the right-hand side runs. Without it a nested path on a plain
+  /// `type mutable` re-walks `o.inner` at write time and lands on whatever the
+  /// RHS left behind.
   private func rewriteLockedPlaceLinks(_ place: MIRPlace) -> MIRPlace {
     switch place {
     case .field(let base, let field):
-      return .field(base: .local(localIDOrZero(loadPlaceOwner(base))), field: field)
+      if isHandleBackedPlace(base) {
+        return .field(base: .local(placeOwnerLocal(base)), field: field)
+      }
+      return .field(base: rewriteLockedPlaceLinks(base), field: field)
     case .enumPayload(let base, let caseName, let fieldName, let fieldIndex, let fieldType):
+      if isHandleBackedPlace(base) {
+        return .enumPayload(
+          base: .local(placeOwnerLocal(base)),
+          caseName: caseName,
+          fieldName: fieldName,
+          fieldIndex: fieldIndex,
+          fieldType: fieldType
+        )
+      }
       return .enumPayload(
-        base: .local(localIDOrZero(loadPlaceOwner(base))),
+        base: rewriteLockedPlaceLinks(base),
         caseName: caseName,
         fieldName: fieldName,
         fieldIndex: fieldIndex,

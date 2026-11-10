@@ -180,7 +180,7 @@ let main(): Int = {
 | `let foreign f(…): R;` | 引用（extern 函数） | `extern R f(…);` | 已落地 |
 | `let foreign f(…): R = { … };` | **定义**（C ABI 导出函数） | `R f(…) { … }` | 已落地（P1） |
 | `let foreign mutable x: T;` | 引用（extern 可变量） | `extern T x;` | 已落地 |
-| `let foreign x: T;` | 引用（extern 只读量） | `extern const T x;` | 已落地 |
+| `let foreign x: T;` | 引用（extern 只读量） | `extern T x;`（裸 extern，无 `const`） | 已落地 |
 | `let foreign mutable x: T = v;` | **定义**（C 变量） | `T x = v;` | 已落地（P1） |
 | `let foreign x: T = v;` | **C 宏常量的值绑定**（无存储、无符号） | 无实体；Koral 侧常量 | 已落地（P1） |
 
@@ -198,6 +198,9 @@ let main(): Int = {
   `foreign_function_duplicate_default_internal` 用例）。
 - foreign 全局量是 **C 直接读取的布局对象**：可按值收 `type foreign` / `[N]T`（函数边界
   不收它们）；访问绕过 Koral 全局量的初始化器机制（裸 extern）。
+- **引用形态一律发裸 `extern`**（`extern T x;`，无 `const`）：Koral 侧的可变性是语言层检查，
+  不进入 C 声明——`extern const` 会与运行时的非 const 定义相撞（conflicting types）；
+  `mutable` 只决定 Koral 侧能否赋值，不改 C 声明。
 - 宏常量是「C 世界的值」：值从 C 头文件复制，`mutable` 决定变量位有无存储——无存储即常量
   （宏的对应物），有存储即 C 变量定义。C 的 `const` 全局**符号**暂缺位（「风险与未决」4）。
 
@@ -375,7 +378,8 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
    `<pred-head> <cmp> <string>` 变体即可，但「同名分区」在开放轴上的形态与
    [`module-design.md`](module-design.md) §11.4 的 feature 一起过闸。
 4. **C `const` 全局符号缺位**：非 mutable + 有值已被宏常量占用，`extern const T x` 的**定义**
-   形态不可表达；写 C shim 兜，或将来给宏常量另立形态再腾位。
+   形态不可表达（声明形态同样只发裸 `extern`——可变性是语言层检查，见 B 节）；写 C shim 兜，
+   或将来给宏常量另立形态再腾位。
 5. **`#if` 块内 `using` 的位置规则**（已随 P3 钉死）：「using 在文件顶部」按**逐列表递归**
    执行——文件与每个分支块各自「using 项在前、其它在后」，`#if` 整条按「（递归）含 `using`
    即 using 项」分类。检查是纯语法的；副作用是两条 mixed `#if` 选枝后可能翻转相对顺序

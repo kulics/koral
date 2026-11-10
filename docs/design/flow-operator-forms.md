@@ -13,7 +13,7 @@
 三个算子各按自己的角色取形态，共享一条显式绑定通道：
 
 - `and then` **以解包值为接收者**——链式（`and then .f()`）或绑定（`and then as v in …`）；
-- `or else` **提供替代值**——裸表达式或绑定（`or else as e in …`，**仅 Result**，绑 `Error`）；
+- `or else` **提供替代值**——裸表达式（可带 `and then` 后缀链）或绑定（`or else as e in …`，**仅 Result**，绑 `Error`）；
 - **没有隐式 `it`**，`it` 不是关键字，是普通标识符。
 
 `and then` **折叠**：变换的声明返回类型已是同族就直接采用，否则包一层。
@@ -48,13 +48,17 @@
 
 | 算子 | 干什么 | 操作数角色 | 形态 |
 |---|---|---|---|
-| `and then` | 对解包值做变换 | 有接收者 | `.成员链`（链式）｜`as v in <layer-operand>`（绑定） |
-| `or else` | 提供替代值 | 没有接收者 | `<layer-operand>`（裸表达式）｜`as e in <layer-operand>`（绑定，仅 Result） |
+| `and then` | 对解包值做变换 | 有接收者 | `<flow-receiver-chain>`：`.成员链`（前导点 + 完整后缀链）｜`as v in <layer-operand>`（绑定） |
+| `or else` | 提供替代值 | 没有接收者 | `<flow-operand>`（`<layer-operand>` + `and then` 后缀链）｜`as e in <layer-operand>`（绑定，仅 Result） |
 | `or return` | 传播 | — | 无操作数（语法糖） |
 
 **不对称是角色决定的**，不是不一致。对照 `x?.title ?? "untitled"`：`?.` 后面接成员访问
 （链在解包值上继续），`??` 后面接表达式（一个替代值）——同一条不对称。两边共享的是
 **绑定形态**（`as n in`）：需要名字时同形，不需要名字时各按角色走短形态。
+
+`and then` 链是 `<flow-operand>` 尾部的**后缀续**（`<and-then-link>*`）；`or else` 收一个
+完整 `<flow-operand>`，所以它可以自己带一条 `and then` 链——`x or else y and then z` 是
+`x or else (y and then z)`。
 
 `and then` **没有裸表达式形态**。变换体天然要对解包值做计算，忽略值的变换不为它留形态
 （见「替代方案」）。
