@@ -47,6 +47,8 @@ public type sendable JsonValue {
 given JsonError: Error {
     /// Return the failure text, including the input position.
     public message(self): String;
+    /// A plain failure wraps nothing.
+    public source(self): Option[Error];
 };
 
 /// Implements `ToString`, matching `message`.

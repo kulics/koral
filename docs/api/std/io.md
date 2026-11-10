@@ -213,6 +213,8 @@ given ByteBuffer: Seeker {
 given IoError: Error {
     /// Return the human-readable description of this failure.
     public message(self): String;
+    /// A plain failure wraps nothing.
+    public source(self): Option[Error];
 };
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.

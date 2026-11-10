@@ -1,0 +1,79 @@
+// EXPECT: counter 16000
+// EXPECT: deque sum 16000
+// EXPECT: done
+
+// Concurrent container stress (concurrency-design.md §std落点): 8 threads
+// hammer one shared map through the combining lambda, and 4 producers feed a
+// shared deque that 4 consumers drain -- every update must land exactly once.
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let counter = ConcurrentDict[String, Int].new();
+    counter.insert("n", 0);
+    let handles = List[Thread].new();
+    let mutable t = UInt(0);
+    while t < UInt(8) then {
+        let h = run_task(() => {
+            let mutable k = UInt(0);
+            while k < UInt(2000) then {
+                let _ = counter.update_and_get("n", (v: Option[Int]): Option[Int] => {
+                    return Option[Int].Some((v or else 0) + 1);
+                });
+                k = k + UInt(1);
+            };
+        });
+        handles.push(h);
+        t = t + UInt(1);
+    };
+    let mutable i = UInt(0);
+    while i < handles.count() then {
+        (handles.get(i) or else panic("handle")).wait().unwrap();
+        i = i + UInt(1);
+    };
+    println("counter \(counter.get("n").unwrap())");
+
+    let q = ConcurrentDeque[Int].new();
+    let taken = ConcurrentDict[String, Int].new();
+    taken.insert("sum", 0);
+    let workers = List[Thread].new();
+    let mutable p = UInt(0);
+    while p < UInt(4) then {
+        let hp = run_task(() => {
+            let mutable k = UInt(0);
+            while k < UInt(4000) then {
+                q.push_back(1);
+                k = k + UInt(1);
+            };
+        });
+        workers.push(hp);
+        p = p + UInt(1);
+    };
+    let mutable c = UInt(0);
+    while c < UInt(4) then {
+        let hc = run_task(() => {
+            let mutable drained = UInt(0);
+            while drained < UInt(4000) then {
+                when q.pop_front() in {
+                    .Some(v) then {
+                        let _ = taken.update_and_get("sum", (x: Option[Int]): Option[Int] => {
+                            return Option[Int].Some((x or else 0) + v);
+                        });
+                        drained = drained + UInt(1);
+                    },
+                    .None() then {},
+                };
+            };
+        });
+        workers.push(hc);
+        c = c + UInt(1);
+    };
+    let mutable w = UInt(0);
+    while w < workers.count() then {
+        (workers.get(w) or else panic("handle")).wait().unwrap();
+        w = w + UInt(1);
+    };
+    println("deque sum \(taken.get("sum").unwrap())");
+    println("done");
+};

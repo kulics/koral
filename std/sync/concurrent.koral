@@ -1,0 +1,387 @@
+using "std" { ... };
+// ============================================================================
+// std.sync - Concurrent containers (self-synchronized shared collections)
+// ============================================================================
+// Design: every operation is one linearizable step under the container's own
+// non-recursive mutex; compound steps go through `update_and_get`'s combining
+// lambda. Displaced values are EXTRACTED under the lock and released after the
+// unlock wherever the inner container offers extraction (Dict side). The Set
+// side drops members inside the lock (a `Set` has no extraction), so every
+// entry is guarded by the busy-owner check: re-entering the same container --
+// from the lambda or from a destructor -- panics instead of deadlocking (the
+// Lazy / AtomicCell discipline). Iteration is not offered over live shared
+// state -- `to_frozen_*` takes a snapshot instead (concurrency-design.md
+// §std落点).
+// ============================================================================
+
+/// A shared `sendable` key/value map with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: sendable](
+    private mutex: Mutex,
+    private mutable busy_owner: UInt64,
+    private map: Dict[K, V],
+);
+
+/// The linearizable operations of a `ConcurrentDict`.
+given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
+
+    /// Create an empty concurrent dict.
+    public new(): ConcurrentDict[K, V] =
+        ConcurrentDict[K, V](Mutex.new(), UInt64(0), Dict[K, V].new());
+
+    /// Create an empty concurrent dict sized for about `capacity` entries.
+    public with_capacity(capacity: UInt): ConcurrentDict[K, V] =
+        ConcurrentDict[K, V](
+            Mutex.new(),
+            UInt64(0),
+            Dict[K, V].with_capacity(capacity),
+        );
+
+    /// The number of entries.
+    public count(self): UInt = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "count");
+        self.mutex.lock();
+        let out = self.map.count();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Whether the dict has no entries.
+    public is_empty(self): Bool = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "is_empty");
+        self.mutex.lock();
+        let out = self.map.is_empty();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// The value stored under `key`, or `None` when absent.
+    public get(self, key: K): Option[V] = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "get");
+        self.mutex.lock();
+        let out = self.map.get(key);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Whether `key` has an entry.
+    public contains_key(self, key: K): Bool = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "contains_key");
+        self.mutex.lock();
+        let out = self.map.contains_key(key);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Store `value` under `key` and return the displaced value, if any.
+    /// The displaced value is extracted under the lock and released after it.
+    public insert(self, key: K, value: V): Option[V] = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "insert");
+        self.mutex.lock();
+        let old = self.map.take(key);
+        self.map.insert(key, value);
+        self.mutex.unlock();
+        return old;
+    };
+
+    /// Store `value` under `key` only when absent, and report whether it was
+    /// stored.
+    public try_insert(self, key: K, value: V): Bool = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "try_insert");
+        self.mutex.lock();
+        let out = self.map.try_insert(key, value);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove `key`'s entry and return its value, if any.
+    public take(self, key: K): Option[V] = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "take");
+        self.mutex.lock();
+        let old = self.map.take(key);
+        self.mutex.unlock();
+        return old;
+    };
+
+    /// Remove `key`'s entry and report whether it existed. The value is
+    /// extracted under the lock and released after it.
+    public try_remove(self, key: K): Bool = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "try_remove");
+        self.mutex.lock();
+        let old = self.map.take(key);
+        self.mutex.unlock();
+        let existed = old is .Some(_);
+        let _ = old;
+        return existed;
+    };
+
+    /// The value stored under `key`, storing `value` first when absent.
+    public get_or_insert(self, key: K, value: V): V = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "get_or_insert");
+        self.mutex.lock();
+        let out = self.map.get_or_insert(key, value);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Atomically read-modify-write one entry: apply `f` to the current
+    /// mapping (`None` when absent) and store the result (`None` removes the
+    /// entry). The whole step is one linearizable operation. `f` runs under
+    /// the container's lock and must not touch the same container (that
+    /// panics instead of deadlocking); the displaced value is released after
+    /// the unlock.
+    public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V] = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "update_and_get");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        let old = self.map.get(key);
+        let next = f(old);
+        let displaced = self.map.take(key);
+        when next in {
+            .Some(value) then {
+                self.map.insert(key, value);
+            },
+            .None() then {},
+        };
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+        let _ = displaced;
+        return next;
+    };
+
+    /// Copy the entries into an immutable `FrozenDict[K, V]` snapshot that
+    /// can cross threads.
+    public to_frozen_dict(self): FrozenDict[K, V] = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "to_frozen_dict");
+        self.mutex.lock();
+        let out = self.map.to_frozen_dict();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove every entry. Displaced values are released after the unlock.
+    public clear(self): Void = {
+        ConcurrentDict[K, V].check_reentrant(self.busy_owner, "clear");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        self.map.clear();
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+    };
+
+    /// Re-entering the same container from a callback or a destructor while
+    /// it holds its non-recursive lock would deadlock -- panic instead
+    /// (the Lazy / AtomicCell discipline).
+    private check_reentrant(busy_owner: UInt64, op: String): Void = {
+        if busy_owner == __koral_thread_current_id() then {
+            panic("ConcurrentDict: re-entrant access during \(op)");
+        };
+    };
+};
+
+/// A shared `sendable` set with atomic per-operation access. Sendable
+/// contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentSet[T: Hash and sendable](
+    private mutex: Mutex,
+    private mutable busy_owner: UInt64,
+    private set: Set[T],
+);
+
+/// The linearizable operations of a `ConcurrentSet`.
+given[T: Hash and sendable] ConcurrentSet[T] {
+
+    /// Create an empty concurrent set.
+    public new(): ConcurrentSet[T] =
+        ConcurrentSet[T](Mutex.new(), UInt64(0), Set[T].new());
+
+    /// The number of members.
+    public count(self): UInt = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "count");
+        self.mutex.lock();
+        let out = self.set.count();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Whether the set has no members.
+    public is_empty(self): Bool = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "is_empty");
+        self.mutex.lock();
+        let out = self.set.is_empty();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Whether `value` is a member.
+    public contains(self, value: T): Bool = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "contains");
+        self.mutex.lock();
+        let out = self.set.contains(value);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Add `value` to the set.
+    public insert(self, value: T): Void = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "insert");
+        self.mutex.lock();
+        self.set.insert(value);
+        self.mutex.unlock();
+    };
+
+    /// Add `value` to the set and report whether it was newly added.
+    public try_insert(self, value: T): Bool = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "try_insert");
+        self.mutex.lock();
+        let out = self.set.try_insert(value);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove `value` from the set. The member is released after the unlock.
+    public remove(self, value: T): Void = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "remove");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        self.set.remove(value);
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+    };
+
+    /// Remove `value` from the set and report whether it was a member. The
+    /// member is released under the lock (a `Set` offers no extraction), so a
+    /// destructor that calls back panics instead of deadlocking.
+    public try_remove(self, value: T): Bool = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "try_remove");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        let out = self.set.try_remove(value);
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Copy the members into an immutable `FrozenSet[T]` snapshot that can
+    /// cross threads.
+    public to_frozen_set(self): FrozenSet[T] = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "to_frozen_set");
+        self.mutex.lock();
+        let out = self.set.to_frozen_set();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove every member. Members are released after the unlock.
+    public clear(self): Void = {
+        ConcurrentSet[T].check_reentrant(self.busy_owner, "clear");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        self.set.clear();
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+    };
+
+    /// Re-entering the same container from a destructor while it holds its
+    /// non-recursive lock would deadlock -- panic instead.
+    private check_reentrant(busy_owner: UInt64, op: String): Void = {
+        if busy_owner == __koral_thread_current_id() then {
+            panic("ConcurrentSet: re-entrant access during \(op)");
+        };
+    };
+};
+
+/// A shared `sendable` double-ended queue with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDeque[T: sendable](
+    private mutex: Mutex,
+    private mutable busy_owner: UInt64,
+    private deque: Deque[T],
+);
+
+/// The linearizable operations of a `ConcurrentDeque`.
+given[T: sendable] ConcurrentDeque[T] {
+
+    /// Create an empty concurrent deque.
+    public new(): ConcurrentDeque[T] =
+        ConcurrentDeque[T](Mutex.new(), UInt64(0), Deque[T].new());
+
+    /// The number of elements.
+    public count(self): UInt = {
+        self.mutex.lock();
+        let out = self.deque.count();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Whether the deque has no elements.
+    public is_empty(self): Bool = {
+        self.mutex.lock();
+        let out = self.deque.is_empty();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Add `value` at the back end.
+    public push_back(self, value: T): Void = {
+        self.mutex.lock();
+        self.deque.push_back(value);
+        self.mutex.unlock();
+    };
+
+    /// Add `value` at the front end.
+    public push_front(self, value: T): Void = {
+        self.mutex.lock();
+        self.deque.push_front(value);
+        self.mutex.unlock();
+    };
+
+    /// Remove and return the front element, or `None` when empty.
+    public pop_front(self): Option[T] = {
+        self.mutex.lock();
+        let out = self.deque.pop_front();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove and return the back element, or `None` when empty.
+    public pop_back(self): Option[T] = {
+        self.mutex.lock();
+        let out = self.deque.pop_back();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// The front element without removing it.
+    public first(self): Option[T] = {
+        self.mutex.lock();
+        let out = self.deque.first();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// The back element without removing it.
+    public last(self): Option[T] = {
+        self.mutex.lock();
+        let out = self.deque.last();
+        self.mutex.unlock();
+        return out;
+    };
+
+    /// Remove every element. Elements are released after the unlock.
+    public clear(self): Void = {
+        ConcurrentDeque[T].check_reentrant(self.busy_owner, "clear");
+        self.mutex.lock();
+        self.busy_owner = __koral_thread_current_id();
+        self.deque.clear();
+        self.busy_owner = UInt64(0);
+        self.mutex.unlock();
+    };
+
+    /// Re-entering the same container from a destructor while it holds its
+    /// non-recursive lock would deadlock -- panic instead.
+    private check_reentrant(busy_owner: UInt64, op: String): Void = {
+        if busy_owner == __koral_thread_current_id() then {
+            panic("ConcurrentDeque: re-entrant access during \(op)");
+        };
+    };
+};

@@ -77,6 +77,9 @@ let hash_mix(h: UInt): UInt = {
 public trait sendable Error {
     /// Return a human-readable description of the failure.
     message(self): String;
+
+    /// Return the failure this one wraps, or `None` for a root failure.
+    source(self): Option[Error];
 };
 
 /// Deterministic cleanup when a value leaves scope.
@@ -105,6 +108,74 @@ given String: Error {
 
     /// Return the string as the failure message.
     public message(self): String = self;
+
+    /// A bare message wraps nothing.
+    public source(self): Option[Error] = Option[Error].None();
+};
+
+/// The standard error wrapper: a failure with context over the failure that
+/// caused it. `message` reports the context line, `source` unwraps to the
+/// cause -- the one building block for error chains.
+public type sendable WrappedError(context: String, cause: Error);
+
+/// Constructors for `WrappedError`.
+given WrappedError {
+
+    /// Wrap `cause` under a context line.
+    public new(context: String, cause: Error): WrappedError =
+        WrappedError(context, cause);
+};
+
+/// `Error` for `WrappedError`: the context is the message, the cause is the
+/// source.
+given WrappedError: Error {
+
+    /// Return the context line.
+    public message(self): String = self.context;
+
+    /// Return the wrapped cause.
+    public source(self): Option[Error] = Option[Error].Some(self.cause);
+};
+
+/// Chain tools for any `Error`: walk the `source` links to the root.
+given Error {
+
+    /// The failure messages along the chain, outermost first.
+    public chain(self): FrozenList[String] = {
+        let mutable messages = List[String].new();
+        messages.push(self.message());
+        let mutable current = self.source();
+        let mutable depth = UInt(1);
+        while current is .Some(_) and depth < UInt(64) then {
+            when current in {
+                .Some(err) then {
+                    messages.push(err.message());
+                    current = err.source();
+                },
+                .None() then {},
+            };
+            depth = depth + UInt(1);
+        };
+        return messages.into_frozen_list();
+    };
+
+    /// Render the failure chain on one line: "context: cause: root".
+    public format_chain(self): String = {
+        let mutable out = self.message();
+        let mutable current = self.source();
+        let mutable depth = UInt(1);
+        while current is .Some(_) and depth < UInt(64) then {
+            when current in {
+                .Some(err) then {
+                    out = out + ": " + err.message();
+                    current = err.source();
+                },
+                .None() then {},
+            };
+            depth = depth + UInt(1);
+        };
+        return out;
+    };
 };
 
 // ============================================================================

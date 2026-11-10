@@ -1,0 +1,65 @@
+// EXPECT: list frozen a b c
+// EXPECT: list emptied
+// EXPECT: list reused 1
+// EXPECT: set frozen true 3
+// EXPECT: set emptied
+// EXPECT: dict frozen 2 30
+// EXPECT: dict emptied
+// EXPECT: before
+// EXPECT: after
+// EXPECT: done
+// EXPECT: Drop Box
+
+// `into_frozen_*` (concurrency-design.md §std落点): the consuming hand-off of a
+// mutable container's storage into its frozen form -- O(1), the elements'
+// ownership travels with the block. The source is left empty and reusable;
+// the elements die with the frozen snapshot, not with the source.
+
+using "std" { ... };
+
+type mutable Box(mutable n: Int);
+
+given Box: Drop {
+    drop(self): Void = {
+        println("Drop Box");
+    };
+};
+
+let main(): Void = {
+    let mutable xs = List[String].new();
+    xs.push("a");
+    xs.push("b");
+    xs.push("c");
+    let frozen = xs.into_frozen_list();
+    println("list frozen \(frozen.get(0).unwrap()) \(frozen.get(1).unwrap()) \(frozen.get(2).unwrap())");
+    println("list emptied \(xs.count())");
+    xs.push("z");
+    println("list reused \(xs.count())");
+
+    let mutable s = Set[Int].new();
+    s.insert(1);
+    s.insert(2);
+    s.insert(2);
+    s.insert(3);
+    let fs = s.into_frozen_set();
+    println("set frozen \(fs.contains(2)) \(fs.count())");
+    println("set emptied \(s.count())");
+
+    let mutable d = Dict[String, Int].new();
+    d.insert("a", 1);
+    d.insert("b", 20);
+    d.insert("b", 30);
+    let fd = d.into_frozen_dict();
+    println("dict frozen \(fd.count()) \(fd.get("b").unwrap())");
+    println("dict emptied \(d.count())");
+
+    // Elements die with the frozen snapshot: the Box's destructor runs when
+    // `hb` dies at scope end, after "after", never at the transfer.
+    let mutable holder = List[Box].new();
+    holder.push(Box(1));
+    let hb = holder.into_frozen_list();
+    println("before");
+    assert(hb.count() == 1, "held");
+    println("after");
+    println("done");
+};

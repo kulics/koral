@@ -210,6 +210,8 @@ grep -q 'w5_probe_move_releases=1' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: move release side" >&2; exit 1; }
 grep -q 'w6_probe_alias_releases=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: alias release side" >&2; exit 1; }
+grep -q 'w7_into_frozen_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: into_frozen is a hand-off, not a copy" >&2; exit 1; }
 echo "rc counter pins OK"
 
 # ── samples ───────────────────────────────────────────────────────────────────

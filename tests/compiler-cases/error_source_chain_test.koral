@@ -1,0 +1,62 @@
+// EXPECT: plain format cannot open file
+// EXPECT: plain chain 1
+// EXPECT: wrapped format cannot parse config: cannot open file
+// EXPECT: wrapped chain 2
+// EXPECT: deep format config: parse at 7: io: root
+// EXPECT: deep chain 4
+// EXPECT: worker saw config: parse at 7: io: root
+// EXPECT: done
+
+// `Error.source` + the `given Error` chain tools (concurrency-design.md §错误侧):
+// a failure can name the failure that caused it; `format` renders the chain on
+// one line, `chain` hands the messages over as a `FrozenList` -- immutable, so
+// a failure report can cross threads.
+
+using "std" { ... };
+using "std/async" { ... };
+using "std/sync" { ... };
+
+/// A test failure that wraps another: its message is the position, its source
+/// is the cause.
+type sendable ParseError(pos: UInt, cause: Error);
+
+given ParseError: Error {
+    message(self): String = "parse at \(self.pos)";
+    source(self): Option[Error] = Option[Error].Some(self.cause);
+};
+
+let main(): Void = {
+    let root = "cannot open file";
+    println("plain format \(root.format_chain())");
+    println("plain chain \(root.chain().count())");
+
+    let wrapped = WrappedError.new("cannot parse config", root);
+    println("wrapped format \(wrapped.format_chain())");
+    println("wrapped chain \(wrapped.chain().count())");
+
+    let deep = WrappedError.new(
+        "config",
+        ParseError(UInt(7), WrappedError.new("io", "root")),
+    );
+    println("deep format \(deep.format_chain())");
+    println("deep chain \(deep.chain().count())");
+
+    // The report crosses threads as a frozen snapshot.
+    let pair = make_channel[FrozenList[String]](UInt(4));
+    let tx = pair.first;
+    let rx = pair.second;
+    let report = deep.chain();
+    let worker = run_task(() => {
+        let seen = rx.recv().unwrap();
+        let mutable line = seen.get(UInt(0)) or else "";
+        let mutable i = UInt(1);
+        while i < seen.count() then {
+            line = line + ": " + (seen.get(i) or else "");
+            i = i + UInt(1);
+        };
+        println("worker saw \(line)");
+    });
+    tx.send(report).unwrap();
+    worker.wait().unwrap();
+    println("done");
+};

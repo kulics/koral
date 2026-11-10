@@ -17,6 +17,18 @@ Import the module with `using "std/container" { ... };`.
 
 ## Types
 ```koral
+/// A set of non-negative integers below a fixed universe `size`, stored one
+/// bit per member: two orders of magnitude denser than a `Set[UInt]`. The
+/// universe is fixed at construction, which keeps `complement` well defined
+/// (the flip lives inside `[0, size)`). Reads outside the universe answer
+/// `false`; writes outside it are bounds errors, like indexing.
+///
+/// `type mutable` working state: thread-local, like every mutable container.
+public type mutable BitSet;
+
+/// A one-shot cursor that walks a `BitSet`'s members in ascending order.
+public type mutable BitSetIterator;
+
 /// A max-heap priority queue: the greatest value is always at the top.
 /// Iteration visits values in internal heap order, not sorted order.
 public type mutable PriorityQueue[T: Ord];
@@ -39,6 +51,66 @@ public type mutable StackIterator[T: Any];
 
 ## Given Implementations
 ```koral
+/// Constructors and core operations for `BitSet`.
+given BitSet {
+    /// Create an empty bit set over the universe `[0, size)`.
+    public new(size: UInt): BitSet;
+    /// The number of members in the set.
+    public count(self): UInt;
+    /// Whether the set has no members.
+    public is_empty(self): Bool;
+    /// Whether `value` is a member; values outside the universe answer `false`.
+    public contains(self, value: UInt): Bool;
+    /// Add `value` to the set. Panics when `value` is outside the universe.
+    public insert(self, value: UInt): Void;
+    /// Add `value` to the set and report whether it was newly added. Panics
+    /// when `value` is outside the universe.
+    public try_insert(self, value: UInt): Bool;
+    /// Remove `value` from the set. Panics when `value` is outside the
+    /// universe; removing a non-member is a no-op.
+    public remove(self, value: UInt): Void;
+    /// Remove `value` from the set and report whether it was a member. Panics
+    /// when `value` is outside the universe.
+    public try_remove(self, value: UInt): Bool;
+    /// Remove every member, keeping the universe.
+    public clear(self): Void;
+    /// The members of both sets. Both sets must share the universe size.
+    public union(self, other: BitSet): BitSet;
+    /// The members of both sets at once. Both sets must share the universe
+    /// size.
+    public intersection(self, other: BitSet): BitSet;
+    /// The members of `self` that are not in `other`. Both sets must share
+    /// the universe size.
+    public difference(self, other: BitSet): BitSet;
+    /// The members in exactly one of the sets. Both sets must share the
+    /// universe size.
+    public symmetric_difference(self, other: BitSet): BitSet;
+    /// The universe members that are not in the set.
+    public complement(self): BitSet;
+    /// Whether every member of `self` is a member of `other`. Sets over
+    /// different universes answer `false`.
+    public is_subset_of(self, other: BitSet): Bool;
+    /// Whether every member of `other` is a member of `self`.
+    public is_superset_of(self, other: BitSet): Bool;
+    /// Whether both sets hold the same members over the same universe.
+    public equals(self, other: BitSet): Bool;
+    /// An independent copy over the same universe.
+    public clone(self): BitSet;
+};
+
+/// `Iterator` for `BitSetIterator`: yields members in ascending order.
+given BitSetIterator: Iterator[UInt] {
+    /// Yield the next member, or `None` after the largest one.
+    public next(self): Option[UInt];
+};
+
+/// `Iterable` for `BitSet`: a fresh ascending cursor over the members.
+given BitSet: Iterable[UInt, BitSetIterator] {
+    /// A fresh cursor over the members in ascending order; the set is
+    /// untouched.
+    public iterator(self): BitSetIterator;
+};
+
 /// Constructors and core heap operations for `PriorityQueue`.
 given[T: Ord] PriorityQueue[T] {
     /// Create an empty priority queue.

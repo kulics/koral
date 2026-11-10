@@ -1,0 +1,16 @@
+// EXPECT-ERROR: Panic: ConcurrentDict: re-entrant access during get
+
+// Re-entering a concurrent container from inside `update_and_get`'s lambda
+// would deadlock on its non-recursive lock -- it panics with a diagnostic
+// instead (the Lazy / AtomicCell discipline).
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("a", 1);
+    let _ = d.update_and_get("a", (v: Option[Int]): Option[Int] => {
+        let _ = d.get("a");
+        return v;
+    });
+};

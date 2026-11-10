@@ -1,0 +1,34 @@
+// EXPECT: replaced 2
+// EXPECT: probed 7
+// EXPECT: done
+
+// Destructors never run inside the container's critical section: the value
+// displaced by `insert` is extracted under the lock and released after it, so
+// a destructor that calls back into the SAME container sees a free lock
+// instead of deadlocking (the release-after-unlock discipline,
+// concurrency-design.md §对象锁语义).
+
+using "std/sync" { ... };
+
+type unsafe sendable mutable Probe(mutable n: Int);
+
+let mutable d = ConcurrentDict[String, Probe].new();
+
+given Probe: Drop {
+    drop(self): Void = {
+        let _ = d.try_insert("probe", Probe(self.n));
+    };
+};
+
+let main(): Void = {
+    d.insert("k", Probe(7));
+    // The displaced value's lifetime ends at the inner block's scope exit --
+    // outside the container's lock, which is the whole point.
+    if true then {
+        let old = d.insert("k", Probe(2));
+        assert(old is .Some(_), "displaced");
+    };
+    println("replaced \(d.count())");
+    println("probed \(d.get("probe").unwrap().n)");
+    println("done");
+};

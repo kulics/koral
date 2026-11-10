@@ -1,0 +1,51 @@
+// EXPECT: insert 1
+// EXPECT: get 20
+// EXPECT: update 21
+// EXPECT: missing 0
+// EXPECT: take 21
+// EXPECT: set 3
+// EXPECT: deque 1 3 2
+// EXPECT: done
+
+// Concurrent containers (concurrency-design.md §std落点): every operation is
+// one linearizable step; compound steps go through `update_and_get`'s
+// combining lambda; snapshots cross threads as frozen collections.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    let old = d.insert("a", 1);
+    assert(old is .None(), "first insert");
+    d.insert("a", 20);
+    println("insert \(d.count())");
+    println("get \(d.get("a").unwrap())");
+
+    let n = d.update_and_get("a", (v: Option[Int]): Option[Int] => {
+        return Option[Int].Some((v or else 0) + 1);
+    });
+    println("update \(n.unwrap())");
+
+    let missing = d.update_and_get("b", (v: Option[Int]): Option[Int] => v);
+    println("missing \(d.count() - UInt(1))");
+    assert(missing is .None(), "absent passthrough");
+
+    let took = d.take("a");
+    println("take \(took.unwrap())");
+
+    let s = ConcurrentSet[Int].new();
+    s.insert(1);
+    s.try_insert(2);
+    s.try_insert(2);
+    s.insert(3);
+    println("set \(s.count())");
+
+    let q = ConcurrentDeque[Int].new();
+    q.push_back(1);
+    q.push_back(3);
+    q.push_front(0);
+    q.pop_front();
+    q.push_back(2);
+    println("deque \(q.pop_front().unwrap()) \(q.pop_front().unwrap()) \(q.pop_front().unwrap())");
+    println("done");
+};

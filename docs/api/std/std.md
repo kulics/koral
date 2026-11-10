@@ -50,12 +50,6 @@ public let intrinsic deinit_memory[T: Any](p: *mutable T): Void;
 /// Moves the value out of `p` and leaves the memory uninitialized.
 public let intrinsic take_memory[T: Any](p: *mutable T): T;
 
-/// Creates a new OS thread executing the given closure.
-/// A `stack_size` of 0 uses the default stack size.
-/// Returns 0 on success, non-zero on failure.
-/// The closure is passed by value to the C runtime which invokes and releases it.
-public let intrinsic spawn_thread(out_handle: *mutable *mutable UInt8, out_tid: *mutable UInt64, f: sendable () -> Void, stack_size: UInt64): Int32;
-
 /// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;
 
@@ -255,6 +249,8 @@ public trait Hash: Eq {
 public trait sendable Error {
     /// Return a human-readable description of the failure.
     message(self): String;
+    /// Return the failure this one wraps, or `None` for a root failure.
+    source(self): Option[Error];
 };
 
 /// Deterministic cleanup when a value leaves scope.
@@ -309,15 +305,15 @@ public type mutable DictValuesIterator[K: Hash, V: Any];
 /// promise backing `unsafe sendable`); the conditional rule still applies to
 /// `K` and `V`.
 ///
-/// Storage is standalone — it does not embed `Dict`: a compacted hash table
-/// (`HashBucket[K, UInt]` buckets holding entry indexes; no tombstones, built
-/// once) plus a dense entry array walked in insertion order. Probing is the
-/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
-/// the owned buffers' destructor lives; the snapshot is immutable after
-/// construction.
+/// Storage is standalone — it does not embed `Dict`: a hash table of
+/// `HashBucket[K, V]` in the mutable `Dict` layout (compacted without
+/// tombstones when copied, or taken over verbatim by `Dict.into_frozen_dict`).
+/// Probing is the shared algorithm from std/hash_lookup.koral. The `mutable`
+/// form is where the owned buffer's destructor lives; the snapshot is
+/// immutable after construction.
 public type unsafe sendable mutable FrozenDict[K: Hash, V: Any];
 
-/// A one-shot cursor that walks a `FrozenDict[K, V]` in insertion order.
+/// A one-shot cursor that walks a `FrozenDict[K, V]`'s table.
 public type mutable FrozenDictIterator[K: Hash, V: Any];
 
 /// Duration 表示时间间隔
@@ -526,15 +522,15 @@ public type mutable SetIterator[T: Hash];
 /// promise backing `unsafe sendable`); the conditional rule still applies to
 /// `T`.
 ///
-/// Storage is standalone — it does not embed `Set`: a compacted hash table
-/// (`HashBucket[T, UInt]` buckets holding entry indexes; no tombstones, built
-/// once) plus a dense entry array walked in insertion order. Probing is the
-/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
-/// the owned buffers' destructor lives; the snapshot is immutable after
-/// construction.
+/// Storage is standalone — it does not embed `Set`: a hash table of
+/// `HashBucket[T, UInt]` in the mutable `Set` layout (compacted without
+/// tombstones when copied, or taken over verbatim by `Set.into_frozen_set`).
+/// Probing is the shared algorithm from std/hash_lookup.koral. The `mutable`
+/// form is where the owned buffer's destructor lives; the snapshot is
+/// immutable after construction.
 public type unsafe sendable mutable FrozenSet[T: Hash];
 
-/// A one-shot cursor that walks a `FrozenSet[T]` in insertion order.
+/// A one-shot cursor that walks a `FrozenSet[T]`'s table.
 public type mutable FrozenSetIterator[T: Hash];
 
 /// String is immutable value data with fixed storage length.
@@ -572,6 +568,11 @@ public type mutable StringBytesIterator;
 
 /// Iterator over the runes of a string, decoding UTF-8 as it goes.
 public type mutable StringRunesIterator;
+
+/// The standard error wrapper: a failure with context over the failure that
+/// caused it. `message` reports the context line, `source` unwraps to the
+/// cause -- the one building block for error chains.
+public type sendable WrappedError;
 
 /// A generic tuple-like pair holding a `first` and a `second` value.
 public type sendable Pair[T: Any, U: Any](public first: T, public second: U);
@@ -2712,7 +2713,7 @@ given[T: Any] List[T] {
     public group_by[K: Hash](self, key: (T) -> K): Dict[K, List[T]];
 };
 
-/// `Drop` for `FrozenDict[K, V]`: releases the bucket and entry arrays.
+/// `Drop` for `FrozenDict[K, V]`: releases the live buckets and the table.
 given[K: Hash, V: Any] FrozenDict[K, V]: Drop {};
 
 /// Read-only access over a `FrozenDict[K, V]`.
@@ -2729,7 +2730,8 @@ given[K: Hash, V: Any] FrozenDict[K, V] {
     public to_dict(self): Dict[K, V];
 };
 
-/// `Iterator` for `FrozenDictIterator[K, V]`: yields entries in insertion order.
+/// `Iterator` for `FrozenDictIterator[K, V]`: yields entries in table order
+/// (the same order `to_frozen_dict`/`into_frozen` leave them in).
 given[K: Hash, V: Any] FrozenDictIterator[K, V]: Iterator[Pair[K, V]] {
     /// Yield the next key/value pair, or `None` after the last entry.
     public next(self): Option[Pair[K, V]];
@@ -2737,8 +2739,7 @@ given[K: Hash, V: Any] FrozenDictIterator[K, V]: Iterator[Pair[K, V]] {
 
 /// `Iterable` for `FrozenDict[K, V]`: a fresh read cursor over the snapshot.
 given[K: Hash, V: Any] FrozenDict[K, V]: Iterable[Pair[K, V], FrozenDictIterator[K, V]] {
-    /// A fresh cursor over the snapshot's entries in insertion order; the
-    /// snapshot is untouched.
+    /// A fresh cursor over the snapshot's entries; the snapshot is untouched.
     public iterator(self): FrozenDictIterator[K, V];
 };
 
@@ -2748,6 +2749,13 @@ given[K: Hash, V: Any] Dict[K, V] {
     /// cross threads. The receiver stays usable; the snapshot bulk-copies into
     /// its own compacted table + entry array of shared key/value handles.
     public to_frozen_dict(self): FrozenDict[K, V];
+    /// Transfer the whole bucket table into a `FrozenDict[K, V]` in O(1): the
+    /// entries' ownership travels with the table -- nothing is copied,
+    /// nothing is retained, and tombstones ride along (they are skipped by
+    /// lookups and iteration). The dict is left empty and reusable. Where
+    /// `to_frozen_dict` copies a compacted snapshot out, `into_frozen_*` hands
+    /// the storage over; the entries die when the frozen snapshot dies.
+    public into_frozen_dict(self): FrozenDict[K, V];
 };
 
 /// Constructing and converting time intervals.
@@ -3192,6 +3200,12 @@ given[T: Any] List[T] {
     /// threads. The receiver stays usable; the snapshot owns its own buffer of
     /// shared element handles.
     public to_frozen_list(self): FrozenList[T];
+    /// Transfer the whole buffer into a `FrozenList[T]` in O(1): the elements'
+    /// ownership travels with the block -- nothing is copied, nothing is
+    /// retained. The list is left empty and reusable. Where `to_frozen_list`
+    /// copies a snapshot out, `into_frozen` hands the storage over; the
+    /// elements die when the frozen snapshot dies.
+    public into_frozen_list(self): FrozenList[T];
 };
 
 /// Querying, extracting, and transforming an optional value.
@@ -3652,7 +3666,7 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
     public next(self): Option[T];
 };
 
-/// `Drop` for `FrozenSet[T]`: releases the bucket and entry arrays.
+/// `Drop` for `FrozenSet[T]`: releases the live buckets and the table.
 given[T: Hash] FrozenSet[T]: Drop {};
 
 /// Read-only access over a `FrozenSet[T]`.
@@ -3667,7 +3681,8 @@ given[T: Hash] FrozenSet[T] {
     public to_set(self): Set[T];
 };
 
-/// `Iterator` for `FrozenSetIterator[T]`: yields elements in insertion order.
+/// `Iterator` for `FrozenSetIterator[T]`: yields the live elements in table
+/// order (the same order `to_frozen_set`/`into_frozen` leave them in).
 given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T];
@@ -3675,8 +3690,7 @@ given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
 
 /// `Iterable` for `FrozenSet[T]`: a fresh read cursor over the snapshot.
 given[T: Hash] FrozenSet[T]: Iterable[T, FrozenSetIterator[T]] {
-    /// A fresh cursor over the snapshot's elements in insertion order; the
-    /// snapshot is untouched.
+    /// A fresh cursor over the snapshot's elements; the snapshot is untouched.
     public iterator(self): FrozenSetIterator[T];
 };
 
@@ -3686,6 +3700,13 @@ given[T: Hash] Set[T] {
     /// threads. The receiver stays usable; the snapshot bulk-copies into its
     /// own compacted table + entry array of shared element handles.
     public to_frozen_set(self): FrozenSet[T];
+    /// Transfer the whole bucket table into a `FrozenSet[T]` in O(1): the
+    /// elements' ownership travels with the table -- nothing is copied,
+    /// nothing is retained, and tombstones ride along (they are skipped by
+    /// lookups and iteration). The set is left empty and reusable. Where
+    /// `to_frozen_set` copies a compacted snapshot out, `into_frozen_*` hands
+    /// the storage over; the elements die when the frozen snapshot dies.
+    public into_frozen_set(self): FrozenSet[T];
 };
 
 /// Construction and incremental building of strings.
@@ -4103,6 +4124,31 @@ given Hash {
 given String: Error {
     /// Return the string as the failure message.
     public message(self): String;
+    /// A bare message wraps nothing.
+    public source(self): Option[Error];
+};
+
+/// Constructors for `WrappedError`.
+given WrappedError {
+    /// Wrap `cause` under a context line.
+    public new(context: String, cause: Error): WrappedError;
+};
+
+/// `Error` for `WrappedError`: the context is the message, the cause is the
+/// source.
+given WrappedError: Error {
+    /// Return the context line.
+    public message(self): String;
+    /// Return the wrapped cause.
+    public source(self): Option[Error];
+};
+
+/// Chain tools for any `Error`: walk the `source` links to the root.
+given Error {
+    /// The failure messages along the chain, outermost first.
+    public chain(self): FrozenList[String];
+    /// Render the failure chain on one line: "context: cause: root".
+    public format_chain(self): String;
 };
 
 /// `Hash` for `Bool`: hashes `false` as 0 and `true` as 1.

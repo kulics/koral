@@ -343,20 +343,19 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
 /// promise backing `unsafe sendable`); the conditional rule still applies to
 /// `T`.
 ///
-/// Storage is standalone — it does not embed `Set`: a compacted hash table
-/// (`HashBucket[T, UInt]` buckets holding entry indexes; no tombstones, built
-/// once) plus a dense entry array walked in insertion order. Probing is the
-/// shared algorithm from std/hash_lookup.koral. The `mutable` form is where
-/// the owned buffers' destructor lives; the snapshot is immutable after
-/// construction.
+/// Storage is standalone — it does not embed `Set`: a hash table of
+/// `HashBucket[T, UInt]` in the mutable `Set` layout (compacted without
+/// tombstones when copied, or taken over verbatim by `Set.into_frozen_set`).
+/// Probing is the shared algorithm from std/hash_lookup.koral. The `mutable`
+/// form is where the owned buffer's destructor lives; the snapshot is
+/// immutable after construction.
 public type unsafe sendable mutable FrozenSet[T: Hash](
     protected buckets: *mutable HashBucket[T, UInt],
-    protected entries: *mutable T,
     protected len: UInt,
     protected capacity: UInt,
 );
 
-/// `Drop` for `FrozenSet[T]`: releases the bucket and entry arrays.
+/// `Drop` for `FrozenSet[T]`: releases the live buckets and the table.
 given[T: Hash] FrozenSet[T]: Drop {
 
     drop(self): Void = {
@@ -366,14 +365,10 @@ given[T: Hash] FrozenSet[T]: Drop {
             };
         };
         dealloc_memory(self.buckets);
-        for i in 0..<self.len then {
-            deinit_memory(self.entries + i);
-        };
-        dealloc_memory(self.entries);
     };
 };
 
-/// A one-shot cursor that walks a `FrozenSet[T]` in insertion order.
+/// A one-shot cursor that walks a `FrozenSet[T]`'s table.
 public type mutable FrozenSetIterator[T: Hash](
     source: FrozenSet[T],
     mutable index: UInt,
@@ -410,15 +405,20 @@ given[T: Hash] FrozenSet[T] {
     };
 };
 
-/// `Iterator` for `FrozenSetIterator[T]`: yields elements in insertion order.
+/// `Iterator` for `FrozenSetIterator[T]`: yields the live elements in table
+/// order (the same order `to_frozen_set`/`into_frozen` leave them in).
 given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
 
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T] = {
-        if self.index < self.source.len then {
-            let value = self.source.entries[self.index];
-            self.index = self.index + 1;
-            return Option[T].Some(value);
+        let mutable i = self.index;
+        while i < self.source.capacity then {
+            let bucket_ptr = self.source.buckets + i;
+            i = i + UInt(1);
+            self.index = i;
+            if bucket_ptr.tag == UInt(1) then {
+                return Option[T].Some(bucket_ptr.key);
+            };
         };
         return Option[T].None();
     };
@@ -427,8 +427,7 @@ given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
 /// `Iterable` for `FrozenSet[T]`: a fresh read cursor over the snapshot.
 given[T: Hash] FrozenSet[T]: Iterable[T, FrozenSetIterator[T]] {
 
-    /// A fresh cursor over the snapshot's elements in insertion order; the
-    /// snapshot is untouched.
+    /// A fresh cursor over the snapshot's elements; the snapshot is untouched.
     public iterator(self): FrozenSetIterator[T] = FrozenSetIterator[T](self, 0);
 };
 
@@ -452,26 +451,39 @@ given[T: Hash] Set[T] {
         for i in 0..<capacity then {
             bucket_set_tag(buckets + i, UInt(0));
         };
-        let entries = alloc_memory[T](len);
-        let mutable next: UInt = UInt(0);
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
             if bucket_ptr.tag == UInt(1) then {
-                init_memory(entries + next, bucket_ptr.key);
                 when find_hash_slot(buckets, capacity, bucket_ptr.key) in {
                     .Some(slot) then {
                         init_memory(
                             buckets + slot,
-                            HashBucket[T, UInt](UInt(1), bucket_ptr.key, next),
+                            HashBucket[T, UInt](UInt(1), bucket_ptr.key, UInt(0)),
                         );
                     },
                     .None() then {
                         panic("FrozenSet build failed");
                     },
                 };
-                next = next + UInt(1);
             };
         };
-        return FrozenSet[T](buckets, entries, len, capacity);
+        return FrozenSet[T](buckets, len, capacity);
+    };
+
+    /// Transfer the whole bucket table into a `FrozenSet[T]` in O(1): the
+    /// elements' ownership travels with the table -- nothing is copied,
+    /// nothing is retained, and tombstones ride along (they are skipped by
+    /// lookups and iteration). The set is left empty and reusable. Where
+    /// `to_frozen_set` copies a compacted snapshot out, `into_frozen_*` hands
+    /// the storage over; the elements die when the frozen snapshot dies.
+    public into_frozen_set(self): FrozenSet[T] = {
+        let buckets = self.buckets;
+        let len = self.size;
+        let capacity = self.capacity;
+        self.buckets = null;
+        self.size = UInt(0);
+        self.capacity = UInt(0);
+        self.deleted = UInt(0);
+        return FrozenSet[T](buckets, len, capacity);
     };
 };

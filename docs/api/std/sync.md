@@ -51,6 +51,18 @@ public type unsafe sendable mutable SendChannel[T: Any];
 /// The receiving half of a bounded channel; dropping it closes the channel for senders.
 public type unsafe sendable mutable RecvChannel[T: Any];
 
+/// A shared `sendable` key/value map with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: sendable];
+
+/// A shared `sendable` set with atomic per-operation access. Sendable
+/// contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentSet[T: Hash and sendable];
+
+/// A shared `sendable` double-ended queue with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDeque[T: sendable];
+
 /// Countdown gate that opens once every latch has been removed.
 public type unsafe sendable mutable LatchGate;
 
@@ -211,6 +223,98 @@ given[T: Any] RecvChannel[T] {
     public recv(self): Result[T];
     /// 非阻塞接收
     public try_recv(self): Result[Option[T]];
+};
+
+/// The linearizable operations of a `ConcurrentDict`.
+given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
+    /// Create an empty concurrent dict.
+    public new(): ConcurrentDict[K, V];
+    /// Create an empty concurrent dict sized for about `capacity` entries.
+    public with_capacity(capacity: UInt): ConcurrentDict[K, V];
+    /// The number of entries.
+    public count(self): UInt;
+    /// Whether the dict has no entries.
+    public is_empty(self): Bool;
+    /// The value stored under `key`, or `None` when absent.
+    public get(self, key: K): Option[V];
+    /// Whether `key` has an entry.
+    public contains_key(self, key: K): Bool;
+    /// Store `value` under `key` and return the displaced value, if any.
+    /// The displaced value is extracted under the lock and released after it.
+    public insert(self, key: K, value: V): Option[V];
+    /// Store `value` under `key` only when absent, and report whether it was
+    /// stored.
+    public try_insert(self, key: K, value: V): Bool;
+    /// Remove `key`'s entry and return its value, if any.
+    public take(self, key: K): Option[V];
+    /// Remove `key`'s entry and report whether it existed. The value is
+    /// extracted under the lock and released after it.
+    public try_remove(self, key: K): Bool;
+    /// The value stored under `key`, storing `value` first when absent.
+    public get_or_insert(self, key: K, value: V): V;
+    /// Atomically read-modify-write one entry: apply `f` to the current
+    /// mapping (`None` when absent) and store the result (`None` removes the
+    /// entry). The whole step is one linearizable operation. `f` runs under
+    /// the container's lock and must not touch the same container (that
+    /// panics instead of deadlocking); the displaced value is released after
+    /// the unlock.
+    public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V];
+    /// Copy the entries into an immutable `FrozenDict[K, V]` snapshot that
+    /// can cross threads.
+    public to_frozen_dict(self): FrozenDict[K, V];
+    /// Remove every entry. Displaced values are released after the unlock.
+    public clear(self): Void;
+};
+
+/// The linearizable operations of a `ConcurrentSet`.
+given[T: Hash and sendable] ConcurrentSet[T] {
+    /// Create an empty concurrent set.
+    public new(): ConcurrentSet[T];
+    /// The number of members.
+    public count(self): UInt;
+    /// Whether the set has no members.
+    public is_empty(self): Bool;
+    /// Whether `value` is a member.
+    public contains(self, value: T): Bool;
+    /// Add `value` to the set.
+    public insert(self, value: T): Void;
+    /// Add `value` to the set and report whether it was newly added.
+    public try_insert(self, value: T): Bool;
+    /// Remove `value` from the set. The member is released after the unlock.
+    public remove(self, value: T): Void;
+    /// Remove `value` from the set and report whether it was a member. The
+    /// member is released under the lock (a `Set` offers no extraction), so a
+    /// destructor that calls back panics instead of deadlocking.
+    public try_remove(self, value: T): Bool;
+    /// Copy the members into an immutable `FrozenSet[T]` snapshot that can
+    /// cross threads.
+    public to_frozen_set(self): FrozenSet[T];
+    /// Remove every member. Members are released after the unlock.
+    public clear(self): Void;
+};
+
+/// The linearizable operations of a `ConcurrentDeque`.
+given[T: sendable] ConcurrentDeque[T] {
+    /// Create an empty concurrent deque.
+    public new(): ConcurrentDeque[T];
+    /// The number of elements.
+    public count(self): UInt;
+    /// Whether the deque has no elements.
+    public is_empty(self): Bool;
+    /// Add `value` at the back end.
+    public push_back(self, value: T): Void;
+    /// Add `value` at the front end.
+    public push_front(self, value: T): Void;
+    /// Remove and return the front element, or `None` when empty.
+    public pop_front(self): Option[T];
+    /// Remove and return the back element, or `None` when empty.
+    public pop_back(self): Option[T];
+    /// The front element without removing it.
+    public first(self): Option[T];
+    /// The back element without removing it.
+    public last(self): Option[T];
+    /// Remove every element. Elements are released after the unlock.
+    public clear(self): Void;
 };
 
 /// Creates the gate and adds, removes, and awaits latches.
