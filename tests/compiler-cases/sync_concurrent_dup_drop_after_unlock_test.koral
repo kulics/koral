@@ -1,0 +1,31 @@
+// EXPECT: dup dropped outside 2
+// EXPECT: done
+
+// A value that is NOT stored dies at its caller's statement end -- after the
+// container released its lock. A duplicate `try_insert` discards the
+// not-stored value that way: its destructor calling back into the SAME
+// container sees a free lock instead of deadlocking (the same
+// release-after-unlock discipline `sync_concurrent_drop_after_unlock_test`
+// pins for displaced values).
+
+using "std/sync" { ... };
+
+type unsafe sendable mutable Probe(mutable n: Int);
+
+let mutable d = ConcurrentDict[String, Probe].new();
+
+given Probe: Drop {
+    drop(self): Void = {
+        let _ = d.try_insert("probe", Probe(self.n));
+    };
+};
+
+let main(): Void = {
+    d.insert("k", Probe(1));
+    let ok = d.try_insert("k", Probe(2));
+    assert(not ok, "duplicate must be refused");
+    // Probe(2) died at the statement above; its destructor already re-entered
+    // the container and stored a fresh probe. Nothing panicked.
+    println("dup dropped outside \(d.count())");
+    println("done");
+};

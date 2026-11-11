@@ -66,36 +66,19 @@ given CodeGen {
 
     // ── RC 分流（concurrency-design.md §RC 分流）────────────────────────────
     //
-    // 受管对象的 RC 走非原子族当且仅当它的静态类型**确定**为非 sendable
-    // （`uses_nonatomic_rc(type) = managed && not is_sendable_type(type)`）；
-    // sendable（含 `unsafe sendable`）保持原子族，发射的 C 逐字节不变。
+    // 受管对象的 RC 一律走原子族。曾经按「非 sendable 静态类型 → 非原子」
+    // 分流，前提是「非 sendable 箱子绝不被多线程碰」——这个前提被
+    // `unsafe sendable` 聚合打破：ConcurrentDict 的 `map: Dict` 字段在共享锁
+    // 下被多线程 retain/release，闭包捕获也会把非 sendable 箱子带到别的线程
+    // （析构释放），非原子计数直接竞态（复现：4 读线程 + 共享锁 get，约三成
+    // 概率 use-after-free 或 "self escaped a drop body"）。参照编译器全程
+    // 原子族。若将来要恢复非原子优化，判据必须是「从任何 sendable / unsafe
+    // sendable 聚合的字段出发的传递可达闭包之外」，而不是单看静态类型。
     //
-    // 定族看「块的归属类型」：句柄形态 `*T` / `?*T` 按被指对象 T 定族；
-    // 函数类型按 `sendable` 修饰位（false → 非原子）；trait object 按 trait
-    // 声明的 `trait sendable` 定（concurrency-design.md §派生规则 6）；
-    // OpaqueType 解映射后递归。Unknown/TypeVar 是错误恢复与类型擦除占位，
-    // 保守走原子族（宁可多算不可少算）。
-    //
-    // 同一个块只由一族碰：族由静态类型在每个 retain/release/weak/闭包环境
-    // 发射点决定，绝不混用于同一块。
+    // 同一个块只由一族碰：全原子后天然成立。
     public uses_nonatomic_rc(self, t: Type): Bool = {
-        return when t in {
-            .ReferenceType(inner) or .MutableReferenceType(inner)
-            or .BorrowedReferenceType(inner) or .MutableBorrowedReferenceType(inner)
-            or .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then self.uses_nonatomic_rc(
-                inner,
-            ),
-            .FunctionType(_, _, is_sendable) then not is_sendable,
-            .TraitObject(_, _, _) then not self.context.is_sendable_type(t),
-            .OpaqueType(def_id) then {
-                when self.context.lookup_type(def_id) in {
-                    .Some(mapped) then self.uses_nonatomic_rc(mapped),
-                    .None() then false,
-                }
-            },
-            .Unknown() or .TypeVar(_) or .GenericParameter(_) or .ModuleType(_) then false,
-            _ then not self.context.is_sendable_type(t),
-        };
+        let _ = t;
+        return false;
     };
 
     /// 强 retain 的值层入口名（`*T` 句柄与受管名义值都走这一对）。

@@ -243,14 +243,17 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// The displaced value is extracted under the lock and released after it.
     public insert(self, key: K, value: V): Option[V];
     /// Store `value` under `key` only when absent, and report whether it was
-    /// stored.
+    /// stored. A discarded duplicate value dies at the caller's statement
+    /// end, after the unlock.
     public try_insert(self, key: K, value: V): Bool;
     /// Remove `key`'s entry and return its value, if any.
     public take(self, key: K): Option[V];
     /// Remove `key`'s entry and report whether it existed. The value is
     /// extracted under the lock and released after it.
     public try_remove(self, key: K): Bool;
-    /// The value stored under `key`, storing `value` first when absent.
+    /// The value stored under `key`, storing `value` first when absent. An
+    /// unused duplicate value dies at the caller's statement end, after the
+    /// unlock.
     public get_or_insert(self, key: K, value: V): V;
     /// Atomically read-modify-write one entry: apply `f` to the current
     /// mapping (`None` when absent) and store the result (`None` removes the
@@ -276,9 +279,12 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     public is_empty(self): Bool;
     /// Whether `value` is a member.
     public contains(self, value: T): Bool;
-    /// Add `value` to the set.
+    /// Add `value` to the set. A discarded duplicate value dies at the
+    /// caller's statement end, after the unlock.
     public insert(self, value: T): Void;
-    /// Add `value` to the set and report whether it was newly added.
+    /// Add `value` to the set and report whether it was newly added. A
+    /// discarded duplicate value dies at the caller's statement end, after
+    /// the unlock.
     public try_insert(self, value: T): Bool;
     /// Remove `value` from the set. The member is released after the unlock.
     public remove(self, value: T): Void;

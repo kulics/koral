@@ -34,8 +34,8 @@
 
 | 声明 | 字段约束 | 对象锁 | RC | 含义 |
 |---|---|---|---|---|
-| `type` | — | 无 | 非原子 | 线程内值 |
-| `type mutable` | 仅 `mutable` 字段 | 无 | 非原子 | 线程内共享对象 |
+| `type` | — | 无 | 原子 | 线程内值 |
+| `type mutable` | 仅 `mutable` 字段 | 无 | 原子 | 线程内共享对象 |
 | `type sendable` | 全部字段 `sendable` | 无（浅不可变） | 原子 | 冻结数据，可安全共享 |
 | `type sendable mutable` | 全部字段 `sendable` | **有** | 原子 | 共享可变，编译器给安全 |
 | `type unsafe sendable` | 无 | 无 | 原子 | 开发者承诺可共享 |
@@ -175,16 +175,15 @@ std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task
 ### `unsafe` 契约
 
 - **语义**：开发者承诺该类型**及其可达状态**跨线程共享无数据竞争。编译器不做字段推导、不给锁。
-- 原子 RC 只保住计数器本身；字段竞争、以及可达的非 `sendable` 对象的 **RC 竞态**（其计数器是非原子的，见「RC 分流」）都在承诺范围内。**撒谎 = UB**（C 后端无兜底）。
+- 原子 RC 保住计数器本身（RC 全程原子，见「RC 分流」）；字段竞争在承诺范围内。**撒谎 = UB**（C 后端无兜底）。
 - **可认领 vs `foreign` 不可认领**：`foreign` 的谎言在每个使用点炸（布局），所以不让用户认领；`sendable` 的谎言集中在一个声明点、审阅可见、命名带警戒色——与 Rust `unsafe impl Send` 同形，可认领。`unsafe` 只出现在类型修饰符位，**不是** unsafe 块/函数体系，不引入第二个概念。
 
 ### RC 分流
 
-- `sendable`（含 `unsafe`）→ 原子 RC（现状）；非 `sendable` → **非原子**（普通整数递增）。
-- **值类型可达的受管块**：`sendable` 值的每次拷贝都 retain 其受管字段，故可达块须自带 `sendable` 标才有原子 RC——safe 形态由字段检查天然保证，`unsafe` 形态要自己给标（std 落点：`String` 值的 `Bytes` 块 = `unsafe sendable mutable`）。
-- 落点：单态化按静态类型选 retain/release 路径；trait object 擦除侧**保守走原子**（不做动态判定，保持局部可判断）。
-- immortal `-1` 哨兵与 weak 升级在非原子路径退化为普通检查——单线程内语义不变。
-- 诚实记账：`_copy` / `_drop` 合计占 self-time 2.7%（[`thin-pointer-design.md`](thin-pointer-design.md)），预期收益是个位数；正确性先于快，本项分期实施。
+- **（2026-11-11 收敛）受管对象的 RC 一律原子**。此前按「非 `sendable` 静态类型 → 非原子」分流，前提是"非 sendable 箱子绝不被多线程碰"——被两类惯用形态打破：① `unsafe sendable` 聚合的非 `sendable` 字段（`ConcurrentDict` 的 `map: Dict` 在共享锁下被多线程 retain/release）；② 闭包捕获把非 `sendable` 箱子带到别的线程（析构释放并发于别处使用）。复现：4 读线程 + 共享锁 `get`，约三成概率 use-after-free 或 `self escaped a drop body`。参照编译器全程原子，koralc 对齐。
+- 恢复非原子优化的唯一健全形态：判据取「从任何 `sendable` / `unsafe sendable` 聚合字段出发的传递可达闭包**之外**」（裸指针穿透归 `unsafe` 契约）；单看静态类型不再够。留作未决，正确性先于快。
+- immortal `-1` 哨兵与 weak 升级语义不变。
+- 诚实记账：`_copy` / `_drop` 合计占 self-time 2.7%（[`thin-pointer-design.md`](thin-pointer-design.md)），全原子的预期代价是个位数百分比（见基准复测）。
 
 ### Drop 与析构
 
@@ -200,7 +199,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 |---|---|
 | `Option` / `Result` / `Pair` / `Range` / `Duration`、纯标量枚举 | `sendable`（safe）+ 条件规则 |
 | 内部裸存储、构造后不变的内部块（`Bytes` 类） | `unsafe sendable`（持析构则 `unsafe sendable mutable`），承诺「构造后不可变」（编译器无法验证行为不可变，逃生舱是诚实形态）。`String` 自值类型重塑后字段可验证（`Bytes`+标量），升 safe `sendable`——不可验证的部分随 `Bytes` 的 unsafe 标下沉（2026-11-09 裁定） |
-| `List` / `Dict` / `Set` / `Deque` / `StringBuilder` / 迭代器 | **不标记（线程内工作状态）**——不跨线程；顺带保留非原子 RC |
+| `List` / `Dict` / `Set` / `Deque` / `StringBuilder` / 迭代器 | **不标记（线程内工作状态）**——不跨线程（RC 仍原子，见「RC 分流」） |
 | `FrozenList` / `FrozenDict` / `FrozenSet`（新增） | `unsafe sendable mutable` + 条件规则：对象形态承载自有缓冲的析构（用户析构仅 `type mutable`，2026-11-09 随值类型禁 Drop 裁定转入）；独立存储、只读快照、构造时拷贝、无写能力；内建**下标只读**（`FrozenList`/`FrozenDict`）、集合字面量可作目标类型；构造=可变侧 `to_frozen_*` + 字面量——**跨线程携带集合数据的唯一形态**（2026-11-08 裁定：可变容器不跨线程，传数据走 Frozen 系） |
 | `Channel` / `SendChannel` / `RecvChannel` / `ChannelStorage` | `unsafe sendable mutable`（条件于 `T`；环形缓冲 + 自管 Mutex/Condvar，条件规则看住跨界） |
 | `Mutex` / `SharedMutex` / `Thread` | `unsafe sendable mutable`（裸指针 handle，受信基座） |
@@ -242,7 +241,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 **未决（不阻塞）**
 
 1. **`ChannelStorage` 内部复核**：环形缓冲的字段访问在 `unsafe` 下自管同步，条件规则看住 `T`；实现时复核边界协议。
-2. **trait object 运行时侧**：RC 分流的擦除侧保守原子；若将来 vtable 带标志再议。
+2. **trait object 运行时侧**：擦除侧本就保守原子；RC 全原子后此项无涉，随「RC 分流」的可达闭包优化一并再议。
 
 ## 实施
 
@@ -250,7 +249,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 
 1. **语义与检查**（P1）：`sendable` 六形态语法 + `Bound.Sendable` 约束位（`compiler/koralc/ast/nodes.koral` 的 `Bound` 枚举挂点）+ 声明/字段校验 + 泛型条件递归 + 派生闭合 + 跨界检查（spawn 签名、全局量、装箱）；sem / mono 双侧。
 2. **锁语义**（P2/P5）：即「对象锁语义」的访问点短锁形态——赋值统一「左路径与下标 → RHS → 写入 → 解锁 → 释放旧值」，`op=` 两步解糖走运算符重载，字段按种类分协议，全局 `let mutable` 同协议；`AtomicCell` / `Lazy` / 全局量按「同步原语的形状」落地；无显式锁块，safe `sendable mutable` 已放行使用。
-3. **非原子 RC 分流**（P3）+ 基准复测。
+3. **非原子 RC 分流**（P3）——2026-11-11 因 `unsafe sendable` 聚合可达性不健全收敛回全原子（见「RC 分流」），基准复测随行。
 4. **std 迁移 + 用户文档**（P4）：guide「Memory Model」增并发节（中英镜像）。
 5. **ARC 优化**（P5/P6，koralc 实现侧、时序不可见，Swift 参照保持语义裁判）：受管参数按 **+0 借用**传入、逃逸点才 retain（逃逸分析按「函数实例, 参数槽」，`self` 即参数 0）；**末次使用移动**按**判 G**放行——从使用点出发的每条执行路径（含回边）在碰到下一次值读前必经一次定义，同语句多读保守拒绝，覆盖多读局部的最后复制读、跨块汇合点、owned 参数与 `self`，循环形状按「定义截断」放行或拒绝，析构时序零变化；析构可观察性污染覆盖**单态化实例的泛型实参**与**枚举载荷**（`for_loop_drop` 时序钉看住）；**借用投影风险面**：+0 借用读（借用实参/借用接收者/借用 PlaceRead）与取址（`Ref`/`Pointer`）会把指向对象内部的裸引用送出去并活得比 +1 长（`bytes.borrow_ptr()` 的指针活过载荷释放），带任何一处的局部整体禁移；**借用型绑定成对消除**（Swift retain/release pair elimination 同形）限**非持有源**（借用参数/捕获/链式别名，其 +1 的所有权在函数体之外）：`let b = <非持有源>` 的全部使用都不消费时 b 即别名，绑定不 retain、作用域尾不 release；tracked 局部源的 +1 可能死在作用域尾/循环重定义的写协议里，需源生死点可达性分析，留作后续。用户 `Drop` 类型不移动、闭包捕获不作移动源（多发射闭包与 Swift 同判）。运行时 **RC 计数器**（`__koral_rc_stats_*`，包在 `KORAL_RC_STATS` 里——**发布面剔除**，普通构建零痕迹，钉子站用该宏单独编出）把每种形状的收益钉成精确数字（`rc_counter_pin`：别名 0、移动链 0、多读末移恰 1、释放侧逐一相符），verify.sh 另以 "release surface OK" 反钉保证测试面不漏进发布产物。与 Swift 的差别只在析构时序契约这一处，是有意分歧。
 
