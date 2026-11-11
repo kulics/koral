@@ -31,7 +31,7 @@ given MIRFunctionBuilder {
         subject: TypedExpr,
         arms: List[TypedWhenArm],
     ): Bool = {
-        if arms.count() < UInt(2) then {
+        if arms.count() < 2 then {
             return false;
         };
         // A guarded arm needs its own conditional test, which a SwitchValue
@@ -49,8 +49,8 @@ given MIRFunctionBuilder {
             or .MutableWeakReferenceType(inner) then inner,
             _ then subject_type,
         };
-        let mutable enum_count: UInt = 0;
-        let mutable literal_count: UInt = 0;
+        let mutable enum_count = 0;
+        let mutable literal_count = 0;
         for arm in arms then {
             when arm.pattern in {
                 .Wildcard() or .Variable(_) then {},
@@ -91,7 +91,7 @@ given MIRFunctionBuilder {
                 },
             };
         };
-        return (enum_count + literal_count) >= UInt(2);
+        return (enum_count + literal_count) >= 2;
     };
 
     /// Extract the switch constant for a pattern.
@@ -350,14 +350,14 @@ given MIRFunctionBuilder {
             // `make_block` moves the cursor, so park the arm's test block first
             // and come back to it before any lowering runs.
             let arm_entry_block = self.current_block_id();
-            let next_block = if pair.first + UInt(1) == arms.count() then unmatched_trap_block
+            let next_block = if pair.first + 1 == arms.count() then unmatched_trap_block
             else self.make_block();
             self.set_current_block(arm_entry_block);
             // An arm whose pattern offers several readings is matched as a
             // backtracking chain (the guard re-runs per reading); an or-free
             // pattern keeps the single-test path, which binds by alias.
             let alternatives = typed_pattern_or_alternatives(arm.pattern);
-            if alternatives.count() > UInt(1) then {
+            if alternatives.count() > 1 then {
                 self.lower_when_arm_alternative_chain(
                     arm,
                     alternatives,
@@ -535,7 +535,7 @@ given MIRFunctionBuilder {
         for pair in alternatives.lazy().enumerate() then {
             self.set_current_block(test_block);
             let alternative = pair.second;
-            let is_last = pair.first + UInt(1) == alternatives.count();
+            let is_last = pair.first + 1 == alternatives.count();
             let condition = self.lower_pattern_condition(
                 subject_place,
                 subject_type,
@@ -627,7 +627,7 @@ given MIRFunctionBuilder {
         let subject_place = MIRPlace.Local(
             when subject_operand in {
                 .Local(id) then id,
-                _ then MIRLocalID(UInt(0)),
+                _ then MIRLocalID(0),
             },
         );
         // `?name` / `is not ?name`: the subject is the upgrade intrinsic
@@ -1026,18 +1026,18 @@ given MIRFunctionBuilder {
     /// `count - k`.
     list_slot_index_operand(
         self,
-        slot_index: UInt,
+        slot_index: Int,
         elements: List[TypedPattern],
         count_value: MIROperand,
     ): MIROperand = {
         let mutable rest_index = -1;
         for pair in elements.lazy().enumerate() then {
             if pair.second is .RestPattern() then {
-                rest_index = Int(pair.first);
+                rest_index = pair.first;
                 break;
             };
         };
-        if rest_index >= 0 and Int(slot_index) > rest_index then {
+        if rest_index >= 0 and slot_index > rest_index then {
             let from_end = elements.count() - slot_index;
             return self.materialize(
                 MIRValue.Binary(
@@ -1048,15 +1048,15 @@ given MIRFunctionBuilder {
                             false,
                         ),
                         MIROperand.Constant(
-                            MIRConstant.Integer(from_end.to_string(), Type.UIntType()),
+                            MIRConstant.Integer(from_end.to_string(), Type.IntType()),
                         ),
-                        Type.UIntType(), unknown_span()),
+                        Type.IntType(), unknown_span()),
                 ),
-                Type.UIntType(),
+                Type.IntType(),
             );
         };
         return MIROperand.Constant(
-            MIRConstant.Integer(slot_index.to_string(), Type.UIntType()),
+            MIRConstant.Integer(slot_index.to_string(), Type.IntType()),
         );
     };
 

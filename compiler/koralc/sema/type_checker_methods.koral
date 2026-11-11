@@ -8,7 +8,7 @@ private type BuiltinSubscriptKind {
     FrozenList(element: Type),
     FrozenDict(key: Type, value: Type),
     Pointer(element: Type, is_mutable: Bool),
-    FixedArray(len: UInt, inner: Type),
+    FixedArray(len: Int, inner: Type),
 };
 
 given TypeChecker {
@@ -23,14 +23,14 @@ given TypeChecker {
         );
     };
 
-    method_param_count(self, method: Symbol): UInt = {
+    method_param_count(self, method: Symbol): Int = {
         return when method.symbol_type in {
             .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then params.count(),
-            _ then UInt(0),
+            _ then 0,
         };
     };
 
-    method_param_type(self, method: Symbol, index: UInt): Option[Type] = {
+    method_param_type(self, method: Symbol, index: Int): Option[Type] = {
         return when method.symbol_type in {
             .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then if index < params.count() then Option[Type].Some(
                 (params[index]).param_type,
@@ -82,7 +82,7 @@ given TypeChecker {
             return true;
         };
         let normalized_receiver = self.normalize_method_receiver_type(receiver_type);
-        let expected_self = self.method_param_type(method, UInt(0)) or else normalized_receiver;
+        let expected_self = self.method_param_type(method, 0) or else normalized_receiver;
         let normalized_expected_self = self.normalize_method_receiver_type(
             expected_self,
         );
@@ -264,9 +264,9 @@ given TypeChecker {
             .FixedArrayType(_, inner) then inner,
             _ then Type.Unknown(),
         };
-        let length: UInt = when base_type in {
+        let length = when base_type in {
             .FixedArrayType(len, _) then len,
-            _ then UInt(0),
+            _ then 0,
         };
         // A non-integer index has no ordering to check and no C arithmetic
         // to ride: reject it here instead of handing it to the walk below
@@ -314,7 +314,7 @@ given TypeChecker {
     wrap_fixed_array_index_with_bounds_check(
         self,
         index: TypedExpr,
-        length: UInt,
+        length: Int,
         span: SourceSpan,
     ): TypedExpr = {
         if self.is_unresolved_expr_type(index.expr_type) or index.expr_type is .NeverType() then {
@@ -494,25 +494,33 @@ given TypeChecker {
         for pair in args.lazy().enumerate() then {
             let arg_idx = pair.first;
             let arg_ref = pair.second;
-            // The helper ABI is exact: literals were aimed at the parameter
-            // types when they were checked, so a remaining mismatch is a
-            // real one (the reference coerces literals and then demands
-            // equality -- adapting here would smuggle `list[i]` with `i:
-            // Int` past a `UInt` parameter).
+            // The reference coerces literals and then demands equality
+            // (coerceLiteral at the helper ABI): a literal operand re-joins
+            // the parameter type -- including a FOLDED `Type(literal)`, which
+            // arrives typed to its own cast. Only literals move; a non-literal
+            // mismatch is real and stays an error (adapting here would smuggle
+            // `list[u]` with `u: UInt` past the `Int` parameter).
             when param_types.get(arg_idx) in {
                 .Some(param_type) then {
-                    if not self.same_expr_type(arg_ref.expr_type, param_type)
-                    and not self.is_unresolved_expr_type(arg_ref.expr_type)
+                    let coerced = self.adapt_expr_to_expected_type_at(
+                        arg_ref,
+                        .Some(param_type),
+                        Option[SourceSpan].None(),
+                    );
+                    if not self.same_expr_type(coerced.expr_type, param_type)
+                    and not self.is_unresolved_expr_type(coerced.expr_type)
                     and not self.is_unresolved_expr_type(param_type) then {
                         self.push_diagnostic_at_span(
-                            self.type_mismatch_message(param_type, arg_ref.expr_type),
+                            self.type_mismatch_message(param_type, coerced.expr_type),
                             self.typed_expr_span(base),
                         );
                     };
+                    typed_args.push(coerced);
                 },
-                .None() then {},
+                .None() then {
+                    typed_args.push(arg_ref);
+                },
             };
-            typed_args.push(arg_ref);
         };
 
         let mutable bindings = self.resolve_signature_method_type_bindings(
@@ -521,7 +529,7 @@ given TypeChecker {
             List[Type].new(),
         );
         for pair in typed_args.lazy().enumerate() then {
-            let param_idx = pair.first + UInt(1);
+            let param_idx = pair.first + 1;
             if param_idx >= self.method_param_count(method) then {
                 break;
             };
@@ -629,8 +637,8 @@ given TypeChecker {
                     );
                     let index_expr = if args.is_empty() then make_typed_expr(
                         TypedExprKind.IntegerLiteral("0"),
-                        Type.UIntType(),
-                    ) else (args[UInt(0)]);
+                        Type.IntType(),
+                    ) else (args[0]);
                     let pointer_base_type = self.builtin_subscript_base_type(
                         pointer_expr.expr_type,
                     );
@@ -685,8 +693,8 @@ given TypeChecker {
                 .Pointer(element_type, _) then {
                     let index_expr = if args.is_empty() then make_typed_expr(
                         TypedExprKind.IntegerLiteral("0"),
-                        Type.UIntType(),
-                    ) else (args[UInt(0)]);
+                        Type.IntType(),
+                    ) else (args[0]);
                     let pointer_base_type = self.builtin_subscript_base_type(
                         base.expr_type,
                     );
@@ -718,8 +726,8 @@ given TypeChecker {
                 .FixedArray(_, _) then {
                     let index_expr = if args.is_empty() then make_typed_expr(
                         TypedExprKind.IntegerLiteral("0"),
-                        Type.UIntType(),
-                    ) else (args[UInt(0)]);
+                        Type.IntType(),
+                    ) else (args[0]);
                     self.build_fixed_array_element_place(base, index_expr)
                 },
             },
@@ -839,7 +847,7 @@ given TypeChecker {
                 return Option[String].None();
             };
         };
-        let trait_def_id = traits[UInt(0)];
+        let trait_def_id = traits[0];
         let trait_name = self.context().get_name(trait_def_id) or else def_id_spelling(
             trait_def_id,
         );
@@ -1079,11 +1087,11 @@ given TypeChecker {
     infer_or_else_success_type(self, t: Type): Type = {
         let ok_fields = self.get_enum_case_field_types(t, "Ok");
         if not ok_fields.is_empty() then {
-            return ok_fields[UInt(0)];
+            return ok_fields[0];
         };
         let some_fields = self.get_enum_case_field_types(t, "Some");
         if not some_fields.is_empty() then {
-            return some_fields[UInt(0)];
+            return some_fields[0];
         };
         return self.extract_option_result_inner(t);
     };
@@ -1091,7 +1099,7 @@ given TypeChecker {
     infer_or_else_error_binding_type(self, t: Type): Type = {
         let err_fields = self.get_enum_case_field_types(t, "Error");
         if not err_fields.is_empty() then {
-            return err_fields[UInt(0)];
+            return err_fields[0];
         };
         return when t in {
             .GenericEnum(_, args) then if self.is_std_flow_enum(t, "Result") and args.count(
@@ -1642,7 +1650,7 @@ given TypeChecker {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
-                    let mutable i: UInt = 0;
+                    let mutable i = 0;
                     while i < p_params.count() then {
                         current_bindings = self.infer_type_bindings_persistent(
                             (p_params[i]).param_type,
@@ -1658,7 +1666,7 @@ given TypeChecker {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
-                    let mutable i: UInt = 0;
+                    let mutable i = 0;
                     while i < p_params.count() then {
                         current_bindings = self.infer_type_bindings_persistent(
                             (p_params[i]).param_type,
@@ -1677,7 +1685,7 @@ given TypeChecker {
                             return bindings;
                         };
                         let mutable current_bindings = bindings;
-                        let mutable i: UInt = 0;
+                        let mutable i = 0;
                         while i < p_params.count() then {
                             current_bindings = self.infer_type_bindings_persistent(
                                 (p_params[i]).param_type,
@@ -1697,7 +1705,7 @@ given TypeChecker {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
-                    let mutable i: UInt = 0;
+                    let mutable i = 0;
                     while i < p_args.count() then {
                         current_bindings = self.infer_type_bindings_persistent(
                             (p_args[i]),
@@ -1717,7 +1725,7 @@ given TypeChecker {
                         return bindings;
                     };
                     let mutable current_bindings = bindings;
-                    let mutable i: UInt = 0;
+                    let mutable i = 0;
                     while i < p_args.count() then {
                         current_bindings = self.infer_type_bindings_persistent(
                             (p_args[i]),
@@ -1975,7 +1983,7 @@ given TypeChecker {
             .Some(checked_symbols) then {
                 if not checked_symbols.is_empty() then {
                     self.infer_type_bindings(
-                        checked_symbols[UInt(0)].symbol_type,
+                        checked_symbols[0].symbol_type,
                         inner_type,
                         checked_bindings,
                     );
@@ -2093,8 +2101,8 @@ given TypeChecker {
             .Some(key) then when self.storage.generic_templates.lookup_extension_method(
                 key,
                 method_name,
-                Option[UInt].None(),
-                Option[UInt].Some(self.receiver_type_args(inner_type).count()),
+                Option[Int].None(),
+                Option[Int].Some(self.receiver_type_args(inner_type).count()),
             ) in {
                 .Some(template) then {
                     // METHOD FACE (§3.4): a template with a conformance trait
@@ -2204,7 +2212,7 @@ given TypeChecker {
             or .MutablePointerType(inner) or .PointerType(inner) then inner,
             _ then normalized_base_type,
         };
-        let mutable receiver_param_type = self.method_param_type(method, UInt(0)) or else normalized_base_type;
+        let mutable receiver_param_type = self.method_param_type(method, 0) or else normalized_base_type;
         return when receiver_param_type in {
             .MutableReferenceType(_) then when normalized_base_type in {
                 .MutableReferenceType(_) or .MutableBorrowedReferenceType(_) then normalized_base_type,
@@ -2336,9 +2344,9 @@ given TypeChecker {
             raw_method,
         );
         let mutable bindings = Dict[String, Type].new();
-        let self_param_type = self.method_param_type(raw_method, UInt(0)) or else Type.Unknown(
+        let self_param_type = self.method_param_type(raw_method, 0) or else Type.Unknown(
         );
-        if self.method_param_count(raw_method) > UInt(0) then {
+        if self.method_param_count(raw_method) > 0 then {
             self.infer_type_bindings(self_param_type, receiver_type, bindings);
         };
         let concrete_self = when receiver_type in {
@@ -2357,7 +2365,7 @@ given TypeChecker {
             );
         };
         if not bound_param_types.is_empty() then {
-            bound_param_types[UInt(0)] = receiver_type;
+            bound_param_types[0] = receiver_type;
         };
         let mutable bound_return_type = self.concretize_default_literal_type(
             self.apply_type_bindings(self.method_return_type(raw_method), bindings),
@@ -2458,7 +2466,7 @@ given TypeChecker {
             return self.method_return_type(method);
         };
         let mutable bindings = Dict[String, Type].new();
-        let mutable self_param_type = self.method_param_type(method, UInt(0)) or else Type.Unknown(
+        let mutable self_param_type = self.method_param_type(method, 0) or else Type.Unknown(
         );
         let concrete_self_type = when receiver_type in {
             .MutableReferenceType(inner) or .ReferenceType(inner) or .MutableBorrowedReferenceType(inner)
@@ -2641,7 +2649,7 @@ given TypeChecker {
                         bound_param_types.push(bound_type);
                     };
                     if not bound_param_types.is_empty() then {
-                        bound_param_types[UInt(0)] = self.concrete_receiver_for_method(
+                        bound_param_types[0] = self.concrete_receiver_for_method(
                             receiver_type,
                             raw_method,
                         );
@@ -2835,8 +2843,8 @@ given TypeChecker {
             let template_opt = self.storage.generic_templates.lookup_extension_method(
                 MethodOwner.Decl(conformance.trait_def_id),
                 method_name,
-                Option[UInt].None(),
-                Option[UInt].Some(conformance.trait_arg_types.count()),
+                Option[Int].None(),
+                Option[Int].Some(conformance.trait_arg_types.count()),
             );
             let template = template_opt or else {
                 continue;
@@ -3085,7 +3093,7 @@ given TypeChecker {
                         bound_param_types.push(bound_type);
                     };
                     if not bound_param_types.is_empty() then {
-                        bound_param_types[UInt(0)] = self.concrete_receiver_for_method(
+                        bound_param_types[0] = self.concrete_receiver_for_method(
                             receiver_type,
                             raw_method,
                         );
@@ -3653,7 +3661,7 @@ given TypeChecker {
         template: GenericExtensionMethodTemplate,
     ): Bool = {
         let _ = self;
-        return not template.method.params.is_empty() and template.method.params[UInt(0)].name == "self";
+        return not template.method.params.is_empty() and template.method.params[0].name == "self";
     };
 
     resolve_static_extension_template_signature(
@@ -3668,8 +3676,8 @@ given TypeChecker {
                 when self.storage.generic_templates.lookup_extension_method(
                     key,
                     method_name,
-                    Option[UInt].None(),
-                    Option[UInt].Some(actual_type_args.count()),
+                    Option[Int].None(),
+                    Option[Int].Some(actual_type_args.count()),
                 ) in {
                     .Some(template) then {
                         if self.extension_template_is_receiver_style(template) then Option[Symbol].None(
@@ -3824,12 +3832,12 @@ given TypeChecker {
     };
 
     resolve_signature_param_types(self, receiver_type: Type, method: Symbol): List[Type] = {
-        if self.method_param_count(method) <= UInt(1) then {
+        if self.method_param_count(method) <= 1 then {
             return List[Type].new();
         };
         let mutable bindings = Dict[String, Type].new();
         self.infer_type_bindings(
-            self.method_param_type(method, UInt(0)) or else Type.Unknown(),
+            self.method_param_type(method, 0) or else Type.Unknown(),
             receiver_type,
             bindings,
         );
@@ -3987,7 +3995,7 @@ given TypeChecker {
                                             owner,
                                         );
                                         let mutable before = bindings.count();
-                                        let mutable i: UInt = 0;
+                                        let mutable i = 0;
                                         while i < required_nodes.count() and i < tpl.trait_arg_types.count() then {
                                             // The constraint's argument is read as a PARAM NAME when it
                                             // is one; resolving it as a type would report
@@ -4036,7 +4044,7 @@ given TypeChecker {
         let mutable bindings = Dict[String, Type].new();
         if self.method_param_count(method) > 0 then {
             self.infer_type_bindings(
-                self.method_param_type(method, UInt(0)) or else Type.Unknown(),
+                self.method_param_type(method, 0) or else Type.Unknown(),
                 receiver_type,
                 bindings,
             );
@@ -4092,9 +4100,9 @@ given TypeChecker {
             method,
             method_type_args,
         );
-        let mutable arg_i: UInt = 0;
-        while arg_i < args.count() and arg_i + UInt(1) < self.method_param_count(method) then {
-            let mutable param_type = self.method_param_type(method, arg_i + UInt(1)) or else Type.Unknown(
+        let mutable arg_i = 0;
+        while arg_i < args.count() and arg_i + 1 < self.method_param_count(method) then {
+            let mutable param_type = self.method_param_type(method, arg_i + 1) or else Type.Unknown(
             );
             self.infer_type_bindings(param_type, args[arg_i].expr_type, bindings);
             arg_i += 1;
@@ -4566,7 +4574,7 @@ given TypeChecker {
         );
         if args.is_empty() and method_type_args.is_empty() and self.method_param_count(
             method,
-        ) == UInt(1) and expected is .None() then {
+        ) == 1 and expected is .None() then {
             return List[Type].new();
         };
         // Align with Swift sema: if arguments produced no method-level bindings and
@@ -4651,7 +4659,7 @@ given TypeChecker {
             args,
             method_type_args,
         );
-        let mutable self_param_type = self.method_param_type(method, UInt(0)) or else Type.Unknown(
+        let mutable self_param_type = self.method_param_type(method, 0) or else Type.Unknown(
         );
         if bindings.is_empty() and self.same_expr_type(self_param_type, receiver_type) then {
             let mutable concrete_return_type = self.concretize_default_literal_type(
@@ -4679,7 +4687,7 @@ given TypeChecker {
         method_type_args: List[Type],
     ): List[Type] = {
         let mutable out = List[Type].new();
-        if self.method_param_count(method) <= UInt(1) then {
+        if self.method_param_count(method) <= 1 then {
             return out;
         };
         let mutable receiver_type = self.concrete_receiver_for_method(base_type, method);
@@ -4890,7 +4898,7 @@ given TypeChecker {
         return when self.resolve_method_signature(base_type, method_name) in {
             .Some(method) then {
                 let mutable out = List[Type].new();
-                if self.method_param_count(method) > UInt(1) then {
+                if self.method_param_count(method) > 1 then {
                     let mutable receiver_type = self.concrete_receiver_for_method(
                         base_type,
                         method,
@@ -4963,7 +4971,7 @@ given TypeChecker {
         ) is .Some(member) then {
             let bindings = self.trait_method_bindings(trait_def_id, receiver_type);
             // member.params 包含 self，跳过第一个
-            if member.params.count() > UInt(0) then {
+            if member.params.count() > 0 then {
                 let mutable out = List[Type].new();
                 for param in member.params.lazy().skip(1) then {
                     out.push(
@@ -4980,14 +4988,14 @@ given TypeChecker {
             return List[Type].new();
         };
         if self.lookup_trait_method_signature(trait_def_id, method_name) is .Some(method) then {
-            if self.method_param_count(method) > UInt(0) then {
+            if self.method_param_count(method) > 0 then {
                 let mutable concrete_receiver_type = self.concrete_receiver_for_method(
                     receiver_type,
                     method,
                 );
                 let mutable bindings = Dict[String, Type].new();
                 self.infer_type_bindings(
-                    self.method_param_type(method, UInt(0)) or else Type.Unknown(),
+                    self.method_param_type(method, 0) or else Type.Unknown(),
                     concrete_receiver_type,
                     bindings,
                 );
@@ -5016,9 +5024,9 @@ given TypeChecker {
             method_name,
         ) in {
             .Some(method) then {
-                if self.method_param_count(method) > UInt(0) then {
+                if self.method_param_count(method) > 0 then {
                     return Option[Type].Some(
-                        self.method_param_type(method, UInt(0)) or else Type.Unknown(),
+                        self.method_param_type(method, 0) or else Type.Unknown(),
                     );
                 };
             },
@@ -5026,11 +5034,11 @@ given TypeChecker {
         };
         if self.storage.trait_registry.flatten_methods_for_def(trait_def_id) is .Ok(methods) and methods.get(
             method_name,
-        ) is .Some(member) and member.params.count() > UInt(0) then {
+        ) is .Some(member) and member.params.count() > 0 then {
             let bindings = self.trait_method_bindings(trait_def_id, receiver_type);
             return Option[Type].Some(
                 self.concretize_default_literal_type(
-                    self.apply_type_bindings(member.params[UInt(0)].param_type, bindings),
+                    self.apply_type_bindings(member.params[0].param_type, bindings),
                 ),
             );
         };

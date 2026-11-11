@@ -82,7 +82,7 @@ public let read_file[T: IntoPath](path: T): Result[List[UInt8]] = {
 public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void] = {
     return when open_file(path.into_path(), OpenMode.Write()) in {
         .Ok(f) then {
-            let mutable start: UInt = 0;
+            let mutable start = 0;
             let end = content.count();
             while start < end then {
                 when f.write(from = content, span = start..<end) in {
@@ -109,7 +109,7 @@ public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void
 public let append_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void] = {
     return when open_file(path.into_path(), OpenMode.Append()) in {
         .Ok(f) then {
-            let mutable start: UInt = 0;
+            let mutable start = 0;
             let end = content.count();
             while start < end then {
                 when f.write(from = content, span = start..<end) in {
@@ -294,7 +294,7 @@ public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
     };
     return Result[FileInfo].Ok(
         FileInfo(
-            UInt64(stat_buf.size),
+            Int(stat_buf.size),
             ft,
             Permission.from_mode(stat_buf.permissions),
             Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
@@ -320,7 +320,7 @@ public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
     };
     return Result[FileInfo].Ok(
         FileInfo(
-            UInt64(stat_buf.size),
+            Int(stat_buf.size),
             ft,
             Permission.from_mode(stat_buf.permissions),
             Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
@@ -379,16 +379,16 @@ public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Resul
 /// instead of returning a silently truncated path.
 public let read_symlink[T: IntoPath](path: T): Result[Path] = {
     let s = path.into_path().to_string();
-    let mutable buf_size: UInt = 4096;
+    let mutable buf_size = 4096;
     while buf_size <= 1048576 then {
-        let buf = alloc_memory[UInt8](buf_size);
-        let result = __koral_readlink(s.bytes.data, buf, buf_size);
+        let buf = alloc_memory[UInt8](UInt(buf_size));
+        let result = __koral_readlink(s.bytes.data, buf, UInt(buf_size));
         if result < 0 then {
             dealloc_memory(buf);
             return Result[Path].Error(last_error_message());
         };
-        if UInt(result) < buf_size then {
-            let target = String.from_utf8_ptr_unchecked(buf, UInt(result));
+        if Int(result) < buf_size then {
+            let target = String.from_utf8_ptr_unchecked(buf, Int(result));
             dealloc_memory(buf);
             return Result[Path].Ok(target.into_path());
         };
@@ -400,7 +400,7 @@ public let read_symlink[T: IntoPath](path: T): Result[Path] = {
 };
 
 /// Truncate a file to the specified size
-public let truncate_file[T: IntoPath](path: T, size: UInt64): Result[Void] = {
+public let truncate_file[T: IntoPath](path: T, size: Int): Result[Void] = {
     let s = path.into_path().to_string();
     let result = __koral_truncate(s.bytes.data, Int64(size));
     if result != 0 then {

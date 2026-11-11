@@ -11,8 +11,8 @@
 /// stored by handle, so `type mutable` values stay shared with their source.
 public type mutable List[T: Any](
     mutable source: *mutable T,
-    mutable len: UInt,
-    mutable cap: UInt,
+    mutable len: Int,
+    mutable cap: Int,
 );
 
 /// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
@@ -27,7 +27,7 @@ given[T: Any] List[T]: Drop {
 };
 
 /// A one-shot cursor that walks a `List[T]` from index 0 to the end.
-public type mutable ListIterator[T: Any](source: List[T], mutable index: UInt);
+public type mutable ListIterator[T: Any](source: List[T], mutable index: Int);
 
 // ============================================================================
 // List Methods
@@ -43,21 +43,24 @@ given[T: Any] List[T] {
     };
 
     /// Create an empty list with room for at least `capacity` elements before the next reallocation.
-    public with_capacity(capacity: UInt): Self = {
+    public with_capacity(capacity: Int): Self = {
+        if capacity < 0 then {
+            panic("List with_capacity negative capacity");
+        };
         let cap = if capacity < 1 then 1 else capacity;
-        let source = alloc_memory[T](cap);
+        let source = alloc_memory[T](UInt(cap));
         return List[T](source, 0, cap);
     };
 
     /// The number of elements in the list.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
-    public reserve(self, additional: UInt): Void = {
+    public reserve(self, additional: Int): Void = {
         self.ensure_capacity(self.len + additional);
     };
 
-    private ensure_capacity(self, min_capacity: UInt): Void = {
+    private ensure_capacity(self, min_capacity: Int): Void = {
         if min_capacity > self.cap then {
             self.grow_to(min_capacity);
         };
@@ -66,18 +69,18 @@ given[T: Any] List[T] {
     /// The growth body behind `ensure_capacity`, kept out of line on purpose:
     /// inlined, it fattens `push` past the C inliner's threshold and every
     /// element then pays a call (measured 11ms vs 2ms on 5M pushes).
-    private grow_to(self, min_capacity: UInt): Void = {
+    private grow_to(self, min_capacity: Int): Void = {
         // 从 0 起步时先要一块够用的容量，避免 1,2,3… 逐个翻倍。
-        let mutable new_cap = if self.cap == UInt(0) then UInt(8)
-        else self.cap * UInt(2);
+        let mutable new_cap = if self.cap == 0 then 8
+        else self.cap * 2;
         if new_cap < min_capacity then {
             new_cap = min_capacity;
         };
-        let new_source = alloc_memory[T](new_cap);
+        let new_source = alloc_memory[T](UInt(new_cap));
         let old_len = self.len;
         // 空列表的 source 是 null，不要交给 memmove。
-        if old_len > UInt(0) then {
-            move_memory(new_source, self.source, old_len);
+        if old_len > 0 then {
+            move_memory(new_source, self.source, UInt(old_len));
         };
         dealloc_memory(self.source);
         self.source = new_source;
@@ -93,7 +96,7 @@ given[T: Any] List[T] {
         let mutable source = self.source;
         let mutable cap = self.cap;
         let len = self.len;
-        let next = len + UInt(1);
+        let next = len + 1;
         if next > cap then {
             self.len = len;
             self.grow_to(next);
@@ -106,7 +109,7 @@ given[T: Any] List[T] {
 
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
-    public push_list(self, other: List[T], span: Range[UInt] = ...): Void = {
+    public push_list(self, other: List[T], span: Range[Int] = ...): Void = {
         let spec = other.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
@@ -121,7 +124,7 @@ given[T: Any] List[T] {
         for i in start..<end then {
             let v = other.source[i];
             init_memory(source + len, v);
-            len = len + UInt(1);
+            len = len + 1;
         };
         self.len = len;
     };
@@ -132,7 +135,7 @@ given[T: Any] List[T] {
         if self.len == 0 then {
             return Option[T].None();
         };
-        let len = self.len - UInt(1);
+        let len = self.len - 1;
         self.len = len;
         let value = take_memory(self.source + len);
         return Option[T].Some(value);
@@ -140,8 +143,8 @@ given[T: Any] List[T] {
 
     /// Insert the slice of `other` picked by `span` (default: the whole list) at
     /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
-    public insert_list_at(self, index: UInt, other: List[T], span: Range[UInt] = ...): Void = {
-        if index > self.len then {
+    public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void = {
+        if index < 0 or index > self.len then {
             panic("List insert_list_at index out of bounds");
         };
         let spec = other.slice_spec(span);
@@ -180,8 +183,8 @@ given[T: Any] List[T] {
 
     /// Insert `value` at `index` and shift later elements right. O(n).
     /// Panics when `index > count`; `index == count` appends.
-    public insert_at(self, index: UInt, value: T): Void = {
-        if index > self.len then {
+    public insert_at(self, index: Int, value: T): Void = {
+        if index < 0 or index > self.len then {
             panic("List insert_at index out of bounds");
         };
         self.ensure_capacity(self.len + 1);
@@ -199,16 +202,16 @@ given[T: Any] List[T] {
     };
 
     /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
-    public remove_at(self, index: UInt): Void = {
-        if index >= self.len then {
+    public remove_at(self, index: Int): Void = {
+        if index < 0 or index >= self.len then {
             panic("List remove_at index out of bounds");
         };
         let _ = self.take_at(index);
     };
 
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
-    public take_at(self, index: UInt): T = {
-        if index >= self.len then {
+    public take_at(self, index: Int): T = {
+        if index < 0 or index >= self.len then {
             panic("List take_at index out of bounds");
         };
         let value = take_memory(self.source + index);
@@ -227,22 +230,22 @@ given[T: Any] List[T] {
 
     /// The element at `index` without removing it, or `None` when out of range.
     /// The list keeps the element: `type mutable` values come back shared with it.
-    public get(self, index: UInt): Option[T] = {
-        if index >= self.len then {
+    public get(self, index: Int): Option[T] = {
+        if index < 0 or index >= self.len then {
             return Option[T].None();
         };
         return Option[T].Some(self.source[index]);
     };
 
-    private __index_get(self, key: UInt): T = {
-        if key >= self.len then {
+    private __index_get(self, key: Int): T = {
+        if key < 0 or key >= self.len then {
             panic("List index out of bounds");
         };
         return self.source[key];
     };
 
-    private __index_set(self, key: UInt, value: T): Void = {
-        if key >= self.len then {
+    private __index_set(self, key: Int, value: T): Void = {
+        if key < 0 or key >= self.len then {
             panic("List index out of bounds");
         };
         self.source[key] = value;
@@ -251,8 +254,8 @@ given[T: Any] List[T] {
     /// 内置下标 `xs[i]` 的内部操作：返回元素槽位指针。读写直接作用于槽位
     /// （成员访问语义），不再把元素按值拷进拷出；retain/release 由槽位的
     /// 读写按既有规则处理。越界 panic 与 `__index_get` 一致。
-    private __index_slot(self, key: UInt): *mutable T = {
-        if key >= self.len then {
+    private __index_slot(self, key: Int): *mutable T = {
+        if key < 0 or key >= self.len then {
             panic("List index out of bounds");
         };
         return self.source + key;
@@ -305,7 +308,7 @@ given[T: Any] List[T] {
         if self.len <= 1 then {
             return;
         };
-        let mutable left: UInt = 0;
+        let mutable left = 0;
         let mutable right = self.len - 1;
         while left < right then {
             let l = self.source + left;
@@ -318,8 +321,8 @@ given[T: Any] List[T] {
         };
     };
 
-    private make_slice(self, start: UInt, len: UInt): List[T] = {
-        if start + len > self.len then {
+    private make_slice(self, start: Int, len: Int): List[T] = {
+        if start < 0 or len < 0 or start + len > self.len then {
             panic("List slice out of bounds");
         };
         let mutable result = List[T].with_capacity(len);
@@ -331,13 +334,16 @@ given[T: Any] List[T] {
 
     /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
     /// Panics when the range is invalid or reaches past the end.
-    public slice_spec(self, range: Range[UInt]): SliceSpec = {
+    public slice_spec(self, range: Range[Int]): SliceSpec = {
         let len = self.len;
-        let mutable start: UInt = 0;
-        let mutable end: UInt = 0;
+        let mutable start = 0;
+        let mutable end = 0;
 
         when range in {
             .Closed(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("List.slice_spec invalid range");
                 };
@@ -348,6 +354,9 @@ given[T: Any] List[T] {
                 end = e + 1;
             },
             .ClosedOpen(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("List.slice_spec invalid range");
                 };
@@ -358,20 +367,26 @@ given[T: Any] List[T] {
                 end = e;
             },
             .OpenClosed(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("List.slice_spec invalid range");
                 };
-                if s == UInt.max_value() or e >= len then {
+                if s == Int.max_value() or e >= len then {
                     panic("List.slice_spec out of bounds");
                 };
                 start = s + 1;
                 end = e + 1;
             },
             .Open(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("List.slice_spec invalid range");
                 };
-                if s == UInt.max_value() or e > len then {
+                if s == Int.max_value() or e > len then {
                     panic("List.slice_spec out of bounds");
                 };
                 // Open(s, s) names no elements: the empty slice at s, exactly
@@ -385,6 +400,9 @@ given[T: Any] List[T] {
                 end = e;
             },
             .From(s) then {
+                if s < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s > len then {
                     panic("List.slice_spec out of bounds");
                 };
@@ -392,6 +410,9 @@ given[T: Any] List[T] {
                 end = len;
             },
             .After(s) then {
+                if s < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if s >= len then {
                     panic("List.slice_spec out of bounds");
                 };
@@ -399,6 +420,9 @@ given[T: Any] List[T] {
                 end = len;
             },
             .To(e) then {
+                if e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if e >= len then {
                     panic("List.slice_spec out of bounds");
                 };
@@ -406,6 +430,9 @@ given[T: Any] List[T] {
                 end = e + 1;
             },
             .Until(e) then {
+                if e < 0 then {
+                    panic("List.slice_spec out of bounds");
+                };
                 if e > len then {
                     panic("List.slice_spec out of bounds");
                 };
@@ -423,7 +450,7 @@ given[T: Any] List[T] {
 
     /// Return a new list holding the `range` slice of this one (elements shared
     /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
-    public sublist(self, range: Range[UInt]): List[T] = {
+    public sublist(self, range: Range[Int]): List[T] = {
         let span = self.slice_spec(range);
         return self.make_slice(span.start(), span.len());
     };
@@ -446,8 +473,8 @@ given[T: Any] List[T] {
         if self.len == 0 then {
             return;
         };
-        let mutable write: UInt = 0;
-        let mutable read: UInt = 0;
+        let mutable write = 0;
+        let mutable read = 0;
         while read < self.len then {
             let v = self.source[read];
             if predicate(v) then {
@@ -477,28 +504,28 @@ given[T: Any] List[T] {
             return;
         };
         // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = alloc_memory[T](len);
+        let buf = alloc_memory[T](UInt(len));
         self.merge_sort_by_key(key, buf, 0, len);
         dealloc_memory(buf);
     };
 
     /// Binary search by the key `key` extracts; the list must already be sorted by that key.
     /// Returns `(index, true)` when found, `(insertion_point, false)` otherwise. O(log n).
-    public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[UInt, Bool] = {
-        let mutable lo: UInt = 0;
+    public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[Int, Bool] = {
+        let mutable lo = 0;
         let mutable hi = self.len;
         while lo < hi then {
             let mid = lo + (hi - lo) / 2;
             let k = key(self.source[mid]);
             if k == target then {
-                return Pair[UInt, Bool](mid, true);
+                return Pair[Int, Bool](mid, true);
             } else if k < target then {
                 lo = mid + 1;
             } else {
                 hi = mid;
             };
         };
-        return Pair[UInt, Bool](lo, false);
+        return Pair[Int, Bool](lo, false);
     };
 };
 
@@ -576,7 +603,7 @@ given[T: Ord] List[T]: Ord {
         let other_len = other.len;
         let limit = if self_len < other_len then self_len else other_len;
 
-        let mutable idx: UInt = 0;
+        let mutable idx = 0;
         while idx < limit then {
             let ord = self.source[idx].compare(other.source[idx]);
             if ord != 0 then {
@@ -614,8 +641,8 @@ given[T: Eq] List[T] {
         if self.len <= 1 then {
             return;
         };
-        let mutable write: UInt = 1;
-        let mutable read: UInt = 1;
+        let mutable write = 1;
+        let mutable read = 1;
         while read < self.len then {
             let prev = self.source[write - 1];
             let curr = self.source[read];
@@ -635,7 +662,7 @@ given[T: Eq] List[T] {
 };
 
 /// A `count`-byte list of zeros.
-public let make_bytes(count: UInt): List[UInt8] = {
+public let make_bytes(count: Int): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
     if count == 0 then {
         return bytes;
@@ -649,7 +676,7 @@ public let make_bytes(count: UInt): List[UInt8] = {
 };
 
 /// A `count`-byte list of uninitialized bytes, meant for buffers that are filled before being read.
-public let make_uninitialized_bytes(count: UInt): List[UInt8] = {
+public let make_uninitialized_bytes(count: Int): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
     bytes.len = count;
     return bytes;
@@ -692,7 +719,7 @@ given[T: Any] List[T] {
     // the run is RC-neutral except for the key reads. The cursor is a raw
     // pointer walk: pointer arithmetic is unchecked, so the hot loop pays no
     // per-step overflow-guard calls.
-    private insertion_sort_by_key[K: Ord](self, key: (T) -> K, start: UInt, end: UInt): Void = {
+    private insertion_sort_by_key[K: Ord](self, key: (T) -> K, start: Int, end: Int): Void = {
         if end <= start then {
             return;
         };
@@ -717,7 +744,7 @@ given[T: Any] List[T] {
     // Recursive merge sort over [start, end). `buf` is one scratch buffer of
     // `self.len` slots shared by every merge level; each merge vacates the
     // slots it uses before returning, so the reuse is safe.
-    private merge_sort_by_key[K: Ord](self, key: (T) -> K, buf: *mutable T, start: UInt, end: UInt): Void = {
+    private merge_sort_by_key[K: Ord](self, key: (T) -> K, buf: *mutable T, start: Int, end: Int): Void = {
         let len = end - start;
         if len <= 32 then {
             self.insertion_sort_by_key(key, start, end);
@@ -752,13 +779,13 @@ given[T: Any] List[T] {
         self,
         key: (T) -> K,
         buf: *mutable T,
-        start: UInt,
-        mid: UInt,
-        end: UInt,
+        start: Int,
+        mid: Int,
+        end: Int,
     ): Void = {
         let source = self.source;
         let left_end = buf + (mid - start);
-        move_memory(buf, source + start, mid - start);
+        move_memory(buf, source + start, UInt(mid - start));
 
         let mutable lp = buf;
         let mutable rp = source + mid;
@@ -793,21 +820,21 @@ given[T: Ord] List[T] {
 
     /// Binary search on a sorted list. O(log n).
     /// Returns `(index, true)` if found, `(insertion_point, false)` if not found.
-    public binary_search(self, target: T): Pair[UInt, Bool] = {
-        let mutable lo: UInt = 0;
+    public binary_search(self, target: T): Pair[Int, Bool] = {
+        let mutable lo = 0;
         let mutable hi = self.len;
         while lo < hi then {
             let mid = lo + (hi - lo) / 2;
             let v = self.source[mid];
             if v == target then {
-                return Pair[UInt, Bool](mid, true);
+                return Pair[Int, Bool](mid, true);
             } else if v < target then {
                 lo = mid + 1;
             } else {
                 hi = mid;
             };
         };
-        return Pair[UInt, Bool](lo, false);
+        return Pair[Int, Bool](lo, false);
     };
 
     /// Sort in place in ascending order using the `Ord` trait.
@@ -823,7 +850,7 @@ given[T: Ord] List[T] {
             return;
         };
         // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = alloc_memory[T](len);
+        let buf = alloc_memory[T](UInt(len));
         self.merge_sort_comparable(buf, 0, len);
         dealloc_memory(buf);
     };
@@ -835,7 +862,7 @@ given[T: Ord] List[T] {
     // RC-neutral except for the element reads. The cursor is a raw pointer
     // walk: pointer arithmetic is unchecked, so the hot loop pays no per-step
     // overflow-guard calls.
-    private insertion_sort_comparable(self, start: UInt, end: UInt): Void = {
+    private insertion_sort_comparable(self, start: Int, end: Int): Void = {
         if end <= start then {
             return;
         };
@@ -870,8 +897,8 @@ given[T: Ord] List[T] {
             return;
         };
         // Recursion budget: 2 * floor(log2(len)).
-        let mutable depth: UInt = 0;
-        let mutable p: UInt = 1;
+        let mutable depth = 0;
+        let mutable p = 1;
         while p < len then {
             p = p * 2;
             depth = depth + 1;
@@ -881,7 +908,7 @@ given[T: Ord] List[T] {
 
     /// Exchange two slots; RC-neutral (two takes, two inits). A self-swap is
     /// a no-op -- taking one slot twice would read its own vacancy.
-    private swap_at(self, a: UInt, b: UInt): Void = {
+    private swap_at(self, a: Int, b: Int): Void = {
         if a == b then {
             return;
         };
@@ -898,7 +925,7 @@ given[T: Ord] List[T] {
     /// smaller side and iterate on the larger -- the stack stays O(log n).
     /// `depth` is the remaining bad-partition budget before heap sort takes
     /// over the rest of the range.
-    private pdqsort_comparable(self, start: UInt, end: UInt, depth: UInt): Void = {
+    private pdqsort_comparable(self, start: Int, end: Int, depth: Int): Void = {
         let mutable s = start;
         let mutable e = end;
         let mutable bad = depth;
@@ -941,7 +968,7 @@ given[T: Ord] List[T] {
 
             // Everything landed on one side (every key equal to the pivot):
             // heap sort the block -- the recursion would not shrink.
-            if left_n == UInt(0) or right_n == UInt(0) then {
+            if left_n == 0 or right_n == 0 then {
                 self.heap_sort_comparable(s, e);
                 return;
             };
@@ -967,10 +994,10 @@ given[T: Ord] List[T] {
     /// Insert-sort the block, giving up once it is clearly not nearly
     /// sorted -- pdqsort's fast path. `true` = the block comes out sorted;
     /// `false` = it needs a real partition (the prefix is still valid).
-    private partial_insertion_sort(self, start: UInt, end: UInt): Bool = {
+    private partial_insertion_sort(self, start: Int, end: Int): Bool = {
         let source = self.source;
         let startp = source + start;
-        let mutable moves: UInt = 0;
+        let mutable moves = 0;
         let mutable ip = source + start + 1;
         let lastp = source + end;
         while ip != lastp then {
@@ -998,7 +1025,7 @@ given[T: Ord] List[T] {
     /// pivot, [out, e) > it. Hoare with skip runs -- a stretch already in
     /// partition order advances without swapping, so the predictor sees
     /// streaks and only inversions pay a swap.
-    private partition_le(self, s: UInt, e: UInt, pivot_val: T): UInt = {
+    private partition_le(self, s: Int, e: Int, pivot_val: T): Int = {
         let source = self.source;
         let mutable lo = s;
         let mutable hi = e - 1;
@@ -1022,7 +1049,7 @@ given[T: Ord] List[T] {
     };
 
     /// The median of three slot values, moving nothing.
-    private median3_val(self, a: UInt, b: UInt, c: UInt): T = {
+    private median3_val(self, a: Int, b: Int, c: Int): T = {
         let source = self.source;
         let va = (source + a)[0];
         let vb = (source + b)[0];
@@ -1046,7 +1073,7 @@ given[T: Ord] List[T] {
     };
 
     /// The ninther: the median of three medians spread across a wide block.
-    private ninther_val(self, s: UInt, e: UInt): T = {
+    private ninther_val(self, s: Int, e: Int): T = {
         let n = e - s;
         let eighth = n / 8;
         let mid = s + n / 2;
@@ -1074,14 +1101,14 @@ given[T: Ord] List[T] {
     /// Scramble a few slots so adversary shapes (organ pipes, saw teeth)
     /// stop defeating the pivot choice. Deterministic and overflow-safe: the
     /// small-stride recurrence keeps every value below `n`.
-    private break_patterns(self, s: UInt, e: UInt): Void = {
+    private break_patterns(self, s: Int, e: Int): Void = {
         let n = e - s;
         if n <= 16 then {
             return;
         };
         let modulus = n - 1;
         let mutable r = n % 97 + 13;
-        let mutable k: UInt = 0;
+        let mutable k = 0;
         while k < 3 then {
             r = (r * 7 + 3) % modulus;
             self.swap_at(s + (k * 5 + 1), s + r);
@@ -1090,7 +1117,7 @@ given[T: Ord] List[T] {
     };
 
     /// In-place heap sort over [start, end): the O(n log n) worst-case arm.
-    private heap_sort_comparable(self, start: UInt, end: UInt): Void = {
+    private heap_sort_comparable(self, start: Int, end: Int): Void = {
         let count = end - start;
         if count <= 1 then {
             return;
@@ -1111,7 +1138,7 @@ given[T: Ord] List[T] {
     };
 
     /// Sift slot `start + root` down through the first `count` slots.
-    private sift_down_comparable(self, start: UInt, root: UInt, count: UInt): Void = {
+    private sift_down_comparable(self, start: Int, root: Int, count: Int): Void = {
         let source = self.source;
         let mutable r = root;
         while true then {
@@ -1137,7 +1164,7 @@ given[T: Ord] List[T] {
     // Recursive merge sort over [start, end). `buf` is one scratch buffer of
     // `self.len` slots shared by every merge level; each merge vacates the
     // slots it uses before returning, so the reuse is safe.
-    private merge_sort_comparable(self, buf: *mutable T, start: UInt, end: UInt): Void = {
+    private merge_sort_comparable(self, buf: *mutable T, start: Int, end: Int): Void = {
         let len = end - start;
         if len <= 32 then {
             self.insertion_sort_comparable(start, end);
@@ -1168,10 +1195,10 @@ given[T: Ord] List[T] {
     // pair; a right remainder is already in place. The cursors are raw
     // pointer walks: pointer arithmetic is unchecked, so the hot loop pays no
     // per-step overflow-guard calls.
-    private merge_comparable(self, buf: *mutable T, start: UInt, mid: UInt, end: UInt): Void = {
+    private merge_comparable(self, buf: *mutable T, start: Int, mid: Int, end: Int): Void = {
         let source = self.source;
         let left_end = buf + (mid - start);
-        move_memory(buf, source + start, mid - start);
+        move_memory(buf, source + start, UInt(mid - start));
 
         let mutable lp = buf;
         let mutable rp = source + mid;
@@ -1217,7 +1244,7 @@ given[T: Ord] List[T] {
 /// with their source). The `mutable` form is where the owned buffer's
 /// destructor lives (user destructors are `type mutable` only); the snapshot
 /// itself is immutable after construction.
-public type unsafe sendable mutable FrozenList[T: Any](protected data: *mutable T, protected len: UInt);
+public type unsafe sendable mutable FrozenList[T: Any](protected data: *mutable T, protected len: Int);
 
 /// `Drop` for `FrozenList[T]`: frees every element and the buffer when the
 /// last handle dies.
@@ -1232,20 +1259,20 @@ given[T: Any] FrozenList[T]: Drop {
 };
 
 /// A one-shot cursor that walks a `FrozenList[T]` from index 0 to the end.
-public type mutable FrozenListIterator[T: Any](source: FrozenList[T], mutable index: UInt);
+public type mutable FrozenListIterator[T: Any](source: FrozenList[T], mutable index: Int);
 
 /// Read-only access over a `FrozenList[T]`.
 given[T: Any] FrozenList[T] {
 
     /// The number of elements in the snapshot.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Whether the snapshot has no elements.
     public is_empty(self): Bool = self.len == 0;
 
     /// The element at `index`, or `None` when the index is out of range.
-    public get(self, index: UInt): Option[T] = {
-        if index >= self.len then {
+    public get(self, index: Int): Option[T] = {
+        if index < 0 or index >= self.len then {
             return Option[T].None();
         };
         return Option[T].Some(self.data[index]);
@@ -1263,8 +1290,8 @@ given[T: Any] FrozenList[T] {
     // Builtin subscript helper for `xs[i]` syntax. Read-only: there is no
     // `__index_slot`, so a frozen subscript can never be a write target.
     // Out-of-range panic matches the mutable `List` subscript exactly.
-    private __index_get(self, key: UInt): T = {
-        if key >= self.len then {
+    private __index_get(self, key: Int): T = {
+        if key < 0 or key >= self.len then {
             panic("List index out of bounds");
         };
         return self.data[key];
@@ -1314,7 +1341,7 @@ given[T: Any] List[T] {
     /// shared element handles.
     public to_frozen_list(self): FrozenList[T] = {
         let len = self.len;
-        let data = alloc_memory[T](len);
+        let data = alloc_memory[T](UInt(len));
         for i in 0..<len then {
             init_memory(data + i, self.source[i]);
         };
@@ -1330,8 +1357,8 @@ given[T: Any] List[T] {
         let data = self.source;
         let len = self.len;
         self.source = alloc_memory[T](UInt(1));
-        self.len = UInt(0);
-        self.cap = UInt(1);
+        self.len = 0;
+        self.cap = 1;
         return FrozenList[T](data, len);
     };
 };

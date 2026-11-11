@@ -5,8 +5,8 @@
 
 type mutable CodegenBufferStorage(
     mutable data: *mutable UInt8,
-    mutable len: UInt,
-    mutable cap: UInt,
+    mutable len: Int,
+    mutable cap: Int,
 );
 
 given CodegenBufferStorage: Drop {
@@ -22,15 +22,18 @@ given CodegenBuffer {
         return CodegenBuffer.with_capacity(256);
     };
 
-    public with_capacity(cap: UInt): CodegenBuffer = {
-        let actual_cap = if cap < 1 then UInt(1) else cap + 1;
-        let data = alloc_memory[UInt8](actual_cap);
+    public with_capacity(cap: Int): CodegenBuffer = {
+        if cap < 0 then {
+            panic("CodegenBuffer with_capacity negative capacity");
+        };
+        let actual_cap = if cap < 1 then 1 else cap + 1;
+        let data = alloc_memory[UInt8](UInt(actual_cap));
         init_memory(data, 0);
         let storage = CodegenBufferStorage(data, 0, actual_cap);
         return CodegenBuffer(storage);
     };
 
-    ensure_capacity(self, min_cap: UInt): Void = {
+    ensure_capacity(self, min_cap: Int): Void = {
         if self.storage.cap >= min_cap then {
             return;
         };
@@ -40,14 +43,14 @@ given CodegenBuffer {
             new_cap = min_cap;
         };
 
-        let new_data = alloc_memory[UInt8](new_cap);
-        copy_memory(new_data, self.storage.data, self.storage.len + 1);
+        let new_data = alloc_memory[UInt8](UInt(new_cap));
+        copy_memory(new_data, self.storage.data, UInt(self.storage.len + 1));
         dealloc_memory(self.storage.data);
         self.storage.data = new_data;
         self.storage.cap = new_cap;
     };
 
-    public count(self): UInt = self.storage.len;
+    public count(self): Int = self.storage.len;
 
     public push_byte(self, value: UInt8): Void = {
         self.ensure_capacity(self.storage.len + 2);
@@ -63,7 +66,7 @@ given CodegenBuffer {
         };
 
         self.ensure_capacity(self.storage.len + other_len + 1);
-        copy_memory(self.storage.data + self.storage.len, other.borrow_ptr(), other_len);
+        copy_memory(self.storage.data + self.storage.len, other.borrow_ptr(), UInt(other_len));
         self.storage.len += other_len;
         self.storage.data[self.storage.len] = 0;
     };
@@ -75,7 +78,7 @@ given CodegenBuffer {
         };
 
         self.ensure_capacity(self.storage.len + other_len + 1);
-        copy_memory(self.storage.data + self.storage.len, other.storage.data, other_len);
+        copy_memory(self.storage.data + self.storage.len, other.storage.data, UInt(other_len));
         self.storage.len += other_len;
         self.storage.data[self.storage.len] = 0;
     };
@@ -94,8 +97,8 @@ given CodegenBuffer {
         let empty_data = alloc_memory[UInt8](UInt(1));
         init_memory(empty_data, 0);
         self.storage.data = empty_data;
-        self.storage.len = UInt(0);
-        self.storage.cap = UInt(1);
+        self.storage.len = 0;
+        self.storage.cap = 1;
         let result = String.from_utf8_ptr_unchecked(data, len);
         dealloc_memory(data);
         return result;

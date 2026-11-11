@@ -175,7 +175,7 @@ public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Resul
 public let read_symlink[T: IntoPath](path: T): Result[Path];
 
 /// Truncate a file to the specified size
-public let truncate_file[T: IntoPath](path: T, size: UInt64): Result[Void];
+public let truncate_file[T: IntoPath](path: T, size: Int): Result[Void];
 
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
@@ -336,14 +336,14 @@ given File {
 given File: Reader {
     /// Read bytes into the target list over the given span and return how many were read.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
 };
 
 /// Writer conformance writing directly to the file descriptor.
 given File: Writer {
     /// Write bytes from the source list over the given span and return how many were written.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
     public flush(self): Result[Void];
 };
@@ -351,7 +351,7 @@ given File: Writer {
 /// Seeker conformance repositioning the file offset.
 given File: Seeker {
     /// Reposition the file offset from the given origin and return the new absolute offset.
-    public seek(self, pos: SeekOrigin): Result[UInt64];
+    public seek(self, pos: SeekOrigin): Result[Int];
 };
 
 /// Convenience checks for each file type case.
@@ -411,7 +411,7 @@ given Permission: ToString {
 /// Accessors for size, type, permissions, and timestamps.
 given FileInfo {
     /// File size in bytes
-    public file_size(self): UInt64;
+    public file_size(self): Int;
     /// File type
     public file_type(self): FileType;
     /// File permissions

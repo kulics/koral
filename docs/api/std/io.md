@@ -33,13 +33,13 @@ public trait Reader {
     /// Fill `into[span]` with bytes and return the count read; `Ok(0)` marks end of input.
     /// `span` defaults to the whole buffer, which is what every caller wants
     /// unless it is resuming a partial transfer.
-    read(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    read(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Int];
 };
 
 /// A byte sink that consumes caller-provided buffers.
 public trait Writer {
     /// Write bytes from `from[span]` and return the count written.
-    write(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    write(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
     /// Write any buffered bytes to the underlying sink.
     flush(self): Result[Void];
 };
@@ -47,7 +47,7 @@ public trait Writer {
 /// A stream whose cursor can be repositioned.
 public trait Seeker {
     /// Move the cursor to `pos` and return its new absolute position.
-    seek(self, pos: SeekOrigin): Result[UInt64];
+    seek(self, pos: SeekOrigin): Result[Int];
 };
 ```
 
@@ -71,9 +71,9 @@ public type sendable IoError {
 
 /// The reference point and offset for a seek: from the start, the current position, or the end, where `Current` and `End` offsets may be negative.
 public type sendable SeekOrigin {
-    Start(offset: UInt64),
-    End(offset: Int64),
-    Current(offset: Int64),
+    Start(offset: Int),
+    End(offset: Int),
+    Current(offset: Int),
 };
 
 /// Process standard input (fd 0) as a byte stream.
@@ -109,8 +109,8 @@ public type unsafe sendable mutable Stderr;
 given[R: Reader] BufReader[R] {
     /// Wrap `r` in a reader with a 4096-byte buffer.
     public new(r: R): BufReader[R];
-    /// Wrap `r` in a reader with a `cap`-byte buffer, panicking when `cap` is zero.
-    public with_capacity(cap: UInt, r: R): BufReader[R];
+    /// Wrap `r` in a reader with a `cap`-byte buffer, panicking when `cap` is zero or negative.
+    public with_capacity(cap: Int, r: R): BufReader[R];
     /// Read one byte through the buffer, returning `None` at end of input.
     public read_byte(self): Result[Option[UInt8]];
     /// Read one UTF-8 rune through the buffer, returning `None` at end of input and failing on invalid UTF-8.
@@ -118,31 +118,32 @@ given[R: Reader] BufReader[R] {
     /// Read bytes through `delim` into `into[span]` and return the count copied, delimiter included.
     /// `span` bounds where the delimiter is looked for and where bytes land,
     /// defaulting to the whole buffer like `Reader.read`.
-    public read_until(self, delim: UInt8, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt];
+    public read_until(self, delim: UInt8, into: List[UInt8] =, span: Range[Int] = ...): Result[Int];
     /// Read one line through its newline as a `String`, returning `None` at end of input and failing on invalid UTF-8.
     public read_line(self): Result[Option[String]];
     /// Skip the next `n` bytes, returning the count actually skipped when input ends early.
-    public skip(self, n: UInt): Result[UInt];
+    /// Panics when `n` is negative.
+    public skip(self, n: Int): Result[Int];
 };
 
 /// Implements `Reader` through the internal buffer.
 given[R: Reader] BufReader[R]: Reader {
     /// Fill `into[span]` from buffered bytes, refilling from the inner reader as needed, and return the count read.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
 };
 
 /// Implements `Seeker`, adjusting `Current` offsets for unread buffered bytes and then discarding them.
 given[R: Reader and Seeker] BufReader[R]: Seeker {
     /// Move the inner reader to `pos`, discarding buffered bytes after compensating `Current` for the unread ones.
-    public seek(self, pos: SeekOrigin): Result[UInt64];
+    public seek(self, pos: SeekOrigin): Result[Int];
 };
 
 /// Creates `BufWriter` values and provides byte, string, line, and rune writes.
 given[W: Writer] BufWriter[W] {
     /// Wrap `w` in a writer with a 4096-byte buffer.
     public new(w: W): BufWriter[W];
-    /// Wrap `w` in a writer with a `cap`-byte buffer, panicking when `cap` is zero.
-    public with_capacity(cap: UInt, w: W): BufWriter[W];
+    /// Wrap `w` in a writer with a `cap`-byte buffer, panicking when `cap` is zero or negative.
+    public with_capacity(cap: Int, w: W): BufWriter[W];
     /// Buffer one byte, flushing to the inner writer first when the buffer is full.
     public write_byte(self, b: UInt8): Result[Void];
     /// Buffer the UTF-8 bytes of `s`.
@@ -156,7 +157,7 @@ given[W: Writer] BufWriter[W] {
 /// Implements `Writer` through the internal buffer.
 given[W: Writer] BufWriter[W]: Writer {
     /// Writes data from `from[span]` into the internal buffer, auto-flushing when full, and returns the count written.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
     /// Flushes internal buffer to inner writer. On partial failure, preserves remaining bytes.
     public flush(self): Result[Void];
 };
@@ -169,7 +170,7 @@ given[W: Writer] BufWriter[W]: Drop {};
 /// Implements `Seeker`, flushing before moving the inner writer's cursor.
 given[W: Writer and Seeker] BufWriter[W]: Seeker {
     /// Flush the internal buffer, then move the inner writer to `pos`.
-    public seek(self, pos: SeekOrigin): Result[UInt64];
+    public seek(self, pos: SeekOrigin): Result[Int];
 };
 
 /// Implements `Drop`, freeing the buffer's heap allocation.
@@ -180,7 +181,8 @@ given ByteBuffer {
     /// Create an empty byte buffer.
     public new(): ByteBuffer;
     /// Create an empty byte buffer with room for at least `cap` bytes.
-    public with_capacity(cap: UInt): ByteBuffer;
+    /// Panics when `cap` is negative.
+    public with_capacity(cap: Int): ByteBuffer;
     /// Create a byte buffer holding the UTF-8 bytes of `s`.
     public from_string(s: String): ByteBuffer;
     /// Create a byte buffer holding a copy of `bytes`.
@@ -190,13 +192,13 @@ given ByteBuffer {
 /// Implements `Reader`, reading from the buffer's cursor.
 given ByteBuffer: Reader {
     /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
 };
 
 /// Implements `Writer`, writing at the buffer's cursor and growing the buffer as needed.
 given ByteBuffer: Writer {
     /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
     /// Flush is a no-op here, since writes already land in the buffer.
     public flush(self): Result[Void];
 };
@@ -206,7 +208,7 @@ given ByteBuffer: Seeker {
     /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
     /// Out-of-range targets — including offsets that overflow `Int64` arithmetic — fail
     /// with `Result.Error` and never panic.
-    public seek(self, pos: SeekOrigin): Result[UInt64];
+    public seek(self, pos: SeekOrigin): Result[Int];
 };
 
 /// Implements `Error`, giving each case a human-readable message.
@@ -230,7 +232,7 @@ given Stdin {
 given Stdin: Reader {
     /// Unbuffered: directly calls the OS read, errors returned immediately.
     /// Returns the number of bytes transferred; `Ok(0)` means EOF.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int];
 };
 
 /// Exposes the underlying file descriptor and terminal detection for the stream.
@@ -247,7 +249,7 @@ given Stdout: Writer {
     /// Unbuffered: directly calls the OS write under the stream's write lock,
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
     /// flush is a no-op on the unbuffered handle (data is already in kernel
     /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
@@ -267,7 +269,7 @@ given Stderr: Writer {
     /// Unbuffered: directly calls the OS write under the stream's write lock,
     /// errors returned immediately. Returns the number of bytes transferred;
     /// short writes are possible.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt];
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int];
     /// flush is a no-op on the unbuffered handle (data is already in kernel
     /// buffer); it takes the write lock so flush serializes with writes.
     public flush(self): Result[Void];
@@ -278,13 +280,13 @@ given Reader {
     /// Read all bytes from self until EOF. Returns all bytes as a list.
     public read_all(self): Result[List[UInt8]];
     /// Copy all bytes from self to dst. Returns total bytes copied.
-    public copy_all_to[W: Writer](self, dst: W): Result[UInt];
+    public copy_all_to[W: Writer](self, dst: W): Result[Int];
 };
 
 /// Adds whole-buffer writes to every `Writer`.
 given Writer {
     /// Write all bytes in `from[span]` to self, looping on short writes. `span`
     /// defaults to the whole buffer, like `Writer.write`.
-    public write_all(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[Void];
+    public write_all(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Void];
 };
 ```

@@ -39,10 +39,10 @@ else if tc == 'o' then "0o"
 else if tc == 'x' then "0x" else if tc == 'X' then "0X" else "";
 
 // Count the runes of `s` by walking UTF-8 sequence starts.
-private let rune_count(s: String): UInt = {
+private let rune_count(s: String): Int = {
     let len = s.count();
-    let mutable pos: UInt = 0;
-    let mutable n: UInt = 0;
+    let mutable pos = 0;
+    let mutable n = 0;
     while pos < len then {
         pos += 1;
         while pos < len and not s.is_rune_boundary(pos) then {
@@ -166,10 +166,10 @@ private let apply_numeric_padding(prefix: String, body: String, spec: FormatSpec
 };
 
 // Return the prefix of `s` holding at most `max_runes` runes, cut on a rune boundary.
-private let truncate_to_runes(s: String, max_runes: UInt): String = {
+private let truncate_to_runes(s: String, max_runes: Int): String = {
     let len = s.count();
-    let mutable byte_pos: UInt = 0;
-    let mutable taken: UInt = 0;
+    let mutable byte_pos = 0;
+    let mutable taken = 0;
     while taken < max_runes and byte_pos < len then {
         byte_pos += 1;
         while byte_pos < len and not s.is_rune_boundary(byte_pos) then {
@@ -183,7 +183,7 @@ private let truncate_to_runes(s: String, max_runes: UInt): String = {
     return s.substring(0..<byte_pos);
 };
 
-private let grouping_size(tc: UInt8, grouping: UInt8): UInt = {
+private let grouping_size(tc: UInt8, grouping: UInt8): Int = {
     if grouping == 0 then {
         return 0;
     };
@@ -219,7 +219,7 @@ private let is_float_format_type_supported(tc: UInt8): Bool = when tc in {
 };
 
 // Insert grouping separators into a digit string.
-private let insert_grouping(digits: String, grouping: UInt8, group_size: UInt): String = {
+private let insert_grouping(digits: String, grouping: UInt8, group_size: Int): String = {
     if grouping == 0 or group_size == 0 or digits.count() <= group_size then {
         return digits;
     };
@@ -239,7 +239,7 @@ private let insert_grouping(digits: String, grouping: UInt8, group_size: UInt): 
         if pos > 0 then {
             result.push_string(sep);
         };
-        let mutable j: UInt = 0;
+        let mutable j = 0;
         while j < group_size and pos + j < len then {
             result.push_byte(digits[pos + j]);
             j += 1;
@@ -256,7 +256,7 @@ private let apply_grouping_to_float_body(body: String, grouping: UInt8): String 
 
     let len = body.count();
     let mutable exp_pos = len;
-    let mutable i: UInt = 0;
+    let mutable i = 0;
     while i < len then {
         let ch = body[i];
         if ch == 'e' or ch == 'E' then {
@@ -290,10 +290,10 @@ private let apply_grouping_to_float_body(body: String, grouping: UInt8): String 
 private let format_float_c_body(
     value: Float64,
     type_char: UInt8,
-    precision: UInt,
+    precision: Int,
     alt_form: Bool,
 ): String = {
-    let cstr = __koral_format_float64(value, type_char, Int(precision), alt_form);
+    let cstr = __koral_format_float64(value, type_char, precision, alt_form);
     return String.from_cstring_unchecked(cstr);
 };
 
@@ -522,7 +522,7 @@ given UInt64: Formattable {
 // Fixed-point format body (no sign prefix).
 private let format_fixed_body(
     f: Float64,
-    precision: UInt,
+    precision: Int,
     grouping: UInt8,
     alt_form: Bool,
 ): String = {
@@ -533,7 +533,7 @@ private let format_fixed_body(
 // Scientific notation format body (no sign prefix).
 private let format_scientific_body(
     f: Float64,
-    frac_digits: UInt,
+    frac_digits: Int,
     uppercase: Bool,
     alt_form: Bool,
 ): String = {
@@ -544,13 +544,13 @@ private let format_scientific_body(
 // Auto format body — selects fixed or scientific like Python's g/G.
 private let format_auto_body(
     f: Float64,
-    precision: UInt,
+    precision: Int,
     uppercase: Bool,
     alt_form: Bool,
     grouping: UInt8,
 ): String = {
     let tc: UInt8 = if uppercase then 'G' else 'g';
-    let p = if precision == 0 then UInt(1) else precision;
+    let p = if precision == 0 then 1 else precision;
     let body = format_float_c_body(f, tc, p, alt_form);
     return apply_grouping_to_float_body(body, grouping);
 };
@@ -591,7 +591,7 @@ given Float64: Formattable {
         };
 
         let f = if is_negative then 0.0 - self else self;
-        let precision = if fmt.precision >= 0 then UInt(fmt.precision) else UInt(6);
+        let precision = if fmt.precision >= 0 then fmt.precision else 6;
 
         // Percentage mode: multiply by 100
         let value = if tc == '%' then f * 100.0 else f;
@@ -664,7 +664,7 @@ given String: Formattable {
         };
 
         // Precision counts runes, so truncation walks to a rune boundary.
-        let out = if fmt.precision >= 0 then truncate_to_runes(self, UInt(fmt.precision))
+        let out = if fmt.precision >= 0 then truncate_to_runes(self, fmt.precision)
         else self;
 
         return apply_padding(out, fmt);

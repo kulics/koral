@@ -385,7 +385,7 @@ public type mutable MonomorphizedProgram(
     // 按 logical_name 倒排的 concrete callable 索引（见 MIRProgram 同名字段：
     // MIR 降级读的是本表，codegen 读的是 MIRProgram 表，两边各自缓存）。
     mutable callables_by_name: Dict[String, List[Pair[DefId, ConcreteCallableInfo]]],
-    mutable callables_by_name_count: UInt,
+    mutable callables_by_name_count: Int,
 );
 
 given MonomorphizedProgram {
@@ -527,11 +527,11 @@ type mutable MonomorphizerStorage(
     mutable trait_target_static_lookup_missing: Set[String],
     mutable declared_static_receiver_lookup_index: Dict[String, List[DefId]],
     mutable materialized_function_def_ids: Set[UInt],
-    mutable declared_static_receiver_indexed_node_count: UInt,
+    mutable declared_static_receiver_indexed_node_count: Int,
 
     // ── Output ───────────────────────────────────────────────────────────────
     mutable generated_nodes: List[TypedDecl],
-    initial_generated_node_count: UInt,
+    initial_generated_node_count: Int,
 
     // ── State ────────────────────────────────────────────────────────────────
     mutable layout_to_template_info: Dict[String, TemplateInfo],
@@ -545,15 +545,15 @@ type mutable MonomorphizerStorage(
     mutable remapped_function_def_ids: Dict[UInt, List[Pair[DefId, Type]]],
     mutable receiver_method_dispatch: Dict[DefId, ReceiverMethodDispatchInfo],
     mutable vtable_requests: List[VtableRequest],
-    mutable conformance_trait_methods_scan_version: Dict[Type, UInt],
+    mutable conformance_trait_methods_scan_version: Dict[Type, Int],
     mutable resolved_function_body_ids: Set[UInt],
     mutable resolved_given_member_body_ids: Set[UInt],
     mutable resolved_global_initializer_ids: Set[UInt],
-    mutable expression_resolve_steps: UInt,
-    expression_resolve_limit: UInt,
+    mutable expression_resolve_steps: Int,
+    expression_resolve_limit: Int,
     mutable expression_resolve_limited: Bool,
-    mutable expression_resolve_total_steps: UInt,
-    expression_resolve_total_limit: UInt,
+    mutable expression_resolve_total_steps: Int,
+    expression_resolve_total_limit: Int,
     mutable expression_resolve_total_limited: Bool,
 
     // ── Cross-module metadata ─────────────────────────────────────────────
@@ -642,9 +642,9 @@ private let is_source_given_decl(decl: TypedDecl): Bool = {
     };
 };
 
-private let mono_env_uint(_name: String, fallback: UInt): UInt = {
+private let mono_env_int(_name: String, fallback: Int): Int = {
     return when env(_name) in {
-        .Some(env_value) then when UInt.parse(env_value.trim_ascii()) in {
+        .Some(env_value) then when Int.parse(env_value.trim_ascii()) in {
             .Ok(value) then value,
             .Error(_) then fallback,
         },
@@ -665,10 +665,10 @@ private let instantiation_kind_profile_name(kind: InstantiationKind): String = {
 // Sort key: given declarations (GivenDecl/GivenTraitDecl/IntrinsicGivenDecl)
 // get priority 0 so they are processed first in the fixpoint loop.  They
 // populate `remappedFunctionDefIds` which other nodes need for method lookup.
-private let mono_decl_given_priority(decl: TypedDecl): UInt = {
+private let mono_decl_given_priority(decl: TypedDecl): Int = {
     return when decl in {
-        .GivenDecl(_, _, _) or .GivenTraitDecl(_, _, _, _, _, _) or .IntrinsicGivenDecl(_, _, _) then UInt(0),
-        _ then UInt(1),
+        .GivenDecl(_, _, _) or .GivenTraitDecl(_, _, _, _, _, _) or .IntrinsicGivenDecl(_, _, _) then 0,
+        _ then 1,
     };
 };
 
@@ -912,7 +912,7 @@ given Monomorphizer {
             Set[String].new(),
             Dict[String, List[DefId]].new(),
             Set[UInt].new(),
-            UInt(0),
+            0,
             // output
             initial_nodes,
             initial_nodes.count(),
@@ -925,15 +925,15 @@ given Monomorphizer {
             Dict[UInt, List[Pair[DefId, Type]]].new(),
             input.generic_templates.receiver_method_dispatch,
             List[VtableRequest].new(),
-            Dict[Type, UInt].new(),
+            Dict[Type, Int].new(),
             Set[UInt].new(),
             Set[UInt].new(),
             Set[UInt].new(),
-            UInt(0),
-            mono_env_uint("KORAL_MONO_EXPR_LIMIT", UInt(0)),
+            0,
+            mono_env_int("KORAL_MONO_EXPR_LIMIT", 0),
             false,
-            UInt(0),
-            mono_env_uint("KORAL_MONO_EXPR_TOTAL_LIMIT", UInt(400000)),
+            0,
+            mono_env_int("KORAL_MONO_EXPR_TOTAL_LIMIT", 400000),
             false,
             // cross-module metadata
             input.global_scope,
@@ -1081,8 +1081,8 @@ given Monomorphizer {
                 entry_name_key,
                 ConcreteMethodEntry(method_symbol, trait_conformance),
             );
-            if m_ref.params.count() > UInt(0) and (m_ref.params[UInt(0)].name == "self" or m_ref.params[
-                UInt(0)
+            if m_ref.params.count() > 0 and (m_ref.params[0].name == "self" or m_ref.params[
+                0
             ].name == "source") then {
                 // The trait's declaration identity arrived as a parameter.
                 // Re-deriving it from the spelling would round-trip an identity
@@ -1497,12 +1497,12 @@ given Monomorphizer {
 
         let mutable dedup_seen_keys = Set[String].new();
         let mutable deduped_nodes = List[TypedDecl].new();
-        let mutable dedup_removed = UInt(0);
+        let mutable dedup_removed = 0;
         for node_ref in self.storage.generated_nodes then {
             when mono_decl_dedup_key(self, node_ref) in {
                 .Some(dedup_key) then {
                     if dedup_seen_keys.contains(dedup_key) then {
-                        dedup_removed += UInt(1);
+                        dedup_removed += 1;
                     } else {
                         dedup_seen_keys.insert(dedup_key);
                         deduped_nodes.push(node_ref);
@@ -1513,18 +1513,18 @@ given Monomorphizer {
                 },
             };
         };
-        if dedup_removed > UInt(0) then {
+        if dedup_removed > 0 then {
             self.storage.generated_nodes = deduped_nodes;
         };
         // removed noisy phase logging
         // removed noisy phase logging
         let mutable unique_def_ids = Set[UInt].new();
-        let mutable duplicate_def_nodes = UInt(0);
+        let mutable duplicate_def_nodes = 0;
         for node_ref in self.storage.generated_nodes then {
             when decl_def_id(node_ref) in {
                 .Some(node_def_id) then {
                     if unique_def_ids.contains(node_def_id.id) then {
-                        duplicate_def_nodes += UInt(1);
+                        duplicate_def_nodes += 1;
                     } else {
                         unique_def_ids.insert(node_def_id.id);
                     };
@@ -1554,11 +1554,11 @@ given Monomorphizer {
         // the enqueue paths are open here — re-resolving really does discover new
         // instantiation requests.
         let mutable fixpoint_prev_count = self.storage.processed_request_keys.count();
-        let mutable fixpoint_rounds: UInt = 0;
+        let mutable fixpoint_rounds = 0;
         let mutable fixpoint_more = true;
-        while fixpoint_more and fixpoint_rounds < UInt(100) then {
-            fixpoint_rounds += UInt(1);
-            self.storage.expression_resolve_total_steps = UInt(0);
+        while fixpoint_more and fixpoint_rounds < 100 then {
+            fixpoint_rounds += 1;
+            self.storage.expression_resolve_total_steps = 0;
             self.storage.expression_resolve_total_limited = false;
             // Swift clears `resolvedStructEnumDefIds` each round so nodes whose
             // types were updated by new instantiations get re-resolved.  Clear
@@ -1574,14 +1574,14 @@ given Monomorphizer {
             // Process by index — resolve_parameterized_type may push new nodes into
             // generated_nodes; keep resolving until all appended nodes are processed.
             let mutable resolved_nodes = List[TypedDecl].new();
-            let mutable ri = UInt(0);
+            let mutable ri = 0;
             while ri < self.storage.generated_nodes.count() then {
                 let node = self.storage.generated_nodes[ri];
                 let node_kind = mono_decl_kind_name(node);
                 // removed noisy phase logging
                 resolved_nodes.push(resolve_types_in_global_node(self, node));
                 // removed noisy phase logging
-                ri += UInt(1);
+                ri += 1;
             };
             self.storage.generated_nodes = resolved_nodes;
             // removed noisy phase logging
@@ -1699,7 +1699,7 @@ given Monomorphizer {
             self.storage.extension_method_def_ids_by_identity,
             self.storage.remapped_function_def_ids,
             Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-            UInt(0),
+            0,
         );
     };
 
@@ -1725,7 +1725,7 @@ given Monomorphizer {
                                     .FunctionType(params, _, _) then {
                                         if not params.is_empty() then {
                                             let param_key = stable_type_key(
-                                                (params[UInt(0)]).param_type,
+                                                (params[0]).param_type,
                                             );
                                             if param_key == self_type_key or param_key.contains(
                                                 self_type_key,
@@ -1740,7 +1740,7 @@ given Monomorphizer {
                                     .ForeignFunctionType(params, _) then {
                                         if not params.is_empty() then {
                                             let param_key = stable_type_key(
-                                                (params[UInt(0)]).param_type,
+                                                (params[0]).param_type,
                                             );
                                             if param_key == self_type_key or param_key.contains(
                                                 self_type_key,
@@ -1755,7 +1755,7 @@ given Monomorphizer {
                                     _ then {},
                                 };
                             };
-                            selected_def_id = matched or else (candidates[UInt(0)]).first;
+                            selected_def_id = matched or else (candidates[0]).first;
                         };
                     },
                     .None() then {},
@@ -1775,7 +1775,7 @@ given Monomorphizer {
                                     .FunctionType(params, _, _) then {
                                         if not params.is_empty() then {
                                             let param_key = stable_type_key(
-                                                (params[UInt(0)]).param_type,
+                                                (params[0]).param_type,
                                             );
                                             if param_key == self_type_key or param_key.contains(
                                                 self_type_key,
@@ -1790,7 +1790,7 @@ given Monomorphizer {
                                     .ForeignFunctionType(params, _) then {
                                         if not params.is_empty() then {
                                             let param_key = stable_type_key(
-                                                (params[UInt(0)]).param_type,
+                                                (params[0]).param_type,
                                             );
                                             if param_key == self_type_key or param_key.contains(
                                                 self_type_key,
@@ -1805,7 +1805,7 @@ given Monomorphizer {
                                     _ then {},
                                 };
                             };
-                            selected_def_id = matched or else (candidates[UInt(0)]).first;
+                            selected_def_id = matched or else (candidates[0]).first;
                         };
                     },
                     .None() then {},
@@ -1840,7 +1840,7 @@ given Monomorphizer {
         context: CompilerContext,
         expr: TypedExpr,
     ): TypedExpr = {
-        let existing_node_count = UInt(0);
+        let existing_node_count = 0;
         let s = MonomorphizerStorage(
             program.generic_templates,
             List[TypedDecl].new(),
@@ -1864,7 +1864,7 @@ given Monomorphizer {
             Set[String].new(),
             Dict[String, List[DefId]].new(),
             Set[UInt].new(),
-            UInt(0),
+            0,
             List[TypedDecl].new(),
             existing_node_count,
             Dict[String, TemplateInfo].new(),
@@ -1875,15 +1875,15 @@ given Monomorphizer {
             program.remapped_function_def_ids,
             program.receiver_method_dispatch,
             List[VtableRequest].new(),
-            Dict[Type, UInt].new(),
+            Dict[Type, Int].new(),
             Set[UInt].new(),
             Set[UInt].new(),
             Set[UInt].new(),
-            UInt(0),
-            mono_env_uint("KORAL_MONO_EXPR_LIMIT", UInt(0)),
+            0,
+            mono_env_int("KORAL_MONO_EXPR_LIMIT", 0),
             false,
-            UInt(0),
-            mono_env_uint("KORAL_MONO_EXPR_TOTAL_LIMIT", UInt(400000)),
+            0,
+            mono_env_int("KORAL_MONO_EXPR_TOTAL_LIMIT", 400000),
             false,
             program.global_scope,
             program.import_graph,
@@ -2349,7 +2349,7 @@ given Monomorphizer {
         name: String,
     ): Option[DefId] = {
         return when type_def_ids_by_name.get(name) in {
-            .Some(def_ids) then when def_ids.get(UInt(0)) in {
+            .Some(def_ids) then when def_ids.get(0) in {
                 .Some(def_id) then Option[DefId].Some(def_id),
                 .None() then Option[DefId].None(),
             },

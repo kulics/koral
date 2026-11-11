@@ -3353,7 +3353,7 @@ extension TypeChecker {
     case frozenSet(element: Type)
     case frozenDict(key: Type, value: Type)
     case range(element: Type)
-    case fixedArray(size: UInt64, element: Type)
+    case fixedArray(size: Int64, element: Type)
   }
 
   /// `null` -- a pointer literal. It has no type of its own: it JOINS the
@@ -8968,11 +8968,12 @@ extension TypeChecker {
       throw SemanticError.invalidOperation(op: opName, type1: left.type.description, type2: right.type.description)
     }
 
-    // Pointer arithmetic: ptr + UInt or ptr - UInt
+    // Pointer arithmetic: ptr + Int or ptr - Int (a negative offset is raw
+    // C addressing); the offset is a count-domain position.
     if case .pointer = left.type, (op == .plus || op == .minus) {
       var offset = right
-      offset = try coerceLiteral(offset, to: .uint)
-      if offset.type == .uint {
+      offset = try coerceLiteral(offset, to: .int)
+      if offset.type == .int {
         return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
@@ -8982,8 +8983,8 @@ extension TypeChecker {
 
     if case .mutablePointer = left.type, (op == .plus || op == .minus) {
       var offset = right
-      offset = try coerceLiteral(offset, to: .uint)
-      if offset.type == .uint {
+      offset = try coerceLiteral(offset, to: .int)
+      if offset.type == .int {
         return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
@@ -9791,7 +9792,7 @@ extension TypeChecker {
     }
 
     let stringType = builtinStringType()
-    let uintType: Type = .uint
+    let intType: Type = .int
     let mutBytePtrType: Type = .mutablePointer(element: .uint8)
 
     func nextInterpSymbol(_ prefix: String, type: Type, mutable: Bool = false) -> Symbol {
@@ -9853,12 +9854,12 @@ extension TypeChecker {
         left: totalExpr,
         op: .plus,
         right: partCount,
-        type: uintType,
+        type: intType,
         span: .unknown
       )
     }
 
-    let totalSymbol = nextInterpSymbol("total", type: uintType)
+    let totalSymbol = nextInterpSymbol("total", type: intType)
     statements.append(
       .variableDeclaration(identifier: totalSymbol, value: totalExpr, mutable: false)
     )
@@ -9899,10 +9900,10 @@ extension TypeChecker {
       .variableDeclaration(identifier: dataSymbol, value: dataExpr, mutable: false)
     )
 
-    let zeroUInt = TypedExpressionNode.integerLiteral(value: "0", type: uintType)
-    let offsetSymbol = nextInterpSymbol("offset", type: uintType, mutable: true)
+    let zeroInt = TypedExpressionNode.integerLiteral(value: "0", type: intType)
+    let offsetSymbol = nextInterpSymbol("offset", type: intType, mutable: true)
     statements.append(
-      .variableDeclaration(identifier: offsetSymbol, value: zeroUInt, mutable: true)
+      .variableDeclaration(identifier: offsetSymbol, value: zeroInt, mutable: true)
     )
 
     for partSymbol in partSymbols {
@@ -9912,7 +9913,7 @@ extension TypeChecker {
         method: countMethod,
         arguments: []
       )
-      let partLenSymbol = nextInterpSymbol("len", type: uintType)
+      let partLenSymbol = nextInterpSymbol("len", type: intType)
       statements.append(
         .variableDeclaration(identifier: partLenSymbol, value: partLenExpr, mutable: false)
       )
@@ -9941,7 +9942,7 @@ extension TypeChecker {
         left: offsetVar,
         op: .plus,
         right: partLenVar,
-        type: uintType,
+        type: intType,
         span: .unknown
       )
       statements.append(

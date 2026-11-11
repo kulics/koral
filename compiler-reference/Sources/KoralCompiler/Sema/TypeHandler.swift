@@ -1373,11 +1373,11 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     /// 定长数组的包装 struct typedef：形状 → 名字。名字由注册表统一发
     /// （指针命名等递归路径都经过这里），typedef 文本由 CodeGen splice。
     /// 顺序即注册顺序：内层形状先注册，生成的 typedef 天然有序。
-    private var fixedArrayTypedefs: [(name: String, size: UInt64, element: Type)] = []
+    private var fixedArrayTypedefs: [(name: String, size: Int64, element: Type)] = []
     private var fixedArrayNameByKey: [String: String] = [:]
 
     /// 定长数组形状的 typedef 名（首次出现时登记形状）。
-    public func fixedArrayTypeName(size: UInt64, element: Type) -> String {
+    public func fixedArrayTypeName(size: Int64, element: Type) -> String {
         let key = "[\(size)]" + generateCTypeName(element)
         if let existing = fixedArrayNameByKey[key] {
             return existing
@@ -1389,7 +1389,7 @@ public final class TypeHandlerRegistry: @unchecked Sendable {
     }
 
     /// 所有已命名的定长数组形状（CodeGen 生成 typedef 用）。
-    public var usedFixedArrayTypedefs: [(name: String, size: UInt64, element: Type)] {
+    public var usedFixedArrayTypedefs: [(name: String, size: Int64, element: Type)] {
         return fixedArrayTypedefs
     }
 

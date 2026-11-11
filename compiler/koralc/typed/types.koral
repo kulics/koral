@@ -1331,7 +1331,7 @@ public type Type {
     FunctionType(params: List[FunctionParamEntry], return_type: Type, is_sendable: Bool),
     /// 定长数组：`[N]Inner`。C 布局（单字段包装 struct），可变值语义；
     /// 元素只能是 foreign 兼容的类型。
-    FixedArrayType(len: UInt, inner: Type),
+    FixedArrayType(len: Int, inner: Type),
     /// foreign 函数指针：`foreign (A) -> R`。裸 C 函数指针，可为 null。
     ForeignFunctionType(params: List[FunctionParamEntry], return_type: Type),
     StructureType(def_id: DefId),
@@ -1584,14 +1584,14 @@ public let stable_type_key(t: Type): String = {
 };
 
 public let type_to_string(t: Type): String = {
-    return type_to_string_impl(t, UInt(0), false);
+    return type_to_string_impl(t, 0, false);
 };
 
 /// 诊断专用渲染：`sendable` 函数类型 / trait object 带 `sendable` 前缀。
 /// 普通 `type_to_string` 是 mangling 的输入，必须保持 flag 擦除；报错文本
 /// 反过来必须让读者分清 `() -> Void` 与 `sendable () -> Void`。
 public let type_to_string_diagnostic(t: Type): String = {
-    return type_to_string_impl(t, UInt(0), true);
+    return type_to_string_impl(t, 0, true);
 };
 
 /// The plain same-width counterpart of an integer type. A wrapping type maps
@@ -1621,7 +1621,7 @@ public let sendable_prefix_text(show: Bool): String = {
     return if show then "sendable " else "";
 };
 
-private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): String = {
+private let type_to_string_impl(t: Type, depth: Int, show_sendable: Bool): String = {
     let chain = split_type_string_wrappers(t);
     let inner = chain.inner;
     let inner_string = when inner in {
@@ -1652,10 +1652,10 @@ private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): Stri
         .NeverType() then "Never",
         .FunctionType(params, return_type, is_sendable) then {
             // depth limit to prevent stack overflow on deeply nested types
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "(...) -> ...";
             };
-            let next_depth = depth + UInt(1);
+            let next_depth = depth + 1;
             let mutable out = StringBuilder.new();
             if show_sendable and is_sendable then {
                 out.push_string("sendable ");
@@ -1682,66 +1682,66 @@ private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): Stri
         .StructureType(def_id) then def_id_spelling(def_id),
         .EnumType(def_id) then def_id_spelling(def_id),
         .ReferenceType(inner) or .MutableReferenceType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "...";
             };
             let mutable out = StringBuilder.new();
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .BorrowedReferenceType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "ref ...";
             };
             let mutable out = StringBuilder.new();
             out.push_string("ref ");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .MutableBorrowedReferenceType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "ref mutable ...";
             };
             let mutable out = StringBuilder.new();
             out.push_string("ref mutable ");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .PointerType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "* ...";
             };
             let mutable out = StringBuilder.new();
             out.push_string("*");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .MutablePointerType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "*mutable ...";
             };
             let mutable out = StringBuilder.new();
             out.push_string("*mutable");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .WeakReferenceType(inner) or .MutableWeakReferenceType(inner) then {
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return "?...";
             };
             let mutable out = StringBuilder.new();
             out.push_string("?");
-            out.push_string(type_to_string_impl(inner, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(inner, depth + 1, show_sendable));
             out.to_string()
         },
         .OpaqueType(def_id) then def_id_spelling(def_id),
         .GenericParameter(name) then name,
         .GenericStruct(template_def_id, args) or .GenericEnum(template_def_id, args) then {
             let template = def_id_spelling(template_def_id);
-            if depth > UInt(200) then {
+            if depth > 200 then {
                 return template + "[...]";
             };
-            let next_depth = depth + UInt(1);
+            let next_depth = depth + 1;
             let mutable out = StringBuilder.new();
             out.push_string(template);
             out.push_byte('[');
@@ -1763,7 +1763,7 @@ private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): Stri
         .TraitObject(trait_def_id, _, is_sendable) then "\(sendable_prefix_text(show_sendable and is_sendable))\(def_id_spelling(trait_def_id))",
         .TypeVar(tv) then tv.display(),
         .Unknown() then "?",
-        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string_impl(inner, depth + UInt(1), show_sendable))",
+        .FixedArrayType(len, inner) then "[\(len)]\(type_to_string_impl(inner, depth + 1, show_sendable))",
         .ForeignFunctionType(params, return_type) then {
             let mutable out = StringBuilder.new();
             out.push_string("foreign (");
@@ -1772,11 +1772,11 @@ private let type_to_string_impl(t: Type, depth: UInt, show_sendable: Bool): Stri
                 if not first then {
                     out.push_string(", ");
                 };
-                out.push_string(type_to_string_impl(p.param_type, depth + UInt(1), show_sendable));
+                out.push_string(type_to_string_impl(p.param_type, depth + 1, show_sendable));
                 first = false;
             };
             out.push_string(") -> ");
-            out.push_string(type_to_string_impl(return_type, depth + UInt(1), show_sendable));
+            out.push_string(type_to_string_impl(return_type, depth + 1, show_sendable));
             out.to_string()
         },
     };
@@ -1789,7 +1789,7 @@ public let stable_hash_combine_value(seed: UInt, value: UInt): UInt = {
 };
 
 public let stable_hash_combine_string(seed: UInt, text: String): UInt = {
-    let mutable hash = stable_hash_combine_value(seed, text.count());
+    let mutable hash = stable_hash_combine_value(seed, text.count().hash());
     for byte in text.bytes() then {
         hash = stable_hash_combine_value(hash, UInt(byte));
     };
@@ -1888,7 +1888,7 @@ public let stable_type_hash(t: Type): UInt = {
         },
         .FunctionType(params, return_type, _) then {
             hash = stable_hash_combine_value(hash, UInt(16));
-            hash = stable_hash_combine_value(hash, params.count());
+            hash = stable_hash_combine_value(hash, params.count().hash());
             for entry in params then {
                 hash = stable_hash_combine_value(hash, stable_type_hash_parameter(entry));
             };
@@ -1944,7 +1944,7 @@ public let stable_type_hash(t: Type): UInt = {
                 hash,
                 if template_def_id.is_valid() then template_def_id.id else UInt(0),
             );
-            hash = stable_hash_combine_value(hash, args.count());
+            hash = stable_hash_combine_value(hash, args.count().hash());
             for arg in args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
             };
@@ -1955,7 +1955,7 @@ public let stable_type_hash(t: Type): UInt = {
                 hash,
                 if template_def_id.is_valid() then template_def_id.id else UInt(0),
             );
-            hash = stable_hash_combine_value(hash, args.count());
+            hash = stable_hash_combine_value(hash, args.count().hash());
             for arg in args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
             };
@@ -1966,7 +1966,7 @@ public let stable_type_hash(t: Type): UInt = {
         },
         .ModuleType(info) then {
             hash = stable_hash_combine_value(hash, UInt(29));
-            hash = stable_hash_combine_value(hash, info.module_path.count());
+            hash = stable_hash_combine_value(hash, info.module_path.count().hash());
             for part in info.module_path then {
                 hash = stable_hash_combine_string(hash, part);
             };
@@ -1981,7 +1981,7 @@ public let stable_type_hash(t: Type): UInt = {
                 hash,
                 if trait_def_id.is_valid() then trait_def_id.id else UInt(0),
             );
-            hash = stable_hash_combine_value(hash, type_args.count());
+            hash = stable_hash_combine_value(hash, type_args.count().hash());
             for arg in type_args then {
                 hash = stable_hash_combine_value(hash, stable_type_hash(arg));
             };
@@ -1991,7 +1991,7 @@ public let stable_type_hash(t: Type): UInt = {
         },
         .FixedArrayType(len, inner) then {
             hash = stable_hash_combine_value(hash, UInt(33));
-            hash = stable_hash_combine_value(hash, len);
+            hash = stable_hash_combine_value(hash, len.hash());
             hash = stable_hash_combine_value(hash, stable_type_hash(inner));
         },
         .ForeignFunctionType(params, return_type) then {

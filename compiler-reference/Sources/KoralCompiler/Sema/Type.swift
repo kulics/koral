@@ -254,7 +254,7 @@ public indirect enum Type: CustomStringConvertible {
   case function(parameters: [Parameter], returns: Type, isSendable: Bool)
   /// Fixed-size array: `[N]Element`. C layout (`T data[N]`), mutable value
   /// semantics; only FFI-shaped elements cross into one.
-  case fixedArray(size: UInt64, element: Type)
+  case fixedArray(size: Int64, element: Type)
   /// A bare C function pointer: `foreign (A) -> R`. Nullable like `*T`.
   case foreignFunction(parameters: [Parameter], returns: Type)
   case structure(defId: DefId)

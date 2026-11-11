@@ -9,9 +9,9 @@ using "std" { ... };
 /// In-memory byte stream with a single cursor, supporting `Reader`, `Writer`, and `Seeker`.
 public type mutable ByteBuffer(
     mutable data: *mutable UInt8,
-    mutable len: UInt,
-    mutable cap: UInt,
-    mutable cursor: UInt,
+    mutable len: Int,
+    mutable cap: Int,
+    mutable cursor: Int,
 );
 
 /// Implements `Drop`, freeing the buffer's heap allocation.
@@ -32,9 +32,13 @@ given ByteBuffer {
     };
 
     /// Create an empty byte buffer with room for at least `cap` bytes.
-    public with_capacity(cap: UInt): ByteBuffer = {
-        let actual_cap = if cap < 1 then UInt(1) else cap;
-        let data = alloc_memory[UInt8](actual_cap);
+    /// Panics when `cap` is negative.
+    public with_capacity(cap: Int): ByteBuffer = {
+        if cap < 0 then {
+            panic("ByteBuffer with_capacity negative capacity");
+        };
+        let actual_cap = if cap < 1 then 1 else cap;
+        let data = alloc_memory[UInt8](UInt(actual_cap));
         return ByteBuffer(data, 0, actual_cap, 0);
     };
 
@@ -46,15 +50,15 @@ given ByteBuffer {
     /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer = {
         let len = bytes.count();
-        let cap = if len < 1 then UInt(1) else len;
-        let data = alloc_memory[UInt8](cap);
+        let cap = if len < 1 then 1 else len;
+        let data = alloc_memory[UInt8](UInt(cap));
         if len > 0 then {
-            copy_memory(data, bytes.borrow_ptr(), len);
+            copy_memory(data, bytes.borrow_ptr(), UInt(len));
         };
         return ByteBuffer(data, len, cap, 0);
     };
 
-    private ensure_capacity(self, min_capacity: UInt): Void = {
+    private ensure_capacity(self, min_capacity: Int): Void = {
         if min_capacity <= self.cap then {
             return;
         };
@@ -62,9 +66,9 @@ given ByteBuffer {
         if new_cap < min_capacity then {
             new_cap = min_capacity;
         };
-        let new_data = alloc_memory[UInt8](new_cap);
+        let new_data = alloc_memory[UInt8](UInt(new_cap));
         if self.len > 0 then {
-            copy_memory(new_data, self.data, self.len);
+            copy_memory(new_data, self.data, UInt(self.len));
         };
         dealloc_memory(self.data);
         self.data = new_data;
@@ -76,26 +80,26 @@ given ByteBuffer {
 given ByteBuffer: Reader {
 
     /// Read bytes at the cursor into `into[span]`, returning the count read and stopping at the end of the buffer.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
 
         let available = self.len - self.cursor;
         if available == 0 then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
 
         let want = span.len();
         let n = if available < want then available else want;
         let dst_ptr = into.borrow_mut_ptr() + start;
         let src_ptr = self.data + self.cursor;
-        copy_memory(dst_ptr, src_ptr, n);
+        copy_memory(dst_ptr, src_ptr, UInt(n));
         self.cursor += n;
-        return Result[UInt].Ok(n);
+        return Result[Int].Ok(n);
     };
 };
 
@@ -103,12 +107,12 @@ given ByteBuffer: Reader {
 given ByteBuffer: Writer {
 
     /// Write bytes from `from[span]` at the cursor, returning the count written and growing the buffer past its end.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
 
         let n = span.len();
@@ -116,10 +120,10 @@ given ByteBuffer: Writer {
         let write_end = write_start + n;
         let new_len = if write_end > self.len then write_end else self.len;
         self.ensure_capacity(new_len);
-        copy_memory(self.data + write_start, from.borrow_ptr() + start, n);
+        copy_memory(self.data + write_start, from.borrow_ptr() + start, UInt(n));
         self.len = new_len;
         self.cursor = write_end;
-        return Result[UInt].Ok(n);
+        return Result[Int].Ok(n);
     };
 
     /// Flush is a no-op here, since writes already land in the buffer.
@@ -132,61 +136,59 @@ given ByteBuffer: Seeker {
     /// Move the cursor to `pos` and return its offset, failing for targets outside the buffer.
     /// Out-of-range targets — including offsets that overflow `Int64` arithmetic — fail
     /// with `Result.Error` and never panic.
-    public seek(self, pos: SeekOrigin): Result[UInt64] = {
-        let len64 = UInt64(self.len);
-        let mutable target: UInt64 = 0;
+    public seek(self, pos: SeekOrigin): Result[Int] = {
+        let len = self.len;
+        let mutable target = 0;
         when pos in {
             .Start(offset) then {
                 target = offset;
             },
             .Current(offset) then {
-                let base = UInt64(self.cursor);
+                let base = self.cursor;
+                // Overflow-safe on either sign: compare against the room on
+                // the target side instead of forming `base + offset`, so an
+                // extreme offset (`Int.min_value()`) errors out without ever
+                // touching an overflowing add.
                 if offset < 0 then {
-                    let mag = UInt64(-(offset + 1)) + 1;
-                    if mag > base then {
-                        return Result[UInt64].Error(
+                    if offset < 0 - base then {
+                        return Result[Int].Error(
                             IoError.Other("invalid seek to negative or out-of-range offset"),
                         );
                     };
-                    target = base - mag;
+                    target = base + offset;
                 } else {
-                    let add = UInt64(offset);
-                    if add > len64 - base then {
-                        return Result[UInt64].Error(
+                    if offset > len - base then {
+                        return Result[Int].Error(
                             IoError.Other("invalid seek to negative or out-of-range offset"),
                         );
                     };
-                    target = base + add;
+                    target = base + offset;
                 };
             },
             .End(offset) then {
-                if offset < 0 then {
-                    let mag = UInt64(-(offset + 1)) + 1;
-                    if mag > len64 then {
-                        return Result[UInt64].Error(
-                            IoError.Other("invalid seek to negative or out-of-range offset"),
-                        );
-                    };
-                    target = len64 - mag;
-                } else {
-                    let add = UInt64(offset);
-                    if add > 0 then {
-                        return Result[UInt64].Error(
-                            IoError.Other("invalid seek to negative or out-of-range offset"),
-                        );
-                    };
-                    target = len64;
+                // Past-the-end targets are invalid for a buffer; only 0 and
+                // backward offsets are meaningful.
+                if offset > 0 then {
+                    return Result[Int].Error(
+                        IoError.Other("invalid seek to negative or out-of-range offset"),
+                    );
                 };
+                if offset < 0 - len then {
+                    return Result[Int].Error(
+                        IoError.Other("invalid seek to negative or out-of-range offset"),
+                    );
+                };
+                target = len + offset;
             },
         };
 
-        if target > len64 then {
-            return Result[UInt64].Error(
+        if target < 0 or target > len then {
+            return Result[Int].Error(
                 IoError.Other("invalid seek to negative or out-of-range offset"),
             );
         };
 
-        self.cursor = UInt(target);
-        return Result[UInt64].Ok(target);
+        self.cursor = target;
+        return Result[Int].Ok(target);
     };
 };

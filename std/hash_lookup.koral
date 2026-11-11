@@ -47,20 +47,22 @@ let bucket_set_tag[K: Any, V: Any](
 /// never delete, so they contain no tombstones and the Deleted case simply
 /// never fires for them.
 // capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
+// 槽位是位置（计数域 `Int`），散列是位域（`UInt`）：`h & mask` 把散列掩码成位置的
+// 那一行是两个域唯一的交汇点，之后的游走（`idx = (idx + 1) & mask`）全在 Int 里。
 let find_hash_slot[K: Hash, V: Any](
     buckets: *mutable HashBucket[K, V],
-    capacity: UInt,
+    capacity: Int,
     key: K,
-): Option[UInt] = {
+): Option[Int] = {
     // 尚未分配桶数组（空表）：没有可命中的槽位。
-    if capacity == UInt(0) then {
-        return Option[UInt].None();
+    if capacity == 0 then {
+        return Option[Int].None();
     };
     let mask = capacity - 1;
     let h = hash_mix(key.hash());
-    let mutable idx = h & mask;
-    let mutable first_deleted = Option[UInt].None();
-    let mutable probes: UInt = 0;
+    let mutable idx = Int(h & UInt(mask));
+    let mutable first_deleted = Option[Int].None();
+    let mutable probes = 0;
     while probes < capacity then {
         let bucket_tag = (buckets + idx).tag;
         if bucket_tag == UInt(0) then {
@@ -69,20 +71,20 @@ let find_hash_slot[K: Hash, V: Any](
                     return first_deleted;
                 },
                 .None() then {
-                    return Option[UInt].Some(idx);
+                    return Option[Int].Some(idx);
                 },
             };
         } else if bucket_tag == UInt(2) then {
             when first_deleted in {
                 .None() then {
-                    first_deleted = Option[UInt].Some(idx);
+                    first_deleted = Option[Int].Some(idx);
                 },
                 _ then {},
             };
         } else {
             // Occupied
             if (buckets + idx).key == key then {
-                return Option[UInt].Some(idx);
+                return Option[Int].Some(idx);
             };
         };
         idx = (idx + 1) & mask;

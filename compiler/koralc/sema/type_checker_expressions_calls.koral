@@ -238,7 +238,7 @@ given TypeChecker {
     raw_generic_function_param_type(
         self,
         template: GenericFunctionTemplate,
-        param_index: UInt,
+        param_index: Int,
     ): Option[Type] = {
         if param_index >= template.parameters.count() then {
             return Option[Type].None();
@@ -427,7 +427,7 @@ given TypeChecker {
                     if not path.is_empty() then {
                         let enum_case_param_types = self.get_enum_case_field_types(
                             expected_type,
-                            path[path.count() - UInt(1)],
+                            path[path.count() - 1],
                         );
                         if not enum_case_param_types.is_empty() then {
                             return enum_case_param_types;
@@ -549,7 +549,7 @@ given TypeChecker {
                 // instead of falling through to a same-named global.
                 generic_scope.define_generic_param(tp.name);
             };
-            let mutable idx: UInt = 0;
+            let mutable idx = 0;
             while idx < template.parameters.count() and idx < typed_args.count() then {
                 let mutable expected_type = self.resolve_type_in_scope(
                     template.parameters[idx].param_type,
@@ -729,10 +729,10 @@ given TypeChecker {
             .MemberPath(base, path) then {
                 let mutable current = base.expr_type;
                 let mutable mutable_path = self.can_take_mutable_ref_of_expr(base);
-                let mutable idx: UInt = 0;
+                let mutable idx = 0;
                 while idx < path.count() then {
                     let segment = path[idx];
-                    let is_last = idx + UInt(1) == path.count();
+                    let is_last = idx + 1 == path.count();
                     let mutable segment_type = segment.symbol_type;
                     if self.is_mutable_ref_like_type(current) then {
                         mutable_path = true;
@@ -754,7 +754,7 @@ given TypeChecker {
                         mutable_path = false;
                     };
                     current = segment_type;
-                    idx += UInt(1);
+                    idx += 1;
                 };
                 false
             },
@@ -780,7 +780,7 @@ given TypeChecker {
             .MemberPath(base, path) then {
                 let mutable current = base.expr_type;
                 let mutable can_take = type_is_any_ref(current) or type_is_raw_pointer(current) or self.can_take_ref_of_expr(base);
-                let mutable idx: UInt = 0;
+                let mutable idx = 0;
                 while not can_take and idx < path.count() then {
                     let mutable segment_type = path[idx].symbol_type;
                     can_take = self.is_ref_like_assignment_type(current) or self.is_ref_like_assignment_type(
@@ -831,7 +831,7 @@ given TypeChecker {
             };
             if all_args_rendered then {
                 let mutable rendered_call = callee_text + "(";
-                let mutable idx: UInt = 0;
+                let mutable idx = 0;
                 while idx < rendered_args.count() then {
                     if idx > 0 then {
                         rendered_call = rendered_call + ", ";
@@ -848,7 +848,7 @@ given TypeChecker {
         return when callee in {
             .Identifier(name, _) then Option[String].Some(name + "("),
             .MemberPath(_, path, _) then if path.is_empty() then Option[String].None()
-            else Option[String].Some(path[path.count() - UInt(1)] + "("),
+            else Option[String].Some(path[path.count() - 1] + "("),
             .StaticMethodCall(_, _, method_name, _, _) then Option[String].Some(
                 method_name + "(",
             ),
@@ -897,7 +897,7 @@ given TypeChecker {
         };
         let param_count = when callable_type in {
             .FunctionType(fn_params, _, _) or .ForeignFunctionType(fn_params, _) then fn_params.count(),
-            _ then UInt(0),
+            _ then 0,
         };
         if callable_type is not .FunctionType(...) and callable_type is not .ForeignFunctionType(_, _) then {
             return true;
@@ -943,7 +943,7 @@ given TypeChecker {
         };
     };
 
-    positional_param_specs_for_count(self, count: UInt): List[FunctionParamSpec] = {
+    positional_param_specs_for_count(self, count: Int): List[FunctionParamSpec] = {
         let mutable specs = List[FunctionParamSpec].new();
         for _ in 0..<count then {
             specs.push(FunctionParamSpec("", false, false, false, Option[Expr].None()));
@@ -965,10 +965,10 @@ given TypeChecker {
     normalize_param_specs_for_count(
         self,
         specs: List[FunctionParamSpec],
-        expected_count: UInt,
+        expected_count: Int,
     ): List[FunctionParamSpec] = {
-        if specs.count() == expected_count + UInt(1) and not specs.is_empty() and specs[
-            UInt(0)
+        if specs.count() == expected_count + 1 and not specs.is_empty() and specs[
+            0
         ].name == "self" then {
             return self.drop_first_param_specs(specs);
         };
@@ -978,9 +978,9 @@ given TypeChecker {
         return self.positional_param_specs_for_count(expected_count);
     };
 
-    declared_call_param_count(self, specs: List[FunctionParamSpec]): UInt = {
-        if not specs.is_empty() and specs[UInt(0)].name == "self" then {
-            return if specs.count() <= UInt(1) then UInt(0) else specs.count() - UInt(1);
+    declared_call_param_count(self, specs: List[FunctionParamSpec]): Int = {
+        if not specs.is_empty() and specs[0].name == "self" then {
+            return if specs.count() <= 1 then 0 else specs.count() - 1;
         };
         return specs.count();
     };
@@ -988,8 +988,8 @@ given TypeChecker {
     drop_receiver_param_specs(self, method: Symbol): List[FunctionParamSpec] = {
         let param_specs = self.context().get_param_specs(method.def_id) or else List[FunctionParamSpec].new(
         );
-        let expected_count = if self.method_param_count(method) == UInt(0) then UInt(0)
-        else self.method_param_count(method) - UInt(1);
+        let expected_count = if self.method_param_count(method) == 0 then 0
+        else self.method_param_count(method) - 1;
         return self.normalize_param_specs_for_count(param_specs, expected_count);
     };
 
@@ -1208,9 +1208,9 @@ given TypeChecker {
             .Ok(methods) then {
                 if methods.get(method_name) is .Some(member) then {
                     let mutable specs = List[FunctionParamSpec].new();
-                    let mutable idx: UInt = if member.params.is_empty() or member.params[
-                        UInt(0)
-                    ].name != "self" then UInt(0) else UInt(1);
+                    let mutable idx = if member.params.is_empty() or member.params[
+                        0
+                    ].name != "self" then 0 else 1;
                     for p in member.params.lazy().skip(idx) then {
                         let has_default = p.default_value is .Some(_);
                         specs.push(
@@ -1312,12 +1312,10 @@ given TypeChecker {
             .None() then {
                 let signature = self.resolve_method_signature(base_type, method_name);
                 when signature in {
-                    .Some(sig) then if self.method_param_count(sig) == UInt(0) then UInt(
-                        0,
-                    ) else self.method_param_count(sig) - UInt(1),
-                    .None() then if self.method_param_count(method) == UInt(0) then UInt(
-                        0,
-                    ) else self.method_param_count(method) - UInt(1),
+                    .Some(sig) then if self.method_param_count(sig) == 0 then 0
+                    else self.method_param_count(sig) - 1,
+                    .None() then if self.method_param_count(method) == 0 then 0
+                    else self.method_param_count(method) - 1,
                 }
             },
         };
@@ -1379,7 +1377,7 @@ given TypeChecker {
                         if not path.is_empty() then {
                             let bound_specs = self.resolve_generic_bound_method_param_specs(
                                 base_name,
-                                path[path.count() - UInt(1)],
+                                path[path.count() - 1],
                             );
                             if not bound_specs.is_empty() then {
                                 return bound_specs;
@@ -1412,7 +1410,7 @@ given TypeChecker {
                     .MemberPath(base, path) where not path.is_empty() then {
                         return when self.resolve_method_signature(
                             base.expr_type,
-                            self.context().symbol_name(path[path.count() - UInt(1)]),
+                            self.context().symbol_name(path[path.count() - 1]),
                         ) in {
                             .Some(sig) then self.drop_receiver_param_specs(sig),
                             .None() then self.positional_param_specs_for_function_type(
@@ -1446,7 +1444,7 @@ given TypeChecker {
             .Identifier(name, _) then name,
             .GenericInstantiation(base, _, _) then base,
             .MemberPath(_, path, _) then if path.is_empty() then "function expression"
-            else path[path.count() - UInt(1)],
+            else path[path.count() - 1],
             .StaticMethodCall(_, _, method_name, _, _) or .QualifiedMethodCall(_, _, method_name, _, _)
             or .QualifiedGenericMethodCall(_, _, _, method_name, _, _) then method_name,
             _ then "function expression",
@@ -1471,7 +1469,7 @@ given TypeChecker {
         for _ in param_specs then {
             ordered.push(Option[Expr].None());
         };
-        let mutable positional_index: UInt = 0;
+        let mutable positional_index = 0;
         let mutable seen_named = false;
         for arg in args then {
             when arg in {
@@ -1487,7 +1485,7 @@ given TypeChecker {
                     };
                     let field_index = when found_index in {
                         .Some(idx) then idx,
-                        .None() then UInt(0),
+                        .None() then 0,
                     };
                     if not param_specs[field_index].named then {
                         self.push_diagnostic_at_span(
@@ -1521,7 +1519,7 @@ given TypeChecker {
                         positional_index += 1;
                     };
                     if positional_index >= param_specs.count() then {
-                        let mutable required_index: UInt = 0;
+                        let mutable required_index = 0;
                         let mutable reported = false;
                         while required_index < param_specs.count() then {
                             if param_specs[required_index].named and ordered[
@@ -1568,7 +1566,7 @@ given TypeChecker {
                                 "Missing positional argument '\(spec.name)' for '\(call_description)'"
                             };
                             let diagnostic_span = if args.is_empty() then call_span
-                            else expr_span(args[UInt(0)]);
+                            else expr_span(args[0]);
                             self.push_diagnostic_at_span(message, diagnostic_span);
                             return Option[List[Expr]].None();
                         },

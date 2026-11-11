@@ -10,7 +10,7 @@
 // CstParser
 // ============================================================================
 
-public type mutable CstParser(tokens: List[Token], mutable pos: UInt);
+public type mutable CstParser(tokens: List[Token], mutable pos: Int);
 
 given CstParser {
 
@@ -99,7 +99,7 @@ given CstParser {
     /// The index of the first token at or after `i` that is not a newline.
     /// The parser's `peek()` skips newlines; the scanner must too, or a
     /// multi-line call argument makes it see `Newline` where the parser sees `(`.
-    private sig_index_at(self, i: UInt): UInt = {
+    private sig_index_at(self, i: Int): Int = {
         let mutable j = i;
         while j < self.tokens.count() and self.tokens[j] is .Newline() then {
             j += 1;
@@ -111,7 +111,7 @@ given CstParser {
     /// can begin a type. Mirrors `is_type_start`, except that `*` only starts
     /// a type when followed by a type head: `f(*p)` dereferences, it does not
     /// cast.
-    private token_starts_type_at(self, raw_i: UInt): Bool = {
+    private token_starts_type_at(self, raw_i: Int): Bool = {
         let i = self.sig_index_at(raw_i);
         if i >= self.tokens.count() then {
             return false;
@@ -142,13 +142,13 @@ given CstParser {
     };
 
     /// The index just past one type starting at `start_index`, or `None`.
-    private scan_type_shape_at(self, raw_start: UInt): Option[UInt] = {
+    private scan_type_shape_at(self, raw_start: Int): Option[Int] = {
         let mutable i = self.sig_index_at(raw_start);
         let mutable more_prefixes = true;
         while more_prefixes then {
             i = self.sig_index_at(i);
             if i >= self.tokens.count() then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             if self.tokens[i] is .KwWeakref() then {
                 i += 1;
@@ -178,26 +178,26 @@ given CstParser {
         };
         i = self.sig_index_at(i);
         if i >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[i] is .KwSelfType() then {
-            return Option[UInt].Some(i + 1);
+            return Option[Int].Some(i + 1);
         };
         if self.tokens[i] is .LBracket() then {
             // `[N]Type` -- fixed array: `[` int-literal `]` then the element.
             let len_i = self.sig_index_at(i + 1);
             if len_i >= self.tokens.count() then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             if self.tokens[len_i] is not .IntLit(_) then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             let rb = self.sig_index_at(len_i + 1);
             if rb >= self.tokens.count() then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             if self.tokens[rb] is not .RBracket() then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             return self.scan_type_shape_at(rb + 1);
         };
@@ -207,7 +207,7 @@ given CstParser {
             // that holds exactly one type. A type LIST without the `->` is
             // not a type.
             let after_params = self.scan_type_list_at(i) or else {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             let arrow_index = self.sig_index_at(after_params);
             if arrow_index < self.tokens.count() and self.tokens[arrow_index] is .Arrow() then {
@@ -218,43 +218,43 @@ given CstParser {
         if self.tokens[i] is .Ident(name) then {
             let after_name = self.sig_index_at(i + 1);
             if not self.is_type_start(.Ident(name)) then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             if after_name < self.tokens.count() and self.tokens[after_name] is .LBracket() then {
                 return self.scan_type_list_at(after_name);
             };
-            return Option[UInt].Some(after_name);
+            return Option[Int].Some(after_name);
         };
-        return Option[UInt].None();
+        return Option[Int].None();
     };
 
     /// The index just past a `[` `<type-list>` `]` (or `(` `<type-list>` `)`)
     /// run starting at `start_index`, or `None`.
-    private scan_type_list_at(self, raw_start: UInt): Option[UInt] = {
+    private scan_type_list_at(self, raw_start: Int): Option[Int] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let is_bracket_list = self.tokens[start_index] is .LBracket();
         let is_paren_list = self.tokens[start_index] is .LParen();
         if not is_bracket_list and not is_paren_list then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let mutable i = start_index + 1;
         let mutable done = false;
-        let mutable result = Option[UInt].None();
+        let mutable result = Option[Int].None();
         while not done then {
             i = self.sig_index_at(i);
             if i >= self.tokens.count() then {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             let token_is_close = if is_bracket_list then self.tokens[i] is .RBracket()
             else self.tokens[i] is .RParen();
             if token_is_close then {
                 done = true;
-                result = Option[UInt].Some(i + 1);
+                result = Option[Int].Some(i + 1);
                 continue;
             };
             if self.tokens[i] is .Comma() then {
@@ -263,7 +263,7 @@ given CstParser {
             };
             let next = self.scan_type_shape_at(i) or else {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             i = next;
@@ -276,23 +276,23 @@ given CstParser {
     /// closing `)`: an empty `()` is not a type, a trailing comma disqualifies
     /// (`(T,)`), and a type LIST is only a type with the `->` that turns it
     /// into a function type.
-    private scan_single_type_group_at(self, raw_start: UInt): Option[UInt] = {
+    private scan_single_type_group_at(self, raw_start: Int): Option[Int] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() or self.tokens[start_index] is not .LParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let after_open = self.sig_index_at(start_index + 1);
         if after_open >= self.tokens.count() or self.tokens[after_open] is .RParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let after_type = self.scan_type_shape_at(after_open) or else {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let rp_index = self.sig_index_at(after_type);
         if rp_index >= self.tokens.count() or self.tokens[rp_index] is not .RParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
-        return Option[UInt].Some(rp_index + 1);
+        return Option[Int].Some(rp_index + 1);
     };
 
     /// Whether `expr` is written as a TYPE NAME: a bare upper-first identifier
@@ -348,7 +348,7 @@ given CstParser {
     /// `)`, or after an optional return type written there. Reads the buffer
     /// only. This replaces a trial that parsed the whole lambda (body included)
     /// speculatively and rolled back on any failure.
-    private shape_is_lambda_at(self, raw_start: UInt): Bool = {
+    private shape_is_lambda_at(self, raw_start: Int): Bool = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return false;
@@ -417,7 +417,7 @@ given CstParser {
     };
 
     /// After a lambda's parameter list: `=>`, or `: Type =>`.
-    private lambda_return_clause_follows_at(self, raw_start: UInt): Bool = {
+    private lambda_return_clause_follows_at(self, raw_start: Int): Bool = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
             return false;
@@ -439,25 +439,25 @@ given CstParser {
     /// `None`. This is the SHAPE of the qualification prefix `base(Trait)` of a
     /// composite qualified call -- the prefix is only legal as part of
     /// `base(Trait).method(...)`.
-    private scan_paren_type_suffix_at(self, raw_start: UInt): Option[UInt] = {
+    private scan_paren_type_suffix_at(self, raw_start: Int): Option[Int] = {
         let start_index = self.sig_index_at(raw_start);
         if start_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[start_index] is not .LParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let after_type = self.scan_type_shape_at(start_index + 1) or else {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let rp_index = self.sig_index_at(after_type);
         if rp_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[rp_index] is not .RParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
-        return Option[UInt].Some(rp_index + 1);
+        return Option[Int].Some(rp_index + 1);
     };
 
     private is_type_start(self, t: Token): Bool = when t in {
@@ -473,7 +473,7 @@ given CstParser {
             // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf): leading
             // underscores are allowed, the first letter is not.
             let runes = name.to_runes();
-            let mutable idx: UInt = 0;
+            let mutable idx = 0;
             while idx < runes.count() and runes[idx].to_uint32() == 95 then {
                 idx += 1;
             };
@@ -491,12 +491,12 @@ given CstParser {
     /// buffer with a depth walk; nothing is parsed. The `->` is what separates
     /// a function type from the parenthesized shapes a signature or a value
     /// can write.
-    private paren_closes_before_arrow_at(self, raw_start: UInt): Bool = {
+    private paren_closes_before_arrow_at(self, raw_start: Int): Bool = {
         let start = self.sig_index_at(raw_start);
         if start >= self.tokens.count() or self.tokens[start] is not .LParen() then {
             return false;
         };
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         let mutable i = start;
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -524,7 +524,7 @@ given CstParser {
     /// as a type list ending exactly at `)` (a grouping `(T)`, or a multi-type
     /// list the type parser will then reject). A signature's parameters start
     /// with `name: Type` / `mutable`, never with a bare type head.
-    private paren_opens_type_at(self, raw_start: UInt): Bool = {
+    private paren_opens_type_at(self, raw_start: Int): Bool = {
         if self.paren_closes_before_arrow_at(raw_start) then {
             return true;
         };
@@ -547,7 +547,7 @@ given CstParser {
         if runes.count() == 0 then {
             return false;
         };
-        let mutable idx: UInt = 0;
+        let mutable idx = 0;
         while idx < runes.count() and runes[idx].to_uint32() == 95 then {
             idx += 1;
         };
@@ -617,8 +617,8 @@ given CstParser {
         };
     };
 
-    private count_newlines(self): UInt = {
-        let mutable count: UInt = 0;
+    private count_newlines(self): Int = {
+        let mutable count = 0;
         let mutable i = self.pos;
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -634,8 +634,8 @@ given CstParser {
         return count;
     };
 
-    private peek_at_skip_nl(self, offset: UInt): Token = {
-        let mutable count: UInt = 0;
+    private peek_at_skip_nl(self, offset: Int): Token = {
+        let mutable count = 0;
         let mutable i = self.pos;
         while i < self.tokens.count() then {
             when self.tokens[i] in {
@@ -694,8 +694,8 @@ given CstParser {
     /// How many leading tokens are access modifiers, before the declaration
     /// keyword. `foreign` / `intrinsic` are not prefix modifiers -- they sit
     /// after the keyword and are read by `eat_kind_modifiers` there.
-    private modifier_token_count(self): UInt = {
-        let mutable offset: UInt = 0;
+    private modifier_token_count(self): Int = {
+        let mutable offset = 0;
         while true then {
             when self.peek_at_skip_nl(offset) in {
                 .KwPublic() or .KwPrivate() or .KwInternal() or .KwProtected() then {
@@ -940,7 +940,7 @@ given CstParser {
                 } else {
                     // `<type-identifier> ::= "_"* [A-Z] ...` (grammar.bnf):
                     // leading underscores are allowed, the first letter is not.
-                    let mutable idx: UInt = 0;
+                    let mutable idx = 0;
                     while idx < runes.count() and runes[idx].to_uint32() == 95 then {
                         idx += 1;
                     };
@@ -1103,7 +1103,7 @@ given CstParser {
 
     private parse_params(self): Result[List[CstParam]] = {
         let mutable params = List[CstParam].new();
-        let mutable first: UInt = 1;
+        let mutable first = 1;
         // Positional params must come before named params (grammar.bnf
         // <func-param-list>): a declaration fixes one call shape, so the two
         // kinds may not be interleaved.
@@ -3171,7 +3171,7 @@ given CstParser {
 
         // Determine declaration kind by peeking past every leading access
         // modifier.
-        let offset: UInt = self.modifier_token_count();
+        let offset = self.modifier_token_count();
         let decl_kw = self.peek_at_skip_nl(offset);
         // `foreign` / `intrinsic` qualify the declaration keyword (`let foreign`),
         // not the prefix; a leading one is the old spelling. Name the token the
@@ -3356,7 +3356,7 @@ given CstParser {
     private validate_using_trailing_tokens(
         self,
         tokens: List[Token],
-        start: UInt,
+        start: Int,
         message: String,
     ): Result[Void] = {
         let mutable seen_semi = false;
@@ -3390,10 +3390,10 @@ given CstParser {
             .StrLit(t) then t,
             _ then "",
         };
-        if raw.count() < UInt(2) then {
+        if raw.count() < 2 then {
             return "";
         };
-        return raw.substring(UInt(1)..<(raw.count() - UInt(1)));
+        return raw.substring(1..<(raw.count() - 1));
     };
 
     /// module-design §3.1: a specifier beginning `./` or `../` merges a file,
@@ -3421,7 +3421,7 @@ given CstParser {
     private validate_import_list_tokens(
         self,
         tokens: List[Token],
-        start: UInt,
+        start: Int,
     ): Result[Void] = {
         let mutable i = start;
         if i >= tokens.count() or tokens[i] is not .LBrace() then {
@@ -3512,11 +3512,11 @@ given CstParser {
                 if item_runes.count() > 0 and alias_runes.count() > 0 then {
                     // Mirrors the compiler's `is_upper_first`: leading
                     // underscores are skipped, the first letter decides.
-                    let mutable ii: UInt = 0;
+                    let mutable ii = 0;
                     while ii < item_runes.count() and item_runes[ii].to_uint32() == 95 then {
                         ii += 1;
                     };
-                    let mutable ai: UInt = 0;
+                    let mutable ai = 0;
                     while ai < alias_runes.count() and alias_runes[ai].to_uint32() == 95 then {
                         ai += 1;
                     };
@@ -3567,7 +3567,7 @@ given CstParser {
     private finish_import_list_tokens(
         self,
         tokens: List[Token],
-        next: UInt,
+        next: Int,
         import_all: Bool,
         saw_exclude: Bool,
         saw_positive: Bool,
@@ -3589,7 +3589,7 @@ given CstParser {
         );
     };
 
-    private skip_newline_tokens(tokens: List[Token], start: UInt): UInt = {
+    private skip_newline_tokens(tokens: List[Token], start: Int): Int = {
         let mutable i = start;
         while i < tokens.count() and tokens[i] is .Newline() then {
             i += 1;
@@ -3645,7 +3645,7 @@ given CstParser {
 
     private collect_using_tokens(self): List[Token] = {
         let mutable tokens = List[Token].new();
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         while not self.is_eof() then {
             when self.peek_raw() in {
                 .Newline() then {
@@ -4152,7 +4152,7 @@ given CstParser {
         let gp = self.parse_generic_params() or return;
         let lp = self.expect(.LParen(), "'('") or return;
         let mutable params = List[CstTraitMethodParam].new();
-        let mutable first: UInt = 1;
+        let mutable first = 1;
         // Positional params must come before named params -- see parse_params.
         let mutable seen_named = false;
         while not self.check(.RParen()) and not self.is_eof() then {
@@ -4274,7 +4274,7 @@ given CstParser {
             };
             // Determine if this is a let-decl or a method without let, peeking
             // past every leading modifier regardless of the order it was written in.
-            let offset: UInt = self.modifier_token_count();
+            let offset = self.modifier_token_count();
             let kw = self.peek_at_skip_nl(offset);
             when kw in {
                 .KwLet() then {

@@ -17,7 +17,7 @@ public type mutable Printer(
     // but only as far back as `strip_limit` -- whitespace that is part of a
     // token (a comment's trailing spaces, say) is author content and stays.
     mutable line: StringBuilder,
-    mutable strip_limit: UInt,
+    mutable strip_limit: Int,
     // Set after a separating comma. The space that follows is written when the
     // next thing lands, and is skipped when that thing is a closer -- so a
     // trailing comma hugs its closer (`f(a, b,)`) rather than leaving `, )`.
@@ -25,7 +25,7 @@ public type mutable Printer(
     // Columns the enclosing statement will still use after this expression --
     // the `;` a declaration or statement adds, for instance. Width checks have
     // to reserve them or a line that "fits" ends up one column over.
-    mutable reserve: UInt,
+    mutable reserve: Int,
     // Measuring mode: nothing is allowed to break, so what comes out is the
     // exact single-line width of the subtree. `flat_length` renders through a
     // printer in this mode instead of guessing at a length.
@@ -33,8 +33,8 @@ public type mutable Printer(
     // Extra indent levels for the next line-start write. A `using` import list
     // is carried as a token list, so its continuation lines hang one level in
     // under the `using`.
-    mutable hang: UInt,
-    mutable indent: UInt,
+    mutable hang: Int,
+    mutable indent: Int,
     mutable at_line_start: Bool,
 );
 
@@ -69,7 +69,7 @@ given Printer {
     /// it goes. Everything from `strip_limit` back is token content and stays.
     private flush_line(self): Void = {
         let runes = self.line.to_string().to_runes();
-        let mutable end: UInt = runes.count();
+        let mutable end = runes.count();
         while end > self.strip_limit then {
             let ch = runes[end - 1].to_uint32();
             if ch == 32 or ch == 9 then {
@@ -157,7 +157,7 @@ given Printer {
     /// told apart by whether the comma and the closer share a line.
     private drop_trailing_comma(self): Void = {
         let runes = self.line.to_string().to_runes();
-        let mutable end: UInt = runes.count();
+        let mutable end = runes.count();
         if end == 0 then {
             return;
         };
@@ -969,7 +969,7 @@ given Printer {
             return false;
         };
 
-        let mutable total: UInt = 1;
+        let mutable total = 1;
         for arg in args then {
             total += self.estimate_call_arg_length(arg) + 1;
         };
@@ -980,7 +980,7 @@ given Printer {
     /// rather than estimated: a guess that runs a couple of columns short is
     /// enough to make one pass break a call and the next pass not, and the
     /// formatter stops being idempotent.
-    private flat_length(self, e: CstExpr): UInt = {
+    private flat_length(self, e: CstExpr): Int = {
         let mutable measure = Printer.new();
         measure.force_flat = true;
         measure.print_expr(e);
@@ -989,10 +989,10 @@ given Printer {
 
     /// Whether the rest of the current line can take `width` more columns.
     /// `line` already holds the indent, so its length is the column.
-    private line_fits(self, width: UInt): Bool =
+    private line_fits(self, width: Int): Bool =
         self.line.count() + width + self.reserve <= Printer.line_width();
 
-    private line_width(): UInt = 90;
+    private line_width(): Int = 90;
 
     // ========================================================================
     // Block printing: { items }
@@ -1591,7 +1591,7 @@ given Printer {
         };
     };
 
-    private print_sequence_token(self, tokens: List[Token], i: UInt): Void = {
+    private print_sequence_token(self, tokens: List[Token], i: Int): Void = {
         let cur = tokens[i];
         if cur is .Newline() then {
             self.write_newline();
@@ -1908,7 +1908,7 @@ given Printer {
     /// kept on one line has none, one exploded across lines has one per line --
     /// so counting it here would let the decision depend on its own output and
     /// the formatter would stop settling.
-    private estimate_call_arg_length(self, arg: CstCallArg): UInt = when arg in {
+    private estimate_call_arg_length(self, arg: CstCallArg): Int = when arg in {
         .Value(label, colon, value, _) then {
             let mutable len = self.flat_length(value);
             if label is .Some(arg_label) then {
@@ -2036,10 +2036,10 @@ given Printer {
         };
     };
 
-    private estimate_default_length(self, named: Bool, d: Option[CstDefault]): UInt = {
+    private estimate_default_length(self, named: Bool, d: Option[CstDefault]): Int = {
         return when d in {
             .Some(default) then {
-                let mutable len: UInt = 2;
+                let mutable len = 2;
                 for t in default.value_tokens then {
                     len += t.to_string().count();
                 };
@@ -2047,9 +2047,9 @@ given Printer {
             },
             .None() then {
                 if named then {
-                    UInt(2)
+                    2
                 } else {
-                    UInt(0)
+                    0
                 }
             },
         };
@@ -2132,7 +2132,7 @@ given Printer {
     ): Void = {
         self.write_newline();
         self.indent += 1;
-        let mutable i: UInt = 0;
+        let mutable i = 0;
         while i < items.count() then {
             when items[i] in {
                 .BlankLine() then {
@@ -2189,7 +2189,7 @@ given Printer {
         };
         self.write_newline();
         self.indent += 1;
-        let mutable i: UInt = 0;
+        let mutable i = 0;
         while i < cases.count() then {
             when cases[i] in {
                 .BlankLine() then {
@@ -2436,7 +2436,7 @@ given Printer {
     // Item classification helpers
     // ========================================================================
 
-    private next_is_trailing_comment(self, items: List[CstItem], index: UInt): Bool = {
+    private next_is_trailing_comment(self, items: List[CstItem], index: Int): Bool = {
         if index + 1 >= items.count() then {
             return false;
         };
@@ -2447,7 +2447,7 @@ given Printer {
     // Length estimation (for line wrapping)
     // ========================================================================
 
-    private estimate_expr_length(self, e: CstExpr): UInt = when e in {
+    private estimate_expr_length(self, e: CstExpr): Int = when e in {
         .IntLit(tok) or .FloatLit(tok) or .StrLit(tok) or .InterpStr(tok) or .BoolLit(tok) or .NullLit(tok)
         or .Ident(tok) or .SelfExpr(tok) or .UnderscoreExpr(tok) then tok.to_string().count(),
         .Commented(comments, inner) then {
@@ -2461,7 +2461,7 @@ given Printer {
         ).count() + 1 + self.estimate_expr_length(right),
         .UnaryMinus(_, operand) or .Deref(_, operand) or .Upgrade(_, operand) then 1 + self.estimate_expr_length(operand),
         .AddressOf(_, mut_kw, operand) then {
-            let mutable prefix: UInt = 1;
+            let mutable prefix = 1;
             if mut_kw is .Some(mk) then {
                 prefix += mk.to_string().count() + 1;
             };
@@ -2470,7 +2470,7 @@ given Printer {
         .NotExpr(_, operand) then 4 + self.estimate_expr_length(operand),
         .EmptyLiteral(_, _) then 2,
         .CollectionLiteral(_, elements, _) then {
-            let mutable len: UInt = 2;
+            let mutable len = 2;
             for i in 0..<elements.count() then {
                 if i > 0 then {
                     len += 1;
@@ -2483,7 +2483,7 @@ given Printer {
             len
         },
         .DictLiteral(_, entries, _) then {
-            let mutable len: UInt = 2;
+            let mutable len = 2;
             for i in 0..<entries.count() then {
                 if i > 0 then {
                     len += 1;
@@ -2549,7 +2549,7 @@ given Printer {
         _ then 10,
     };
 
-    private estimate_type_length(self, t: CstType): UInt = when t in {
+    private estimate_type_length(self, t: CstType): Int = when t in {
         .Named(name) then name.to_string().count(),
         .ConstraintKeyword(kw) then kw.to_string().count(),
         .SelfType(_) then 4,
@@ -2573,7 +2573,7 @@ given Printer {
         },
         .Function(_, args, _, return_type) then {
             // `(...) -> `: two parens, two arrow runes, two spaces.
-            let mutable len = UInt(6);
+            let mutable len = 6;
             for i in 0..<args.count() then {
                 if i > 0 then {
                     len += 2;
@@ -2585,7 +2585,7 @@ given Printer {
         },
         .ForeignFunction(_, _, args, _, return_type) then {
             // `foreign (...) -> `: the above plus `foreign `.
-            let mutable len = UInt(14);
+            let mutable len = 14;
             for i in 0..<args.count() then {
                 if i > 0 then {
                     len += 2;
@@ -2614,8 +2614,8 @@ given Printer {
         params: List[CstParam],
         rp: Option[Token],
         ret: Option[CstType],
-    ): UInt = {
-        let mutable len: UInt = 0;
+    ): Int = {
+        let mutable len = 0;
         if vis is .Some(v) then {
             len += v.to_string().count() + 1;
         };
@@ -2696,8 +2696,8 @@ given Printer {
         gp: Option[CstGenericParams],
         name: Token,
         items: List[CstStructBodyItem],
-    ): UInt = {
-        let mutable len: UInt = 0;
+    ): Int = {
+        let mutable len = 0;
         if vis is .Some(v) then {
             len += v.to_string().count() + 1;
         };
@@ -2758,16 +2758,16 @@ given Printer {
         return len;
     };
 
-    private count_params(self, params: List[CstParam]): UInt = {
-        let mutable count: UInt = 0;
+    private count_params(self, params: List[CstParam]): Int = {
+        let mutable count = 0;
         for _ in params then {
             count += 1;
         };
         return count;
     };
 
-    private count_struct_fields(self, items: List[CstStructBodyItem]): UInt = {
-        let mutable count: UInt = 0;
+    private count_struct_fields(self, items: List[CstStructBodyItem]): Int = {
+        let mutable count = 0;
         for item in items then {
             when item in {
                 .Field(_) then {
@@ -3025,7 +3025,7 @@ given Printer {
     /// mutable BufReader[R Reader]`, not `... ()`.
     private print_type_body_signature(self, body: CstTypeBody): Void = when body in {
         .Struct(lp, items, rp) then {
-            let mutable visible: UInt = 0;
+            let mutable visible = 0;
             for item in items then {
                 when item in {
                     .Field(field) then {
@@ -3081,7 +3081,7 @@ given Printer {
         public_only: Bool,
     ): Void = {
         self.write_token(lb);
-        let mutable shown: UInt = 0;
+        let mutable shown = 0;
         for item in members then {
             when item in {
                 .Decl(d) or .DeclPreSemi(_, d) then {
@@ -3130,7 +3130,7 @@ given Printer {
     /// The doc-comment run above one rendered member, written a line at a time
     /// ahead of the member's signature. An ordinary `//` note is not
     /// documentation and stays off the page.
-    private print_doc_run(self, items: List[CstItem], index: UInt): Void = {
+    private print_doc_run(self, items: List[CstItem], index: Int): Void = {
         for c in doc_comments_above(items, index) then {
             self.write(c);
             self.write_newline();
@@ -3166,9 +3166,9 @@ given Printer {
         self.flush_line();
         let runes = self.output.to_string().to_runes();
         let mutable result = StringBuilder.new();
-        let mutable consecutive_newlines: UInt = 0;
+        let mutable consecutive_newlines = 0;
 
-        let mutable i: UInt = 0;
+        let mutable i = 0;
         while i < runes.count() then {
             let r = runes[i];
             if r.to_uint32() == 10 then {
@@ -3377,7 +3377,7 @@ public let type_to_string(t: CstType): String = {
 /// maintainer, not documentation, and is left out. Returned as text: a line
 /// comment holds one line, and both callers -- the printer ahead of a member
 /// signature, the doc generator ahead of a page entry -- write lines.
-public let doc_comments_above(items: List[CstItem], index: UInt): List[String] = {
+public let doc_comments_above(items: List[CstItem], index: Int): List[String] = {
     let mutable start = index;
     while start > 0 then {
         when items[start - 1] in {

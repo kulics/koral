@@ -2801,9 +2801,9 @@ final class MIRFunctionCodeEmitter {
 
     // The TARGET decides the conversion policy (numeric-families design):
     // a wrapping-family target truncates to the target width's low bits and
-    // never panics; a plain-family target is checked. A same-width pair is a
-    // lossless retype either way -- the width test below folds away at the C
-    // compiler for same-width pairs, and the truncating path is a pure cast.
+    // never panics; a plain-family target is checked whenever the value sets
+    // differ (width change or signedness flip). Only a same-width,
+    // same-signedness pair is a lossless retype either way.
     if targetType.isWrappingIntegerType {
       if isFloat(sourceType) {
         // Float -> Wrapping is two steps. Domain first: NaN and +-inf have no
@@ -2819,10 +2819,34 @@ final class MIRFunctionCodeEmitter {
       return codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(expression)")
     }
 
-    if isFloat(sourceType) && (isSignedInt(targetType) || isUnsignedInt(targetType)), let (minMacro, maxMacro) = minMaxMacros(for: targetType) {
+    // Float -> regular int is two steps (numeric-families design §浮点):
+    // truncate toward zero first, then range-check the integer value. The
+    // half-open double bounds say exactly "trunc(v) fits in [MIN, MAX]" --
+    // below 64 bits `> MIN-1 && < MAX+1` is exact; at 64 bits the boundary
+    // neighbourhood contains only integers, so `>= -2^63 && < 2^63` (signed)
+    // and `> -1.0 && < 2^64` (unsigned) are exact. `(double)INT64_MAX` rounds
+    // UP to 2^63, so a `<= (double)MAX` test would wave `2^63` through into
+    // undefined behaviour. NaN and +-inf fail both comparisons and take the
+    // same panic, so the truncating cast after the guard is always defined.
+    func floatTruncRangeCondition(for type: Type, value: String) -> String? {
+      switch type {
+      case .int8: return "\(value) > -129.0 && \(value) < 128.0"
+      case .int16: return "\(value) > -32769.0 && \(value) < 32768.0"
+      case .int32: return "\(value) > -2147483649.0 && \(value) < 2147483648.0"
+      case .int64, .int: return "\(value) >= -9223372036854775808.0 && \(value) < 9223372036854775808.0"
+      case .uint8: return "\(value) > -1.0 && \(value) < 256.0"
+      case .uint16: return "\(value) > -1.0 && \(value) < 65536.0"
+      case .uint32: return "\(value) > -1.0 && \(value) < 4294967296.0"
+      case .uint64, .uint: return "\(value) > -1.0 && \(value) < 18446744073709551616.0"
+      default: return nil
+      }
+    }
+
+    if isFloat(sourceType) && (isSignedInt(targetType) || isUnsignedInt(targetType)), let condition = floatTruncRangeCondition(for: targetType, value: "") {
       let floatValue = codeGen.nextTempWithInit(cType: "double", initExpr: "(double)\(expression)")
+      let boundTest = floatTruncRangeCondition(for: targetType, value: floatValue) ?? condition
       codeGen.addIndent()
-      codeGen.appendToBuffer("if (!(\(floatValue) >= (double)\(minMacro) && \(floatValue) <= (double)\(maxMacro))) {\n")
+      codeGen.appendToBuffer("if (!(\(boundTest))) {\n")
       codeGen.withIndent {
         codeGen.addIndent()
         codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
@@ -2832,22 +2856,46 @@ final class MIRFunctionCodeEmitter {
       return codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(floatValue)")
     }
 
-    // A width-changing numeric conversion is checked and does not wrap; a
-    // same-width one reinterprets the bit pattern and never panics. The width
-    // test is left to the C compiler (`sizeof` is a constant expression), so
-    // the guards disappear entirely for same-width pairs and the rule holds on
-    // every target regardless of how wide `Int` is there.
+    // A numeric conversion is checked whenever the two types do not hold the
+    // same values (numeric-families design §转换语义): a width change OR a
+    // signedness flip. Only a same-width, same-signedness pair -- identical
+    // value sets -- is a free retype.
     //
-    // Two guards are needed inside the width-changing case, because the round
-    // trip alone is blind across signedness: `(int)(unsigned)(-1) == -1`, so a
-    // value the target cannot hold can come back unchanged.
-    // One shared C type makes the width test compile-time false and every
-    // check inside it dead; skip the emission and let the pure-cast tail
-    // below return the same value (same behavior, less noise for clang).
+    // Two guards, each covering what the other is blind to: the round trip
+    // catches what the target cannot hold when the WIDTHS differ (left to the
+    // C compiler via `sizeof`, so it disappears for equal-width pairs and the
+    // rule holds on every target regardless of how wide `Int` is there); the
+    // signedness guard catches sign flips INCLUDING same-width ones -- the
+    // round trip alone is blind across signedness (`(int)(unsigned)(-1) == -1`
+    // comes back unchanged), so that guard sits OUTSIDE the `sizeof` block. A
+    // same-width signed <-> unsigned conversion is a value conversion and is
+    // checked like any other, never a bit reinterpretation.
+    // One shared C type makes both guards unnecessary; skip the emission and
+    // let the pure-cast tail below return the same value.
     if (isSignedInt(sourceType) || isUnsignedInt(sourceType)) && (isSignedInt(targetType) || isUnsignedInt(targetType)) && codeGen.cTypeName(sourceType) != codeGen.cTypeName(targetType) {
       let sourceCType = codeGen.cTypeName(sourceType)
       let sourceValue = codeGen.nextTempWithInit(cType: sourceCType, initExpr: expression)
       let converted = codeGen.nextTempWithInit(cType: targetCType, initExpr: "(\(targetCType))\(sourceValue)")
+      if isSignedInt(sourceType) && isUnsignedInt(targetType) {
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if (\(sourceValue) < 0) {\n")
+        codeGen.withIndent {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
+        }
+        codeGen.addIndent()
+        codeGen.appendToBuffer("}\n")
+      }
+      if isUnsignedInt(sourceType) && isSignedInt(targetType), let (_, maxMacro) = minMaxMacros(for: targetType) {
+        codeGen.addIndent()
+        codeGen.appendToBuffer("if ((unsigned long long)\(sourceValue) > (unsigned long long)\(maxMacro)) {\n")
+        codeGen.withIndent {
+          codeGen.addIndent()
+          codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
+        }
+        codeGen.addIndent()
+        codeGen.appendToBuffer("}\n")
+      }
       codeGen.addIndent()
       codeGen.appendToBuffer("if (sizeof(\(sourceCType)) != sizeof(\(targetCType))) {\n")
       codeGen.withIndent {
@@ -2859,26 +2907,6 @@ final class MIRFunctionCodeEmitter {
         }
         codeGen.addIndent()
         codeGen.appendToBuffer("}\n")
-        if isSignedInt(sourceType) && isUnsignedInt(targetType) {
-          codeGen.addIndent()
-          codeGen.appendToBuffer("if (\(sourceValue) < 0) {\n")
-          codeGen.withIndent {
-            codeGen.addIndent()
-            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
-          }
-          codeGen.addIndent()
-          codeGen.appendToBuffer("}\n")
-        }
-        if isUnsignedInt(sourceType) && isSignedInt(targetType), let (_, maxMacro) = minMaxMacros(for: targetType) {
-          codeGen.addIndent()
-          codeGen.appendToBuffer("if ((unsigned long long)\(sourceValue) > (unsigned long long)\(maxMacro)) {\n")
-          codeGen.withIndent {
-            codeGen.addIndent()
-            codeGen.appendToBuffer("__koral_panic_numeric_conversion_overflow(\(locLiteral));\n")
-          }
-          codeGen.addIndent()
-          codeGen.appendToBuffer("}\n")
-        }
       }
       codeGen.addIndent()
       codeGen.appendToBuffer("}\n")

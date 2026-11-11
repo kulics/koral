@@ -130,7 +130,7 @@ public indirect enum TypeNode: CustomStringConvertible {
   /// Function type: (ParamType1, ParamType2, ...) -> ReturnType
   case functionType(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
   /// Fixed-size array: `[N]Element`
-  case fixedArray(size: UInt64, element: TypeNode, span: SourceSpan)
+  case fixedArray(size: Int64, element: TypeNode, span: SourceSpan)
   /// Foreign function pointer: `foreign (A, B) -> R`
   case foreignFunction(paramTypes: [TypeNode], returnType: TypeNode, span: SourceSpan)
   /// `sendable` qualifier (concurrency-design.md): `sendable (A) -> R`,

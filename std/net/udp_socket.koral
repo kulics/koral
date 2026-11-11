@@ -82,19 +82,19 @@ given UdpSocket {
         self,
         addr: T,
         from: List[UInt8] =,
-        span: Range[UInt] = ...,
-    ): Result[UInt] = {
+        span: Range[Int] = ...,
+    ): Result[Int] = {
         let addr = when addr.into_socket_addr() in {
             .Ok(value) then value,
             .Error(_) then {
-                return Result[UInt].Error("invalid socket address");
+                return Result[Int].Error("invalid socket address");
             },
         };
         let spec = from.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
         let addr_bytes = addr.to_sockaddr_bytes();
         let addr_len = UInt32(addr_bytes.count());
@@ -108,9 +108,9 @@ given UdpSocket {
             addr_len,
         );
         if n < 0 then {
-            return Result[UInt].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt].Ok(UInt(n));
+        return Result[Int].Ok(Int(n));
     };
 
     /// Receive a datagram and return the number of bytes read and the sender's address.
@@ -120,20 +120,20 @@ given UdpSocket {
     public recv_from(
         self,
         into: List[UInt8] =,
-        span: Range[UInt] = ...,
-    ): Result[Pair[UInt, SocketAddr]] = {
+        span: Range[Int] = ...,
+    ): Result[Pair[Int, SocketAddr]] = {
         let spec = into.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
         if end <= start then {
-            return Result[Pair[UInt, SocketAddr]].Error(
+            return Result[Pair[Int, SocketAddr]].Error(
                 "recv_from: buffer span is empty",
             );
         };
 
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
-        for i in UInt(0)..<UInt(128) then {
+        for i in 0..<128 then {
             init_memory(addr_buf + i, UInt8(0));
         };
         let mutable addr_len: UInt32 = UInt32(128);
@@ -148,10 +148,10 @@ given UdpSocket {
             &addr_len,
         );
         if n < 0 then {
-            return Result[Pair[UInt, SocketAddr]].Error(last_error_message());
+            return Result[Pair[Int, SocketAddr]].Error(last_error_message());
         };
 
-        let actual_len = UInt(addr_len);
+        let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
             addr_list.push(addr_buf[j]);
@@ -160,11 +160,11 @@ given UdpSocket {
         let sa_result = SocketAddr.from_sockaddr_bytes(addr_list);
         when sa_result in {
             .Error(e) then {
-                return Result[Pair[UInt, SocketAddr]].Error(e);
+                return Result[Pair[Int, SocketAddr]].Error(e);
             },
             .Ok(sender_addr) then {
-                return Result[Pair[UInt, SocketAddr]].Ok(
-                    Pair[UInt, SocketAddr](UInt(n), sender_addr),
+                return Result[Pair[Int, SocketAddr]].Ok(
+                    Pair[Int, SocketAddr](Int(n), sender_addr),
                 );
             },
         };
@@ -196,38 +196,38 @@ given UdpSocket {
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
     // `span` defaults to the whole buffer, like `Writer.write`.
-    public send(self, from: List[UInt8] =, span: Range[UInt] = ...): Result[UInt] = {
+    public send(self, from: List[UInt8] =, span: Range[Int] = ...): Result[Int] = {
         let spec = from.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
         let data_ptr = from.borrow_ptr() + start;
         let n = __koral_socket_send(self.sock_fd, data_ptr, UInt64(spec.len()), Int32(0));
         if n < 0 then {
-            return Result[UInt].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt].Ok(UInt(n));
+        return Result[Int].Ok(Int(n));
     };
 
     /// Receive data in connected mode.
     /// Returns the number of bytes received.
     /// Returns Error if the socket is not connected.
     // `span` defaults to the whole buffer, like `Reader.read`.
-    public recv(self, into: List[UInt8] =, span: Range[UInt] = ...): Result[UInt] = {
+    public recv(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Int] = {
         let spec = into.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
         let data_ptr = into.borrow_mut_ptr() + start;
         let n = __koral_socket_recv(self.sock_fd, data_ptr, UInt64(spec.len()), Int32(0));
         if n < 0 then {
-            return Result[UInt].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt].Ok(UInt(n));
+        return Result[Int].Ok(Int(n));
     };
 
     // ========================================================================
@@ -238,7 +238,7 @@ given UdpSocket {
     public local_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
-        for i in UInt(0)..<UInt(128) then {
+        for i in 0..<128 then {
             init_memory(addr_buf + i, UInt8(0));
         };
         let mutable addr_len: UInt32 = UInt32(128);
@@ -248,7 +248,7 @@ given UdpSocket {
             return Result[SocketAddr].Error(last_error_message());
         };
 
-        let actual_len = UInt(addr_len);
+        let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
             addr_list.push(addr_buf[j]);
@@ -262,7 +262,7 @@ given UdpSocket {
     public peer_addr(self): Result[SocketAddr] = {
         let addr_buf = alloc_memory[UInt8](128);
         defer dealloc_memory(addr_buf);
-        for i in UInt(0)..<UInt(128) then {
+        for i in 0..<128 then {
             init_memory(addr_buf + i, UInt8(0));
         };
         let mutable addr_len: UInt32 = UInt32(128);
@@ -272,7 +272,7 @@ given UdpSocket {
             return Result[SocketAddr].Error(last_error_message());
         };
 
-        let actual_len = UInt(addr_len);
+        let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
             addr_list.push(addr_buf[j]);
@@ -386,7 +386,7 @@ given UdpSocket {
         let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
-        for i in UInt(0)..<UInt(16) then {
+        for i in 0..<16 then {
             init_memory(tv_buf + i, UInt8(0));
         };
         let mutable len = opt_len;
@@ -409,7 +409,7 @@ given UdpSocket {
         let opt_len = timeout_option_len(self.sock_fd);
         let tv_buf = alloc_memory[UInt8](16);
         defer dealloc_memory(tv_buf);
-        for i in UInt(0)..<UInt(16) then {
+        for i in 0..<16 then {
             init_memory(tv_buf + i, UInt8(0));
         };
         let mutable len = opt_len;

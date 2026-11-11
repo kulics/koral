@@ -92,8 +92,8 @@ type BorrowedSelfWalkMode {
 /// handle flow out of that parameter is what decides the convention.
 type mutable BorrowedSelfWalk(
     mode: BorrowedSelfWalkMode,
-    root_local_id: UInt,
-    root_param_index: UInt,
+    root_local_id: Int,
+    root_param_index: Int,
     // Every phase-1 candidate, keyed by borrowed_slot_key. A bare-root
     // parameter passed to a candidate's matching slot records a fixpoint edge;
     // one passed to anybody else escapes.
@@ -105,7 +105,7 @@ type mutable BorrowedSelfWalk(
     // Pointer rooted at them). A projection read rooted at any other local
     // cannot be rewritten during a call -- no alias into its storage exists
     // -- so the borrowed convention may pass it +0 without a protective copy.
-    address_taken: Set[UInt],
+    address_taken: Set[Int],
     mutable escaped: Bool,
 );
 
@@ -118,7 +118,7 @@ type mutable BorrowedSelfCandidateInfo(
 /// Candidate/edge key for one (function instance, parameter index) slot. The
 /// pair is the ABI unit: the borrowed convention is uniform per slot, not per
 /// function -- `f(a, b)` may borrow `a` while owning `b`.
-let borrowed_slot_key(def_id: UInt, index: UInt): String = {
+let borrowed_slot_key(def_id: UInt, index: Int): String = {
     return "\(def_id)|\(index)";
 };
 
@@ -138,22 +138,22 @@ let borrowed_self_type_is_candidate(t: Type): Bool = {
 /// projections: taking a reference to a projection takes a reference to the
 /// root's storage. Deref/PointerElement bases are value bases and root at
 /// nothing here.
-let borrowed_self_place_root_local(place: MIRPlace): Option[UInt] = {
+let borrowed_self_place_root_local(place: MIRPlace): Option[Int] = {
     let mutable current = place;
     while true then {
         when current in {
             .Local(local) then {
-                return Option[UInt].Some(local.raw_value);
+                return Option[Int].Some(local.raw_value);
             },
             .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
                 current = base;
             },
             .Global(_) or .Deref(_, _) or .PointerElement(_, _) then {
-                return Option[UInt].None();
+                return Option[Int].None();
             },
         };
     };
-    return Option[UInt].None();
+    return Option[Int].None();
 };
 
 /// Root classification of a place relative to the self local:
@@ -162,7 +162,7 @@ let borrowed_self_place_root_local(place: MIRPlace): Option[UInt] = {
 /// walked separately; codegen's `root_local_of_place` treats them the same way
 /// (a Move read through them is already forced to a retained copy, so their
 /// behavior cannot change under the borrowed convention).
-let borrowed_self_place_root_kind(place: MIRPlace, root_local_id: UInt): UInt = {    let mutable current = place;
+let borrowed_self_place_root_kind(place: MIRPlace, root_local_id: Int): UInt = {    let mutable current = place;
     let mutable via_projection = false;
     while true then {
         when current in {
@@ -199,7 +199,7 @@ let borrowed_self_arg0_consumable(value: MIRValue): Bool = {
 /// The one allowed bare-self shape at a receiver slot: a Copy/Borrow read of
 /// the self local. `emit_direct_call_argument` passes that raw (+0) and the
 /// callee (a set member) does not release it.
-let borrowed_self_is_bare_receiver(value: MIRValue, root_local_id: UInt): Bool = {
+let borrowed_self_is_bare_receiver(value: MIRValue, root_local_id: Int): Bool = {
     return when value in {
         .PlaceRead(place, ownership) then {
             if not (ownership is .Copy() or is .Borrow()) then {
@@ -218,7 +218,7 @@ let borrowed_self_is_bare_receiver(value: MIRValue, root_local_id: UInt): Bool =
 /// bare self local into a RETAINED copy owned by a call-local slot (which the
 /// slot's own cleanup releases), so it is balanced under the +0 handle. Any
 /// other value in an assignment is classified normally.
-let borrowed_self_is_bare_copy_binding(value: MIRValue, root_local_id: UInt): Bool = {
+let borrowed_self_is_bare_copy_binding(value: MIRValue, root_local_id: Int): Bool = {
     return when value in {
         .PlaceRead(place, ownership) then {
             if not (ownership is .Copy()) then {
@@ -578,16 +578,16 @@ let borrowed_self_walk_function(w: BorrowedSelfWalk, function: MIRFunction): Voi
 /// `.Ref` / `.Pointer` places. A projection read rooted at any other local
 /// cannot be rewritten during a call (no alias into its storage exists), so
 /// the borrowed convention may pass it +0 without a protective copy.
-let mir_address_taken_locals(function: MIRFunction): Set[UInt] = {
+let mir_address_taken_locals(function: MIRFunction): Set[Int] = {
     let walk = BorrowedSelfWalk(
         BorrowedSelfWalkMode.GlobalUsage(),
-        UInt(0),
-        UInt(0),
+        0,
+        0,
         Dict[String, Bool].new(),
         Dict[UInt, Bool].new(),
         Dict[String, Bool].new(),
         Dict[String, Bool].new(),
-        Set[UInt].new(),
+        Set[Int].new(),
         false,
     );
     borrowed_self_walk_function(walk, function);
@@ -610,13 +610,13 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
     // address-taken symbols and unsafe call shapes.
     let global_walk = BorrowedSelfWalk(
         BorrowedSelfWalkMode.GlobalUsage(),
-        UInt(0),
-        UInt(0),
+        0,
+        0,
         Dict[String, Bool].new(),
         Dict[UInt, Bool].new(),
         Dict[String, Bool].new(),
         Dict[String, Bool].new(),
-        Set[UInt].new(),
+        Set[Int].new(),
         false,
     );
     for function in program.functions then {
@@ -627,7 +627,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
     let mutable candidate_order = List[String].new();
     let mutable candidate_info = Dict[String, BorrowedSelfCandidateInfo].new();
     let mutable candidate_flags = Dict[String, Bool].new();
-    let mutable root_local_by_key = Dict[String, UInt].new();
+    let mutable root_local_by_key = Dict[String, Int].new();
     for function in program.functions then {
         let def_id = function.identifier.def_id.id;
         if global_walk.unsafe_callees.get(def_id) is .Some(_) then {
@@ -639,7 +639,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
             if not borrowed_self_type_is_candidate(param.param_type) then {
                 continue;
             };
-            if index > UInt(0) then {
+            if index > 0 then {
                 let is_trait_impl = when function.kind in {
                     .Given(_, _, _, trait_def_id) then trait_def_id is .Some(_),
                     _ then false,
@@ -658,10 +658,10 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
             if global_walk.unsafe_slots.get(slot_key) is .Some(_) then {
                 continue;
             };
-            let mutable param_local = Option[UInt].None();
+            let mutable param_local = Option[Int].None();
             for local in function.locals then {
                 if local.storage is .Parameter() and local.name == param.name then {
-                    param_local = Option[UInt].Some(local.id.raw_value);
+                    param_local = Option[Int].Some(local.id.raw_value);
                     break;
                 };
             };
@@ -670,7 +670,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
             };
             candidate_order.push(slot_key);
             candidate_flags.insert(slot_key, true);
-            root_local_by_key.insert(slot_key, param_local or else UInt(0));
+            root_local_by_key.insert(slot_key, param_local or else 0);
             candidate_info.insert(
                 slot_key,
                 BorrowedSelfCandidateInfo(true, Dict[String, Bool].new()),
@@ -684,7 +684,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
             let slot_key = borrowed_slot_key(def_id, pair.first);
             when candidate_info.get(slot_key) in {
                 .Some(info) then {
-                    let root_local_id = root_local_by_key.get(slot_key) or else UInt(0);
+                    let root_local_id = root_local_by_key.get(slot_key) or else 0;
                     let walk = BorrowedSelfWalk(
                         BorrowedSelfWalkMode.SelfEscape(),
                         root_local_id,
@@ -693,7 +693,7 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
                         global_walk.unsafe_callees,
                         global_walk.unsafe_slots,
                         Dict[String, Bool].new(),
-                        Set[UInt].new(),
+                        Set[Int].new(),
                         false,
                     );
                     borrowed_self_walk_function(walk, function);
@@ -753,11 +753,11 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
 /// parameter and capture locals plus every global: a write through one of
 /// them rewrites the CALLER's state (or state reachable from anywhere).
 type mutable PurityWalk(
-    root_ids: Set[UInt],
+    root_ids: Set[Int],
     // Locals whose type carries drop glue: their values can hold handles
     // into caller-reachable object graphs, so writes through them may
     // rewrite the caller's state even though the local itself is fresh.
-    drop_local_ids: Set[UInt],
+    drop_local_ids: Set[Int],
     callees: Dict[UInt, Bool],
     mutable impure: Bool,
 );
@@ -768,8 +768,8 @@ type mutable PurityWalk(
 /// graphs), or through an unknown pointer.
 let purity_place_reaches_caller_state(
     place: MIRPlace,
-    roots: Set[UInt],
-    drop_ids: Set[UInt],
+    roots: Set[Int],
+    drop_ids: Set[Int],
 ): Bool = {
     let mutable current = place;
     while true then {
@@ -960,13 +960,13 @@ let compute_impure_function_ids(program: MIRProgram): Dict[UInt, Bool] = {
     let mutable callees_by_def = Dict[UInt, Dict[UInt, Bool]].new();
     for function in program.functions then {
         let def_id = function.identifier.def_id.id;
-        let roots = Set[UInt].new();
+        let roots = Set[Int].new();
         for local in function.locals then {
             if local.storage is .Parameter() or local.storage is .Capture() then {
                 roots.insert(local.id.raw_value);
             };
         };
-        let drop_ids = Set[UInt].new();
+        let drop_ids = Set[Int].new();
         for local in function.locals then {
             if type_needs_drop(local.local_type) then {
                 drop_ids.insert(local.id.raw_value);
@@ -1151,10 +1151,10 @@ let compute_observable_drop_defs(codegen: CodeGen): Dict[UInt, Bool] = {
     return tainted;
 };
 /// 使用点位置：块号 + 语句号（终结子占用「语句数」这个号）。
-type MoveBlockPos(block_index: UInt, statement_index: UInt);
+type MoveBlockPos(block_index: Int, statement_index: Int);
 
 /// 判 G 扫描队列项：从块内某语句号起向后扫描。
-type mutable MoveScanEntry(block_index: UInt, start_statement: UInt);
+type mutable MoveScanEntry(block_index: Int, start_statement: Int);
 
 /// 值读/定义位置表。逐局部记 (块,语句) → 标志——bit0 值读 / bit1 定义 /
 /// bit2 复制读（移动候选形态）/ bit3 同语句多读（保守拒绝）；`copy_sites`
@@ -1163,11 +1163,11 @@ type mutable MoveScanEntry(block_index: UInt, start_statement: UInt);
 /// 会打架，整局部排除。`block_successors` 是 CFG 后继（块下标），`i` 处是
 /// 第 i 块的后继；`block_statements[i]` 是第 i 块的语句数（终结子的语句号）。
 type mutable MoveUseTable(
-    mutable flags: Dict[UInt, Dict[UInt, Dict[UInt, UInt]]],
-    mutable copy_sites: Dict[UInt, List[MoveBlockPos]],
-    mutable consumed_elsewhere: Dict[UInt, Bool],
-    mutable block_successors: List[List[UInt]],
-    mutable block_statements: List[UInt],
+    mutable flags: Dict[Int, Dict[Int, Dict[Int, UInt]]],
+    mutable copy_sites: Dict[Int, List[MoveBlockPos]],
+    mutable consumed_elsewhere: Dict[Int, Bool],
+    mutable block_successors: List[List[Int]],
+    mutable block_statements: List[Int],
     // 借用参数槽（`borrowed_param_slots` 快照）：发射期实参会把这些槽的实参
     // 改写成 `.Borrow()`（`apply_borrowed_self_receiver_convention`），走查
     // 必须用同一有效所有权分类——借用实参读不是移动候选（发射点不会消费）。
@@ -1176,9 +1176,9 @@ type mutable MoveUseTable(
     //（`Ref`/`Pointer`）都可能把指向对象内部的裸引用送出去并活得比 +1 长
     //（`bytes.borrow_ptr()` 的指针在 from_bytes 里活过了载荷释放）。带任何
     // 一处的局部不得移动——移动会把 +1 生命周期缩短到最后一个读。
-    mutable projection_risks: Dict[UInt, Bool],
-    mutable block_index: UInt,
-    mutable statement_index: UInt,
+    mutable projection_risks: Dict[Int, Bool],
+    mutable block_index: Int,
+    mutable statement_index: Int,
 );
 
 private let move_table_note(
@@ -1189,11 +1189,11 @@ private let move_table_note(
     let key = local_id.raw_value;
     let mutable by_block = when table.flags.get(key) in {
         .Some(existing) then existing,
-        .None() then Dict[UInt, Dict[UInt, UInt]].new(),
+        .None() then Dict[Int, Dict[Int, UInt]].new(),
     };
     let mutable by_stmt = when by_block.get(table.block_index) in {
         .Some(existing) then existing,
-        .None() then Dict[UInt, UInt].new(),
+        .None() then Dict[Int, UInt].new(),
     };
     let prev = when by_stmt.get(table.statement_index) in {
         .Some(existing) then existing,
@@ -1435,25 +1435,25 @@ let build_move_use_table(codegen: CodeGen, function: MIRFunction): MoveUseTable 
         borrowed_slots.insert(pair.first, pair.second);
     };
     let table = MoveUseTable(
-        Dict[UInt, Dict[UInt, Dict[UInt, UInt]]].new(),
-        Dict[UInt, List[MoveBlockPos]].new(),
-        Dict[UInt, Bool].new(),
-        List[List[UInt]].new(),
-        List[UInt].new(),
+        Dict[Int, Dict[Int, Dict[Int, UInt]]].new(),
+        Dict[Int, List[MoveBlockPos]].new(),
+        Dict[Int, Bool].new(),
+        List[List[Int]].new(),
+        List[Int].new(),
         borrowed_slots,
-        Dict[UInt, Bool].new(),
-        UInt(0),
-        UInt(0),
+        Dict[Int, Bool].new(),
+        0,
+        0,
     );
     // 块 id → 数组下标；后继边按下标存。
-    let mutable id_to_index = Dict[UInt, UInt].new();
-    let mutable index = UInt(0);
+    let mutable id_to_index = Dict[Int, Int].new();
+    let mutable index = 0;
     for block in function.blocks then {
         id_to_index.insert(block.id.raw_value, index);
-        index += UInt(1);
+        index += 1;
     };
     for block in function.blocks then {
-        let mutable targets = List[UInt].new();
+        let mutable targets = List[Int].new();
         when block.terminator in {
             .Goto(target) then targets.push(id_to_index.get(target.raw_value) or else target.raw_value),
             .Branch(_, then_block, else_block) then {
@@ -1472,10 +1472,10 @@ let build_move_use_table(codegen: CodeGen, function: MIRFunction): MoveUseTable 
             .ReturnValue(_) or .Unreachable() then {},
         };
         table.block_successors.push(targets);
-        table.block_statements.push(UInt(block.statements.count()));
+        table.block_statements.push(block.statements.count());
     };
     for block in function.blocks then {
-        table.statement_index = UInt(0);
+        table.statement_index = 0;
         for statement in block.statements then {
             when statement in {
                 .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
@@ -1516,7 +1516,7 @@ let build_move_use_table(codegen: CodeGen, function: MIRFunction): MoveUseTable 
                 .Retain(value) or .Release(value) then move_walk_value(value, table),
                 .Evaluate(value) then move_walk_value(value, table),
             };
-            table.statement_index += UInt(1);
+            table.statement_index += 1;
         };
         // 终结子占用「语句数」这个语句号。
         when block.terminator in {
@@ -1528,16 +1528,16 @@ let build_move_use_table(codegen: CodeGen, function: MIRFunction): MoveUseTable 
                 .None() then {},
             },
         };
-        table.block_index += UInt(1);
+        table.block_index += 1;
     };
     return table;
 };
 
 private let move_flags_at(
     table: MoveUseTable,
-    local_key: UInt,
-    block_index: UInt,
-    statement_index: UInt,
+    local_key: Int,
+    block_index: Int,
+    statement_index: Int,
 ): UInt = {
     return when table.flags.get(local_key) in {
         .Some(by_block) then when by_block.get(block_index) in {
@@ -1561,7 +1561,7 @@ private let move_flags_at(
 /// 语句与后继块构成截断。
 private let move_site_is_last_use(
     table: MoveUseTable,
-    local_key: UInt,
+    local_key: Int,
     site: MoveBlockPos,
 ): Bool = {
     let own_bits = move_flags_at(table, local_key, site.block_index, site.statement_index);
@@ -1575,16 +1575,16 @@ private let move_site_is_last_use(
         return true;
     };
     let mutable work = List[MoveScanEntry].new();
-    work.push(MoveScanEntry(site.block_index, site.statement_index + UInt(1)));
-    let mutable visited = Dict[UInt, Dict[UInt, Bool]].new();
+    work.push(MoveScanEntry(site.block_index, site.statement_index + 1));
+    let mutable visited = Dict[Int, Dict[Int, Bool]].new();
     let start_key = site.block_index;
-    let mutable start_seen = Dict[UInt, Bool].new();
-    start_seen.insert(UInt(1), true);
+    let mutable start_seen = Dict[Int, Bool].new();
+    start_seen.insert(1, true);
     visited.insert(start_key, start_seen);
-    let mutable cursor = UInt(0);
+    let mutable cursor = 0;
     while cursor < work.count() then {
         let entry = work[cursor];
-        cursor += UInt(1);
+        cursor += 1;
         let stmt_count = table.block_statements[entry.block_index];
         let mutable s = entry.start_statement;
         let mutable cut = false;
@@ -1597,19 +1597,19 @@ private let move_site_is_last_use(
                 cut = true;
                 break;
             };
-            s += UInt(1);
+            s += 1;
         };
         if not cut then {
             let successors = table.block_successors[entry.block_index];
             for succ in successors then {
                 let mutable seen = when visited.get(succ) in {
                     .Some(existing) then existing,
-                    .None() then Dict[UInt, Bool].new(),
+                    .None() then Dict[Int, Bool].new(),
                 };
-                if seen.get(UInt(0)) is .None() then {
-                    seen.insert(UInt(0), true);
+                if seen.get(0) is .None() then {
+                    seen.insert(0, true);
                     visited.insert(succ, seen);
-                    work.push(MoveScanEntry(succ, UInt(0)));
+                    work.push(MoveScanEntry(succ, 0));
                 };
             };
         };
@@ -1625,10 +1625,10 @@ let compute_move_designations(
     codegen: CodeGen,
     function: MIRFunction,
     table: MoveUseTable,
-    tracked_init_locals: Dict[UInt, Bool],
-    non_owning_local_ids: Dict[UInt, Bool],
-): Dict[UInt, MoveBlockPos] = {
-    let mutable designations = Dict[UInt, MoveBlockPos].new();
+    tracked_init_locals: Dict[Int, Bool],
+    non_owning_local_ids: Dict[Int, Bool],
+): Dict[Int, MoveBlockPos] = {
+    let mutable designations = Dict[Int, MoveBlockPos].new();
     for local in function.locals then {
         let key = local.id.raw_value;
         if local.storage is .Capture() then {
@@ -1660,13 +1660,13 @@ let compute_move_designations(
 };
 
 private let alias_note_def(
-    def_counts: Dict[UInt, UInt],
+    def_counts: Dict[Int, Int],
     target: MIRLocalID,
 ): Void = {
     let key = target.raw_value;
     let next = when def_counts.get(key) in {
-        .Some(n) then n + UInt(1),
-        .None() then UInt(1),
+        .Some(n) then n + 1,
+        .None() then 1,
     };
     def_counts.insert(key, next);
 };
@@ -1676,12 +1676,12 @@ private let alias_note_def(
 /// 且无移动指定点（有指定点的源已被自己的移动优化，别名会双重记账）。
 private let alias_source_is_sound(
     table: MoveUseTable,
-    non_owning_local_ids: Dict[UInt, Bool],
-    tracked_init_locals: Dict[UInt, Bool],
-    designations: Dict[UInt, MoveBlockPos],
-    def_counts: Dict[UInt, UInt],
-    disqualified: Dict[UInt, Bool],
-    source_key: UInt,
+    non_owning_local_ids: Dict[Int, Bool],
+    tracked_init_locals: Dict[Int, Bool],
+    designations: Dict[Int, MoveBlockPos],
+    def_counts: Dict[Int, Int],
+    disqualified: Dict[Int, Bool],
+    source_key: Int,
 ): Bool = {
     if disqualified.get(source_key) is .Some(_) then {
         return false;
@@ -1711,14 +1711,14 @@ let compute_alias_locals(
     codegen: CodeGen,
     function: MIRFunction,
     table: MoveUseTable,
-    tracked_init_locals: Dict[UInt, Bool],
-    non_owning_local_ids: Dict[UInt, Bool],
-    designations: Dict[UInt, MoveBlockPos],
-): Dict[UInt, Bool] = {
+    tracked_init_locals: Dict[Int, Bool],
+    non_owning_local_ids: Dict[Int, Bool],
+    designations: Dict[Int, MoveBlockPos],
+): Dict[Int, Bool] = {
     let _ = codegen;
-    let mutable candidates = Dict[UInt, UInt].new();
-    let mutable def_counts = Dict[UInt, UInt].new();
-    let mutable disqualified = Dict[UInt, Bool].new();
+    let mutable candidates = Dict[Int, Int].new();
+    let mutable def_counts = Dict[Int, Int].new();
+    let mutable disqualified = Dict[Int, Bool].new();
 
     for block in function.blocks then {
         for statement in block.statements then {
@@ -1791,7 +1791,7 @@ let compute_alias_locals(
         };
     };
 
-    let mutable aliases = Dict[UInt, Bool].new();
+    let mutable aliases = Dict[Int, Bool].new();
     for local in function.locals then {
         let key = local.id.raw_value;
         if local.storage is .Parameter() or local.storage is .Capture() then {
@@ -1799,7 +1799,7 @@ let compute_alias_locals(
             when candidates.get(key) in {
                 .Some(source_key) then {
                     let def_once = when def_counts.get(key) in {
-                        .Some(n) then n == UInt(1),
+                        .Some(n) then n == 1,
                         .None() then false,
                     };
                     if tracked_init_locals.get(key) is .Some(_)

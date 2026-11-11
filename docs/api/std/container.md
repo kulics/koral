@@ -54,9 +54,9 @@ public type mutable StackIterator[T: Any];
 /// Constructors and core operations for `BitSet`.
 given BitSet {
     /// Create an empty bit set over the universe `[0, size)`.
-    public new(size: UInt): BitSet;
+    public new(size: Int): BitSet;
     /// The number of members in the set.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the set has no members.
     public is_empty(self): Bool;
     /// Whether `value` is a member; values outside the universe answer `false`.
@@ -116,9 +116,9 @@ given[T: Ord] PriorityQueue[T] {
     /// Create an empty priority queue.
     public new(): Self;
     /// Create an empty priority queue with room for `capacity` values before resizing.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// Return the number of values in the queue.
-    public count(self): UInt;
+    public count(self): Int;
     /// Return `true` if the queue holds no values.
     public is_empty(self): Bool;
     /// Remove all values from the queue.
@@ -148,9 +148,9 @@ given[T: Any] Queue[T] {
     /// Create an empty queue.
     public new(): Self;
     /// Create an empty queue with room for `capacity` values before resizing.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// Return the number of values in the queue.
-    public count(self): UInt;
+    public count(self): Int;
     /// Return `true` if the queue holds no values.
     public is_empty(self): Bool;
     /// Remove all values from the queue.
@@ -186,9 +186,9 @@ given[T: Any] Stack[T] {
     /// Create an empty stack.
     public new(): Self;
     /// Create an empty stack with room for `capacity` values before resizing.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// Return the number of values on the stack.
-    public count(self): UInt;
+    public count(self): Int;
     /// Return `true` if the stack holds no values.
     public is_empty(self): Bool;
     /// Remove all values from the stack.

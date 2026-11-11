@@ -86,27 +86,28 @@ given UInt8: Randomizable {
     public random[R: RandomSource](source: R): UInt8;
 };
 
-/// Randomizable conformance reinterpreting the source's 64 bits as a signed value.
+/// Randomizable conformance reading the source's 64 bits as a two's-complement
+/// signed value.
 given Int64: Randomizable {
-    /// Return the source's next 64 bits reinterpreted as a signed Int64.
+    /// Return the source's next 64 bits read as a signed Int64.
     public random[R: RandomSource](source: R): Int64;
 };
 
-/// Randomizable conformance reinterpreting 32 random bits as a signed value.
+/// Randomizable conformance reading 32 random bits as a two's-complement signed value.
 given Int32: Randomizable {
-    /// Return 32 random bits reinterpreted as a signed Int32.
+    /// Return 32 random bits read as a signed Int32.
     public random[R: RandomSource](source: R): Int32;
 };
 
-/// Randomizable conformance reinterpreting 16 random bits as a signed value.
+/// Randomizable conformance reading 16 random bits as a two's-complement signed value.
 given Int16: Randomizable {
-    /// Return 16 random bits reinterpreted as a signed Int16.
+    /// Return 16 random bits read as a signed Int16.
     public random[R: RandomSource](source: R): Int16;
 };
 
-/// Randomizable conformance reinterpreting 8 random bits as a signed value.
+/// Randomizable conformance reading 8 random bits as a two's-complement signed value.
 given Int8: Randomizable {
-    /// Return 8 random bits reinterpreted as a signed Int8.
+    /// Return 8 random bits read as a signed Int8.
     public random[R: RandomSource](source: R): Int8;
 };
 

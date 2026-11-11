@@ -24,7 +24,7 @@ public let current_thread_id(): UInt64;
 public let yield_thread_now(): Void;
 
 /// 获取可用并行度（通常等于逻辑 CPU 核心数，但可能受 cgroup、affinity 等限制）
-public let available_parallelism(): UInt;
+public let available_parallelism(): Int;
 ```
 
 ## Traits
@@ -61,8 +61,8 @@ given Task {
     public new(f: sendable () -> Void): Task;
     /// Set the thread name (chainable).
     public set_name(self, name: String): Task;
-    /// Set the thread stack size (chainable).
-    public set_stack_size(self, size: UInt): Task;
+    /// Set the thread stack size in bytes (chainable). Panics when `size` is negative.
+    public set_stack_size(self, size: Int): Task;
     /// Create a thread and return a Thread handle.
     /// Panics on failure.
     public spawn(self): Thread;

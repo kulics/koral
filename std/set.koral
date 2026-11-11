@@ -18,9 +18,9 @@
 /// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Set[T: Hash](
     mutable buckets: *mutable HashBucket[T, UInt],
-    mutable size: UInt,
-    mutable capacity: UInt,
-    mutable deleted: UInt,
+    mutable size: Int,
+    mutable capacity: Int,
+    mutable deleted: Int,
 );
 
 /// `Drop` for `Set[T]`: releases the bucket array.
@@ -37,7 +37,7 @@ given[T: Hash] Set[T]: Drop {
 };
 
 /// Iterator over a `Set`'s elements, in unspecified order.
-public type mutable SetIterator[T: Hash](source: Set[T], mutable index: UInt);
+public type mutable SetIterator[T: Hash](source: Set[T], mutable index: Int);
 
 // ============================================================================
 // Set Methods
@@ -52,15 +52,18 @@ given[T: Hash] Set[T] {
 
     /// Create an empty set with its buckets allocated up front, sized for about
     /// `capacity` elements.
-    public with_capacity(capacity: UInt): Self = {
+    public with_capacity(capacity: Int): Self = {
+        if capacity < 0 then {
+            panic("Set with_capacity negative capacity");
+        };
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
-        let requested: UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
-        let mutable cap: UInt = UInt(4);
+        let requested = if capacity < 4 then 4 else capacity * 2;
+        let mutable cap = 4;
         while cap < requested then {
-            cap = cap * UInt(2);
+            cap = cap * 2;
         };
-        let buckets = alloc_memory[HashBucket[T, UInt]](cap);
+        let buckets = alloc_memory[HashBucket[T, UInt]](UInt(cap));
         for i in 0..<cap then {
             bucket_set_tag(buckets + i, UInt(0));
         };
@@ -68,11 +71,11 @@ given[T: Hash] Set[T] {
     };
 
     /// Return the number of elements in the set.
-    public count(self): UInt = self.size;
+    public count(self): Int = self.size;
 
     // The shared probe from std/hash_lookup.koral (the one probing algorithm
     // this container shares with Dict/FrozenDict/FrozenSet).
-    private find_slot(self, value: T): Option[UInt] =
+    private find_slot(self, value: T): Option[Int] =
         find_hash_slot(self.buckets, self.capacity, value);
 
     private rehash(self): Void = {
@@ -81,11 +84,11 @@ given[T: Hash] Set[T] {
         // 新容量只由存活条目决定（tombstone 不带进新表）：
         // 负载保持 ≤ 0.5（size * 2 < new_cap），空集合首次分配 16 桶；
         // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
-        let mutable new_cap = UInt(16);
+        let mutable new_cap = 16;
         while self.size * 2 >= new_cap then {
-            new_cap = new_cap * UInt(2);
+            new_cap = new_cap * 2;
         };
-        let new_buckets = alloc_memory[HashBucket[T, UInt]](new_cap);
+        let new_buckets = alloc_memory[HashBucket[T, UInt]](UInt(new_cap));
         for i in 0..<new_cap then {
             bucket_set_tag(new_buckets + i, UInt(0));
         };
@@ -351,8 +354,8 @@ given[T: Hash] SetIterator[T]: Iterator[T] {
 /// immutable after construction.
 public type unsafe sendable mutable FrozenSet[T: Hash](
     protected buckets: *mutable HashBucket[T, UInt],
-    protected len: UInt,
-    protected capacity: UInt,
+    protected len: Int,
+    protected capacity: Int,
 );
 
 /// `Drop` for `FrozenSet[T]`: releases the live buckets and the table.
@@ -371,14 +374,14 @@ given[T: Hash] FrozenSet[T]: Drop {
 /// A one-shot cursor that walks a `FrozenSet[T]`'s table.
 public type mutable FrozenSetIterator[T: Hash](
     source: FrozenSet[T],
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// Read-only access over a `FrozenSet[T]`.
 given[T: Hash] FrozenSet[T] {
 
     /// The number of elements in the snapshot.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Whether the snapshot has no elements.
     public is_empty(self): Bool = self.len == 0;
@@ -414,7 +417,7 @@ given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
         let mutable i = self.index;
         while i < self.source.capacity then {
             let bucket_ptr = self.source.buckets + i;
-            i = i + UInt(1);
+            i = i + 1;
             self.index = i;
             if bucket_ptr.tag == UInt(1) then {
                 return Option[T].Some(bucket_ptr.key);
@@ -440,14 +443,14 @@ given[T: Hash] Set[T] {
     public to_frozen_set(self): FrozenSet[T] = {
         let len = self.size;
         // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
-        let mutable capacity: UInt = UInt(0);
-        if len > UInt(0) then {
-            capacity = UInt(4);
-            while len * UInt(2) >= capacity then {
-                capacity = capacity * UInt(2);
+        let mutable capacity = 0;
+        if len > 0 then {
+            capacity = 4;
+            while len * 2 >= capacity then {
+                capacity = capacity * 2;
             };
         };
-        let buckets = alloc_memory[HashBucket[T, UInt]](capacity);
+        let buckets = alloc_memory[HashBucket[T, UInt]](UInt(capacity));
         for i in 0..<capacity then {
             bucket_set_tag(buckets + i, UInt(0));
         };
@@ -481,9 +484,9 @@ given[T: Hash] Set[T] {
         let len = self.size;
         let capacity = self.capacity;
         self.buckets = null;
-        self.size = UInt(0);
-        self.capacity = UInt(0);
-        self.deleted = UInt(0);
+        self.size = 0;
+        self.capacity = 0;
+        self.deleted = 0;
         return FrozenSet[T](buckets, len, capacity);
     };
 };

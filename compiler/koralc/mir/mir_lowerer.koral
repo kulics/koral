@@ -35,7 +35,7 @@ private let empty_monomorphized_program(): MonomorphizedProgram = {
         Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
         Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-        UInt(0),
+        0,
     );
 };
 
@@ -60,7 +60,7 @@ private let make_builder_program_view(
         Dict[MethodInstanceKey, DefId].new(),
         Dict[UInt, List[Pair[DefId, Type]]].new(),
         Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-        UInt(0),
+        0,
     );
 };
 
@@ -156,7 +156,7 @@ public let lower_monomorphized_program_releasing_source(
         prepared.metadata_program.concrete_callables_by_def_id,
         prepared.metadata_program.conformance_witnesses,
         Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-        UInt(0),
+        0,
     );
     trace_mir_progress("[mir-work] skipping ref promotion");
     return LoweredMIRProgram(lowered, lowerer.diagnostics);
@@ -200,7 +200,7 @@ given MIRLowerer {
     /// initializers in the same order. Isolated modules rank among themselves
     /// by path; leftovers (only possible on an illegal `using` cycle) get the
     /// remaining ranks in path order.
-    global_init_module_ranks(self): Dict[String, UInt] = {
+    global_init_module_ranks(self): Dict[String, Int] = {
         let deps = Dict[String, Set[String]].new();
         let dependents = Dict[String, Set[String]].new();
         let universe = Set[String].new();
@@ -221,32 +221,32 @@ given MIRLowerer {
         for edge in self.program.import_graph.symbol_imports then {
             add_edge(join_path(edge.module, "."), join_path(edge.target, "."));
         };
-        let mutable rank_of = Dict[String, UInt].new();
+        let mutable rank_of = Dict[String, Int].new();
         let mutable ready = List[String].new();
         for m in universe then {
-            if (deps.get(m) or else Set[String].new()).count() == UInt(0) then {
+            if (deps.get(m) or else Set[String].new()).count() == 0 then {
                 ready.push(m);
             };
         };
-        let mutable next_rank = UInt(0);
+        let mutable next_rank = 0;
         while not ready.is_empty() then {
-            let mutable best_i = UInt(0);
-            let mutable i = UInt(1);
+            let mutable best_i = 0;
+            let mutable i = 1;
             while i < ready.count() then {
                 if ready[i].compare(ready[best_i]) < 0 then {
                     best_i = i;
                 };
-                i += UInt(1);
+                i += 1;
             };
             let m = ready.take_at(best_i);
             rank_of.insert(m, next_rank);
-            next_rank += UInt(1);
+            next_rank += 1;
             let m_dependents = dependents.get(m) or else Set[String].new();
             for dependent in m_dependents then {
                 when deps.get(dependent) in {
                     .Some(dep_set) then {
                         dep_set.remove(m);
-                        if dep_set.count() == UInt(0) then {
+                        if dep_set.count() == 0 then {
                             ready.push(dependent);
                         };
                     },
@@ -267,7 +267,7 @@ given MIRLowerer {
         leftovers.sort_by((m) => m);
         for m in leftovers then {
             rank_of.insert(m, next_rank);
-            next_rank += UInt(1);
+            next_rank += 1;
         };
         return rank_of;
     };
@@ -444,17 +444,17 @@ given MIRLowerer {
         // gives `b == 2`) and a module's globals run after the modules it
         // uses. The sort key is (module rank, declaration order).
         let ranks = self.global_init_module_ranks();
-        let mutable buckets = Dict[UInt, List[MIRGlobal]].new();
-        let mutable max_rank = UInt(0);
+        let mutable buckets = Dict[Int, List[MIRGlobal]].new();
+        let mutable max_rank = 0;
         for entry in global_var_entries then {
             let rank = when entry in {
                 .GlobalVariable(identifier, _, _, _) then {
                     when self.context.def_id_map.get_module_path(identifier.def_id) in {
-                        .Some(path) then ranks.get(join_path(path, ".")) or else UInt(0),
-                        .None() then UInt(0),
+                        .Some(path) then ranks.get(join_path(path, ".")) or else 0,
+                        .None() then 0,
                     }
                 },
-                _ then UInt(0),
+                _ then 0,
             };
             when buckets.get(rank) in {
                 .Some(bucket) then {
@@ -470,7 +470,7 @@ given MIRLowerer {
                 max_rank = rank;
             };
         };
-        let mutable r = UInt(0);
+        let mutable r = 0;
         while r <= max_rank then {
             when buckets.get(r) in {
                 .Some(bucket) then {
@@ -480,7 +480,7 @@ given MIRLowerer {
                 },
                 .None() then {},
             };
-            r += UInt(1);
+            r += 1;
         };
 
         let program = MIRProgram(
@@ -494,7 +494,7 @@ given MIRLowerer {
             self.program.concrete_callables_by_def_id,
             self.program.conformance_witnesses,
             Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-            UInt(0),
+            0,
         );
         return program;
     };
@@ -959,7 +959,7 @@ given MIRLowerer {
             program.concrete_callables_by_def_id,
             program.conformance_witnesses,
             Dict[String, List[Pair[DefId, ConcreteCallableInfo]]].new(),
-            UInt(0),
+            0,
         );
         trace_mir_progress("[mir-work] skipping ref promotion");
         return lowered;
@@ -993,11 +993,11 @@ given MIRLowerer {
             .Some(dispatch_info) then dispatch_info.conformance_trait_def_id,
             .None() then Option[DefId].None(),
         };
-        let is_drop_method = params.count() == 1 and params[UInt(0)].name == "self" and self.context.is_std_drop_impl_def_id(
+        let is_drop_method = params.count() == 1 and params[0].name == "self" and self.context.is_std_drop_impl_def_id(
             drop_trait_def_id,
         );
         if is_drop_method then {
-            let self_param = params[UInt(0)];
+            let self_param = params[0];
             let base_param_type = when self_param.param_type in {
                 .MutablePointerType(inner) then inner,
                 _ then self_param.param_type,
@@ -1063,7 +1063,7 @@ given MIRLowerer {
             .None() then Option[DefId].None(),
         };
         let mutable is_drop_method = member.params.count() == 1 and member.params[
-            UInt(0)
+            0
         ].name == "self" and self.context.is_std_drop_impl_def_id(drop_trait_def_id);
         let mutable rebuilt_param_types = List[Type].new();
         for param in member.params then {
@@ -1170,7 +1170,7 @@ given MIRLowerer {
         if slot.parameters.is_empty() then {
             return false;
         };
-        let first = slot.parameters[UInt(0)];
+        let first = slot.parameters[0];
         if first.name != "self" then {
             return false;
         };

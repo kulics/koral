@@ -21,7 +21,7 @@
 /// carries the construction-then-immutable promise (and the atomic RC) for
 /// the shared block, `len` is a scalar -- so string values cross threads
 /// freely.
-public type sendable String(protected bytes: Bytes, protected len: UInt);
+public type sendable String(protected bytes: Bytes, protected len: Int);
 
 /// The managed byte block behind a `String`. The bytes live in the same heap
 /// block as this object -- one allocation -- and `data` points at the inline
@@ -34,7 +34,7 @@ public type sendable String(protected bytes: Bytes, protected len: UInt);
 /// `sendable` `String` crosses threads by copy -- the block's refcount must be
 /// atomic (this mark supplies it; the `mutable` form adds no lock). Promise:
 /// written only while the block is being filled, read-only after the wrap.
-protected type unsafe sendable mutable Bytes(protected data: *mutable UInt8, protected len: UInt);
+protected type unsafe sendable mutable Bytes(protected data: *mutable UInt8, protected len: Int);
 
 /// Intrinsic: allocate a single-block `Bytes` of byte length `len` whose
 /// bytes are not yet written (only byte `[len]` is set to 0). The bytes live
@@ -50,7 +50,7 @@ given Bytes {
     /// Interpret this block as a `String` holding `len` content bytes: the
     /// value takes the block over without a copy. The compiler's
     /// interpolation lowering wraps its `alloc_bytes` result through here.
-    protected wrap(self, len: UInt): String = String(self, len);
+    protected wrap(self, len: Int): String = String(self, len);
 };
 
 /// Mutable builder for incremental string construction without relying on
@@ -60,29 +60,29 @@ given Bytes {
 public type mutable StringBuilder(
     mutable buf: Bytes,
     mutable data: *mutable UInt8,
-    mutable len: UInt,
-    mutable cap: UInt,
+    mutable len: Int,
+    mutable cap: Int,
 );
 
 // String iterator types
 /// Iterator over the whitespace-separated words of a string.
 public type mutable StringSplitAsciiWhitespaceIterator(
     source: String,
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// Iterator over the parts of a string separated by a fixed separator.
 public type mutable StringSplitIterator(
     source: String,
     sep: String,
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// Iterator over the lines of a string, split at `\n`.
-public type mutable StringLinesIterator(source: String, mutable index: UInt);
+public type mutable StringLinesIterator(source: String, mutable index: Int);
 
 /// Iterator over the raw UTF-8 bytes of a string.
-public type mutable StringBytesIterator(source: String, mutable index: UInt);
+public type mutable StringBytesIterator(source: String, mutable index: Int);
 
 // No `Drop` for `String`: user destructors live only on `type mutable` (a
 // value's cleanup is its synthesized field release). The `bytes` field
@@ -101,32 +101,35 @@ given StringBuilder {
     public new(): StringBuilder = StringBuilder.with_capacity(16);
 
     /// Create an empty builder with room for at least `capacity` bytes.
-    public with_capacity(capacity: UInt): StringBuilder = {
+    public with_capacity(capacity: Int): StringBuilder = {
+        if capacity < 0 then {
+            panic("StringBuilder with_capacity negative capacity");
+        };
         let cap = if capacity < 1 then 1 else capacity + 1;
         // One `Bytes` block of `cap` allocated bytes (content `cap - 1`):
         // the block is what `into_string` hands over.
-        let buf = alloc_bytes(cap - 1);
+        let buf = alloc_bytes(UInt(cap - 1));
         buf.data[0] = 0;
         return StringBuilder(buf, buf.data, 0, cap);
     };
 
     /// The number of bytes pushed so far.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Whether nothing has been pushed yet.
     public is_empty(self): Bool = self.len == 0;
 
     /// The growth body behind the push hot paths, kept out of line on purpose --
     /// same shape and reason as `List.grow_to` (see std/list.koral).
-    private grow_to(self, min_cap: UInt): Void = {
+    private grow_to(self, min_cap: Int): Void = {
         let mutable new_cap = self.cap * 2;
         if new_cap < min_cap then {
             new_cap = min_cap;
         };
         // A fresh `Bytes` block; assigning it over `self.buf` releases the
         // old block through the RC.
-        let new_buf = alloc_bytes(new_cap - 1);
-        copy_memory(new_buf.data, self.data, self.len + 1);
+        let new_buf = alloc_bytes(UInt(new_cap - 1));
+        copy_memory(new_buf.data, self.data, UInt(self.len + 1));
         self.buf = new_buf;
         self.data = new_buf.data;
         self.cap = new_cap;
@@ -153,8 +156,8 @@ given StringBuilder {
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     /// The default span is the whole string and skips range resolution, bounds
     /// checks and rune-boundary checks entirely.
-    public push_string(self, other: String, span: Range[UInt] = ...): Void = {
-        let mutable start: UInt = 0;
+    public push_string(self, other: String, span: Range[Int] = ...): Void = {
+        let mutable start = 0;
         let mutable copy_len = other.len;
         if span is .Full() then {
             copy_len = other.len;
@@ -172,7 +175,7 @@ given StringBuilder {
             len = self.len;
         };
         let data = self.data;
-        copy_memory(data + len, other.borrow_ptr() + start, copy_len);
+        copy_memory(data + len, other.borrow_ptr() + start, UInt(copy_len));
         len += copy_len;
         self.len = len;
         data[len] = 0;
@@ -248,9 +251,9 @@ given String {
 
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String = {
-        let s = alloc_bytes(len);
-        copy_memory(s.data, bytes, len);
+    public from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String = {
+        let s = alloc_bytes(UInt(len));
+        copy_memory(s.data, bytes, UInt(len));
         return String(s, len);
     };
 
@@ -261,15 +264,15 @@ given String {
     public concat(left: String, right: String): String = {
         let left_len = left.len;
         let right_len = right.len;
-        let result = alloc_bytes(left_len + right_len);
-        copy_memory(result.data, left.bytes.data, left_len);
-        copy_memory(result.data + left_len, right.bytes.data, right_len);
+        let result = alloc_bytes(UInt(left_len + right_len));
+        copy_memory(result.data, left.bytes.data, UInt(left_len));
+        copy_memory(result.data + left_len, right.bytes.data, UInt(right_len));
         return String(result, left_len + right_len);
     };
 
     // Validate UTF-8 byte sequence (strict)
-    private validate_utf8(bytes: *UInt8, len: UInt): Bool = {
-        let mutable i: UInt = 0;
+    private validate_utf8(bytes: *UInt8, len: Int): Bool = {
+        let mutable i = 0;
         while i < len then {
             let b0 = bytes[i];
             // 1-ASCII(byte )
@@ -347,7 +350,7 @@ given String {
 
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
-    public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String] = {
+    public from_utf8_ptr(bytes: *UInt8, len: Int): Result[String] = {
         if not String.validate_utf8(bytes, len) then {
             return Result[String].Error("Invalid UTF-8");
         };
@@ -366,7 +369,7 @@ given String {
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
     public from_cstring(cstr: *UInt8): Result[String] = {
-        let mutable len: UInt = 0;
+        let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
         };
@@ -376,7 +379,7 @@ given String {
     /// Build a string from a null-terminated C string without validating UTF-8.
     /// Behavior is undefined when the bytes are not valid UTF-8.
     public from_cstring_unchecked(cstr: *UInt8): String = {
-        let mutable len: UInt = 0;
+        let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
         };
@@ -384,7 +387,7 @@ given String {
     };
 
     /// Create an empty string.
-    public new(): String = String(alloc_bytes(UInt(0)), UInt(0));
+    public new(): String = String(alloc_bytes(UInt(0)), 0);
 
     // Using comparison patterns for ASCII space check
     private is_ascii_space(b: UInt8): Bool = {
@@ -409,14 +412,14 @@ given String {
         return false;
     };
 
-    private bounds_check_read(self, index: UInt): Void = {
-        if index > self.len then {
+    private bounds_check_read(self, index: Int): Void = {
+        if index < 0 or index > self.len then {
             panic("String index out of bounds");
         };
     };
 
     /// The length of the string in UTF-8 bytes, not runes.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
     /// Whether the string is empty.
     public is_empty(self): Bool = self.len == 0;
     /// Borrow the internal null-terminated bytes; valid while the string lives.
@@ -434,21 +437,21 @@ given String {
         if len == 0 then {
             return bytes;
         };
-        copy_memory(bytes.borrow_mut_ptr(), self.bytes.data, len);
+        copy_memory(bytes.borrow_mut_ptr(), self.bytes.data, UInt(len));
         return bytes;
     };
 
     /// Return the byte at `index`, or `None` when it is past the end.
     /// The index is a byte offset and need not be a rune boundary.
-    public get(self, index: UInt): Option[UInt8] = {
-        if index >= self.len then {
+    public get(self, index: Int): Option[UInt8] = {
+        if index < 0 or index >= self.len then {
             return Option[UInt8].None();
         };
         return Option[UInt8].Some(self.bytes.data[index]);
     };
 
-    private __index_get(self, key: UInt): UInt8 = {
-        if key >= self.len then {
+    private __index_get(self, key: Int): UInt8 = {
+        if key < 0 or key >= self.len then {
             panic("String index out of bounds");
         };
         return self.bytes.data[key];
@@ -483,30 +486,30 @@ given String {
 
     /// Return the byte index of the first occurrence of `pat`, or `None` when
     /// absent; an empty pattern never matches.
-    public find(self, pat: String): Option[UInt] = self.find_from(0, pat);
+    public find(self, pat: String): Option[Int] = self.find_from(0, pat);
 
     /// Return the byte index of the last occurrence of `pat`, or `None` when
     /// absent; an empty pattern never matches.
-    public find_last(self, pat: String): Option[UInt] = {
+    public find_last(self, pat: String): Option[Int] = {
         if pat.len == 0 then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
-        let mutable result = Option[UInt].None();
-        let mutable start: UInt = 0;
+        let mutable result = Option[Int].None();
+        let mutable start = 0;
         // Using while is pattern matching for iterator-like loop
         while self.find_from(start, pat) is .Some(idx) then {
-            result = Option[UInt].Some(idx);
+            result = Option[Int].Some(idx);
             start = idx + 1;
         };
         return result;
     };
 
-    private make_substring(self, start: UInt, len: UInt): String = {
-        if start + len > self.len then {
+    private make_substring(self, start: Int, len: Int): String = {
+        if start < 0 or len < 0 or start + len > self.len then {
             panic("substring out of bounds");
         };
-        let s = alloc_bytes(len);
-        copy_memory(s.data, self.bytes.data + start, len);
+        let s = alloc_bytes(UInt(len));
+        copy_memory(s.data, self.bytes.data + start, UInt(len));
         return String(s, len);
     };
 
@@ -514,7 +517,7 @@ given String {
 
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
-    public is_rune_boundary(self, byte_index: UInt): Bool = {
+    public is_rune_boundary(self, byte_index: Int): Bool = {
         if byte_index > self.len then {
             return false;
         };
@@ -524,7 +527,7 @@ given String {
         return not String.is_utf8_continuation_byte(self.bytes.data[byte_index]);
     };
 
-    private validate_substring_bounds(self, start: UInt, end: UInt): Void = {
+    private validate_substring_bounds(self, start: Int, end: Int): Void = {
         if start > end then {
             panic("substring invalid range");
         };
@@ -538,13 +541,16 @@ given String {
 
     /// Resolve `range` into the byte span it names, panicking when the range is
     /// invalid or out of bounds or lands off a rune boundary.
-    public slice_spec(self, range: Range[UInt]): SliceSpec = {
+    public slice_spec(self, range: Range[Int]): SliceSpec = {
         let len = self.len;
-        let mutable start: UInt = 0;
-        let mutable end: UInt = 0;
+        let mutable start = 0;
+        let mutable end = 0;
 
         when range in {
             .Closed(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("String.slice_spec invalid range");
                 };
@@ -555,6 +561,9 @@ given String {
                 end = e + 1;
             },
             .ClosedOpen(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("String.slice_spec invalid range");
                 };
@@ -565,20 +574,26 @@ given String {
                 end = e;
             },
             .OpenClosed(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("String.slice_spec invalid range");
                 };
-                if s == UInt.max_value() or e >= len then {
+                if s == Int.max_value() or e >= len then {
                     panic("String.slice_spec out of bounds");
                 };
                 start = s + 1;
                 end = e + 1;
             },
             .Open(s, e) then {
+                if s < 0 or e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s > e then {
                     panic("String.slice_spec invalid range");
                 };
-                if s == UInt.max_value() or e > len then {
+                if s == Int.max_value() or e > len then {
                     panic("String.slice_spec out of bounds");
                 };
                 // Open(s, s) names no bytes: the empty slice at s, exactly like
@@ -592,6 +607,9 @@ given String {
                 end = e;
             },
             .From(s) then {
+                if s < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s > len then {
                     panic("String.slice_spec out of bounds");
                 };
@@ -599,6 +617,9 @@ given String {
                 end = len;
             },
             .After(s) then {
+                if s < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if s >= len then {
                     panic("String.slice_spec out of bounds");
                 };
@@ -606,6 +627,9 @@ given String {
                 end = len;
             },
             .To(e) then {
+                if e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if e >= len then {
                     panic("String.slice_spec out of bounds");
                 };
@@ -613,6 +637,9 @@ given String {
                 end = e + 1;
             },
             .Until(e) then {
+                if e < 0 then {
+                    panic("String.slice_spec out of bounds");
+                };
                 if e > len then {
                     panic("String.slice_spec out of bounds");
                 };
@@ -631,14 +658,14 @@ given String {
 
     /// Return the substring that `range` names.
     /// Panics when the range is invalid, out of bounds, or off a rune boundary.
-    public substring(self, range: Range[UInt]): String = {
+    public substring(self, range: Range[Int]): String = {
         let span = self.slice_spec(range);
         return self.make_substring(span.start(), span.len());
     };
 
     /// Return the string with leading ASCII whitespace removed.
     public trim_ascii_start(self): String = {
-        let mutable i: UInt = 0;
+        let mutable i = 0;
         while i < self.len and String.is_ascii_space(self.bytes.data[i]) then {
             i += 1;
         };
@@ -688,7 +715,7 @@ given String {
 
     /// Return a copy with ASCII letters lowercased; other bytes are unchanged.
     public to_ascii_lowercase(self): String = {
-        let s = alloc_bytes(self.len);
+        let s = alloc_bytes(UInt(self.len));
         for i in 0..<self.len then {
             init_memory(s.data + i, String.to_lower_byte(self.bytes.data[i]));
         };
@@ -697,7 +724,7 @@ given String {
 
     /// Return a copy with ASCII letters uppercased; other bytes are unchanged.
     public to_ascii_uppercase(self): String = {
-        let s = alloc_bytes(self.len);
+        let s = alloc_bytes(UInt(self.len));
         for i in 0..<self.len then {
             init_memory(s.data + i, String.to_upper_byte(self.bytes.data[i]));
         };
@@ -707,7 +734,7 @@ given String {
     /// Return a copy with each ASCII word titlecased: its first letter upper,
     /// the rest lower.
     public to_ascii_titlecase(self): String = {
-        let s = alloc_bytes(self.len);
+        let s = alloc_bytes(UInt(self.len));
         let mutable in_word = false;
         for i in 0..<self.len then {
             let b = self.bytes.data[i];
@@ -728,20 +755,19 @@ given String {
 
     /// Search from byte index `start` for the first occurrence of `pat`, returning
     /// its index or `None`; panics when `start` is past the end.
-    public find_from(self, start: UInt, pat: String): Option[UInt] = {
+    public find_from(self, start: Int, pat: String): Option[Int] = {
         if pat.len == 0 then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
-        if start > self.len then {
-            panic("find start out of bounds");
-        };
-        if pat.len > self.len then {
-            return Option[UInt].None();
+        // An Option-returning search is total: a negative or past-the-end
+        // start is an out-of-domain position and yields `None`, never a panic.
+        if start < 0 or start > self.len or pat.len > self.len then {
+            return Option[Int].None();
         };
         let mutable i = start;
         let max = self.len - pat.len;
         while i <= max then {
-            let mutable j: UInt = 0;
+            let mutable j = 0;
             let mutable ok = true;
             while j < pat.len then {
                 if self.bytes.data[i + j] != pat.bytes.data[j] then {
@@ -751,26 +777,29 @@ given String {
                 j += 1;
             };
             if ok then {
-                return Option[UInt].Some(i);
+                return Option[Int].Some(i);
             };
             i += 1;
         };
-        return Option[UInt].None();
+        return Option[Int].None();
     };
 
     /// Whether `pat` occurs anywhere in the string.
     public contains(self, pat: String): Bool = self.find_from(0, pat).is_some();
 
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
-    public repeat(self, times: UInt): String = {
+    public repeat(self, times: Int): String = {
+        if times < 0 then {
+            panic("String repeat negative times");
+        };
         if times == 0 then {
             return String.new();
         };
         let total = self.len * times;
-        let s = alloc_bytes(total);
-        let mutable offset: UInt = 0;
+        let s = alloc_bytes(UInt(total));
+        let mutable offset = 0;
         for _ in 0..<times then {
-            copy_memory(s.data + offset, self.bytes.data, self.len);
+            copy_memory(s.data + offset, self.bytes.data, UInt(self.len));
             offset += self.len;
         };
         return String(s, total);
@@ -778,16 +807,19 @@ given String {
 
     /// Replace only the first `n` occurrences of `pat` with `with`.
     /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
-    public replace_n(self, pat: String, n: UInt, with: String =): String = {
+    public replace_n(self, pat: String, n: Int, with: String =): String = {
         if pat.len == 0 then {
             panic("replace empty pattern");
+        };
+        if n < 0 then {
+            panic("String replace_n negative count");
         };
         if n == 0 then {
             return self.make_substring(0, self.len);
         };
         let mutable result = StringBuilder.new();
-        let mutable start: UInt = 0;
-        let mutable count: UInt = 0;
+        let mutable start = 0;
+        let mutable count = 0;
         while count < n then {
             when self.find_from(start, pat) in {
                 .Some(idx) then {
@@ -851,7 +883,7 @@ given String {
             panic("replace empty pattern");
         };
         let mutable result = StringBuilder.new();
-        let mutable start: UInt = 0;
+        let mutable start = 0;
         // Using while is pattern matching
         while self.find_from(start, pat) is .Some(idx) then {
             let prefix_len = idx - start;
@@ -950,7 +982,7 @@ given String: Eq {
         if self.len != other.len then {
             return false;
         };
-        return compare_memory(self.borrow_ptr(), other.borrow_ptr(), self.len) == 0;
+        return compare_memory(self.borrow_ptr(), other.borrow_ptr(), UInt(self.len)) == 0;
     };
 };
 
@@ -964,7 +996,7 @@ given String: Ord {
         let self_len = self.len;
         let other_len = other.len;
         let min = if self_len < other_len then self_len else other_len;
-        let c = compare_memory(self.bytes.data, other.bytes.data, min);
+        let c = compare_memory(self.bytes.data, other.bytes.data, UInt(min));
         if c != 0 then {
             return if c < 0 then 0 - 1 else 1;
         };
@@ -1083,7 +1115,7 @@ given StringLinesIterator: Iterator[String] {
 // ============================================================================
 
 /// Iterator over the runes of a string, decoding UTF-8 as it goes.
-public type mutable StringRunesIterator(source: String, mutable byte_index: UInt);
+public type mutable StringRunesIterator(source: String, mutable byte_index: Int);
 
 /// `Iterator[Rune]` for `StringRunesIterator`: yields the decoded runes one at a time.
 given StringRunesIterator: Iterator[Rune] {

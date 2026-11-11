@@ -513,7 +513,7 @@ public struct ListPatternOps {
   public let elementType: Type
   /// `List.count()`, returning the subject's length.
   public let countSymbol: Symbol
-  /// `List.__index_get(UInt)`, reading one element by position.
+  /// `List.__index_get(Int)`, reading one element by position.
   public let indexSymbol: Symbol
 
   public init(listType: Type, elementType: Type, countSymbol: Symbol, indexSymbol: Symbol) {

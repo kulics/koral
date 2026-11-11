@@ -1366,7 +1366,7 @@ extension TypeChecker {
     case frozenList(element: Type)
     case frozenDict(key: Type, value: Type)
     case pointer(element: Type, mutable: Bool)
-    case fixedArray(size: UInt64, element: Type)
+    case fixedArray(size: Int64, element: Type)
   }
 
   func builtinSubscriptBaseType(_ type: Type) -> Type {
@@ -1485,7 +1485,7 @@ extension TypeChecker {
   /// hatch).
   private func wrapFixedArrayIndexWithBoundsCheck(
     index: TypedExpressionNode,
-    length: UInt64,
+    length: Int64,
     span: SourceSpan
   ) throws -> TypedExpressionNode {
     // A failed or diverging index has no value to check; it has its own
@@ -1668,9 +1668,9 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
       }
       var index = args[0]
-      index = try coerceLiteral(index, to: .uint)
-      if index.type != .uint && index.type != .error {
-        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+      index = try coerceLiteral(index, to: .int)
+      if index.type != .int && index.type != .error {
+        throw SemanticError.typeMismatch(expected: "Int", got: index.type.description)
       }
       let ptrExpr: TypedExpressionNode
       switch type {
@@ -1688,9 +1688,9 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: args.count)
       }
       var index = args[0]
-      index = try coerceLiteral(index, to: .uint)
-      if index.type != .uint && index.type != .error {
-        throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+      index = try coerceLiteral(index, to: .int)
+      if index.type != .int && index.type != .error {
+        throw SemanticError.typeMismatch(expected: "Int", got: index.type.description)
       }
       let ptrExpr: TypedExpressionNode
       switch type {
@@ -1748,7 +1748,7 @@ extension TypeChecker {
         throw SemanticError.invalidArgumentCount(function: "subscript", expected: 1, got: args.count)
       }
       var index = args[0]
-      index = try coerceLiteral(index, to: .uint)
+      index = try coerceLiteral(index, to: .int)
       return try buildFixedArrayElementPlace(base: base, index: index, span: span)
     case .pointer:
       fatalError("pointer subscript should have returned above")

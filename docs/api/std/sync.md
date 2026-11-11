@@ -16,7 +16,8 @@ Import the module with `using "std/sync" { ... };`.
 /// 通道是有界的：队列达到 `capacity` 时 send() 阻塞。
 /// capacity 为 0 时是无缓冲的会合通道（rendezvous）：send() 阻塞到某个
 /// 接收方取走该消息才返回，用于严格的交接与同步场景。
-public let make_channel[T: Any](capacity: UInt): Pair[SendChannel[T], RecvChannel[T]];
+/// capacity 为负时 panic。
+public let make_channel[T: Any](capacity: Int): Pair[SendChannel[T], RecvChannel[T]];
 ```
 
 ## Traits
@@ -230,9 +231,10 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// Create an empty concurrent dict.
     public new(): ConcurrentDict[K, V];
     /// Create an empty concurrent dict sized for about `capacity` entries.
-    public with_capacity(capacity: UInt): ConcurrentDict[K, V];
+    /// Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentDict[K, V];
     /// The number of entries.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the dict has no entries.
     public is_empty(self): Bool;
     /// The value stored under `key`, or `None` when absent.
@@ -274,7 +276,7 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     /// Create an empty concurrent set.
     public new(): ConcurrentSet[T];
     /// The number of members.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the set has no members.
     public is_empty(self): Bool;
     /// Whether `value` is a member.
@@ -304,7 +306,7 @@ given[T: sendable] ConcurrentDeque[T] {
     /// Create an empty concurrent deque.
     public new(): ConcurrentDeque[T];
     /// The number of elements.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the deque has no elements.
     public is_empty(self): Bool;
     /// Add `value` at the back end.
@@ -325,10 +327,10 @@ given[T: sendable] ConcurrentDeque[T] {
 
 /// Creates the gate and adds, removes, and awaits latches.
 given LatchGate {
-    /// Create a gate held closed by `count` latches.
-    public new(count: UInt): LatchGate;
-    /// Add `count` more latches to the gate.
-    public latch(self, count: UInt): Void;
+    /// Create a gate held closed by `count` latches. Panics when `count` is negative.
+    public new(count: Int): LatchGate;
+    /// Add `count` more latches to the gate. Panics when `count` is negative.
+    public latch(self, count: Int): Void;
     /// Remove one latch, waking all waiters when the last is removed and panicking when none remain.
     public unlatch(self): Void;
     /// Remove one latch, then block until the gate opens; panics when no latch remains.
@@ -388,8 +390,8 @@ given MutexCondvar {
 
 /// Creates the semaphore and takes and returns permits.
 given Semaphore {
-    /// Create a semaphore with `permits` permits available.
-    public new(permits: UInt): Semaphore;
+    /// Create a semaphore with `permits` permits available. Panics when `permits` is negative.
+    public new(permits: Int): Semaphore;
     /// Take a permit, blocking until one is available.
     public acquire(self): Void;
     /// Take a permit only if one is immediately available.

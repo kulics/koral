@@ -1,0 +1,70 @@
+// EXPECT: PASS
+// A same-width conversion is unchecked exactly when the two types hold the
+// same values (same width & signedness). A same-width SIGNEDNESS FLIP is a
+// value conversion: in range it converts normally (the out-of-range side is
+// pinned by the *_panic cases), and in the Wrapping family it wraps modulo
+// 2^N -- the wrapped answer the family promises, never a silent bit
+// reinterpretation.
+
+let main(): Int = {
+    // Same width, same signedness: free retypes either way.
+    let n = -5;
+    let wv: WrappingInt = WrappingInt(n);
+    let back = Int(wv);
+    if back != -5 then {
+        eprintln("FAIL: Int -> WrappingInt -> Int round trip, got \(back)");
+        return 1;
+    };
+
+    let u64: UInt64 = 18446744073709551615;
+    let u: UInt = UInt(u64);
+    let u64back: UInt64 = UInt64(u);
+    if u64back != 18446744073709551615 then {
+        eprintln("FAIL: UInt64 -> UInt -> UInt64 round trip, got \(u64back)");
+        return 1;
+    };
+
+    // Same-width sign flips convert when the value fits the target.
+    let pos = 5;
+    let upos: UInt = UInt(pos);
+    if upos != 5 then {
+        eprintln("FAIL: Int 5 -> UInt, got \(upos)");
+        return 1;
+    };
+    let small: UInt = 7;
+    let ssmall = Int(small);
+    if ssmall != 7 then {
+        eprintln("FAIL: UInt 7 -> Int, got \(ssmall)");
+        return 1;
+    };
+
+    // Same-width sign flips in the Wrapping family wrap modulo 2^N.
+    let wn: WrappingInt = WrappingInt(-5);
+    let wu: WrappingUInt = WrappingUInt(wn);
+    if UInt(wu) != 18446744073709551611 then {
+        eprintln("FAIL: WrappingInt -5 -> WrappingUInt, got \(UInt(wu))");
+        return 1;
+    };
+    let wback: WrappingInt = WrappingInt(wu);
+    if Int(wback) != -5 then {
+        eprintln("FAIL: WrappingUInt -> WrappingInt wrap back, got \(Int(wback))");
+        return 1;
+    };
+
+    // Narrower widths behave the same.
+    let b: Int8 = 100;
+    let ub: UInt8 = UInt8(b);
+    if ub != 100 then {
+        eprintln("FAIL: Int8 100 -> UInt8, got \(ub)");
+        return 1;
+    };
+    let ub2: UInt8 = 200;
+    let b2: Int8 = Int8(WrappingInt8(ub2));
+    if b2 != -56 then {
+        eprintln("FAIL: UInt8 200 -> WrappingInt8 -> Int8, got \(b2)");
+        return 1;
+    };
+
+    println("PASS");
+    return 0;
+};

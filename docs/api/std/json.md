@@ -18,7 +18,7 @@ Import the module with `using "std/json" { ... };`.
 ## Types
 ```koral
 /// JSON parse failure with `msg` and the `position` in the input where parsing stopped.
-public type sendable JsonError(public msg: String, public position: UInt);
+public type sendable JsonError(public msg: String, public position: Int);
 
 /// A JSON value: `Null`, `Bool`, `Number`, `String`, `Array`, or `Object`.
 /// `Number` holds a `Float64`, `Array` a frozen list of values, and `Object` a
@@ -92,7 +92,7 @@ given JsonValue {
     /// Return the value stored under `key`, or `None` when this is not an `Object` or has no such key.
     public get_field(self, key: String): Option[JsonValue];
     /// Return the element at `index`, or `None` when this is not an `Array` or the index is out of range.
-    public get_element(self, index: UInt): Option[JsonValue];
+    public get_element(self, index: Int): Option[JsonValue];
     /// Format as JSON indented two spaces per level, with each array element and object entry on its own line.
     /// Panics with `JSON error: maximum nesting depth exceeded` past `max_json_depth`.
     public to_string_pretty(self): String;

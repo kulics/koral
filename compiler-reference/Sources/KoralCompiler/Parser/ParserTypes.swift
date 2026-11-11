@@ -177,7 +177,7 @@ extension Parser {
           expected: "an integer array size")
       }
       try match(.integer(raw))
-      guard let size = UInt64(raw), size >= 1 else {
+      guard let size = Int64(raw), size >= 1 else {
         throw ParserError.rejectedConstruct(
           span: currentSpan, message: "Fixed array size must be at least 1")
       }

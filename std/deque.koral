@@ -9,9 +9,9 @@
 /// both ends are O(1) amortized, and indexing is O(1).
 public type mutable Deque[T: Any](
     mutable source: *mutable T,
-    mutable len: UInt,
-    mutable cap: UInt,
-    mutable head: UInt,
+    mutable len: Int,
+    mutable cap: Int,
+    mutable head: Int,
 );
 
 /// `Drop` for `Deque[T]`: frees every element and the ring buffer when the last handle dies.
@@ -27,40 +27,46 @@ given[T: Any] Deque[T]: Drop {
 };
 
 /// A one-shot cursor that walks a `Deque[T]` from front to back.
-public type mutable DequeIterator[T: Any](source: Deque[T], mutable index: UInt);
+public type mutable DequeIterator[T: Any](source: Deque[T], mutable index: Int);
 
 /// Construction, mutation, and query operations on `Deque[T]`.
 given[T: Any] Deque[T] {
 
     /// Create an empty deque, with a small ring buffer allocated up front.
     public new(): Self = {
-        let cap: UInt = 10;
-        let source = alloc_memory[T](cap);
+        let cap = 10;
+        let source = alloc_memory[T](UInt(cap));
         return Deque[T](source, 0, cap, 0);
     };
 
     /// Create an empty deque with room for at least `capacity` elements before the next reallocation.
-    public with_capacity(capacity: UInt): Self = {
+    public with_capacity(capacity: Int): Self = {
+        if capacity < 0 then {
+            panic("Deque with_capacity negative capacity");
+        };
         let cap = if capacity < 1 then 1 else capacity;
-        let source = alloc_memory[T](cap);
+        let source = alloc_memory[T](UInt(cap));
         return Deque[T](source, 0, cap, 0);
     };
 
     /// The number of elements in the deque.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Grow capacity so the deque can hold `additional` more elements without reallocating.
-    public reserve(self, additional: UInt): Void = {
+    public reserve(self, additional: Int): Void = {
+        if additional < 0 then {
+            panic("Deque reserve negative additional");
+        };
         self.ensure_capacity(self.len + additional);
     };
 
     /// Whether the deque has no elements.
     public is_empty(self): Bool = self.len == 0;
 
-    private physical_index(self, logical_index: UInt): UInt =
+    private physical_index(self, logical_index: Int): Int =
         (self.head + logical_index) % self.cap;
 
-    private ensure_capacity(self, min_capacity: UInt): Void = {
+    private ensure_capacity(self, min_capacity: Int): Void = {
         if min_capacity > self.cap then {
             self.grow_to(min_capacity);
         };
@@ -68,7 +74,7 @@ given[T: Any] Deque[T] {
 
     /// The growth body behind `ensure_capacity`, kept out of line on purpose --
     /// same shape and reason as `List.grow_to` (see std/list.koral).
-    private grow_to(self, min_capacity: UInt): Void = {
+    private grow_to(self, min_capacity: Int): Void = {
         let mutable new_cap = self.cap * 2;
         if new_cap < min_capacity then {
             new_cap = min_capacity;
@@ -77,7 +83,7 @@ given[T: Any] Deque[T] {
         let old_len = self.len;
         let old_cap = self.cap;
         let old_head = self.head;
-        let new_source = alloc_memory[T](new_cap);
+        let new_source = alloc_memory[T](UInt(new_cap));
         for i in 0..<old_len then {
             let old_index = (old_head + i) % old_cap;
             let moved = take_memory(old_source + old_index);
@@ -92,7 +98,7 @@ given[T: Any] Deque[T] {
     /// Append `value` at the back end (amortized O(1)), without consuming the caller's value.
     public push_back(self, value: T): Void = {
         let len = self.len;
-        let next = len + UInt(1);
+        let next = len + 1;
         if next > self.cap then {
             self.grow_to(next);
         };
@@ -104,7 +110,7 @@ given[T: Any] Deque[T] {
     /// Insert `value` at the front end (amortized O(1)), without consuming the caller's value.
     public push_front(self, value: T): Void = {
         let len = self.len;
-        let next = len + UInt(1);
+        let next = len + 1;
         if next > self.cap then {
             self.grow_to(next);
         };
@@ -153,24 +159,24 @@ given[T: Any] Deque[T] {
     };
 
     /// The element at logical index `index` (0 is the front), or `None` when out of range.
-    public get(self, index: UInt): Option[T] = {
-        if index >= self.len then {
+    public get(self, index: Int): Option[T] = {
+        if index < 0 or index >= self.len then {
             return Option[T].None();
         };
         let physical = self.physical_index(index);
         return Option[T].Some(self.source[physical]);
     };
 
-    private __index_get(self, key: UInt): T = {
-        if key >= self.len then {
+    private __index_get(self, key: Int): T = {
+        if key < 0 or key >= self.len then {
             panic("Deque index out of bounds");
         };
         let physical = self.physical_index(key);
         return self.source[physical];
     };
 
-    private __index_set(self, key: UInt, value: T): Void = {
-        if key >= self.len then {
+    private __index_set(self, key: Int, value: T): Void = {
+        if key < 0 or key >= self.len then {
             panic("Deque index out of bounds");
         };
         let physical = self.physical_index(key);
@@ -178,8 +184,8 @@ given[T: Any] Deque[T] {
     };
 
     /// 内置下标 `dq[i]` 的内部操作：返回元素槽位指针。见 `List.__index_slot`。
-    private __index_slot(self, key: UInt): *mutable T = {
-        if key >= self.len then {
+    private __index_slot(self, key: Int): *mutable T = {
+        if key < 0 or key >= self.len then {
             panic("Deque index out of bounds");
         };
         let physical = self.physical_index(key);
@@ -201,7 +207,7 @@ given[T: Any] Deque[T] {
         if self.len <= 1 then {
             return;
         };
-        let mutable left: UInt = 0;
+        let mutable left = 0;
         let mutable right = self.len - 1;
         while left < right then {
             let lp = self.physical_index(left);
@@ -219,8 +225,8 @@ given[T: Any] Deque[T] {
         if self.len == 0 then {
             return;
         };
-        let mutable write: UInt = 0;
-        let mutable read: UInt = 0;
+        let mutable write = 0;
+        let mutable read = 0;
         while read < self.len then {
             let rp = self.physical_index(read);
             let v = self.source[rp];

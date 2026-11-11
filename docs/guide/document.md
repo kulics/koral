@@ -349,31 +349,37 @@ panic — as does converting a NaN or an infinity to an integer. `Wrapping*` typ
 share the regular types' width and ABI: the family is a compile-time policy, not
 a different machine value.
 
-The conversion matrix follows from the target alone:
+The conversion matrix follows from the target alone. A conversion is
+**unchecked** only when the two types hold exactly the same values — same width
+and same signedness. Anything else, a width change or a signedness flip, is a
+real conversion and follows the target family's policy:
 
-| Source → Target | Same width | Width-changing |
+| Source → Target | Same width & signedness | Width change or signedness flip |
 |---|---|---|
 | Regular → Regular | lossless retype | **checked** |
-| Regular → Wrapping | lossless retype | **truncates** |
+| Regular → Wrapping | lossless retype | **wraps** |
 | Wrapping → Regular | lossless retype | **checked** |
-| Wrapping → Wrapping | lossless retype | **truncates** |
+| Wrapping → Wrapping | lossless retype | **wraps** |
 
-- **Same width** is always a lossless retype, in either direction, signedness
-  flips included: no information is lost, only how the bits are read.
-  `UInt(n)` for `n = -5` reinterprets to `18446744073709551611`; it does not
-  wrap.
-- **Width-changing to a regular target** is checked against the target type's
-  range (narrowing or widening alike). If the value does not fit, the program
-  panics at run time.
-- **Width-changing to a Wrapping target** takes the target width's low bits —
+- **Same width and signedness** is a lossless retype — the two types hold the
+  same values. `UInt64(x: UInt)` and `Int(WrappingInt(n))` are free; the latter
+  gives `n` back unchanged.
+- **Any conversion to a regular target that can lose a value** is checked
+  against the target type's range — a signedness flip included. `UInt(-5)`
+  panics at run time; it is not reinterpreted. A conversion moves values, not
+  bit patterns: `-5` and `18446744073709551611` are different numbers, and only
+  the Wrapping family is in the business of ignoring that.
+- **Any conversion to a Wrapping target** takes the target width's low bits —
   truncating, or sign/zero-extending when widening the two's-complement
-  representation — and never panics.
+  representation — and never panics. A signedness flip at the same width wraps
+  modulo 2^N, which is the wrapped answer the family promises.
 
 ```koral
 let big: Int = 300;
 let a: UInt8 = UInt8(big);                        // Panic: numeric conversion overflow
 let n: Int = -5;
-let u: UInt = UInt(n);                            // 18446744073709551611 -- reinterpreted
+// let u: UInt = UInt(n);                         // Panic: numeric conversion overflow
+let u: UInt = UInt(WrappingUInt(n));              // 18446744073709551611 -- wrapped on purpose
 let low: UInt8 = UInt8(WrappingUInt8(big));       // 44 -- the low byte
 let b: Int8 = -1;
 let wide: UInt = UInt(WrappingUInt(b));           // 18446744073709551615 -- sign-extends first
@@ -3062,6 +3068,8 @@ built-ins. The step is not atomic across threads.
 #### Builtin Subscript Rules
 
 - `value[key]` and `value[key] = expr` are supported only for `String`, `List[T]`, `Deque[T]`, `Dict[K, V]`, `FrozenList[T]`, `FrozenDict[K, V]`, fixed-size arrays `[N]T`, `*T`, and `*mutable T`.
+- A **numeric index is an `Int`** — counts and positions are signed throughout the standard library, so an integer literal in subscript position infers `Int`, and an `Int` variable needs no conversion to index. `Dict[K, V]` / `FrozenDict[K, V]` take a `K` key instead.
+- On `String`, `List`, `Deque`, `FrozenList` and fixed-size arrays the index is bounds-checked: an out-of-range **or negative** index panics. Pointer subscripts are the exception — `p[i]` is unchecked C indexing, and a negative `i` is raw pointer arithmetic.
 - `String[key]` returns a `UInt8` byte value. It is read-only and not addressable.
 - `List[T]` and `Deque[T]` (both `type mutable`) support value reads, assignment, and nested place updates.
 - `FrozenList[T]` and `FrozenDict[K, V]` subscripts are read-only: `frozen[i]` and `frozen_dict[key]` read exactly like `List[i]` / `Dict[key]` (same out-of-range / missing-key panics), and assigning to one is a compile error. `FrozenSet[T]` has no subscript.
@@ -3694,7 +3702,8 @@ permission for the rest of it. `&mutable` / `&mutable expr` forms a
 `[N]T` is a C-layout fixed array of N elements of `T`: mutable value semantics
 (copies on assignment and passing; the same write matrix as above applies to
 `a[i] = v`). A numeric subscript is bounds-checked: the index is evaluated
-once and an out-of-range one panics instead of reading neighbouring memory.
+once and an out-of-range or negative one panics instead of reading neighbouring
+memory.
 `T` must cross the FFI boundary — a built-in scalar, a `*` /
 `*mutable` pointer, another `type foreign` or `type foreign`'s array-friendly
 forms.

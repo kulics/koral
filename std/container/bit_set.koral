@@ -12,8 +12,8 @@ using "std" { ... };
 /// `type mutable` working state: thread-local, like every mutable container.
 public type mutable BitSet(
     mutable words: List[UInt64],
-    mutable size: UInt,
-    mutable live: UInt,
+    mutable size: Int,
+    mutable live: Int,
 );
 
 /// A one-shot cursor that walks a `BitSet`'s members in ascending order.
@@ -23,58 +23,61 @@ public type mutable BitSetIterator(source: BitSet, mutable next_bit: UInt);
 given BitSet {
 
     /// Create an empty bit set over the universe `[0, size)`.
-    public new(size: UInt): BitSet = {
+    public new(size: Int): BitSet = {
+        if size < 0 then {
+            panic("BitSet new negative size");
+        };
         let mutable words = List[UInt64].new();
-        let word_count = (size + UInt(63)) / UInt(64);
-        let mutable w = UInt(0);
+        let word_count = (size + 63) / 64;
+        let mutable w = 0;
         while w < word_count then {
             words.push(UInt64(0));
-            w = w + UInt(1);
+            w = w + 1;
         };
-        return BitSet(words, size, UInt(0));
+        return BitSet(words, size, 0);
     };
 
     /// The number of members in the set.
-    public count(self): UInt = self.live;
+    public count(self): Int = self.live;
 
     /// Whether the set has no members.
-    public is_empty(self): Bool = self.live == UInt(0);
+    public is_empty(self): Bool = self.live == 0;
 
     /// Whether `value` is a member; values outside the universe answer `false`.
     public contains(self, value: UInt): Bool = {
-        if value >= self.size then {
+        if value >= UInt(self.size) then {
             return false;
         };
-        let word = self.words.get(value / UInt(64)) or else UInt64(0);
+        let word = self.words.get(Int(value / UInt(64))) or else UInt64(0);
         return (word & BitSet.bit_mask(value)) != UInt64(0);
     };
 
     /// Add `value` to the set. Panics when `value` is outside the universe.
     public insert(self, value: UInt): Void = {
-        if value >= self.size then {
+        if value >= UInt(self.size) then {
             panic("BitSet insert index out of bounds");
         };
-        let index = value / UInt(64);
+        let index = Int(value / UInt(64));
         let mask = BitSet.bit_mask(value);
         let word = self.words.get(index) or else UInt64(0);
         if (word & mask) == UInt64(0) then {
             self.words[index] = word | mask;
-            self.live = self.live + UInt(1);
+            self.live = self.live + 1;
         };
     };
 
     /// Add `value` to the set and report whether it was newly added. Panics
     /// when `value` is outside the universe.
     public try_insert(self, value: UInt): Bool = {
-        if value >= self.size then {
+        if value >= UInt(self.size) then {
             panic("BitSet try_insert index out of bounds");
         };
-        let index = value / UInt(64);
+        let index = Int(value / UInt(64));
         let mask = BitSet.bit_mask(value);
         let word = self.words.get(index) or else UInt64(0);
         if (word & mask) == UInt64(0) then {
             self.words[index] = word | mask;
-            self.live = self.live + UInt(1);
+            self.live = self.live + 1;
             return true;
         };
         return false;
@@ -83,30 +86,30 @@ given BitSet {
     /// Remove `value` from the set. Panics when `value` is outside the
     /// universe; removing a non-member is a no-op.
     public remove(self, value: UInt): Void = {
-        if value >= self.size then {
+        if value >= UInt(self.size) then {
             panic("BitSet remove index out of bounds");
         };
-        let index = value / UInt(64);
+        let index = Int(value / UInt(64));
         let mask = BitSet.bit_mask(value);
         let word = self.words.get(index) or else UInt64(0);
         if (word & mask) != UInt64(0) then {
             self.words[index] = word & (BitSet.bit_not(mask));
-            self.live = self.live - UInt(1);
+            self.live = self.live - 1;
         };
     };
 
     /// Remove `value` from the set and report whether it was a member. Panics
     /// when `value` is outside the universe.
     public try_remove(self, value: UInt): Bool = {
-        if value >= self.size then {
+        if value >= UInt(self.size) then {
             panic("BitSet try_remove index out of bounds");
         };
-        let index = value / UInt(64);
+        let index = Int(value / UInt(64));
         let mask = BitSet.bit_mask(value);
         let word = self.words.get(index) or else UInt64(0);
         if (word & mask) != UInt64(0) then {
             self.words[index] = word & (BitSet.bit_not(mask));
-            self.live = self.live - UInt(1);
+            self.live = self.live - 1;
             return true;
         };
         return false;
@@ -114,12 +117,12 @@ given BitSet {
 
     /// Remove every member, keeping the universe.
     public clear(self): Void = {
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             self.words[i] = UInt64(0);
-            i = i + UInt(1);
+            i = i + 1;
         };
-        self.live = UInt(0);
+        self.live = 0;
     };
 
 
@@ -127,13 +130,13 @@ given BitSet {
     public union(self, other: BitSet): BitSet = {
         BitSet.check_same_size(self, other);
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let merged = (self.words.get(i) or else UInt64(0))
                 | (other.words.get(i) or else UInt64(0));
             out.words[i] = merged;
             out.live = out.live + BitSet.popcount(merged);
-            i = i + UInt(1);
+            i = i + 1;
         };
         return out;
     };
@@ -143,13 +146,13 @@ given BitSet {
     public intersection(self, other: BitSet): BitSet = {
         BitSet.check_same_size(self, other);
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let merged = (self.words.get(i) or else UInt64(0))
                 & (other.words.get(i) or else UInt64(0));
             out.words[i] = merged;
             out.live = out.live + BitSet.popcount(merged);
-            i = i + UInt(1);
+            i = i + 1;
         };
         return out;
     };
@@ -159,13 +162,13 @@ given BitSet {
     public difference(self, other: BitSet): BitSet = {
         BitSet.check_same_size(self, other);
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let merged = (self.words.get(i) or else UInt64(0))
                 & BitSet.bit_not(other.words.get(i) or else UInt64(0));
             out.words[i] = merged;
             out.live = out.live + BitSet.popcount(merged);
-            i = i + UInt(1);
+            i = i + 1;
         };
         return out;
     };
@@ -175,13 +178,13 @@ given BitSet {
     public symmetric_difference(self, other: BitSet): BitSet = {
         BitSet.check_same_size(self, other);
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let merged = (self.words.get(i) or else UInt64(0))
                 ^ (other.words.get(i) or else UInt64(0));
             out.words[i] = merged;
             out.live = out.live + BitSet.popcount(merged);
-            i = i + UInt(1);
+            i = i + 1;
         };
         return out;
     };
@@ -189,17 +192,17 @@ given BitSet {
     /// The universe members that are not in the set.
     public complement(self): BitSet = {
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let flipped = BitSet.bit_not(self.words.get(i) or else UInt64(0));
             out.words[i] = flipped;
-            i = i + UInt(1);
+            i = i + 1;
         };
         out.live = self.size - self.live;
         // Bits at and above the universe are zero in every member word.
-        if self.size % UInt(64) != UInt(0) then {
-            let last = out.words.count() - UInt(1);
-            let tail = self.size % UInt(64);
+        if self.size % 64 != 0 then {
+            let last = out.words.count() - 1;
+            let tail = self.size % 64;
             let keep = (UInt64(1) << UInt64(tail)) - UInt64(1);
             out.words[last] = (out.words.get(last) or else UInt64(0)) & keep;
         };
@@ -212,14 +215,14 @@ given BitSet {
         if self.size != other.size then {
             return false;
         };
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             let mine = self.words.get(i) or else UInt64(0);
             let theirs = other.words.get(i) or else UInt64(0);
             if (mine & BitSet.bit_not(theirs)) != UInt64(0) then {
                 return false;
             };
-            i = i + UInt(1);
+            i = i + 1;
         };
         return true;
     };
@@ -232,13 +235,13 @@ given BitSet {
         if self.size != other.size then {
             return false;
         };
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             if (self.words.get(i) or else UInt64(0))
                 != (other.words.get(i) or else UInt64(0)) then {
                 return false;
             };
-            i = i + UInt(1);
+            i = i + 1;
         };
         return true;
     };
@@ -246,10 +249,10 @@ given BitSet {
     /// An independent copy over the same universe.
     public clone(self): BitSet = {
         let mutable out = BitSet.new(self.size);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.words.count() then {
             out.words[i] = self.words.get(i) or else UInt64(0);
-            i = i + UInt(1);
+            i = i + 1;
         };
         out.live = self.live;
         return out;
@@ -262,12 +265,12 @@ given BitSet {
     private bit_not(bits: UInt64): UInt64 = ~bits;
 
     /// The number of set bits in a word (Kernighan's count).
-    private popcount(bits: UInt64): UInt = {
+    private popcount(bits: UInt64): Int = {
         let mutable word = bits;
-        let mutable n = UInt(0);
+        let mutable n = 0;
         while word != UInt64(0) then {
             word = word & (word - UInt64(1));
-            n = n + UInt(1);
+            n = n + 1;
         };
         return n;
     };
@@ -286,7 +289,7 @@ given BitSetIterator: Iterator[UInt] {
     /// Yield the next member, or `None` after the largest one.
     public next(self): Option[UInt] = {
         let mutable bit = self.next_bit;
-        while bit < self.source.size then {
+        while bit < UInt(self.source.size) then {
             self.next_bit = bit + UInt(1);
             if self.source.contains(bit) then {
                 return Option[UInt].Some(bit);

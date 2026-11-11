@@ -262,15 +262,17 @@ private let fnv1a32(
 private let hex32_padded(value: WrappingUInt32): String = {
     let digits = "0123456789abcdef";
     let mutable v: UInt = UInt(value);
-    let mutable nibbles = List[UInt].new();
+    // The nibbles are digit VALUES derived from the hash word; the one
+    // width->count crossing happens at the derivation, never on the carry.
+    let mutable nibbles = List[Int].new();
     for _ in 0..<8 then {
-        nibbles.push(v % 16);
+        nibbles.push(Int(v % 16));
         v = v / 16;
     };
     let mutable out = StringBuilder.new();
-    let mutable k: UInt = nibbles.count();
-    while k > UInt(0) then {
-        k -= UInt(1);
+    let mutable k = nibbles.count();
+    while k > 0 then {
+        k -= 1;
         out.push_byte(digits[nibbles[k]]);
     };
     return out.to_string();
@@ -309,11 +311,11 @@ public let entry_relative_path(entry_file: String, package_root: String): String
     for part in root.split("/") then {
         root_parts.push(part);
     };
-    let mutable common: UInt = 0;
+    let mutable common = 0;
     while common < entry_parts.count() and common < root_parts.count() and entry_parts[
         common
     ] == root_parts[common] then {
-        common += UInt(1);
+        common += 1;
     };
     let mutable parts = List[String].new();
     for _ in common..<root_parts.count() then {
@@ -332,7 +334,7 @@ private let drop_last_extension(segment: String): String = {
         return segment;
     };
     let mutable kept = List[String].new();
-    kept.push_list(pieces, span = 0..<(pieces.count() - UInt(1)));
+    kept.push_list(pieces, span = 0..<(pieces.count() - 1));
     return kept.join_to_string(".");
 };
 
@@ -353,7 +355,7 @@ private let symbol_key_segment(raw: String): String = {
     if result.is_empty() then {
         return "M";
     };
-    let first = result[UInt(0)];
+    let first = result[0];
     if first >= '0' and first <= '9' then {
         return "M" + result;
     };
@@ -370,7 +372,7 @@ public let symbol_key_segments(relative_entry_path: String): List[String] = {
         parts.push(part);
     };
     if not parts.is_empty() then {
-        let last_index = parts.count() - UInt(1);
+        let last_index = parts.count() - 1;
         parts[last_index] = drop_last_extension(parts[last_index]);
     };
     let mutable out = List[String].new();
@@ -429,7 +431,7 @@ public let is_valid_package_or_segment_name(name: String): Bool = {
     if name.is_empty() then {
         return false;
     };
-    let first = name[UInt(0)];
+    let first = name[0];
     if first < 'a' or first > 'z' then {
         return false;
     };
@@ -1218,7 +1220,7 @@ public let load_package_registry(
         },
         .None() then {},
     };
-    let mutable next: UInt = 0;
+    let mutable next = 0;
     while next < pending.count() then {
         let owner = pending[next];
         next = next + 1;

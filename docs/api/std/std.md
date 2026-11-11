@@ -15,10 +15,10 @@ Import the module with `using "std" { ... };`.
 public let sleep(d: Duration): Void;
 
 /// A `count`-byte list of zeros.
-public let make_bytes(count: UInt): List[UInt8];
+public let make_bytes(count: Int): List[UInt8];
 
 /// A `count`-byte list of uninitialized bytes, meant for buffers that are filled before being read.
-public let make_uninitialized_bytes(count: UInt): List[UInt8];
+public let make_uninitialized_bytes(count: Int): List[UInt8];
 
 /// Allocates uninitialized memory for `capacity` number of elements.
 public let intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
@@ -2561,11 +2561,11 @@ given[T: Any] Deque[T] {
     /// Create an empty deque, with a small ring buffer allocated up front.
     public new(): Self;
     /// Create an empty deque with room for at least `capacity` elements before the next reallocation.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// The number of elements in the deque.
-    public count(self): UInt;
+    public count(self): Int;
     /// Grow capacity so the deque can hold `additional` more elements without reallocating.
-    public reserve(self, additional: UInt): Void;
+    public reserve(self, additional: Int): Void;
     /// Whether the deque has no elements.
     public is_empty(self): Bool;
     /// Append `value` at the back end (amortized O(1)), without consuming the caller's value.
@@ -2581,7 +2581,7 @@ given[T: Any] Deque[T] {
     /// The back element without removing it, or `None` when the deque is empty.
     public last(self): Option[T];
     /// The element at logical index `index` (0 is the front), or `None` when out of range.
-    public get(self, index: UInt): Option[T];
+    public get(self, index: Int): Option[T];
     /// Remove every element, keeping the allocated ring buffer.
     public clear(self): Void;
     /// Reverses the order of elements in place. O(n).
@@ -2631,9 +2631,9 @@ given[K: Hash, V: Any] Dict[K, V] {
     public new(): Self;
     /// Create an empty dict with its buckets allocated up front, sized for about
     /// `capacity` entries.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// Return the number of entries in the dict.
-    public count(self): UInt;
+    public count(self): Int;
     /// Store `value` under `key`, replacing any entry already stored there.
     public insert(self, key: K, value: V): Void;
     /// Store `value` under `key` only if the key is absent; return whether it
@@ -2719,7 +2719,7 @@ given[K: Hash, V: Any] FrozenDict[K, V]: Drop {};
 /// Read-only access over a `FrozenDict[K, V]`.
 given[K: Hash, V: Any] FrozenDict[K, V] {
     /// The number of entries in the snapshot.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the snapshot has no entries.
     public is_empty(self): Bool;
     /// The value stored under `key`, or `None` when absent.
@@ -2835,9 +2835,9 @@ given[T: Any, R: Iterator[T]] StepIterator[T, R]: Iterator[T] {
 };
 
 /// `Iterator` for `EnumerateIterator[T, R]`: yields `(index, element)` pairs.
-given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[UInt, T]] {
+given[T: Any, R: Iterator[T]] EnumerateIterator[T, R]: Iterator[Pair[Int, T]] {
     /// Return the next `(index, element)` pair, or `None` when the source is exhausted.
-    public next(self): Option[Pair[UInt, T]];
+    public next(self): Option[Pair[Int, T]];
 };
 
 /// `Iterator` for `InspectIterator[T, R]`: passes elements through after inspecting them.
@@ -2899,14 +2899,14 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
     public map[U: Any](self, fn: (T) -> U): LazyView[U, MapIterator[T, U, R]];
     /// Apply `fn` to each element and keep only its `Some` results.
     public filter_map[U: Any](self, fn: (T) -> Option[U]): LazyView[U, FilterMapIterator[T, U, R]];
-    /// Yield at most the first `n` elements of the pipeline.
-    public take(self, n: UInt): LazyView[T, TakeIterator[T, R]];
-    /// Drop the first `n` elements of the pipeline and yield the rest.
-    public skip(self, n: UInt): LazyView[T, SkipIterator[T, R]];
+    /// Yield at most the first `n` elements of the pipeline. Panics when `n` is negative.
+    public take(self, n: Int): LazyView[T, TakeIterator[T, R]];
+    /// Drop the first `n` elements of the pipeline and yield the rest. Panics when `n` is negative.
+    public skip(self, n: Int): LazyView[T, SkipIterator[T, R]];
     /// Yield every `n`-th element of the pipeline, starting with the first. Panics when `n < 1`.
-    public step_by(self, n: UInt): LazyView[T, StepIterator[T, R]];
+    public step_by(self, n: Int): LazyView[T, StepIterator[T, R]];
     /// Pair each element with its zero-based index.
-    public enumerate(self): LazyView[Pair[UInt, T], EnumerateIterator[T, R]];
+    public enumerate(self): LazyView[Pair[Int, T], EnumerateIterator[T, R]];
     /// Run `fn` on each element as it passes, yielding the elements unchanged.
     public inspect(self, fn: (T) -> Void): LazyView[T, InspectIterator[T, R]];
     /// Insert `v` between consecutive elements of the pipeline, with none at the ends.
@@ -2932,15 +2932,15 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
     /// Run `fn` on every element for its side effects.
     public for_each(self, fn: (T) -> Void): Void;
     /// The number of elements the pipeline yields.
-    public count(self): UInt;
+    public count(self): Int;
     /// The first element the pipeline yields, or `None` when it yields nothing.
     public first(self): Option[T];
     /// The last element the pipeline yields, or `None` when it yields nothing.
     public last(self): Option[T];
     /// The element at zero-based index `n`, or `None` when the pipeline yields fewer.
-    public nth(self, n: UInt): Option[T];
+    public nth(self, n: Int): Option[T];
     /// The zero-based index of the first element satisfying `fn`, or `None` when none does.
-    public position(self, fn: (T) -> Bool): Option[UInt];
+    public position(self, fn: (T) -> Bool): Option[Int];
     /// The first element satisfying `fn`, or `None` when none does.
     public find(self, fn: (T) -> Bool): Option[T];
     /// The first `Some` result of `fn` over the elements, or `None` when there is none.
@@ -3014,11 +3014,11 @@ given[T: Any] List[T] {
     /// `entry_list` / `local_entry_list`，为它们每次都付一次 alloc 不值得。
     public new(): Self;
     /// Create an empty list with room for at least `capacity` elements before the next reallocation.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// The number of elements in the list.
-    public count(self): UInt;
+    public count(self): Int;
     /// Grow capacity so the list can hold `additional` more elements without reallocating.
-    public reserve(self, additional: UInt): Void;
+    public reserve(self, additional: Int): Void;
     /// Append `value` at the end of the list (amortized O(1)), without consuming the caller's value.
     /// Every hot field is read before the growth call and re-read only in
     /// the growth path: an opaque call in the loop forces the C backend to
@@ -3027,22 +3027,22 @@ given[T: Any] List[T] {
     public push(self, value: T): Void;
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
-    public push_list(self, other: List[T], span: Range[UInt] = ...): Void;
+    public push_list(self, other: List[T], span: Range[Int] = ...): Void;
     /// Remove and return the last element, or `None` when the list is empty.
     public pop(self): Option[T];
     /// Insert the slice of `other` picked by `span` (default: the whole list) at
     /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
-    public insert_list_at(self, index: UInt, other: List[T], span: Range[UInt] = ...): Void;
+    public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void;
     /// Insert `value` at `index` and shift later elements right. O(n).
     /// Panics when `index > count`; `index == count` appends.
-    public insert_at(self, index: UInt, value: T): Void;
+    public insert_at(self, index: Int, value: T): Void;
     /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
-    public remove_at(self, index: UInt): Void;
+    public remove_at(self, index: Int): Void;
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
-    public take_at(self, index: UInt): T;
+    public take_at(self, index: Int): T;
     /// The element at `index` without removing it, or `None` when out of range.
     /// The list keeps the element: `type mutable` values come back shared with it.
-    public get(self, index: UInt): Option[T];
+    public get(self, index: Int): Option[T];
     /// The first element without removing it, or `None` when the list is empty.
     public first(self): Option[T];
     /// The last element without removing it, or `None` when the list is empty.
@@ -3060,10 +3060,10 @@ given[T: Any] List[T] {
     public reverse(self): Void;
     /// Resolve `range` against this list's length into a `SliceSpec` (start + length).
     /// Panics when the range is invalid or reaches past the end.
-    public slice_spec(self, range: Range[UInt]): SliceSpec;
+    public slice_spec(self, range: Range[Int]): SliceSpec;
     /// Return a new list holding the `range` slice of this one (elements shared
     /// one level); this list is left untouched. Panics on an invalid or out-of-bounds range.
-    public sublist(self, range: Range[UInt]): List[T];
+    public sublist(self, range: Range[Int]): List[T];
     /// Concatenation: returns a new list, leaving both inputs usable.
     /// Deliberately not `Add` — arithmetic traits stay off heap-owning containers.
     public concat(self, other: List[T]): List[T];
@@ -3074,7 +3074,7 @@ given[T: Any] List[T] {
     public sort_by[K: Ord](self, key: (T) -> K): Void;
     /// Binary search by the key `key` extracts; the list must already be sorted by that key.
     /// Returns `(index, true)` when found, `(insertion_point, false)` otherwise. O(log n).
-    public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[UInt, Bool];
+    public binary_search_by[K: Ord](self, key: (T) -> K, target: K): Pair[Int, Bool];
 };
 
 /// Raw-pointer accessors for `List[T]` of `foreign` elements (the FFI boundary).
@@ -3146,7 +3146,7 @@ given[T: Any] List[T] {};
 given[T: Ord] List[T] {
     /// Binary search on a sorted list. O(log n).
     /// Returns `(index, true)` if found, `(insertion_point, false)` if not found.
-    public binary_search(self, target: T): Pair[UInt, Bool];
+    public binary_search(self, target: T): Pair[Int, Bool];
     /// Sort in place in ascending order using the `Ord` trait.
     /// Stable: equal elements keep their relative order.
     public sort(self): Void;
@@ -3167,11 +3167,11 @@ given[T: Any] FrozenList[T]: Drop {};
 /// Read-only access over a `FrozenList[T]`.
 given[T: Any] FrozenList[T] {
     /// The number of elements in the snapshot.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the snapshot has no elements.
     public is_empty(self): Bool;
     /// The element at `index`, or `None` when the index is out of range.
-    public get(self, index: UInt): Option[T];
+    public get(self, index: Int): Option[T];
     /// Copy the snapshot back out as a fresh mutable `List[T]`.
     public to_list(self): List[T];
 };
@@ -3396,13 +3396,13 @@ given Int8 {};
 /// Construction and accessors for `SliceSpec`.
 given SliceSpec {
     /// Create a spec for the `len` elements starting at `offset`.
-    public new(offset: UInt =, len: UInt =): SliceSpec;
+    public new(offset: Int =, len: Int =): SliceSpec;
     /// Return the slice's start offset.
-    public start(self): UInt;
+    public start(self): Int;
     /// Return the offset just past the slice's last element.
-    public end(self): UInt;
+    public end(self): Int;
     /// Return the number of elements the slice covers.
-    public len(self): UInt;
+    public len(self): Int;
 };
 
 /// Containment and emptiness checks for `Range` intervals.
@@ -3565,7 +3565,7 @@ given Rune {
     public is_valid(self): Bool;
     /// Return the number of UTF-8 bytes this rune encodes to; an invalid rune
     /// reports 3, the length of its replacement encoding.
-    public byte_count(self): UInt;
+    public byte_count(self): Int;
     /// Return whether the rune is a line break: LF, CR, NEL, line separator,
     /// or paragraph separator.
     public is_newline(self): Bool;
@@ -3607,9 +3607,9 @@ given[T: Hash] Set[T] {
     public new(): Self;
     /// Create an empty set with its buckets allocated up front, sized for about
     /// `capacity` elements.
-    public with_capacity(capacity: UInt): Self;
+    public with_capacity(capacity: Int): Self;
     /// Return the number of elements in the set.
-    public count(self): UInt;
+    public count(self): Int;
     /// Add `value` to the set if it is not already present.
     public insert(self, value: T): Void;
     /// Add `value` only if it is absent; return whether it was added.
@@ -3672,7 +3672,7 @@ given[T: Hash] FrozenSet[T]: Drop {};
 /// Read-only access over a `FrozenSet[T]`.
 given[T: Hash] FrozenSet[T] {
     /// The number of elements in the snapshot.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the snapshot has no elements.
     public is_empty(self): Bool;
     /// Whether `value` is in the snapshot.
@@ -3714,9 +3714,9 @@ given StringBuilder {
     /// Create an empty builder with a small initial capacity.
     public new(): StringBuilder;
     /// Create an empty builder with room for at least `capacity` bytes.
-    public with_capacity(capacity: UInt): StringBuilder;
+    public with_capacity(capacity: Int): StringBuilder;
     /// The number of bytes pushed so far.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether nothing has been pushed yet.
     public is_empty(self): Bool;
     /// Append one raw byte to the builder.
@@ -3728,7 +3728,7 @@ given StringBuilder {
     /// all of it -- the same shape as `List.push_list` (std/list.koral) and `Reader.read`.
     /// The default span is the whole string and skips range resolution, bounds
     /// checks and rune-boundary checks entirely.
-    public push_string(self, other: String, span: Range[UInt] = ...): Void;
+    public push_string(self, other: String, span: Range[Int] = ...): Void;
     /// Encode `rune` in UTF-8 and append it, substituting the replacement
     /// character for an invalid rune.
     public push_rune(self, rune: Rune): Void;
@@ -3745,7 +3745,7 @@ given StringBuilder {
 given String {
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_utf8_ptr_unchecked(bytes: *UInt8, len: UInt): String;
+    public from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String;
     /// The concatenation of `left` and `right` in ONE allocation: both parts
     /// copy straight into the result's own buffer. `String.add` routes here --
     /// building a temporary raw buffer and copying it again into the result
@@ -3753,7 +3753,7 @@ given String {
     public concat(left: String, right: String): String;
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
-    public from_utf8_ptr(bytes: *UInt8, len: UInt): Result[String];
+    public from_utf8_ptr(bytes: *UInt8, len: Int): Result[String];
     /// Copy `bytes` into a string, returning an error when they are not valid UTF-8.
     public from_bytes(bytes: List[UInt8]): Result[String];
     /// Copy `bytes` into a string without validating UTF-8.
@@ -3768,7 +3768,7 @@ given String {
     /// Create an empty string.
     public new(): String;
     /// The length of the string in UTF-8 bytes, not runes.
-    public count(self): UInt;
+    public count(self): Int;
     /// Whether the string is empty.
     public is_empty(self): Bool;
     /// Borrow the internal null-terminated bytes; valid while the string lives.
@@ -3777,26 +3777,26 @@ given String {
     public to_bytes(self): List[UInt8];
     /// Return the byte at `index`, or `None` when it is past the end.
     /// The index is a byte offset and need not be a rune boundary.
-    public get(self, index: UInt): Option[UInt8];
+    public get(self, index: Int): Option[UInt8];
     /// Whether the string begins with `prefix`.
     public starts_with(self, prefix: String): Bool;
     /// Whether the string ends with `suffix`.
     public ends_with(self, suffix: String): Bool;
     /// Return the byte index of the first occurrence of `pat`, or `None` when
     /// absent; an empty pattern never matches.
-    public find(self, pat: String): Option[UInt];
+    public find(self, pat: String): Option[Int];
     /// Return the byte index of the last occurrence of `pat`, or `None` when
     /// absent; an empty pattern never matches.
-    public find_last(self, pat: String): Option[UInt];
+    public find_last(self, pat: String): Option[Int];
     /// Whether `byte_index` falls on a rune boundary: 0, the byte length, or the
     /// start of a UTF-8 sequence; `false` when the index is past the end.
-    public is_rune_boundary(self, byte_index: UInt): Bool;
+    public is_rune_boundary(self, byte_index: Int): Bool;
     /// Resolve `range` into the byte span it names, panicking when the range is
     /// invalid or out of bounds or lands off a rune boundary.
-    public slice_spec(self, range: Range[UInt]): SliceSpec;
+    public slice_spec(self, range: Range[Int]): SliceSpec;
     /// Return the substring that `range` names.
     /// Panics when the range is invalid, out of bounds, or off a rune boundary.
-    public substring(self, range: Range[UInt]): String;
+    public substring(self, range: Range[Int]): String;
     /// Return the string with leading ASCII whitespace removed.
     public trim_ascii_start(self): String;
     /// Return the string with trailing ASCII whitespace removed.
@@ -3816,14 +3816,14 @@ given String {
     public to_ascii_titlecase(self): String;
     /// Search from byte index `start` for the first occurrence of `pat`, returning
     /// its index or `None`; panics when `start` is past the end.
-    public find_from(self, start: UInt, pat: String): Option[UInt];
+    public find_from(self, start: Int, pat: String): Option[Int];
     /// Whether `pat` occurs anywhere in the string.
     public contains(self, pat: String): Bool;
     /// Return the string repeated `times` times, or the empty string when `times` is 0.
-    public repeat(self, times: UInt): String;
+    public repeat(self, times: Int): String;
     /// Replace only the first `n` occurrences of `pat` with `with`.
     /// If `n` is 0, return a copy of the string unchanged; panic on an empty `pat`.
-    public replace_n(self, pat: String, n: UInt, with: String =): String;
+    public replace_n(self, pat: String, n: Int, with: String =): String;
     /// Split on the first occurrence of `sep`, returning (before, after).
     /// Return `None` when `sep` is not found.
     public split_once(self, sep: String): Option[Pair[String, String]];
@@ -4223,9 +4223,11 @@ given UInt64: Default {
     public default(): Self;
 };
 
-/// `Hash` for `Int`: the value's bits as a `UInt`.
+/// `Hash` for `Int`: the value's two's-complement bits as a `UInt`, so a value
+/// and its `WrappingInt` twin hash alike.
 given Int: Hash {
-    /// Return the value's bits as a `UInt`.
+    /// Return the two's-complement bit pattern as a `UInt`, so negative values
+    /// hash by their bits and match their `WrappingInt` twin.
     public hash(self): UInt;
 };
 

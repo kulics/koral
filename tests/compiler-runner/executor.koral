@@ -31,10 +31,10 @@ private let infer_exit_code(status: ExitStatus): Int = {
 };
 
 private type CommandExecution {
-    Finished(output: CommandOutput, peak_bytes: UInt),
+    Finished(output: CommandOutput, peak_bytes: Int),
     TimedOut(exit_code: Int),
     Aborted(exit_code: Int),
-    MemoryExceeded(exit_code: Int, peak_bytes: UInt),
+    MemoryExceeded(exit_code: Int, peak_bytes: Int),
     InfrastructureError(message: String),
 };
 
@@ -55,8 +55,8 @@ private let timeout_case_result(
     );
 };
 
-private let memory_limit_failure_message(config: RunnerConfig, peak_bytes: UInt): String = {
-    return "case exceeded memory limit (peak \(peak_bytes / UInt(1024) / UInt(1024)) MB, limit \(config.memory_limit_mb) MB)";
+private let memory_limit_failure_message(config: RunnerConfig, peak_bytes: Int): String = {
+    return "case exceeded memory limit (peak \(peak_bytes / 1024 / 1024) MB, limit \(config.memory_limit_mb) MB)";
 };
 
 private let memory_exceeded_case_result(
@@ -64,7 +64,7 @@ private let memory_exceeded_case_result(
     info: CaseInfo,
     start: MonoTime,
     exit_code: Int,
-    peak_bytes: UInt,
+    peak_bytes: Int,
 ): CaseResult = {
     let duration_ms = start.elapsed().as_milliseconds();
     return failure_result(
@@ -219,7 +219,7 @@ private let find_built_executable(output_dir: Path): Result[Path] = {
 private let prepared_run_executable_path(
     info: CaseInfo,
     output_dir: Path,
-    launch_attempt: UInt,
+    launch_attempt: Int,
 ): Result[Path] = {
     let exe_path = when path_exist(executable_path_for_case(info, output_dir)) in {
         true then executable_path_for_case(info, output_dir),
@@ -412,12 +412,12 @@ private let execute_command_with_timeout(
     let stderr_content = read_text_file_or_empty(stderr_path);
 
     // Peak RSS comes from the kernel (wait4 ru_maxrss) captured at process exit.
-    let peak_memory = UInt(proc.peak_rss_bytes());
-    let memory_limit_bytes = config.memory_limit_mb * UInt(1024) * UInt(1024);
+    let peak_memory = Int(proc.peak_rss_bytes());
+    let memory_limit_bytes = config.memory_limit_mb * 1024 * 1024;
 
     when exit_status in {
         .Some(status) then {
-            if memory_limit_bytes > UInt(0) and peak_memory > memory_limit_bytes then {
+            if memory_limit_bytes > 0 and peak_memory > memory_limit_bytes then {
                 return CommandExecution.MemoryExceeded(
                     infer_exit_code(status),
                     peak_memory,
@@ -456,7 +456,7 @@ private let execute_built_executable_with_retry(
     timeout_secs: Int64,
     stop_requested: AtomicInt,
 ): CommandExecution = {
-    let first_program = prepared_run_executable_path(info, output_dir, UInt(0)) or else as e in {
+    let first_program = prepared_run_executable_path(info, output_dir, 0) or else as e in {
         return CommandExecution.InfrastructureError(
             "failed to prepare built executable: " + e.message(),
         );
@@ -474,7 +474,7 @@ private let execute_built_executable_with_retry(
     return when first in {
         .InfrastructureError(_) then {
             sleep(100ms);
-            let second_program = prepared_run_executable_path(info, output_dir, UInt(1)) or else as e in {
+            let second_program = prepared_run_executable_path(info, output_dir, 1) or else as e in {
                 return .InfrastructureError(
                     "failed to prepare built executable: " + e.message(),
                 );
@@ -495,7 +495,7 @@ private let execute_built_executable_with_retry(
                     let third_program = prepared_run_executable_path(
                         info,
                         output_dir,
-                        UInt(2),
+                        2,
                     ) or else as e in {
                         return .InfrastructureError(
                             "failed to prepare built executable: " + e.message(),
@@ -540,7 +540,7 @@ private let create_case_output_dir(config: RunnerConfig, info: CaseInfo): Result
         },
     };
 
-    let mutable attempt: UInt = 0;
+    let mutable attempt = 0;
     while attempt < 4096 then {
         let candidate = case_root.join(attempt.to_string());
         when create_dir(candidate) in {
@@ -601,7 +601,7 @@ private let output_lines_equal(a: String, b: String): Bool = {
     if a_lines.count() != b_lines.count() then {
         return false;
     };
-    let mutable i: UInt = 0;
+    let mutable i = 0;
     while i < a_lines.count() then {
         if a_lines[i] != b_lines[i] then {
             return false;
@@ -623,7 +623,7 @@ private let output_multisets_equal(a: String, b: String): Bool = {
     };
     a_lines.sort_by((s) => s);
     b_lines.sort_by((s) => s);
-    let mutable i: UInt = 0;
+    let mutable i = 0;
     while i < a_lines.count() then {
         if a_lines[i] != b_lines[i] then {
             return false;
@@ -658,7 +658,7 @@ private let first_output_difference(
     let a_lines = output_lines_trimmed(a);
     let b_lines = output_lines_trimmed(b);
     let shared = min(a_lines.count(), b_lines.count());
-    let mutable i: UInt = 0;
+    let mutable i = 0;
     while i < shared then {
         if a_lines[i] != b_lines[i] then {
             return "line " + i.to_string() + ": " + a_label + " said '" + a_lines[i] + "', " + b_label + " said '" + b_lines[

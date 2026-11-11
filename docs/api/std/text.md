@@ -364,7 +364,7 @@ given Regex {
     /// Return the original pattern string.
     public pattern(self): String;
     /// Return the number of capturing groups in the pattern.
-    public group_count(self): UInt;
+    public group_count(self): Int;
 };
 
 /// Accessors for the matched text and its byte offsets.
@@ -372,9 +372,9 @@ given Match {
     /// Return the substring matched by the pattern.
     public text(self): String;
     /// Return the byte offset where the match starts.
-    public start(self): UInt;
+    public start(self): Int;
     /// Return the byte offset just past the match's end.
-    public end(self): UInt;
+    public end(self): Int;
 };
 
 /// Accessors for the overall match and its capturing groups.
@@ -382,18 +382,18 @@ given Captures {
     /// Return the substring matched by the whole pattern.
     public text(self): String;
     /// Return the byte offset where the overall match starts.
-    public start(self): UInt;
+    public start(self): Int;
     /// Return the byte offset just past the overall match's end.
-    public end(self): UInt;
+    public end(self): Int;
     /// Return the number of capture slots, counting the whole match as group 0.
-    public group_count(self): UInt;
+    public group_count(self): Int;
     /// Return group `index`'s text, where group 0 is the whole match.
     /// `None` when the index is out of range or the group did not take part in the match.
-    public group(self, index: UInt): Option[String];
+    public group(self, index: Int): Option[String];
     /// Return the byte offset where group `index` starts, or `None` if unavailable.
-    public group_start(self, index: UInt): Option[UInt];
+    public group_start(self, index: Int): Option[Int];
     /// Return the byte offset just past group `index`'s end, or `None` if unavailable.
-    public group_end(self, index: UInt): Option[UInt];
+    public group_end(self, index: Int): Option[Int];
 };
 
 /// Iterator conformance for `MatchIterator`, yielding matches one after another.

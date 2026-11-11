@@ -6,21 +6,21 @@ type MIRPlaceAccess(path: String, cleanup: Option[MIRValueCleanup]);
 
 type MIRLocalLifetimePlan(
     root_locals: List[MIRLocalID],
-    locals_by_scope: Dict[UInt, List[MIRLocalID]],
+    locals_by_scope: Dict[Int, List[MIRLocalID]],
     hoisted_declaration_locals: List[MIRLocalID],
-    block_local_declarations_by_block: Dict[UInt, List[MIRLocalID]],
-    block_local_declaration_locals: Dict[UInt, Bool],
+    block_local_declarations_by_block: Dict[Int, List[MIRLocalID]],
+    block_local_declaration_locals: Dict[Int, Bool],
 );
 
 type MIRFunctionEmitPlan(
     local_names: List[String],
-    local_names_by_id: Dict[UInt, String],
-    non_owning_local_ids: Dict[UInt, Bool],
-    tracked_init_locals: Dict[UInt, Bool],
+    local_names_by_id: Dict[Int, String],
+    non_owning_local_ids: Dict[Int, Bool],
+    tracked_init_locals: Dict[Int, Bool],
     lifetime_plan: MIRLocalLifetimePlan,
-    address_taken_local_ids: Set[UInt],
-    move_designations: Dict[UInt, MoveBlockPos],
-    alias_locals: Dict[UInt, Bool],
+    address_taken_local_ids: Set[Int],
+    move_designations: Dict[Int, MoveBlockPos],
+    alias_locals: Dict[Int, Bool],
 );
 
 /// 一个 MIR 函数发射出的 C 函数体，以及该函数体是否含 alloc_memory。
@@ -48,9 +48,9 @@ private let is_non_owning_local_value(value: MIRValue, target_type: Type): Bool 
     };
 };
 
-private let compute_non_owning_mir_locals(function: MIRFunction): Dict[UInt, Bool] = {
-    let mutable saw_assignment_by_local = Dict[UInt, Bool].new();
-    let mutable all_non_owning_by_local = Dict[UInt, Bool].new();
+private let compute_non_owning_mir_locals(function: MIRFunction): Dict[Int, Bool] = {
+    let mutable saw_assignment_by_local = Dict[Int, Bool].new();
+    let mutable all_non_owning_by_local = Dict[Int, Bool].new();
 
     for block in function.blocks then {
         for statement in block.statements then {
@@ -83,7 +83,7 @@ private let compute_non_owning_mir_locals(function: MIRFunction): Dict[UInt, Boo
         };
     };
 
-    let mutable result = Dict[UInt, Bool].new();
+    let mutable result = Dict[Int, Bool].new();
     for local in function.locals then {
         if local.storage is .Parameter() and is_borrowed_reference_like_type(
             local.local_type,
@@ -114,7 +114,7 @@ private let mir_active_scope_contains(
 };
 
 private let mir_parent_scope(
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     scope: MIRScopeID,
 ): Option[MIRScopeID] = {
     return when parent_scope_by_scope.get(scope.raw_value) in {
@@ -124,13 +124,13 @@ private let mir_parent_scope(
 };
 
 private let mir_nearest_active_common_scope(
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     existing_scope: MIRScopeID,
     active_scopes: List[MIRScopeID],
 ): Option[MIRScopeID] = {
     let mutable scope_opt = Option[MIRScopeID].Some(existing_scope);
     while scope_opt is .Some(_) then {
-        let scope = scope_opt or else MIRScopeID(UInt(0));
+        let scope = scope_opt or else MIRScopeID(0);
         if mir_active_scope_contains(active_scopes, scope) then {
             return Option[MIRScopeID].Some(scope);
         };
@@ -140,11 +140,11 @@ private let mir_nearest_active_common_scope(
 };
 
 private let mir_record_local_use(
-    shared_use_scope_by_local: Dict[UInt, MIRScopeID],
-    first_use_block_by_local: Dict[UInt, UInt],
-    multiple_use_blocks_by_local: Dict[UInt, Bool],
-    tracked_drop_local_ids: Dict[UInt, Bool],
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local: Dict[Int, MIRScopeID],
+    first_use_block_by_local: Dict[Int, Int],
+    multiple_use_blocks_by_local: Dict[Int, Bool],
+    tracked_drop_local_ids: Dict[Int, Bool],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     local: MIRLocalID,
     block: MIRBlockID,
     active_scopes: List[MIRScopeID],
@@ -171,7 +171,7 @@ private let mir_record_local_use(
                     if not active_scopes.is_empty() then {
                         shared_use_scope_by_local.insert(
                             local.raw_value,
-                            active_scopes[active_scopes.count() - UInt(1)],
+                            active_scopes[active_scopes.count() - 1],
                         );
                     };
                 },
@@ -193,11 +193,11 @@ private let mir_record_local_use(
 };
 
 private let mir_walk_operand_uses(
-    shared_use_scope_by_local: Dict[UInt, MIRScopeID],
-    first_use_block_by_local: Dict[UInt, UInt],
-    multiple_use_blocks_by_local: Dict[UInt, Bool],
-    tracked_drop_local_ids: Dict[UInt, Bool],
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local: Dict[Int, MIRScopeID],
+    first_use_block_by_local: Dict[Int, Int],
+    multiple_use_blocks_by_local: Dict[Int, Bool],
+    tracked_drop_local_ids: Dict[Int, Bool],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     operand: MIROperand,
     block: MIRBlockID,
     active_scopes: List[MIRScopeID],
@@ -218,11 +218,11 @@ private let mir_walk_operand_uses(
 };
 
 private let mir_walk_place_uses(
-    shared_use_scope_by_local: Dict[UInt, MIRScopeID],
-    first_use_block_by_local: Dict[UInt, UInt],
-    multiple_use_blocks_by_local: Dict[UInt, Bool],
-    tracked_drop_local_ids: Dict[UInt, Bool],
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local: Dict[Int, MIRScopeID],
+    first_use_block_by_local: Dict[Int, Int],
+    multiple_use_blocks_by_local: Dict[Int, Bool],
+    tracked_drop_local_ids: Dict[Int, Bool],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     place: MIRPlace,
     block: MIRBlockID,
     active_scopes: List[MIRScopeID],
@@ -263,11 +263,11 @@ private let mir_walk_place_uses(
 };
 
 private let mir_walk_intrinsic_uses(
-    shared_use_scope_by_local: Dict[UInt, MIRScopeID],
-    first_use_block_by_local: Dict[UInt, UInt],
-    multiple_use_blocks_by_local: Dict[UInt, Bool],
-    tracked_drop_local_ids: Dict[UInt, Bool],
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local: Dict[Int, MIRScopeID],
+    first_use_block_by_local: Dict[Int, Int],
+    multiple_use_blocks_by_local: Dict[Int, Bool],
+    tracked_drop_local_ids: Dict[Int, Bool],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     intrinsic_node: MIRIntrinsic,
     block: MIRBlockID,
     active_scopes: List[MIRScopeID],
@@ -430,11 +430,11 @@ private let mir_walk_intrinsic_uses(
 };
 
 private let mir_walk_value_uses(
-    shared_use_scope_by_local: Dict[UInt, MIRScopeID],
-    first_use_block_by_local: Dict[UInt, UInt],
-    multiple_use_blocks_by_local: Dict[UInt, Bool],
-    tracked_drop_local_ids: Dict[UInt, Bool],
-    parent_scope_by_scope: Dict[UInt, MIRScopeID],
+    shared_use_scope_by_local: Dict[Int, MIRScopeID],
+    first_use_block_by_local: Dict[Int, Int],
+    multiple_use_blocks_by_local: Dict[Int, Bool],
+    tracked_drop_local_ids: Dict[Int, Bool],
+    parent_scope_by_scope: Dict[Int, MIRScopeID],
     value: MIRValue,
     block: MIRBlockID,
     active_scopes: List[MIRScopeID],
@@ -639,23 +639,23 @@ type mutable MIRFunctionCodeEmitter(
     codegen: CodeGen,
     function: MIRFunction,
     mutable local_names: List[String],
-    mutable local_names_by_id: Dict[UInt, String],
-    mutable non_owning_local_ids: Dict[UInt, Bool],
-    mutable tracked_init_locals: Dict[UInt, Bool],
+    mutable local_names_by_id: Dict[Int, String],
+    mutable non_owning_local_ids: Dict[Int, Bool],
+    mutable tracked_init_locals: Dict[Int, Bool],
     mutable lifetime_plan: MIRLocalLifetimePlan,
-    mutable address_taken_local_ids: Set[UInt],
+    mutable address_taken_local_ids: Set[Int],
     // P5 末次使用移动的指定点表（见 codegen_borrowed_self.koral）。
-    mutable move_designations: Dict[UInt, MoveBlockPos],
+    mutable move_designations: Dict[Int, MoveBlockPos],
     // WP-2 借用型绑定（成对消除）：绑定读不复制、作用域尾不释放。
-    mutable alias_locals: Dict[UInt, Bool],
+    mutable alias_locals: Dict[Int, Bool],
     // 发射游标：当前 (块,语句) —— 移动指定点按它命中。
-    mutable current_block_index: UInt,
-    mutable current_statement_index: UInt,
-    mutable lambda_counter: UInt,
+    mutable current_block_index: Int,
+    mutable current_statement_index: Int,
+    mutable lambda_counter: Int,
     mutable nested_definitions: StringBuilder,
     mutable current_owner_callable_name_cache_prefix: Option[String],
     mutable callable_name_cache: Dict[UInt, String],
-    mutable consumed_locals: Dict[UInt, Bool],
+    mutable consumed_locals: Dict[Int, Bool],
     // 本函数体是否发射过 alloc_memory（含增长/创建辅助）。为 true 时函数
     // 定义带 KORAL_NOINLINE —— 见 koral_runtime.h 该宏处的注释。
     mutable saw_alloc_memory: Bool,
@@ -666,9 +666,9 @@ private let build_mir_function_emit_plan(
     function: MIRFunction,
 ): MIRFunctionEmitPlan = {
     let mutable local_names = List[String].new();
-    let mutable local_names_by_id = Dict[UInt, String].new();
+    let mutable local_names_by_id = Dict[Int, String].new();
     let mutable non_owning_local_ids = compute_non_owning_mir_locals(function);
-    let mutable tracked_init_locals = Dict[UInt, Bool].new();
+    let mutable tracked_init_locals = Dict[Int, Bool].new();
 
     // Borrowed-self convention (Swift's "guaranteed self" / ARC pair elision):
     // the analysis (codegen_borrowed_self.koral) proved this method's `self`
@@ -766,9 +766,9 @@ given MIRFunctionCodeEmitter {
             plan.address_taken_local_ids,
             plan.move_designations,
             plan.alias_locals,
-            UInt(0),
-            UInt(0),
-            UInt(0),
+            0,
+            0,
+            0,
             StringBuilder.new(),
             when codegen.current_function_owner_type in {
                 .Some(owner_type) then Option[String].Some(
@@ -777,18 +777,18 @@ given MIRFunctionCodeEmitter {
                 .None() then Option[String].None(),
             },
             Dict[UInt, String].new(),
-            Dict[UInt, Bool].new(),
+            Dict[Int, Bool].new(),
             false,
         );
     };
 
     public emit_body(self): Void = {
         self.emit_local_declarations();
-        let mutable block_index = UInt(0);
+        let mutable block_index = 0;
         for block in self.function.blocks then {
             self.current_block_index = block_index;
             self.emit_block(block);
-            block_index += UInt(1);
+            block_index += 1;
         };
     };
 
@@ -903,7 +903,7 @@ given MIRFunctionCodeEmitter {
             .None() then false,
         };
         self.codegen.add_indent();
-        let mutable statement_index = UInt(0);
+        let mutable statement_index = 0;
         if wraps_block then {
             self.codegen.buffer.push_string(self.block_label(block.id));
             self.codegen.buffer.push_string(": {\n");
@@ -917,7 +917,7 @@ given MIRFunctionCodeEmitter {
                     ),
                     _ then self.emit_statement(statement),
                 };
-                statement_index += UInt(1);
+                statement_index += 1;
             };
             self.current_statement_index = statement_index;
             self.emit_terminator(block.terminator);
@@ -937,7 +937,7 @@ given MIRFunctionCodeEmitter {
                 ),
                 _ then self.emit_statement(statement),
             };
-            statement_index += UInt(1);
+            statement_index += 1;
         };
         self.current_statement_index = statement_index;
         self.emit_terminator(block.terminator);
@@ -1810,19 +1810,19 @@ given MIRFunctionCodeEmitter {
                 };
                 if call.arguments.count() == 1 then {
                     let ownership = if has_ownerships then call.argument_ownerships[
-                        UInt(0)
+                        0
                     ] else MIROwnershipUse.Move();
                     let emission = self.emit_direct_call_argument(
-                        call.arguments[UInt(0)],
+                        call.arguments[0],
                         ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     // Auto-wrap: if the function parameter expects a borrowed reference
                     // but the argument is a raw value, wrap it in a stack borrow.
-                    let mutable arg_type = self.type_of_value(call.arguments[UInt(0)]);
+                    let mutable arg_type = self.type_of_value(call.arguments[0]);
                     let mutable expected_param_type = self.codegen.function_type_param_type(
                         function_type,
-                        UInt(0),
+                        0,
                     ) or else Type.Unknown();
                     let needs_wrap = is_borrowed_reference_like_type(
                         expected_param_type,
@@ -1843,11 +1843,11 @@ given MIRFunctionCodeEmitter {
                         call.result_type,
                     );
                     if ownership is .Move() or is .Take() then {
-                        self.consume_moved_source(call.arguments[UInt(0)]);
+                        self.consume_moved_source(call.arguments[0]);
                     };
                     self.emit_residual_cleanups(
                         final_emission,
-                        self.call_arg_consumed(ownership, call.arguments[UInt(0)]),
+                        self.call_arg_consumed(ownership, call.arguments[0]),
                     );
                     return MIRValueEmission(
                         expression,
@@ -1856,33 +1856,33 @@ given MIRFunctionCodeEmitter {
                 };
                 if call.arguments.count() == 2 then {
                     let first_ownership = if has_ownerships then call.argument_ownerships[
-                        UInt(0)
+                        0
                     ] else MIROwnershipUse.Move();
                     let second_ownership = if has_ownerships then call.argument_ownerships[
-                        UInt(1)
+                        1
                     ] else MIROwnershipUse.Move();
                     let first_emission = self.emit_direct_call_argument(
-                        call.arguments[UInt(0)],
+                        call.arguments[0],
                         first_ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     let second_emission = self.emit_direct_call_argument(
-                        call.arguments[UInt(1)],
+                        call.arguments[1],
                         second_ownership,
                         self.codegen.impure_function_ids.get(symbol.def_id.id) is .None(),
                     );
                     // Auto-wrap borrowed reference parameters.
-                    let mutable first_type = self.type_of_value(call.arguments[UInt(0)]);
+                    let mutable first_type = self.type_of_value(call.arguments[0]);
                     let mutable second_type = self.type_of_value(
-                        call.arguments[UInt(1)],
+                        call.arguments[1],
                     );
                     let first_expected = self.codegen.function_type_param_type(
                         function_type,
-                        UInt(0),
+                        0,
                     ) or else Type.Unknown();
                     let second_expected = self.codegen.function_type_param_type(
                         function_type,
-                        UInt(1),
+                        1,
                     ) or else Type.Unknown();
                     let first = if is_borrowed_reference_like_type(first_expected) and not is_reference_like_type(
                         first_type,
@@ -1915,18 +1915,18 @@ given MIRFunctionCodeEmitter {
                         call.result_type,
                     );
                     if first_ownership is .Move() or is .Take() then {
-                        self.consume_moved_source(call.arguments[UInt(0)]);
+                        self.consume_moved_source(call.arguments[0]);
                     };
                     if second_ownership is .Move() or is .Take() then {
-                        self.consume_moved_source(call.arguments[UInt(1)]);
+                        self.consume_moved_source(call.arguments[1]);
                     };
                     self.emit_residual_cleanups(
                         first,
-                        self.call_arg_consumed(first_ownership, call.arguments[UInt(0)]),
+                        self.call_arg_consumed(first_ownership, call.arguments[0]),
                     );
                     self.emit_residual_cleanups(
                         second,
-                        self.call_arg_consumed(second_ownership, call.arguments[UInt(1)]),
+                        self.call_arg_consumed(second_ownership, call.arguments[1]),
                     );
                     return MIRValueEmission(
                         expression,
@@ -2760,7 +2760,7 @@ given MIRFunctionCodeEmitter {
                 },
             };
             let member_base = "\(payload_expr)->data.\(self.codegen.sanitize_codegen_identifier(construction.case_name))";
-            let mutable argument_index: UInt = 0;
+            let mutable argument_index = 0;
             for field in case_info.second then {
                 if not self.codegen.type_is_void(field.param_type) then {
                     let arg_value = construction.arguments[argument_index];
@@ -2819,7 +2819,7 @@ given MIRFunctionCodeEmitter {
                 self.codegen.buffer.push_string(";\n");
             },
         };
-        let mutable argument_index: UInt = 0;
+        let mutable argument_index = 0;
         for field in case_info.second then {
             if not self.codegen.type_is_void(field.param_type) then {
                 let arg_value = construction.arguments[argument_index];
@@ -3127,8 +3127,8 @@ given MIRFunctionCodeEmitter {
         let mutable dispatch_method_name = method_name;
         let mutable signature_return_type = result_type;
         let mutable signature_param_types = List[Type].new();
-        if method_index >= 0 and UInt(method_index) < members.count() then {
-            let member = members[UInt(method_index)];
+        if method_index >= 0 and method_index < members.count() then {
+            let member = members[method_index];
             dispatch_method_name = member.name;
             signature_return_type = member.return_type or else signature_return_type;
             for p in member.parameters then {
@@ -3384,17 +3384,24 @@ given MIRFunctionCodeEmitter {
         );
     };
 
-    /// A width-changing numeric conversion is checked and does not wrap; a
-    /// same-width one reinterprets the bit pattern and never panics. The width
-    /// test is left to the C compiler (`sizeof` is a constant expression), so
-    /// the guards disappear entirely for same-width pairs and the rule holds on
-    /// every target regardless of how wide `Int` is there.
+    /// A numeric conversion is checked whenever the two types do not hold the
+    /// same values (numeric-families design §转换语义): a width change OR a
+    /// signedness flip. Only a same-width, same-signedness pair — identical
+    /// value sets — is a free retype.
     ///
-    /// Two guards are needed inside the width-changing case, because the round
-    /// trip alone is blind across signedness: `(int)(unsigned)(-1) == -1`, so a
-    /// value the target cannot hold can come back unchanged. Same-signedness
-    /// widening needs neither guard to fire, and the C compiler folds the round
-    /// trip away there.
+    /// Two guards, each covering what the other is blind to:
+    ///
+    /// * the **round trip** `((S)converted != (S)src)` catches values the
+    ///   target cannot hold when the WIDTHS differ. It is left to the C
+    ///   compiler (`sizeof` is a constant expression), so it disappears for
+    ///   equal-width pairs and the rule holds on every target regardless of
+    ///   how wide `Int` is there.
+    /// * the **signedness guard** catches sign flips, including same-width
+    ///   ones — the round trip alone is blind across signedness
+    ///   (`(int)(unsigned)(-1) == -1`, a value the target cannot hold comes
+    ///   back unchanged). This guard sits OUTSIDE the `sizeof` block: a
+    ///   same-width signed <-> unsigned conversion is a value conversion and
+    ///   is checked like any other, never a bit reinterpretation.
     emit_numeric_conversion_guard(
         self,
         source_value: String,
@@ -3407,26 +3414,10 @@ given MIRFunctionCodeEmitter {
         let source_c_type = self.codegen.c_type_name(source_type);
         let target_c_type = self.codegen.c_type_name(target_type);
         if source_c_type == target_c_type then {
-            // The whole guard sits behind `sizeof(a) != sizeof(b)`: with one
-            // C type the condition is compile-time false and every check
-            // inside is dead. Skip the emission (same behavior, less noise
-            // for the C compiler).
+            // One C type: same width, same signedness — a pure retype. Skip
+            // the emission (same behavior, less noise for the C compiler).
             return;
         };
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(
-            "if (sizeof(\(source_c_type)) != sizeof(\(target_c_type))) {\n",
-        );
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(
-            "if (((\(source_c_type))\(converted)) != (\(source_c_type))\(source_value)) {\n",
-        );
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string(
-            "    __koral_panic_numeric_conversion_overflow(\(loc_literal));\n",
-        );
-        self.codegen.add_indent();
-        self.codegen.buffer.push_string("}\n");
         if self.is_signed_int_cast_target_type(source_type) and self.is_unsigned_int_cast_target_type(
             target_type,
         ) then {
@@ -3458,6 +3449,20 @@ given MIRFunctionCodeEmitter {
                 .None() then {},
             };
         };
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "if (sizeof(\(source_c_type)) != sizeof(\(target_c_type))) {\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "if (((\(source_c_type))\(converted)) != (\(source_c_type))\(source_value)) {\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string(
+            "    __koral_panic_numeric_conversion_overflow(\(loc_literal));\n",
+        );
+        self.codegen.add_indent();
+        self.codegen.buffer.push_string("}\n");
         self.codegen.add_indent();
         self.codegen.buffer.push_string("}\n");
     };
@@ -3518,6 +3523,43 @@ given MIRFunctionCodeEmitter {
         };
     };
 
+    /// The exact range test for a float -> regular-integer conversion, applied
+    /// to the value TRUNCATED TOWARD ZERO (numeric-families design §浮点: 先
+    /// 向零截断得整数值，再按目标家族执行范围策略). The half-open double bounds
+    /// below say exactly "trunc(v) fits in [MIN, MAX]":
+    ///
+    /// * below 64 bits MIN-1 / MAX+1 are representable doubles, so the strict
+    ///   `> MIN-1 && < MAX+1` test is exact (`Int8(-128.5)` truncates to -128
+    ///   and is in range; `Int8(127.9)` is 127; `Int8(128.0)` panics).
+    /// * at 64 bits every double in the boundary neighbourhood is already an
+    ///   integer, so `>= -2^63 && < 2^63` (signed) and `> -1.0 && < 2^64`
+    ///   (unsigned) are exact — the latter also admits `(-0.5) -> 0`.
+    ///   `2^63` itself must panic: `(double)INT64_MAX` rounds UP to `2^63`, so
+    ///   a `<= (double)MAX` test would wave through a value whose cast is
+    ///   undefined behaviour.
+    /// NaN and +-inf fail both comparisons and take the same panic, so the
+    /// truncating cast after the guard is always defined.
+    float_trunc_range_condition(self, t: Type, value: String): Option[String] = {
+        let _ = self;
+        return when t in {
+            .Int8Type() then Option[String].Some("\(value) > -129.0 && \(value) < 128.0"),
+            .Int16Type() then Option[String].Some("\(value) > -32769.0 && \(value) < 32768.0"),
+            .Int32Type() then Option[String].Some(
+                "\(value) > -2147483649.0 && \(value) < 2147483648.0",
+            ),
+            .Int64Type() or .IntType() then Option[String].Some(
+                "\(value) >= -9223372036854775808.0 && \(value) < 9223372036854775808.0",
+            ),
+            .UInt8Type() then Option[String].Some("\(value) > -1.0 && \(value) < 256.0"),
+            .UInt16Type() then Option[String].Some("\(value) > -1.0 && \(value) < 65536.0"),
+            .UInt32Type() then Option[String].Some("\(value) > -1.0 && \(value) < 4294967296.0"),
+            .UInt64Type() or .UIntType() then Option[String].Some(
+                "\(value) > -1.0 && \(value) < 18446744073709551616.0",
+            ),
+            _ then Option[String].None(),
+        };
+    };
+
     /// The wrapping-family cast targets: `WrappingInt` .. `WrappingUInt64`.
     is_wrapping_int_cast_target_type(self, t: Type): Bool = {
         let _ = self;
@@ -3536,8 +3578,9 @@ given MIRFunctionCodeEmitter {
         let mutable target_c_type = self.codegen.c_type_name(target_type);
         // The TARGET decides the conversion policy (numeric-families design):
         // a wrapping-family target truncates to the target width's low bits and
-        // never panics; a plain-family target is checked. A same-width pair is
-        // a lossless retype either way.
+        // never panics; a plain-family target is checked whenever the value
+        // sets differ (width change or signedness flip). Only a same-width,
+        // same-signedness pair is a lossless retype either way.
         let expression = if self.is_wrapping_int_cast_target_type(target_type) then {
             if self.is_float_cast_source_type(source_type) then {
                 // Float -> Wrapping is two steps. Domain first: NaN and +-inf
@@ -3558,33 +3601,30 @@ given MIRFunctionCodeEmitter {
             }
         } else if self.is_float_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
             target_type,
-        ) or self.is_unsigned_int_cast_target_type(target_type)) then when self.float_cast_target_bounds(
-            target_type,
-        ) in {
-            .Some(bounds) then {
-                let float_value = self.codegen.next_temp_with_init(
-                    "double",
-                    "(double)\(source.expression)",
-                );
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string(
-                    "if (!(\(float_value) >= (double)\(bounds.first) && \(float_value) <= (double)\(bounds.second))) {\n",
-                );
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string(
-                    "    __koral_panic_numeric_conversion_overflow(\(loc_literal));\n",
-                );
-                self.codegen.add_indent();
-                self.codegen.buffer.push_string("}\n");
-                self.codegen.next_temp_with_init(
-                    target_c_type,
-                    "(\(target_c_type))\(float_value)",
-                )
-            },
-            .None() then self.codegen.next_temp_with_init(
+        ) or self.is_unsigned_int_cast_target_type(target_type)) then {
+            // Float -> regular int is two steps (numeric-families design §浮点):
+            // truncate toward zero first, then range-check the integer value.
+            let float_value = self.codegen.next_temp_with_init(
+                "double",
+                "(double)\(source.expression)",
+            );
+            when self.float_trunc_range_condition(target_type, float_value) in {
+                .Some(condition) then {
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("if (!(\(condition))) {\n");
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string(
+                        "    __koral_panic_numeric_conversion_overflow(\(loc_literal));\n",
+                    );
+                    self.codegen.add_indent();
+                    self.codegen.buffer.push_string("}\n");
+                },
+                .None() then {},
+            };
+            self.codegen.next_temp_with_init(
                 target_c_type,
-                "(\(target_c_type))\(source.expression)",
-            ),
+                "(\(target_c_type))\(float_value)",
+            )
         }
         else if self.is_int_cast_source_type(source_type) and (self.is_signed_int_cast_target_type(
             target_type,
@@ -3961,7 +4001,7 @@ given MIRFunctionCodeEmitter {
         self.codegen.buffer.push_string(env_var);
         self.codegen.buffer.push_string("->__refcount = 1;\n");
 
-        let mutable ci: UInt = 0;
+        let mutable ci = 0;
         for capture in lambda.captures then {
             let field_name = self.capture_field_name(capture);
             let source = capture_source_overrides.get(capture.def_id.id) or else "";
@@ -4613,7 +4653,7 @@ given MIRFunctionCodeEmitter {
         self,
         enum_type: Type,
         case_name: String,
-    ): Pair[UInt, List[EnumCaseParam]] = {
+    ): Pair[Int, List[EnumCaseParam]] = {
         let def_id = when enum_type in {
             .EnumType(id) then id,
             .GenericEnum(...) then self.codegen.find_type_def_id_by_layout_or_template(
@@ -4623,17 +4663,17 @@ given MIRFunctionCodeEmitter {
         };
         when self.codegen.context.get_enum_cases(def_id) in {
             .Some(cases) then {
-                let mutable index: UInt = 0;
+                let mutable index = 0;
                 for c in cases then {
                     if c.name == case_name then {
-                        return Pair[UInt, List[EnumCaseParam]](index, c.params);
+                        return Pair[Int, List[EnumCaseParam]](index, c.params);
                     };
                     index += 1;
                 };
             },
             .None() then {},
         };
-        return Pair[UInt, List[EnumCaseParam]](UInt(0), List[EnumCaseParam].new());
+        return Pair[Int, List[EnumCaseParam]](0, List[EnumCaseParam].new());
     };
 
     type_list_to_ref_list(self, args: List[Type]): List[Type] = {
@@ -4986,9 +5026,9 @@ private let join_strings(values: List[String], separator: String): String = {
 private let build_mir_lifetime_plan(
     function: MIRFunction,
     codegen: CodeGen,
-    tracked_init_locals: Dict[UInt, Bool],
+    tracked_init_locals: Dict[Int, Bool],
 ): MIRLocalLifetimePlan = {
-    let mutable tracked_drop_local_ids = Dict[UInt, Bool].new();
+    let mutable tracked_drop_local_ids = Dict[Int, Bool].new();
     let mutable has_tracked_drop_locals = false;
     for local in function.locals then {
         let has_init_flag = tracked_init_locals.get(local.id.raw_value) or else false;
@@ -5012,25 +5052,25 @@ private let build_mir_lifetime_plan(
         };
         return MIRLocalLifetimePlan(
             List[MIRLocalID].new(),
-            Dict[UInt, List[MIRLocalID]].new(),
+            Dict[Int, List[MIRLocalID]].new(),
             hoisted_declaration_locals,
-            Dict[UInt, List[MIRLocalID]].new(),
-            Dict[UInt, Bool].new(),
+            Dict[Int, List[MIRLocalID]].new(),
+            Dict[Int, Bool].new(),
         );
     };
 
     let mutable root_locals = List[MIRLocalID].new();
-    let mutable locals_by_scope = Dict[UInt, List[MIRLocalID]].new();
+    let mutable locals_by_scope = Dict[Int, List[MIRLocalID]].new();
     let mutable hoisted_declaration_locals = List[MIRLocalID].new();
-    let mutable block_local_declarations_by_block = Dict[UInt, List[MIRLocalID]].new();
-    let mutable block_local_declaration_locals = Dict[UInt, Bool].new();
-    let mutable parent_scope_by_scope = Dict[UInt, MIRScopeID].new();
-    let mutable declared_scope_by_local = Dict[UInt, MIRScopeID].new();
+    let mutable block_local_declarations_by_block = Dict[Int, List[MIRLocalID]].new();
+    let mutable block_local_declaration_locals = Dict[Int, Bool].new();
+    let mutable parent_scope_by_scope = Dict[Int, MIRScopeID].new();
+    let mutable declared_scope_by_local = Dict[Int, MIRScopeID].new();
     let mutable active_scopes = List[MIRScopeID].new();
-    let mutable declared_block_by_local = Dict[UInt, MIRBlockID].new();
-    let mutable shared_use_scope_by_local = Dict[UInt, MIRScopeID].new();
-    let mutable first_use_block_by_local = Dict[UInt, UInt].new();
-    let mutable multiple_use_blocks_by_local = Dict[UInt, Bool].new();
+    let mutable declared_block_by_local = Dict[Int, MIRBlockID].new();
+    let mutable shared_use_scope_by_local = Dict[Int, MIRScopeID].new();
+    let mutable first_use_block_by_local = Dict[Int, Int].new();
+    let mutable multiple_use_blocks_by_local = Dict[Int, Bool].new();
     for block in function.blocks then {
         for statement in block.statements then {
             when statement in {
@@ -5038,7 +5078,7 @@ private let build_mir_lifetime_plan(
                     if not active_scopes.is_empty() then {
                         parent_scope_by_scope.insert(
                             scope.raw_value,
-                            active_scopes[active_scopes.count() - UInt(1)],
+                            active_scopes[active_scopes.count() - 1],
                         );
                     };
                     active_scopes.push(scope);
@@ -5060,7 +5100,7 @@ private let build_mir_lifetime_plan(
                     if not active_scopes.is_empty() then {
                         declared_scope_by_local.insert(
                             local_id.raw_value,
-                            active_scopes[active_scopes.count() - UInt(1)],
+                            active_scopes[active_scopes.count() - 1],
                         );
                     };
                     mir_record_local_use(
@@ -5258,7 +5298,7 @@ private let build_mir_lifetime_plan(
                     local.id.raw_value,
                 );
                 while scope is .Some(_) then {
-                    let scope_id = scope or else MIRScopeID(UInt(0));
+                    let scope_id = scope or else MIRScopeID(0);
                     let retained_scope = when shared_use_scope_opt in {
                         .Some(shared_use_scope) then shared_use_scope.raw_value == scope_id.raw_value,
                         .None() then false,
@@ -5335,7 +5375,7 @@ given CodeGen {
         if params.is_empty() then {
             return Option[Type].None();
         };
-        let first_param = params[UInt(0)];
+        let first_param = params[0];
         if not (first_param.name == "self" or first_param.name == "source") then {
             return Option[Type].None();
         };

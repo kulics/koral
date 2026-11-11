@@ -36,11 +36,11 @@ type ReInst {
     /// Match one byte against a 256-bit class (negation folded at compile).
     Class(bits: [32]UInt8),
     /// Try `x` first (higher priority), then `y`.
-    Split(x: UInt, y: UInt),
+    Split(x: Int, y: Int),
     /// Jump to `x`.
-    Jump(x: UInt),
+    Jump(x: Int),
     /// Record the current position in capture slot `slot`.
-    Save(slot: UInt),
+    Save(slot: Int),
     /// Assert the start of the text, or of a line in multiline mode.
     Bol(multiline: Bool),
     /// Assert the end of the text, or of a line in multiline mode.
@@ -63,7 +63,7 @@ given ClassBuilder {
     };
 
     set_byte(self, ch: UInt8): Void = {
-        let i = UInt(ch);
+        let i = Int(ch);
         self.bits[i >> 3] = self.bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
     };
 
@@ -81,7 +81,7 @@ given ClassBuilder {
     };
 
     invert(self): Void = {
-        for i in UInt(0)..<UInt(32) then {
+        for i in 0..<32 then {
             self.bits[i] = ~self.bits[i];
         };
     };
@@ -132,7 +132,7 @@ let re_lower_byte(b: UInt8): UInt8 = {
 // Assembly: segments with segment-relative pcs, relocated when appended
 // ----------------------------------------------------------------------------
 
-let re_relocate(inst: ReInst, base: UInt): ReInst = {
+let re_relocate(inst: ReInst, base: Int): ReInst = {
     return when inst in {
         .Jump(x) then .Jump(x + base),
         .Split(x, y) then .Split(x + base, y + base),
@@ -182,8 +182,8 @@ type mutable ReParser(
     pat: String,
     ignore_case: Bool,
     multiline: Bool,
-    mutable pos: UInt,
-    mutable ngroups: UInt,
+    mutable pos: Int,
+    mutable ngroups: Int,
     mutable error: String,
 );
 
@@ -221,7 +221,7 @@ given ReParser {
             return true;
         };
         // split b0 / next; b0; jmp end; split b1 / next; b1; jmp end; ...
-        let mutable jmps = List[UInt].new();
+        let mutable jmps = List[Int].new();
         for i in 0..<branches.count() then {
             if i + 1 < branches.count() then {
                 let split_at = out.count();
@@ -287,21 +287,21 @@ given ReParser {
     /// `{n}`, `{n,}`, `{n,m}` over `atom`, greedy.
     parse_bounded(self, out: List[ReInst], atom: List[ReInst]): Bool = {
         self.pos += 1;
-        let mutable n: UInt = 0;
+        let mutable n = 0;
         let mutable n_digits = false;
         while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
-            n = n * 10 + UInt(self.peek() - '0');
+            n = n * 10 + Int(self.peek() - '0');
             n_digits = true;
             self.pos += 1;
         };
-        let mutable m: UInt = n;
+        let mutable m = n;
         let mutable unbounded = false;
         if not self.at_end() and self.peek() == ',' then {
             self.pos += 1;
             if not self.at_end() and self.peek() != '}' then {
                 m = 0;
                 while not self.at_end() and self.peek() >= '0' and self.peek() <= '9' then {
-                    m = m * 10 + UInt(self.peek() - '0');
+                    m = m * 10 + Int(self.peek() - '0');
                     self.pos += 1;
                 };
             } else {
@@ -576,19 +576,19 @@ given ReParser {
 /// recycled rows and grows the pool on first touch.
 type mutable ReRowPool(
     rows: List[*mutable Int32],
-    mutable free_buf: *mutable UInt,
-    mutable free_len: UInt,
-    mutable free_cap: UInt,
-    temp_buf: *mutable UInt,
-    mutable temp_len: UInt,
-    temp_cap: UInt,
-    width: UInt,
+    mutable free_buf: *mutable Int,
+    mutable free_len: Int,
+    mutable free_cap: Int,
+    temp_buf: *mutable Int,
+    mutable temp_len: Int,
+    temp_cap: Int,
+    width: Int,
 );
 
 given ReRowPool {
     /// Address of row `i` -- a raw-pointer table walk, no bounds check: the
     /// step loop's Save/spawn paths hit this per byte.
-    at(self, i: UInt): *mutable Int32 = {
+    at(self, i: Int): *mutable Int32 = {
         let base = self.rows.borrow_ptr();
         return base[i];
     };
@@ -596,93 +596,93 @@ given ReRowPool {
     /// Copy row `src` into row `dst` -- the copy-on-write half of a `Save`
     /// and the copy every spawn takes. This width-sized copy is the ONLY row
     /// copy in the step loop; everything else passes row indices.
-    copy_row(self, src: UInt, dst: UInt): Void = {
+    copy_row(self, src: Int, dst: Int): Void = {
         let sp = self.at(src);
         let dp = self.at(dst);
-        let mutable i = UInt(0);
+        let mutable i = 0;
         while i < self.width then {
             dp[i] = sp[i];
-            i += UInt(1);
+            i += 1;
         };
     };
 
     /// Load a row into the match result: an inline value copy for patterns
     /// that fit the inline slots (zero allocations -- the common case), one
     /// packed heap block beyond.
-    load_row(self, i: UInt): ReSlots = {
+    load_row(self, i: Int): ReSlots = {
         let src = self.at(i);
-        if self.width <= UInt(34) then {
+        if self.width <= 34 then {
             let mutable slots: [34]Int32 = [];
-            let mutable k = UInt(0);
+            let mutable k = 0;
             while k < self.width then {
                 slots[k] = src[k];
-                k += UInt(1);
+                k += 1;
             };
             return ReSlots(slots, "");
         };
         return ReSlots(
             re_blank_slots(),
-            String.from_utf8_ptr_unchecked(src as *UInt8, self.width * UInt(4)),
+            String.from_utf8_ptr_unchecked(src as *UInt8, self.width * 4),
         );
     };
 
     /// A row for a thread: recycled from the free stack, or a fresh block on
     /// first touch. The spawn fills it with `copy_row` immediately. The free
     /// stack is a raw array -- this runs per spawn in the step loop.
-    take(self): UInt = {
-        if self.free_len == UInt(0) then {
-            self.rows.push(alloc_memory[Int32](self.width));
-            return self.rows.count() - UInt(1);
+    take(self): Int = {
+        if self.free_len == 0 then {
+            self.rows.push(alloc_memory[Int32](UInt(self.width)));
+            return self.rows.count() - 1;
         };
-        self.free_len = self.free_len - UInt(1);
+        self.free_len = self.free_len - 1;
         return self.free_buf[self.free_len];
     };
 
     /// Return a row to the pool -- a thread's death.
-    give(self, i: UInt): Void = {
+    give(self, i: Int): Void = {
         if self.free_len == self.free_cap then {
-            let new_cap = self.free_cap * UInt(2) + UInt(8);
-            let grown = alloc_memory[UInt](new_cap);
-            copy_memory(grown, self.free_buf, self.free_len);
+            let new_cap = self.free_cap * 2 + 8;
+            let grown = alloc_memory[Int](UInt(new_cap));
+            copy_memory(grown, self.free_buf, UInt(self.free_len));
             dealloc_memory(self.free_buf);
             self.free_buf = grown;
             self.free_cap = new_cap;
         };
         self.free_buf[self.free_len] = i;
-        self.free_len = self.free_len + UInt(1);
+        self.free_len = self.free_len + 1;
     };
 
     /// A row for a `Save`'s copy-on-write. The thread that survives this call
     /// has copied the row out at spawn, so `end_call` returns every temp
     /// unconditionally. The temp stack is a raw bump -- this runs per `Save`.
-    take_temp(self): UInt = {
+    take_temp(self): Int = {
         if self.temp_len >= self.temp_cap then {
             panic("regex: capture row pool exhausted");
         };
         let i = self.take();
         self.temp_buf[self.temp_len] = i;
-        self.temp_len = self.temp_len + UInt(1);
+        self.temp_len = self.temp_len + 1;
         return i;
     };
 
     /// Return every temp taken during the closure call to the free stack.
     end_call(self): Void = {
-        let mutable k = UInt(0);
+        let mutable k = 0;
         while k < self.temp_len then {
             self.give(self.temp_buf[k]);
-            k += UInt(1);
+            k += 1;
         };
-        self.temp_len = UInt(0);
+        self.temp_len = 0;
     };
 };
 
 given ReRowPool: Drop {
     /// Release every row block and the two stacks owned by the pool.
     drop(self): Void = {
-        let mutable k = UInt(0);
+        let mutable k = 0;
         while k < self.rows.count() then {
             dealloc_memory(self.rows[k]);
-            k += UInt(1);
+            k += 1;
         };
         dealloc_memory(self.free_buf);
         dealloc_memory(self.temp_buf);
@@ -705,14 +705,14 @@ type mutable ReScratch(
     clist: List[ReThread],
     nlist: List[ReThread],
     bmarks: *mutable Int32,
-    mutable bcur: *mutable UInt32,
-    mutable bcur_len: UInt,
-    mutable bnext: *mutable UInt32,
-    mutable bnext_len: UInt,
-    bstack: *mutable UInt32,
-    mutable bstack_len: UInt,
-    bstarts: List[UInt],
-    banchors: List[UInt],
+    mutable bcur: *mutable Int,
+    mutable bcur_len: Int,
+    mutable bnext: *mutable Int,
+    mutable bnext_len: Int,
+    bstack: *mutable Int,
+    mutable bstack_len: Int,
+    bstarts: List[Int],
+    banchors: List[Int],
     mutable bgen: Int32,
     alt_buf: *mutable UInt32,
     undo_buf: *mutable UInt32,
@@ -730,7 +730,7 @@ given ReScratch: Drop {
     };
 };
 
-let re_new_scratch(inst_count: UInt, width: UInt): ReScratch = {
+let re_new_scratch(inst_count: Int, width: Int): ReScratch = {
     let cm = List[Int32].with_capacity(inst_count);
     let nm = List[Int32].with_capacity(inst_count);
     for _ in 0..<inst_count then cm.push(0);
@@ -739,33 +739,33 @@ let re_new_scratch(inst_count: UInt, width: UInt): ReScratch = {
     // allocated on first touch and recycled through the pool's free stack,
     // so the pool's memory follows the live rows a run actually uses.
     let rows = List[*mutable Int32].new();
-    rows.push(alloc_memory[Int32](width));
-    let blankp = rows[UInt(0)];
-    let mutable bi = UInt(0);
+    rows.push(alloc_memory[Int32](UInt(width)));
+    let blankp = rows[0];
+    let mutable bi = 0;
     while bi < width then {
         blankp[bi] = Int32(0) - Int32(1);
-        bi += UInt(1);
+        bi += 1;
     };
-    let free_cap = inst_count * UInt(2) + UInt(16);
-    let temp_cap = inst_count + UInt(8);
+    let free_cap = inst_count * 2 + 16;
+    let temp_cap = inst_count + 8;
     let pool = ReRowPool(
         rows,
-        alloc_memory[UInt](free_cap),
-        UInt(0),
+        alloc_memory[Int](UInt(free_cap)),
+        0,
         free_cap,
-        alloc_memory[UInt](temp_cap),
-        UInt(0),
+        alloc_memory[Int](UInt(temp_cap)),
+        0,
         temp_cap,
         width,
     );
     // Backward-scan buffers: the marks set, the two frontiers (at most one
     // entry per program counter) and the closure stack (at most every
     // epsilon edge in one position).
-    let bmarks = alloc_memory[Int32](inst_count);
-    let mutable zi = UInt(0);
+    let bmarks = alloc_memory[Int32](UInt(inst_count));
+    let mutable zi = 0;
     while zi < inst_count then {
         bmarks[zi] = Int32(0);
-        zi += UInt(1);
+        zi += 1;
     };
     return ReScratch(
         false,
@@ -773,21 +773,21 @@ let re_new_scratch(inst_count: UInt, width: UInt): ReScratch = {
         cm,
         nm,
         pool,
-        List[ReSeed].with_capacity(inst_count * UInt(4) + UInt(16)),
-        List[ReThread].with_capacity(inst_count + UInt(8)),
-        List[ReThread].with_capacity(inst_count + UInt(8)),
+        List[ReSeed].with_capacity(inst_count * 4 + 16),
+        List[ReThread].with_capacity(inst_count + 8),
+        List[ReThread].with_capacity(inst_count + 8),
         bmarks,
-        alloc_memory[UInt32](inst_count),
-        UInt(0),
-        alloc_memory[UInt32](inst_count),
-        UInt(0),
-        alloc_memory[UInt32](inst_count * UInt(4) + UInt(8)),
-        UInt(0),
-        List[UInt].new(),
-        List[UInt].new(),
+        alloc_memory[Int](UInt(inst_count)),
+        0,
+        alloc_memory[Int](UInt(inst_count)),
+        0,
+        alloc_memory[Int](UInt(inst_count * 4 + 8)),
+        0,
+        List[Int].new(),
+        List[Int].new(),
         Int32(2),
-        alloc_memory[UInt32](UInt(3) * (re_bt_budget() + UInt(2))),
-        alloc_memory[UInt32](UInt(2) * (re_bt_budget() + UInt(2))),
+        alloc_memory[UInt32](UInt(3 * (re_bt_budget() + 2))),
+        alloc_memory[UInt32](UInt(2 * (re_bt_budget() + 2))),
     );
 };
 
@@ -802,9 +802,9 @@ let re_new_scratch(inst_count: UInt, width: UInt): ReScratch = {
 type mutable ReReq(
     byte: UInt8,
     ci: Bool,
-    pc: UInt,
-    eps_from: *mutable UInt32,
-    eps_off: *mutable UInt32,
+    pc: Int,
+    eps_from: *mutable Int,
+    eps_off: *mutable Int,
 );
 
 given ReReq: Drop {
@@ -826,7 +826,7 @@ type mutable ReCode(
     aux1: *mutable UInt32,
     aux2: *mutable UInt32,
     match_bits: *mutable UInt8,
-    count: UInt,
+    count: Int,
 );
 
 given ReCode: Drop {
@@ -843,32 +843,32 @@ given ReCode: Drop {
 /// the variant form; the step loop never touches it again.
 let re_build_code(insts: List[ReInst]): ReCode = {
     let n = insts.count();
-    let op = alloc_memory[UInt8](n);
-    let aux1 = alloc_memory[UInt32](n);
-    let aux2 = alloc_memory[UInt32](n);
-    let match_bits = alloc_memory[UInt8](n * UInt(32));
-    let mutable zi = UInt(0);
-    while zi < n * UInt(32) then {
+    let op = alloc_memory[UInt8](UInt(n));
+    let aux1 = alloc_memory[UInt32](UInt(n));
+    let aux2 = alloc_memory[UInt32](UInt(n));
+    let match_bits = alloc_memory[UInt8](UInt(n * 32));
+    let mutable zi = 0;
+    while zi < n * 32 then {
         match_bits[zi] = UInt8(0);
-        zi += UInt(1);
+        zi += 1;
     };
-    for pc in UInt(0)..<n then {
-        let base = pc * UInt(32);
+    for pc in 0..<n then {
+        let base = pc * 32;
         aux1[pc] = UInt32(0);
         aux2[pc] = UInt32(0);
         when insts[pc] in {
             .Byte(ch, ci) then {
                 op[pc] = UInt8(0);
-                let i = UInt(ch);
+                let i = Int(ch);
                 match_bits[base + (i >> 3)] = match_bits[base + (i >> 3)] | (UInt8(1) << UInt8(i & 7));
                 if ci and ch >= 'a' and ch <= 'z' then {
-                    let up = UInt(ch - 32);
+                    let up = Int(ch - 32);
                     match_bits[base + (up >> 3)] = match_bits[base + (up >> 3)] | (UInt8(1) << UInt8(up & 7));
                 };
             },
             .Class(bits) then {
                 op[pc] = UInt8(0);
-                for k in UInt(0)..<UInt(32) then {
+                for k in 0..<32 then {
                     match_bits[base + k] = bits[k];
                 };
             },
@@ -908,23 +908,23 @@ let re_build_code(insts: List[ReInst]): ReCode = {
     // stay in place and keep their bytes: the analysis and the backward
     // prefilter walk the expanded graph, where a loop step is one byte --
     // exactly what their model assumes.
-    let mutable pc2 = UInt(0);
+    let mutable pc2 = 0;
     while pc2 < n then {
-        let mutable loop_consumer = UInt(0);
-        let mutable run_pc = UInt(0);
-        let mutable exit_pc = UInt(0);
+        let mutable loop_consumer = 0;
+        let mutable run_pc = 0;
+        let mutable exit_pc = 0;
         let mutable star = false;
         when insts[pc2] in {
             .Split(x, y) then {
                 // star: split at s, consume at s+1, jump(s) at s+2, exit s+3.
-                if x == pc2 + UInt(1) and y == pc2 + UInt(3) and pc2 + UInt(3) <= n then {
-                    when insts[pc2 + UInt(2)] in {
+                if x == pc2 + 1 and y == pc2 + 3 and pc2 + 3 <= n then {
+                    when insts[pc2 + 2] in {
                         .Jump(t) then {
                             if t == pc2 then {
-                                when insts[pc2 + UInt(1)] in {
+                                when insts[pc2 + 1] in {
                                     .Byte(_, _) or .Class(_) then {
                                         run_pc = pc2;
-                                        loop_consumer = pc2 + UInt(1);
+                                        loop_consumer = pc2 + 1;
                                         exit_pc = y;
                                         star = true;
                                     },
@@ -939,11 +939,11 @@ let re_build_code(insts: List[ReInst]): ReCode = {
             .Byte(_, _) or .Class(_) then {
                 // plus: consume at s, split(s, s+2) at s+1. The mandatory
                 // first consume stays; the Split becomes the run.
-                if pc2 + UInt(2) <= n then {
-                    when insts[pc2 + UInt(1)] in {
+                if pc2 + 2 <= n then {
+                    when insts[pc2 + 1] in {
                         .Split(x, y) then {
-                            if x == pc2 and y == pc2 + UInt(2) then {
-                                run_pc = pc2 + UInt(1);
+                            if x == pc2 and y == pc2 + 2 then {
+                                run_pc = pc2 + 1;
                                 loop_consumer = pc2;
                                 exit_pc = y;
                                 star = true;
@@ -965,15 +965,15 @@ let re_build_code(insts: List[ReInst]): ReCode = {
             aux1[run_pc] = UInt32(exit_pc);
             aux2[run_pc] = UInt32(loop_consumer);
         };
-        pc2 += UInt(1);
+        pc2 += 1;
     };
     return ReCode(op, aux1, aux2, match_bits, n);
 };
 
 /// Does instruction `u`'s byte set (the precomputed bitmap) cover `b`?
-let re_bits_match(match_bits: *mutable UInt8, u: UInt, b: UInt8): Bool = {
-    let base = u * UInt(32);
-    let i = UInt(b);
+let re_bits_match(match_bits: *mutable UInt8, u: Int, b: UInt8): Bool = {
+    let base = u * 32;
+    let i = Int(b);
     return ((match_bits[base + (i >> 3)] >> UInt8(i & 7)) & 1) == 1;
 };
 
@@ -983,7 +983,7 @@ let re_bits_match(match_bits: *mutable UInt8, u: UInt, b: UInt8): Bool = {
 /// run of this regex.
 type ReProgram(
     insts: List[ReInst],
-    ngroups: UInt,
+    ngroups: Int,
     start_any: Bool,
     start_bits: [32]UInt8,
     code: ReCode,
@@ -995,12 +995,12 @@ type ReProgram(
 /// (empty-matching patterns like `a*`). Computed from the program's
 /// epsilon closure at pc 0; assertions are treated as pass-through, so the
 /// set may over-approximate -- safe for a skip test.
-let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
+let re_analyze_start(insts: List[ReInst], ngroups: Int): ReProgram = {
     let mutable start_any = false;
     let mutable bits: [32]UInt8 = [];
     let mutable marks = List[Int32].new();
     for _ in 0..<insts.count() then marks.push(0);
-    let mutable work = List[UInt].new();
+    let mutable work = List[Int].new();
     work.push(0);
     while not work.is_empty() then {
         let pc = work.take_at(work.count() - 1);
@@ -1021,15 +1021,15 @@ let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
                 start_any = true;
             },
             .Byte(ch, ci) then {
-                let i = UInt(ch);
+                let i = Int(ch);
                 bits[i >> 3] = bits[i >> 3] | (UInt8(1) << UInt8(i & 7));
                 if ci and ch >= 'a' and ch <= 'z' then {
-                    let u = UInt(ch - 32);
+                    let u = Int(ch - 32);
                     bits[u >> 3] = bits[u >> 3] | (UInt8(1) << UInt8(u & 7));
                 };
             },
             .Class(bs) then {
-                for k in UInt(0)..<UInt(32) then {
+                for k in 0..<32 then {
                     bits[k] = bits[k] | bs[k];
                 };
             },
@@ -1043,7 +1043,7 @@ let re_analyze_start(insts: List[ReInst], ngroups: UInt): ReProgram = {
         bits,
         code,
         re_analyze_required(insts, code.match_bits),
-        re_new_scratch(insts.count(), ngroups * UInt(2) + UInt(2)),
+        re_new_scratch(insts.count(), ngroups * 2 + 2),
     );
 };
 
@@ -1060,14 +1060,14 @@ let re_analyze_required(
     match_bits: *mutable UInt8,
 ): Option[ReReq] = {
     let n = insts.count();
-    let mutable candidates = List[UInt].new();
-    for pc in UInt(0)..<n then {
+    let mutable candidates = List[Int].new();
+    for pc in 0..<n then {
         when insts[pc] in {
             .Byte(_, _) then {
                 let mutable marks = List[Bool].new();
                 for _ in 0..<n then marks.push(false);
-                let mutable work = List[UInt].new();
-                work.push(UInt(0));
+                let mutable work = List[Int].new();
+                work.push(0);
                 let mutable reaches = false;
                 while not work.is_empty() then {
                     let cur = work.take_at(work.count() - 1);
@@ -1082,7 +1082,7 @@ let re_analyze_required(
                             work.push(x);
                         },
                         .Match() then { reaches = true; },
-                        _ then work.push(cur + UInt(1)),
+                        _ then work.push(cur + 1),
                     };
                 };
                 if not reaches then {
@@ -1093,16 +1093,16 @@ let re_analyze_required(
         };
     };
     // Preference: non-alnum first, then program order.
-    let mutable ordered = List[UInt].new();
-    for pass in UInt(0)..<UInt(2) then {
+    let mutable ordered = List[Int].new();
+    for pass in 0..<2 then {
         for pc in candidates then {
             when insts[pc] in {
                 .Byte(ch, _) then {
                     let alnum = (ch >= 'a' and ch <= 'z')
                         or (ch >= 'A' and ch <= 'Z')
                         or (ch >= '0' and ch <= '9');
-                    if (pass == UInt(0) and not alnum)
-                        or (pass == UInt(1) and alnum) then {
+                    if (pass == 0 and not alnum)
+                        or (pass == 1 and alnum) then {
                         ordered.push(pc);
                     };
                 },
@@ -1128,7 +1128,7 @@ let re_analyze_required(
 /// occurrences). Returns None when the property fails.
 let re_build_required(
     insts: List[ReInst],
-    req_pc: UInt,
+    req_pc: Int,
     match_bits: *mutable UInt8,
 ): Option[ReReq] = {
     let n = insts.count();
@@ -1147,69 +1147,69 @@ let re_build_required(
     // Save/Bol/Eol at u (whose edge goes to u + 1) point back at their
     // targets. Flat arrays keep the backward scan's closure free of
     // container traffic.
-    let eps_off = alloc_memory[UInt32](n + UInt(1));
-    let mutable oi = UInt(0);
-    while oi < n + UInt(1) then {
-        eps_off[oi] = UInt32(0);
-        oi += UInt(1);
+    let eps_off = alloc_memory[Int](UInt(n + 1));
+    let mutable oi = 0;
+    while oi < n + 1 then {
+        eps_off[oi] = 0;
+        oi += 1;
     };
-    for u in UInt(0)..<n then {
+    for u in 0..<n then {
         when insts[u] in {
             .Jump(x) then {
-                eps_off[x + UInt(1)] = eps_off[x + UInt(1)] + UInt32(1);
+                eps_off[x + 1] = eps_off[x + 1] + 1;
             },
             .Split(x, y) then {
-                eps_off[x + UInt(1)] = eps_off[x + UInt(1)] + UInt32(1);
-                eps_off[y + UInt(1)] = eps_off[y + UInt(1)] + UInt32(1);
+                eps_off[x + 1] = eps_off[x + 1] + 1;
+                eps_off[y + 1] = eps_off[y + 1] + 1;
             },
             .Save(_) then {
-                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+                eps_off[u + 2] = eps_off[u + 2] + 1;
             },
             .Bol(_) then {
-                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+                eps_off[u + 2] = eps_off[u + 2] + 1;
             },
             .Eol(_) then {
-                eps_off[u + UInt(2)] = eps_off[u + UInt(2)] + UInt32(1);
+                eps_off[u + 2] = eps_off[u + 2] + 1;
             },
             _ then {},
         };
     };
-    for k in UInt(0)..<n then {
-        eps_off[k + UInt(1)] = eps_off[k + UInt(1)] + eps_off[k];
+    for k in 0..<n then {
+        eps_off[k + 1] = eps_off[k + 1] + eps_off[k];
     };
-    let eps_from = alloc_memory[UInt32](UInt(eps_off[n]));
-    let mutable fill = alloc_memory[UInt32](n);
-    let mutable fi = UInt(0);
+    let eps_from = alloc_memory[Int](UInt(eps_off[n]));
+    let mutable fill = alloc_memory[Int](UInt(n));
+    let mutable fi = 0;
     while fi < n then {
-        fill[fi] = UInt32(0);
-        fi += UInt(1);
+        fill[fi] = 0;
+        fi += 1;
     };
-    for u in UInt(0)..<n then {
+    for u in 0..<n then {
         when insts[u] in {
             .Jump(x) then {
-                eps_from[UInt(eps_off[x]) + UInt(fill[x])] = UInt32(u);
-                fill[x] = fill[x] + UInt32(1);
+                eps_from[eps_off[x] + fill[x]] = u;
+                fill[x] = fill[x] + 1;
             },
             .Split(x, y) then {
-                eps_from[UInt(eps_off[x]) + UInt(fill[x])] = UInt32(u);
-                fill[x] = fill[x] + UInt32(1);
-                eps_from[UInt(eps_off[y]) + UInt(fill[y])] = UInt32(u);
-                fill[y] = fill[y] + UInt32(1);
+                eps_from[eps_off[x] + fill[x]] = u;
+                fill[x] = fill[x] + 1;
+                eps_from[eps_off[y] + fill[y]] = u;
+                fill[y] = fill[y] + 1;
             },
             .Save(_) then {
-                let v = u + UInt(1);
-                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
-                fill[v] = fill[v] + UInt32(1);
+                let v = u + 1;
+                eps_from[eps_off[v] + fill[v]] = u;
+                fill[v] = fill[v] + 1;
             },
             .Bol(_) then {
-                let v = u + UInt(1);
-                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
-                fill[v] = fill[v] + UInt32(1);
+                let v = u + 1;
+                eps_from[eps_off[v] + fill[v]] = u;
+                fill[v] = fill[v] + 1;
             },
             .Eol(_) then {
-                let v = u + UInt(1);
-                eps_from[UInt(eps_off[v]) + UInt(fill[v])] = UInt32(u);
-                fill[v] = fill[v] + UInt32(1);
+                let v = u + 1;
+                eps_from[eps_off[v] + fill[v]] = u;
+                fill[v] = fill[v] + 1;
             },
             _ then {},
         };
@@ -1218,13 +1218,13 @@ let re_build_required(
     // Every instruction that can reach req_pc -- the prefix territory.
     let mutable reach = List[Bool].new();
     for _ in 0..<n then reach.push(false);
-    let mutable work = List[UInt].new();
+    let mutable work = List[Int].new();
     work.push(req_pc);
     reach[req_pc] = true;
     while not work.is_empty() then {
         let cur = work.take_at(work.count() - 1);
-        if cur > UInt(0) then {
-            let u = cur - UInt(1);
+        if cur > 0 then {
+            let u = cur - 1;
             when insts[u] in {
                 .Byte(_, _) or .Class(_) then {
                     if not reach[u] then {
@@ -1235,12 +1235,12 @@ let re_build_required(
                 _ then {},
             };
         };
-        let es = UInt(eps_off[cur]);
-        let ee = UInt(eps_off[cur + UInt(1)]);
+        let es = eps_off[cur];
+        let ee = eps_off[cur + 1];
         let mutable ek = es;
         while ek < ee then {
-            let u = UInt(eps_from[ek]);
-            ek += UInt(1);
+            let u = eps_from[ek];
+            ek += 1;
             if not reach[u] then {
                 reach[u] = true;
                 work.push(u);
@@ -1253,7 +1253,7 @@ let re_build_required(
     // prefix that could consume EITHER byte could hide one mid-match --
     // which would let feasible starts interleave across occurrences and
     // break the leftmost early stop.
-    for u in UInt(0)..<n then {
+    for u in 0..<n then {
         if u != req_pc and reach[u] then {
             if re_bits_match(match_bits, u, req_byte) then {
                 return Option[ReReq].None();
@@ -1268,7 +1268,7 @@ let re_build_required(
     // The backward scan's closure is dispatch-free: a prefix assertion would
     // need its meaning evaluated per position, so patterns with one on the
     // path to the byte keep the plain scan.
-    for u in UInt(0)..<n then {
+    for u in 0..<n then {
         if reach[u] then {
             when insts[u] in {
                 .Bol(_) or .Eol(_) then {
@@ -1312,10 +1312,10 @@ let re_compile(pattern: String, ignore_case: Bool, multiline: Bool): Result[RePr
 /// group `k` (1-based) occupies slots `2k` and `2k + 1`; a slot of `0 - 1`
 /// means "did not take part in this match". A row carries the pattern's
 /// groups; up to 65535 capture groups are accepted at compile.
-type ReThread(pc: UInt, row: UInt);
+type ReThread(pc: Int, row: Int);
 
 /// A pending epsilon-closure step: same transport as a thread.
-type ReSeed(pc: UInt, row: UInt);
+type ReSeed(pc: Int, row: Int);
 
 /// One match's capture slots -- the hybrid result shape: an inline value
 /// copy (zero allocations) while the pattern fits the inline slots (up to
@@ -1328,8 +1328,8 @@ given ReSlots {
     /// One slot from either storage shape. The inline slots land in a local
     /// first -- indexing the member array in place would take `&self.slots`
     /// and disqualify the borrowed-self convention (see `Captures.slot_at`).
-    slot(self, index: UInt): Int32 = {
-        if self.spill.count() > UInt(0) then {
+    slot(self, index: Int): Int32 = {
+        if self.spill.count() > 0 then {
             let p = self.spill.borrow_ptr() as *Int32;
             return p[index];
         };
@@ -1343,7 +1343,7 @@ given ReSlots {
 let re_blank_slots(): [34]Int32 = {
     let unset = Int32(0) - Int32(1);
     let mutable a: [34]Int32 = [];
-    for i in UInt(0)..<UInt(34) then {
+    for i in 0..<34 then {
         a[i] = unset;
     };
     return a;
@@ -1357,16 +1357,21 @@ let re_blank_slots(): [34]Int32 = {
 let re_run(
     prog: ReProgram,
     text: String,
-    offset: UInt,
+    offset: Int,
     track_groups: Bool,
 ): Option[ReSlots] = {
+    // A negative start lies outside the search domain: no position can
+    // match, mirroring the Option accessors' out-of-domain rule.
+    if offset < 0 then {
+        return Option[ReSlots].None();
+    };
     // With a required literal byte the search goes through the prefilter:
     // enumerate feasible starts at the byte's occurrences and run the
     // machine anchored at each, leftmost first.
     if prog.req is .Some(_) then {
         return re_run_filtered(prog, text, offset, track_groups);
     };
-    return re_run_scan(prog, text, offset, track_groups, Option[List[UInt]].None());
+    return re_run_scan(prog, text, offset, track_groups, Option[List[Int]].None());
 };
 
 /// The Pike-VM itself. With `anchors` set (increasing), a start thread is
@@ -1377,9 +1382,9 @@ let re_run(
 let re_run_scan(
     prog: ReProgram,
     text: String,
-    offset: UInt,
+    offset: Int,
     track_groups: Bool,
-    anchors: Option[List[UInt]],
+    anchors: Option[List[Int]],
 ): Option[ReSlots] = {
     let insts = prog.insts;
     let code = prog.code;
@@ -1392,7 +1397,7 @@ let re_run_scan(
     let reuse = not shared.in_use;
     let scratch = if reuse
         then shared
-        else re_new_scratch(insts.count(), prog.ngroups * UInt(2) + UInt(2));
+        else re_new_scratch(insts.count(), prog.ngroups * 2 + 2);
     // Each thread list is built against its own marks set: a program counter
     // may appear at most once per list, and the first thread to reach it
     // (highest priority) keeps the slot. The sets travel with the lists when
@@ -1431,7 +1436,7 @@ let re_run_scan(
     let mutable best_caps = ReSlots(re_blank_slots(), "");
     let mutable matched = false;
 
-    let mutable anchor_i = UInt(0);
+    let mutable anchor_i = 0;
     let mutable pos = offset;
     while pos <= text_len then {
         if not matched then {
@@ -1441,14 +1446,14 @@ let re_run_scan(
                 .Some(list) then {
                     if anchor_i < list.count() and list[anchor_i] == pos then {
                         inject = true;
-                        anchor_i += UInt(1);
+                        anchor_i += 1;
                     };
                 },
                 .None() then {
                     if prog.start_any then {
                         inject = true;
                     } else if pos < text_len then {
-                        let i = UInt(bp[pos]);
+                        let i = Int(bp[pos]);
                         inject = ((prog.start_bits[i >> 3] >> UInt8(i & 7)) & 1) == 1;
                     };
                 },
@@ -1462,8 +1467,8 @@ let re_run_scan(
                     text_len,
                     pos,
                     clist,
-                    UInt(0),
-                    UInt(0),
+                    0,
+                    0,
                     track_groups,
                     pool,
                     work,
@@ -1510,7 +1515,7 @@ let re_run_scan(
                 } else if opc == UInt8(7) and pos < text_len then {
                     // The run consumes one byte and stays; its closure
                     // re-forks the exit at the next boundary.
-                    if re_bits_match(code.match_bits, UInt(code.aux2[t.pc]), bp[pos]) then {
+                    if re_bits_match(code.match_bits, Int(code.aux2[t.pc]), bp[pos]) then {
                         re_add(
                             code,
                             nmp,
@@ -1578,7 +1583,7 @@ let re_run_scan(
 /// only picks the engine, never the answer. The scratch's alt/undo buffers
 /// are sized from it (at most one alternative and one capture write per
 /// step).
-let re_bt_budget(): UInt = UInt(4000);
+let re_bt_budget(): Int = 4000;
 
 /// The three outcomes of one anchored backtracking attempt. `Budget` means
 /// UNKNOWN, never "no match": a search that ran out of budget has not
@@ -1600,8 +1605,8 @@ type ReBt {
 let re_backtrack(
     prog: ReProgram,
     bp: *UInt8,
-    text_len: UInt,
-    start: UInt,
+    text_len: Int,
+    start: Int,
     track_groups: Bool,
     pool: ReRowPool,
 ): ReBt = {
@@ -1610,87 +1615,87 @@ let re_backtrack(
     let alt = scratch.alt_buf;
     let undo = scratch.undo_buf;
     let row = pool.take_temp();
-    pool.copy_row(UInt(0), row);
+    pool.copy_row(0, row);
     let caps = pool.at(row);
-    let mutable alt_len = UInt(0);
-    let mutable undo_len = UInt(0);
-    let mutable pc = UInt(0);
+    let mutable alt_len = 0;
+    let mutable undo_len = 0;
+    let mutable pc = 0;
     let mutable pos = start;
     let mutable budget = re_bt_budget();
 
     while true then {
-        if budget == UInt(0) then {
+        if budget == 0 then {
             pool.end_call();
             return ReBt.Budget();
         };
-        budget = budget - UInt(1);
+        budget = budget - 1;
         let mutable failed = false;
         let opc = code.op[pc];
         if opc == UInt8(0) then {
             if pos < text_len and re_bits_match(code.match_bits, pc, bp[pos]) then {
-                pos = pos + UInt(1);
-                pc = pc + UInt(1);
+                pos = pos + 1;
+                pc = pc + 1;
             } else {
                 failed = true;
             };
         } else if opc == UInt8(1) then {
             // Split: `x` first (the higher-priority branch), `y` later.
-            let f = alt_len * UInt(3);
+            let f = alt_len * 3;
             alt[f] = UInt32(code.aux2[pc]);
-            alt[f + UInt(1)] = UInt32(pos);
-            alt[f + UInt(2)] = UInt32(undo_len);
-            alt_len = alt_len + UInt(1);
-            pc = UInt(code.aux1[pc]);
+            alt[f + 1] = UInt32(pos);
+            alt[f + 2] = UInt32(undo_len);
+            alt_len = alt_len + 1;
+            pc = Int(code.aux1[pc]);
         } else if opc == UInt8(2) then {
-            pc = UInt(code.aux1[pc]);
+            pc = Int(code.aux1[pc]);
         } else if opc == UInt8(3) then {
-            let slot = UInt(code.aux1[pc]);
-            if track_groups or slot < UInt(2) then {
-                let u = undo_len * UInt(2);
+            let slot = Int(code.aux1[pc]);
+            if track_groups or slot < 2 then {
+                let u = undo_len * 2;
                 undo[u] = UInt32(slot);
-                undo[u + UInt(1)] = UInt32(caps[slot]);
-                undo_len = undo_len + UInt(1);
+                undo[u + 1] = UInt32(WrappingUInt32(caps[slot]));
+                undo_len = undo_len + 1;
                 caps[slot] = Int32(pos);
             };
-            pc = pc + UInt(1);
+            pc = pc + 1;
         } else if opc == UInt8(7) then {
             // A fused greedy run: consume as many matching bytes as
             // possible, then continue at the exit. The alternatives are the
             // exit at every shorter end -- pushed short-to-long so the LIFO
             // pops the next-shortest first -- bounded by the budget, whose
             // overrun hands the whole search to the Pike-VM.
-            let exit_pc = UInt(code.aux1[pc]);
-            let bits_pc = UInt(code.aux2[pc]);
+            let exit_pc = Int(code.aux1[pc]);
+            let bits_pc = Int(code.aux2[pc]);
             let start = pos;
             while pos < text_len and re_bits_match(code.match_bits, bits_pc, bp[pos]) then {
-                pos = pos + UInt(1);
+                pos = pos + 1;
             };
             let limit = start;
-            if UInt(alt_len) + (pos - limit) > re_bt_budget() then {
+            if alt_len + (pos - limit) > re_bt_budget() then {
                 pool.end_call();
                 return ReBt.Budget();
             };
             let mutable k = limit;
             while k < pos then {
-                let f = alt_len * UInt(3);
+                let f = alt_len * 3;
                 alt[f] = UInt32(exit_pc);
-                alt[f + UInt(1)] = UInt32(k);
-                alt[f + UInt(2)] = UInt32(undo_len);
-                alt_len = alt_len + UInt(1);
-                k = k + UInt(1);
+                alt[f + 1] = UInt32(k);
+                alt[f + 2] = UInt32(undo_len);
+                alt_len = alt_len + 1;
+                k = k + 1;
             };
             pc = exit_pc;
         } else if opc == UInt8(4) then {
             let multiline = code.aux1[pc] == UInt32(1);
-            if pos == UInt(0) or (multiline and pos > UInt(0) and bp[pos - UInt(1)] == '\n') then {
-                pc = pc + UInt(1);
+            if pos == 0 or (multiline and pos > 0 and bp[pos - 1] == '\n') then {
+                pc = pc + 1;
             } else {
                 failed = true;
             };
         } else if opc == UInt8(5) then {
             let multiline = code.aux1[pc] == UInt32(1);
             if pos == text_len or (multiline and pos < text_len and bp[pos] == '\n') then {
-                pc = pc + UInt(1);
+                pc = pc + 1;
             } else {
                 failed = true;
             };
@@ -1700,19 +1705,19 @@ let re_backtrack(
             return ReBt.Found(out);
         };
         if failed then {
-            if alt_len == UInt(0) then {
+            if alt_len == 0 then {
                 pool.end_call();
                 return ReBt.Missing();
             };
-            alt_len = alt_len - UInt(1);
-            let f = alt_len * UInt(3);
-            pc = UInt(alt[f]);
-            pos = UInt(alt[f + UInt(1)]);
-            let mark = UInt(alt[f + UInt(2)]);
+            alt_len = alt_len - 1;
+            let f = alt_len * 3;
+            pc = Int(alt[f]);
+            pos = Int(alt[f + 1]);
+            let mark = Int(alt[f + 2]);
             while undo_len > mark then {
-                undo_len = undo_len - UInt(1);
-                let u = undo_len * UInt(2);
-                caps[UInt(undo[u])] = Int32(undo[u + UInt(1)]);
+                undo_len = undo_len - 1;
+                let u = undo_len * 2;
+                caps[Int(undo[u])] = Int32(WrappingInt32(undo[u + 1]));
             };
         };
     };
@@ -1737,9 +1742,9 @@ let re_backward_starts(
     prog: ReProgram,
     req: ReReq,
     bp: *UInt8,
-    q: UInt,
-    text_len: UInt,
-): List[UInt] = {
+    q: Int,
+    text_len: Int,
+): List[Int] = {
     let insts = prog.insts;
     let n = insts.count();
     let scratch = prog.scratch;
@@ -1747,10 +1752,10 @@ let re_backward_starts(
     let mutable bgen = scratch.bgen + Int32(1);
     if bgen > Int32(1000000000) then {
         // Generations are about to wrap: re-zero the set once.
-        let mutable zi = UInt(0);
+        let mutable zi = 0;
         while zi < n then {
             bmarks[zi] = Int32(0);
-            zi += UInt(1);
+            zi += 1;
         };
         bgen = Int32(1);
     };
@@ -1758,7 +1763,7 @@ let re_backward_starts(
     let mutable bcur = scratch.bcur;
     let mutable bnext = scratch.bnext;
     let bstack = scratch.bstack;
-    scratch.bcur_len = UInt(0);
+    scratch.bcur_len = 0;
     let starts = scratch.bstarts;
     starts.clear();
     let mutable i = q;
@@ -1767,31 +1772,31 @@ let re_backward_starts(
         // Seed the frontier for position `i`: at `q` the required byte has
         // consumed text[q]; earlier, every consumer of text[i] whose
         // successor can finish.
-        scratch.bstack_len = UInt(0);
+        scratch.bstack_len = 0;
         if i == q then {
-            bstack[0] = UInt32(req.pc);
-            scratch.bstack_len = UInt(1);
+            bstack[0] = req.pc;
+            scratch.bstack_len = 1;
         } else {
             let cur_len = scratch.bcur_len;
-            let mutable ci = UInt(0);
+            let mutable ci = 0;
             while ci < cur_len then {
-                let pc = UInt(bcur[ci]);
-                ci += UInt(1);
-                if pc > UInt(0) then {
-                    let u = pc - UInt(1);
+                let pc = bcur[ci];
+                ci += 1;
+                if pc > 0 then {
+                    let u = pc - 1;
                     if re_bits_match(prog.code.match_bits, u, bp[i]) then {
                         let t = scratch.bstack_len;
-                        bstack[t] = UInt32(u);
-                        scratch.bstack_len = t + UInt(1);
+                        bstack[t] = u;
+                        scratch.bstack_len = t + 1;
                     };
                 };
             };
         };
-        scratch.bnext_len = UInt(0);
-        while scratch.bstack_len > UInt(0) then {
-            let t = scratch.bstack_len - UInt(1);
+        scratch.bnext_len = 0;
+        while scratch.bstack_len > 0 then {
+            let t = scratch.bstack_len - 1;
             scratch.bstack_len = t;
-            let u = UInt(bstack[t]);
+            let u = bstack[t];
             if bmarks[u] == bgen then {
                 continue;
             };
@@ -1800,23 +1805,23 @@ let re_backward_starts(
             // patterns), so every popped instruction simply joins the
             // frontier and walks its reverse epsilon edges.
             let nt = scratch.bnext_len;
-            bnext[nt] = UInt32(u);
-            scratch.bnext_len = nt + UInt(1);
-            let es = UInt(req.eps_off[u]);
-            let ee = UInt(req.eps_off[u + UInt(1)]);
+            bnext[nt] = u;
+            scratch.bnext_len = nt + 1;
+            let es = req.eps_off[u];
+            let ee = req.eps_off[u + 1];
             let mutable ek = es;
             while ek < ee then {
                 let st = scratch.bstack_len;
                 bstack[st] = req.eps_from[ek];
-                scratch.bstack_len = st + UInt(1);
-                ek += UInt(1);
+                scratch.bstack_len = st + 1;
+                ek += 1;
             };
         };
         // pc 0 in the frontier means a match can start exactly at `i`.
-        if bmarks[UInt(0)] == bgen then {
+        if bmarks[0] == bgen then {
             starts.push(i);
         };
-        if scratch.bnext_len == UInt(0) or i == UInt(0) then {
+        if scratch.bnext_len == 0 or i == 0 then {
             break;
         };
         // The next position's frontier is this one's; the buffers trade
@@ -1829,13 +1834,13 @@ let re_backward_starts(
         let tmp_len = scratch.bcur_len;
         scratch.bcur_len = scratch.bnext_len;
         scratch.bnext_len = tmp_len;
-        i -= UInt(1);
+        i -= 1;
         bgen += Int32(1);
         if bgen > Int32(1000000000) then {
-            let mutable zi = UInt(0);
+            let mutable zi = 0;
             while zi < n then {
                 bmarks[zi] = Int32(0);
-                zi += UInt(1);
+                zi += 1;
             };
             bgen = Int32(1);
         };
@@ -1847,14 +1852,14 @@ let re_backward_starts(
 /// The next position at or after `from` whose byte the required
 /// instruction would consume. Kept as a tight loop so the C compiler can
 /// vectorize the scan -- the per-occurrence work lives in the caller.
-let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: UInt, from: UInt): UInt = {
+let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = {
     let mutable q = from;
     while q < text_len then {
         let b = bp[q];
         if b == req.byte or (req.ci and re_lower_byte(b) == req.byte) then {
             return q;
         };
-        q += UInt(1);
+        q += 1;
     };
     return text_len;
 };
@@ -1866,13 +1871,13 @@ let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: UInt, from: UInt): UInt
 let re_run_filtered(
     prog: ReProgram,
     text: String,
-    offset: UInt,
+    offset: Int,
     track_groups: Bool,
 ): Option[ReSlots] = {
     let req = when prog.req in {
         .Some(r) then r,
         .None() then {
-            return re_run_scan(prog, text, offset, track_groups, Option[List[UInt]].None());
+            return re_run_scan(prog, text, offset, track_groups, Option[List[Int]].None());
         },
     };
     let bp = text.borrow_ptr();
@@ -1890,8 +1895,8 @@ let re_run_filtered(
             let anchors = scratch.banchors;
             anchors.clear();
             let mutable k = starts.count();
-            while k > UInt(0) then {
-                k -= UInt(1);
+            while k > 0 then {
+                k -= 1;
                 if starts[k] >= offset then {
                     anchors.push(starts[k]);
                 };
@@ -1903,10 +1908,10 @@ let re_run_filtered(
                 // overrun hands the whole anchor set to the Pike-VM below,
                 // which answers leftmost-first correctly at any cost.
                 let mutable unknown = false;
-                let mutable ka = UInt(0);
+                let mutable ka = 0;
                 while (not unknown) and ka < anchors.count() then {
                     let p = anchors[ka];
-                    ka = ka + UInt(1);
+                    ka = ka + 1;
                     when re_backtrack(prog, bp, text_len, p, track_groups, pool) in {
                         .Found(slots) then {
                             return Option[ReSlots].Some(slots);
@@ -1923,7 +1928,7 @@ let re_run_filtered(
                         text,
                         offset,
                         track_groups,
-                        Option[List[UInt]].Some(anchors),
+                        Option[List[Int]].Some(anchors),
                     ) in {
                         .Some(slots) then {
                             return Option[ReSlots].Some(slots);
@@ -1933,7 +1938,7 @@ let re_run_filtered(
                 };
             };
         };
-        q = re_find_occurrence(req, bp, text_len, q + UInt(1));
+        q = re_find_occurrence(req, bp, text_len, q + 1);
     };
     return Option[ReSlots].None();
 };
@@ -1950,11 +1955,11 @@ let re_add(
     marks: *mutable Int32,
     generation: Int32,
     bp: *UInt8,
-    text_len: UInt,
-    pos: UInt,
+    text_len: Int,
+    pos: Int,
     list: List[ReThread],
-    pc0: UInt,
-    row0: UInt,
+    pc0: Int,
+    row0: Int,
     track_groups: Bool,
     pool: ReRowPool,
     work: List[ReSeed],
@@ -1969,11 +1974,11 @@ let re_add(
         marks[seed.pc] = generation;
         let opc = code.op[seed.pc];
         if opc == UInt8(2) then {
-            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+            work.push(ReSeed(Int(code.aux1[seed.pc]), seed.row));
         } else if opc == UInt8(1) then {
             // Pushed in reverse: the stack pops `x` first.
-            work.push(ReSeed(UInt(code.aux2[seed.pc]), seed.row));
-            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+            work.push(ReSeed(Int(code.aux2[seed.pc]), seed.row));
+            work.push(ReSeed(Int(code.aux1[seed.pc]), seed.row));
         } else if opc == UInt8(7) then {
             // A fused run forks in the closure exactly like its Split did:
             // the run's own continuation consumes at this pc (greedy, higher
@@ -1984,9 +1989,9 @@ let re_add(
             let row = pool.take();
             pool.copy_row(seed.row, row);
             list.push(ReThread(seed.pc, row));
-            work.push(ReSeed(UInt(code.aux1[seed.pc]), seed.row));
+            work.push(ReSeed(Int(code.aux1[seed.pc]), seed.row));
         } else if opc == UInt8(3) then {
-            let slot = UInt(code.aux1[seed.pc]);
+            let slot = Int(code.aux1[seed.pc]);
             if track_groups or slot < 2 then {
                 // Copy-on-write into a call-scoped temp: the seed's row
                 // may be shared with sibling branches or belong to the
@@ -2001,7 +2006,7 @@ let re_add(
             };
         } else if opc == UInt8(4) then {
             let multiline = code.aux1[seed.pc] == UInt32(1);
-            if pos == 0 or (multiline and pos > 0 and bp[pos - UInt(1)] == '\n') then {
+            if pos == 0 or (multiline and pos > 0 and bp[pos - 1] == '\n') then {
                 work.push(ReSeed(seed.pc + 1, seed.row));
             };
         } else if opc == UInt8(5) then {

@@ -18,9 +18,9 @@
 /// when they dominate and rebuild; it is not part of the public API surface.
 public type mutable Dict[K: Hash, V: Any](
     mutable buckets: *mutable HashBucket[K, V],
-    mutable size: UInt,
-    mutable capacity: UInt,
-    mutable deleted: UInt,
+    mutable size: Int,
+    mutable capacity: Int,
+    mutable deleted: Int,
 );
 
 /// `Drop` for `Dict[K, V]`: releases the bucket array.
@@ -39,7 +39,7 @@ given[K: Hash, V: Any] Dict[K, V]: Drop {
 /// Iterator over a `Dict`'s key/value pairs, in unspecified order.
 public type mutable DictIterator[K: Hash, V: Any](
     source: Dict[K, V],
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 // ============================================================================
@@ -57,15 +57,18 @@ given[K: Hash, V: Any] Dict[K, V] {
 
     /// Create an empty dict with its buckets allocated up front, sized for about
     /// `capacity` entries.
-    public with_capacity(capacity: UInt): Self = {
+    public with_capacity(capacity: Int): Self = {
+        if capacity < 0 then {
+            panic("Dict with_capacity negative capacity");
+        };
         // Hash tables need extra space for efficiency (load factor ~0.5).
         // 桶数规约成 2 的幂，这样 find_slot 能用掩码代替取模（取模是整数除法）。
-        let requested: UInt = if capacity < UInt(4) then UInt(4) else capacity * UInt(2);
-        let mutable cap: UInt = UInt(4);
+        let requested = if capacity < 4 then 4 else capacity * 2;
+        let mutable cap = 4;
         while cap < requested then {
-            cap = cap * UInt(2);
+            cap = cap * 2;
         };
-        let buckets = alloc_memory[HashBucket[K, V]](cap);
+        let buckets = alloc_memory[HashBucket[K, V]](UInt(cap));
         for i in 0..<cap then {
             bucket_set_tag(buckets + i, UInt(0));
         };
@@ -73,11 +76,11 @@ given[K: Hash, V: Any] Dict[K, V] {
     };
 
     /// Return the number of entries in the dict.
-    public count(self): UInt = self.size;
+    public count(self): Int = self.size;
 
     // The shared probe from std/hash_lookup.koral (the one probing algorithm
     // this container shares with Set/FrozenDict/FrozenSet).
-    private find_slot(self, key: K): Option[UInt] =
+    private find_slot(self, key: K): Option[Int] =
         find_hash_slot(self.buckets, self.capacity, key);
 
     private rehash(self): Void = {
@@ -86,11 +89,11 @@ given[K: Hash, V: Any] Dict[K, V] {
         // 新容量只由存活条目决定（tombstone 不带进新表）：
         // 负载保持 ≤ 0.5（size * 2 < new_cap），空表首次分配 16 桶；
         // tombstone 主导触发时借此缩回合适容量（hashbrown 的 rebuild 规则）。
-        let mutable new_cap = UInt(16);
+        let mutable new_cap = 16;
         while self.size * 2 >= new_cap then {
-            new_cap = new_cap * UInt(2);
+            new_cap = new_cap * 2;
         };
-        let new_buckets = alloc_memory[HashBucket[K, V]](new_cap);
+        let new_buckets = alloc_memory[HashBucket[K, V]](UInt(new_cap));
         for i in 0..<new_cap then {
             bucket_set_tag(new_buckets + i, UInt(0));
         };
@@ -392,7 +395,7 @@ given[K: Hash, V: Any] DictIterator[K, V]: Iterator[Pair[K, V]] {
 /// Iterator over just the keys of a `Dict`, in unspecified order.
 public type mutable DictKeysIterator[K: Hash, V: Any](
     source: Dict[K, V],
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// `Iterator` for `DictKeysIterator[K, V]`: yields the keys in unspecified order.
@@ -414,7 +417,7 @@ given[K: Hash, V: Any] DictKeysIterator[K, V]: Iterator[K] {
 /// Iterator over just the values of a `Dict`, in unspecified order.
 public type mutable DictValuesIterator[K: Hash, V: Any](
     source: Dict[K, V],
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// `Iterator` for `DictValuesIterator[K, V]`: yields the values in unspecified order.
@@ -497,8 +500,8 @@ given[T: Any] List[T] {
 /// immutable after construction.
 public type unsafe sendable mutable FrozenDict[K: Hash, V: Any](
     protected buckets: *mutable HashBucket[K, V],
-    protected len: UInt,
-    protected capacity: UInt,
+    protected len: Int,
+    protected capacity: Int,
 );
 
 /// `Drop` for `FrozenDict[K, V]`: releases the live buckets and the table.
@@ -517,14 +520,14 @@ given[K: Hash, V: Any] FrozenDict[K, V]: Drop {
 /// A one-shot cursor that walks a `FrozenDict[K, V]`'s table.
 public type mutable FrozenDictIterator[K: Hash, V: Any](
     source: FrozenDict[K, V],
-    mutable index: UInt,
+    mutable index: Int,
 );
 
 /// Read-only access over a `FrozenDict[K, V]`.
 given[K: Hash, V: Any] FrozenDict[K, V] {
 
     /// The number of entries in the snapshot.
-    public count(self): UInt = self.len;
+    public count(self): Int = self.len;
 
     /// Whether the snapshot has no entries.
     public is_empty(self): Bool = self.len == 0;
@@ -588,7 +591,7 @@ given[K: Hash, V: Any] FrozenDictIterator[K, V]: Iterator[Pair[K, V]] {
         let mutable i = self.index;
         while i < self.source.capacity then {
             let bucket_ptr = self.source.buckets + i;
-            i = i + UInt(1);
+            i = i + 1;
             self.index = i;
             if bucket_ptr.tag == UInt(1) then {
                 return Option[Pair[K, V]].Some(Pair[K, V](
@@ -617,14 +620,14 @@ given[K: Hash, V: Any] Dict[K, V] {
     public to_frozen_dict(self): FrozenDict[K, V] = {
         let len = self.size;
         // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
-        let mutable capacity: UInt = UInt(0);
-        if len > UInt(0) then {
-            capacity = UInt(4);
-            while len * UInt(2) >= capacity then {
-                capacity = capacity * UInt(2);
+        let mutable capacity = 0;
+        if len > 0 then {
+            capacity = 4;
+            while len * 2 >= capacity then {
+                capacity = capacity * 2;
             };
         };
-        let buckets = alloc_memory[HashBucket[K, V]](capacity);
+        let buckets = alloc_memory[HashBucket[K, V]](UInt(capacity));
         for i in 0..<capacity then {
             bucket_set_tag(buckets + i, UInt(0));
         };
@@ -662,9 +665,9 @@ given[K: Hash, V: Any] Dict[K, V] {
         let len = self.size;
         let capacity = self.capacity;
         self.buckets = null;
-        self.size = UInt(0);
-        self.capacity = UInt(0);
-        self.deleted = UInt(0);
+        self.size = 0;
+        self.capacity = 0;
+        self.deleted = 0;
         return FrozenDict[K, V](buckets, len, capacity);
     };
 };

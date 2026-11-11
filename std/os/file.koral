@@ -118,7 +118,7 @@ given File {
         };
         return Result[FileInfo].Ok(
             FileInfo(
-                UInt64(stat_buf.size),
+                Int(stat_buf.size),
                 ft,
                 Permission.from_mode(stat_buf.permissions),
                 Duration(stat_buf.modified_secs, stat_buf.modified_nanos),
@@ -199,19 +199,19 @@ given File: Reader {
 
     /// Read bytes into the target list over the given span and return how many were read.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public read(self, into: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+    public read(self, into: List[UInt8] =, span: Range[Int] =): Result[Int] = {
         let span = into.slice_spec(span);
         let start = span.start();
         let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
         let data_ptr = into.borrow_mut_ptr() + start;
-        let n = __koral_read(self.storage.fd, data_ptr, span.len());
+        let n = __koral_read(self.storage.fd, data_ptr, UInt(span.len()));
         if n < 0 then {
-            return Result[UInt].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt].Ok(UInt(n));
+        return Result[Int].Ok(Int(n));
     };
 };
 
@@ -220,19 +220,19 @@ given File: Writer {
 
     /// Write bytes from the source list over the given span and return how many were written.
     /// Unbuffered: each call hits the file descriptor and errors surface immediately.
-    public write(self, from: List[UInt8] =, span: Range[UInt] =): Result[UInt] = {
+    public write(self, from: List[UInt8] =, span: Range[Int] =): Result[Int] = {
         let span = from.slice_spec(span);
         let start = span.start();
         let end = span.end();
         if end <= start then {
-            return Result[UInt].Ok(0);
+            return Result[Int].Ok(0);
         };
         let data_ptr = from.borrow_ptr() + start;
-        let n = __koral_write(self.storage.fd, data_ptr, span.len());
+        let n = __koral_write(self.storage.fd, data_ptr, UInt(span.len()));
         if n < 0 then {
-            return Result[UInt].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt].Ok(UInt(n));
+        return Result[Int].Ok(Int(n));
     };
 
     /// flush is a no-op on unbuffered File (data is already in kernel buffer).
@@ -243,7 +243,7 @@ given File: Writer {
 given File: Seeker {
 
     /// Reposition the file offset from the given origin and return the new absolute offset.
-    public seek(self, pos: SeekOrigin): Result[UInt64] = {
+    public seek(self, pos: SeekOrigin): Result[Int] = {
         let mutable offset: Int64 = 0;
         let mutable whence: Int32 = 0;
         when pos in {
@@ -252,18 +252,18 @@ given File: Seeker {
                 whence = 0;
             },
             .Current(o) then {
-                offset = o;
+                offset = Int64(o);
                 whence = 1;
             },
             .End(o) then {
-                offset = o;
+                offset = Int64(o);
                 whence = 2;
             },
         };
         let new_pos = __koral_lseek(self.storage.fd, offset, whence);
         if new_pos < 0 then {
-            return Result[UInt64].Error(last_error_message());
+            return Result[Int].Error(last_error_message());
         };
-        return Result[UInt64].Ok(UInt64(new_pos));
+        return Result[Int].Ok(Int(new_pos));
     };
 };

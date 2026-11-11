@@ -46,6 +46,7 @@ docs/
     flow-operator-forms-implementation.md 记录
     identity-matching-tracking.md         记录
     cffi-design-implementation.md         记录
+    numeric-domains-implementation.md     记录
     bootstrap-productization.md           章程
     samples-capability.md                 记录
 ```

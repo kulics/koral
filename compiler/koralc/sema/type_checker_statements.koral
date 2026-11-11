@@ -314,7 +314,7 @@ given TypeChecker {
     ): TypedStatement = {
         let mutable current = expr;
         let mutable current_span = span;
-        let mutable lower_steps: UInt = 0;
+        let mutable lower_steps = 0;
 
         while true then {
             when current in {
@@ -330,7 +330,7 @@ given TypeChecker {
                         .Some(lowered) then {
                             // Keep condition-lowering iterative to avoid recursive stack/memory blowups.
                             lower_steps += 1;
-                            if lower_steps > UInt(1024) then {
+                            if lower_steps > 1024 then {
                                 self.push_diagnostic_at_span(
                                     "Condition lowering exceeded maximum rewrite steps",
                                     current_span,
@@ -451,7 +451,7 @@ given TypeChecker {
                 );
                 let mutable typed_arms = List[TypedWhenArm].new();
                 let mutable patterns = List[TypedPattern].new();
-                let mutable synthetic_indices = Set[UInt].new();
+                let mutable synthetic_indices = Set[Int].new();
                 for arm in arms then {
                     let mutable arm_scope = Scope.new_child(scope);
                     let arm_pattern_ref = arm.pattern;
@@ -736,10 +736,14 @@ given TypeChecker {
                         },
                         .Pointer(element_type, _) then {
                             let index_arg = outer_args[0];
-                            let typed_index = self.check_expr_scoped_ref(
-                                index_arg,
-                                Option[Type].Some(Type.UIntType()),
-                                scope,
+                            let typed_index = self.adapt_expr_to_expected_type_at(
+                                self.check_expr_scoped_ref(
+                                    index_arg,
+                                    Option[Type].Some(Type.IntType()),
+                                    scope,
+                                ),
+                                Option[Type].Some(Type.IntType()),
+                                Option[SourceSpan].None(),
                             );
                             let pointer_base_type = self.builtin_subscript_base_type(
                                 typed_outer_base.expr_type,
@@ -774,10 +778,10 @@ given TypeChecker {
                             );
                             let index_expr = if outer_args.is_empty() then make_typed_expr(
                                 TypedExprKind.IntegerLiteral("0"),
-                                Type.UIntType(),
+                                Type.IntType(),
                             ) else self.check_expr_scoped_ref(
-                                (outer_args[UInt(0)]),
-                                Option[Type].Some(Type.UIntType()),
+                                (outer_args[0]),
+                                Option[Type].Some(Type.IntType()),
                                 scope,
                             );
                             self.build_fixed_array_element_place(resolved_base, index_expr)
@@ -826,10 +830,14 @@ given TypeChecker {
                         );
                     };
                     let index_arg = args[0];
-                    let typed_index = self.check_expr_scoped_ref(
-                        index_arg,
-                        Option[Type].Some(Type.UIntType()),
-                        scope,
+                    let typed_index = self.adapt_expr_to_expected_type_at(
+                        self.check_expr_scoped_ref(
+                            index_arg,
+                            Option[Type].Some(Type.IntType()),
+                            scope,
+                        ),
+                        Option[Type].Some(Type.IntType()),
+                        Option[SourceSpan].None(),
                     );
                     let ptr_expr = when typed_base.expr_type in {
                         .ReferenceType(_) or .MutableReferenceType(_) then make_typed_expr(
@@ -938,7 +946,7 @@ given TypeChecker {
                     let index_arg = args[0];
                     let typed_index = self.check_expr_scoped_ref(
                         index_arg,
-                        Option[Type].Some(Type.UIntType()),
+                        Option[Type].Some(Type.IntType()),
                         scope,
                     );
                     let lvalue_expr = self.build_fixed_array_element_place(
@@ -1290,7 +1298,7 @@ given TypeChecker {
             },
             .None() then false,
         };
-        let trailing_index = if statements.is_empty() then UInt(0)
+        let trailing_index = if statements.is_empty() then 0
         else statements.count() - 1;
         let mutable typed_stmts = List[TypedStatement].new();
         let mutable control_flow_terminator = Option[String].None();
@@ -2222,7 +2230,7 @@ given TypeChecker {
                 let mutable current = base.expr_type;
                 for pair in path.lazy().enumerate() then {
                     let segment = pair.second;
-                    let is_last = pair.first + UInt(1) == path.count();
+                    let is_last = pair.first + 1 == path.count();
                     let segment_type = segment.symbol_type;
                     let current_allows = self.assignment_type_is_mutable_link(current)
                         or writable
@@ -2492,10 +2500,14 @@ given TypeChecker {
                         },
                         .Pointer(element_type, _) then {
                             let index_arg = outer_args[0];
-                            let typed_index = self.check_expr_scoped_ref(
-                                index_arg,
-                                Option[Type].Some(Type.UIntType()),
-                                scope,
+                            let typed_index = self.adapt_expr_to_expected_type_at(
+                                self.check_expr_scoped_ref(
+                                    index_arg,
+                                    Option[Type].Some(Type.IntType()),
+                                    scope,
+                                ),
+                                Option[Type].Some(Type.IntType()),
+                                Option[SourceSpan].None(),
                             );
                             let pointer_base_type = self.builtin_subscript_base_type(
                                 typed_outer_base.expr_type,
@@ -2530,10 +2542,10 @@ given TypeChecker {
                             );
                             let index_expr = if outer_args.is_empty() then make_typed_expr(
                                 TypedExprKind.IntegerLiteral("0"),
-                                Type.UIntType(),
+                                Type.IntType(),
                             ) else self.check_expr_scoped_ref(
-                                (outer_args[UInt(0)]),
-                                Option[Type].Some(Type.UIntType()),
+                                (outer_args[0]),
+                                Option[Type].Some(Type.IntType()),
                                 scope,
                             );
                             self.build_fixed_array_element_place(resolved_base, index_expr)
@@ -2651,7 +2663,7 @@ given TypeChecker {
                 let mutable current = base.expr_type;
                 for pair in path.lazy().enumerate() then {
                     let segment = pair.second;
-                    let is_last = pair.first + UInt(1) == path.count();
+                    let is_last = pair.first + 1 == path.count();
                     let segment_type = segment.symbol_type;
                     let mutable can_traverse_immutable_segment = false;
                     if not is_last then {

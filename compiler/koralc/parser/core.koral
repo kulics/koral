@@ -34,15 +34,15 @@ private let c_reserved_words: FrozenList[String] = [
 /// no C reserved word.
 private let is_valid_c_name(s: String): Bool = {
     let bytes = s.to_bytes();
-    if bytes.count() == UInt(0) then {
+    if bytes.count() == 0 then {
         return false;
     };
-    let first = bytes[UInt(0)];
+    let first = bytes[0];
     if not ((first >= 'A' and first <= 'Z') or (first >= 'a' and first <= 'z')
         or first == '_') then {
         return false;
     };
-    for i in UInt(1)..<bytes.count() then {
+    for i in 1..<bytes.count() then {
         let b = bytes[i];
         if not ((b >= 'A' and b <= 'Z') or (b >= 'a' and b <= 'z')
             or (b >= '0' and b <= '9') or b == '_') then {
@@ -70,7 +70,7 @@ private let is_foreign_constant_initializer(expr: Expr): Bool = when expr in {
 public type mutable Parser(
     tokens: List[Token],
     file_path: String,
-    mutable index: UInt,
+    mutable index: Int,
     mutable pending_statements: List[Statement],
     // The build target's condition atoms (cffi-design.md §D) — what `#if`
     // branches are selected against. `""` matches no condition.
@@ -286,7 +286,7 @@ given Parser {
     split_pattern_args(self, text: String): List[String] = {
         let mutable result = List[String].new();
         let mutable current = StringBuilder.new();
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         let runes = text.to_runes();
         for ch in runes then {
             if ch == '(' or ch == '[' then {
@@ -330,9 +330,9 @@ given Parser {
         return Token(TokenKind.Eof(), 0, 0, false);
     };
 
-    save_state(self): UInt = self.index;
+    save_state(self): Int = self.index;
 
-    restore_state(self, saved: UInt): Void = {
+    restore_state(self, saved: Int): Void = {
         self.index = saved;
     };
 
@@ -536,7 +536,7 @@ given Parser {
     /// The same qualifiers, read as a bounded token peek from `start_index`.
     /// Reads the buffer only -- never moves the cursor -- so a caller that just
     /// needs to know what is there does not have to parse and roll back.
-    peek_decl_qualifiers_at(self, start_index: UInt): DeclQualifiers = {
+    peek_decl_qualifiers_at(self, start_index: Int): DeclQualifiers = {
         let mutable is_foreign = false;
         let mutable is_intrinsic = false;
         let mutable invalid_message = Option[String].None();
@@ -912,7 +912,7 @@ given Parser {
 
     /// `*` + type-head (mutable, uppercase ident, Self) starts a pointer type.
     /// `*` + anything else is the dereference operator.
-    index_followed_by_type_head_at(self, index: UInt): Bool = {
+    index_followed_by_type_head_at(self, index: Int): Bool = {
         if index + 1 >= self.tokens.count() then {
             return false;
         };
@@ -928,7 +928,7 @@ given Parser {
     /// A `(` counts when it opens a parenthesized TYPE: either a function
     /// type's parameter list (`*(Int) -> Int(p)` is a cast) or a grouping
     /// (`*(Int)(p)` is a cast); `*(p)` is a deref.
-    index_followed_by_type_application_at(self, index: UInt): Bool = {
+    index_followed_by_type_application_at(self, index: Int): Bool = {
         if self.index_followed_by_type_head_at(index) then {
             return true;
         };
@@ -946,29 +946,29 @@ given Parser {
 
     /// The index just past a `[` ... `]` type argument list that starts at
     /// `start_index`, or `None` when the run is not exactly one.
-    scan_type_list_at(self, start_index: UInt): Option[UInt] = {
+    scan_type_list_at(self, start_index: Int): Option[Int] = {
         if start_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[start_index].kind is not .LBracket() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let mutable i = start_index + 1;
         if i < self.tokens.count() and self.tokens[i].kind is .RBracket() then {
-            return Option[UInt].Some(i + 1);
+            return Option[Int].Some(i + 1);
         };
         let mutable done = false;
-        let mutable result = Option[UInt].None();
+        let mutable result = Option[Int].None();
         while not done then {
             let next = self.scan_type_shape_at(i) or else {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             i = next;
             if i >= self.tokens.count() then {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             when self.tokens[i].kind in {
@@ -977,16 +977,16 @@ given Parser {
                     // A trailing comma is allowed: `[A, B,]`.
                     if i < self.tokens.count() and self.tokens[i].kind is .RBracket() then {
                         done = true;
-                        result = Option[UInt].Some(i + 1);
+                        result = Option[Int].Some(i + 1);
                     };
                 },
                 .RBracket() then {
                     done = true;
-                    result = Option[UInt].Some(i + 1);
+                    result = Option[Int].Some(i + 1);
                 },
                 _ then {
                     done = true;
-                    result = Option[UInt].None();
+                    result = Option[Int].None();
                 },
             };
         };
@@ -995,29 +995,29 @@ given Parser {
 
     /// The index just past a `(` ... `)` function-type parameter list that
     /// starts at `start_index`, or `None`.
-    scan_type_param_list_at(self, start_index: UInt): Option[UInt] = {
+    scan_type_param_list_at(self, start_index: Int): Option[Int] = {
         if start_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[start_index].kind is not .LParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let mutable i = start_index + 1;
         if i < self.tokens.count() and self.tokens[i].kind is .RParen() then {
-            return Option[UInt].Some(i + 1);
+            return Option[Int].Some(i + 1);
         };
         let mutable done = false;
-        let mutable result = Option[UInt].None();
+        let mutable result = Option[Int].None();
         while not done then {
             let next = self.scan_type_shape_at(i) or else {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             i = next;
             if i >= self.tokens.count() then {
                 done = true;
-                result = Option[UInt].None();
+                result = Option[Int].None();
                 continue;
             };
             when self.tokens[i].kind in {
@@ -1025,16 +1025,16 @@ given Parser {
                     i += 1;
                     if i < self.tokens.count() and self.tokens[i].kind is .RParen() then {
                         done = true;
-                        result = Option[UInt].Some(i + 1);
+                        result = Option[Int].Some(i + 1);
                     };
                 },
                 .RParen() then {
                     done = true;
-                    result = Option[UInt].Some(i + 1);
+                    result = Option[Int].Some(i + 1);
                 },
                 _ then {
                     done = true;
-                    result = Option[UInt].None();
+                    result = Option[Int].None();
                 },
             };
         };
@@ -1048,11 +1048,11 @@ given Parser {
     /// scan as a non-empty type list ending exactly at `)` (a parenthesized
     /// type). An empty `()` is decided by the `->` alone -- `let f () Int = …`
     /// stays a signature.
-    paren_opens_type_at(self, index: UInt): Bool = {
+    paren_opens_type_at(self, index: Int): Bool = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return false;
         };
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1087,7 +1087,7 @@ given Parser {
     /// The span of the balanced `(` ... `)` group starting at `index` -- from
     /// the opening paren to the closing one. A grouping complaint is anchored
     /// at the whole group.
-    paren_group_span_at(self, index: UInt): Option[SourceSpan] = {
+    paren_group_span_at(self, index: Int): Option[SourceSpan] = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return Option[SourceSpan].None();
         };
@@ -1096,7 +1096,7 @@ given Parser {
             self.tokens[index].column,
             Option[String].Some(self.file_path),
         );
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1124,11 +1124,11 @@ given Parser {
     /// Whether the balanced `(` ... `)` run starting at `index` is followed by
     /// a `->`: the tell of a function TYPE's parameter list. A parenthesized
     /// group without the `->` is a grouping of exactly one type instead.
-    paren_run_followed_by_arrow_at(self, index: UInt): Bool = {
+    paren_run_followed_by_arrow_at(self, index: Int): Bool = {
         if index >= self.tokens.count() or self.tokens[index].kind is not .LParen() then {
             return false;
         };
-        let mutable depth: UInt = 0;
+        let mutable depth = 0;
         let mutable i = index;
         while i < self.tokens.count() then {
             when self.tokens[i].kind in {
@@ -1151,13 +1151,13 @@ given Parser {
 
     /// The index just past one type starting at `start_index`, or `None` when
     /// the run there is not a type.
-    scan_type_shape_at(self, start_index: UInt): Option[UInt] = {
+    scan_type_shape_at(self, start_index: Int): Option[Int] = {
         let mutable i = start_index;
         // Prefixes: `?T`, `*T`, `*mutable T`, `sendable T`. They nest: `?*T`.
         let mutable more_prefixes = true;
         while more_prefixes then {
             if i >= self.tokens.count() then {
-                return Option[UInt].None();
+                return Option[Int].None();
             };
             if self.tokens[i].kind is .QuestionMark() then {
                 i += 1;
@@ -1176,11 +1176,11 @@ given Parser {
         };
 
         if i >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         when self.tokens[i].kind in {
             .KwSelfType() then {
-                return Option[UInt].Some(i + 1);
+                return Option[Int].Some(i + 1);
             },
             .LParen() then {
                 // Function type: `( <type-list> ) "->" <type>`. Without the
@@ -1198,15 +1198,15 @@ given Parser {
             .Identifier(name) then {
                 i += 1;
                 if not self.is_upper_first(name) then {
-                    return Option[UInt].None();
+                    return Option[Int].None();
                 };
                 if i < self.tokens.count() and self.tokens[i].kind is .LBracket() then {
                     return self.scan_type_list_at(i);
                 };
-                return Option[UInt].Some(i);
+                return Option[Int].Some(i);
             },
             _ then {
-                return Option[UInt].None();
+                return Option[Int].None();
             },
         };
     };
@@ -1215,28 +1215,28 @@ given Parser {
     /// or `None`. This is the SHAPE of a postfix cast and of a Rust-style
     /// qualified path `Type(Trait)`; which one it is depends on the base, not
     /// on the tokens here.
-    scan_paren_type_suffix_at(self, start_index: UInt): Option[UInt] = {
+    scan_paren_type_suffix_at(self, start_index: Int): Option[Int] = {
         if start_index >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[start_index].kind is not .LParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         let after_type = self.scan_type_shape_at(start_index + 1) or else {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if after_type >= self.tokens.count() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
         if self.tokens[after_type].kind is not .RParen() then {
-            return Option[UInt].None();
+            return Option[Int].None();
         };
-        return Option[UInt].Some(after_type + 1);
+        return Option[Int].Some(after_type + 1);
     };
 
     /// The index just past a `[ <type-list> ]` suffix that starts at
     /// `start_index`, or `None`.
-    scan_type_arg_list_suffix_at(self, start_index: UInt): Option[UInt] = {
+    scan_type_arg_list_suffix_at(self, start_index: Int): Option[Int] = {
         return self.scan_type_list_at(start_index);
     };
 
@@ -1502,7 +1502,7 @@ given Parser {
                         ),
                     );
                 };
-                let mutable size: UInt = 0;
+                let mutable size = 0;
                 let mutable size_ok = false;
                 size_ok = when size_token.kind in {
                     .IntegerLiteral(v) then {
@@ -1510,20 +1510,22 @@ given Parser {
                             false
                         } else {
                             let mutable digits_ok = true;
-                            let mutable acc: UInt = 0;
+                            let mutable acc = 0;
                             for b in v.to_bytes() then {
                                 if b < UInt8(48) or b > UInt8(57) then {
                                     digits_ok = false;
-                                } else if acc > UInt(1844674407370955161) then {
+                                } else if acc > 922337203685477580 then {
                                     // Same complaint the seed gives a literal
-                                    // that does not fit its integer parser.
+                                    // that does not fit its integer parser
+                                    // (array sizes are counts and live in
+                                    // `Int`, so the bound is `Int.max / 10`).
                                     digits_ok = false;
                                 } else {
-                                    acc = acc * UInt(10) + UInt(b - UInt8(48));
+                                    acc = acc * 10 + Int(b - UInt8(48));
                                 };
                             };
                             size = acc;
-                            digits_ok and acc >= UInt(1)
+                            digits_ok and acc >= 1
                         }
                     },
                     _ then false,

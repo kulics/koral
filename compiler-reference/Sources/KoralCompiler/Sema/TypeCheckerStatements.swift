@@ -547,12 +547,12 @@ extension TypeChecker {
         if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
           let typedBase = try inferWritableSubscriptBase(baseExpr)
           var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-          // Coerce single arg to UInt for list/deque/pointer; dict forms use their own key type.
+          // Coerce single arg to Int for list/deque/pointer; dict forms use their own key type.
           let subscriptKind = resolveBuiltinSubscriptKind(baseType: typedBase.type)
           let isKeyedSubscript = if case .dict = subscriptKind { true }
             else if case .frozenDict = subscriptKind { true } else { false }
           if typedArgs.count == 1, !isKeyedSubscript {
-            typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
+            typedArgs[0] = try coerceLiteral(typedArgs[0], to: .int)
           }
 
           // Built-in pointer subscript compound assignment: ptr[i] op= v → deref (ptr + i) = deref (ptr + i) op v
@@ -574,9 +574,9 @@ extension TypeChecker {
               throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
             }
             var index = typedArgs[0]
-            index = try coerceLiteral(index, to: .uint)
-            if index.type != .uint && index.type != .error {
-              throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+            index = try coerceLiteral(index, to: .int)
+            if index.type != .int && index.type != .error {
+              throw SemanticError.typeMismatch(expected: "Int", got: index.type.description)
             }
             let ptrExpr: TypedExpressionNode
             if case .reference = typedBase.type {
@@ -776,12 +776,12 @@ extension TypeChecker {
       if case .subscriptExpression(let baseExpr, let argExprs, _) = target {
         let typedBase = try inferWritableSubscriptBase(baseExpr)
         var typedArgs = try argExprs.map { try inferTypedExpression($0) }
-        // Coerce single arg to UInt for list/deque/pointer; dict forms use their own key type.
+        // Coerce single arg to Int for list/deque/pointer; dict forms use their own key type.
         let subscriptKind = resolveBuiltinSubscriptKind(baseType: typedBase.type)
         let isKeyedSubscript = if case .dict = subscriptKind { true }
           else if case .frozenDict = subscriptKind { true } else { false }
         if typedArgs.count == 1, !isKeyedSubscript {
-          typedArgs[0] = try coerceLiteral(typedArgs[0], to: .uint)
+          typedArgs[0] = try coerceLiteral(typedArgs[0], to: .int)
         }
 
         // Built-in pointer subscript assignment: ptr[i] = v → deref (ptr + i) = v
@@ -803,9 +803,9 @@ extension TypeChecker {
               throw SemanticError.invalidArgumentCount(function: "pointer subscript", expected: 1, got: typedArgs.count)
             }
           var index = typedArgs[0]
-          index = try coerceLiteral(index, to: .uint)
-          if index.type != .uint && index.type != .error {
-            throw SemanticError.typeMismatch(expected: "UInt", got: index.type.description)
+          index = try coerceLiteral(index, to: .int)
+          if index.type != .int && index.type != .error {
+            throw SemanticError.typeMismatch(expected: "Int", got: index.type.description)
           }
           let ptrExpr: TypedExpressionNode
           if case .reference = typedBase.type {

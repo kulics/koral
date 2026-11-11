@@ -118,7 +118,7 @@ given MIRVerifier {
         if function.blocks.is_empty() then {
             return self.fail(function, "function has no basic blocks");
         };
-        let mutable block_ids = Set[UInt].new();
+        let mutable block_ids = Set[Int].new();
         for block in function.blocks then {
             if block_ids.contains(block.id.raw_value) then {
                 return self.fail(function, "function has duplicate basic block IDs");
@@ -130,7 +130,7 @@ given MIRVerifier {
         };
 
         let local_types = self.mir_local_type_map(function);
-        let mutable local_ids = Set[UInt].new();
+        let mutable local_ids = Set[Int].new();
         for local in function.locals then {
             if local_ids.contains(local.id.raw_value) then {
                 return self.fail(function, "function has duplicate local IDs");
@@ -169,9 +169,9 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         statement: MIRStatement,
-        block_ids: Set[UInt],
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        block_ids: Set[Int],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         let _ = block_ids;
         return when statement in {
@@ -223,9 +223,9 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         terminator: MIRTerminator,
-        block_ids: Set[UInt],
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        block_ids: Set[Int],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         return when terminator in {
             .Goto(target) then self.verify_target(function, target, block_ids),
@@ -270,8 +270,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         place: MIRPlace,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         return when place in {
             .Local(local_id) then self.verify_local_id(function, local_id, local_ids),
@@ -310,8 +310,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         value: MIRValue,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         return when value in {
             .Operand(operand) then self.verify_operand(
@@ -474,8 +474,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         operand: MIROperand,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         let _ = local_types;
         return when operand in {
@@ -500,8 +500,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         node: MIRIntrinsic,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         return when node in {
             .FixedArrayLiteral(result_type, elements) then {
@@ -642,8 +642,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         lambda: MIRLambda,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         if self.program.context.contains_generic_parameter(lambda.lambda_type) then {
             return self.fail(function, "lambda has unresolved generic type");
@@ -661,8 +661,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         conversion: MIRTraitObjectConversion,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         if conversion.trait_name.is_empty() then {
             return self.fail(function, "trait object conversion has empty trait name");
@@ -742,8 +742,8 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         call: MIRTraitMethodCall,
-        local_ids: Set[UInt],
-        local_types: Dict[UInt, Type],
+        local_ids: Set[Int],
+        local_types: Dict[Int, Type],
     ): Result[Void] = {
         if call.trait_name.is_empty() then {
             return self.fail(function, "trait method call has empty trait name");
@@ -794,10 +794,10 @@ given MIRVerifier {
                 "trait method call references unknown trait metadata",
             );
         };
-        if UInt(call.method_index) >= ordered_names.count() then {
+        if call.method_index >= ordered_names.count() then {
             return self.fail(function, "trait method call method index out of range");
         };
-        let slot_name = ordered_names[UInt(call.method_index)];
+        let slot_name = ordered_names[call.method_index];
         if slot_name != call.method_name then {
             return self.fail(
                 function,
@@ -815,7 +815,7 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         local_id: MIRLocalID,
-        local_ids: Set[UInt],
+        local_ids: Set[Int],
     ): Result[Void] = {
         if local_ids.contains(local_id.raw_value) then {
             return Result[Void].Ok({});
@@ -830,7 +830,7 @@ given MIRVerifier {
         self,
         function: MIRFunction,
         target: MIRBlockID,
-        block_ids: Set[UInt],
+        block_ids: Set[Int],
     ): Result[Void] = {
         if block_ids.contains(target.raw_value) then {
             return Result[Void].Ok({});
@@ -1006,8 +1006,8 @@ given MIRVerifier {
     private callee_param_count(
         self,
         callee: MIROperand,
-        local_types: Dict[UInt, Type],
-    ): Option[UInt] = {
+        local_types: Dict[Int, Type],
+    ): Option[Int] = {
         let mutable resolved = Option[Type].None();
         when callee in {
             .Function(sym) then {
@@ -1021,17 +1021,17 @@ given MIRVerifier {
         when resolved in {
             .Some(t) then {
                 return when t in {
-                    .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then Option[UInt].Some(params.count()),
-                    _ then Option[UInt].None(),
+                    .FunctionType(params, _, _) or .ForeignFunctionType(params, _) then Option[Int].Some(params.count()),
+                    _ then Option[Int].None(),
                 };
             },
             .None() then {},
         };
-        return Option[UInt].None();
+        return Option[Int].None();
     };
 
-    private mir_local_type_map(self, function: MIRFunction): Dict[UInt, Type] = {
-        let mutable local_types = Dict[UInt, Type].new();
+    private mir_local_type_map(self, function: MIRFunction): Dict[Int, Type] = {
+        let mutable local_types = Dict[Int, Type].new();
         for local in function.locals then {
             local_types.insert(local.id.raw_value, local.local_type);
         };
@@ -1041,7 +1041,7 @@ given MIRVerifier {
     private mir_type_of_operand(
         self,
         operand: MIROperand,
-        local_types: Dict[UInt, Type],
+        local_types: Dict[Int, Type],
     ): Type = {
         let _ = self;
         return when operand in {
@@ -1059,7 +1059,7 @@ given MIRVerifier {
     private mir_type_of_place(
         self,
         place: MIRPlace,
-        local_types: Dict[UInt, Type],
+        local_types: Dict[Int, Type],
     ): Type = {
         let _ = self;
         return when place in {
@@ -1076,7 +1076,7 @@ given MIRVerifier {
     private mir_type_of_value(
         self,
         value: MIRValue,
-        local_types: Dict[UInt, Type],
+        local_types: Dict[Int, Type],
     ): Type = {
         return when value in {
             .Operand(operand) then self.mir_type_of_operand(operand, local_types),

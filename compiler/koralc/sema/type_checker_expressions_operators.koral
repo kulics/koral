@@ -12,11 +12,11 @@ given TypeChecker {
     ): Bool = {
         return when method_symbol.symbol_type in {
             .FunctionType(params, _, _) then {
-                if params.count() < UInt(2) then {
+                if params.count() < 2 then {
                     return false;
                 };
-                let mutable receiver_type = (params[UInt(0)]).param_type;
-                let mutable arg_type = (params[UInt(1)]).param_type;
+                let mutable receiver_type = (params[0]).param_type;
+                let mutable arg_type = (params[1]).param_type;
                 let receiver_matches = self.same_expr_type(receiver_type, base_type) or self.type_matches_expected_pattern(
                     receiver_type,
                     base_type,
@@ -28,11 +28,11 @@ given TypeChecker {
                 return receiver_matches and arg_matches;
             },
             .ForeignFunctionType(params, _) then {
-                if params.count() < UInt(2) then {
+                if params.count() < 2 then {
                     return false;
                 };
-                let mutable receiver_type = (params[UInt(0)]).param_type;
-                let mutable arg_type = (params[UInt(1)]).param_type;
+                let mutable receiver_type = (params[0]).param_type;
+                let mutable arg_type = (params[1]).param_type;
                 let receiver_matches = self.same_expr_type(receiver_type, base_type) or self.type_matches_expected_pattern(
                     receiver_type,
                     base_type,
@@ -351,8 +351,8 @@ given TypeChecker {
         if left_t is .UInt8Type() and self.is_rune_type(right_t) and typed_right.expr_kind is .TypeConstruction(...) then {
             when typed_right.expr_kind in {
                 .TypeConstruction(_, _, rune_args) then {
-                    if rune_args.count() > UInt(0) then {
-                        when rune_args[UInt(0)].expr_kind in {
+                    if rune_args.count() > 0 then {
+                        when rune_args[0].expr_kind in {
                             .IntegerLiteral(cp_text) then {
                                 when Int.parse(cp_text) in {
                                     .Ok(cp) then {
@@ -383,8 +383,8 @@ given TypeChecker {
         if right_t is .UInt8Type() and self.is_rune_type(left_t) and typed_left.expr_kind is .TypeConstruction(...) then {
             when typed_left.expr_kind in {
                 .TypeConstruction(_, _, rune_args) then {
-                    if rune_args.count() > UInt(0) then {
-                        when rune_args[UInt(0)].expr_kind in {
+                    if rune_args.count() > 0 then {
+                        when rune_args[0].expr_kind in {
                             .IntegerLiteral(cp_text) then {
                                 when Int.parse(cp_text) in {
                                     .Ok(cp) then {
@@ -796,7 +796,7 @@ given TypeChecker {
         );
         if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
             let params = self.resolve_method_param_types(left_t, method_name);
-            let expected_t = if params.is_empty() then left_t else params[UInt(0)];
+            let expected_t = if params.is_empty() then left_t else params[0];
             if not self.same_expr_type(right_t, expected_t) then {
                 // Fatal: the reference compiler's method-call argument
                 // coercion throws here, abandoning the rest of the declaration.
@@ -824,8 +824,8 @@ given TypeChecker {
 
     /// The pairs the seed refuses before it builds the node. Legal here:
     /// numeric x numeric of one type (the join already ran), and
-    /// `pointer +/- offset` where the offset is an UInt or an integer literal
-    /// (which joins UInt). Everything else gets the seed's family for the
+    /// `pointer +/- offset` where the offset is an Int or an integer literal
+    /// (which joins Int). Everything else gets the seed's family for the
     /// shape -- `Invalid operation ...` or the operator-trait complaint --
     /// and an error node in place of the arithmetic.
     arithmetic_pair_rejection(
@@ -856,10 +856,12 @@ given TypeChecker {
                     _ then false,
                 };
                 if op_takes_offset then {
-                    // `ptr + offset`: the offset is an UInt, or an integer
-                    // literal that joins UInt. `p + 1` is legal; `p + n` for
-                    // an Int `n` is not pointer arithmetic at all.
-                    let offset_fits = self.same_expr_type(right_t, Type.UIntType()) or typed_right.expr_kind is .IntegerLiteral(_);
+                    // `ptr + offset`: the offset is an Int, or an integer
+                    // literal that joins Int. Counts and positions are signed,
+                    // so `p + n` for an Int `n` is exactly pointer arithmetic
+                    // (a negative offset is raw C addressing); a UInt `n` is
+                    // not.
+                    let offset_fits = self.same_expr_type(right_t, Type.IntType()) or typed_right.expr_kind is .IntegerLiteral(_);
                     if offset_fits then {
                         return Option[TypedExpr].None();
                     };
@@ -960,7 +962,7 @@ given TypeChecker {
         );
         if self.resolve_method_signature(left_t, method_name) is .Some(_) then {
             let params = self.resolve_method_param_types(left_t, method_name);
-            let expected_t = if params.is_empty() then left_t else params[UInt(0)];
+            let expected_t = if params.is_empty() then left_t else params[0];
             if not self.same_expr_type(right_t, expected_t) then {
                 // Fatal: the reference compiler's method-call argument
                 // coercion throws here, abandoning the rest of the declaration.
@@ -1031,7 +1033,7 @@ given TypeChecker {
         let operands = chain.first;
         let ops = chain.second;
 
-        let first_operand = (operands[UInt(0)]);
+        let first_operand = (operands[0]);
         // Join first, then range-check: a leading integer literal joins the
         // next operand's integer width, so that neighbour types first and the
         // literal is checked against that width instead of against its Int
@@ -1039,8 +1041,8 @@ given TypeChecker {
         // neighbour's type the same way -- a pointer joins it, a non-pointer
         // is the mismatch row with `null` on the got-side; two `null`s have no
         // operand to aim at and both stay unconstrained.
-        let second_operand = if operands.count() > UInt(1) then Option[Expr].Some(
-            operands[UInt(1)],
+        let second_operand = if operands.count() > 1 then Option[Expr].Some(
+            operands[1],
         ) else Option[Expr].None();
         let first_is_null = self.is_null_literal_operand(first_operand);
         let second_is_null = when second_operand in {
@@ -1078,10 +1080,10 @@ given TypeChecker {
             ) else self.check_operand_expr_ref(first_operand, expected, scope);
         };
 
-        let mutable i: UInt = 1;
+        let mutable i = 1;
         while i < operands.count() then {
             let next_operand = (operands[i]);
-            let typed_right = if i == UInt(1) and pre_typed_second is .Some(pre_typed) then pre_typed
+            let typed_right = if i == 1 and pre_typed_second is .Some(pre_typed) then pre_typed
             else self.check_operand_expr_ref(
                 next_operand,
                 .Some(current.expr_type),
@@ -1092,7 +1094,7 @@ given TypeChecker {
             if current.expr_type is .Unknown() or typed_right.expr_type is .Unknown() then {
                 return self.empty_typed_block(Type.Unknown());
             };
-            let op_i = ops[i - UInt(1)];
+            let op_i = ops[i - 1];
             current = self.combine_bitwise_operands(
                 current,
                 op_i,
@@ -2136,13 +2138,13 @@ given TypeChecker {
         self,
         operands: List[Expr],
         operators: List[ComparisonOperator],
-        index: UInt,
+        index: Int,
         left_expr: TypedExpr,
         left_source: Option[Expr],
         pre_typed_right: Option[TypedExpr],
         scope: Scope,
     ): TypedExpr = {
-        let mutable right_source = (operands[index + UInt(1)]);
+        let mutable right_source = (operands[index + 1]);
         let right_source_ref = right_source;
         // A literal operand joins the width of the value it is compared
         // against. A null literal joins the left side's POINTER type the same
@@ -2182,7 +2184,7 @@ given TypeChecker {
             scope,
         );
 
-        if index + UInt(1) == operators.count() then {
+        if index + 1 == operators.count() then {
             return self.build_typed_comparison_expr(
                 normalized.first,
                 operators[index],
@@ -2215,7 +2217,7 @@ given TypeChecker {
         let next = self.lower_comparison_chain_step(
             operands,
             operators,
-            index + UInt(1),
+            index + 1,
             temp_ref,
             Option[Expr].None(),
             Option[TypedExpr].None(),
@@ -2245,18 +2247,18 @@ given TypeChecker {
         operators: List[ComparisonOperator],
         scope: Scope,
     ): TypedExpr = {
-        if operands.is_empty() or operands.count() != operators.count() + UInt(1) or operators.count(
-        ) < UInt(2) then {
+        if operands.is_empty() or operands.count() != operators.count() + 1 or operators.count(
+        ) < 2 then {
             self.push_diagnostic_at_span("Invalid comparison chain", unknown_span());
             return self.empty_typed_block(Type.Unknown());
         };
-        let mutable first_operand = (operands[UInt(0)]);
+        let mutable first_operand = (operands[0]);
         let first_operand_ref = first_operand;
         // Join first, then range-check: a leading integer literal joins the
         // next operand's integer width, so that neighbour types first and the
         // literal is checked against that width instead of against its Int
         // default before the two ever meet.
-        let second_operand = (operands[UInt(1)]);
+        let second_operand = (operands[1]);
         let mutable pre_typed_right = Option[TypedExpr].None();
         if self.is_integer_literal_operand(first_operand_ref) and not self.is_integer_literal_operand(
             second_operand,
@@ -2275,7 +2277,7 @@ given TypeChecker {
         return self.lower_comparison_chain_step(
             operands,
             operators,
-            UInt(0),
+            0,
             typed_left,
             Option[Expr].Some(first_operand_ref),
             pre_typed_right,
@@ -2837,12 +2839,12 @@ given TypeChecker {
                 self.builtin_string_type(),
             );
         };
-        if parts.count() == UInt(1) then {
-            return self.convert_interpolated_part_to_string(parts[UInt(0)], scope);
+        if parts.count() == 1 then {
+            return self.convert_interpolated_part_to_string(parts[0], scope);
         };
 
         let mutable string_type = self.builtin_string_type();
-        let mutable uint_type = Type.UIntType();
+        let mutable int_type = Type.IntType();
         let mutable byte_ptr_type = Type.PointerType(Type.UInt8Type());
         let mutable mut_byte_ptr_type = Type.MutablePointerType(Type.UInt8Type());
         let mutable block_statements = List[TypedStatement].new();
@@ -2873,35 +2875,35 @@ given TypeChecker {
         };
 
         let first_part_var = make_typed_expr(
-            TypedExprKind.Variable((part_symbols[UInt(0)])),
-            (part_symbols[UInt(0)]).symbol_type,
+            TypedExprKind.Variable((part_symbols[0])),
+            (part_symbols[0]).symbol_type,
         );
         let mutable total_expr = self.build_unary_method_call(
             first_part_var,
             "count",
-            uint_type,
+            int_type,
         );
-        let mutable part_idx: UInt = 1;
+        let mutable part_idx = 1;
         while part_idx < part_symbols.count() then {
             let part_var = make_typed_expr(
                 TypedExprKind.Variable((part_symbols[part_idx])),
                 (part_symbols[part_idx]).symbol_type,
             );
-            let part_count = self.build_unary_method_call(part_var, "count", uint_type);
+            let part_count = self.build_unary_method_call(part_var, "count", int_type);
             total_expr = make_typed_expr(
                 TypedExprKind.ArithmeticExpr(
                     total_expr,
                     ArithmeticOperator.Add(),
                     part_count,
                 ),
-                uint_type,
+                int_type,
             );
             part_idx += 1;
         };
 
         let total_symbol = self.make_expr_temp_symbol(
             "__interp_total",
-            uint_type,
+            int_type,
             VariableKind.Value(),
         );
         block_statements.push(
@@ -2965,14 +2967,14 @@ given TypeChecker {
         block_statements.push(
             TypedStatement.LetStmt(data_symbol, data_expr, unknown_span()),
         );
-        let zero_uint = make_typed_expr(TypedExprKind.IntegerLiteral("0"), uint_type);
+        let zero_int = make_typed_expr(TypedExprKind.IntegerLiteral("0"), int_type);
         let offset_symbol = self.make_expr_temp_symbol(
             "__interp_offset",
-            uint_type,
+            int_type,
             VariableKind.MutableValue(),
         );
         block_statements.push(
-            TypedStatement.LetStmt(offset_symbol, zero_uint, unknown_span()),
+            TypedStatement.LetStmt(offset_symbol, zero_int, unknown_span()),
         );
 
         for part_symbol in part_symbols then {
@@ -2980,10 +2982,10 @@ given TypeChecker {
                 TypedExprKind.Variable(part_symbol),
                 part_symbol.symbol_type,
             );
-            let part_len_expr = self.build_unary_method_call(part_var, "count", uint_type);
+            let part_len_expr = self.build_unary_method_call(part_var, "count", int_type);
             let part_len_symbol = self.make_expr_temp_symbol(
                 "__interp_len",
-                uint_type,
+                int_type,
                 VariableKind.Value(),
             );
             block_statements.push(
@@ -3028,7 +3030,7 @@ given TypeChecker {
                     ArithmeticOperator.Add(),
                     part_len_var,
                 ),
-                uint_type,
+                int_type,
             );
             let offset_target = make_typed_expr(
                 TypedExprKind.Variable(offset_symbol),

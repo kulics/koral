@@ -727,10 +727,10 @@ given TypeChecker {
                 );
                 let mutable typed_arms = List[TypedWhenArm].new();
                 let mutable patterns = List[TypedPattern].new();
-                let mutable synthetic_indices = Set[UInt].new();
+                let mutable synthetic_indices = Set[Int].new();
                 let mutable result_type = Type.Unknown();
                 let mutable running_expected = expected;
-                let mutable arm_index: UInt = 0;
+                let mutable arm_index = 0;
                 let mutable any_arm_complained = false;
                 for arm in arms then {
                     let mutable arm_scope = Scope.new_child(scope);
@@ -1631,7 +1631,7 @@ given TypeChecker {
                                     .WhenExpr(_, arms) then {
                                         if not arms.is_empty() then {
                                             let single_branch_then_type = self.concretize_default_literal_type(
-                                                arms[UInt(0)].body.expr_type,
+                                                arms[0].body.expr_type,
                                             );
                                             let then_is_valid_single_branch = when single_branch_then_type in {
                                                 .VoidType() or .NeverType() then true,
@@ -1695,11 +1695,11 @@ given TypeChecker {
                             .Some(eb) then if expected is .None() and self.branch_needs_expected_type_for_implicit_member(
                                 eb,
                             ) and not typed_arms.is_empty() and typed_arms[
-                                typed_arms.count() - UInt(1)
+                                typed_arms.count() - 1
                             ].second.expr_type is not .NeverType() and self.is_implicit_member_context_type(
-                                typed_arms[typed_arms.count() - UInt(1)].second.expr_type,
+                                typed_arms[typed_arms.count() - 1].second.expr_type,
                             ) then Option[Type].Some(
-                                typed_arms[typed_arms.count() - UInt(1)].second.expr_type,
+                                typed_arms[typed_arms.count() - 1].second.expr_type,
                             ) else expected,
                             .None() then expected,
                         };
@@ -2252,12 +2252,12 @@ given TypeChecker {
                 for seg in path then {
                     copied_path.push(seg);
                 };
-                if copied_path.count() == UInt(1) then {
+                if copied_path.count() == 1 then {
                     when typed_base.expr_kind in {
                         .Variable(sym) then when sym.kind in {
                             .TypeSymbol() then when self.try_make_type_member_value_lambda(
                                 typed_base.expr_type,
-                                copied_path[UInt(0)],
+                                copied_path[0],
                             ) in {
                                 .Some(lambda_value) then {
                                     return self.adapt_expr_to_expected_type_at(
@@ -2272,7 +2272,7 @@ given TypeChecker {
                         },
                         .GenericInstantiation(_, _) then when self.try_make_type_member_value_lambda(
                             typed_base.expr_type,
-                            copied_path[UInt(0)],
+                            copied_path[0],
                         ) in {
                             .Some(lambda_value) then {
                                 return self.adapt_expr_to_expected_type_at(
@@ -2454,9 +2454,9 @@ given TypeChecker {
                 if inaccessible_method_member then {
                     return self.empty_typed_block(Type.Unknown());
                 };
-                let member_expr = if typed_path.count() == UInt(1) then self.make_typed_member_path_expr(
+                let member_expr = if typed_path.count() == 1 then self.make_typed_member_path_expr(
                     typed_base,
-                    typed_path[UInt(0)],
+                    typed_path[0],
                     current_type,
                 )
                 else make_typed_expr(
@@ -2780,13 +2780,13 @@ given TypeChecker {
                         ) then {
                             let mutable rest_args = List[Expr].new();
                             for pair in args.lazy().enumerate() then {
-                                if pair.first > UInt(0) then {
+                                if pair.first > 0 then {
                                     rest_args.push(pair.second);
                                 };
                             };
                             return self.check_expr_scoped_ref(
                                 Expr.QualifiedMethodCall(
-                                    args[UInt(0)],
+                                    args[0],
                                     trait_type_node,
                                     method_name,
                                     rest_args,
@@ -2961,13 +2961,13 @@ given TypeChecker {
                         ) then {
                             let mutable rest_args = List[Expr].new();
                             for pair in args.lazy().enumerate() then {
-                                if pair.first > UInt(0) then {
+                                if pair.first > 0 then {
                                     rest_args.push(pair.second);
                                 };
                             };
                             return self.check_expr_scoped_ref(
                                 Expr.QualifiedGenericMethodCall(
-                                    args[UInt(0)],
+                                    args[0],
                                     trait_type_node,
                                     method_type_args,
                                     method_name,
@@ -3215,20 +3215,25 @@ given TypeChecker {
                     .Some(kind) then when kind in {
                         .Pointer(element_type, _) then {
                             let index_arg = (args[0]);
-                            let typed_index = self.check_expr_scoped_ref(
-                                index_arg,
-                                Option[Type].Some(Type.UIntType()),
-                                scope,
+                            // The reference coerces literals then demands
+                            // equality: a literal index (including a folded
+                            // `Type(literal)`) re-joins `Int`; anything else
+                            // is a type mismatch.
+                            let typed_index = self.adapt_expr_to_expected_type_at(
+                                self.check_expr_scoped_ref(
+                                    index_arg,
+                                    Option[Type].Some(Type.IntType()),
+                                    scope,
+                                ),
+                                Option[Type].Some(Type.IntType()),
+                                Option[SourceSpan].None(),
                             );
-                            // Raw-pointer walks take an exact `UInt` index
-                            // (the reference coerces literals then demands
-                            // equality): anything else is a type mismatch.
-                            if not self.same_expr_type(typed_index.expr_type, Type.UIntType())
+                            if not self.same_expr_type(typed_index.expr_type, Type.IntType())
                             and not self.is_unresolved_expr_type(typed_index.expr_type) then {
                                 self.push_expr_diagnostic(
                                     expr,
                                     self.type_mismatch_message(
-                                        Type.UIntType(),
+                                        Type.IntType(),
                                         typed_index.expr_type,
                                     ),
                                 );
@@ -3263,7 +3268,7 @@ given TypeChecker {
                                 typed_args.push(
                                     self.check_expr_scoped_ref(
                                         a,
-                                        Option[Type].Some(Type.UIntType()),
+                                        Option[Type].Some(Type.IntType()),
                                         scope,
                                     ),
                                 );
@@ -3407,10 +3412,10 @@ given TypeChecker {
                         .FixedArray(_, _) then {
                             let index_expr = if args.is_empty() then make_typed_expr(
                                 TypedExprKind.IntegerLiteral("0"),
-                                Type.UIntType(),
+                                Type.IntType(),
                             ) else self.check_expr_scoped_ref(
-                                (args[UInt(0)]),
-                                Option[Type].Some(Type.UIntType()),
+                                (args[0]),
+                                Option[Type].Some(Type.IntType()),
                                 scope,
                             );
                             self.build_fixed_array_element_place(typed_base, index_expr)
@@ -3844,7 +3849,7 @@ given TypeChecker {
                                         typed_args.push(
                                             self.check_expr_scoped_ref(
                                                 arg,
-                                                Option[Type].Some(Type.UIntType()),
+                                                Option[Type].Some(Type.IntType()),
                                                 scope,
                                             ),
                                         );
@@ -3901,7 +3906,7 @@ given TypeChecker {
                                         typed_args.push(
                                             self.check_expr_scoped_ref(
                                                 arg,
-                                                Option[Type].Some(Type.UIntType()),
+                                                Option[Type].Some(Type.IntType()),
                                                 scope,
                                             ),
                                         );
@@ -4024,7 +4029,7 @@ given TypeChecker {
     report_locked_field_address_of(self, inner: TypedExpr, expr: Expr): Void = {
         when inner.expr_kind in {
             .MemberPath(base, path) then {
-                if path.count() == UInt(0) then {
+                if path.count() == 0 then {
                     return;
                 };
                 if self.lock_probe_owner_is_locked(base.expr_type) then {
@@ -4034,8 +4039,8 @@ given TypeChecker {
                     );
                     return;
                 };
-                let mutable index = UInt(0);
-                while index + UInt(1) < path.count() then {
+                let mutable index = 0;
+                while index + 1 < path.count() then {
                     if self.lock_probe_owner_is_locked(path[index].symbol_type) then {
                         self.push_diagnostic(
                             "Cannot take the address of a field of a 'sendable mutable' object",
@@ -4043,7 +4048,7 @@ given TypeChecker {
                         );
                         return;
                     };
-                    index += UInt(1);
+                    index += 1;
                 };
             },
             _ then {},

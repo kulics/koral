@@ -285,6 +285,40 @@ Receiver choice and method naming should reinforce each other:
 - prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for observation or derivation
 - avoid naming a borrowed method in a way that suggests linear consumption
 
+### 计数域与宽度域
+
+签名里的数分两个域，按**这个数是什么**分，不按实现方便分：
+
+- **计数域用 `Int`**：下标、长度、计数、偏移（含 seek 位置、match 起止）、区间位置
+  （`Range[Int]`、`SliceSpec`）、查找结果（`find`/`position`/`binary_search`）、字节数
+  （读写传输数、`Rune.byte_count`）、match group 索引与 span、容量族（`with_capacity`/
+  `reserve`/`make_bytes`）、迭代器位置（`enumerate` 的下标）、嵌套深度、格式宽度。
+  判据：数的是「第几个 / 多少个 / 在哪里」，天然要与负值检查搭配。
+- **宽度域保持 `UInt`**：哈希值与散列种子、位运算（移位量、`count_ones` 族、掩码）、
+  `BitSet` 成员、字节值（`UInt8`）、FFI 与内存原语的宽度（`alloc_memory`/`copy_memory`、
+  foreign 声明里的 `size_t` 形）、`AtomicUInt`、`RegexFlag`，以及**值域型** API
+  （`next_uint`、`JsonValue.UInt`、radix、端口、码点）。
+  判据：数的是位模式、宽度或某个数值域里的值，负值无意义且不需要参与计数运算。
+
+**为什么不统一 `UInt`**：计数域的每一次消费——与字面量比、与 `Int` 循环变量比、
+传给取 `Int` 的 API——都要付一次转型，而转型掩盖的恰恰是本该显式处理的负值。
+**为什么不统一 `Int`**：位模式与宽度没有负值语义，写成 `Int` 只会把「这里不可能是负的」
+的不变量从类型里删掉，还让哈希/掩码代码被迫穿 `Int`。
+
+边界行为三条：
+
+1. **Option 型访问器是全函数**：`get(-1)`、`find_from(-1, …)` 之类，任何越域
+   （负值或越上界）都归 `None`，不 panic。
+2. **下标与修改类 API 越域 panic**（含负值）：`xs[-1]`、`insert_at(-1, …)`、
+   `substring(-1..2)` 等与越上界同族的 `out of bounds` panic。
+3. **容量/分配类负值 panic**：`with_capacity(-1)`、`make_bytes(-1)` 等。
+
+**FFI 边界**：内存原语与 foreign 声明保持 `UInt`（宽度域）；`std` 对外 API 用 `Int`，
+在边界处先校验负值、再受检转换。宽度域的转换（`UInt(WrappingUInt(x))` 惯用法）
+只出现在真正的位模式场景，不出现在计数搬运路径上。
+
+数值转换语义（同宽符号互转受检等）见 [`numeric-families-design.md`](numeric-families-design.md)。
+
 ### Review Checklist
 
 Before adding or changing a method in `std/`, ask:
@@ -292,6 +326,7 @@ Before adding or changing a method in `std/`, ask:
 1. After this call, should the caller still expect to use the original receiver value? (Almost always yes; the caller retains the original.)
 2. Is the receiver `type` or `type mutable`? (This determines whether `self` is immutable or mutable.)
 3. Does the method name match the ownership behavior of the receiver and the method body?
+4. If the signature carries a number, is it 计数域 (`Int`) or 宽度域 (`UInt`)? (See 「计数域与宽度域」.)
 
 If the type is `type`, all methods are observation or transformation by nature. If the type is `type mutable`, both mutation and observation methods use `self`; verify that the method body matches the stated intent. If the method semantically consumes the receiver, ensure that consumption is part of the public contract (e.g., `into_*` naming).
 
@@ -315,5 +350,7 @@ If the type is `type`, all methods are observation or transformation by nature. 
 
 ## 实施
 
-无单独的实现记录文件。这些约定随 `std/` 的 API 一起落地；新增或修改 `std` API 时按
-「Review Checklist」一节的三问自检。
+计数域/宽度域分工的实现落地见
+[`../implementation/numeric-domains-implementation.md`](../implementation/numeric-domains-implementation.md)；
+接收者形态等约定随 `std/` 的 API 一起落地，新增或修改 `std` API 时按
+「Review Checklist」一节的四问自检。

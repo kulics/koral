@@ -2191,13 +2191,13 @@ private final class MIRFunctionBuilder {
         .binary(MIRBinaryOperation(
           left: countValue,
           operatorKind: .arithmetic(.minus, checked: false),
-          right: .constant(.integer(String(fromEnd), .uint)),
-          type: .uint
+          right: .constant(.integer(String(fromEnd), .int)),
+          type: .int
         )),
-        type: .uint
+        type: .int
       )
     }
-    return .constant(.integer(String(slotIndex), .uint))
+    return .constant(.integer(String(slotIndex), .int))
   }
 
   /// The subject handle as a call receiver.
@@ -2217,9 +2217,9 @@ private final class MIRFunctionBuilder {
         callee: .function(ops.countSymbol),
         arguments: [listSubjectArgument(subjectPlace)],
         argumentOwnerships: [.copy],
-        type: .uint
+        type: .int
       )),
-      type: .uint
+      type: .int
     )
   }
 
@@ -2279,7 +2279,7 @@ private final class MIRFunctionBuilder {
       .binary(MIRBinaryOperation(
         left: countValue,
         operatorKind: .comparison(lengthOperator),
-        right: .constant(.integer(String(bound), .uint)),
+        right: .constant(.integer(String(bound), .int)),
         type: .bool
       )),
       type: .bool
