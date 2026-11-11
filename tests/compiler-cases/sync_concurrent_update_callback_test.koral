@@ -1,0 +1,38 @@
+// EXPECT: callback reads ok
+// EXPECT: update 2
+// EXPECT: dict count 2
+// EXPECT: done
+
+// The callback of `ConcurrentDict.update_and_get` runs OUTSIDE the container's
+// lock (L3, concurrency-design.md §同步语义五级分层) -- the same shape as
+// `AtomicCell.update_and_get` (同名同义: optimistic, callback unlocked, may run
+// more than once). So the callback may freely READ the same container and even
+// write a DIFFERENT entry: validation is by PER-ENTRY version number, and only
+// the entry being updated can invalidate the attempt. The busy-owner re-entry
+// fence is gone -- it existed only because the callback and the destructors
+// used to run inside the lock.
+//
+// Negative control (the old shape is what goes red, on every platform): with
+// the callback run under the container's lock AND the old busy-owner fence,
+// the in-callback `d.get` panics "re-entrant access during get". Under the
+// lock without a fence it self-deadlocks on non-recursive rwlocks (Linux,
+// Windows); Darwin's pthread_rwlock tolerates same-thread re-entry -- see the
+// note in sync_concurrent_drop_outside_lock_test.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("a", 1);
+    let next = d.update_and_get("a", (v: Option[Int]): Option[Int] => {
+        let seen = d.get("a").unwrap();
+        assert(d.contains_key("a"), "same key still readable");
+        assert(d.count() == 1 or d.count() == 2, "container readable");
+        d.insert("other", 99);
+        println("callback reads ok");
+        return Option[Int].Some(seen + 1);
+    });
+    println("update \(next.unwrap())");
+    println("dict count \(d.count())");
+    println("done");
+};

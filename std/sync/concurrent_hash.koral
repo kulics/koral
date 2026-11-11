@@ -1,0 +1,44 @@
+using "std" { ... };
+// ============================================================================
+// std.sync - Concurrent-family hashing primitive
+// ============================================================================
+// The concurrent containers (concurrent_dict / concurrent_set /
+// concurrent_deque) keep their OWN data structures and share no storage code
+// with the `Dict` family (concurrency-design.md §同步原语的形状: 完全解耦,
+// 各自的不变量各自维护). This file is the one thing they do share -- the
+// table-level hash mix -- so a change to std's `Dict` probing can never
+// silently move out from under them.
+// ============================================================================
+
+// The per-process hash seed, mirrored from the runtime binding in std/traits
+// (each module declares the externs it reads; the runtime defines them).
+let foreign __koral_hash_seed(): UInt;
+let foreign __koral_hash_seed_value: UInt;
+
+/// The current hash seed, drawn lazily on first use. Reading the extern
+/// global is a plain load, not a call -- this is the hot half of every table
+/// hash.
+let concurrent_hash_seed(): UInt = {
+    let drawn = __koral_hash_seed_value;
+    if drawn != UInt(0) then {
+        return drawn;
+    };
+    return __koral_hash_seed();
+};
+
+/// Table-level hash mixing (splitmix64 finalizer over the per-process seed):
+/// folds the high bits of a hash into the low bits so power-of-two bucket
+/// masks (`h & (cap - 1)`) can't be fed patterned low bits. The seed is what
+/// makes the mix unusable to an attacker (hash flooding). Same finalizer as
+/// std/hash_lookup's mix, deliberately re-implemented for the concurrent
+/// family.
+let concurrent_hash_mix(h: UInt): UInt = {
+    let k1 = (UInt(3210233709) << 32) | UInt(484763065); // 0xBF58476D1CE4E5B9
+    let k2 = (UInt(2496678331) << 32) | UInt(321982955); // 0x94D049BB133111EB
+    let mutable x = h ^ concurrent_hash_seed();
+    x = x ^ (x >> 30);
+    x = UInt(WrappingUInt(x) * WrappingUInt(k1));
+    x = x ^ (x >> 27);
+    x = UInt(WrappingUInt(x) * WrappingUInt(k2));
+    return x ^ (x >> 31);
+};

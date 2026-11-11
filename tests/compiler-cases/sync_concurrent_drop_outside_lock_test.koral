@@ -1,0 +1,129 @@
+// EXPECT: dict_clear_drop_outside 1
+// EXPECT: dict_take_key_drop_outside 1
+// EXPECT: set_remove_drop_outside 1
+// EXPECT: set_clear_drop_outside 1
+// EXPECT: deque_clear_drop_outside 1
+// EXPECT: done
+
+// Destructors are implicit user code (五级推论 1, concurrency-design.md
+// §同步语义五级分层): a `Drop` body may call back into the world, so the
+// concurrent containers never run one inside their lock. Every removal path
+// extracts the displaced key / value / member under the lock and releases it
+// AFTER the unlock -- `take` (the key dies too), `remove` / `try_remove`, and
+// `clear` (which swaps the whole table out and drops it unlocked). The probes
+// below call back into the SAME container from their destructors; each line
+// prints only when that call went through, and each count is 1 because the
+// callback stored exactly one fresh element.
+//
+// Negative control (the old shape is what goes red, on every platform): with
+// the drop still inside the lock AND the old busy-owner fence, the
+// destructor's re-entry panics "re-entrant access during count". With the
+// drop inside and no fence the re-entry is a self-deadlock on the platforms
+// whose rwlock is non-recursive (Linux glibc writer-nonrecursive, Windows
+// SRWLOCK) -- the runner times the case out -- while Darwin's pthread_rwlock
+// tolerates same-thread re-entry and would silently pass. That UB spread is
+// exactly why 推论 1 fixes the discipline ("析构不得进锁") instead of trusting
+// the platform lock.
+
+using "std/sync" { ... };
+
+// ---- ConcurrentDict.clear: value destructors outside the lock ----
+type unsafe sendable mutable ClearValue(n: Int);
+
+let mutable cd: ConcurrentDict[String, ClearValue] = ConcurrentDict[String, ClearValue].new();
+
+given ClearValue: Drop {
+    drop(self): Void = {
+        if self.n > 0 then {
+            let _ = cd.count();
+            let _ = cd.insert("reentered", ClearValue(0));
+        };
+    };
+};
+
+// ---- ConcurrentDict.take: key destructors outside the lock ----
+type unsafe sendable mutable TakeKey(n: Int);
+
+given TakeKey: Eq {
+    equals(self, other: TakeKey): Bool = self.n == other.n;
+};
+
+given TakeKey: Hash {
+    hash(self): UInt = UInt(self.n);
+};
+
+let mutable td: ConcurrentDict[TakeKey, Int] = ConcurrentDict[TakeKey, Int].new();
+
+given TakeKey: Drop {
+    drop(self): Void = {
+        if self.n > 0 then {
+            let _ = td.count();
+            let _ = td.insert(TakeKey(0), 0);
+        };
+    };
+};
+
+// ---- ConcurrentSet.remove / clear: member destructors outside the lock ----
+type unsafe sendable mutable SetProbe(n: Int);
+
+given SetProbe: Eq {
+    equals(self, other: SetProbe): Bool = self.n == other.n;
+};
+
+given SetProbe: Hash {
+    hash(self): UInt = UInt(self.n);
+};
+
+let mutable sd: ConcurrentSet[SetProbe] = ConcurrentSet[SetProbe].new();
+
+given SetProbe: Drop {
+    drop(self): Void = {
+        if self.n > 0 then {
+            let _ = sd.count();
+            let _ = sd.try_insert(SetProbe(0));
+        };
+    };
+};
+
+// ---- ConcurrentDeque.clear: element destructors outside the lock ----
+type unsafe sendable mutable DequeProbe(n: Int);
+
+let mutable qd: ConcurrentDeque[DequeProbe] = ConcurrentDeque[DequeProbe].new();
+
+given DequeProbe: Drop {
+    drop(self): Void = {
+        if self.n > 0 then {
+            let _ = qd.count();
+            qd.push_back(DequeProbe(0));
+        };
+    };
+};
+
+let main(): Void = {
+    // ConcurrentDict.clear: the dropped values re-enter the same dict.
+    cd.insert("k", ClearValue(1));
+    cd.clear();
+    println("dict_clear_drop_outside \(cd.count())");
+
+    // ConcurrentDict.take: the dropped KEY re-enters the same dict.
+    td.insert(TakeKey(1), 7);
+    let gone = td.take(TakeKey(1));
+    assert(gone is .Some(_), "taken");
+    println("dict_take_key_drop_outside \(td.count())");
+
+    // ConcurrentSet.remove: the dropped member re-enters the same set.
+    sd.insert(SetProbe(1));
+    sd.remove(SetProbe(1));
+    println("set_remove_drop_outside \(sd.count())");
+
+    // ConcurrentSet.clear: members drop after the unlock.
+    sd.insert(SetProbe(2));
+    sd.clear();
+    println("set_clear_drop_outside \(sd.count())");
+
+    // ConcurrentDeque.clear: elements drop after the unlock.
+    qd.push_back(DequeProbe(1));
+    qd.clear();
+    println("deque_clear_drop_outside \(qd.count())");
+    println("done");
+};

@@ -2127,6 +2127,16 @@ The contract: **the developer promises that the type, and everything reachable f
 
 Reach for `unsafe sendable` when the type brings its own synchronization (`Mutex`, atomic cells, thread-safe FFI handles) — not to silence a check that has not actually been satisfied.
 
+#### Self-Synchronized Primitives
+
+The `std` primitives that bring their own synchronization — `AtomicCell`, the `ConcurrentDict` / `ConcurrentSet` / `ConcurrentDeque` containers, `Lazy`, and global initializers — run a fixed discipline, and the shape of every operation is part of its name (the same name always means the same thing, in every type):
+
+- **Single-step operations hold their lock for exactly one step.** `AtomicCell.get` / `set` / `swap` / `compare_exchange` and each `Concurrent*` operation are one linearizable step. Inside the lock, the only user code allowed is an element's `hash` / `eq` (a dict key's, or `compare_exchange`'s `Eq`) — and those must be **pure functions**: no side effects, no locks, no calling back into anything. This is a contract, not a checked restriction; violating it breaks the guarantee.
+- **Destructors never run inside these locks.** A displaced or deleted value is released after the unlock — a `Drop` body is user code like any other and may call back into the world.
+- **`update_and_get` runs its callback outside the lock**, on `AtomicCell` and `ConcurrentDict` alike. The callback therefore **may run more than once** — the update is optimistic, committed only when the snapshot still validates — and must not have side effects outside the value it computes. Reading the object from the callback is fine. **Writing the object the callback updates panics** (`AtomicCell.update_and_get: the updater wrote the same cell`, `ConcurrentDict.update_and_get: the updater wrote the same container`) instead of retrying forever. Ordinary contention simply retries: there is **no attempt limit** and no guarantee of finishing in a bounded number of steps. A `ConcurrentDict` update validates per entry, so a write to a *different* entry never invalidates it.
+- **One-time initialization** — `Lazy` and global initializers — runs the initializer **outside any lock**, at most once; other threads wait for the value to be published. An initializer that re-enters its own value on the same thread panics with the cycle spelled out (`global initialization cycle: a -> b -> a`, `Lazy.get: the initializer called get() on the same Lazy`). **Cross-thread cycles are not detected**: two threads initializing two values that need each other simply deadlock — that shape is documented, not diagnosed.
+- **The explicit primitives** — `Mutex`, `SharedMutex`, `Semaphore`, `Channel`, `LatchGate` — are your own critical sections. Anything may run inside, including callbacks and destructors, and deadlock freedom is the programmer's responsibility.
+
 #### Frozen Collections
 
 The mutable containers — `List`, `Dict`, `Set`, `Deque`, `StringBuilder`, and the iterators — are `type mutable` thread-confined working state: none of them is `sendable`, and none of them crosses a boundary. The cross-thread story for collection **data** is to build in mutable containers and **freeze at the boundary**: `FrozenList[T]`, `FrozenDict[K, V]`, and `FrozenSet[T]` are immutable snapshots that may cross threads.

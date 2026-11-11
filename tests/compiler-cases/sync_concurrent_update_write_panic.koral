@@ -1,0 +1,23 @@
+// EXPECT-ERROR: Panic: ConcurrentDict.update_and_get: the updater wrote the same container
+
+// The L3 rule (concurrency-design.md §同步语义五级分层) on the write shape: the
+// callback of `ConcurrentDict.update_and_get` runs outside the lock and must
+// not write the container it updates. A write to the SAME entry bumps its
+// version and stamps the callback's thread as the entry's last writer, so the
+// commit fails validation, attributes the interference to the updater itself,
+// and panics instead of retrying forever.
+//
+// Negative control: without the last-writer record the run hangs in the
+// unbounded retry loop (there is deliberately no attempt ceiling) and the
+// runner times it out.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("a", 1);
+    let _ = d.update_and_get("a", (v: Option[Int]): Option[Int] => {
+        d.insert("a", 99);
+        return v;
+    });
+};

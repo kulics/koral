@@ -2066,6 +2066,16 @@ type unsafe sendable mutable Mutex(private handle: *UInt8);
 
 类型自带同步（`Mutex`、原子单元、线程安全的 FFI 句柄）时才用 `unsafe sendable`——不是用来消掉一个你还没有真正满足的检查。
 
+#### 自同步原语
+
+`std` 里自带同步的原语——`AtomicCell`、`ConcurrentDict` / `ConcurrentSet` / `ConcurrentDeque` 并发容器、`Lazy` 与全局量初始化器——跑一套固定的纪律，且操作的形状就写在名字里（同名必同义，每个类型上都一样）：
+
+- **单步操作恰好持锁一步。** `AtomicCell.get` / `set` / `swap` / `compare_exchange` 与 `Concurrent*` 的每次操作都是一个可线性化步骤。锁内允许的用户代码**只有元素的 `hash` / `eq`**（字典键的，或 `compare_exchange` 的 `Eq`）——且它们必须是**纯函数**：无副作用、不上锁、不回调任何东西。这是契约，不做运行时检查；破坏契约即破坏保证。
+- **析构永不在这些锁内运行。** 被挤出或删除的值一律解锁后释放——`Drop` 体就是用户代码，它可能回调任何地方。
+- **`update_and_get` 的回调在锁外运行**——`AtomicCell` 与 `ConcurrentDict` 一视同仁。所以回调**可能执行多次**（乐观执行，快照仍成立才提交），不得在计算之外产生副作用。回调里**读**对象没问题；**写**它所更新的对象直接 panic（`AtomicCell.update_and_get: the updater wrote the same cell`、`ConcurrentDict.update_and_get: the updater wrote the same container`），而不是无限重试。正常竞争就继续重试：**没有次数上限**，也不保证有限步完成。`ConcurrentDict` 的更新按**条目**验证，写别的条目不会作废它。
+- **一次性初始化**——`Lazy` 与全局量——初始化器**在无锁状态下**运行、至多一次；别的线程等值发布。初始化器在**同线程**上重入自己的值会 panic 并报出环（`global initialization cycle: a -> b -> a`、`Lazy.get: the initializer called get() on the same Lazy`）。**跨线程环不检测**：两个线程各初始化一个互相依赖的值会死锁——这个形状只记文档，不做诊断。
+- **显式原语**——`Mutex`、`SharedMutex`、`Semaphore`、`Channel`、`LatchGate`——是你自己的临界区。里面可以跑任何东西（回调、析构都行），死锁自由由程序员负责。
+
 #### 冻结集合
 
 可变容器——`List`、`Dict`、`Set`、`Deque`、`StringBuilder` 与各种迭代器——是 `type mutable` 的线程内工作状态：全都不是 `sendable`，全都不跨界。集合**数据**的跨线程故事是：在可变容器里构建，在**边界处冻结**——`FrozenList[T]`、`FrozenDict[K, V]`、`FrozenSet[T]` 是可以跨线程的不可变快照。

@@ -1,0 +1,47 @@
+// EXPECT: inits 1
+// EXPECT: value 42
+// EXPECT: done
+
+// L4 one-time initialization under contention (concurrency-design.md
+// §同步语义五级分层): the state machine runs the initializer at most once and
+// with NO lock held, `init_owner` is atomic (it names the initializing thread
+// for the same-thread self-dependency verdict), and every other thread just
+// waits for the value to be published. Eight threads racing on the first
+// `get` must see exactly one initializer run and one value.
+//
+// Negative control: with a racy (non-atomic) `init_owner` publication the
+// waiter path can observe a torn owner; with a broken claim the initializer
+// runs twice -- either way `inits` is not 1 and the case goes red.
+
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let init_count = AtomicInt.new(0);
+    let lazy_val = Lazy[Int].new(() => {
+        init_count.fetch_add(1);
+        return 42;
+    });
+    let handles = List[Thread].new();
+    let mutable t = 0;
+    while t < 8 then {
+        let shared = lazy_val;
+        handles.push(
+            run_task(() => {
+                let mutable r = 0;
+                while r < 200 then {
+                    assert(shared.get() == 42, "every reader sees the value");
+                    r = r + 1;
+                };
+            }),
+        );
+        t = t + 1;
+    };
+    for h in handles then {
+        let _ = h.wait();
+    };
+    assert(lazy_val.is_initialized(), "initialized after the readers");
+    println("inits \(init_count.load())");
+    println("value \(lazy_val.get())");
+    println("done");
+};

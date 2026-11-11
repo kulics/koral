@@ -5,12 +5,17 @@ using "std" { ... };
 // Provides: [T]Lazy (thread-safe lazy initialization with cached result)
 // Access via: using "std/sync" { ... };
 // ============================================================================
-// Design: Pure Koral implementation on AtomicInt + Mutex + MutexCondvar, in
-// the same shape as the global initializer and AtomicCell's optimistic update:
-// the state machine decides who runs the initializer, and the initializer
-// itself runs with NO lock held. A `get()` from inside the initializer can
-// therefore never deadlock against this value's guard -- it either sees the
-// cached result or is refused with a diagnostic.
+// Design (concurrency-design.md §同步语义五级分层): L4 one-time
+// initialization, pure Koral on AtomicInt + Mutex + MutexCondvar, in the same
+// shape as the global initializer: the state machine decides who runs the
+// initializer, and the initializer itself runs with NO lock held. A `get()`
+// from inside the initializer can therefore never deadlock against this
+// value's guard -- it either sees the cached result or is refused with a
+// diagnostic. `init_owner` is ATOMIC: it names the initializing thread (the
+// same-thread self-dependency verdict) and is read by other threads while the
+// initializer runs. CROSS-THREAD CYCLES ARE NOT DETECTED: two Lazies whose
+// initializers call each other from two threads simply deadlock; only the
+// same-thread re-entry is diagnosed.
 // ============================================================================
 
 let foreign __koral_thread_current_id(): UInt64;
@@ -29,12 +34,14 @@ public type unsafe sendable mutable Lazy[T: Any](
     private condvar: MutexCondvar,
     private func: sendable () -> T,
     private mutable value: Option[T],
-    private mutable init_owner: UInt64,
+    private init_owner: AtomicUInt,
 );
 
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
-    /// Wrap `f` so it runs at most once, on the first `get`.
+    /// Wrap `f` so it runs at most once, on the first `get`. The initializer
+    /// runs with no lock held (it may call other lazy values, globals and
+    /// locks) and runs at most once -- the `Lazy` name carries that shape.
     public new(f: sendable () -> T): Lazy[T] = {
         let mutex = Mutex.new();
         let condvar = mutex.condvar();
@@ -44,7 +51,7 @@ given[T: Any] Lazy[T] {
             condvar,
             f,
             Option[T].None(),
-            UInt64(0),
+            AtomicUInt.new(UInt(0)),
         );
     };
 
@@ -53,13 +60,16 @@ given[T: Any] Lazy[T] {
     /// The initializer runs with no lock held, so it may call other lazy
     /// values, globals and locks without lock-ordering deadlocks. It must not
     /// call `get()` on the same `Lazy`: there is no value to return yet, and
-    /// that mistake panics with a diagnostic instead of hanging.
+    /// that mistake panics with a diagnostic instead of hanging. Other threads
+    /// simply wait for the value to be published. CROSS-THREAD CYCLES ARE NOT
+    /// DETECTED: two threads whose initializers each wait on the other's
+    /// `Lazy` deadlock -- document your initialization order instead.
     public get(self): T = {
         if self.state.load() == lazy_state_done then {
             return self.value.unwrap();
         };
         if self.state.compare_exchange(expected = lazy_state_uninitialized, desired = lazy_state_initializing) then {
-            self.init_owner = __koral_thread_current_id();
+            self.init_owner.store(UInt(__koral_thread_current_id()));
             let result = self.func();
             self.value = Option[T].Some(result);
             self.state.store(lazy_state_done);
@@ -70,7 +80,7 @@ given[T: Any] Lazy[T] {
         };
         // Someone else claimed initialization (or has just finished).
         if self.state.load() == lazy_state_initializing
-            and self.init_owner == __koral_thread_current_id() then {
+            and self.init_owner.load() == UInt(__koral_thread_current_id()) then {
             panic("Lazy.get: the initializer called get() on the same Lazy");
         };
         self.mutex.lock();

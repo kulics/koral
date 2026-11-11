@@ -1,10 +1,16 @@
-// EXPECT-ERROR: Panic: AtomicCell.update_and_get: too many retries -- the updater must not modify the same cell
+// EXPECT-ERROR: Panic: AtomicCell.update_and_get: the updater wrote the same cell
 
-// `update_and_get` is optimistic: the updater runs with no lock held and its
-// result is committed only when the cell is unchanged, so an updater that
-// writes the cell it updates invalidates every attempt and the loop gives up
-// with a diagnostic instead of spinning forever. (An updater that only READS
-// the cell is fine -- see sync_atomic_cell_test.)
+// `update_and_get` is optimistic (L3, concurrency-design.md §同步语义五级分层):
+// the updater runs with no lock held and its result is committed only when the
+// cell is unchanged, so an updater that writes the cell it updates invalidates
+// every attempt. The cell records the LAST WRITER, and when the failed attempt's
+// last writer is the updater's own thread the loop panics with a diagnostic
+// instead of retrying forever. (An updater that only READS the cell is fine --
+// see sync_atomic_cell_read_in_update_test.)
+//
+// Negative control: with the last-writer check removed this hangs in the retry
+// loop (there is deliberately no attempt ceiling) and the runner times it out;
+// with the old 100000-attempt ceiling it panics with a different message.
 
 using "std/sync" { ... };
 

@@ -52,6 +52,10 @@ public type unsafe sendable mutable SendChannel[T: Any];
 /// The receiving half of a bounded channel; dropping it closes the channel for senders.
 public type unsafe sendable mutable RecvChannel[T: Any];
 
+/// A shared `sendable` double-ended queue with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDeque[T: sendable];
+
 /// A shared `sendable` key/value map with atomic per-operation access.
 /// Sendable contract: self-synchronized.
 public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: sendable];
@@ -59,10 +63,6 @@ public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: send
 /// A shared `sendable` set with atomic per-operation access. Sendable
 /// contract: self-synchronized.
 public type unsafe sendable mutable ConcurrentSet[T: Hash and sendable];
-
-/// A shared `sendable` double-ended queue with atomic per-operation access.
-/// Sendable contract: self-synchronized.
-public type unsafe sendable mutable ConcurrentDeque[T: sendable];
 
 /// Countdown gate that opens once every latch has been removed.
 public type unsafe sendable mutable LatchGate;
@@ -183,13 +183,17 @@ given[T: sendable] AtomicCell[T] {
     /// linearizable operation -- this is the home of
     /// `counter.update_and_get(n => n + 1)`.
     ///
-    /// Optimistic: `f` runs with NO lock held, against a snapshot. The result
-    /// is committed only when nobody else wrote in between; otherwise the
-    /// snapshot is taken again and `f` runs again. `f` may therefore run more
-    /// than once and must not have side effects outside the cell. `f` must not
-    /// write the cell it updates -- every attempt would be invalidated and the
-    /// loop would give up with a panic instead of spinning forever. Reading the
-    /// cell inside `f` is fine.
+    /// Optimistic (the same shape as `ConcurrentDict.update_and_get`): `f`
+    /// runs with NO lock held, against a snapshot, and may run MORE THAN ONCE
+    /// -- the result is committed only when nobody wrote the cell in between,
+    /// otherwise the snapshot is taken again and `f` runs again. `f` must not
+    /// have side effects outside the cell. Reading the cell inside `f` is
+    /// fine; writing the cell it updates invalidates every attempt, and when
+    /// the cell's last writer is `f`'s own thread the loop panics with
+    /// `AtomicCell.update_and_get: the updater wrote the same cell` instead of
+    /// retrying forever. Normal contention retries with no attempt limit and
+    /// no guarantee of finishing in a bounded number of steps. The old value
+    /// is released after the unlock.
     public update_and_get(self, f: (T) -> T): T;
 };
 
@@ -200,6 +204,11 @@ given[T: Eq and sendable] AtomicCell[T] {
     /// `expected`; report whether the exchange happened. Equality is `Eq`
     /// value equality, not pointer identity. The old value is released after
     /// the unlock.
+    ///
+    /// Contract (L2, concurrency-design.md §同步语义五级分层): the `Eq` runs
+    /// inside the cell's lock -- that is within the single-step scope -- so
+    /// `Eq` must be a pure function: no side effects, no locks, no callbacks.
+    /// The contract is documented only, not checked at runtime.
     public compare_exchange(self, expected: T, desired: T): Bool;
 };
 
@@ -226,6 +235,42 @@ given[T: Any] RecvChannel[T] {
     public try_recv(self): Result[Option[T]];
 };
 
+/// `Drop` for `ConcurrentDeque[T]`: the last handle is gone, so the remaining
+/// elements die here -- outside every lock.
+given[T: sendable] ConcurrentDeque[T]: Drop {};
+
+/// The linearizable operations of a `ConcurrentDeque`.
+given[T: sendable] ConcurrentDeque[T] {
+    /// Create an empty concurrent deque.
+    public new(): ConcurrentDeque[T];
+    /// The number of elements.
+    public count(self): Int;
+    /// Whether the deque has no elements.
+    public is_empty(self): Bool;
+    /// Add `value` at the back end.
+    public push_back(self, value: T): Void;
+    /// Add `value` at the front end.
+    public push_front(self, value: T): Void;
+    /// Remove and return the front element, or `None` when empty. The
+    /// element travels to the caller -- nothing is dropped under the lock.
+    public pop_front(self): Option[T];
+    /// Remove and return the back element, or `None` when empty. The
+    /// element travels to the caller -- nothing is dropped under the lock.
+    public pop_back(self): Option[T];
+    /// The front element without removing it.
+    public first(self): Option[T];
+    /// The back element without removing it.
+    public last(self): Option[T];
+    /// Remove every element. The elements are released after the unlock --
+    /// the whole old ring is dropped outside the lock.
+    public clear(self): Void;
+};
+
+/// `Drop` for `ConcurrentDict[K, V]`: the last handle is gone, so the
+/// remaining entries die here -- outside every lock, like every other
+/// destructor in this family.
+given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V]: Drop {};
+
 /// The linearizable operations of a `ConcurrentDict`.
 given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// Create an empty concurrent dict.
@@ -242,16 +287,17 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// Whether `key` has an entry.
     public contains_key(self, key: K): Bool;
     /// Store `value` under `key` and return the displaced value, if any.
-    /// The displaced value is extracted under the lock and released after it.
+    /// The displaced value and the old key are released after the unlock.
     public insert(self, key: K, value: V): Option[V];
     /// Store `value` under `key` only when absent, and report whether it was
     /// stored. A discarded duplicate value dies at the caller's statement
     /// end, after the unlock.
     public try_insert(self, key: K, value: V): Bool;
-    /// Remove `key`'s entry and return its value, if any.
+    /// Remove `key`'s entry and return its value, if any. The old key is
+    /// released after the unlock.
     public take(self, key: K): Option[V];
-    /// Remove `key`'s entry and report whether it existed. The value is
-    /// extracted under the lock and released after it.
+    /// Remove `key`'s entry and report whether it existed. The value and the
+    /// old key are released after the unlock.
     public try_remove(self, key: K): Bool;
     /// The value stored under `key`, storing `value` first when absent. An
     /// unused duplicate value dies at the caller's statement end, after the
@@ -259,17 +305,35 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     public get_or_insert(self, key: K, value: V): V;
     /// Atomically read-modify-write one entry: apply `f` to the current
     /// mapping (`None` when absent) and store the result (`None` removes the
-    /// entry). The whole step is one linearizable operation. `f` runs under
-    /// the container's lock and must not touch the same container (that
-    /// panics instead of deadlocking); the displaced value is released after
+    /// entry). The whole step is one linearizable operation.
+    ///
+    /// Optimistic -- the same shape as `AtomicCell.update_and_get`: `f` runs
+    /// with NO lock held and may run MORE THAN ONCE (the result commits only
+    /// when the entry is unchanged since the snapshot, validated by its
+    /// PER-ENTRY version; a write to a different entry never invalidates it).
+    /// `f` must not have side effects outside the value it computes. Reading
+    /// the container inside `f` is fine. Writing the entry `f` updates makes
+    /// every attempt fail, and when the entry's last writer is `f`'s own
+    /// thread the loop panics with
+    /// `ConcurrentDict.update_and_get: the updater wrote the same container`
+    /// instead of retrying forever (an entry that vanished since the snapshot
+    /// is attributed by the container's last writer). Normal contention
+    /// retries with no attempt limit and no guarantee of finishing in a
+    /// bounded number of steps. Displaced values and keys are released after
     /// the unlock.
     public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V];
     /// Copy the entries into an immutable `FrozenDict[K, V]` snapshot that
-    /// can cross threads.
+    /// can cross threads. The entries are gathered under the shared lock; the
+    /// snapshot is built (and the temporary arrays freed) after the unlock.
     public to_frozen_dict(self): FrozenDict[K, V];
-    /// Remove every entry. Displaced values are released after the unlock.
+    /// Remove every entry. The displaced keys and values are released after
+    /// the unlock -- the whole old table is dropped outside the lock.
     public clear(self): Void;
 };
+
+/// `Drop` for `ConcurrentSet[T]`: the last handle is gone, so the remaining
+/// members die here -- outside every lock.
+given[T: Hash and sendable] ConcurrentSet[T]: Drop {};
 
 /// The linearizable operations of a `ConcurrentSet`.
 given[T: Hash and sendable] ConcurrentSet[T] {
@@ -288,40 +352,19 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     /// discarded duplicate value dies at the caller's statement end, after
     /// the unlock.
     public try_insert(self, value: T): Bool;
-    /// Remove `value` from the set. The member is released after the unlock.
+    /// Remove `value` from the set. The stored member is extracted under the
+    /// lock and released after it.
     public remove(self, value: T): Void;
     /// Remove `value` from the set and report whether it was a member. The
-    /// member is released under the lock (a `Set` offers no extraction), so a
-    /// destructor that calls back panics instead of deadlocking.
+    /// stored member is extracted under the lock and released after it, so a
+    /// destructor that calls back sees a free lock.
     public try_remove(self, value: T): Bool;
     /// Copy the members into an immutable `FrozenSet[T]` snapshot that can
-    /// cross threads.
+    /// cross threads. The members are gathered under the shared lock; the
+    /// snapshot is built (and the temporary array freed) after the unlock.
     public to_frozen_set(self): FrozenSet[T];
-    /// Remove every member. Members are released after the unlock.
-    public clear(self): Void;
-};
-
-/// The linearizable operations of a `ConcurrentDeque`.
-given[T: sendable] ConcurrentDeque[T] {
-    /// Create an empty concurrent deque.
-    public new(): ConcurrentDeque[T];
-    /// The number of elements.
-    public count(self): Int;
-    /// Whether the deque has no elements.
-    public is_empty(self): Bool;
-    /// Add `value` at the back end.
-    public push_back(self, value: T): Void;
-    /// Add `value` at the front end.
-    public push_front(self, value: T): Void;
-    /// Remove and return the front element, or `None` when empty.
-    public pop_front(self): Option[T];
-    /// Remove and return the back element, or `None` when empty.
-    public pop_back(self): Option[T];
-    /// The front element without removing it.
-    public first(self): Option[T];
-    /// The back element without removing it.
-    public last(self): Option[T];
-    /// Remove every element. Elements are released after the unlock.
+    /// Remove every member. The members are released after the unlock -- the
+    /// whole old table is dropped outside the lock.
     public clear(self): Void;
 };
 
@@ -341,14 +384,19 @@ given LatchGate {
 
 /// Creates the lazy value and reads it once initialized.
 given[T: Any] Lazy[T] {
-    /// Wrap `f` so it runs at most once, on the first `get`.
+    /// Wrap `f` so it runs at most once, on the first `get`. The initializer
+    /// runs with no lock held (it may call other lazy values, globals and
+    /// locks) and runs at most once -- the `Lazy` name carries that shape.
     public new(f: sendable () -> T): Lazy[T];
     /// Return the value, running and caching the initializer on first use.
     ///
     /// The initializer runs with no lock held, so it may call other lazy
     /// values, globals and locks without lock-ordering deadlocks. It must not
     /// call `get()` on the same `Lazy`: there is no value to return yet, and
-    /// that mistake panics with a diagnostic instead of hanging.
+    /// that mistake panics with a diagnostic instead of hanging. Other threads
+    /// simply wait for the value to be published. CROSS-THREAD CYCLES ARE NOT
+    /// DETECTED: two threads whose initializers each wait on the other's
+    /// `Lazy` deadlock -- document your initialization order instead.
     public get(self): T;
     /// Check whether the initializer has already run.
     public is_initialized(self): Bool;

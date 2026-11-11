@@ -1,0 +1,196 @@
+using "std" { ... };
+// ============================================================================
+// std.sync - ConcurrentDeque (self-synchronized shared deque)
+// ============================================================================
+// Design (concurrency-design.md §同步语义五级分层): L2 single steps only --
+// every operation is one linearizable step under the container's own
+// read/write lock, and no user code runs inside it at all (elements are
+// never hashed or compared here). Destructors NEVER run inside the lock
+// (五级推论 1): `pop_*` hands the element to the caller and `clear` swaps the
+// whole ring out and drops it unlocked. Storage is SELF-CONTAINED -- its own
+// ring buffer below, no dependency on `Deque` (完全解耦, 各自维护).
+// ============================================================================
+
+/// A shared `sendable` double-ended queue with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDeque[T: sendable](
+    private rw_lock: SharedMutex,
+    private mutable source: *mutable T,
+    private mutable len: Int,
+    private mutable cap: Int,
+    private mutable head: Int,
+);
+
+/// `Drop` for `ConcurrentDeque[T]`: the last handle is gone, so the remaining
+/// elements die here -- outside every lock.
+given[T: sendable] ConcurrentDeque[T]: Drop {
+
+    drop(self): Void = {
+        for i in 0..<self.len then {
+            let index = (self.head + i) % self.cap;
+            deinit_memory(self.source + index);
+        };
+        dealloc_memory(self.source);
+    };
+};
+
+/// The linearizable operations of a `ConcurrentDeque`.
+given[T: sendable] ConcurrentDeque[T] {
+
+    /// Create an empty concurrent deque.
+    public new(): ConcurrentDeque[T] = {
+        let cap = 10;
+        let source = alloc_memory[T](UInt(cap));
+        return ConcurrentDeque[T](SharedMutex.new(), source, 0, cap, 0);
+    };
+
+    // Grow capacity so the ring can hold `min_capacity` elements. The caller
+    // holds the exclusive lock; ownership of the elements moves with the
+    // buffers, so nothing is dropped here.
+    private grow_to(self, min_capacity: Int): Void = {
+        let mutable new_cap = self.cap * 2;
+        if new_cap < min_capacity then {
+            new_cap = min_capacity;
+        };
+        let old_source = self.source;
+        let old_len = self.len;
+        let old_cap = self.cap;
+        let old_head = self.head;
+        let new_source = alloc_memory[T](UInt(new_cap));
+        for i in 0..<old_len then {
+            let old_index = (old_head + i) % old_cap;
+            let moved = take_memory(old_source + old_index);
+            init_memory(new_source + i, moved);
+        };
+        dealloc_memory(old_source);
+        self.source = new_source;
+        self.cap = new_cap;
+        self.head = 0;
+    };
+
+    private physical_index(self, logical_index: Int): Int =
+        (self.head + logical_index) % self.cap;
+
+    /// The number of elements.
+    public count(self): Int = {
+        self.rw_lock.lock_shared();
+        let out = self.len;
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Whether the deque has no elements.
+    public is_empty(self): Bool = {
+        self.rw_lock.lock_shared();
+        let out = self.len == 0;
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Add `value` at the back end.
+    public push_back(self, value: T): Void = {
+        self.rw_lock.lock();
+        let len = self.len;
+        let next = len + 1;
+        if next > self.cap then {
+            self.grow_to(next);
+        };
+        let index = self.physical_index(len);
+        init_memory(self.source + index, value);
+        self.len = next;
+        self.rw_lock.unlock();
+    };
+
+    /// Add `value` at the front end.
+    public push_front(self, value: T): Void = {
+        self.rw_lock.lock();
+        let len = self.len;
+        let next = len + 1;
+        if next > self.cap then {
+            self.grow_to(next);
+        };
+        self.head = (self.head + self.cap - 1) % self.cap;
+        init_memory(self.source + self.head, value);
+        self.len = next;
+        self.rw_lock.unlock();
+    };
+
+    /// Remove and return the front element, or `None` when empty. The
+    /// element travels to the caller -- nothing is dropped under the lock.
+    public pop_front(self): Option[T] = {
+        self.rw_lock.lock();
+        let out = if self.len == 0 then {
+            Option[T].None()
+        } else {
+            let index = self.physical_index(0);
+            let element = take_memory(self.source + index);
+            self.head = (self.head + 1) % self.cap;
+            self.len = self.len - 1;
+            Option[T].Some(element)
+        };
+        self.rw_lock.unlock();
+        return out;
+    };
+
+    /// Remove and return the back element, or `None` when empty. The
+    /// element travels to the caller -- nothing is dropped under the lock.
+    public pop_back(self): Option[T] = {
+        self.rw_lock.lock();
+        let out = if self.len == 0 then {
+            Option[T].None()
+        } else {
+            let index = self.physical_index(self.len - 1);
+            let element = take_memory(self.source + index);
+            self.len = self.len - 1;
+            Option[T].Some(element)
+        };
+        self.rw_lock.unlock();
+        return out;
+    };
+
+    /// The front element without removing it.
+    public first(self): Option[T] = {
+        self.rw_lock.lock_shared();
+        let out = if self.len == 0 then {
+            Option[T].None()
+        } else {
+            Option[T].Some(self.source[self.physical_index(0)])
+        };
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// The back element without removing it.
+    public last(self): Option[T] = {
+        self.rw_lock.lock_shared();
+        let out = if self.len == 0 then {
+            Option[T].None()
+        } else {
+            Option[T].Some(self.source[self.physical_index(self.len - 1)])
+        };
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Remove every element. The elements are released after the unlock --
+    /// the whole old ring is dropped outside the lock.
+    public clear(self): Void = {
+        self.rw_lock.lock();
+        let old_source = self.source;
+        let old_len = self.len;
+        let old_cap = self.cap;
+        let old_head = self.head;
+        let cap = 10;
+        let source = alloc_memory[T](UInt(cap));
+        self.source = source;
+        self.len = 0;
+        self.cap = cap;
+        self.head = 0;
+        self.rw_lock.unlock();
+        for i in 0..<old_len then {
+            let index = (old_head + i) % old_cap;
+            deinit_memory(old_source + index);
+        };
+        dealloc_memory(old_source);
+    };
+};

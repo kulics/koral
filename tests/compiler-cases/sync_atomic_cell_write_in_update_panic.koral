@@ -1,0 +1,22 @@
+// EXPECT-ERROR: Panic: AtomicCell.update_and_get: the updater wrote the same cell
+
+// The direct-write shape of the L3 rule (concurrency-design.md §同步语义五级
+// 分层): the updater of `update_and_get` runs outside the lock and must not
+// write the cell it updates -- a `set` from inside the updater invalidates the
+// attempt, the cell's last writer is the updater's own thread, and the loop
+// panics instead of retrying forever. This pins the last-writer record on the
+// plain write path (the nested-update shape is
+// sync_atomic_cell_reentrant_update_panic).
+//
+// Negative control: without recording the last writer the run hangs in the
+// unbounded retry loop and the runner times it out.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let cell = AtomicCell[Int].new(1);
+    let _ = cell.update_and_get((v: Int): Int => {
+        cell.set(v + 1);
+        return v + 2;
+    });
+};

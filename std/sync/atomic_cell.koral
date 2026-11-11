@@ -5,19 +5,18 @@ using "std" { ... };
 // Provides: AtomicCell (one shared value with atomic get/set/swap/update_and_get/CAS)
 // Access via: using "std/sync" { ... };
 // ============================================================================
-// Design: pure Koral on Mutex, one linearizable step per operation. Reads and
-// writes hold the cell's own mutex only for the access itself; `update_and_get`
-// is OPTIMISTIC -- it snapshots under the lock, runs the updater with no lock
-// held, then commits only if the cell is unchanged, otherwise it retries. The
-// updater therefore cannot deadlock against the cell (it holds nothing) and
-// the old value is always released after the unlock, so a destructor never
-// runs inside the critical section.
+// Design (concurrency-design.md §同步语义五级分层): pure Koral on Mutex.
+// `get` / `set` / `swap` / `compare_exchange` are L2 -- one linearizable step
+// per operation; the cell's own mutex covers only the access itself, and the
+// only user code that may run inside is `Eq` (a pure function, contract only).
+// `update_and_get` is L3 -- an OPTIMISTIC combine: the snapshot/validation/commit
+// steps hold the lock, the updater runs with NO lock held and may run more than
+// once. Validation is by version; when it fails and the cell's LAST WRITER is
+// the updater's own thread, the updater wrote the cell it updates and the loop
+// panics instead of retrying forever. Normal contention retries with no
+// attempt limit. Old values are always released after the unlock, so a
+// destructor never runs inside the critical section.
 // ============================================================================
-
-/// Optimistic attempt ceiling for `update_and_get`: an updater that modifies
-/// the cell it updates changes the version on every attempt and would retry
-/// forever, so the loop gives up with a diagnostic instead of hanging.
-private let atomic_update_max_attempts: Int = 100000;
 
 /// One shared `sendable` value with atomic access: every operation is a
 /// single linearizable step. `update_and_get` runs a combining lambda
@@ -28,6 +27,7 @@ public type unsafe sendable mutable AtomicCell[T: sendable](
     private mutex: Mutex,
     private mutable value: T,
     private mutable version: UInt64,
+    private mutable last_writer: UInt64,
 );
 
 /// The cell's linearizable operations: construction, atomic read/write,
@@ -35,7 +35,7 @@ public type unsafe sendable mutable AtomicCell[T: sendable](
 given[T: sendable] AtomicCell[T] {
     /// Create a cell holding `initial`.
     public new(initial: T): AtomicCell[T] =
-        AtomicCell[T](Mutex.new(), initial, UInt64(0));
+        AtomicCell[T](Mutex.new(), initial, UInt64(0), UInt64(0));
 
     /// Atomically read the current value.
     public get(self): T = {
@@ -52,6 +52,7 @@ given[T: sendable] AtomicCell[T] {
         let old = self.value;
         self.value = value;
         self.version = self.version + 1;
+        self.last_writer = __koral_thread_current_id();
         self.mutex.unlock();
         let _ = old;
     };
@@ -63,6 +64,7 @@ given[T: sendable] AtomicCell[T] {
         let old = self.value;
         self.value = value;
         self.version = self.version + 1;
+        self.last_writer = __koral_thread_current_id();
         self.mutex.unlock();
         return old;
     };
@@ -72,15 +74,18 @@ given[T: sendable] AtomicCell[T] {
     /// linearizable operation -- this is the home of
     /// `counter.update_and_get(n => n + 1)`.
     ///
-    /// Optimistic: `f` runs with NO lock held, against a snapshot. The result
-    /// is committed only when nobody else wrote in between; otherwise the
-    /// snapshot is taken again and `f` runs again. `f` may therefore run more
-    /// than once and must not have side effects outside the cell. `f` must not
-    /// write the cell it updates -- every attempt would be invalidated and the
-    /// loop would give up with a panic instead of spinning forever. Reading the
-    /// cell inside `f` is fine.
+    /// Optimistic (the same shape as `ConcurrentDict.update_and_get`): `f`
+    /// runs with NO lock held, against a snapshot, and may run MORE THAN ONCE
+    /// -- the result is committed only when nobody wrote the cell in between,
+    /// otherwise the snapshot is taken again and `f` runs again. `f` must not
+    /// have side effects outside the cell. Reading the cell inside `f` is
+    /// fine; writing the cell it updates invalidates every attempt, and when
+    /// the cell's last writer is `f`'s own thread the loop panics with
+    /// `AtomicCell.update_and_get: the updater wrote the same cell` instead of
+    /// retrying forever. Normal contention retries with no attempt limit and
+    /// no guarantee of finishing in a bounded number of steps. The old value
+    /// is released after the unlock.
     public update_and_get(self, f: (T) -> T): T = {
-        let mutable attempts = 0;
         while true then {
             self.mutex.lock();
             let old = self.value;
@@ -93,15 +98,19 @@ given[T: sendable] AtomicCell[T] {
                 let prev = self.value;
                 self.value = next;
                 self.version = seen + 1;
+                self.last_writer = __koral_thread_current_id();
                 self.mutex.unlock();
                 let _ = prev;
                 return next;
             };
+            // Validation is version-based; the last-writer record attributes
+            // the failed attempt: a write by `f`'s own thread since the
+            // snapshot means `f` wrote the cell it updates.
+            let updater_wrote = self.last_writer == __koral_thread_current_id();
             self.mutex.unlock();
             let _ = old;
-            attempts = attempts + 1;
-            if attempts >= atomic_update_max_attempts then {
-                panic("AtomicCell.update_and_get: too many retries -- the updater must not modify the same cell");
+            if updater_wrote then {
+                panic("AtomicCell.update_and_get: the updater wrote the same cell");
             };
         };
         panic("AtomicCell.update_and_get: unreachable");
@@ -115,12 +124,18 @@ given[T: Eq and sendable] AtomicCell[T] {
     /// `expected`; report whether the exchange happened. Equality is `Eq`
     /// value equality, not pointer identity. The old value is released after
     /// the unlock.
+    ///
+    /// Contract (L2, concurrency-design.md §同步语义五级分层): the `Eq` runs
+    /// inside the cell's lock -- that is within the single-step scope -- so
+    /// `Eq` must be a pure function: no side effects, no locks, no callbacks.
+    /// The contract is documented only, not checked at runtime.
     public compare_exchange(self, expected: T, desired: T): Bool = {
         self.mutex.lock();
         if self.value == expected then {
             let old = self.value;
             self.value = desired;
             self.version = self.version + 1;
+            self.last_writer = __koral_thread_current_id();
             self.mutex.unlock();
             let _ = old;
             return true;

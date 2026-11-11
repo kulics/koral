@@ -1,0 +1,516 @@
+using "std" { ... };
+// ============================================================================
+// std.sync - ConcurrentDict (self-synchronized shared map)
+// ============================================================================
+// Design (concurrency-design.md §同步语义五级分层):
+// - L2 single steps: every operation is one linearizable step under the
+//   container's own read/write lock; inside the lock the only user code that
+//   runs is the key's `hash` / `eq` (contract: pure functions).
+// - L3 combine: `update_and_get`'s callback runs OUTSIDE the lock (the same
+//   shape as `AtomicCell.update_and_get`), may run more than once, and the
+//   result commits by PER-ENTRY version number. When validation fails and the
+//   entry's last writer is the callback's own thread, the callback wrote the
+//   entry it updates and the loop panics instead of retrying forever (the
+//   entry record is gone -> the container's last writer decides). Normal
+//   contention retries with no attempt limit.
+// - Destructors NEVER run inside the lock (五级推论 1: a Drop is user code):
+//   displaced / deleted keys and values are extracted under the lock and
+//   released after the unlock; `clear` swaps the whole table out and drops it
+//   unlocked.
+// - Storage is SELF-CONTAINED -- its own open-addressing table below, no
+//   dependency on `Dict` / `hash_lookup` (完全解耦, 各自维护). Frozen
+//   snapshots leave through the package-internal `build_frozen_dict`.
+// ============================================================================
+
+/// A concurrent-dict slot: tag word + inline key + value + update
+/// bookkeeping. struct+tag layout (not an enum) so fields are addressable by
+/// pointer; only Occupied slots carry initialized key/value, and the tag is
+/// the only word valid on Empty/Deleted slots. `version` is bumped by every
+/// write to the entry (the optimistic-commit stamp), `writer` names the
+/// thread of that write (the L3 attribution record).
+type ConcurrentDictSlot[K: Any, V: Any](
+    tag: UInt,
+    key: K,
+    value: V,
+    version: UInt64,
+    writer: UInt64,
+);
+
+private let dict_tag_ptr[K: Any, V: Any](
+    slot_ptr: *mutable ConcurrentDictSlot[K, V],
+): *mutable UInt = slot_ptr as *mutable UInt;
+
+private let dict_set_tag[K: Any, V: Any](
+    slot_ptr: *mutable ConcurrentDictSlot[K, V],
+    tag: UInt,
+): Void = {
+    let tag_ptr = dict_tag_ptr(slot_ptr);
+    *tag_ptr = tag;
+};
+
+/// The tombstone-aware linear probe over this family's own slots: return the
+/// slot holding `key`, or the slot an insertion should use (the first
+/// tombstone when one was seen, else the first empty slot). `capacity` is a
+/// power of two (or 0 for a table with no slots).
+// capacity 恒为 2 的幂，故 `& (capacity - 1)` 与 `% capacity` 等价，但省掉整数除法。
+private let dict_find_slot[K: Hash, V: Any](
+    slots: *mutable ConcurrentDictSlot[K, V],
+    capacity: Int,
+    key: K,
+): Option[Int] = {
+    if capacity == 0 then {
+        return Option[Int].None();
+    };
+    let mask = capacity - 1;
+    let h = concurrent_hash_mix(key.hash());
+    let mutable idx = Int(h & UInt(mask));
+    let mutable first_deleted = Option[Int].None();
+    let mutable probes = 0;
+    while probes < capacity then {
+        let slot_tag = (slots + idx).tag;
+        if slot_tag == UInt(0) then {
+            when first_deleted in {
+                .Some(_) then {
+                    return first_deleted;
+                },
+                .None() then {
+                    return Option[Int].Some(idx);
+                },
+            };
+        } else if slot_tag == UInt(2) then {
+            when first_deleted in {
+                .None() then {
+                    first_deleted = Option[Int].Some(idx);
+                },
+                _ then {},
+            };
+        } else {
+            if (slots + idx).key == key then {
+                return Option[Int].Some(idx);
+            };
+        };
+        idx = (idx + 1) & mask;
+        probes += 1;
+    };
+    return first_deleted;
+};
+
+/// A shared `sendable` key/value map with atomic per-operation access.
+/// Sendable contract: self-synchronized.
+public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: sendable](
+    private rw_lock: SharedMutex,
+    private mutable slots: *mutable ConcurrentDictSlot[K, V],
+    private mutable capacity: Int,
+    private mutable size: Int,
+    private mutable deleted: Int,
+    private mutable version_counter: UInt64,
+    private mutable last_writer: UInt64,
+);
+
+/// `Drop` for `ConcurrentDict[K, V]`: the last handle is gone, so the
+/// remaining entries die here -- outside every lock, like every other
+/// destructor in this family.
+given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V]: Drop {
+
+    drop(self): Void = {
+        for i in 0..<self.capacity then {
+            if (self.slots + i).tag == UInt(1) then {
+                deinit_memory(self.slots + i);
+            };
+        };
+        dealloc_memory(self.slots);
+    };
+};
+
+/// The linearizable operations of a `ConcurrentDict`.
+given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
+
+    /// Create an empty concurrent dict.
+    public new(): ConcurrentDict[K, V] =
+        ConcurrentDict[K, V](SharedMutex.new(), null, 0, 0, 0, UInt64(0), UInt64(0));
+
+    /// Create an empty concurrent dict sized for about `capacity` entries.
+    /// Panics when `capacity` is negative.
+    public with_capacity(capacity: Int): ConcurrentDict[K, V] = {
+        if capacity < 0 then {
+            panic("ConcurrentDict with_capacity negative capacity");
+        };
+        let requested = if capacity < 4 then 4 else capacity * 2;
+        let mutable cap = 4;
+        while cap < requested then {
+            cap = cap * 2;
+        };
+        let slots = alloc_memory[ConcurrentDictSlot[K, V]](UInt(cap));
+        for i in 0..<cap then {
+            dict_set_tag(slots + i, UInt(0));
+        };
+        return ConcurrentDict[K, V](SharedMutex.new(), slots, cap, 0, 0, UInt64(0), UInt64(0));
+    };
+
+    // Bookkeeping for one write to the container: bump the entry-version
+    // counter and record the writing thread (the L3 attribution record).
+    private stamp_write(self): UInt64 = {
+        self.version_counter = self.version_counter + 1;
+        self.last_writer = __koral_thread_current_id();
+        return self.version_counter;
+    };
+
+    // Grow / rebuild the table. Tombstones carry no key or value here, so a
+    // rebuild frees nothing and no destructor runs (the caller holds the
+    // exclusive lock).
+    private rehash(self): Void = {
+        let old_capacity = self.capacity;
+        let old_slots = self.slots;
+        // 新容量只由存活条目决定：负载保持 ≤ 0.5（size * 2 < new_cap），空表
+        // 首次分配 16 槽；tombstone 主导触发时借此缩回合适容量。
+        let mutable new_cap = 16;
+        while self.size * 2 >= new_cap then {
+            new_cap = new_cap * 2;
+        };
+        let new_slots = alloc_memory[ConcurrentDictSlot[K, V]](UInt(new_cap));
+        for i in 0..<new_cap then {
+            dict_set_tag(new_slots + i, UInt(0));
+        };
+        self.slots = new_slots;
+        self.capacity = new_cap;
+        self.size = 0;
+        self.deleted = 0;
+        for i in 0..<old_capacity then {
+            if (old_slots + i).tag == UInt(1) then {
+                let moved = take_memory(old_slots + i);
+                let idx = when dict_find_slot(new_slots, new_cap, moved.key) in {
+                    .Some(j) then j,
+                    .None() then { panic("ConcurrentDict rehash failed"); },
+                };
+                init_memory(new_slots + idx, moved);
+                self.size = self.size + 1;
+            };
+        };
+        dealloc_memory(old_slots);
+    };
+
+    // The growth trigger shared by the insert paths (mirrors the Dict
+    // family's rule: live load full, or tombstones dominating).
+    private ensure_room(self): Void = {
+        if self.size * 2 >= self.capacity or self.deleted * 2 > self.capacity then {
+            self.rehash();
+        };
+    };
+
+    /// The number of entries.
+    public count(self): Int = {
+        self.rw_lock.lock_shared();
+        let out = self.size;
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Whether the dict has no entries.
+    public is_empty(self): Bool = {
+        self.rw_lock.lock_shared();
+        let out = self.size == 0;
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// The value stored under `key`, or `None` when absent.
+    public get(self, key: K): Option[V] = {
+        self.rw_lock.lock_shared();
+        let out = when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(idx) then {
+                let slot_ptr = self.slots + idx;
+                if slot_ptr.tag == UInt(1) then {
+                    Option[V].Some(slot_ptr.value)
+                } else {
+                    Option[V].None()
+                }
+            },
+            .None() then Option[V].None(),
+        };
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Whether `key` has an entry.
+    public contains_key(self, key: K): Bool = {
+        self.rw_lock.lock_shared();
+        let out = when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(idx) then (self.slots + idx).tag == UInt(1),
+            .None() then false,
+        };
+        self.rw_lock.unlock_shared();
+        return out;
+    };
+
+    /// Store `value` under `key` and return the displaced value, if any.
+    /// The displaced value and the old key are released after the unlock.
+    public insert(self, key: K, value: V): Option[V] = {
+        self.rw_lock.lock();
+        self.ensure_room();
+        let final_idx = when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(i) then i,
+            .None() then { panic("ConcurrentDict insert failed"); },
+        };
+        let slot_ptr = self.slots + final_idx;
+        let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
+        let mutable displaced = Option[V].None();
+        if slot_ptr.tag == UInt(1) then {
+            displaced = Option[V].Some(slot_ptr.value);
+            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+        } else {
+            if slot_ptr.tag == UInt(2) then {
+                self.deleted = self.deleted - 1;
+            };
+            self.size = self.size + 1;
+        };
+        let record_version = self.stamp_write();
+        init_memory(
+            slot_ptr,
+            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+        );
+        self.rw_lock.unlock();
+        return displaced;
+    };
+
+    /// Store `value` under `key` only when absent, and report whether it was
+    /// stored. A discarded duplicate value dies at the caller's statement
+    /// end, after the unlock.
+    public try_insert(self, key: K, value: V): Bool = {
+        self.rw_lock.lock();
+        self.ensure_room();
+        let final_idx = when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(i) then i,
+            .None() then { panic("ConcurrentDict try_insert failed"); },
+        };
+        let slot_ptr = self.slots + final_idx;
+        if slot_ptr.tag == UInt(1) then {
+            self.rw_lock.unlock();
+            return false;
+        };
+        if slot_ptr.tag == UInt(2) then {
+            self.deleted = self.deleted - 1;
+        };
+        self.size = self.size + 1;
+        let record_version = self.stamp_write();
+        init_memory(
+            slot_ptr,
+            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+        );
+        self.rw_lock.unlock();
+        return true;
+    };
+
+    /// Remove `key`'s entry and return its value, if any. The old key is
+    /// released after the unlock.
+    public take(self, key: K): Option[V] = {
+        self.rw_lock.lock();
+        let mutable out = Option[V].None();
+        let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
+        when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(idx) then {
+                let slot_ptr = self.slots + idx;
+                if slot_ptr.tag == UInt(1) then {
+                    out = Option[V].Some(slot_ptr.value);
+                    dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                    dict_set_tag(slot_ptr, UInt(2));
+                    self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
+                    let _ = self.stamp_write();
+                };
+            },
+            .None() then {},
+        };
+        self.rw_lock.unlock();
+        return out;
+    };
+
+    /// Remove `key`'s entry and report whether it existed. The value and the
+    /// old key are released after the unlock.
+    public try_remove(self, key: K): Bool = {
+        self.rw_lock.lock();
+        let mutable existed = false;
+        let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
+        when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(idx) then {
+                let slot_ptr = self.slots + idx;
+                if slot_ptr.tag == UInt(1) then {
+                    existed = true;
+                    dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                    dict_set_tag(slot_ptr, UInt(2));
+                    self.size = self.size - 1;
+                    self.deleted = self.deleted + 1;
+                    let _ = self.stamp_write();
+                };
+            },
+            .None() then {},
+        };
+        self.rw_lock.unlock();
+        return existed;
+    };
+
+    /// The value stored under `key`, storing `value` first when absent. An
+    /// unused duplicate value dies at the caller's statement end, after the
+    /// unlock.
+    public get_or_insert(self, key: K, value: V): V = {
+        self.rw_lock.lock();
+        self.ensure_room();
+        let final_idx = when dict_find_slot(self.slots, self.capacity, key) in {
+            .Some(i) then i,
+            .None() then { panic("ConcurrentDict get_or_insert failed"); },
+        };
+        let slot_ptr = self.slots + final_idx;
+        if slot_ptr.tag == UInt(1) then {
+            let existing = slot_ptr.value;
+            self.rw_lock.unlock();
+            return existing;
+        };
+        if slot_ptr.tag == UInt(2) then {
+            self.deleted = self.deleted - 1;
+        };
+        self.size = self.size + 1;
+        let record_version = self.stamp_write();
+        init_memory(
+            slot_ptr,
+            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+        );
+        self.rw_lock.unlock();
+        return value;
+    };
+
+    /// Atomically read-modify-write one entry: apply `f` to the current
+    /// mapping (`None` when absent) and store the result (`None` removes the
+    /// entry). The whole step is one linearizable operation.
+    ///
+    /// Optimistic -- the same shape as `AtomicCell.update_and_get`: `f` runs
+    /// with NO lock held and may run MORE THAN ONCE (the result commits only
+    /// when the entry is unchanged since the snapshot, validated by its
+    /// PER-ENTRY version; a write to a different entry never invalidates it).
+    /// `f` must not have side effects outside the value it computes. Reading
+    /// the container inside `f` is fine. Writing the entry `f` updates makes
+    /// every attempt fail, and when the entry's last writer is `f`'s own
+    /// thread the loop panics with
+    /// `ConcurrentDict.update_and_get: the updater wrote the same container`
+    /// instead of retrying forever (an entry that vanished since the snapshot
+    /// is attributed by the container's last writer). Normal contention
+    /// retries with no attempt limit and no guarantee of finishing in a
+    /// bounded number of steps. Displaced values and keys are released after
+    /// the unlock.
+    public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V] = {
+        while true then {
+            self.rw_lock.lock_shared();
+            let mutable seen = UInt64(0);
+            let mutable old = Option[V].None();
+            when dict_find_slot(self.slots, self.capacity, key) in {
+                .Some(idx) then {
+                    let slot_ptr = self.slots + idx;
+                    if slot_ptr.tag == UInt(1) then {
+                        seen = slot_ptr.version;
+                        old = Option[V].Some(slot_ptr.value);
+                    };
+                },
+                .None() then {},
+            };
+            self.rw_lock.unlock_shared();
+
+            let next = f(old);
+
+            self.rw_lock.lock();
+            if next is .Some(_) then {
+                self.ensure_room();
+            };
+            let final_idx = when dict_find_slot(self.slots, self.capacity, key) in {
+                .Some(i) then i,
+                .None() then { panic("ConcurrentDict update_and_get failed"); },
+            };
+            let slot_ptr = self.slots + final_idx;
+            let exists = slot_ptr.tag == UInt(1);
+            let current_version = if exists then slot_ptr.version else UInt64(0);
+            let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
+            if current_version != seen then {
+                // The attempt was invalidated: attribute the interfering
+                // write. An existing entry names its own writer; a vanished
+                // one falls back to the container's last writer.
+                let updater_wrote = if exists then {
+                    slot_ptr.writer == __koral_thread_current_id()
+                } else {
+                    self.last_writer == __koral_thread_current_id()
+                };
+                self.rw_lock.unlock();
+                if updater_wrote then {
+                    panic("ConcurrentDict.update_and_get: the updater wrote the same container");
+                };
+            } else {
+                when next in {
+                    .Some(v) then {
+                        let record_version = self.stamp_write();
+                        if exists then {
+                            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                        } else {
+                            if slot_ptr.tag == UInt(2) then {
+                                self.deleted = self.deleted - 1;
+                            };
+                            self.size = self.size + 1;
+                        };
+                        init_memory(
+                            slot_ptr,
+                            ConcurrentDictSlot[K, V](UInt(1), key, v, record_version, __koral_thread_current_id()),
+                        );
+                    },
+                    .None() then {
+                        if exists then {
+                            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                            dict_set_tag(slot_ptr, UInt(2));
+                            self.size = self.size - 1;
+                            self.deleted = self.deleted + 1;
+                            let _ = self.stamp_write();
+                        };
+                    },
+                };
+                self.rw_lock.unlock();
+                return next;
+            };
+        };
+        panic("ConcurrentDict.update_and_get: unreachable");
+    };
+
+    /// Copy the entries into an immutable `FrozenDict[K, V]` snapshot that
+    /// can cross threads. The entries are gathered under the shared lock; the
+    /// snapshot is built (and the temporary arrays freed) after the unlock.
+    public to_frozen_dict(self): FrozenDict[K, V] = {
+        self.rw_lock.lock_shared();
+        let len = self.size;
+        let keys = alloc_memory[K](UInt(len));
+        let values = alloc_memory[V](UInt(len));
+        let mutable j = 0;
+        for i in 0..<self.capacity then {
+            let slot_ptr = self.slots + i;
+            if slot_ptr.tag == UInt(1) then {
+                init_memory(keys + j, slot_ptr.key);
+                init_memory(values + j, slot_ptr.value);
+                j = j + 1;
+            };
+        };
+        self.rw_lock.unlock_shared();
+        return build_frozen_dict(keys, values, len);
+    };
+
+    /// Remove every entry. The displaced keys and values are released after
+    /// the unlock -- the whole old table is dropped outside the lock.
+    public clear(self): Void = {
+        self.rw_lock.lock();
+        let old_slots = self.slots;
+        let old_capacity = self.capacity;
+        self.slots = null;
+        self.capacity = 0;
+        self.size = 0;
+        self.deleted = 0;
+        let _ = self.stamp_write();
+        self.rw_lock.unlock();
+        for i in 0..<old_capacity then {
+            if (old_slots + i).tag == UInt(1) then {
+                deinit_memory(old_slots + i);
+            };
+        };
+        dealloc_memory(old_slots);
+    };
+};

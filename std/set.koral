@@ -490,3 +490,46 @@ given[T: Hash] Set[T] {
         return FrozenSet[T](buckets, len, capacity);
     };
 };
+
+// ============================================================================
+// Package-internal snapshot construction
+// ============================================================================
+/// Build a `FrozenSet[T]` from `len` initialized elements held in the `keys`
+/// array. Package-internal construction entry for std builders outside this
+/// module (the concurrent containers in `std/sync` keep their own storage and
+/// freeze through here); not part of the public surface. Takes ownership of
+/// the array: each element is MOVED into the snapshot and the array is freed.
+/// With `len == 0` the array may be `null`.
+protected let build_frozen_set[T: Hash](
+    keys: *mutable T,
+    len: Int,
+): FrozenSet[T] = {
+    // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
+    let mutable capacity = 0;
+    if len > 0 then {
+        capacity = 4;
+        while len * 2 >= capacity then {
+            capacity = capacity * 2;
+        };
+    };
+    let buckets = alloc_memory[HashBucket[T, UInt]](UInt(capacity));
+    for i in 0..<capacity then {
+        bucket_set_tag(buckets + i, UInt(0));
+    };
+    for i in 0..<len then {
+        let key = take_memory(keys + i);
+        when find_hash_slot(buckets, capacity, key) in {
+            .Some(slot) then {
+                init_memory(
+                    buckets + slot,
+                    HashBucket[T, UInt](UInt(1), key, UInt(0)),
+                );
+            },
+            .None() then {
+                panic("FrozenSet build failed");
+            },
+        };
+    };
+    dealloc_memory(keys);
+    return FrozenSet[T](buckets, len, capacity);
+};

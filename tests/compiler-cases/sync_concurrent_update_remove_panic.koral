@@ -1,0 +1,25 @@
+// EXPECT-ERROR: Panic: ConcurrentDict.update_and_get: the updater wrote the same container
+
+// The vanished-entry shape of the L3 rule (concurrency-design.md §同步语义五级
+// 分层): a callback that REMOVES the entry it updates leaves no entry record to
+// blame, so the commit attributes the interference by the container's LAST
+// WRITER -- which is the callback's own thread here -- and panics instead of
+// retrying forever. (The same-entry write shape is
+// sync_concurrent_update_write_panic; a foreign thread's removal just retries.)
+//
+// Negative control: without the last-writer attribution this run CONVERGES on
+// its second attempt (the callback sees an absent entry, its removal is a
+// no-op, and the commit lands) and exits 0 -- the case then fails as
+// `unexpected_success`, because an EXPECT-ERROR case must abort with the
+// panic.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("a", 1);
+    let _ = d.update_and_get("a", (v: Option[Int]): Option[Int] => {
+        let _ = d.take("a");
+        return v;
+    });
+};

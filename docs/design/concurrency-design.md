@@ -1,7 +1,7 @@
 # 并发安全：`sendable` 族 · 对象锁 · 跨界检查
 
-> **Status**：Implemented · 2026-11-10 · 对应实现：P1–P6 全部落地（见文内「实施」）——含对象锁重设计（访问点短锁、赋值求值顺序统一「左路径与下标→RHS→写入」、`op=` 两步解糖、旧值解锁后放、锁去可重入）、同步原语定形（全局量初始化 / `AtomicCell` / `Lazy`，见「同步原语的形状」）与 ARC 优化（参数借用、末次使用移动、借用型绑定成对消除）
-> **范围**：跨线程共享的类型约束（`sendable` 族）、对象锁语义、跨界检查、RC 分流
+> **Status**：Implemented · 2026-11-12 · 对应实现：P1–P6 全部落地（见文内「实施」）——含对象锁重设计（访问点短锁、赋值求值顺序统一「左路径与下标→RHS→写入」、`op=` 两步解糖、旧值解锁后放、锁去可重入）、同步原语定形（全局量初始化 / `AtomicCell` / `Lazy`，见「同步原语的形状」）与 ARC 优化（参数借用、末次使用移动、借用型绑定成对消除）；2026-11-12 增「同步语义五级分层」（L1–L5 与三条推论）并按它重定同步原语形状（`update_and_get` 同名同义、回调锁外 + 最后写入线程判panic、并发容器自含数据结构、锁外析构、`init_owner` 原子化）
+> **范围**：跨线程共享的类型约束（`sendable` 族）、对象锁语义、跨界检查、RC 分流、同步语义分层
 > **体裁**：设计文档 —— 记决定与取舍，不记执行过程。
 > **用法**（用户向）见 [`../guide/document.md`](../guide/document.md) §Concurrency 与 [`../guide/document-zh.md`](../guide/document-zh.md) §并发（中英镜像）；写法细则以 koralfmt 为准。
 
@@ -154,23 +154,79 @@ std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task
    旧值解锁后放；不可变 `let` 全局直接读。
 5. **不提供显式锁块**。
 
-### 同步原语的形状（全局量 · `AtomicCell` · `Lazy`）
+### 同步语义五级分层（L1–L5）
 
-自带同步的三件工具同形：**状态机认领初始化/提交，被认领的代码在无锁状态下运行**。
+**裁定（2026-11-12）**：全语言的同步点按**五级**分层定死——每级的语义、范围、锁内
+允许什么、死锁责任各归其位，任何新同步 API 先入级再落地。这张表是同步语义的正本，
+「同步原语的形状」按级引用它。
 
-- **全局量**：每个全局的初始化器**至多运行一次**，由对自己**状态字节**的 CAS 认领
+| 级别 | 语义 | 范围 | 锁内允许什么 | 死锁责任 |
+|---|---|---|---|---|
+| **L1 编译器短锁** | 访问点短锁：一次字段访问一个原子步骤 | safe `sendable mutable` 对象的字段访问、`let mutable` 全局绑定槽 | **什么都不允许**——无任何用户代码，析构也不允许（旧值一律解锁后放） | **Koral 保证不死锁**：任何时刻至多持一把短锁，锁内无用户代码，锁内不可能再取锁 |
+| **L2 std 自同步单步** | 单步线性化：一次操作一个原子步骤 | `AtomicCell` 的 `get`/`set`/`swap`/`compare_exchange`、`Concurrent*` 的单步操作 | **只允许元素类型的 `eq` / `hash`**，且实现必须是纯函数（契约，见手册）；**不允许任意回调与析构**（删除/替换/清空一律锁外析构） | **守契约时 Koral 保证不死锁**；`eq`/`hash` 非纯 = 违约 |
+| **L3 无锁回调** | 乐观执行：锁内只取快照、验证、提交；回调在锁外跑 | `AtomicCell.update_and_get`、`ConcurrentDict.update_and_get` | 锁内只有快照/验证/提交三步；**析构在锁外**；回调不持任何锁 | **Koral 保证不因内部回调死锁**；**回调同线程写同一个对象 → panic**（按最后写入线程判定）；正常竞争**无上限重试**，不保证有限次数完成 |
+| **L4 一次性初始化** | 状态机认领唯一一次初始化；初始化器无锁运行 | `Lazy.get`、全局量初始化 | 初始化**不持锁**；等待者只等发布 | **同线程自依赖 → panic**（结果确定）；**跨线程环不检测**（可能死锁，见「跨线程环不检测」） |
+| **L5 显式原语** | 程序员自己的临界区 | `Mutex` / `SharedMutex` / `Semaphore` / `Channel` / `LatchGate` | **任意**——用户代码、回调、析构都可以 | **程序员负责** |
+
+**三条推论**（从表里直接掉出来，写新代码先对这三条）：
+
+1. **析构是隐式用户代码**（`Drop` 可以回调宿主对象），**不得出现在 L1 / L2 的锁内**。
+   「旧值解锁后放」「删除/清空锁外析构」不是优化偏好，是这条推论的执行形式。
+2. **回调是否持锁、是否可能多次执行，必须能从名字看出来；同名必须同义。**
+   `update_and_get` 在 `AtomicCell` 与 `ConcurrentDict` 上同义：乐观、回调不持锁、
+   可能多次执行、按版本号提交——名字承诺的形状不得随类型漂移（此前
+   `ConcurrentDict.update_and_get` 的回调在锁内跑、一次性执行，正是同名异义，
+   2026-11-12 收敛）。同理 `Lazy.new(f)` 的初始化器：恰好一次、不持锁。
+3. **运行时检测面只覆盖「同线程、结果确定」的那一类问题**——同线程初始化环、
+   回调写同一个对象。跨线程环、锁序、竞争、逻辑原子性**不做运行时检测**：
+   它们落在文档契约或程序员责任里（L4 的跨线程环、L5 全部、L1 的跨对象锁序）。
+
+#### 跨线程环不检测
+
+L4 的两个成员只诊断**同线程**环：全局量的初始化链是线程局部的（`a -> b -> a` 报路径），
+`Lazy` 靠 `init_owner`（原子）认出"初始化器里 `get()` 自己"。**跨线程环不检测**：
+线程 A 初始化 `a` 时等 `b`、线程 B 初始化 `b` 时等 `a`，两边各自合法，合成环——
+运行时只看到"对方还没发布"，无法在单点判定，检测它需要全局等待图（跨 L4 状态的
+全局分析），而其结果也不是"结果确定"的一类（见推论 3）。**裁定：跨线程环可能死锁，
+不检测，写进文档**（本节与手册）；Lazy 同理（两个 `Lazy` 的初始化器互相 `get()`）。
+
+### 同步原语的形状（全局量 · `AtomicCell` · `Lazy` · `Concurrent*`）
+
+自带同步的工具同形：**状态机/版本号认领初始化或提交，被认领的代码在无锁状态下运行**；
+锁内只做 L2 允许的事。
+
+- **全局量（L4）**：每个全局的初始化器**至多运行一次**，由对自己**状态字节**的 CAS 认领
   （0 = 未初始化、1 = 初始化中、2 = 完成）。**没有进程级初始化锁**——初始化一个全局
   从不串行化另一个；初始化器**不持任何锁**运行，因此可以访问别的全局、拿别的锁而无
   锁序死锁。初始化器内部重入自己就是初始化环，按 `global initialization cycle: a -> b -> a`
-  panic（链是线程局部的）；输掉认领的线程等发布。全局仍在主函数体之前急切运行：
-  模块内按声明序，跨模块按 `using` 拓扑序。
-- **`AtomicCell[T]`**：`get` / `set` / `swap` / `compare_exchange` 都是**格自身 Mutex 上的
-  单步线性化**。`update_and_get` 是**乐观**的：锁内取快照，updater **不持锁**运行，
-  仅当格未变才提交，否则重试。updater 因此**可能跑多次**、不得有副作用；它可以**读**格
-  但**不得写**（每次尝试都被作废，循环直接 panic 放弃而不是空转）。旧值一律在解锁之后释放。
-- **`Lazy[T]`**：逐值状态机（0/1/2）认领唯一一次初始化，初始化器**不持锁**运行
-  （可以调别的 lazy、全局与锁）。同一值的初始化器里 `get()` 不死锁，而是 panic
-  `Lazy.get: the initializer called get() on the same Lazy`；其余线程在条件变量上等值发布。
+  panic（链是线程局部的）；输掉认领的线程等发布。**跨线程环不检测**（见上节）。
+  全局仍在主函数体之前急切运行：模块内按声明序，跨模块按 `using` 拓扑序。
+- **`AtomicCell[T]`（L2 单步 + L3 组合）**：`get` / `set` / `swap` / `compare_exchange`
+  是格自身 Mutex 上的 L2 单步线性化。**`compare_exchange` 的 `Eq` 在锁内跑**——按 L2
+  属允许范围（元素类型的 `eq`），`Eq` 须为纯函数是**契约，只写在手册**，不做运行时
+  检查（2026-11-12 裁定：此前对该点的额外限制撤回）。`update_and_get` 是 L3 无锁回调：
+  锁内取快照，updater **不持锁**运行，仅当格未变（版本号）才提交，否则重试——updater
+  **可能跑多次**、不得有副作用，读格合法、**写格使每次尝试作废**。验证失败且**最后一次
+  写入是 updater 所在线程**（格记最后写入线程）→ panic
+  `AtomicCell.update_and_get: the updater wrote the same cell`；正常竞争**无上限重试**
+  （旧的 10 万次上限撤除），不保证有限次数完成。旧值一律在解锁之后释放。
+- **`Lazy[T]`（L4）**：逐值状态机（0/1/2）认领唯一一次初始化，`init_owner` 是**原子**
+  （认领线程 id，2026-11-12 从普通字段改原子：同线程自依赖判定点，跨线程读写不得
+  竞争）；初始化器**不持锁**运行（可以调别的 lazy、全局与锁）。同一值的初始化器里
+  `get()` 不死锁，而是 panic `Lazy.get: the initializer called get() on the same Lazy`；
+  其余线程在条件变量上等值发布。**跨线程环不检测**（见上节）。
+- **`ConcurrentDict` / `ConcurrentSet` / `ConcurrentDeque`（L2 单步 + L3 组合）**：
+  单步操作是容器自身读写锁上的 L2 线性化，锁内只跑键的 `hash` / `eq`（L2 契约同上）；
+  **数据结构自含**——自有开放寻址表 / 环形缓冲，不依赖 `Dict` / `Set` / `Deque`
+  与 `hash_lookup`（2026-11-12 裁定：完全解耦，各自的不变量各自维护；冻结快照经
+  包内构造入口进 `FrozenDict` / `FrozenSet`，那是类型边界不是数据结构依赖）。
+  **删除/替换/清空一律锁外析构**：被挤出的键值先取出、解锁后再放。`update_and_get`
+  与 `AtomicCell` **同名同义**：回调锁外跑、可能多次执行、**按条目版本号提交**
+  （写别的条目不作废本条目）；验证失败且最后一次写入是回调线程（条目记写者、
+  条目失踪时退回容器的最后写入线程）→ panic
+  `ConcurrentDict.update_and_get: the updater wrote the same container`；正常竞争
+  无上限重试。旧的 busy-owner 重入围栏**整个删除**——回调与析构都不在锁内跑，
+  重入不再需要围栏，需要的是 L3 的最后写入线程判定。
 
 ### `unsafe` 契约
 
@@ -187,6 +243,14 @@ std 落点因此干净：`Task` 的字段是 `func: sendable () -> Void`，`Task
 
 ### Drop 与析构
 
+**析构是隐式用户代码**（五级推论 1）：`Drop` 体可以回调宿主对象，所以它不比显式回调
+更安全——**不得出现在 L1 / L2 的锁内**。对象锁的「旧值解锁后放」、并发容器的
+「删除/替换/清空锁外析构」都是这条的执行形式；L3 的回调锁外跑同样让析构只在锁外发生。
+这条纪律**不依赖平台锁的重入行为**——同线程重入一把非递归锁是 POSIX/Win32 的
+未定义行为：Linux glibc（writer-nonrecursive）与 Windows SRWLOCK 会自死锁，而
+Darwin 的 `pthread_rwlock` 会放行（实测），所以「析构在锁内」在 macOS 上可能静默
+通过、在别的平台上死锁；判定只能落在「析构位置」本身，不能落在「锁会不会拦住」。
+
 sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构体须线程无关；线程亲和资源（文件游标、socket、PRNG）不标 `sendable`，或契约写明析构线程无关。这是「`Drop` 让共享可观察」（[`type-semantics.md`](type-semantics.md)）在并发轴上的延伸。析构期间的 immortal 哨兵与 weak 不复活规则不变；最后句柄已死 ⇒ 析构体内的字段访问无并发，锁无害。
 
 ### 推荐模式：线程内私有状态 + sendable 消息
@@ -201,11 +265,12 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 | 内部裸存储、构造后不变的内部块（`Bytes` 类） | `unsafe sendable`（持析构则 `unsafe sendable mutable`），承诺「构造后不可变」（编译器无法验证行为不可变，逃生舱是诚实形态）。`String` 自值类型重塑后字段可验证（`Bytes`+标量），升 safe `sendable`——不可验证的部分随 `Bytes` 的 unsafe 标下沉（2026-11-09 裁定） |
 | `List` / `Dict` / `Set` / `Deque` / `StringBuilder` / 迭代器 | **不标记（线程内工作状态）**——不跨线程（RC 仍原子，见「RC 分流」） |
 | `FrozenList` / `FrozenDict` / `FrozenSet`（新增） | `unsafe sendable mutable` + 条件规则：对象形态承载自有缓冲的析构（用户析构仅 `type mutable`，2026-11-09 随值类型禁 Drop 裁定转入）；独立存储、只读快照、构造时拷贝、无写能力；内建**下标只读**（`FrozenList`/`FrozenDict`）、集合字面量可作目标类型；构造=可变侧 `to_frozen_*` + 字面量——**跨线程携带集合数据的唯一形态**（2026-11-08 裁定：可变容器不跨线程，传数据走 Frozen 系） |
+| `ConcurrentDict` / `ConcurrentSet` / `ConcurrentDeque`（新增） | `unsafe sendable mutable`（条件于 `K`/`T`；L2 单步 + L3 组合，形态见「同步原语的形状」）——**自含数据结构**（自有开放寻址表 / 环形缓冲，不依赖 `Dict`/`Set`/`Deque`/`hash_lookup`，2026-11-12 裁定），删除/替换/清空锁外析构，`to_frozen_*` 经包内构造入口出快照 |
 | `Channel` / `SendChannel` / `RecvChannel` / `ChannelStorage` | `unsafe sendable mutable`（条件于 `T`；环形缓冲 + 自管 Mutex/Condvar，条件规则看住跨界） |
 | `Mutex` / `SharedMutex` / `Thread` | `unsafe sendable mutable`（裸指针 handle，受信基座） |
 | `Atomic*` | `unsafe sendable mutable`（自带原子操作，FFI 内变路径不走对象锁） |
-| `AtomicCell[T]` | `unsafe sendable mutable`（条件于 `T: sendable`；单步线性化 + 乐观 `update_and_get`，形态见「同步原语的形状」）——`op=` 两步解糖之后，跨访问原子递增等场景的显式工具 |
-| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T`；状态机 + 条件变量自管，形态见「同步原语的形状」） |
+| `AtomicCell[T]` | `unsafe sendable mutable`（条件于 `T: sendable`；L2 单步 + L3 组合，形态见「同步原语的形状」）——`op=` 两步解糖之后，跨访问原子递增等场景的显式工具；`compare_exchange` 的 `Eq` 在锁内（L2 范围），纯函数契约写在手册 |
+| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T`；L4，状态机 + 原子 `init_owner` + 条件变量自管，形态见「同步原语的形状」） |
 | `Task` / `run_task` / `spawn_thread` | `sendable () -> Void` 参数位 |
 
 **错误侧裁定（2026-11-08，随 trait 重设计收编）**：`Error` 是 `trait sendable`——错误类型**单一形态**，必须自行声明 `sendable` / `unsafe sendable` 才能实现它（`given` 处检查，与 Swift `Error: Sendable` 对齐）。`Result[T]` 的错误载荷是普通 `Error`（声明已携带共享性），Result 因此是 safe `sendable`。
@@ -252,5 +317,6 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 3. **非原子 RC 分流**（P3）——2026-11-11 因 `unsafe sendable` 聚合可达性不健全收敛回全原子（见「RC 分流」），基准复测随行。
 4. **std 迁移 + 用户文档**（P4）：guide「Memory Model」增并发节（中英镜像）。
 5. **ARC 优化**（P5/P6，koralc 实现侧、时序不可见，Swift 参照保持语义裁判）：受管参数按 **+0 借用**传入、逃逸点才 retain（逃逸分析按「函数实例, 参数槽」，`self` 即参数 0）；**末次使用移动**按**判 G**放行——从使用点出发的每条执行路径（含回边）在碰到下一次值读前必经一次定义，同语句多读保守拒绝，覆盖多读局部的最后复制读、跨块汇合点、owned 参数与 `self`，循环形状按「定义截断」放行或拒绝，析构时序零变化；析构可观察性污染覆盖**单态化实例的泛型实参**与**枚举载荷**（`for_loop_drop` 时序钉看住）；**借用投影风险面**：+0 借用读（借用实参/借用接收者/借用 PlaceRead）与取址（`Ref`/`Pointer`）会把指向对象内部的裸引用送出去并活得比 +1 长（`bytes.borrow_ptr()` 的指针活过载荷释放），带任何一处的局部整体禁移；**借用型绑定成对消除**（Swift retain/release pair elimination 同形）限**非持有源**（借用参数/捕获/链式别名，其 +1 的所有权在函数体之外）：`let b = <非持有源>` 的全部使用都不消费时 b 即别名，绑定不 retain、作用域尾不 release；tracked 局部源的 +1 可能死在作用域尾/循环重定义的写协议里，需源生死点可达性分析，留作后续。用户 `Drop` 类型不移动、闭包捕获不作移动源（多发射闭包与 Swift 同判）。运行时 **RC 计数器**（`__koral_rc_stats_*`，包在 `KORAL_RC_STATS` 里——**发布面剔除**，普通构建零痕迹，钉子站用该宏单独编出）把每种形状的收益钉成精确数字（`rc_counter_pin`：别名 0、移动链 0、多读末移恰 1、释放侧逐一相符），verify.sh 另以 "release surface OK" 反钉保证测试面不漏进发布产物。与 Swift 的差别只在析构时序契约这一处，是有意分歧。
+6. **五级分层收敛**（2026-11-12，std 侧）：「同步语义五级分层」落地——`AtomicCell.update_and_get` 去 10 万次上限、格记最后写入线程、回调写同一格改 panic；`compare_exchange` 的锁内 `Eq` 撤回额外限制（L2 范围，纯函数契约只写手册）；`ConcurrentDict.update_and_get` 回调移出锁、按条目版本号提交、busy-owner 围栏整体删除；`Concurrent*` 三容器改**自含数据结构**（`std/sync/concurrent_dict.koral` / `concurrent_set.koral` / `concurrent_deque.koral`），删除/替换/清空锁外析构，冻结快照走 `dict.koral` / `set.koral` 的包内构造入口；`Lazy.init_owner` 改原子；跨线程环不检测写进设计与手册。测试面：回调锁外读回入、同对象写 panic、锁外析构回入、并发 `Lazy` 单次初始化各有钉。
 
 验证：**双编译器同步**（`compiler/` 与 `compiler-reference/`），差分对齐的已知坑（typed span、多错误收集、span 锚点、符号名、literal range 循环变量）在 sema 改动中会全踩一遍；[`../implementation/samples-capability.md`](../implementation/samples-capability.md) 押着的 grep-j 并行样例当验收用例。

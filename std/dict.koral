@@ -671,3 +671,50 @@ given[K: Hash, V: Any] Dict[K, V] {
         return FrozenDict[K, V](buckets, len, capacity);
     };
 };
+
+// ============================================================================
+// Package-internal snapshot construction
+// ============================================================================
+/// Build a `FrozenDict[K, V]` from `len` initialized entries held in the
+/// parallel `keys` / `values` arrays. Package-internal construction entry for
+/// std builders outside this module (the concurrent containers in `std/sync`
+/// keep their own storage and freeze through here); not part of the public
+/// surface. Takes ownership of the arrays: each element is MOVED into the
+/// snapshot and both arrays are freed. With `len == 0` the arrays may be
+/// `null`.
+protected let build_frozen_dict[K: Hash, V: Any](
+    keys: *mutable K,
+    values: *mutable V,
+    len: Int,
+): FrozenDict[K, V] = {
+    // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
+    let mutable capacity = 0;
+    if len > 0 then {
+        capacity = 4;
+        while len * 2 >= capacity then {
+            capacity = capacity * 2;
+        };
+    };
+    let buckets = alloc_memory[HashBucket[K, V]](UInt(capacity));
+    for i in 0..<capacity then {
+        bucket_set_tag(buckets + i, UInt(0));
+    };
+    for i in 0..<len then {
+        let key = take_memory(keys + i);
+        let value = take_memory(values + i);
+        when find_hash_slot(buckets, capacity, key) in {
+            .Some(slot) then {
+                init_memory(
+                    buckets + slot,
+                    HashBucket[K, V](UInt(1), key, value),
+                );
+            },
+            .None() then {
+                panic("FrozenDict build failed");
+            },
+        };
+    };
+    dealloc_memory(keys);
+    dealloc_memory(values);
+    return FrozenDict[K, V](buckets, len, capacity);
+};

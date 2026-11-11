@@ -1,0 +1,40 @@
+// EXPECT: frozen dict a=1
+// EXPECT: frozen set count 2
+// EXPECT: frozen empty ok
+// EXPECT: done
+
+// Frozen snapshots leave the concurrent containers through the package-internal
+// snapshot builders (concurrency-design.md §同步原语的形状): the entries are
+// gathered under the shared lock, and the `FrozenDict` / `FrozenSet` is built
+// after the unlock. The containers keep their own storage, so this is the one
+// boundary where the concurrent family meets the frozen family -- and the
+// snapshot's contents must survive it exactly.
+
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("a", 1);
+    d.insert("b", 2);
+    d.insert("a", 1);
+    let frozen = d.to_frozen_dict();
+    println("frozen dict a=\(frozen.get("a").unwrap())");
+    assert(frozen.count() == 2, "snapshot keeps two entries");
+    assert(frozen.get("zzz") is .None(), "missing key stays missing");
+    assert(d.count() == 2, "source stays usable");
+
+    let s = ConcurrentSet[Int].new();
+    s.insert(1);
+    s.try_insert(2);
+    s.try_insert(2);
+    let frozen_set = s.to_frozen_set();
+    println("frozen set count \(frozen_set.count())");
+    assert(frozen_set.contains(2), "member present");
+    assert(not frozen_set.contains(9), "absent member stays absent");
+
+    let empty = ConcurrentDict[String, Int].new().to_frozen_dict();
+    let empty_set = ConcurrentSet[Int].new().to_frozen_set();
+    assert(empty.is_empty() and empty_set.is_empty(), "empty snapshots");
+    println("frozen empty ok");
+    println("done");
+};
