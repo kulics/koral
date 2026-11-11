@@ -1008,10 +1008,16 @@ extension Parser {
   private func globalVariableDeclaration(
     name: String, mutable: Bool, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
+    // A global binding carries its type: only local `let` statements infer
+    // (grammar <let-decl> vs <let-statement>).
     var type: TypeNode? = nil
     if currentToken === .colon {
       try match(.colon)
       type = try parseType()
+    } else {
+      throw ParserError.rejectedConstruct(
+        span: currentSpan,
+        message: "Missing type: global variable declarations must explicitly declare a type")
     }
 
     try match(.equal)

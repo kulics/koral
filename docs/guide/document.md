@@ -600,11 +600,11 @@ Koral's variables use binding semantics, equivalent to binding a variable name a
 
 In Koral, read-only variables are declared using the `let` keyword, following the principle of declaration before use.
 
-Koral ensures type safety through static typing. Variable bindings can explicitly annotate types at declaration. When there is enough information in the context, we can also omit the type, and the compiler will infer the variable's type.
+Koral ensures type safety through static typing. Variable bindings can explicitly annotate types at declaration. Inside a function body, when there is enough information in the context, we can also omit the type, and the compiler will infer the variable's type. Global bindings never infer — see [Global Bindings](#global-bindings).
 
 ```koral
 let a: Int = 5;   // Explicit type annotation
-let b = 123;     // Automatic type inference
+let b = 123;     // Automatic type inference (local bindings only)
 ```
 
 Once a read-only variable is declared, its value cannot be changed within the current scope.
@@ -627,8 +627,31 @@ If we need a variable that can be rebound, we can use a mutable variable declara
 
 ```koral
 let mutable a: Int = 5;   // Explicit type annotation
-let mutable b = 123;     // Automatic type inference
+let mutable b = 123;     // Automatic type inference (local bindings only)
 ```
+
+#### Global Bindings
+
+Inference is a convenience of function bodies. A **global** binding — a `let`
+or `let mutable` declaration at the top level of a module — must carry an
+explicit type annotation; an unannotated global is a compile error
+(`Missing type: global variable declarations must explicitly declare a type`).
+Functions and methods already require full signatures, so every global surface
+reads with its types spelled out and only local names are inferred.
+
+```koral
+let counter: Int = 0;        // global: the annotation is required
+let cache: Dict[String, Int] = Dict[String, Int].new();
+
+let main(): Int = {
+    let step = 2;            // local: inferred
+    return counter + step;
+};
+```
+
+The rule keeps a module's public shape checkable from its declarations alone —
+a global's type is visible to every importer and to the initializer-ordering
+machinery without following its initializer's inference.
 
 #### Tuple Destructuring
 
