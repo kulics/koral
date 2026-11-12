@@ -1,0 +1,65 @@
+// EXPECT: normalize_root_ok
+// EXPECT: normalize_dots_ok
+// EXPECT: normalize_relative_dots_ok
+// EXPECT: normalize_separators_ok
+// Path.normalize edge semantics (the reference algorithm's contract):
+// root prefixes are kept verbatim, "." drops, ".." pops a real component --
+// kept on relative paths with nothing above, cancelled against an absolute
+// root -- and trailing separators drop on non-root paths.
+
+using "std/os" { ... };
+
+let main(): Void = {
+    // ========================================================================
+    // Root forms are kept verbatim
+    // ========================================================================
+    assert("/".into_path().normalize().to_string() == "/", "root slash");
+    assert("//".into_path().normalize().to_string() == "//", "unc root");
+    assert("///".into_path().normalize().to_string() == "//", "triple slash is unc root");
+    assert("C:/".into_path().normalize().to_string() == "C:/", "drive root");
+    assert("C:".into_path().normalize().to_string() == "C:", "drive without slash is relative");
+    assert("C:/a/..".into_path().normalize().to_string() == "C:/", "drive root cancels ..");
+    assert("/a/..".into_path().normalize().to_string() == "/", "slash root cancels ..");
+    assert("//srv/share/..".into_path().normalize().to_string() == "//srv", "unc pops share");
+    assert("".into_path().normalize().to_string() == "", "empty");
+
+    println("normalize_root_ok");
+
+    // ========================================================================
+    // "." drops; ".." pops the last real component
+    // ========================================================================
+    assert("a/./b".into_path().normalize().to_string() == "a/b", "dot drops");
+    assert("./a".into_path().normalize().to_string() == "a", "leading dot drops");
+    assert("a/b/..".into_path().normalize().to_string() == "a", "pop b");
+    assert("a/b/../..".into_path().normalize().to_string() == "", "pop everything");
+    assert("a/../..".into_path().normalize().to_string() == "..", "pop then keep ..");
+    assert("a/..a/..".into_path().normalize().to_string() == "a", "dot-dot-prefix is a name");
+    assert("...".into_path().normalize().to_string() == "...", "triple dot is a name");
+    assert("/../..".into_path().normalize().to_string() == "/", "absolute .. cancels at root");
+    assert("a:b/../x".into_path().normalize().to_string() == "x", "colon is not a drive root");
+
+    println("normalize_dots_ok");
+
+    // ========================================================================
+    // Relative ".." that cannot cancel is kept, below any real component
+    // ========================================================================
+    assert("..".into_path().normalize().to_string() == "..", "lone dot-dot");
+    assert("../..".into_path().normalize().to_string() == "../..", "two dot-dots");
+    assert("../a/..".into_path().normalize().to_string() == "..", "dot-dot survives a pop");
+    assert("../a".into_path().normalize().to_string() == "../a", "below dot-dot");
+    assert("../../a/../b".into_path().normalize().to_string() == "../../b", "kept below pops");
+    assert("..a/..".into_path().normalize().to_string() == "", "name then pop");
+
+    println("normalize_relative_dots_ok");
+
+    // ========================================================================
+    // Separator unification and trailing separators
+    // ========================================================================
+    assert("a\\b".into_path().normalize().to_string() == "a/b", "backslash unifies");
+    assert("a/b/".into_path().normalize().to_string() == "a/b", "trailing drops");
+    assert("a/".into_path().normalize().to_string() == "a", "trailing on single drops");
+    assert("a//b".into_path().normalize().to_string() == "a/b", "doubles collapse");
+    assert("\\a\\b".into_path().normalize().to_string() == "/a/b", "absolute backslashes");
+
+    println("normalize_separators_ok");
+};

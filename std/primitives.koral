@@ -126,27 +126,47 @@ protected let intrinsic spawn_thread(
 //   let alive = ?w is .Some(_);                           // true when still alive
 
 // ============================================================================
-// SECTION 6: Float Bit Manipulation (runtime)
+// SECTION 6: Float Bit Manipulation
 // ============================================================================
-let foreign __koral_float32_to_bits(value: Float32): UInt32;
-let foreign __koral_float32_from_bits(bits: UInt32): Float32;
-let foreign __koral_float64_to_bits(value: Float64): UInt64;
-let foreign __koral_float64_from_bits(bits: UInt64): Float64;
+// The bit pun is a byte-wise `copy_memory` between stack slots (lowered to
+// memcpy), not a typed re-read through `*UInt64` -- the generated C compiles
+// at -O1/-O2 without `-fno-strict-aliasing`, so reading a `double` object
+// through a `uint64_t*` is undefined there and memcpy is the safe pun.
 
 /// Raw bit conversion for `Float32`.
 given Float32 {
     /// Returns the raw IEEE 754 bit pattern of `self`.
-    public to_bits(self): UInt32 = __koral_float32_to_bits(self);
+    public to_bits(self): UInt32 = {
+        let slot = self;
+        let mutable bits: UInt32 = 0;
+        copy_memory[UInt8](&mutable bits as *mutable UInt8, &slot as *UInt8, 4);
+        return bits;
+    };
     /// Builds a `Float32` from a raw IEEE 754 bit pattern.
-    public from_bits(bits: UInt32): Float32 = __koral_float32_from_bits(bits);
+    public from_bits(bits: UInt32): Float32 = {
+        let src = bits;
+        let mutable out: Float32 = 0.0;
+        copy_memory[UInt8](&mutable out as *mutable UInt8, &src as *UInt8, 4);
+        return out;
+    };
 };
 
 /// Raw bit conversion for `Float64`.
 given Float64 {
     /// Returns the raw IEEE 754 bit pattern of `self`.
-    public to_bits(self): UInt64 = __koral_float64_to_bits(self);
+    public to_bits(self): UInt64 = {
+        let slot = self;
+        let mutable bits: UInt64 = 0;
+        copy_memory[UInt8](&mutable bits as *mutable UInt8, &slot as *UInt8, 8);
+        return bits;
+    };
     /// Builds a `Float64` from a raw IEEE 754 bit pattern.
-    public from_bits(bits: UInt64): Float64 = __koral_float64_from_bits(bits);
+    public from_bits(bits: UInt64): Float64 = {
+        let src = bits;
+        let mutable out: Float64 = 0.0;
+        copy_memory[UInt8](&mutable out as *mutable UInt8, &src as *UInt8, 8);
+        return out;
+    };
 };
 
 /// Special values and classification for `Float32`.

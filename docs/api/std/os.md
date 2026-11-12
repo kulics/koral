@@ -187,21 +187,22 @@ public let path_separator(): String;
 
 /// Whether the host is Windows.
 ///
-/// Derived from the separator the runtime was compiled for, not from `OS` or
-/// any other environment variable: an env sniff answers "unset" in a stripped
+/// Selected at compile time from the build target (`#if os("windows")`, the
+/// same predicate `host_os_name()` answers), not from `OS` or any other
+/// environment variable: an env sniff answers "unset" in a stripped
 /// environment (`env -i`, some CI shells) and then `.exe` naming and PATH
 /// splitting both come out wrong.
 public let is_windows_host(): Bool;
 
 /// The host os as a condition atom: `"windows"`, `"linux"` or `"macos"` -- the
 /// same closed vocabulary `#if os("...")` conditions and manifest `platform`
-/// overlays use (cffi-design.md §D/§E). `""` on anything else: the atom set is
-/// closed, so an unknown host simply matches no condition.
+/// overlays use (cffi-design.md §D/§E). The atom set is closed and matches the
+/// build-target set exactly, so there is no unknown-host answer.
 public let host_os_name(): String;
 
 /// The host arch as a condition atom: `"x86_64"` or `"aarch64"` -- the same
-/// closed vocabulary `#if arch("...")` uses (cffi-design.md §D). `""` on
-/// anything else: the atom set is closed.
+/// closed vocabulary `#if arch("...")` uses (cffi-design.md §D). The atom set
+/// is closed and matches the build-target set exactly.
 public let host_arch_name(): String;
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
@@ -481,6 +482,10 @@ given Path {
     ///
     /// 这是用户态的规范形，平台无关。传给操作系统之前由运行时各 syscall 边界
     /// 负责翻译成平台分隔符，所以这里刻意不翻成 `\`。
+    ///
+    /// 语义：根前缀（`/`、`//`、`X:/`）原样保留；`.` 丢弃；`..` 弹出一个普通
+    /// 组件——相对路径无组件可弹时保留（没有东西可抵消），绝对路径则直接抵消
+    /// 根而丢弃；非根路径的尾部分隔符丢弃（`"a/b/"` → `"a/b"`）。
     public normalize(self): Path;
     /// 将路径拆分为组件列表
     public components(self): List[String];

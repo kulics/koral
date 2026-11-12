@@ -7,14 +7,38 @@ using "std" { ... };
 // ============================================================================
 
 // ============================================================================
-// FFI Declarations
+// Build-target constants
 // ============================================================================
+// Selected at compile time per build target (cffi-design.md §D) -- the same
+// closed os/arch vocabulary `#if` conditions and manifest `platform` overlays
+// use. An env sniff is deliberately not consulted: it answers "unset" in a
+// stripped environment (`env -i`, some CI shells) and then `.exe` naming and
+// PATH splitting both come out wrong.
 
-let foreign __koral_normalize_path(path: *UInt8, buf: *UInt8, size: UInt): Int;
-let foreign __koral_path_separator(): UInt8;
-let foreign __koral_path_list_separator(): UInt8;
-let foreign __koral_host_os(): UInt8;
-let foreign __koral_host_arch(): UInt8;
+#if os("windows") then {
+    let host_is_windows: Bool = true;
+    let host_path_separator: UInt8 = UInt8(92);
+    let host_path_list_separator: UInt8 = UInt8(59);
+    let host_os_atom: String = "windows";
+} else {
+    #if os("macos") then {
+        let host_is_windows: Bool = false;
+        let host_path_separator: UInt8 = UInt8(47);
+        let host_path_list_separator: UInt8 = UInt8(58);
+        let host_os_atom: String = "macos";
+    } else {
+        let host_is_windows: Bool = false;
+        let host_path_separator: UInt8 = UInt8(47);
+        let host_path_list_separator: UInt8 = UInt8(58);
+        let host_os_atom: String = "linux";
+    };
+};
+
+#if arch("x86_64") then {
+    let host_arch_atom: String = "x86_64";
+} else {
+    let host_arch_atom: String = "aarch64";
+};
 
 // ============================================================================
 // Path Type
@@ -202,13 +226,46 @@ given Path {
     ///
     /// 这是用户态的规范形，平台无关。传给操作系统之前由运行时各 syscall 边界
     /// 负责翻译成平台分隔符，所以这里刻意不翻成 `\`。
+    ///
+    /// 语义：根前缀（`/`、`//`、`X:/`）原样保留；`.` 丢弃；`..` 弹出一个普通
+    /// 组件——相对路径无组件可弹时保留（没有东西可抵消），绝对路径则直接抵消
+    /// 根而丢弃；非根路径的尾部分隔符丢弃（`"a/b/"` → `"a/b"`）。
     public normalize(self): Path = {
-        let buf_size = self._path.count() + 1;
-        let buf = alloc_memory[UInt8](UInt(buf_size));
-        defer dealloc_memory(buf);
-        let len = __koral_normalize_path(self._path.bytes.data, buf, UInt(buf_size));
-        let result = String.from_utf8_ptr_unchecked(buf, len);
-        return Path(result);
+        let src = self._path.replace_all("\\", with = "/");
+        let root = path_root_marker(src);
+        let rest = if root.is_empty() then src else src.substring(root.count()...);
+        let mutable parts: List[String] = [];
+        // Kept components above the root; kept ".." entries sit below any real
+        // component and are never popped by a later ".." (mirrors the regular
+        // counter of the reference algorithm: a ".." pops a real component when
+        // one is left, else it is kept or cancelled against the root).
+        let mutable regular = 0;
+        for part in rest.split("/") then {
+            if not part.is_empty() and part != "." then {
+                if part == ".." then {
+                    if regular > 0 then {
+                        let _ = parts.pop();
+                        regular -= 1;
+                    } else if root.is_empty() then {
+                        parts.push("..");
+                    };
+                } else {
+                    parts.push(part);
+                    regular += 1;
+                };
+            };
+        };
+        let mutable out = StringBuilder.new();
+        out.push_string(root);
+        let mutable first = true;
+        for part in parts then {
+            if not first then {
+                out.push_byte('/');
+            };
+            out.push_string(part);
+            first = false;
+        };
+        return Path(out.to_string());
     };
 
     /// 将路径拆分为组件列表
@@ -316,47 +373,35 @@ given Path {
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator(): String = {
-    let sep = __koral_path_separator();
     let mutable s = StringBuilder.new();
-    s.push_byte(sep);
+    s.push_byte(host_path_separator);
     return s.to_string();
 };
 
 /// Whether the host is Windows.
 ///
-/// Derived from the separator the runtime was compiled for, not from `OS` or
-/// any other environment variable: an env sniff answers "unset" in a stripped
+/// Selected at compile time from the build target (`#if os("windows")`, the
+/// same predicate `host_os_name()` answers), not from `OS` or any other
+/// environment variable: an env sniff answers "unset" in a stripped
 /// environment (`env -i`, some CI shells) and then `.exe` naming and PATH
 /// splitting both come out wrong.
-public let is_windows_host(): Bool = __koral_path_separator() == UInt8(92);
+public let is_windows_host(): Bool = host_is_windows;
 
 /// The host os as a condition atom: `"windows"`, `"linux"` or `"macos"` -- the
 /// same closed vocabulary `#if os("...")` conditions and manifest `platform`
-/// overlays use (cffi-design.md §D/§E). `""` on anything else: the atom set is
-/// closed, so an unknown host simply matches no condition.
-public let host_os_name(): String = {
-    let code = __koral_host_os();
-    if code == UInt8(119) then { return "windows"; }; // 'w'
-    if code == UInt8(108) then { return "linux"; };   // 'l'
-    if code == UInt8(109) then { return "macos"; };   // 'm'
-    return "";
-};
+/// overlays use (cffi-design.md §D/§E). The atom set is closed and matches the
+/// build-target set exactly, so there is no unknown-host answer.
+public let host_os_name(): String = host_os_atom;
 
 /// The host arch as a condition atom: `"x86_64"` or `"aarch64"` -- the same
-/// closed vocabulary `#if arch("...")` uses (cffi-design.md §D). `""` on
-/// anything else: the atom set is closed.
-public let host_arch_name(): String = {
-    let code = __koral_host_arch();
-    if code == UInt8(120) then { return "x86_64"; }; // 'x'
-    if code == UInt8(97) then { return "aarch64"; }; // 'a'
-    return "";
-};
+/// closed vocabulary `#if arch("...")` uses (cffi-design.md §D). The atom set
+/// is closed and matches the build-target set exactly.
+public let host_arch_name(): String = host_arch_atom;
 
 /// Get platform path list separator (":" on Unix, ";" on Windows)
 public let path_list_separator(): String = {
-    let sep = __koral_path_list_separator();
     let mutable s = StringBuilder.new();
-    s.push_byte(sep);
+    s.push_byte(host_path_list_separator);
     return s.to_string();
 };
 

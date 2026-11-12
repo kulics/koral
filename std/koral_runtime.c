@@ -638,7 +638,7 @@ int __koral_nanosleep(struct KoralTimespec *req, struct KoralTimespec *rem) {
 // ============================================================================
 
 // Translate to the separator the OS wants. Called at every syscall boundary;
-// userland keeps the canonical '/' form (see __koral_normalize_path).
+// userland keeps the canonical '/' form (see Path.normalize in std/os/path.koral).
 static void normalize_path_internal(const char* src, char* dst, size_t size) {
     size_t i = 0;
     while (src[i] && i < size - 1) {
@@ -700,145 +700,6 @@ static char* __koral_wide_to_utf8(const wchar_t* w) {
     return s;
 }
 #endif
-
-// Canonicalize a path in userland: unify separators to '/' and resolve "."
-// and ".." components. The result is what Path.normalize() hands back, and it
-// is the form every string comparison in the compilers may rely on -- which is
-// why this deliberately does NOT flip to the platform separator.
-//
-// The result never grows: '.' and '..' only ever remove bytes, and separator
-// unification is 1:1. Callers size the buffer to strlen(path) + 1.
-int __koral_normalize_path(const char* path, char* buf, size_t size) {
-    if (!path || !buf || size == 0) return 0;
-
-    size_t len = strlen(path);
-    if (len + 1 > size) len = size - 1;
-
-    // Unify separators to '/'.
-    for (size_t i = 0; i < len; i++) {
-        buf[i] = (path[i] == '\\') ? '/' : path[i];
-    }
-    buf[len] = '\0';
-
-    // Root prefix, kept verbatim: "C:/" or "/" / "//" (UNC). The drive form
-    // must match Path.is_absolute exactly -- an ASCII letter before ':' AND a
-    // separator after it -- otherwise "a:b/../x" normalizes as if "a:" were a
-    // drive root and comes out "a:/x" instead of "x".
-    int drive_letter = (buf[0] >= 'A' && buf[0] <= 'Z') || (buf[0] >= 'a' && buf[0] <= 'z');
-    size_t root = 0;
-    if (len >= 3 && buf[1] == ':' && buf[2] == '/' && drive_letter) {
-        root = 3;
-    } else if (len >= 1 && buf[0] == '/') {
-        root = (len >= 2 && buf[1] == '/') ? 2 : 1;
-    }
-
-    // Rewrite components after the root in place. `out` is the end of the last
-    // component kept so far (or of the root); it never runs ahead of the read
-    // cursor because the output is never longer than the input.
-    //
-    // `regular` counts real components written above the root. A ".." pops one
-    // of those; when there are none left, a relative path keeps the ".."
-    // (there is nothing above it to cancel) and an absolute one drops it.
-    size_t out = root;
-    size_t i = root;
-    size_t regular = 0;
-
-    while (i < len) {
-        while (i < len && buf[i] == '/') i++;
-        if (i >= len) break;
-
-        size_t cs = i;
-        while (i < len && buf[i] != '/') i++;
-        size_t cl = i - cs;
-
-        if (cl == 1 && buf[cs] == '.') {
-            continue;
-        }
-
-        if (cl == 2 && buf[cs] == '.' && buf[cs + 1] == '.') {
-            if (regular > 0) {
-                // Remove the last regular component. `out` ends up just past
-                // the component before it, with its trailing separator dropped.
-                size_t j = out - 1;
-                while (j > root && buf[j] != '/') j--;
-                out = (buf[j] == '/') ? j : root;
-                regular--;
-            } else if (root == 0) {
-                // Relative path with nothing above: keep the "..".
-                if (out > 0 && buf[out - 1] != '/') {
-                    if (out + 1 < size) buf[out++] = '/';
-                }
-                if (out + 2 < size) {
-                    buf[out++] = '.';
-                    buf[out++] = '.';
-                }
-            }
-            // Absolute path with nothing above: ".." cancels against the root,
-            // so it is dropped.
-            continue;
-        }
-
-        // Append a separator before the component unless we sit right after a
-        // root that already ends in '/' (or this is the first thing written).
-        if (out > 0 && buf[out - 1] != '/') {
-            if (out + 1 < size) buf[out++] = '/';
-        }
-        if (out + cl < size) {
-            memmove(buf + out, buf + cs, cl);
-            out += cl;
-        }
-        regular++;
-    }
-
-    // Trailing separator on a non-root path is dropped ("a/b/" -> "a/b").
-    while (out > root && out > 1 && buf[out - 1] == '/') out--;
-
-    buf[out] = '\0';
-    return (int)out;
-}
-
-char __koral_path_separator(void) {
-#ifdef _WIN32
-    return '\\';
-#else
-    return '/';
-#endif
-}
-
-// The host os atom ('w'indows / 'l'inux / 'm'acos, 0 otherwise) -- the same
-// closed vocabulary the `#if os("...")` conditions and the manifest `platform`
-// overlays use (cffi-design.md §D/§E). One vocabulary, one resolver.
-uint8_t __koral_host_os(void) {
-#if defined(_WIN32) || defined(_WIN64)
-    return 'w';
-#elif defined(__APPLE__)
-    return 'm';
-#elif defined(__linux__)
-    return 'l';
-#else
-    return 0;
-#endif
-}
-
-// The host arch atom ('x'86_64 / 'a'arch64, 0 otherwise) -- what
-// `#if arch("...")` conditions select against (cffi-design.md §D).
-uint8_t __koral_host_arch(void) {
-#if defined(__x86_64__) || defined(_M_X64)
-    return 'x';
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    return 'a';
-#else
-    return 0;
-#endif
-}
-
-char __koral_path_list_separator(void) {
-#ifdef _WIN32
-    return ';';
-#else
-    return ':';
-#endif
-}
 
 int __koral_path_exists(const char* path) {
     char normalized[4096];
@@ -1089,34 +950,6 @@ const uint8_t* __koral_last_error_text(void) {
     return (const uint8_t*)strerror(errno);
 }
 #endif
-
-// ============================================================================
-// Float bit conversions
-// ============================================================================
-
-uint32_t __koral_float32_to_bits(float value) {
-    uint32_t bits = 0;
-    memcpy(&bits, &value, sizeof(uint32_t));
-    return bits;
-}
-
-float __koral_float32_from_bits(uint32_t bits) {
-    float value = 0.0f;
-    memcpy(&value, &bits, sizeof(uint32_t));
-    return value;
-}
-
-uint64_t __koral_float64_to_bits(double value) {
-    uint64_t bits = 0;
-    memcpy(&bits, &value, sizeof(uint64_t));
-    return bits;
-}
-
-double __koral_float64_from_bits(uint64_t bits) {
-    double value = 0.0;
-    memcpy(&value, &bits, sizeof(uint64_t));
-    return value;
-}
 
 // ============================================================================
 // File helpers (stdlib wrappers)
@@ -4821,19 +4654,6 @@ void __koral_condvar_wait_shared_mutex(void* raw, void* shared_mutex) {
 
 // winsock2.h and ws2tcpip.h already included at top of file
 
-// Platform-specific socket constants
-int32_t __koral_const_SOL_SOCKET(void) { return (int32_t)SOL_SOCKET; }
-int32_t __koral_const_SO_REUSEADDR(void) { return (int32_t)SO_REUSEADDR; }
-int32_t __koral_const_SO_BROADCAST(void) { return (int32_t)SO_BROADCAST; }
-int32_t __koral_const_SO_RCVTIMEO(void) { return (int32_t)SO_RCVTIMEO; }
-int32_t __koral_const_SO_SNDTIMEO(void) { return (int32_t)SO_SNDTIMEO; }
-int32_t __koral_const_IPPROTO_TCP(void) { return (int32_t)IPPROTO_TCP; }
-int32_t __koral_const_TCP_NODELAY(void) { return (int32_t)TCP_NODELAY; }
-int32_t __koral_const_AF_INET(void) { return (int32_t)AF_INET; }
-int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
-int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
-int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
-
 // Koral portable sockaddr format:
 // - IPv4: 16 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=addr, rest=0
 // - IPv6: 28 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=flow(be),
@@ -5109,19 +4929,6 @@ int32_t __koral_socket_getpeername(int64_t fd, uint8_t* addr_out, uint32_t* addr
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-
-// Platform-specific socket constants
-int32_t __koral_const_SOL_SOCKET(void) { return (int32_t)SOL_SOCKET; }
-int32_t __koral_const_SO_REUSEADDR(void) { return (int32_t)SO_REUSEADDR; }
-int32_t __koral_const_SO_BROADCAST(void) { return (int32_t)SO_BROADCAST; }
-int32_t __koral_const_SO_RCVTIMEO(void) { return (int32_t)SO_RCVTIMEO; }
-int32_t __koral_const_SO_SNDTIMEO(void) { return (int32_t)SO_SNDTIMEO; }
-int32_t __koral_const_IPPROTO_TCP(void) { return (int32_t)IPPROTO_TCP; }
-int32_t __koral_const_TCP_NODELAY(void) { return (int32_t)TCP_NODELAY; }
-int32_t __koral_const_AF_INET(void) { return (int32_t)AF_INET; }
-int32_t __koral_const_AF_INET6(void) { return (int32_t)AF_INET6; }
-int32_t __koral_const_SOCK_STREAM(void) { return (int32_t)SOCK_STREAM; }
-int32_t __koral_const_SOCK_DGRAM(void) { return (int32_t)SOCK_DGRAM; }
 
 // Koral portable sockaddr format:
 // - IPv4: 16 bytes  [0..1]=family(le), [2..3]=port(be), [4..7]=addr, rest=0
