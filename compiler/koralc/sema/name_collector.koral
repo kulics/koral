@@ -16,6 +16,13 @@ public type mutable NameCollector(
     // user modules may both declare `Box[T]`, and a non-generic `Duration` may
     // share std's name freely -- both are pinned by cross-module tests.
     mutable std_generic_template_names: Set[String],
+    // 同名顶层定义注册表（name-resolution.md §同名顶层定义的冲突规则）：
+    // 模块级（非 private）名字 → 声明的**名字 span**；private 名字 → 每个文件
+    // 的名字 span。检查与锚点都在名字 span 上做——与种子侧逐字一致。
+    mutable module_top_level_names: Dict[String, SourceSpan],
+    mutable private_top_level_names: Dict[String, Dict[String, SourceSpan]],
+    // 本次冲突的诊断锚点（check_top_level_name_conflict 置位，调用方取用）。
+    mutable duplicate_anchor: Option[SourceSpan],
 );
 
 given NameCollector {
@@ -28,6 +35,9 @@ given NameCollector {
             "",
             "",
             Set[String].new(),
+            Dict[String, SourceSpan].new(),
+            Dict[String, Dict[String, SourceSpan]].new(),
+            Option[SourceSpan].None(),
         );
     };
 
@@ -40,6 +50,9 @@ given NameCollector {
             source_file,
             "",
             Set[String].new(),
+            Dict[String, SourceSpan].new(),
+            Dict[String, Dict[String, SourceSpan]].new(),
+            Option[SourceSpan].None(),
         );
     };
 
@@ -162,42 +175,102 @@ given NameCollector {
         self,
         name: String,
         access: AccessModifier,
+        new_span: SourceSpan,
     ): Bool = {
-        return self.has_existing_top_level_definition(name, access);
+        return self.check_top_level_name_conflict(name, access, new_span);
     };
 
     private has_conflicting_top_level_type_name(
         self,
         name: String,
         access: AccessModifier,
+        new_span: SourceSpan,
     ): Bool = {
-        return self.has_existing_top_level_definition(name, access);
+        return self.check_top_level_name_conflict(name, access, new_span);
     };
 
-    private has_existing_top_level_definition(
+    /// 源码顺序比较（文件, 行, 列）——与种子侧同尺子（它同样带 fileName），
+    /// 锚点才逐字一致。合成 span 无文件名，两侧都按空串参与比较。
+    private span_is_later(self, a: SourceSpan, b: SourceSpan): Bool = {
+        let _ = self;
+        let af = a.start.file or else "";
+        let bf = b.start.file or else "";
+        if af != bf then {
+            return af > bf;
+        };
+        if a.start.line != b.start.line then {
+            return a.start.line > b.start.line;
+        };
+        return a.start.column > b.start.column;
+    };
+
+    /// §同名顶层定义的冲突规则（name-resolution.md，2026-11-12）：同一模块内
+    /// 两个同名顶层定义在「同文件」或「任一方非 private」时冲突——private 不得
+    /// 遮蔽模块级同名。对称、与收集顺序无关；诊断锚在两者里源码位置较后的
+    /// **名字 span** 上（两个编译器的合并收集顺序不同，锚新声明会各指一处）。
+    private check_top_level_name_conflict(
         self,
         name: String,
         access: AccessModifier,
+        new_span: SourceSpan,
     ): Bool = {
-        let next_def_id = self.context.next_def_id();
-        for id in 1..<next_def_id then {
-            let def_id = DefId(id);
-            if self.context.get_name(def_id) is .Some(existing_name) and existing_name == name then {
-                let existing_module = self.context.get_module_path(def_id) or else List[String].new(
-                );
-                if string_list_eq(existing_module, self.module_path) then {
-                    if access is not .Private() then {
-                        return true;
-                    };
-                    let existing_source = self.context.get_source_file(def_id);
-                    if source_file_matches(
-                        existing_source,
-                        Option[String].Some(self.source_file),
-                    ) then {
-                        return true;
+        let is_private = access is .Private();
+        // 键带模块前缀：一个收集器可跑多个模块，裸名会跨模块撞（与种子侧
+        // qualifiedName 同规则）。
+        let qualified = if self.module_path.is_empty() then name
+        else join_path(self.module_path, ".") + "." + name;
+        let mutable anchor = Option[SourceSpan].None();
+        when self.module_top_level_names.get(qualified) in {
+            .Some(existing_span) then {
+                let candidate = if self.span_is_later(existing_span, new_span) then {
+                    existing_span
+                } else {
+                    new_span
+                };
+                anchor = Option[SourceSpan].Some(candidate);
+            },
+            .None() then {},
+        };
+        when self.private_top_level_names.get(qualified) in {
+            .Some(per_file) then {
+                if not is_private or per_file.get(self.source_file) is .Some(_) then {
+                    for kv in per_file.iterator() then {
+                        let candidate = if self.span_is_later(kv.second, new_span) then {
+                            kv.second
+                        } else {
+                            new_span
+                        };
+                        anchor = when anchor in {
+                            .Some(best) then Option[SourceSpan].Some(
+                                if self.span_is_later(best, candidate) then best else candidate,
+                            ),
+                            .None() then Option[SourceSpan].Some(candidate),
+                        };
                     };
                 };
+            },
+            .None() then {},
+        };
+        when anchor in {
+            .Some(best) then {
+                self.duplicate_anchor = Option[SourceSpan].Some(best);
+                return true;
+            },
+            .None() then {},
+        };
+        if is_private then {
+            when self.private_top_level_names.get(qualified) in {
+                .Some(per_file) then {
+                    per_file.insert(self.source_file, new_span);
+                },
+                .None() then {
+                    let per_file = Dict[String, SourceSpan].new();
+                    per_file.insert(self.source_file, new_span);
+                    self.private_top_level_names.insert(qualified, per_file);
+                },
             };
+        } else {
+            self.module_top_level_names.insert(qualified, new_span);
         };
         return false;
     };
@@ -208,14 +281,14 @@ given NameCollector {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
-                if self.has_conflicting_top_level_type_name(name, access) then {
+                if self.has_conflicting_top_level_type_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -241,14 +314,14 @@ given NameCollector {
                 if self.shadows_std_generic_template(name, not type_params.is_empty()) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
-                if self.has_conflicting_top_level_type_name(name, access) then {
+                if self.has_conflicting_top_level_type_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -270,10 +343,10 @@ given NameCollector {
                 self.global_scope.define_scoped_type(self.module_path, name, t);
             },
             .TypeAliasDecl(access, name, _, target, span, name_span) then {
-                if self.has_conflicting_top_level_type_name(name, access) then {
+                if self.has_conflicting_top_level_type_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -297,10 +370,10 @@ given NameCollector {
                 if self.reject_intrinsic_outside_std(span) then {
                     return;
                 };
-                if self.has_conflicting_top_level_type_name(name, access) then {
+                if self.has_conflicting_top_level_type_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -353,10 +426,10 @@ given NameCollector {
                 );
             },
             .ForeignTypeDecl(access, name, sendability, fields, cname, span, name_span) then {
-                if self.has_conflicting_top_level_type_name(name, access) then {
+                if self.has_conflicting_top_level_type_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -400,10 +473,10 @@ given NameCollector {
                     .Private() then Option[String].Some(self.source_file),
                     _ then Option[String].None(),
                 };
-                if self.has_existing_top_level_definition(name, access) then {
+                if self.check_top_level_name_conflict(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -434,10 +507,10 @@ given NameCollector {
                 );
             },
             .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
-                if self.has_conflicting_top_level_name(name, access) then {
+                if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -460,10 +533,10 @@ given NameCollector {
                 if self.reject_intrinsic_outside_std(span) then {
                     return;
                 };
-                if self.has_conflicting_top_level_name(name, access) then {
+                if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -481,10 +554,10 @@ given NameCollector {
                 self.global_scope.define(self.context, sym);
             },
             .ForeignFunctionDecl(access, name, params, return_type, body, cname, span, name_span) then {
-                if self.has_conflicting_top_level_name(name, access) then {
+                if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -506,10 +579,10 @@ given NameCollector {
                 self.global_scope.define(self.context, sym);
             },
             .LetDecl(access, name, is_mutable, type_name, initializer, span, name_span) then {
-                if self.has_conflicting_top_level_name(name, access) then {
+                if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };
@@ -517,10 +590,10 @@ given NameCollector {
                 self.global_scope.define(self.context, sym);
             },
             .ForeignLetDecl(access, name, is_mutable, type_name, initializer, cname, span, name_span) then {
-                if self.has_conflicting_top_level_name(name, access) then {
+                if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
-                        name_span,
+                        self.duplicate_anchor or else name_span,
                     );
                     return;
                 };

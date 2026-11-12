@@ -2595,7 +2595,8 @@ extension TypeChecker {
       return .blockExpression(statements: [stmt], tailExpression: nil, type: blockType)
 
     case .call(let callee, let arguments, _):
-      return try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType)
+      return seatTypedCallResult(
+        try inferCallExpression(callee: callee, arguments: arguments, expectedType: expectedType))
 
     case .andExpression(let left, let right, _):
       let typedLeft = try inferTypedExpression(left)
@@ -3301,8 +3302,29 @@ extension TypeChecker {
         kind: .variable(.Value)
       )
       let tempRef: TypedExpressionNode = .variable(identifier: tempSymbol)
+      // Written order is evaluation order (guide "Evaluation Order"): the left
+      // operand runs before the right one. The chain's FIRST left operand is a
+      // real expression, so bind it to a temp first; the old shape emitted the
+      // right operand's declaration first, so `a < b < c` ran b, a, c. Middle
+      // operands are evaluated exactly once, in the right-hand declaration.
+      var statements: [TypedStatementNode] = []
+      let leftRef: TypedExpressionNode
+      if index == 0 {
+        let leftTempSymbol = typeChecker.makeLocalSymbol(
+          name: typeChecker.freshComparisonChainTempName(),
+          type: normalizedLeft.type,
+          kind: .variable(.Value)
+        )
+        statements.append(
+          .variableDeclaration(identifier: leftTempSymbol, value: normalizedLeft, mutable: false))
+        leftRef = .variable(identifier: leftTempSymbol)
+      } else {
+        leftRef = normalizedLeft
+      }
+      statements.append(
+        .variableDeclaration(identifier: tempSymbol, value: normalizedRight, mutable: false))
       let condition = try typeChecker.buildTypedComparisonExpression(
-        lhs: normalizedLeft,
+        lhs: leftRef,
         op: operators[index],
         rhs: tempRef,
         leftSpan: operands[index].span,
@@ -3313,9 +3335,7 @@ extension TypeChecker {
       let elseExpr: TypedExpressionNode = .booleanLiteral(value: false, type: .bool)
 
       return .blockExpression(
-        statements: [
-          .variableDeclaration(identifier: tempSymbol, value: normalizedRight, mutable: false),
-        ],
+        statements: statements,
         tailExpression: .ifExpression(
           condition: condition,
           thenBranch: next,

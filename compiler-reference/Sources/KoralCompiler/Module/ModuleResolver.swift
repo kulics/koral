@@ -24,6 +24,7 @@ public enum ModuleError: Error, CustomStringConvertible {
     case fileMergeWithList(String, span: SourceSpan)
     case fileMergeNotKoral(String, span: SourceSpan)
     case crossPackageMerge(String, span: SourceSpan)
+    case mergeTargetIsRegisteredEntry(String, String, span: SourceSpan)
     case fileClaimedTwice(file: String, owner: String, claimant: String, entryFile: String)
 
     /// The phase the failure belongs to.
@@ -68,7 +69,8 @@ public enum ModuleError: Error, CustomStringConvertible {
              .invalidModuleSpecifier(_, let span),
              .fileMergeWithList(_, let span),
              .fileMergeNotKoral(_, let span),
-             .crossPackageMerge(_, let span):
+             .crossPackageMerge(_, let span),
+             .mergeTargetIsRegisteredEntry(_, _, let span):
             return span
         case .parseError(_, let underlying as ParserError):
             return underlying.span
@@ -134,6 +136,8 @@ public enum ModuleError: Error, CustomStringConvertible {
             return "File merge path must end in '.koral'; write '\(specifier).koral'"
         case .crossPackageMerge(let specifier, _):
             return "cannot merge '\(specifier)': merge is limited to the current package; import it with 'using \"\(specifier)\" { ... };'"
+        case .mergeTargetIsRegisteredEntry(let specifier, let moduleName, _):
+            return "cannot merge '\(specifier)': it is the entry of registered module '\(moduleName)'; merge a registered module by name with 'using \"\(moduleName)\";'"
         case .fileClaimedTwice(let file, let owner, let claimant, _):
             return "Error: source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'"
         }
@@ -167,7 +171,8 @@ public enum ModuleError: Error, CustomStringConvertible {
              .invalidModuleSpecifier(_, let span),
              .fileMergeWithList(_, let span),
              .fileMergeNotKoral(_, let span),
-             .crossPackageMerge(_, let span):
+             .crossPackageMerge(_, let span),
+             .mergeTargetIsRegisteredEntry(_, _, let span):
             return "\(span): error: \(messageWithoutLocation)"
         }
     }
@@ -921,6 +926,23 @@ public class ModuleResolver {
         if let myRoot = packageRoot(containing: currentFile) {
             guard let targetRoot = packageRoot(containing: filePath), targetRoot == myRoot else {
                 throw ModuleError.crossPackageMerge(fileName, span: using.span)
+            }
+        }
+
+        // §3.1 "a path pointing at a registered entry errors and gives the
+        // name" (2026-11-12): the path form must not swallow a registered
+        // module's entry -- that is spelled by name.
+        let targetNorm = URL(fileURLWithPath: filePath).standardized.path
+        var pkgCandidates: [LoadedPackage] = []
+        if let root = rootPackage { pkgCandidates.append(root) }
+        if let registry { pkgCandidates.append(contentsOf: registry.all) }
+        for pkg in pkgCandidates {
+            for (key, config) in pkg.manifest.modules {
+                let entryNorm = URL(fileURLWithPath: config.entryPath).standardized.path
+                if entryNorm == targetNorm {
+                    let nameForm = key == "." ? pkg.selfName : "\(pkg.selfName)/\(key)"
+                    throw ModuleError.mergeTargetIsRegisteredEntry(fileName, nameForm, span: using.span)
+                }
             }
         }
 

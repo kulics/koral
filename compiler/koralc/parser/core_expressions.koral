@@ -1703,20 +1703,55 @@ given Parser {
     parse_if_expression(self): Result[Expr] = {
         let start = self.current();
         self.advance();
-        let condition = self.parse_expression_checked("if condition") or return;
-
+        // `else if` 链**迭代**消费（2026-11-12）：旧形每个子句经 else 槽重入
+        // 整套表达式文法（约 18 层原生栈帧），~150 个子句就把栈打穿。这里
+        // 收集子句、最后折叠成同样的嵌套 IfExpr 形状——AST 形状不变，sema 的
+        // 链扁平化不受影响；每个嵌套 IfExpr 的 span 与旧形一致（从自己的 if
+        // 记号到整条链尾）。
+        let mutable clause_starts = List[Token].new();
+        let mutable conditions = List[Expr].new();
+        let mutable thens = List[Expr].new();
+        clause_starts.push(start);
+        conditions.push(self.parse_expression_checked("if condition") or return);
         let _ = self.expect_kw_then("if expression") or return;
-        let then_expr = self.parse_control_flow_body() or return;
+        thens.push(self.parse_control_flow_body() or return);
 
         let mutable else_expr = Option[Expr].None();
-        if self.current().kind is .KwElse() then {
+        while self.current().kind is .KwElse() then {
             self.advance();
-            let parsed_else = self.parse_branch_body("if else body") or return;
-            else_expr = .Some(parsed_else);
+            if self.current().kind is .KwIf() then {
+                let clause_start = self.current();
+                self.advance();
+                clause_starts.push(clause_start);
+                conditions.push(self.parse_expression_checked("if condition") or return);
+                let _ = self.expect_kw_then("if expression") or return;
+                thens.push(self.parse_control_flow_body() or return);
+            } else {
+                else_expr = .Some(self.parse_branch_body("if else body") or return);
+                break;
+            };
         };
 
-        let span = self.span_from_start(start);
-        return .Ok(Expr.IfExpr(condition, then_expr, else_expr, span));
+        let mutable folded = else_expr;
+        let mutable i = conditions.count() - 1;
+        while i >= 0 then {
+            let span = self.span_from_start(clause_starts[i]);
+            folded = Option[Expr].Some(
+                Expr.IfExpr(conditions[i], thens[i], folded, span),
+            );
+            i -= 1;
+        };
+        return .Ok(
+            when folded in {
+                .Some(e) then e,
+                .None() then Expr.IfExpr(
+                    conditions[0],
+                    thens[0],
+                    Option[Expr].None(),
+                    self.span_from_start(start),
+                ),
+            },
+        );
     };
 
     parse_while_expression(self): Result[Expr] = {

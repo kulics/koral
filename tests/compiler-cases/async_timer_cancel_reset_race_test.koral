@@ -1,0 +1,45 @@
+// EXPECT: timer_cancel_reset_race_ok
+// EXPECT: ticker_cancel_reset_race_ok
+
+// Hammer cancel() from another thread while the main thread reset()s and
+// wait()s. Pre-fix, cancel() could call __koral_timer_context_cancel on a
+// context that reset() was destroying or rebuilding (C-level use-after-free);
+// the internal mutex now serializes every ctx access.
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let t = Timer.new(30ms);
+    let stop = AtomicInt.new(0);
+    let canceller = run_task(() => {
+        while stop.load() == 0 then {
+            t.cancel();
+            yield_thread_now();
+        };
+    });
+    for i in 0..<300 then {
+        t.reset(1ms);
+        t.wait();
+    };
+    stop.store(1);
+    let _ = canceller.wait();
+    t.cancel();
+    println("timer_cancel_reset_race_ok");
+
+    let tk = Ticker.new(5ms);
+    let stop2 = AtomicInt.new(0);
+    let canceller2 = run_task(() => {
+        while stop2.load() == 0 then {
+            tk.cancel();
+            yield_thread_now();
+        };
+    });
+    for i in 0..<200 then {
+        tk.reset(1ms);
+        tk.wait();
+    };
+    stop2.store(1);
+    let _ = canceller2.wait();
+    tk.cancel();
+    println("ticker_cancel_reset_race_ok");
+};

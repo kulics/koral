@@ -28,6 +28,7 @@ public type sendable ModuleError {
     NoMainModule(package_name: String, declared: FrozenList[String], span: SourceSpan),
     InvalidModuleSpecifier(specifier: String, span: SourceSpan),
     CrossPackageMerge(specifier: String, span: SourceSpan),
+    MergeTargetIsRegisteredEntry(specifier: String, module_name: String, span: SourceSpan),
     FileClaimedTwice(file: String, owner: String, claimant: String),
 };
 
@@ -36,7 +37,8 @@ given ModuleError {
     /// names files rather than source (a missing file, a merge ring) has none.
     public span(self): Option[SourceSpan] = when self in {
         .DuplicateUsing(_, span) or .UnknownPackageName(_, _, span) or .UnknownModule(_, _, _, span)
-        or .NoMainModule(_, _, span) or .InvalidModuleSpecifier(_, span) or .CrossPackageMerge(_, span) then Option[SourceSpan].Some(span),
+        or .NoMainModule(_, _, span) or .InvalidModuleSpecifier(_, span) or .CrossPackageMerge(_, span)
+        or .MergeTargetIsRegisteredEntry(_, _, span) then Option[SourceSpan].Some(span),
         _ then Option[SourceSpan].None(),
     };
 
@@ -94,6 +96,7 @@ given ModuleError: Error {
             },
             .InvalidModuleSpecifier(specifier, _) then "Invalid module name '\(specifier)'; a module name is 'package[/subpath]' with lowercase identifier segments",
             .CrossPackageMerge(specifier, _) then "cannot merge '\(specifier)': merge is limited to the current package; import it with 'using \"\(specifier)\" { ... };'",
+            .MergeTargetIsRegisteredEntry(specifier, module_name, _) then "cannot merge '\(specifier)': it is the entry of registered module '\(module_name)'; merge a registered module by name with 'using \"\(module_name)\";'",
             .FileClaimedTwice(file, owner, claimant) then "source file '\(file)' is already part of module '\(owner)' and cannot also join '\(claimant)'",
         };
     };
@@ -871,6 +874,47 @@ given ModuleResolver {
                 };
             },
             .None() then {},
+        };
+
+        // §3.1「路径指向已登记入口时报错并给名字」（2026-11-12 落地）：路径
+        // 形态的合并不得吞掉已登记模块的入口——那要写名字形态。目标是已登记
+        // 入口时在**解析期**拒绝，与哪个模块先解析无关。
+        let target_norm = (when absolute_path(file_path.into_path()) in {
+            .Ok(p) then p,
+            .Error(_) then file_path.into_path(),
+        }).normalize().to_string();
+        let mutable pkg_candidates = List[LoadedPackage].new();
+        when self.storage.root_package in {
+            .Some(pkg) then pkg_candidates.push(pkg),
+            .None() then {},
+        };
+        when self.storage.registry in {
+            .Some(reg) then {
+                for pkg in reg.all then {
+                    pkg_candidates.push(pkg);
+                };
+            },
+            .None() then {},
+        };
+        for pkg in pkg_candidates then {
+            let root_norm = pkg.manifest.package_root.into_path().normalize().to_string();
+            for kv in pkg.manifest.modules then {
+                let entry_norm = (when absolute_path(kv.second.entry_path.into_path()) in {
+                    .Ok(p) then p,
+                    .Error(_) then kv.second.entry_path.into_path(),
+                }).normalize().to_string();
+                if entry_norm == target_norm then {
+                    let name_form = if kv.first == "." then pkg.self_name
+                    else pkg.self_name + "/" + kv.first;
+                    return Result[Void].Error(
+                        ModuleError.MergeTargetIsRegisteredEntry(
+                            file_name,
+                            name_form,
+                            using_span,
+                        ).render(module.entry_file()),
+                    );
+                };
+            };
         };
 
         // A merge cycle means each file is waiting on the other's definitions

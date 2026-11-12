@@ -76,6 +76,10 @@ public type mutable Parser(
     // branches are selected against. `""` matches no condition.
     target_os: String,
     target_arch: String,
+    // 类型形状扫描的记忆表（2026-11-12）：scan_type_shape_at 是纯前瞻，
+    // 每个起点的结果只算一次。旧形在 `(` 处先试参数表、失败再整段重扫
+    // 括号后缀，嵌套括号按 Θ(2^深度) 爆炸——24 层括号要 6.6s。
+    mutable type_shape_scan_cache: Dict[Int, Option[Int]],
 );
 
 given Parser {
@@ -311,7 +315,7 @@ given Parser {
     };
 
     public new(tokens: List[Token]): Parser = {
-        return Parser(tokens, "", 0, List[Statement].new(), "", "");
+        return Parser(tokens, "", 0, List[Statement].new(), "", "", Dict[Int, Option[Int]].new());
     };
 
     public new_in_file(
@@ -320,7 +324,15 @@ given Parser {
         target_os: String,
         target_arch: String,
     ): Parser = {
-        return Parser(tokens, file_path, 0, List[Statement].new(), target_os, target_arch);
+        return Parser(
+            tokens,
+            file_path,
+            0,
+            List[Statement].new(),
+            target_os,
+            target_arch,
+            Dict[Int, Option[Int]].new(),
+        );
     };
 
     current(self): Token = {
@@ -1152,6 +1164,18 @@ given Parser {
     /// The index just past one type starting at `start_index`, or `None` when
     /// the run there is not a type.
     scan_type_shape_at(self, start_index: Int): Option[Int] = {
+        when self.type_shape_scan_cache.get(start_index) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
+        let result = self.scan_type_shape_uncached(start_index);
+        self.type_shape_scan_cache.insert(start_index, result);
+        return result;
+    };
+
+    scan_type_shape_uncached(self, start_index: Int): Option[Int] = {
         let mutable i = start_index;
         // Prefixes: `?T`, `*T`, `*mutable T`, `sendable T`. They nest: `?*T`.
         let mutable more_prefixes = true;

@@ -444,6 +444,13 @@ let sci = 1500.0.format(".2e");               // "1.50e3"
 `.Error`, not `0`. Integer types implement `RadixParseable` for bases
 2–36; floats parse decimal, `nan`, `inf` and `-inf` only.
 
+A float's `to_string` is the **shortest decimal that parses back to the same
+value** — round-trip is the contract, not a fixed digit count: `2.3` prints
+`"2.3"`, `1e20` prints `"1e+20"`, `0.0` prints `"0"` (it is the same text JSON
+numbers use). `Float32` round-trips through `Float32.parse`, `Float64` through
+`Float64.parse`. When you need a *presentation* — fixed decimals, scientific
+notation, width — say so with `.format(spec)` instead.
+
 There are no free-function conversions in `std` — no `parse_int`, `to_int`
 or `to_string(x)`. Use `T.parse(s)`, `parse_radix`, `.to_string()` and
 `.format(spec)`.

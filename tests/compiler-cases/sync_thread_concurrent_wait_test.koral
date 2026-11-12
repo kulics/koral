@@ -1,0 +1,51 @@
+// EXPECT: thread_concurrent_wait_ok
+// EXPECT: thread_wait_idempotent_ok
+// EXPECT: thread_wait_observes_completion_ok
+
+// Two threads calling wait() on one Thread handle must both observe completion
+// deterministically: exactly one join happens under the hood and every waiter
+// returns the same outcome. Pre-fix this raced two pthread_join calls on the
+// same handle (double-join / crash).
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let done = AtomicInt.new(0);
+    let ok_count = AtomicInt.new(0);
+    let target = run_task(() => {
+        sleep(50ms);
+        done.store(1);
+    });
+    let w1 = run_task(() => {
+        when target.wait() in {
+            .Ok(_) then {
+                let _ = ok_count.fetch_add(1);
+            },
+            .Error(e) then assert(false, "w1 wait should succeed, got " + e.message()),
+        };
+    });
+    let w2 = run_task(() => {
+        when target.wait() in {
+            .Ok(_) then {
+                let _ = ok_count.fetch_add(1);
+            },
+            .Error(e) then assert(false, "w2 wait should succeed, got " + e.message()),
+        };
+    });
+    let _ = w1.wait();
+    let _ = w2.wait();
+    assert(ok_count.load() == 2, "both concurrent waiters should succeed");
+    println("thread_concurrent_wait_ok");
+
+    // Idempotent repeat on the same handle after a successful wait.
+    when target.wait() in {
+        .Ok(_) then {},
+        .Error(e) then assert(false, "repeat wait should succeed, got " + e.message()),
+    };
+    println("thread_wait_idempotent_ok");
+
+    // wait() blocks until the thread finishes: once every waiter returned, the
+    // target's write is visible without extra synchronization.
+    assert(done.load() == 1, "every waiter observes completion");
+    println("thread_wait_observes_completion_ok");
+};

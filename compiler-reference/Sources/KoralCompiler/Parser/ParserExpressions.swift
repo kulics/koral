@@ -1941,17 +1941,42 @@ extension Parser {
   }
 
   private func ifExpression() throws -> ExpressionNode {
-    let startSpan = currentSpan
+    // `else if` chains are consumed ITERATIVELY (2026-11-12): the else slot
+    // used to re-enter the full expression grammar per clause (~17 native
+    // frames each), so ~150 links overflowed the stack. Clauses are collected
+    // and folded into the same nested if-expression shape afterwards; every
+    // nested span still runs from its own `if` keyword to the chain end.
+    var clauseStarts: [SourceSpan] = []
+    var conditions: [ExpressionNode] = []
+    var thenBranches: [ExpressionNode] = []
+    clauseStarts.append(currentSpan)
     try match(.ifKeyword)
-    let condition = try expression()
+    conditions.append(try expression())
     try match(.thenKeyword)
-    let thenBranch = try branchBody()
+    thenBranches.append(try branchBody())
     var elseBranch: ExpressionNode? = nil
-    if currentToken === .elseKeyword {
+    while currentToken === .elseKeyword {
       try match(.elseKeyword)
-      elseBranch = try branchBody()
+      if currentToken === .ifKeyword {
+        clauseStarts.append(currentSpan)
+        try match(.ifKeyword)
+        conditions.append(try expression())
+        try match(.thenKeyword)
+        thenBranches.append(try branchBody())
+      } else {
+        elseBranch = try branchBody()
+        break
+      }
     }
-    return .ifExpression(condition: condition, thenBranch: thenBranch, elseBranch: elseBranch, span: SourceSpan(start: startSpan.start, end: currentSpan.end))
+    var folded = elseBranch
+    var i = conditions.count - 1
+    while i >= 0 {
+      folded = .ifExpression(
+        condition: conditions[i], thenBranch: thenBranches[i], elseBranch: folded,
+        span: SourceSpan(start: clauseStarts[i].start, end: currentSpan.end))
+      i -= 1
+    }
+    return folded!
   }
 
   private func whileExpression() throws -> ExpressionNode {

@@ -1270,6 +1270,23 @@ private let move_walk_value_as_borrow(value: MIRValue, table: MoveUseTable): Voi
     };
 };
 
+/// 消费性实参的顶层读（init_memory 的 value）：按 MIR 自带消费点计（与
+/// .Move()/.Take() 读同级），值源局部整局部禁移；place 的嵌套子表达式仍按
+/// 普通值走（它们只是地址/下标计算，不被消费）。
+private let move_walk_value_as_consumed(value: MIRValue, table: MoveUseTable): Void = {
+    when value in {
+        .Operand(.Local(local_id)) then move_table_note_consumed(table, local_id),
+        .PlaceRead(place, _) then {
+            when move_place_root_local(place) in {
+                .Some(root) then move_table_note_consumed(table, root),
+                .None() then {},
+            };
+            move_walk_place(place, table);
+        },
+        _ then move_walk_value(value, table),
+    };
+};
+
 private let move_walk_operand(operand: MIROperand, table: MoveUseTable): Void = {
     when operand in {
         .Local(local_id) then move_table_note_use(table, local_id),
@@ -1305,7 +1322,11 @@ private let move_walk_intrinsic(node: MIRIntrinsic, table: MoveUseTable): Void =
         },
         .InitMemory(pointer, value) then {
             move_walk_value(pointer, table);
-            move_walk_value(value, table);
+            // init_memory 的实参是**消费性使用**（契约即「接管 value 的所有权」；
+            // 发射侧 consume_moved_source 对可转移形态真会清 init flag）。按 MIR
+            // 自带消费点计——与 .Move()/.Take() 读同级，值源局部整局部禁移：
+            // 否则末次移动会与这里的消费抢同一个 +1（双认领 → 双释放）。
+            move_walk_value_as_consumed(value, table);
         },
         .NullPtr(_) then {},
         .FixedArrayLiteral(_, elements) then {

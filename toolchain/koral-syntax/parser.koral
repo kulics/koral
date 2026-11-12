@@ -2444,19 +2444,65 @@ given CstParser {
     };
 
     private parse_if_expr(self): Result[CstExpr] = {
+        // `else if` 链**迭代**消费（2026-11-12，与两个编译器的解析器同形）：
+        // 旧形每个子句经 else 槽重入整套表达式文法，~150 个子句把栈打穿。
+        // 收集子句后折叠出与旧形逐字同构的嵌套 If CST。
+        let mutable clause_kws = List[Token].new();
+        let mutable clause_conds = List[CstExpr].new();
+        let mutable clause_then_kws = List[Token].new();
+        let mutable clause_then_bodies = List[CstExpr].new();
+        let mutable clause_else_kws = List[Option[Token]].new();
         let kw = self.expect(.KwIf(), "'if'") or return;
-        let cond = self.parse_expr_node() or return;
-
+        clause_kws.push(kw);
+        clause_conds.push(self.parse_expr_node() or return);
         let then_kw = self.expect(.KwThen(), "'then'") or return;
-        let then_body = self.parse_branch_body() or return;
-        if self.check(.KwElse()) then {
-            let else_kw = self.eat();
-            let else_body = self.parse_branch_body() or return;
-            return .Ok(
-                .If(kw, cond, then_kw, then_body, .Some(else_kw), .Some(else_body)),
-            );
+        clause_then_kws.push(then_kw);
+        clause_then_bodies.push(self.parse_branch_body() or return);
+        clause_else_kws.push(Option[Token].None());
+        let mutable final_else_body = Option[CstExpr].None();
+        let mutable chained = true;
+        while chained then {
+            chained = false;
+            if self.check(.KwElse()) then {
+                let else_kw = self.eat();
+                if self.check(.KwIf()) then {
+                    clause_else_kws[clause_else_kws.count() - 1] = Option[Token].Some(else_kw);
+                    let next_kw = self.expect(.KwIf(), "'if'") or return;
+                    clause_kws.push(next_kw);
+                    clause_conds.push(self.parse_expr_node() or return);
+                    let next_then_kw = self.expect(.KwThen(), "'then'") or return;
+                    clause_then_kws.push(next_then_kw);
+                    clause_then_bodies.push(self.parse_branch_body() or return);
+                    clause_else_kws.push(Option[Token].None());
+                    chained = true;
+                } else {
+                    clause_else_kws[clause_else_kws.count() - 1] = Option[Token].Some(else_kw);
+                    final_else_body = .Some(self.parse_branch_body() or return);
+                };
+            };
         };
-        return .Ok(.If(kw, cond, then_kw, then_body, .None(), .None()));
+        let last = clause_kws.count() - 1;
+        let mutable node: CstExpr = .If(
+            clause_kws[last],
+            clause_conds[last],
+            clause_then_kws[last],
+            clause_then_bodies[last],
+            clause_else_kws[last],
+            final_else_body,
+        );
+        let mutable i = last - 1;
+        while i >= 0 then {
+            node = .If(
+                clause_kws[i],
+                clause_conds[i],
+                clause_then_kws[i],
+                clause_then_bodies[i],
+                clause_else_kws[i],
+                Option[CstExpr].Some(node),
+            );
+            i -= 1;
+        };
+        return .Ok(node);
     };
 
     private parse_while_expr(self): Result[CstExpr] = {

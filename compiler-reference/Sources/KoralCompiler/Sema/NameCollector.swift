@@ -66,6 +66,58 @@ public class NameCollector: CompilerPass {
     /// 收集到的函数声明
     private var collectedFunctions: [String: CollectedFunctionInfo] = [:]
 
+    /// Symmetric top-level name registry (name-resolution.md \u{00A7}\u{540C}\u{540D}\u{9876}\u{5C42}\u{5B9A}\u{4E49}\u{7684}\u{51B2}\u{7A81}\u{89C4}\u{5219}, 2026-11-12).
+    /// Bare name -> files holding a PRIVATE definition, plus the names with a
+    /// module-level (non-private) definition. The per-kind maps key private
+    /// entries by file and cannot answer the cross-kind, order-independent
+    /// question on their own.
+    private var privateTopLevelNames: [String: [String: SourceSpan]] = [:]
+    private var moduleTopLevelNames: [String: SourceSpan] = [:]
+
+    /// \u{540C}\u{540D}\u{9876}\u{5C42}\u{5B9A}\u{4E49}\u{7684}\u{51B2}\u{7A81}\u{89C4}\u{5219}: two same-named top-level definitions in
+    /// one module conflict iff they share a file or either side is non-private
+    /// -- a private symbol may not shadow its module-level peer. Symmetric and
+    /// collection-order independent (the old checks consulted only the incoming
+    /// declaration's access, so the answer flipped with file order).
+    /// Source-order comparison for the conflict anchor: the LATER of the two
+    /// declarations by (file, line, column) reports the duplicate, so the
+    /// diagnostic is collection-order independent (the two compilers discover
+    /// merged files in opposite orders).
+    private func laterSpan(_ a: SourceSpan, _ b: SourceSpan) -> SourceSpan {
+        // (file, line, column) -- the same ruler as koralc's span_is_later.
+        // Synthesized locations carry no file name and compare as "".
+        let af = a.start.fileName ?? ""
+        let bf = b.start.fileName ?? ""
+        if af != bf { return af > bf ? a : b }
+        if a.start.line != b.start.line { return a.start.line > b.start.line ? a : b }
+        return a.start.column > b.start.column ? a : b
+    }
+
+    private func checkTopLevelNameConflict(
+        name: String, qualifiedName: String, isPrivate: Bool, span: SourceSpan
+    ) throws {
+        var anchor: SourceSpan? = nil
+        if let existing = moduleTopLevelNames[qualifiedName] {
+            anchor = laterSpan(existing, span)
+        }
+        if let entries = privateTopLevelNames[qualifiedName] {
+            if !isPrivate || entries[currentSourceFile] != nil {
+                for (_, entrySpan) in entries {
+                    anchor = anchor.map { laterSpan($0, entrySpan) } ?? entrySpan
+                }
+                anchor = anchor.map { laterSpan($0, span) } ?? span
+            }
+        }
+        if let conflictAnchor = anchor {
+            throw SemanticError.duplicateDefinition(name, span: conflictAnchor)
+        }
+        if isPrivate {
+            privateTopLevelNames[qualifiedName, default: [:]][currentSourceFile] = span
+        } else {
+            moduleTopLevelNames[qualifiedName] = span
+        }
+    }
+
     /// Foreign struct layout claims: one entry per struct-form `type foreign`
     /// (its C name, Koral name, source). Checked across declarations at the
     /// end of `run` -- see the report there.
@@ -368,10 +420,10 @@ public class NameCollector: CompilerPass {
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
-        // 检查重复定义
-        if collectedTraits[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
+        // 检查重复定义（对称规则，与收集顺序无关）
+        try checkTopLevelNameConflict(
+            name: name, qualifiedName: qualifiedName, isPrivate: access == .private,
+            span: nameSpan)
 
         // 检查方法级类型参数冲突
         try checkMethodTypeParameterConflicts(
@@ -431,15 +483,9 @@ public class NameCollector: CompilerPass {
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
-        // 检查重复定义（非私有类型，在同一模块+文件中）
-        if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
-
-        // 检查泛型模板重复
-        if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
+        // 检查重复定义（对称规则，与收集顺序无关）
+        try checkTopLevelNameConflict(
+            name: name, qualifiedName: qualifiedName, isPrivate: isPrivate, span: nameSpan)
         
         // 确定定义类型
         let defKind: DefKind
@@ -517,15 +563,9 @@ public class NameCollector: CompilerPass {
         // 生成完整限定名用于重复检查
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
 
-        // 检查重复定义（非私有类型，在同一模块+文件中）
-        if !isPrivate && collectedTypes[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
-
-        // 检查泛型模板重复
-        if !isPrivate && collectedGenericTemplates[qualifiedName] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
+        // 检查重复定义（对称规则，与收集顺序无关）
+        try checkTopLevelNameConflict(
+            name: name, qualifiedName: qualifiedName, isPrivate: isPrivate, span: nameSpan)
         
         // 确定定义类型
         let defKind: DefKind
@@ -618,10 +658,9 @@ public class NameCollector: CompilerPass {
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"
         let key = isPrivate ? "\(name)@\(currentSourceFile)" : qualifiedName
 
-        // 检查重复定义（同名自由函数不允许重载，后定义不得覆盖先前定义）
-        if collectedFunctions[key] != nil {
-            throw SemanticError.duplicateDefinition(name, span: nameSpan)
-        }
+        // 检查重复定义（同名自由函数不允许重载；对称规则，与收集顺序无关）
+        try checkTopLevelNameConflict(
+            name: name, qualifiedName: qualifiedName, isPrivate: isPrivate, span: nameSpan)
 
         collectedFunctions[key] = CollectedFunctionInfo(
             defId: defId,

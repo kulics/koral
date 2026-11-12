@@ -43,8 +43,12 @@ uint8_t** __koral_argv(void) {
 #define KORAL_STR_SLAB_BYTES ((uintptr_t)256 * KORAL_STR_SLOT)
 #define KORAL_STR_REGION_BYTES ((uintptr_t)32 * 1024 * 1024)
 
-static char* __koral_str_region = NULL;
-static uintptr_t __koral_str_region_end = 0;
+// 区指针与区界是**跨线程共享**的：每个线程在每个块 free 时都会读一次区间
+// 判定（__koral_str_in_region），不是一次性读。全部原子读写（2026-11-12）：
+// 发布序 top/end 先写、region 指针最后 release 发布；读侧先 acquire 读
+// region、再读 end（thin-pointer-design.md §并发下的内存序）。
+static _Atomic(char*) __koral_str_region = NULL;
+static _Atomic(uintptr_t) __koral_str_region_end = 0;
 static _Atomic(uintptr_t) __koral_str_region_top = 0;
 
 static _Thread_local void* __koral_str_freelist = NULL;
@@ -59,24 +63,27 @@ static void __koral_str_region_init(void) {
     if (atomic_compare_exchange_strong(&state, &expected, 1)) {
         char* region = (char*)malloc(KORAL_STR_REGION_BYTES);
         if (region) {
-            __koral_str_region_end = (uintptr_t)region + KORAL_STR_REGION_BYTES;
-            atomic_store(&__koral_str_region_top, (uintptr_t)region);
-            atomic_thread_fence(memory_order_release);
-            __koral_str_region = region;
+            atomic_store_explicit(&__koral_str_region_end,
+                (uintptr_t)region + KORAL_STR_REGION_BYTES, memory_order_relaxed);
+            atomic_store_explicit(&__koral_str_region_top,
+                (uintptr_t)region, memory_order_relaxed);
+            atomic_store_explicit(&__koral_str_region, region, memory_order_release);
         } else {
             atomic_store(&state, 2);
         }
     } else {
-        while (atomic_load(&state) == 1 && !__koral_str_region) {
+        while (atomic_load(&state) == 1
+            && !atomic_load_explicit(&__koral_str_region, memory_order_acquire)) {
             /* spin until the winner publishes (or fails) */
         }
     }
 }
 
 static inline int __koral_str_in_region(const void* p) {
-    return __koral_str_region
-        && (const char*)p >= __koral_str_region
-        && (const char*)p < (const char*)__koral_str_region_end;
+    char* region = atomic_load_explicit(&__koral_str_region, memory_order_acquire);
+    if (!region) return 0;
+    uintptr_t end = atomic_load_explicit(&__koral_str_region_end, memory_order_relaxed);
+    return (const char*)p >= region && (const char*)p < (const char*)end;
 }
 
 static void* __koral_str_slot_alloc(void) {
@@ -87,7 +94,8 @@ static void* __koral_str_slot_alloc(void) {
     }
     if (__koral_str_slab_next == __koral_str_slab_end) {
         uintptr_t base = atomic_fetch_add(&__koral_str_region_top, KORAL_STR_SLAB_BYTES);
-        if (base == 0 || base + KORAL_STR_SLAB_BYTES > __koral_str_region_end) {
+        uintptr_t end = atomic_load_explicit(&__koral_str_region_end, memory_order_relaxed);
+        if (base == 0 || base + KORAL_STR_SLAB_BYTES > end) {
             return NULL; /* 区耗尽/未建：回落 malloc */
         }
         __koral_str_slab_next = (char*)base;
@@ -127,10 +135,10 @@ void* __koral_string_alloc(uintptr_t len) {
     uintptr_t need = overhead + len;
     struct __koral_Control* control = NULL;
     if (need <= KORAL_STR_SLOT) {
-        if (!__koral_str_region) {
+        if (!atomic_load_explicit(&__koral_str_region, memory_order_acquire)) {
             __koral_str_region_init();
         }
-        if (__koral_str_region) {
+        if (atomic_load_explicit(&__koral_str_region, memory_order_acquire)) {
             control = (struct __koral_Control*)__koral_str_slot_alloc();
         }
     }
@@ -205,9 +213,12 @@ void __koral_release_slow(struct __koral_Control* control, __koral_Dtor dtor) {
     // 那次 fetch_sub（RcBox 协议）：强路径与弱路径都走同一判定，胜者恰好
     // 一个。早先「强看 weak、weak 看 strong」的互查是两个释放者，两线程并发
     // 各释放一个引用计数时双双看到 0，double free。
-    // release 减量：发布 dtor 的写。胜者是本线程时直接 free；胜者是别的
-    // weak_release 时，对方的 acquire fence 与这里同步（见 __koral_weak_release）。
+    // release 减量：发布 dtor 的写。与 Rust `Arc::drop_slow` 同形——赢下弱
+    // 计数递减的一方**自己**取 acquire fence 再 free：不能只靠对面
+    // （__koral_weak_release）来 fence，因为赢的可能是本线程（弱计数归隐式
+    // +1 时），那就没有对面来同步（2026-11-12 补齐）。
     if (atomic_fetch_sub_explicit(&control->weak_count, 1, memory_order_release) == 1) {
+        atomic_thread_fence(memory_order_acquire);
         __koral_control_free(control);
     }
 }

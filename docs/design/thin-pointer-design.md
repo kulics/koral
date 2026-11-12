@@ -168,6 +168,28 @@ static const struct {
 进行**；内存的释放判定点是隐式 weak 的零穿越。理由见
 [`type-semantics.md`](type-semantics.md)「析构期间对象不可复活」。
 
+### 并发下的内存序（RC 计数与字符串区）
+
+RC 协议的两个计数器是 C11 原子；**每个「释放整块」的判定点都要与此前所有
+release 减量同步**，形态照 Rust 的 `Arc` / `Weak`：
+
+- **强路径**：`__koral_release` 的快路径以 `fetch_sub(release)` 递减，
+  归零方在进 `__koral_release_slow`（跑析构）之前取 **acquire fence**。
+- **弱计数到 0 的 free 判定点有两条**——析构后释放隐式 weak 的强路径
+  （`__koral_release_slow` 尾部）与显式 weak 的 `__koral_weak_release`——
+  两者都是 `fetch_sub(weak, release) == 1` 后 **acquire fence 再 free**。
+  Rust `Weak::drop` 与 `Arc::drop_slow` 同形。**2026-11-12 补齐**：
+  `__koral_release_slow` 此前只靠「对方（weak_release）的 fence」同步，
+  而赢下 weak 递减的若是强路径自己，就没有对面来 fence——赢的一方同样
+  要自己取 fence（`Arc::drop_slow` 的写法），才能看见其它线程更早的
+  weak/强释放对块的全部写。
+- **字符串区（`__koral_str_region`）是跨线程共享的 bump 区**：区指针与区界
+  由一次惰性初始化发布，之后**每个线程在每个块 free 时都会读**
+  （`__koral_str_in_region` 的地址区间判定）——这不是一次性读。**2026-11-12
+  改原子读写**：`region` / `region_end` 用原子 load/store（发布序不变：
+  top/end 先写、region 指针最后 release 发布；读侧先 acquire 读 region、
+  再读 end），消除 plain 读写的数据竞争。`top` 的 bump 分配本就是原子。
+
 ### 尺寸与设计收益
 
 | | 现在 |

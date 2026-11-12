@@ -2205,8 +2205,37 @@ given TypeChecker {
             TypedExprKind.Variable(temp_symbol),
             temp_symbol.symbol_type,
         );
+        let mutable block_statements = List[TypedStatement].new();
+        // 书写序 = 求值序（guide §Evaluation Order）：左操作数先于右操作数。
+        // 链首的左操作数是真表达式，先绑进临时，其后才是右操作数的临时——
+        // 旧形把右操作数的 LetStmt 排在前面，`a < b < c` 实跑 b, a, c。
+        // 中间接操作数只在这里求值一次（临时），短路与单次求值语义不变。
+        let left_ref = when left_source in {
+            .Some(_) then {
+                let left_temp_symbol = self.make_expr_temp_symbol(
+                    "__cmp_chain_left",
+                    normalized.first.expr_type,
+                    VariableKind.Value(),
+                );
+                block_statements.push(
+                    TypedStatement.LetStmt(
+                        left_temp_symbol,
+                        normalized.first,
+                        unknown_span(),
+                    ),
+                );
+                make_typed_expr(
+                    TypedExprKind.Variable(left_temp_symbol),
+                    left_temp_symbol.symbol_type,
+                )
+            },
+            .None() then normalized.first,
+        };
+        block_statements.push(
+            TypedStatement.LetStmt(temp_symbol, normalized.second, unknown_span()),
+        );
         let condition = self.build_typed_comparison_expr(
-            normalized.first,
+            left_ref,
             operators[index],
             temp_ref,
             when left_source in {
@@ -2222,10 +2251,6 @@ given TypeChecker {
             Option[Expr].None(),
             Option[TypedExpr].None(),
             scope,
-        );
-        let mutable block_statements = List[TypedStatement].new();
-        block_statements.push(
-            TypedStatement.LetStmt(temp_symbol, normalized.second, unknown_span()),
         );
         let else_false = make_typed_expr(
             TypedExprKind.BoolLiteral(false),

@@ -1,5 +1,16 @@
 using "std/os" { IntoPath, env, read_text_file };
 
+// Source-span identity for the written-argument hoist
+// (hoist_written_arg_order: a planned argument is a WRITTEN argument exactly
+// when its span matches one of the call's own argument expressions; a
+// default's span lives at the parameter declaration instead).
+private let span_eq(a: SourceSpan, b: SourceSpan): Bool =
+    a.start.line == b.start.line and a.start.column == b.start.column
+        and a.end.line == b.end.line and a.end.column == b.end.column;
+
+private let span_loc_lt(a: SourceLocation, b: SourceLocation): Bool =
+    a.line < b.line or (a.line == b.line and a.column < b.column);
+
 given TypeChecker {
     /// The resolved type of a `Base[Args]` instantiation -- the spelling the
     /// type-as-value message names. `List[Foo]`, `Dict[String, Int]`, nested
@@ -1575,6 +1586,113 @@ given TypeChecker {
             };
         };
         return Option[List[Expr]].Some(expressions);
+    };
+
+    /// 书写序 = 求值序（guide §Evaluation Order，2026-11-12）：命名实参与命名
+    /// 构造字段把实参表达式按**参数序**落位，但实参的**求值**仍按书写序。
+    /// 计划后的槽位若还是**书写实参**的同一表达式（span 相同），其书写位置即
+    /// 该实参在调用里的次序；默认值实参的 span 在参数声明处、对不上任何书写
+    /// 实参，留在自己的槽位求值——自然排在全部书写实参之后。书写序即参数序时
+    /// 原样返回（常见路径零变化、ARC 计数不受扰）。绑定挂在参数序第 0 槽的
+    /// Block 上：接收者与被调用方仍先于实参求值，与旧行为一致。
+    hoist_written_arg_order(
+        self,
+        written_args: List[Expr],
+        planned_args: List[Expr],
+        typed_args: List[TypedExpr],
+    ): List[TypedExpr] = {
+        let count = typed_args.count();
+        if count < 2 or planned_args.count() != count then {
+            return typed_args;
+        };
+        // 每个槽位的书写位置：与某书写实参同 span → 该实参的书写序号；否则
+        // （默认值）→ -1，不参与排序。
+        let mutable written_pos = List[Int].new();
+        for _ in 0..<count then {
+            written_pos.push(-1);
+        };
+        for pair in written_args.lazy().enumerate() then {
+            let w = pair.first;
+            let w_span = expr_span(self.call_argument_expr(pair.second));
+            let mutable i = 0;
+            while i < count then {
+                if written_pos[i] < 0 and span_eq(expr_span(planned_args[i]), w_span) then {
+                    written_pos[i] = w;
+                };
+                i += 1;
+            };
+        };
+        // 书写槽位按书写序号排序 = 书写序。
+        let mutable seq = List[Int].new();
+        let mutable i = 0;
+        while i < count then {
+            if written_pos[i] >= 0 then {
+                seq.push(i);
+            };
+            i += 1;
+        };
+        let mutable a = 1;
+        while a < seq.count() then {
+            let mutable b = a;
+            while b > 0 and written_pos[seq[b]] < written_pos[seq[b - 1]] then {
+                let tmp = seq[b];
+                seq[b] = seq[b - 1];
+                seq[b - 1] = tmp;
+                b -= 1;
+            };
+            a += 1;
+        };
+        // 书写序即参数序 → 不介入（默认值实参的槽位插曲不动）。
+        let mutable ascending = true;
+        let mutable k = 1;
+        while k < seq.count() then {
+            if seq[k - 1] >= seq[k] then {
+                ascending = false;
+                break;
+            };
+            k += 1;
+        };
+        if ascending then {
+            return typed_args;
+        };
+        let mutable slot_syms = List[Option[Symbol]].new();
+        for _ in 0..<count then {
+            slot_syms.push(Option[Symbol].None());
+        };
+        let mutable bindings = List[TypedStatement].new();
+        for slot in seq then {
+            let temp_symbol = self.make_expr_temp_symbol(
+                "__arg_order",
+                typed_args[slot].expr_type,
+                VariableKind.Value(),
+            );
+            slot_syms[slot] = Option[Symbol].Some(temp_symbol);
+            bindings.push(
+                TypedStatement.LetStmt(temp_symbol, typed_args[slot], unknown_span()),
+            );
+        };
+        let mutable new_args = List[TypedExpr].new();
+        for p in 0..<count then {
+            when slot_syms[p] in {
+                .Some(temp_symbol) then {
+                    new_args.push(
+                        make_typed_expr(
+                            TypedExprKind.Variable(temp_symbol),
+                            temp_symbol.symbol_type,
+                        ),
+                    );
+                },
+                .None() then {
+                    new_args.push(typed_args[p]);
+                },
+            };
+        };
+        let tail = new_args[0];
+        new_args[0] = make_typed_expr(
+            TypedExprKind.Block(bindings, Option[TypedExpr].Some(tail)),
+            tail.expr_type,
+        );
+        return new_args;
     };
 
     validate_call_argument_order(self, args: List[Expr]): Bool = {

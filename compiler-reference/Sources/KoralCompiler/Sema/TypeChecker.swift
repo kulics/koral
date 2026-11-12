@@ -1456,6 +1456,11 @@ public class TypeChecker {
   }
 
   /// 当前正在处理的节点所属 package。
+  /// Written-argument order stack for the evaluation-order hoist
+  /// (attachArgEvalPrelude/seatTypedCallResult, ConstructorArgumentPlanning):
+  /// planCallArgumentExpressions pushes the plan's written order, and the
+  /// typed call construction pops it. Nested calls settle LIFO.
+  var argWrittenOrderStack: [[Int]] = []
   var currentPackageID: String = "" {
     didSet {
       // The access-level rule (`DefIdMap.isDefHidden`) compares declarations

@@ -174,6 +174,27 @@ clang -I std tests/runtime-cases/object_lock_stress.c "$WORK/rt_plain.o" \
 "$WORK/object_lock_stress$EXE"
 echo "object lock protocol OK"
 
+# The string slab region's atomic publication (thin-pointer-design.md
+# §并发下的内存序): the region pointer / end are read on every block free from
+# every thread, so the lazy init must publish them atomically -- a torn read
+# misclassifies a region slot as a malloc block and free() aborts on the
+# interior pointer. Races 8 threads through the region init and the free-path
+# membership test. Built WITH TSan where clang has it (macOS/Linux): the
+# pre-fix plain-pointer publication is caught deterministically as a data
+# race by TSan but only probabilistically by behavior, so the sanitizer run
+# is the pin. Windows clang has no TSan -- run the plain build there.
+if [ "$WINDOWS" = "1" ]; then
+  clang -I std tests/runtime-cases/str_region_race.c "$WORK/rt_plain.o" \
+    -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS
+else
+  clang -c -I std -fsanitize=thread std/koral_runtime.c -o "$WORK/rt_tsan.o" \
+    -Wno-everything -O1
+  clang -I std -fsanitize=thread tests/runtime-cases/str_region_race.c \
+    "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS
+fi
+"$WORK/str_region_race$EXE"
+echo "str region publication OK"
+
 "$BOOTSTRAP" emit-c tests/runtime-cases/weak_init_probe.koral -o "$WORK/weak_init_probe"
 probe_c="$WORK/weak_init_probe/weak_init_probe.c"
 grep -q 'weak_count = 1' "$probe_c"
@@ -212,6 +233,8 @@ grep -q 'w6_probe_alias_releases=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: alias release side" >&2; exit 1; }
 grep -q 'w7_into_frozen_retains=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: into_frozen is a hand-off, not a copy" >&2; exit 1; }
+grep -q 'w8_init_memory_retains=2' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: init_memory argument is a consuming use" >&2; exit 1; }
 echo "rc counter pins OK"
 
 # ── samples ───────────────────────────────────────────────────────────────────

@@ -81,8 +81,11 @@ public type unsafe sendable mutable StdoutPipe;
 public type unsafe sendable mutable StderrPipe;
 
 /// Child process handle providing wait, pipe access, and lifecycle management.
-/// Sendable contract: `wait`/`kill` from another thread is idiomatic (a
-/// watchdog reaps while the spawner continues).
+/// Sendable contract: CROSS-THREAD SHARED — `wait`/`kill` from another thread is
+/// idiomatic (a watchdog reaps while the spawner continues). The handle
+/// synchronizes its own state: wait/try_wait/pipe takes are safe to call
+/// concurrently; wait is idempotent (every caller observes the same exit
+/// status, exactly one reap) and pipe takes are single-shot.
 public type unsafe sendable mutable Process;
 
 /// I/O redirection configuration for child process stdin/stdout/stderr.
@@ -224,12 +227,20 @@ given Process {
     /// by the kernel after the process was reaped. 0 means not captured.
     public peak_rss_bytes(self): UInt64;
     /// Block until the child process exits, returning its exit status.
+    /// Idempotent and thread-safe: any number of threads may call wait()
+    /// concurrently; exactly one of them reaps the child and every caller
+    /// observes the same exit status. The reap itself runs outside the lock.
     public wait(self): Result[ExitStatus];
     /// Wait for the child process to exit and capture all stdout/stderr output.
     /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
+    /// The pipe fds are claimed single-shot: a concurrent take_*_pipe() wins or
+    /// loses the claim atomically, so no fd is ever closed twice.
     public wait_output(self): Result[CommandOutput];
     /// Non-blocking check if the child process has exited.
     /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
+    /// While another thread's wait() is reaping, returns Ok(None); poll again
+    /// for the recorded status. Once the child is reaped, repeat calls return
+    /// the recorded status.
     public try_wait(self): Result[Option[ExitStatus]];
     /// Take ownership of the stdin pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).

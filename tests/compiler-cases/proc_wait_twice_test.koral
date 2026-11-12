@@ -1,0 +1,48 @@
+// EXPECT: proc_wait_twice_ok
+// EXPECT: proc_pipe_take_single_shot_ok
+
+// Process.wait() is idempotent: calling it twice reaps the child exactly once
+// and both calls observe the same exit status. Pipe takes stay single-shot.
+using "std/os" { ... };
+using "std/proc" { ... };
+
+let main(): Void = {
+    when Command.new("echo").arg("koral_proc_wait").spawn() in {
+        .Ok(proc) then {
+            when proc.wait() in {
+                .Ok(status) then assert(status.is_success(), "first wait success"),
+                .Error(e) then panic("first wait failed: " + e.message()),
+            };
+            when proc.wait() in {
+                .Ok(status) then assert(
+                    status.is_success(),
+                    "repeat wait should return the same status",
+                ),
+                .Error(e) then panic("repeat wait must stay idempotent: " + e.message()),
+            };
+        },
+        .Error(e) then panic("spawn failed: " + e.message()),
+    };
+    println("proc_wait_twice_ok");
+
+    when Command.new("echo").arg("koral_proc_pipes").set_stdout(IoRedirect.Piped()).spawn() in {
+        .Ok(proc) then {
+            let first = proc.take_stdout_pipe();
+            let second = proc.take_stdout_pipe();
+            when first in {
+                .Some(_) then {},
+                .None() then panic("first stdout take should be Some"),
+            };
+            when second in {
+                .Some(_) then panic("second stdout take must be None"),
+                .None() then {},
+            };
+            when proc.wait() in {
+                .Ok(status) then assert(status.is_success(), "wait after pipe takes"),
+                .Error(e) then panic("wait failed: " + e.message()),
+            };
+        },
+        .Error(e) then panic("spawn failed: " + e.message()),
+    };
+    println("proc_pipe_take_single_shot_ok");
+};

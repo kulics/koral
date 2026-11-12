@@ -34,22 +34,31 @@ public let available_parallelism(): Int;
 ```koral
 /// Thread builder, configures thread parameters then creates thread via spawn().
 /// Analogous to Command builder -> Process handle pattern.
+/// Sendable contract: TRANSFER, not SHARE — builder discipline: configure from
+/// one thread, then spawn(); a Task handle is handed off, not shared.
 public type unsafe sendable mutable Task;
 
 /// Handle to a spawned thread, obtained from Task.spawn().
 /// Release it with wait() or detach(); dropping it without either detaches the thread automatically.
-/// Sendable contract: `wait`/`detach` from another thread is idiomatic.
+/// Sendable contract: CROSS-THREAD SHARED — `wait`/`detach` from another thread
+/// is idiomatic, safe, and idempotent. The handle synchronizes its own state:
+/// exactly one thread performs the actual join (or detach), and every waiter
+/// observes the same completion outcome.
 public type unsafe sendable mutable Thread;
 
 /// One-shot countdown timer that blocks in wait() until its duration elapses.
-/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
-/// another thread is safe.
+/// Sendable contract: CROSS-THREAD SHARED — handoff to a worker is idiomatic and
+/// `cancel`/`reset` from another thread is safe. The handle serializes its own
+/// state (duration, fired/cancelled flags, timer context) behind an internal
+/// mutex, so `cancel` racing `reset` can never touch a destroyed timer context.
 public type unsafe sendable mutable Timer;
 
 /// Periodic timer whose wait() blocks for one interval at a time.
 /// Each interval is measured from the previous wait() return, so drift accumulates instead of staying on a fixed schedule.
-/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
-/// another thread is safe.
+/// Sendable contract: CROSS-THREAD SHARED — handoff to a worker is idiomatic and
+/// `cancel`/`reset` from another thread is safe. The handle serializes its own
+/// state (interval, cancelled flag, timer context) behind an internal mutex, so
+/// `cancel` racing `reset` can never touch a destroyed timer context.
 public type unsafe sendable mutable Ticker;
 ```
 
@@ -73,13 +82,19 @@ given Thread: Drop {};
 
 /// Join or detach the thread, and query its id and name.
 given Thread {
-    /// Block until the thread finishes.
-    /// Returns Error if already waited or detached.
-    /// A failed join (e.g. a thread waiting on itself) leaves the handle open:
-    /// the call stays retryable and Drop still detaches instead of leaking the
-    /// OS thread resources.
+    /// Block until the thread finishes, and report its completion.
+    /// Idempotent and thread-safe: any number of threads may call wait()
+    /// concurrently; exactly one of them performs the actual join and every
+    /// caller observes the same outcome. A repeat wait() after a successful
+    /// one returns the same success without joining again. A failed join
+    /// (e.g. a thread waiting on itself) releases the claim and leaves the
+    /// handle open: the call stays retryable and Drop still detaches instead
+    /// of leaking the OS thread resources. Returns Error("thread already
+    /// detached") only while the handle is detached.
     public wait(self): Result[Void];
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
+    /// Idempotent and thread-safe: only a still-live thread is detached, exactly
+    /// once; detaching after wait() or detach() is a no-op.
     public detach(self): Void;
     /// Get the thread ID.
     public id(self): UInt64;
@@ -105,6 +120,8 @@ given Timer {
     /// call reset while another thread is blocked in wait() on this timer.
     public reset(self, d: Duration): Void;
     /// Cancel the timer. Any blocked wait() returns immediately.
+    /// Idempotent and thread-safe: serializes with reset() so the cancel never
+    /// touches a timer context that reset() is destroying or rebuilding.
     public cancel(self): Void;
 };
 
@@ -123,6 +140,8 @@ given Ticker {
     /// call reset while another thread is blocked in wait() on this ticker.
     public reset(self, interval: Duration): Void;
     /// Cancel the ticker. Any blocked wait() returns immediately.
+    /// Idempotent and thread-safe: serializes with reset() so the cancel never
+    /// touches a timer context that reset() is destroying or rebuilding.
     public cancel(self): Void;
 };
 ```

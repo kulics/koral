@@ -14,6 +14,53 @@ let foreign __koral_format_float64(
     alt_form: Bool,
 ): *UInt8;
 
+// Correctly-rounded decimal -> double (strtod); the argument must be a
+// NUL-terminated String's bytes. Used to verify round-trips below.
+let foreign __koral_parse_float64(cstr: *UInt8): Float64;
+
+// Shortest round-trip decimal via trial precision: for each significant digit
+// count p, `%g` emits a compact form ("2.3", "1e+20", "0") whose re-parse is
+// compared bit-for-bit against the value; the shortest text that round-trips
+// is kept (17 digits always suffice for Float64, 9 for Float32). This is the
+// same rendering JSON numbers use (std/json's format_json_number), so one
+// spelling covers interpolation, to_string and JSON output. This never
+// converts through `Int`, so magnitudes above 2^63 print fine.
+private let format_float_shortest(f: Float64, is_float32: Bool): String = {
+    let limit = if is_float32 then 9 else 17;
+    let mutable best = "";
+    let mutable best_len = 0;
+    let mutable found = false;
+    let mutable p = 1;
+    while p <= limit then {
+        let text = String.from_cstring_unchecked(
+            __koral_format_float64(f, 'g', p, false),
+        );
+        let parsed = __koral_parse_float64(text.bytes.data);
+        // Float32 round-trips through Float64-parse-then-narrow, exactly like
+        // Float32.parse (float narrowing is unchecked -- numeric-families).
+        let round_trips = if is_float32 then {
+            Float32(parsed).to_bits() == Float32(f).to_bits()
+        } else {
+            parsed.to_bits() == f.to_bits()
+        };
+        if round_trips then {
+            if not found or text.count() < best_len then {
+                best = text;
+                best_len = text.count();
+                found = true;
+            };
+        };
+        p += 1;
+    };
+    if not found then {
+        // Unreachable for finite values; keep a safe rendering anyway.
+        best = String.from_cstring_unchecked(
+            __koral_format_float64(f, 'g', limit, false),
+        );
+    };
+    return best;
+};
+
 /// Types that can render themselves as a `String`.
 public trait ToString {
     /// Return the display form of this value.
@@ -239,11 +286,13 @@ given WrappingUInt64: ToString {
     public to_string(self): String = UInt64(self).to_string();
 };
 
-/// `ToString` for `Float32`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
+/// `ToString` for `Float32`: the shortest decimal that parses back to the same
+/// value (`Float32.parse`), or `NaN`, `Inf`, `-Inf`.
 given Float32: ToString {
 
-    /// Return the value as decimal text with six fractional digits, or as
-    /// `NaN`, `Inf`, or `-Inf`.
+    /// Return the shortest decimal text that parses back to this value, or
+    /// `NaN`, `Inf`, or `-Inf`. For a fixed presentation (decimals, width)
+    /// use `.format(spec)`.
     public to_string(self): String = {
         let bits = self.to_bits();
         let exp = (bits >> 23) & 255;
@@ -258,19 +307,19 @@ given Float32: ToString {
             return "Inf";
         };
 
-        // Six fractional digits, correctly rounded, with no integer
-        // conversion (which would overflow for |f| >= 2^63).
-        return String.from_cstring_unchecked(
-            __koral_format_float64(Float64(self), 'f', 6, false),
-        );
+        // Shortest text that parses back to the same Float32 (round-trip),
+        // with no integer conversion (which would overflow for |f| >= 2^63).
+        return format_float_shortest(Float64(self), true);
     };
 };
 
-/// `ToString` for `Float64`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
+/// `ToString` for `Float64`: the shortest decimal that parses back to the same
+/// value (`Float64.parse`), or `NaN`, `Inf`, `-Inf`.
 given Float64: ToString {
 
-    /// Return the value as decimal text with six fractional digits, or as
-    /// `NaN`, `Inf`, or `-Inf`.
+    /// Return the shortest decimal text that parses back to this value, or
+    /// `NaN`, `Inf`, or `-Inf`. For a fixed presentation (decimals, width)
+    /// use `.format(spec)`.
     public to_string(self): String = {
         let bits = self.to_bits();
         let exp = (bits >> 52) & 2047;
@@ -285,9 +334,9 @@ given Float64: ToString {
             return "Inf";
         };
 
-        // Six fractional digits, correctly rounded, with no integer
-        // conversion (which would overflow for |f| >= 2^63).
-        return String.from_cstring_unchecked(__koral_format_float64(self, 'f', 6, false));
+        // Shortest text that parses back to the same Float64 (round-trip),
+        // with no integer conversion (which would overflow for |f| >= 2^63).
+        return format_float_shortest(self, false);
     };
 };
 

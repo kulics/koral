@@ -55,6 +55,22 @@ let freeze_window(): String = {
     return "w7_into_frozen_retains=\(r1 - r0)";
 };
 
+// init_memory 的实参算消费性使用（2026-11-12 细化，code­gen_borrowed_self
+// 的 move_walk_value_as_consumed）：value 源局部整体禁移。init_memory 接管
+// value 的 +1，之后对同一局部的读必须是复制——若末次移动在后面的读上开火，
+// 就与 init_memory 的消费抢同一个 +1（双认领 → 双释放，运行直接崩）。
+let init_memory_window(): String = {
+    let slot = alloc_memory[Box](UInt(1));
+    let x = Box(4);
+    let r0 = __koral_rc_stats_retains();
+    init_memory(slot, x);
+    let y = x;
+    let r1 = __koral_rc_stats_retains();
+    let _ = read(y);
+    deinit_memory(slot);
+    return "w8_init_memory_retains=\(r1 - r0)";
+};
+
 let main(): Void = {
     __koral_rc_stats_enable();
 
@@ -90,4 +106,6 @@ let main(): Void = {
     println("w6_probe_alias_releases=\(d3b - d2b)");
 
     println(freeze_window());
+
+    println(init_memory_window());
 };

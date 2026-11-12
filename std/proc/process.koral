@@ -1,4 +1,5 @@
 using "std" { ... };
+using "std/sync" { Mutex };
 // ============================================================================
 // std.proc - Process Handle
 // ============================================================================
@@ -50,6 +51,9 @@ let foreign __koral_read_all_pipes(
     out_stderr_len: *mutable UInt64,
 ): Int32;
 
+/// Yield the current thread's time slice (used while another thread reaps).
+let foreign __koral_thread_yield(): Void;
+
 /// Get pointer to errno value.
 /// Reuse errno helpers from std.os to avoid cross-module symbol ambiguity.
 
@@ -62,7 +66,10 @@ let foreign __koral_read_all_pipes(
 // ============================================================================
 
 /// Internal storage for child process state.
-/// Holds the PID, pipe file descriptors (-1 means no pipe), and wait status.
+/// Holds the PID, pipe file descriptors (-1 means no pipe), wait claim state,
+/// and the recorded exit status (raw_status is valid once waited is true).
+/// Every check-then-act on these fields runs under the internal mutex, so
+/// concurrent wait/try_wait/pipe takes can never double-reap or double-close.
 type unsafe sendable mutable ProcessStorage(
     pid: UInt32,
     mutable stdin_fd: Int32,
@@ -70,12 +77,34 @@ type unsafe sendable mutable ProcessStorage(
     mutable stderr_fd: Int32,
     mutable waited: Bool,
     mutable peak_rss_bytes: UInt64,
+    mutable waiting: Bool,
+    mutable raw_status: Int,
+    private mutex: Mutex,
+);
+
+/// Internal constructor used by Command.spawn().
+let make_process_storage(
+    pid: UInt32,
+    stdin_fd: Int32,
+    stdout_fd: Int32,
+    stderr_fd: Int32,
+): ProcessStorage = ProcessStorage(
+    pid,
+    stdin_fd,
+    stdout_fd,
+    stderr_fd,
+    false,
+    0,
+    false,
+    0,
+    Mutex.new(),
 );
 
 given ProcessStorage: Drop {
 
     /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
     drop(self): Void = {
+        self.mutex.lock();
         if self.stdin_fd >= 0 then {
             __koral_pipe_close(self.stdin_fd);
         };
@@ -88,6 +117,7 @@ given ProcessStorage: Drop {
         if not self.waited then {
             __koral_waitpid(self.pid);
         };
+        self.mutex.unlock();
     };
 };
 
@@ -96,8 +126,11 @@ given ProcessStorage: Drop {
 // ============================================================================
 
 /// Child process handle providing wait, pipe access, and lifecycle management.
-/// Sendable contract: `wait`/`kill` from another thread is idiomatic (a
-/// watchdog reaps while the spawner continues).
+/// Sendable contract: CROSS-THREAD SHARED — `wait`/`kill` from another thread is
+/// idiomatic (a watchdog reaps while the spawner continues). The handle
+/// synchronizes its own state: wait/try_wait/pipe takes are safe to call
+/// concurrently; wait is idempotent (every caller observes the same exit
+/// status, exactly one reap) and pipe takes are single-shot.
 public type unsafe sendable mutable Process(mutable storage: ProcessStorage);
 
 /// Wait for the child to exit, capture its output, and take ownership of its pipes.
@@ -110,44 +143,93 @@ given Process {
     /// by the kernel after the process was reaped. 0 means not captured.
     public peak_rss_bytes(self): UInt64 = self.storage.peak_rss_bytes;
 
+    /// Reconstruct the recorded exit status. Call with the storage lock held.
+    private stored_status(self): ExitStatus = if self.storage.raw_status < 0 then {
+        ExitStatus.from_signal(0 - self.storage.raw_status)
+    } else {
+        ExitStatus.from_code(self.storage.raw_status)
+    };
+
     /// Block until the child process exits, returning its exit status.
+    /// Idempotent and thread-safe: any number of threads may call wait()
+    /// concurrently; exactly one of them reaps the child and every caller
+    /// observes the same exit status. The reap itself runs outside the lock.
     public wait(self): Result[ExitStatus] = {
-        if self.storage.waited then {
-            return Result[ExitStatus].Error("process already waited");
+        let mutable finished = false;
+        let mutable outcome = Result[ExitStatus].Error("failed to wait process");
+        while not finished then {
+            self.storage.mutex.lock();
+            if self.storage.waited then {
+                let status = self.stored_status();
+                self.storage.mutex.unlock();
+                outcome = Result[ExitStatus].Ok(status);
+                finished = true;
+            } else {
+                if not self.storage.waiting then {
+                    // Claim the wait: this caller alone reaps the child.
+                    self.storage.waiting = true;
+                    self.storage.mutex.unlock();
+                    // waitpid may block for the child's life: run it outside
+                    // the lock so other queries are not stalled behind it.
+                    let mutable exit_code: Int32 = 0;
+                    let mutable signal_num: Int32 = 0;
+                    let mutable maxrss: UInt64 = 0;
+                    let result = __koral_waitpid_full(
+                        self.storage.pid,
+                        &exit_code,
+                        &signal_num,
+                        &maxrss,
+                    );
+                    self.storage.mutex.lock();
+                    self.storage.waiting = false;
+                    if result != 0 then {
+                        self.storage.mutex.unlock();
+                        // Failed reap releases the claim: the call stays retryable.
+                        outcome = Result[ExitStatus].Error(last_error_message());
+                    } else {
+                        self.storage.peak_rss_bytes = maxrss;
+                        self.storage.raw_status = if signal_num > 0 then {
+                            0 - Int(signal_num)
+                        } else {
+                            Int(exit_code)
+                        };
+                        self.storage.waited = true;
+                        let status = self.stored_status();
+                        self.storage.mutex.unlock();
+                        outcome = Result[ExitStatus].Ok(status);
+                    };
+                    finished = true;
+                } else {
+                    // Another wait() is reaping: block until it publishes the
+                    // outcome, then loop to report the same result.
+                    self.storage.mutex.unlock();
+                    __koral_thread_yield();
+                };
+            };
         };
-        let mutable exit_code: Int32 = 0;
-        let mutable signal_num: Int32 = 0;
-        let mutable maxrss: UInt64 = 0;
-        let result = __koral_waitpid_full(
-            self.storage.pid,
-            &exit_code,
-            &signal_num,
-            &maxrss,
-        );
-        if result != 0 then {
-            return Result[ExitStatus].Error(last_error_message());
-        };
-        self.storage.peak_rss_bytes = maxrss;
-        self.storage.waited = true;
-        return if signal_num > 0 then Result[ExitStatus].Ok(
-            ExitStatus.from_signal(Int(signal_num)),
-        ) else Result[ExitStatus].Ok(ExitStatus.from_code(Int(exit_code)));
+        return outcome;
     };
 
     /// Wait for the child process to exit and capture all stdout/stderr output.
     /// Uses __koral_read_all_pipes for concurrent reading to avoid pipe deadlock.
+    /// The pipe fds are claimed single-shot: a concurrent take_*_pipe() wins or
+    /// loses the claim atomically, so no fd is ever closed twice.
     public wait_output(self): Result[CommandOutput] = {
-        // Close un-taken stdin_fd to send EOF to child
-        if self.storage.stdin_fd >= 0 then {
-            __koral_pipe_close(self.storage.stdin_fd);
-            self.storage.stdin_fd = -1;
-        };
-
+        // Claim the pipe fds under the lock; displaced fds are closed after
+        // the lock is released.
+        self.storage.mutex.lock();
+        let stdin_fd = self.storage.stdin_fd;
+        self.storage.stdin_fd = -1;
         let stdout_fd = self.storage.stdout_fd;
-        let stderr_fd = self.storage.stderr_fd;
-        // Mark fds as consumed to prevent double-close in drop
         self.storage.stdout_fd = -1;
+        let stderr_fd = self.storage.stderr_fd;
         self.storage.stderr_fd = -1;
+        self.storage.mutex.unlock();
+
+        // Close un-taken stdin to send EOF to child
+        if stdin_fd >= 0 then {
+            __koral_pipe_close(stdin_fd);
+        };
 
         // Read both pipes concurrently via C runtime (uses poll/select internally)
         let mutable out_stdout: *mutable UInt8 = null;
@@ -212,7 +294,20 @@ given Process {
 
     /// Non-blocking check if the child process has exited.
     /// Returns Ok(Some(status)) if exited, Ok(None) if still running, Error on system error.
+    /// While another thread's wait() is reaping, returns Ok(None); poll again
+    /// for the recorded status. Once the child is reaped, repeat calls return
+    /// the recorded status.
     public try_wait(self): Result[Option[ExitStatus]] = {
+        self.storage.mutex.lock();
+        if self.storage.waited then {
+            let status = self.stored_status();
+            self.storage.mutex.unlock();
+            return Result[Option[ExitStatus]].Ok(Option[ExitStatus].Some(status));
+        };
+        if self.storage.waiting then {
+            self.storage.mutex.unlock();
+            return Result[Option[ExitStatus]].Ok(Option[ExitStatus].None());
+        };
         let mutable exit_code: Int32 = 0;
         let mutable signal_num: Int32 = 0;
         let mutable maxrss: UInt64 = 0;
@@ -223,51 +318,61 @@ given Process {
             &maxrss,
         );
         if result < 0 then {
+            self.storage.mutex.unlock();
             return Result[Option[ExitStatus]].Error(last_error_message());
         };
         if result == 0 then {
+            self.storage.mutex.unlock();
             return Result[Option[ExitStatus]].Ok(Option[ExitStatus].None());
         };
         self.storage.peak_rss_bytes = maxrss;
-        self.storage.waited = true;
-        let status = if signal_num > 0 then {
-            ExitStatus.from_signal(Int(signal_num))
+        self.storage.raw_status = if signal_num > 0 then {
+            0 - Int(signal_num)
         } else {
-            ExitStatus.from_code(Int(exit_code))
+            Int(exit_code)
         };
+        self.storage.waited = true;
+        let status = self.stored_status();
+        self.storage.mutex.unlock();
         return Result[Option[ExitStatus]].Ok(Option[ExitStatus].Some(status));
     };
 
     /// Take ownership of the stdin pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
     public take_stdin_pipe(self): Option[StdinPipe] = {
-        if self.storage.stdin_fd < 0 then {
-            return Option[StdinPipe].None();
-        };
+        self.storage.mutex.lock();
         let fd = self.storage.stdin_fd;
         self.storage.stdin_fd = -1;
+        self.storage.mutex.unlock();
+        if fd < 0 then {
+            return Option[StdinPipe].None();
+        };
         return Option[StdinPipe].Some(StdinPipe(PipeStorage(fd)));
     };
 
     /// Take ownership of the stdout pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
     public take_stdout_pipe(self): Option[StdoutPipe] = {
-        if self.storage.stdout_fd < 0 then {
-            return Option[StdoutPipe].None();
-        };
+        self.storage.mutex.lock();
         let fd = self.storage.stdout_fd;
         self.storage.stdout_fd = -1;
+        self.storage.mutex.unlock();
+        if fd < 0 then {
+            return Option[StdoutPipe].None();
+        };
         return Option[StdoutPipe].Some(StdoutPipe(PipeStorage(fd)));
     };
 
     /// Take ownership of the stderr pipe (only Some when configured as Piped).
     /// Subsequent calls return None (ownership already transferred).
     public take_stderr_pipe(self): Option[StderrPipe] = {
-        if self.storage.stderr_fd < 0 then {
-            return Option[StderrPipe].None();
-        };
+        self.storage.mutex.lock();
         let fd = self.storage.stderr_fd;
         self.storage.stderr_fd = -1;
+        self.storage.mutex.unlock();
+        if fd < 0 then {
+            return Option[StderrPipe].None();
+        };
         return Option[StderrPipe].Some(StderrPipe(PipeStorage(fd)));
     };
 };

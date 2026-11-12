@@ -3,6 +3,10 @@ import Foundation
 struct ConstructorArgumentPlan {
   let orderedCallArgs: [CallArg?]
   let usesDefaults: Bool
+  /// Written position of each parameter slot's argument, or -1 for a slot
+  /// filled from the declared default. Written order is evaluation order
+  /// (guide "Evaluation Order", 2026-11-12).
+  let writtenOrder: [Int]
 }
 
 extension TypeChecker {
@@ -62,6 +66,8 @@ extension TypeChecker {
     paramTypeKeys: [String] = []
   ) throws -> ConstructorArgumentPlan {
     var orderedCallArgs: [CallArg?] = Array(repeating: nil, count: paramNames.count)
+    var writtenOrder: [Int] = Array(repeating: -1, count: paramNames.count)
+    var writtenIndex = 0
     var positionalIndex = 0
     var seenNamed = false
 
@@ -79,6 +85,8 @@ extension TypeChecker {
           throw SemanticError(.generic("Duplicate argument '\(label)'"), span: arg.span)
         }
         orderedCallArgs[fieldIndex] = arg
+        writtenOrder[fieldIndex] = writtenIndex
+        writtenIndex += 1
       } else {
         // Positional argument
         if seenNamed {
@@ -97,6 +105,8 @@ extension TypeChecker {
           throw SemanticError(.generic("Too many positional arguments in call to '\(callDescription)'"), span: arg.span)
         }
         orderedCallArgs[positionalIndex] = arg
+        writtenOrder[positionalIndex] = writtenIndex
+        writtenIndex += 1
         positionalIndex += 1
       }
     }
@@ -118,7 +128,8 @@ extension TypeChecker {
 
     return ConstructorArgumentPlan(
       orderedCallArgs: orderedCallArgs,
-      usesDefaults: usesDefaults
+      usesDefaults: usesDefaults,
+      writtenOrder: writtenOrder
     )
   }
 
@@ -157,7 +168,67 @@ extension TypeChecker {
       }
       expressions.append(defaultExpr)
     }
+    argWrittenOrderStack.append(plan.writtenOrder)
     return expressions
+  }
+
+  /// Typed-domain counterpart of koralc's `hoist_written_arg_order`: written
+  /// order is evaluation order (guide "Evaluation Order", 2026-11-12). The
+  /// planner seats arguments in PARAMETER order; this binds the written
+  /// arguments to temps in written order -- the prelude rides on parameter
+  /// slot 0 (the receiver / callee still evaluate first), default-filled slots
+  /// stay put and so run after the written arguments. Symbol refs, not names,
+  /// so no scope question arises. Written order already matching parameter
+  /// order is a no-op (the common path is untouched).
+  func hoistTypedArgs(
+    _ args: [TypedExpressionNode], writtenOrder: [Int]
+  ) -> [TypedExpressionNode] {
+    let count = args.count
+    guard count >= 2, writtenOrder.count == count else { return args }
+    var seq: [Int] = (0..<count).filter { writtenOrder[$0] >= 0 }
+    seq.sort { writtenOrder[$0] < writtenOrder[$1] }
+    var ascending = true
+    if seq.count >= 2 {
+      for i in 1..<seq.count where seq[i - 1] >= seq[i] { ascending = false }
+    }
+    guard !ascending, !seq.isEmpty else { return args }
+    var statements: [TypedStatementNode] = []
+    var newArgs = args
+    var slot0Tail: TypedExpressionNode = args[0]
+    var slot0Temp: Symbol? = nil
+    for slot in seq {
+      let tempSymbol = makeLocalSymbol(
+        name: "__arg_order_\(slot)", type: args[slot].type, kind: .variable(.Value))
+      statements.append(
+        .variableDeclaration(identifier: tempSymbol, value: args[slot], mutable: false))
+      newArgs[slot] = .variable(identifier: tempSymbol)
+      if slot == 0 { slot0Temp = tempSymbol }
+    }
+    if let temp = slot0Temp {
+      slot0Tail = .variable(identifier: temp)
+    }
+    newArgs[0] = .blockExpression(
+      statements: statements, tailExpression: slot0Tail, type: args[0].type)
+    return newArgs
+  }
+
+  /// Seat a freshly built typed call/construction node in written evaluation
+  /// order, popping the written order that planCallArgumentExpressions pushed.
+  func seatTypedCallResult(_ node: TypedExpressionNode) -> TypedExpressionNode {
+    guard !argWrittenOrderStack.isEmpty else { return node }
+    let writtenOrder = argWrittenOrderStack.removeLast()
+    switch node {
+    case .call(let callee, let arguments, let type):
+      return .call(
+        callee: callee, arguments: hoistTypedArgs(arguments, writtenOrder: writtenOrder),
+        type: type)
+    case .typeConstruction(let identifier, let typeArgs, let arguments, let type):
+      return .typeConstruction(
+        identifier: identifier, typeArgs: typeArgs,
+        arguments: hoistTypedArgs(arguments, writtenOrder: writtenOrder), type: type)
+    default:
+      return node
+    }
   }
 
   /// Plan constructor arguments with support for mixed positional/named params and defaults.
@@ -473,6 +544,6 @@ extension TypeChecker {
       }
     }
 
-    return typedArguments
+    return hoistTypedArgs(typedArguments, writtenOrder: plan.writtenOrder)
   }
 }

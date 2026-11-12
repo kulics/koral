@@ -1,4 +1,5 @@
 using "std" { ... };
+using "std/sync" { AtomicInt };
 // ============================================================================
 // std.async - Thread Handle
 // ============================================================================
@@ -12,22 +13,44 @@ using "std" { ... };
 let foreign __koral_thread_join(handle: *UInt8): Int32;
 let foreign __koral_thread_detach(handle: *UInt8): Void;
 
+// ============================================================================
+// Thread state machine (single atomic state)
+// ============================================================================
+// The handle's lifecycle is one atomic integer, claimed with compare_exchange
+// so wait()/detach()/Drop can never double-join or double-detach, no matter
+// how many threads use the handle at once:
+//   0 = live (neither waited nor detached)
+//   1 = join in flight (exactly one wait() won the claim and is joining)
+//   2 = waited (the join completed and its outcome is published)
+//   3 = detached
+// A failed join releases the claim back to 0, so the handle stays retryable.
+
+/// Internal constructor used by Task.spawn().
+let make_thread(
+    handle: *UInt8,
+    thread_id: UInt64,
+    thread_name: Option[String],
+): Thread = Thread(handle, thread_id, thread_name, AtomicInt.new(0));
+
 /// Handle to a spawned thread, obtained from Task.spawn().
 /// Release it with wait() or detach(); dropping it without either detaches the thread automatically.
-/// Sendable contract: `wait`/`detach` from another thread is idiomatic.
+/// Sendable contract: CROSS-THREAD SHARED — `wait`/`detach` from another thread
+/// is idiomatic, safe, and idempotent. The handle synchronizes its own state:
+/// exactly one thread performs the actual join (or detach), and every waiter
+/// observes the same completion outcome.
 public type unsafe sendable mutable Thread(
     handle: *UInt8,
     thread_id: UInt64,
     thread_name: Option[String],
-    mutable waited: Bool,
-    mutable detached: Bool,
+    private state: AtomicInt,
 );
 
 /// Drop conformance: detaches the thread when it was neither waited nor detached.
 given Thread: Drop {
 
     drop(self): Void = {
-        if not self.waited and not self.detached then {
+        // Claim the live state; only the winner detaches, exactly once.
+        if self.state.compare_exchange(expected = 0, desired = 3) then {
             __koral_thread_detach(self.handle);
         };
     };
@@ -36,33 +59,60 @@ given Thread: Drop {
 /// Join or detach the thread, and query its id and name.
 given Thread {
 
-    /// Block until the thread finishes.
-    /// Returns Error if already waited or detached.
-    /// A failed join (e.g. a thread waiting on itself) leaves the handle open:
-    /// the call stays retryable and Drop still detaches instead of leaking the
-    /// OS thread resources.
+    /// Block until the thread finishes, and report its completion.
+    /// Idempotent and thread-safe: any number of threads may call wait()
+    /// concurrently; exactly one of them performs the actual join and every
+    /// caller observes the same outcome. A repeat wait() after a successful
+    /// one returns the same success without joining again. A failed join
+    /// (e.g. a thread waiting on itself) releases the claim and leaves the
+    /// handle open: the call stays retryable and Drop still detaches instead
+    /// of leaking the OS thread resources. Returns Error("thread already
+    /// detached") only while the handle is detached.
     public wait(self): Result[Void] = {
-        if self.waited then {
-            return Result[Void].Error("thread already waited");
+        let mutable finished = false;
+        let mutable outcome = Result[Void].Error("failed to wait thread");
+        while not finished then {
+            if self.state.compare_exchange(expected = 0, desired = 1) then {
+                // Claim won: this caller alone performs the join.
+                let result = __koral_thread_join(self.handle);
+                if result != 0 then {
+                    // Release the claim: the handle stays open and retryable.
+                    self.state.store(0);
+                    outcome = Result[Void].Error("failed to wait thread");
+                } else {
+                    self.state.store(2);
+                    outcome = Result[Void].Ok({});
+                };
+                finished = true;
+            } else {
+                let state = self.state.load();
+                if state == 2 then {
+                    outcome = Result[Void].Ok({});
+                    finished = true;
+                } else {
+                    if state == 3 then {
+                        outcome = Result[Void].Error("thread already detached");
+                        finished = true;
+                    } else {
+                        if state == 1 then {
+                            // Another wait() is joining: block until it
+                            // publishes its outcome, then report the same one.
+                            yield_thread_now();
+                        };
+                    };
+                };
+            };
         };
-        if self.detached then {
-            return Result[Void].Error("thread already detached");
-        };
-        let result = __koral_thread_join(self.handle);
-        if result != 0 then {
-            return Result[Void].Error("failed to wait thread");
-        };
-        self.waited = true;
-        return Result[Void].Ok({});
+        return outcome;
     };
 
     /// Detach the thread (thread continues running, resources reclaimed by OS on exit).
+    /// Idempotent and thread-safe: only a still-live thread is detached, exactly
+    /// once; detaching after wait() or detach() is a no-op.
     public detach(self): Void = {
-        if self.waited or self.detached then {
-            return;
+        if self.state.compare_exchange(expected = 0, desired = 3) then {
+            __koral_thread_detach(self.handle);
         };
-        __koral_thread_detach(self.handle);
-        self.detached = true;
     };
 
     /// Get the thread ID.

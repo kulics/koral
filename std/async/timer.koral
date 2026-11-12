@@ -1,4 +1,5 @@
 using "std" { ... };
+using "std/sync" { Mutex };
 // ============================================================================
 // std.async - Timer / Ticker
 // ============================================================================
@@ -33,24 +34,29 @@ private let timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32 = {
 };
 
 /// One-shot countdown timer that blocks in wait() until its duration elapses.
-/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
-/// another thread is safe.
+/// Sendable contract: CROSS-THREAD SHARED — handoff to a worker is idiomatic and
+/// `cancel`/`reset` from another thread is safe. The handle serializes its own
+/// state (duration, fired/cancelled flags, timer context) behind an internal
+/// mutex, so `cancel` racing `reset` can never touch a destroyed timer context.
 public type unsafe sendable mutable Timer(
     private mutable ctx: *UInt8,
     private mutable d_secs: Int64,
     private mutable d_nanos: Int64,
     private mutable fired: Bool,
     private mutable cancelled: Bool,
+    private mutex: Mutex,
 );
 
 /// Drop conformance: cancels a still-pending timer and destroys its timer context.
 given Timer: Drop {
 
     drop(self): Void = {
+        self.mutex.lock();
         if not self.cancelled then {
             __koral_timer_context_cancel(self.ctx);
         };
         __koral_timer_context_destroy(self.ctx);
+        self.mutex.unlock();
     };
 };
 
@@ -62,19 +68,35 @@ given Timer {
         if d < Duration.zero() then {
             panic("Timer.new: duration must not be negative");
         };
-        return Timer(__koral_timer_context_create(), d.secs, d.nanos, false, false);
+        return Timer(
+            __koral_timer_context_create(),
+            d.secs,
+            d.nanos,
+            false,
+            false,
+            Mutex.new(),
+        );
     };
 
     /// Block for the timer's duration. Returns immediately if already fired or cancelled.
     /// Marks the timer as fired only when the full duration elapses; a wait()
     /// cut short by cancel() leaves the timer unfired.
     public wait(self): Void = {
+        self.mutex.lock();
         if self.fired or self.cancelled then {
+            self.mutex.unlock();
             return;
         };
-        let rc = timer_sleep(self.ctx, self.d_secs, self.d_nanos);
+        let ctx = self.ctx;
+        let secs = self.d_secs;
+        let nanos = self.d_nanos;
+        self.mutex.unlock();
+        // Sleep outside the lock so cancel() can interrupt the sleep.
+        let rc = timer_sleep(ctx, secs, nanos);
         if rc == 0 then {
+            self.mutex.lock();
             self.fired = true;
+            self.mutex.unlock();
         };
     };
 
@@ -87,6 +109,7 @@ given Timer {
         if d < Duration.zero() then {
             panic("Timer.reset: duration must not be negative");
         };
+        self.mutex.lock();
         self.d_secs = d.secs;
         self.d_nanos = d.nanos;
         self.fired = false;
@@ -95,36 +118,46 @@ given Timer {
             self.ctx = __koral_timer_context_create();
             self.cancelled = false;
         };
+        self.mutex.unlock();
     };
 
     /// Cancel the timer. Any blocked wait() returns immediately.
+    /// Idempotent and thread-safe: serializes with reset() so the cancel never
+    /// touches a timer context that reset() is destroying or rebuilding.
     public cancel(self): Void = {
+        self.mutex.lock();
         if not self.cancelled then {
             __koral_timer_context_cancel(self.ctx);
             self.cancelled = true;
         };
+        self.mutex.unlock();
     };
 };
 
 /// Periodic timer whose wait() blocks for one interval at a time.
 /// Each interval is measured from the previous wait() return, so drift accumulates instead of staying on a fixed schedule.
-/// Sendable contract: handoff to a worker is idiomatic; `cancel` from
-/// another thread is safe.
+/// Sendable contract: CROSS-THREAD SHARED — handoff to a worker is idiomatic and
+/// `cancel`/`reset` from another thread is safe. The handle serializes its own
+/// state (interval, cancelled flag, timer context) behind an internal mutex, so
+/// `cancel` racing `reset` can never touch a destroyed timer context.
 public type unsafe sendable mutable Ticker(
     private mutable ctx: *UInt8,
     private mutable i_secs: Int64,
     private mutable i_nanos: Int64,
     private mutable cancelled: Bool,
+    private mutex: Mutex,
 );
 
 /// Drop conformance: cancels a still-running ticker and destroys its timer context.
 given Ticker: Drop {
 
     drop(self): Void = {
+        self.mutex.lock();
         if not self.cancelled then {
             __koral_timer_context_cancel(self.ctx);
         };
         __koral_timer_context_destroy(self.ctx);
+        self.mutex.unlock();
     };
 };
 
@@ -136,15 +169,28 @@ given Ticker {
         if interval <= Duration.zero() then {
             panic("Ticker.new: interval must be positive");
         };
-        return Ticker(__koral_timer_context_create(), interval.secs, interval.nanos, false);
+        return Ticker(
+            __koral_timer_context_create(),
+            interval.secs,
+            interval.nanos,
+            false,
+            Mutex.new(),
+        );
     };
 
     /// Block until the next tick. Returns immediately if cancelled.
     public wait(self): Void = {
+        self.mutex.lock();
         if self.cancelled then {
+            self.mutex.unlock();
             return;
         };
-        timer_sleep(self.ctx, self.i_secs, self.i_nanos);
+        let ctx = self.ctx;
+        let secs = self.i_secs;
+        let nanos = self.i_nanos;
+        self.mutex.unlock();
+        // Sleep outside the lock so cancel() can interrupt the sleep.
+        timer_sleep(ctx, secs, nanos);
     };
 
     /// Change the interval. Takes effect on the next wait() call.
@@ -155,6 +201,7 @@ given Ticker {
         if interval <= Duration.zero() then {
             panic("Ticker.reset: interval must be positive");
         };
+        self.mutex.lock();
         self.i_secs = interval.secs;
         self.i_nanos = interval.nanos;
         if self.cancelled then {
@@ -162,13 +209,18 @@ given Ticker {
             self.ctx = __koral_timer_context_create();
             self.cancelled = false;
         };
+        self.mutex.unlock();
     };
 
     /// Cancel the ticker. Any blocked wait() returns immediately.
+    /// Idempotent and thread-safe: serializes with reset() so the cancel never
+    /// touches a timer context that reset() is destroying or rebuilding.
     public cancel(self): Void = {
+        self.mutex.lock();
         if not self.cancelled then {
             __koral_timer_context_cancel(self.ctx);
             self.cancelled = true;
         };
+        self.mutex.unlock();
     };
 };

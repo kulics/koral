@@ -4049,17 +4049,21 @@ given WrappingUInt64: ToString {
     public to_string(self): String;
 };
 
-/// `ToString` for `Float32`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
+/// `ToString` for `Float32`: the shortest decimal that parses back to the same
+/// value (`Float32.parse`), or `NaN`, `Inf`, `-Inf`.
 given Float32: ToString {
-    /// Return the value as decimal text with six fractional digits, or as
-    /// `NaN`, `Inf`, or `-Inf`.
+    /// Return the shortest decimal text that parses back to this value, or
+    /// `NaN`, `Inf`, or `-Inf`. For a fixed presentation (decimals, width)
+    /// use `.format(spec)`.
     public to_string(self): String;
 };
 
-/// `ToString` for `Float64`: decimal with six fractional digits, or `NaN`, `Inf`, `-Inf`.
+/// `ToString` for `Float64`: the shortest decimal that parses back to the same
+/// value (`Float64.parse`), or `NaN`, `Inf`, `-Inf`.
 given Float64: ToString {
-    /// Return the value as decimal text with six fractional digits, or as
-    /// `NaN`, `Inf`, or `-Inf`.
+    /// Return the shortest decimal text that parses back to this value, or
+    /// `NaN`, `Inf`, or `-Inf`. For a fixed presentation (decimals, width)
+    /// use `.format(spec)`.
     public to_string(self): String;
 };
 

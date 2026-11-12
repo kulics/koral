@@ -423,6 +423,11 @@ let sci = 1500.0.format(".2e");               // "1.50e3"
 `Int.parse("abc")` 是 `.Error`，不是 `0`。整数类型实现 `RadixParseable`，
 支持 2–36 进制；浮点只接受十进制、`nan`、`inf` 与 `-inf`。
 
+浮点的 `to_string` 给出**能原样解析回来的最短十进制**——承诺的是往返（round-trip），
+不是固定位数：`2.3` 打印 `"2.3"`，`1e20` 打印 `"1e+20"`，`0.0` 打印 `"0"`（与
+JSON 数字同形）。`Float32` 经 `Float32.parse` 往返，`Float64` 经 `Float64.parse`
+往返。需要固定小数位、科学计数法、宽度等**展示**形状时，用 `.format(spec)` 明说。
+
 `std` 中没有自由函数形式的转换——没有 `parse_int`、`to_int`、`to_string(x)`。
 用 `T.parse(s)`、`parse_radix`、`.to_string()` 和 `.format(spec)`。
 
