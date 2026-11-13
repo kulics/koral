@@ -211,9 +211,11 @@ public let instantiate_function(
     let template_span = mono.storage.context.get_span(template.def_id) or else unknown_span(
     );
 
-    // Allocate a new DefId for the concrete function with full metadata so
-    // later phases can recover it from the emitted declaration structurally.
-    let def_id = mono.storage.context.allocate_full(
+    // Mint (or reuse) the DefId of the concrete function with full metadata
+    // so later phases can recover it from the emitted declaration
+    // structurally. One instance = one DefId, shared with the
+    // extension-method instantiation path (see mint_or_reuse_def_id).
+    let def_id = mono.mint_or_reuse_def_id(
         mangled_name,
         DefKind.Function(),
         template_module_path,
@@ -3132,9 +3134,12 @@ public let instantiate_extension_method_from_entry(
     let function_type = Type.FunctionType(method_param_entries, concrete_return_type, false);
     let method_span = resolved_template.method.span;
 
-    // e. Allocate a new DefId for the concrete method with full metadata so
-    // codegen can bind the emitted FunctionDecl back to this symbol.
-    let def_id = mono.storage.context.allocate_full(
+    // e. Mint (or reuse) the DefId of the concrete method with full metadata
+    // so codegen can bind the emitted FunctionDecl back to this symbol. One
+    // instance = one DefId, shared with the function-instantiation path (see
+    // mint_or_reuse_def_id); the deferred-body re-instantiation below reuses
+    // it instead of re-minting and orphaning earlier call sites.
+    let def_id = mono.mint_or_reuse_def_id(
         mangled_name,
         DefKind.Function(),
         List[String].new(),
@@ -3307,6 +3312,10 @@ public let instantiate_extension_method_from_entry(
         InstantiatedFunction(mangled_name, function_type),
     );
     mono.storage.instantiated_function_symbols.insert(cache_key, result_symbol);
+    // The plain key too: `instantiate_function`'s callers look the symbol up
+    // by bare mangled name, and a miss there fell back to the pre-instantiation
+    // symbol -- a template identity no emitted body carries.
+    mono.storage.instantiated_function_symbols.insert(mangled_name, result_symbol);
 
     // Skip code generation if the instantiated function type still contains
     // generic parameters. Mirrors Swift `instantiateExtensionMethodFromEntry`'s

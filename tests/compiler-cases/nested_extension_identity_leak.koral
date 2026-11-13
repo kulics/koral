@@ -1,0 +1,52 @@
+// EXPECT: start
+// EXPECT: box dropped
+// EXPECT: box dropped
+// EXPECT: bump=10
+// EXPECT: end
+// Pin: one instantiated body = one DefId (bootstrap memory leak, 2026-11-13).
+// `hit` is instantiated while `bump`'s body is being resolved, which defers
+// its declaration to a pending request -- and the deferred re-instantiation
+// used to mint a SECOND DefId for the same body (measured: Box_I_hit_d136
+// minted 7740/7741/7743 in one compile). Call sites that kept the first
+// symbol looked up the borrowed-receiver convention under a key no body
+// carried, copied their receiver for a callee that never released the copy,
+// and the box never dropped (+1 per trapped call; koralc check peaked at
+// 3.07GB on this shape inside List.grow_to while self-compiling).
+//
+// This case pins the identity/dispatch contract and the drop behavior: two
+// non-last-use reads of `self` where the first call site must pass borrowed.
+// Small single-file compiles re-resolve call symbols to the surviving DefId,
+// so the self-compilation leak itself is pinned by the "self-check memory
+// pin" stage in scripts/verify.sh (peak RSS on the compiler package).
+type mutable Box[T: Any](mutable value: T, mutable hits: Int);
+
+given[T: Any] Box[T]: Drop {
+    drop(self): Void = {
+        println("box dropped");
+    };
+};
+
+given[T: Any] Box[T] {
+    hit(self): Int = {
+        return self.hits + 1;
+    };
+
+    bump(self): Int = {
+        let a = self.hit();
+        let b = self.hit();
+        return a + b;
+    };
+};
+
+let main(): Int = {
+    println("start");
+    let mutable total = 0;
+    {
+        let x = Box[Int](10, 0);
+        let y = Box[Int](20, 3);
+        total = x.bump() + y.bump();
+    };
+    println("bump=\(total)");
+    println("end");
+    return 0;
+};

@@ -117,6 +117,35 @@ dangling=$(grep -cE '^[a-zA-Z_][a-zA-Z0-9_]*\(\);' "$WORK/s3/koralc.c" || true)
 echo "dangling=${dangling}"
 test "${dangling}" = "0"
 
+# ── 4b. self-check memory pin ─────────────────────────────────────────────────
+# Type-checking the compiler package must stay in the hundreds of MB. Pins the
+# 2026-11-13 bootstrap leak: one instantiated body carrying two DefIds (the
+# deferred re-instantiation used to re-mint), which split the borrowed-receiver
+# convention -- each trapped call site copied its receiver into a callee that
+# never released the copy, and this run peaked at 3.07GB with 35.4M leaked
+# blocks. The limit is ~7x the healthy peak (212MB) and half the failure.
+say "4b. self-check memory pin"
+if [ "$WINDOWS" = "0" ] && [ -x /usr/bin/time ]; then
+  if [ "$(uname -s)" = "Darwin" ]; then
+    /usr/bin/time -l "$WORK/s3/koralc$EXE" check \
+      --package-config compiler/koral.json --target-module koralc \
+      > "$WORK/4b-check.log" 2> "$WORK/4b-time.txt"
+    rss_bytes=$(awk '/maximum resident set size/ {print $1}' "$WORK/4b-time.txt")
+    rss_kb=$((rss_bytes / 1024))
+  else
+    /usr/bin/time -v "$WORK/s3/koralc$EXE" check \
+      --package-config compiler/koral.json --target-module koralc \
+      > "$WORK/4b-check.log" 2> "$WORK/4b-time.txt"
+    rss_kb=$(awk -F': ' '/Maximum resident set size/ {print $2}' "$WORK/4b-time.txt")
+  fi
+  echo "self-check peak RSS: ${rss_kb} KB"
+  test -n "${rss_kb}" && test "${rss_kb}" -lt 1500000 || {
+    echo "self-check memory pin failed: ${rss_kb} KB (limit 1500000 KB)" >&2
+    exit 1; }
+else
+  echo "memory pin skipped (Windows or no /usr/bin/time)"
+fi
+
 # ── 5) stage2 suite ───────────────────────────────────────────────────────────
 say "5. stage2 suite"
 "$RUNNER" \

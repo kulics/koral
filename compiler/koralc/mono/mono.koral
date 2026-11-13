@@ -47,6 +47,44 @@ public type ConcreteCallableInfo(
     trait_conformance_def_id: Option[DefId],
 );
 
+// Union of two registrations for one callable. The function-instantiation
+// path registers (mangled name, no owner); the extension-method path
+// registers (method name, owner, trait conformance). First-wins dropped the
+// method face whenever the function path registered first -- order-dependent
+// identity. Some-wins on every face field; the logical name follows the
+// record that carries an owner (the method face is the semantic name).
+let merge_concrete_callable_info(
+    a: ConcreteCallableInfo,
+    b: ConcreteCallableInfo,
+): ConcreteCallableInfo = {
+    let owner_type = when a.owner_type in {
+        .Some(_) then a.owner_type,
+        .None() then b.owner_type,
+    };
+    let logical_name = when a.owner_type in {
+        .Some(_) then a.logical_name,
+        .None() then when b.owner_type in {
+            .Some(_) then b.logical_name,
+            .None() then a.logical_name,
+        },
+    };
+    let trait_conformance = when a.trait_conformance in {
+        .Some(_) then a.trait_conformance,
+        .None() then b.trait_conformance,
+    };
+    let trait_conformance_def_id = when a.trait_conformance_def_id in {
+        .Some(_) then a.trait_conformance_def_id,
+        .None() then b.trait_conformance_def_id,
+    };
+    return ConcreteCallableInfo(
+        a.def_id,
+        logical_name,
+        owner_type,
+        trait_conformance,
+        trait_conformance_def_id,
+    );
+};
+
 public let mono_receiver_lookup_type(context: CompilerContext, t: Type): Type = {
     return when t in {
         .OpaqueType(def_id) then {
@@ -510,6 +548,12 @@ type mutable MonomorphizerStorage(
     mutable instantiated_types: Dict[InstantiationKey, Type],
     mutable instantiated_functions: Dict[String, InstantiatedFunction],
     mutable instantiated_function_symbols: Dict[String, Symbol],
+    // One instantiated body = one DefId. Both instantiation paths (generic
+    // function and extension method) mangle one instance to one name; minting
+    // a fresh DefId per path left call sites holding symbols no body carried
+    // (the deferred-body re-instantiation minted a second DefId and moved the
+    // body there), splitting every DefId-keyed per-body table.
+    mutable concrete_def_ids_by_mangled_name: Dict[String, DefId],
     mutable resolved_parameterized_types: Dict[Type, Type],
     mutable resolving_parameterized_type_keys: Set[Type],
     mutable generated_layouts: Set[String],
@@ -822,9 +866,69 @@ given Monomorphizer {
     };
 
     register_concrete_callable_if_absent(self, info: ConcreteCallableInfo): Void = {
-        if not self.storage.concrete_callables_by_def_id.contains_key(info.def_id) then {
-            self.storage.concrete_callables_by_def_id.insert(info.def_id, info);
+        when self.storage.concrete_callables_by_def_id.get(info.def_id) in {
+            .Some(existing) then {
+                self.storage.concrete_callables_by_def_id.insert(
+                    info.def_id,
+                    merge_concrete_callable_info(existing, info),
+                );
+            },
+            .None() then {
+                self.storage.concrete_callables_by_def_id.insert(info.def_id, info);
+            },
         };
+    };
+
+    // Mint the identity of one instantiated body, once per mangled name.
+    // The function-instantiation and extension-method instantiation paths used
+    // to each allocate a DefId for the same instance: the deferred-body
+    // re-instantiation re-minted and moved the body to the new DefId, leaving
+    // earlier call sites holding the dead one -- and every DefId-keyed
+    // per-body table (borrowed-parameter conventions above all) split in two,
+    // leaking one copy per call site that missed its slot. Later paths reuse
+    // the identity and only fill metadata the first minter left empty.
+    mint_or_reuse_def_id(
+        self,
+        mangled_name: String,
+        kind: DefKind,
+        module_path: List[String],
+        source_file: String,
+        access: AccessModifier,
+        span: SourceSpan,
+    ): DefId = {
+        when self.storage.concrete_def_ids_by_mangled_name.get(mangled_name) in {
+            .Some(existing) then {
+                let context = self.storage.context;
+                when context.get_module_path(existing) in {
+                    .Some(existing_module_path) then {
+                        if existing_module_path.is_empty() and not module_path.is_empty() then {
+                            context.set_module_path(existing, module_path);
+                        };
+                    },
+                    .None() then {},
+                };
+                when context.get_source_file(existing) in {
+                    .Some(existing_source_file) then {
+                        if existing_source_file.is_empty() and not source_file.is_empty() then {
+                            context.set_source_file(existing, source_file);
+                        };
+                    },
+                    .None() then {},
+                };
+                return existing;
+            },
+            .None() then {},
+        };
+        let def_id = self.storage.context.allocate_full(
+            mangled_name,
+            kind,
+            module_path,
+            source_file,
+            access,
+            span,
+        );
+        self.storage.concrete_def_ids_by_mangled_name.insert(mangled_name, def_id);
+        return def_id;
     };
 
     set_receiver_method_dispatch_if_absent(
@@ -895,6 +999,7 @@ given Monomorphizer {
             Dict[InstantiationKey, Type].new(),
             Dict[String, InstantiatedFunction].new(),
             Dict[String, Symbol].new(),
+            Dict[String, DefId].new(),
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
@@ -1847,6 +1952,7 @@ given Monomorphizer {
             Dict[InstantiationKey, Type].new(),
             Dict[String, InstantiatedFunction].new(),
             Dict[String, Symbol].new(),
+            Dict[String, DefId].new(),
             Dict[Type, Type].new(),
             Set[Type].new(),
             Set[String].new(),
