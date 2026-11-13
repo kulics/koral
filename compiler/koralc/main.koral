@@ -9,6 +9,7 @@ using "./mono/mono.koral";
 using "./mir/mir.koral";
 using "./codegen/codegen.koral";
 using "std/os" { env };
+using "std/async" { Task, Thread };
 using "./driver/driver.koral";
 
 // The compiler's own hashing is pinned at startup: its emitted C must be
@@ -17,9 +18,20 @@ using "./driver/driver.koral";
 // that is also how the walk-independence of the pipeline is tested.
 let foreign __koral_hash_seed_pin(value: UInt): Void;
 
+// rustc policy: the compiler recurses deeply (unification, generic
+// instantiation, MIR walks), so the real work runs on a fat stack instead of
+// the platform main-thread stack -- Windows gives that 1MB and overflows on
+// large packages. 64MB dwarfs any depth the driver reaches.
+let mutable driver_exit_code: Int = 0;
+
 public let main(): Int = {
     if env("KORAL_HASH_SEED") is .None() then {
         __koral_hash_seed_pin(UInt(7046029254386353131));
     };
-    return run_driver();
+    let worker = Task.new(() => {
+        driver_exit_code = run_driver();
+    });
+    let handle = worker.set_stack_size(67108864).spawn();
+    let _ = handle.wait();
+    return driver_exit_code;
 };

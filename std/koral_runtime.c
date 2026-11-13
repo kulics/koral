@@ -4103,10 +4103,215 @@ fail:
 // Thread management (std.task)
 // ============================================================================
 
-#if !defined(_WIN32) && !defined(_WIN64)
+#if defined(_WIN32) || defined(_WIN64)
+#include <process.h>
+#include <malloc.h>
+#else
 #include <pthread.h>
 #include <sched.h>
 #include <unistd.h>
+#include <limits.h>
+#include <signal.h>
+#endif
+
+// ============================================================================
+// Unified thread stack policy + stack-overflow reporting
+// ============================================================================
+// One default and one floor on every platform (koral_runtime.h): a request of
+// 0 selects KORAL_DEFAULT_STACK_SIZE; anything below KORAL_MIN_STACK_SIZE (or
+// PTHREAD_STACK_MIN, whichever is higher) clamps up. Never a silent fall back
+// to whatever the platform happens to default to -- that spread (512KB macOS
+// pthreads, 8MB Linux, 1MB Windows) and that silence are what made
+// Task.set_stack_size a per-platform lie.
+
+static uint64_t __koral_resolve_stack_size(uint64_t requested) {
+#if defined(_WIN32) || defined(_WIN64)
+    const uint64_t floor = KORAL_MIN_STACK_SIZE;
+#else
+    const uint64_t floor = ((uint64_t)PTHREAD_STACK_MIN > KORAL_MIN_STACK_SIZE)
+                               ? (uint64_t)PTHREAD_STACK_MIN
+                               : KORAL_MIN_STACK_SIZE;
+#endif
+    if (requested == 0) {
+        return KORAL_DEFAULT_STACK_SIZE;
+    }
+    return (requested < floor) ? floor : requested;
+}
+
+// The unified overflow report: the same shape a panic prints, identically on
+// Windows/macOS/Linux. One write(2)/WriteFile and nothing else -- it must run
+// on an alternate stack (POSIX) or on Windows' post-overflow page, so no
+// stdio, no allocation.
+#define KORAL_STACK_OVERFLOW_MSG "Panic: stack overflow\n"
+
+static void __koral_report_stack_overflow(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
+    DWORD written = 0;
+    if (err != NULL && err != INVALID_HANDLE_VALUE) {
+        WriteFile(err, KORAL_STACK_OVERFLOW_MSG,
+                  (DWORD)(sizeof(KORAL_STACK_OVERFLOW_MSG) - 1), &written, NULL);
+    }
+#else
+    (void)!write(STDERR_FILENO, KORAL_STACK_OVERFLOW_MSG,
+                 sizeof(KORAL_STACK_OVERFLOW_MSG) - 1);
+#endif
+}
+
+#if defined(_WIN32) || defined(_WIN64)
+
+static LPTOP_LEVEL_EXCEPTION_FILTER g_old_exception_filter = NULL;
+
+static LONG WINAPI __koral_stack_overflow_filter(EXCEPTION_POINTERS* info) {
+    if (info != NULL && info->ExceptionRecord != NULL &&
+        info->ExceptionRecord->ExceptionCode == EXCEPTION_STACK_OVERFLOW) {
+        __koral_report_stack_overflow();
+        // Windows committed one guard page to run this filter; hand it back
+        // before anything else touches the stack, then die the way a panic
+        // dies.
+        _resetstkoflw();
+        abort();
+    }
+    if (g_old_exception_filter != NULL) {
+        return g_old_exception_filter(info);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+static void __koral_stack_guard_install(void) {
+    static _Atomic int installed = 0;
+    if (atomic_exchange(&installed, 1) != 0) {
+        return;
+    }
+    g_old_exception_filter =
+        SetUnhandledExceptionFilter(__koral_stack_overflow_filter);
+}
+
+#else
+
+// The handler cannot run on the overflowed stack, so every thread that can
+// recurse registers a small alternate stack first.
+#define KORAL_ALT_STACK_BYTES (64 * 1024)
+
+static _Thread_local void* g_altstack_mem = NULL;
+static struct sigaction g_old_segv_action;
+#if defined(__APPLE__)
+static struct sigaction g_old_bus_action;
+#endif
+
+static void __koral_install_thread_altstack(void) {
+    if (g_altstack_mem != NULL) {
+        return;
+    }
+    void* mem = malloc(KORAL_ALT_STACK_BYTES);
+    if (mem == NULL) {
+        return;
+    }
+    stack_t ss;
+    ss.ss_sp = mem;
+    ss.ss_size = KORAL_ALT_STACK_BYTES;
+    ss.ss_flags = 0;
+    if (sigaltstack(&ss, NULL) != 0) {
+        free(mem);
+        return;
+    }
+    g_altstack_mem = mem;
+}
+
+static void __koral_release_thread_altstack(void) {
+    if (g_altstack_mem == NULL) {
+        return;
+    }
+    stack_t ss;
+    ss.ss_sp = NULL;
+    ss.ss_size = 0;
+    ss.ss_flags = SS_DISABLE;
+    sigaltstack(&ss, NULL);
+    free(g_altstack_mem);
+    g_altstack_mem = NULL;
+}
+
+// Overflow = the fault landed in the guard window just below the thread's own
+// stack (the pointer walked off the mapping). Anything else is a real fault
+// and must keep its old fate -- sanitizers, crash reporters, core dumps.
+static int __koral_fault_is_stack_overflow(void* addr) {
+    if (addr == NULL) {
+        return 0;
+    }
+    uintptr_t low = 0;
+#if defined(__APPLE__)
+    void* top = pthread_get_stackaddr_np(pthread_self());
+    size_t size = pthread_get_stacksize_np(pthread_self());
+    if (top != NULL) {
+        low = (uintptr_t)top - (uintptr_t)size;
+    }
+#else
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+        void* base = NULL;
+        size_t size = 0;
+        if (pthread_attr_getstack(&attr, &base, &size) == 0 && base != NULL) {
+            low = (uintptr_t)base;
+        }
+        pthread_attr_destroy(&attr);
+    }
+#endif
+    if (low == 0) {
+        return 0;  // bounds unknown: never misreport a real fault
+    }
+    uintptr_t a = (uintptr_t)addr;
+    // 1MB below the edge covers a bottom-probed frame larger than any Koral
+    // frame; 64KB above it covers a touch landing in the last mapped page.
+    return a >= low - 1024 * 1024 && a <= low + 64 * 1024;
+}
+
+static void __koral_stack_overflow_handler(int sig, siginfo_t* info, void* ctx) {
+    (void)sig;
+    (void)ctx;
+    if (info != NULL && __koral_fault_is_stack_overflow(info->si_addr)) {
+        __koral_report_stack_overflow();
+        abort();
+    }
+    // Not a stack overflow: reinstall the previous handler and re-raise so
+    // whatever was installed before us (sanitizer runtimes, crash reporters)
+    // still gets its fault.
+    struct sigaction* prev = &g_old_segv_action;
+#if defined(__APPLE__)
+    if (sig == SIGBUS) {
+        prev = &g_old_bus_action;
+    }
+#endif
+    sigaction(sig, prev, NULL);
+    raise(sig);
+}
+
+static void __koral_stack_guard_install(void) {
+    static _Atomic int installed = 0;
+    if (atomic_exchange(&installed, 1) != 0) {
+        return;
+    }
+    __koral_install_thread_altstack();
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = __koral_stack_overflow_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_ONSTACK | SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, &g_old_segv_action);
+#if defined(__APPLE__)
+    // macOS reports a guard-page hit as often SIGBUS as SIGSEGV.
+    sigaction(SIGBUS, &sa, &g_old_bus_action);
+#endif
+}
+
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+// Load-time install: single-threaded programs are covered without ever
+// spawning. __koral_spawn_thread also installs lazily (belt and braces for
+// toolchains without constructor support).
+__attribute__((constructor)) static void __koral_stack_guard_ctor(void) {
+    __koral_stack_guard_install();
+}
 #endif
 
 // Invoke a Koral closure: if env is NULL, call as void(*)(void); otherwise call as void(*)(void*).
@@ -4127,7 +4332,7 @@ typedef struct {
 #if defined(_WIN32) || defined(_WIN64)
 
 // --- Windows thread trampoline ---
-static DWORD WINAPI __koral_thread_trampoline_win(LPVOID arg) {
+static unsigned __stdcall __koral_thread_trampoline_win(void* arg) {
     KoralThreadArgs* args = (KoralThreadArgs*)arg;
     __koral_closure_invoke(&args->closure);
     __koral_closure_release(args->closure);
@@ -4141,16 +4346,26 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
     if (!args) return -1;
     args->closure = closure;
     __koral_closure_retain(args->closure);
+    __koral_stack_guard_install();
 
-    SIZE_T win_stack_size = (stack_size > 0) ? (SIZE_T)stack_size : 0;
-    HANDLE h = CreateThread(NULL, win_stack_size, __koral_thread_trampoline_win, args, 0, NULL);
-    if (h == NULL) {
+    // _beginthreadex, not CreateThread: the trampoline runs CRT code
+    // (malloc/free, stdio), and the CRT only cleans up its per-thread state
+    // for threads it created. The size is the stack RESERVE in bytes (rounded
+    // up to the 64KB allocation granularity); the parameter is `unsigned`, so
+    // requests above 4GB clamp -- far beyond anything Koral programs ask for.
+    uint64_t resolved = __koral_resolve_stack_size(stack_size);
+    if (resolved > 0xFFFFFFFFu) {
+        resolved = 0xFFFFFFFFu;
+    }
+    uintptr_t h = _beginthreadex(NULL, (unsigned)resolved,
+                                 __koral_thread_trampoline_win, args, 0, NULL);
+    if (h == 0) {
         __koral_closure_release(args->closure);
         free(args);
         return -1;
     }
     *out_handle = (uint8_t*)h;
-    *out_tid = (uint64_t)GetThreadId(h);
+    *out_tid = (uint64_t)GetThreadId((HANDLE)h);
     return 0;
 }
 
@@ -4193,9 +4408,11 @@ uint32_t __koral_hardware_concurrency(void) {
 // --- POSIX thread trampoline ---
 static void* __koral_thread_trampoline_posix(void* arg) {
     KoralThreadArgs* args = (KoralThreadArgs*)arg;
+    __koral_install_thread_altstack();
     __koral_closure_invoke(&args->closure);
     __koral_closure_release(args->closure);
     free(args);
+    __koral_release_thread_altstack();
     return NULL;
 }
 
@@ -4205,20 +4422,28 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
     if (!args) return -1;
     args->closure = closure;
     __koral_closure_retain(args->closure);
+    __koral_stack_guard_install();
 
+    // Resolve the size once, here: 0 -> the unified default, tiny requests
+    // clamp up to the floor. A rejected setstacksize must fail the spawn --
+    // silently handing the thread the platform default is what made
+    // set_stack_size a lie on Linux (EINVAL below PTHREAD_STACK_MIN).
     pthread_attr_t attr;
-    pthread_attr_t* attr_ptr = NULL;
-    if (stack_size > 0) {
-        pthread_attr_init(&attr);
-        pthread_attr_setstacksize(&attr, (size_t)stack_size);
-        attr_ptr = &attr;
+    if (pthread_attr_init(&attr) != 0) {
+        __koral_closure_release(args->closure);
+        free(args);
+        return -1;
+    }
+    if (pthread_attr_setstacksize(&attr, (size_t)__koral_resolve_stack_size(stack_size)) != 0) {
+        pthread_attr_destroy(&attr);
+        __koral_closure_release(args->closure);
+        free(args);
+        return -1;
     }
 
     pthread_t thread;
-    int err = pthread_create(&thread, attr_ptr, __koral_thread_trampoline_posix, args);
-    if (attr_ptr) {
-        pthread_attr_destroy(&attr);
-    }
+    int err = pthread_create(&thread, &attr, __koral_thread_trampoline_posix, args);
+    pthread_attr_destroy(&attr);
     if (err != 0) {
         __koral_closure_release(args->closure);
         free(args);

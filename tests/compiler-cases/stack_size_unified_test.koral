@@ -1,0 +1,39 @@
+// EXPECT: default_stack_ok
+// EXPECT: big_stack_ok
+// Pins the unified thread stack contract from the Koral side (the precise
+// byte bounds live in tests/runtime-cases/stack_contract_pin.c): a default
+// stack (no set_stack_size) must carry ~0.5-4MB of recursion on every
+// platform -- the old macOS pthread default of 512KB would die here -- and
+// set_stack_size must be honored past the default: 120K frames on a 256MB
+// request survives only if the request lands (the 8MB default would die).
+// Frame sizes differ between the two compilers, so both probes keep wide
+// margins on either side of their boundary.
+using "std/async" { Task, Thread };
+
+let rec(n: Int): Int = {
+    if n > 0 then {
+        return rec(n - 1) + 1;
+    };
+    return 0;
+};
+
+let main(): Int = {
+    let t1 = Task.new(() => {
+        let depth = rec(20000);
+        if depth == 20000 then {
+            println("default_stack_ok");
+        };
+    });
+    let h1 = t1.spawn();
+    let _ = h1.wait();
+
+    let t2 = Task.new(() => {
+        let depth = rec(120000);
+        if depth == 120000 then {
+            println("big_stack_ok");
+        };
+    });
+    let h2 = t2.set_stack_size(268435456).spawn();
+    let _ = h2.wait();
+    return 0;
+};

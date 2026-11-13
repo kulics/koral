@@ -70,7 +70,12 @@ given Task {
     public new(f: sendable () -> Void): Task;
     /// Set the thread name (chainable).
     public set_name(self, name: String): Task;
-    /// Set the thread stack size in bytes (chainable). Panics when `size` is negative.
+    /// Set the thread stack size in bytes (chainable). Panics when `size` is
+    /// negative. Requests below the platform floor (64KB) clamp up to it.
+    /// Leaving it unset gives the unified default (8MB) on every platform --
+    /// not the platform's own idea of a default (macOS pthreads 512KB, Linux
+    /// 8MB, Windows 1MB). A stack overflow on any thread reports
+    /// `Panic: stack overflow` and aborts.
     public set_stack_size(self, size: Int): Task;
     /// Create a thread and return a Thread handle.
     /// Panics on failure.

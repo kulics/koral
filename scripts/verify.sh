@@ -272,6 +272,33 @@ grep -q 'w8_init_memory_retains=2' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: init_memory argument is a consuming use" >&2; exit 1; }
 echo "rc counter pins OK"
 
+# ── stack contract pins ───────────────────────────────────────────────────────
+# Unified thread stack policy (2026-11-13): one 8MB default on every
+# platform, one 64KB floor (tiny requests clamp up, never fall back to the
+# platform default), explicit sizes honored past the default, and one
+# overflow report -- `Panic: stack overflow` -- instead of a bare
+# SIGSEGV/SIGBUS/0xC00000FD. The byte-level bounds live in the C probes so
+# the pins do not depend on Koral frame sizes.
+say "stack contract pins"
+clang -I std tests/runtime-cases/stack_contract_pin.c std/koral_runtime.c \
+  -o "$WORK/stack_contract_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+"$WORK/stack_contract_pin$EXE" > "$WORK/stack_contract_pin.out"
+grep -q 'default_ok' "$WORK/stack_contract_pin.out" || {
+  echo "stack pin failed: default stack must be >= 4MB (unified 8MB)" >&2; exit 1; }
+grep -q 'big_ok' "$WORK/stack_contract_pin.out" || {
+  echo "stack pin failed: set_stack_size must be honored past the default" >&2; exit 1; }
+grep -q 'clamp_ok' "$WORK/stack_contract_pin.out" || {
+  echo "stack pin failed: below-floor request must clamp up to the floor" >&2; exit 1; }
+
+clang -I std tests/runtime-cases/stack_overflow_pin.c std/koral_runtime.c \
+  -o "$WORK/stack_overflow_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+if "$WORK/stack_overflow_pin$EXE" > "$WORK/stack_overflow_pin.out" 2> "$WORK/stack_overflow_pin.err"; then
+  echo "stack pin failed: the 1-byte-stack recursion must overflow" >&2; exit 1
+fi
+grep -q 'Panic: stack overflow' "$WORK/stack_overflow_pin.err" || {
+  echo "stack pin failed: overflow must report 'Panic: stack overflow'" >&2; exit 1; }
+echo "stack contract pins OK"
+
 # ── samples ───────────────────────────────────────────────────────────────────
 say "samples"
 mkdir -p bin/samples

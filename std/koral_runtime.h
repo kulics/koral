@@ -287,6 +287,16 @@ void __koral_global_init_cycle(const char* name);
 // bits in two's complement. Never panics after the domain step.
 uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits, const char* loc);
 
+// Unified thread stack policy (Windows/macOS/Linux): a requested stack_size of
+// 0 selects KORAL_DEFAULT_STACK_SIZE -- one default everywhere, instead of the
+// platform's idea of one (macOS pthreads get 512KB, Linux 8MB, Windows 1MB).
+// Requests below KORAL_MIN_STACK_SIZE clamp up to it (plus any higher
+// PTHREAD_STACK_MIN on POSIX) so a tiny request never silently falls back to
+// the default. A stack overflow aborts with `Panic: stack overflow` on stderr
+// -- the same report shape a panic makes, identically on every platform.
+#define KORAL_DEFAULT_STACK_SIZE ((uint64_t)8 * 1024 * 1024)
+#define KORAL_MIN_STACK_SIZE ((uint64_t)64 * 1024)
+
 int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                              struct __koral_Closure closure, uint64_t stack_size);
 int32_t __koral_thread_join(uint8_t* handle);
