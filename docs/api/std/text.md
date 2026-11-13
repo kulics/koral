@@ -69,6 +69,15 @@ public type mutable CapturesIterator;
 
 /// Iterator over the text pieces between a regex's matches.
 public type mutable RegexSplitIterator;
+
+/// Iterable view over the successive non-overlapping matches of a regex.
+public type MatchView;
+
+/// Iterable view over successive matches, each with its capture groups.
+public type CapturesView;
+
+/// Iterable view over the text pieces between a regex's matches.
+public type RegexSplitView;
 ```
 
 ## Given Implementations
@@ -321,13 +330,19 @@ given Regex {
 
 /// Capture-group search plus match and capture iterators.
 given Regex {
-    /// Iterate over every non-overlapping match in `text`, without capture groups.
-    public find_all(self, text: String): MatchIterator;
+    /// Return a view over every non-overlapping match in `text`, without
+    /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
+    /// pipelines); it hands out a fresh cursor per `iterator()` and is never
+    /// spent.
+    public find_all(self, text: String): MatchView;
     /// Return the first match in `text` with all of its capture groups.
     /// Returns `None` when the pattern does not match.
     public captures(self, text: String): Option[Captures];
-    /// Iterate over every non-overlapping match in `text`, each with its capture groups.
-    public captures_all(self, text: String): CapturesIterator;
+    /// Return a view over every non-overlapping match in `text`, each with its
+    /// capture groups. The view is `Iterable` (`for`, and `lazy()` for
+    /// pipelines); it hands out a fresh cursor per `iterator()` and is never
+    /// spent.
+    public captures_all(self, text: String): CapturesView;
 };
 
 /// Substitution of the first match or of every match.
@@ -341,8 +356,11 @@ given Regex {
 
 /// Splitting text around matches.
 given Regex {
-    /// Split `text` around every match, yielding the pieces between matches and the trailing tail.
-    public split(self, text: String): RegexSplitIterator;
+    /// Return a view of `text` split around every match -- the pieces between
+    /// matches and the trailing tail. The view is `Iterable` (`for`, and
+    /// `lazy()` for pipelines); it hands out a fresh cursor per `iterator()`
+    /// and is never spent.
+    public split(self, text: String): RegexSplitView;
 };
 
 /// Flag constructors and bitwise combinators for `RegexFlag`.
@@ -394,6 +412,24 @@ given Captures {
     public group_start(self, index: Int): Option[Int];
     /// Return the byte offset just past group `index`'s end, or `None` if unavailable.
     public group_end(self, index: Int): Option[Int];
+};
+
+/// `Iterable` for `MatchView`: a fresh matches cursor per call.
+given MatchView: Iterable[Match, MatchIterator] {
+    /// Build a fresh cursor over the matches; the view itself is untouched.
+    public iterator(self): MatchIterator;
+};
+
+/// `Iterable` for `CapturesView`: a fresh captures cursor per call.
+given CapturesView: Iterable[Captures, CapturesIterator] {
+    /// Build a fresh cursor over the capture sets; the view itself is untouched.
+    public iterator(self): CapturesIterator;
+};
+
+/// `Iterable` for `RegexSplitView`: a fresh pieces cursor per call.
+given RegexSplitView: Iterable[String, RegexSplitIterator] {
+    /// Build a fresh cursor over the pieces; the view itself is untouched.
+    public iterator(self): RegexSplitIterator;
 };
 
 /// Iterator conformance for `MatchIterator`, yielding matches one after another.

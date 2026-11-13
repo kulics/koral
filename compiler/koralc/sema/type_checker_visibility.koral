@@ -1498,6 +1498,32 @@ given TypeChecker {
                 if not self.validate_trait_name(trait_name) then {
                     return false;
                 };
+                // A trait argument that names a parameter this bindings map
+                // cannot see -- an ENCLOSING template's parameter, like
+                // `chain`'s `R2: Iterator[T]` where `T` belongs to the
+                // receiver's given block -- is uncheckable at the call site.
+                // Resolving it as a type name would report `Undefined type` for
+                // a parameter the call has simply not bound; read it as "might
+                // hold" (the same verdict `bound_may_hold` gives materialization)
+                // and skip. The conformance was already pinned by
+                // constraint-driven inference, and mono re-checks at
+                // instantiation.
+                let mutable checkable = true;
+                for arg_node in bound_trait_args(b) then {
+                    when arg_node in {
+                        .Identifier(name, _) then {
+                            if bindings.get(name) is .None()
+                                and self.lookup_current_file_type_symbol(name) is .None()
+                                and self.resolve_type_name_binding(name) is .None() then {
+                                checkable = false;
+                            };
+                        },
+                        _ then {},
+                    };
+                };
+                if not checkable then {
+                    return true;
+                };
                 let trait_args = self.bound_trait_args_with_bindings(b, bindings);
                 if trait_args.is_empty() then {
                     self.enforce_explicit_trait_requirement_with_context(

@@ -3420,6 +3420,14 @@ extension TypeChecker {
     }
 
     guard let target = try classifyCollectionTarget(expectedType, span: span) else {
+      // `[]` cannot default the way a non-empty literal does -- there is no
+      // element to infer from. Same verdict as a bare `[]` (the koralc mirror
+      // reports the same text here).
+      try handleError(
+        SemanticError(
+          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
+          span: span
+        ))
       return failedExpression()
     }
     switch target {
@@ -3471,12 +3479,13 @@ extension TypeChecker {
   ) throws -> TypedExpressionNode {
     let target: CollectionTargetKind
 
-    if let expectedType {
-      guard let classified = try classifyCollectionTarget(expectedType, span: span) else {
-        return failedExpression()
-      }
+    if let expectedType, let classified = try classifyCollectionTarget(expectedType, span: span) {
       target = classified
     } else {
+      // No family target (a generic parameter, a user type, no expectation at
+      // all): the sequence literal DEFAULTS to `List` -- `List` is `Iterable`,
+      // so the literal flows into zip / chain's `S2`. Shape mismatches inside
+      // the family are still errors in the switch below.
       let inferredElementType = try inferCommonElementType(elements: elements, span: span)
       target = .list(element: inferredElementType)
     }
@@ -3579,10 +3588,7 @@ extension TypeChecker {
     let keyType: Type
     let valueType: Type
 
-    if let expectedType {
-      guard let target = try classifyCollectionTarget(expectedType, span: span) else {
-        return failedExpression()
-      }
+    if let expectedType, let target = try classifyCollectionTarget(expectedType, span: span) {
       switch target {
       case .map(let k, let v):
         keyType = k
@@ -3610,18 +3616,17 @@ extension TypeChecker {
           freezeMethod: "to_frozen_dict",
           span: span
         )
-      case .frozenList, .frozenSet:
-        throw SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
-          span: span
-        )
-      case .list, .set, .range, .fixedArray:
+      case .frozenList, .frozenSet, .list, .set, .range, .fixedArray:
+        // Family shape mismatch: a dict literal cannot build a sequence
+        // target. One message across the family (the koralc mirror agrees).
         throw SemanticError(
           .generic("Dict literal can only be assigned to [K, V]Dict"),
           span: span
         )
       }
     } else {
+      // No family target: the dict literal DEFAULTS to `Dict` (the family
+      // rule, symmetric with `inferCollectionLiteral`'s `List` default).
       keyType = try inferCommonElementType(elements: entries.map { $0.key }, span: span)
       valueType = try inferCommonElementType(elements: entries.map { $0.value }, span: span)
     }
@@ -3673,11 +3678,11 @@ extension TypeChecker {
         }
         return .frozenDict(key: args[0], value: args[1])
       default:
-        try handleError(
-          SemanticError(
-            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
-            span: span
-          ))
+        // Non-family target (a user type, a generic parameter, ...): not an
+        // error. The literal DEFAULTS -- `inferCollectionLiteral` reads a
+        // sequence literal as `List`, `inferDictLiteral` reads a dict literal
+        // as `Dict` -- so a literal flows into `Iterable`-constrained
+        // positions (zip / chain's `S2`). The koralc mirror agrees.
         return nil
       }
 
@@ -3689,20 +3694,12 @@ extension TypeChecker {
         }
         return .range(element: args[0])
       default:
-        try handleError(
-          SemanticError(
-            .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
-            span: span
-          ))
+        // Non-family target: the literal defaults (see the note above).
         return nil
       }
 
     default:
-      try handleError(
-        SemanticError(
-          .generic("Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range"),
-          span: span
-        ))
+      // Non-family target: the literal defaults (see the note above).
       return nil
     }
   }
@@ -8155,14 +8152,22 @@ extension TypeChecker {
               continue
             }
 
-            let unresolvedTraitArgs: [Type] = try withNewScope {
+            let unresolvedTraitArgs: [Type?] = try withNewScope {
               for genericParam in typeParameters {
                 currentScope.defineGenericParameter(genericParam.name, type: .genericParameter(name: genericParam.name))
               }
-              return try traitArgs.map { try resolveTypeNode($0) }
+              return traitArgs.map { arg -> Type? in
+                // A constraint argument naming a parameter this scope cannot
+                // see (an ENCLOSING template's parameter) is not a binding
+                // source here; read it as a PARAM NAME instead of resolving it
+                // as a type, which would report `Undefined type` for a
+                // parameter the call has not bound.
+                try? resolveTypeNode(arg)
+              }
             }
 
             for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              guard let expectedTraitArg else { continue }
               let before = inferred
               _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
               if before != inferred {

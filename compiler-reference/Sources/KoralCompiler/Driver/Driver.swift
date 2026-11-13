@@ -959,6 +959,16 @@ public class Driver {
     clangArgs.append("-o")
     clangArgs.append(exeURL.path)
     clangArgs.append(contentsOf: optimizeArgs)
+    // Windows defaults the main thread's stack to 1MB (PE header) while
+    // macOS/Linux give 8MB: deep-but-legal nesting -- a long `else if` chain
+    // in the source being compiled, say -- overflows the compiler on Windows
+    // while passing elsewhere (deep_else_if_chain was exactly this). Smooth
+    // the platform difference at the link: reserve the POSIX-sized stack on
+    // Windows too. koralc's driver and verify.sh's hand-linked stages pass
+    // the same flag.
+    #if os(Windows)
+    clangArgs.append("-Wl,/STACK:8388608")
+    #endif
     var seenLibs = Set<String>()
     for lib in extraLinkedLibraries + runtimeLinks where lib != "c" && seenLibs.insert(lib).inserted {
       clangArgs.append("-l\(lib)")

@@ -298,6 +298,12 @@ public type mutable DictKeysIterator[K: Hash, V: Any];
 /// Iterator over just the values of a `Dict`, in unspecified order.
 public type mutable DictValuesIterator[K: Hash, V: Any];
 
+/// Iterable view over just the keys of a `Dict`.
+public type DictKeysView[K: Hash, V: Any];
+
+/// Iterable view over just the values of a `Dict`.
+public type DictValuesView[K: Hash, V: Any];
+
 /// An immutable key/value snapshot that may cross threads. Built by
 /// `Dict.to_frozen_dict`, which bulk-copies straight into this storage (no
 /// intermediate container), or by a dict literal targeting the type. The
@@ -565,6 +571,21 @@ public type mutable StringLinesIterator;
 
 /// Iterator over the raw UTF-8 bytes of a string.
 public type mutable StringBytesIterator;
+
+/// Iterable view over the whitespace-separated words of a string.
+public type StringSplitAsciiWhitespaceView;
+
+/// Iterable view over the parts of a string separated by a fixed separator.
+public type StringSplitView;
+
+/// Iterable view over the lines of a string, split at `\n`.
+public type StringLinesView;
+
+/// Iterable view over the raw UTF-8 bytes of a string.
+public type StringBytesView;
+
+/// Iterable view over the runes of a string, decoding UTF-8 as it goes.
+public type StringRunesView;
 
 /// Iterator over the runes of a string, decoding UTF-8 as it goes.
 public type mutable StringRunesIterator;
@@ -2692,12 +2713,28 @@ given[K: Hash, V: Any] DictValuesIterator[K, V]: Iterator[V] {
     public next(self): Option[V];
 };
 
-/// Key-only and value-only iterator constructors.
+/// `Iterable` for `DictKeysView[K, V]`: a fresh keys cursor per call.
+given[K: Hash, V: Any] DictKeysView[K, V]: Iterable[K, DictKeysIterator[K, V]] {
+    /// Build a fresh cursor over the keys; the view itself is untouched.
+    public iterator(self): DictKeysIterator[K, V];
+};
+
+/// `Iterable` for `DictValuesView[K, V]`: a fresh values cursor per call.
+given[K: Hash, V: Any] DictValuesView[K, V]: Iterable[V, DictValuesIterator[K, V]] {
+    /// Build a fresh cursor over the values; the view itself is untouched.
+    public iterator(self): DictValuesIterator[K, V];
+};
+
+/// Key-only and value-only view constructors.
 given[K: Hash, V: Any] Dict[K, V] {
-    /// Return an iterator over the dict's keys, in unspecified order.
-    public keys(self): DictKeysIterator[K, V];
-    /// Return an iterator over the dict's values, in unspecified order.
-    public values(self): DictValuesIterator[K, V];
+    /// Return a view over the dict's keys, in unspecified order. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public keys(self): DictKeysView[K, V];
+    /// Return a view over the dict's values, in unspecified order. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public values(self): DictValuesView[K, V];
 };
 
 /// `Iterable` for `Dict[K, V]`: iterates key/value pairs in unspecified order.
@@ -2928,7 +2965,12 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
     /// using the first element as the starting accumulator. `None` when empty.
     public reduce(self, fn: (T, T) -> T): Option[T];
     /// Collect every element into a new `List[T]`.
-    public into_list(self): List[T];
+    public to_list(self): List[T];
+    /// Collect every element into an immutable `FrozenList[T]` snapshot that
+    /// can cross threads (the conditional rule: `FrozenList[T]` is sendable
+    /// only when `T` is). The pipeline stays usable; the snapshot owns its own
+    /// buffer of shared element handles.
+    public to_frozen_list(self): FrozenList[T];
     /// Run `fn` on every element for its side effects.
     public for_each(self, fn: (T) -> Void): Void;
     /// The number of elements the pipeline yields.
@@ -2975,7 +3017,11 @@ given[T: Ord, R: Iterator[T]] LazyView[T, R] {
 /// Set-collecting terminal for `LazyView[T, R]` of `Hash` elements.
 given[T: Hash, R: Iterator[T]] LazyView[T, R] {
     /// Collect every element into a new `Set[T]`, collapsing duplicates.
-    public into_set(self): Set[T];
+    public to_set(self): Set[T];
+    /// Collect every element into an immutable `FrozenSet[T]` snapshot that
+    /// can cross threads (the conditional rule: `FrozenSet[T]` is sendable
+    /// only when `T` is), collapsing duplicates. The pipeline stays usable.
+    public to_frozen_set(self): FrozenSet[T];
 };
 
 /// Summation terminal for `LazyView[T, R]` of `Add[T] and Zero` elements.
@@ -3709,6 +3755,36 @@ given[T: Hash] Set[T] {
     public into_frozen_set(self): FrozenSet[T];
 };
 
+/// `Iterable` for `StringSplitAsciiWhitespaceView`: a fresh word cursor per call.
+given StringSplitAsciiWhitespaceView: Iterable[String, StringSplitAsciiWhitespaceIterator] {
+    /// Build a fresh cursor over the words; the view itself is untouched.
+    public iterator(self): StringSplitAsciiWhitespaceIterator;
+};
+
+/// `Iterable` for `StringSplitView`: a fresh parts cursor per call.
+given StringSplitView: Iterable[String, StringSplitIterator] {
+    /// Build a fresh cursor over the parts; the view itself is untouched.
+    public iterator(self): StringSplitIterator;
+};
+
+/// `Iterable` for `StringLinesView`: a fresh lines cursor per call.
+given StringLinesView: Iterable[String, StringLinesIterator] {
+    /// Build a fresh cursor over the lines; the view itself is untouched.
+    public iterator(self): StringLinesIterator;
+};
+
+/// `Iterable` for `StringBytesView`: a fresh bytes cursor per call.
+given StringBytesView: Iterable[UInt8, StringBytesIterator] {
+    /// Build a fresh cursor over the UTF-8 bytes; the view itself is untouched.
+    public iterator(self): StringBytesIterator;
+};
+
+/// `Iterable` for `StringRunesView`: a fresh runes cursor per call.
+given StringRunesView: Iterable[Rune, StringRunesIterator] {
+    /// Build a fresh cursor over the decoded runes; the view itself is untouched.
+    public iterator(self): StringRunesIterator;
+};
+
 /// Construction and incremental building of strings.
 given StringBuilder {
     /// Create an empty builder with a small initial capacity.
@@ -3833,15 +3909,21 @@ given String {
     /// Replace every occurrence of `pat` with `with`, left to right without overlap.
     /// Panic on an empty `pat`; with no match, return the string unchanged.
     public replace_all(self, pat: String, with: String =): String;
-    /// Return an iterator over the words separated by runs of ASCII whitespace;
-    /// leading and trailing whitespace produce no empty words.
-    public split_ascii_whitespace(self): StringSplitAsciiWhitespaceIterator;
-    /// Return an iterator over the parts between occurrences of `sep`.
+    /// Return a view over the words separated by runs of ASCII whitespace;
+    /// leading and trailing whitespace produce no empty words. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public split_ascii_whitespace(self): StringSplitAsciiWhitespaceView;
+    /// Return a view over the parts between occurrences of `sep`.
     /// With no match the whole string is one part; an empty `sep` yields it once.
-    public split(self, sep: String): StringSplitIterator;
-    /// Return an iterator over the lines split at `\n`, without the newline.
-    /// A trailing newline does not produce an extra empty line.
-    public lines(self): StringLinesIterator;
+    /// The view is `Iterable` (`for`, and `lazy()` for pipelines); it hands out
+    /// a fresh cursor per `iterator()` and is never spent.
+    public split(self, sep: String): StringSplitView;
+    /// Return a view over the lines split at `\n`, without the newline.
+    /// A trailing newline does not produce an extra empty line. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public lines(self): StringLinesView;
     /// Return the string without `prefix`, or unchanged when there is no such prefix.
     public trim_prefix(self, prefix: String): String;
     /// Return the string without `suffix`, or unchanged when there is no such suffix.
@@ -3850,10 +3932,14 @@ given String {
     public strip_prefix(self, prefix: String): Option[String];
     /// Return the string without `suffix`, or `None` when there is no such suffix.
     public strip_suffix(self, suffix: String): Option[String];
-    /// Return an iterator over the raw UTF-8 bytes.
-    public bytes(self): StringBytesIterator;
-    /// Return an iterator over the runes (Unicode code points) decoded from UTF-8.
-    public runes(self): StringRunesIterator;
+    /// Return a view over the raw UTF-8 bytes. The view is `Iterable` (`for`,
+    /// and `lazy()` for pipelines); it hands out a fresh cursor per
+    /// `iterator()` and is never spent.
+    public bytes(self): StringBytesView;
+    /// Return a view over the runes (Unicode code points) decoded from UTF-8.
+    /// The view is `Iterable` (`for`, and `lazy()` for pipelines); it hands out
+    /// a fresh cursor per `iterator()` and is never spent.
+    public runes(self): StringRunesView;
     /// Convert the string to a `List` of runes for random access.
     public to_runes(self): List[Rune];
 };

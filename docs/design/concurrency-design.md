@@ -210,7 +210,7 @@ L4 的两个成员只诊断**同线程**环：全局量的初始化链是线程�
   写入是 updater 所在线程**（格记最后写入线程）→ panic
   `AtomicCell.update_and_get: the updater wrote the same cell`；正常竞争**无上限重试**
   （旧的 10 万次上限撤除），不保证有限次数完成。旧值一律在解锁之后释放。
-- **`Lazy[T]`（L4）**：逐值状态机（0/1/2）认领唯一一次初始化，`init_owner` 是**原子**
+- **`Lazy[T]`（L4）**：`T: sendable`（2026-11-12 约束位，与 `AtomicCell` 一致——值发布给每个 `get` 的调用线程；线程内 memo 非 sendable 值不归它管）。逐值状态机（0/1/2）认领唯一一次初始化，`init_owner` 是**原子**
   （认领线程 id，2026-11-12 从普通字段改原子：同线程自依赖判定点，跨线程读写不得
   竞争）；初始化器**不持锁**运行（可以调别的 lazy、全局与锁）。同一值的初始化器里
   `get()` 不死锁，而是 panic `Lazy.get: the initializer called get() on the same Lazy`；
@@ -271,7 +271,7 @@ sendable 类型的析构在**最后句柄死亡的那个线程**执行，析构�
 | `Mutex` / `SharedMutex` / `Thread` | `unsafe sendable mutable`（裸指针 handle，受信基座） |
 | `Atomic*` | `unsafe sendable mutable`（自带原子操作，FFI 内变路径不走对象锁） |
 | `AtomicCell[T]` | `unsafe sendable mutable`（条件于 `T: sendable`；L2 单步 + L3 组合，形态见「同步原语的形状」）——`op=` 两步解糖之后，跨访问原子递增等场景的显式工具；`compare_exchange` 的 `Eq` 在锁内（L2 范围），纯函数契约写在手册 |
-| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T`；L4，状态机 + 原子 `init_owner` + 条件变量自管，形态见「同步原语的形状」） |
+| `Lazy[T]` | `unsafe sendable mutable`（条件于 `T: sendable`，与 `AtomicCell` 同形的约束位：值要发布给每个 `get` 的调用线程；L4，状态机 + 原子 `init_owner` + 条件变量自管，形态见「同步原语的形状」） |
 | `Task` / `run_task` / `spawn_thread` | `sendable () -> Void` 参数位 |
 
 **错误侧裁定（2026-11-08，随 trait 重设计收编）**：`Error` 是 `trait sendable`——错误类型**单一形态**，必须自行声明 `sendable` / `unsafe sendable` 才能实现它（`given` 处检查，与 Swift `Error: Sendable` 对齐）。`Result[T]` 的错误载荷是普通 `Error`（声明已携带共享性），Result 因此是 safe `sendable`。

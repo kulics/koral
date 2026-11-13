@@ -1859,11 +1859,16 @@ static wchar_t* __koral_win_widen_path(const char* path) {
     wchar_t* joined = wpath;
     if (!(rooted || drive_abs)) {
         DWORD need = GetCurrentDirectoryW(0, NULL);
-        if (need == 0) { free(wpath); return NULL; }
+        if (need == 0) { __koral_win_record_error(GetLastError()); free(wpath); return NULL; }
         wchar_t* cwd = (wchar_t*)malloc(need * sizeof(wchar_t));
         if (!cwd) { free(wpath); return NULL; }
         DWORD got = GetCurrentDirectoryW(need, cwd);
-        if (got == 0 || got >= need) { free(cwd); free(wpath); return NULL; }
+        if (got == 0 || got >= need) {
+            DWORD cwd_err = GetLastError();
+            free(cwd); free(wpath);
+            __koral_win_record_error(cwd_err);
+            return NULL;
+        }
         size_t cl = wcslen(cwd), wl = wcslen(wpath);
         joined = (wchar_t*)malloc((cl + 1 + wl + 1) * sizeof(wchar_t));
         if (!joined) { free(cwd); free(wpath); return NULL; }
@@ -1873,7 +1878,9 @@ static wchar_t* __koral_win_widen_path(const char* path) {
         free(cwd);
         free(wpath);
     }
-    // `..` needs the POSIX walk; a path without it passes straight through.
+    // `.`/`..` need the POSIX walk -- the `\\?\` namespace takes the spelling
+    // literally and refuses either component; a path without them passes
+    // straight through.
     {
         int has_dots = 0;
         const wchar_t* q = joined;
@@ -1881,7 +1888,9 @@ static wchar_t* __koral_win_widen_path(const char* path) {
             while (*q == L'\\') q++;
             const wchar_t* cs = q;
             while (*q && *q != L'\\') q++;
-            if ((size_t)(q - cs) == 2 && cs[0] == L'.' && cs[1] == L'.') {
+            size_t cs_len = (size_t)(q - cs);
+            if ((cs_len == 2 && cs[0] == L'.' && cs[1] == L'.')
+                || (cs_len == 1 && cs[0] == L'.')) {
                 has_dots = 1;
                 break;
             }
@@ -2168,7 +2177,13 @@ int32_t __koral_open(const uint8_t* path, int32_t open_mode, uint32_t perm) {
                            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                            NULL, creation, FILE_ATTRIBUTE_NORMAL, NULL);
     free(wpath);
-    if (h == INVALID_HANDLE_VALUE) return -1;
+    if (h == INVALID_HANDLE_VALUE) {
+        // Record before any later Win32 call can spend the thread's
+        // last-error slot: `last_error_message()` reads the recorded code,
+        // and a bare -1 here used to surface as "No error".
+        __koral_win_record_error(GetLastError());
+        return -1;
+    }
     int fd = _open_osfhandle((intptr_t)h, oflags);
     if (fd < 0) {
         CloseHandle(h);
@@ -3415,13 +3430,51 @@ int32_t __koral_spawn(
     else si.hStdError = GetStdHandle(STD_ERROR_HANDLE);
 
     memset(&pi, 0, sizeof(pi));
-    // lpApplicationName stays NULL on purpose: the module name is the first
-    // token of the command line, and only THAT spelling is searched against
-    // the application directory, the system directories and PATH (and gets
-    // `.exe` appended). Passing the bare name as lpApplicationName skips the
-    // PATH search entirely, so `Command.new("sh")` could never work.
+    // lpApplicationName stays NULL for BARE names on purpose: the module name
+    // is the first token of the command line, and only THAT spelling is
+    // searched against the application directory, the system directories and
+    // PATH (and gets `.exe` appended). Passing the bare name as
+    // lpApplicationName skips the PATH search entirely, so `Command.new("sh")`
+    // could never work.
+    //
+    // A name WITH a directory component is a different case: the first-token
+    // resolution does not reliably find a relative spelling like
+    // `bin/samples/cat.exe` (while `./bin/...` and absolute forms work), so
+    // anchor it at the current directory and pass it as lpApplicationName
+    // explicitly. The command line keeps the caller's spelling, so the child's
+    // argv[0] is unchanged. Anchoring is best-effort: on failure fall back to
+    // the NULL form and let CreateProcess report its own error.
+    wchar_t* wmodule = NULL;
+    {
+        const char* prog = (const char*)program;
+        int has_sep = strchr(prog, '/') != NULL || strchr(prog, '\\') != NULL;
+        int rooted = prog[0] == '/' || prog[0] == '\\'
+            || (prog[0] != '\0' && prog[1] == ':');
+        if (has_sep && !rooted) {
+            wchar_t* wrel = __koral_utf8_to_wide(prog);
+            if (wrel) {
+                for (wchar_t* p = wrel; *p; p++) {
+                    if (*p == L'/') *p = L'\\';
+                }
+                DWORD need = GetCurrentDirectoryW(0, NULL);
+                wchar_t* cwd = (need != 0) ? (wchar_t*)malloc(need * sizeof(wchar_t)) : NULL;
+                DWORD got = (cwd != NULL) ? GetCurrentDirectoryW(need, cwd) : 0;
+                if (got != 0 && got < need) {
+                    size_t cl = wcslen(cwd), wl = wcslen(wrel);
+                    wmodule = (wchar_t*)malloc((cl + 1 + wl + 1) * sizeof(wchar_t));
+                    if (wmodule) {
+                        memcpy(wmodule, cwd, cl * sizeof(wchar_t));
+                        wmodule[cl] = L'\\';
+                        memcpy(wmodule + cl + 1, wrel, (wl + 1) * sizeof(wchar_t));
+                    }
+                }
+                if (cwd) free(cwd);
+                free(wrel);
+            }
+        }
+    }
     BOOL ok = CreateProcessW(
-        NULL, wcmdline, NULL, NULL, TRUE,
+        wmodule, wcmdline, NULL, NULL, TRUE,
         env_block ? CREATE_UNICODE_ENVIRONMENT : 0,
         env_block, wwork_dir, &si, &pi
     );
@@ -3430,6 +3483,7 @@ int32_t __koral_spawn(
 
     free(wcmdline);
     free(wprogram);
+    free(wmodule);
     free(wwork_dir);
     if (env_block) free(env_block);
 

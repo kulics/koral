@@ -1263,16 +1263,32 @@ given TypeChecker {
             return self.empty_typed_block(Type.Unknown());
         };
 
+        // 家族规则（std-api 设计裁定）：序列字面量的目标家族是 List/Set 系
+        // （外加 FixedArray 与 Range 两个自有形态），Dict 系是形状不匹配。
+        // 目标不属家族（泛型参数位、未知、用户类型）时字面量**默认推断成
+        // List**——`List` 是 `Iterable`，于是 `zip([1, 2])` / `chain(["z"])`
+        // 这类 Iterable 约束位可以直接写字面量。
+        let mutable defaulted = false;
         let elem_expected = when expected in {
             .Some(et) then self.extract_collection_element_type(et),
             .None() then Option[Type].None(),
         };
         if expected is .Some(et) and elem_expected is .None() then {
-            self.push_diagnostic(
-                self.collection_literal_target_error(et),
-                unknown_span(),
-            );
-            return self.empty_typed_block(Type.Unknown());
+            if self.is_std_type(et, "Dict") or self.is_std_type(et, "FrozenDict") then {
+                self.push_diagnostic(
+                    self.collection_literal_target_error(et),
+                    unknown_span(),
+                );
+                return self.empty_typed_block(Type.Unknown());
+            };
+            if self.extract_range_element_type(et) is .Some(_) then {
+                self.push_diagnostic(
+                    "Range literal '...' cannot be used as a collection literal",
+                    unknown_span(),
+                );
+                return self.empty_typed_block(Type.Unknown());
+            };
+            defaulted = true;
         };
 
         let mutable typed_elems = List[TypedExpr].new();
@@ -1281,7 +1297,7 @@ given TypeChecker {
         };
         let result_type = self.infer_collection_literal_result_type(
             typed_elems,
-            expected,
+            if defaulted then Option[Type].None() else expected,
         );
         return self.lower_collection_literal_from_typed(typed_elems, result_type);
     };
@@ -1325,12 +1341,22 @@ given TypeChecker {
                 Option[Type].None(),
             ),
         };
+        // 家族规则：字典字面量的目标家族是 Dict 系；进序列家族（List/Set 系）
+        // 或 Range/FixedArray 是形状不匹配，其余目标（泛型参数位、未知、用户
+        // 类型）**默认推断成 Dict**——与序列字面量默认 `List` 对称。
+        let mutable defaulted = false;
         if expected is .Some(et) and kv_types.first is .None() then {
-            self.push_diagnostic(
-                "Collection literals only support built-in [T]List, [T]Set, [K, V]Dict, [T]FrozenList, [T]FrozenSet, [K, V]FrozenDict, and [T]Range",
-                unknown_span(),
-            );
-            return self.empty_typed_block(Type.Unknown());
+            if self.is_std_type(et, "List") or self.is_std_type(et, "Set")
+                or self.is_std_type(et, "FrozenList") or self.is_std_type(et, "FrozenSet")
+                or self.extract_range_element_type(et) is .Some(_)
+                or et is .FixedArrayType(_, _) then {
+                self.push_diagnostic(
+                    "Dict literal can only be assigned to [K, V]Dict",
+                    unknown_span(),
+                );
+                return self.empty_typed_block(Type.Unknown());
+            };
+            defaulted = true;
         };
 
         let mutable typed_entries = List[Pair[TypedExpr, TypedExpr]].new();
@@ -1341,7 +1367,7 @@ given TypeChecker {
         };
         let mutable result_type = self.infer_dict_literal_result_type(
             typed_entries,
-            expected,
+            if defaulted then Option[Type].None() else expected,
         );
         return self.lower_dict_literal_from_typed(typed_entries, result_type);
     };

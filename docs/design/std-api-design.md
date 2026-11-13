@@ -81,7 +81,7 @@ Common consumption cases:
 
 Lazy pipeline adapters and terminals are NOT in this list. A `LazyView` is a
 value describing a pipeline; every terminal builds a fresh cursor, walks it and
-drops it, so `count`, `into_list` and `is_empty` on one all leave it usable.
+drops it, so `count`, `to_list` and `is_empty` on one all leave it usable.
 Consume the receiver only for a one-shot cursor (`Iterator.next`), which is the
 one thing in the iteration API that genuinely advances state.
 
@@ -189,7 +189,7 @@ matter how long the chain gets, and no per-stage view type to declare. Nothing
 in it mutates, so it is repeatable and safe to share. Adapters return another
 `LazyView` wrapping the factory they already had (so chains never nest), and
 every terminal builds a cursor, walks it and drops it. That makes the whole
-pipeline surface observational: `count`, `into_list`, `is_empty`, `fold` and
+pipeline surface observational: `count`, `to_list`, `is_empty`, `fold` and
 friends all leave the pipeline and the source untouched.
 
 Reaching for a factory rather than a source is deliberate. Holding the source
@@ -224,6 +224,16 @@ Typical `Iterable` cases where the source remains reusable:
 One-shot sources such as generators, streams, or parsers whose progression
 state lives in the source value itself are NOT `Iterable`: they cannot hand out
 a fresh cursor, so they are plain cursors and get no `lazy()`.
+
+A producer that names a WALK rather than a position returns a named `Iterable`
+view, not a cursor: `string.split` / `lines` / `bytes` / `runes` /
+`split_ascii_whitespace`, `dict.keys` / `values`, and `regex.find_all` /
+`captures_all` / `split` hand back `StringSplitView`, `DictKeysView`,
+`MatchView` and friends. The view holds the source and the walk's parameters,
+hands out a fresh cursor per `iterator()`, and is never spent; `lazy()` stays
+the one door into pipelines, so a view carries no lazy names of its own.
+One-shot producers keep cursors: `read_dir` / `walk_dir` advance an OS
+directory handle and are not `Iterable`.
 
 This design also means observational methods such as set algebra should not be treated as consuming merely because they happen to call `iterator()`. If the source collection is `type mutable`, the public API naturally preserves the shared handle.
 
@@ -284,6 +294,11 @@ Receiver choice and method naming should reinforce each other:
 - prefer `into_*` for consuming conversions and ownership-moving adapters
 - prefer `to_*`, `as_*`, `with_*`, and predicate/getter names for observation or derivation
 - avoid naming a borrowed method in a way that suggests linear consumption
+- `LazyView`'s collecting terminals are `to_*` (`to_list`, `to_set`,
+  `to_frozen_list`, `to_frozen_set`): a pipeline is observational and never
+  spent, so `into_*` would promise a consumption that does not happen
+  (`into_frozen_*` on the mutable containers stays `into_*` -- it hands the
+  storage over)
 
 ### 计数域与宽度域
 

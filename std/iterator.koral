@@ -16,8 +16,10 @@
 //
 // Nothing lazy is spelled on the container itself. `dict.take(key)`,
 // `string.find(pat)`, `list.first()` and friends stay the container's own
-// method, and names like `map` / `filter` / `to_list` / `collect` on a
-// container are kept free for a future eager api -- do not spend them here.
+// method, and names like `map` / `filter` / `to_list` / `collect` stay free
+// ON THE CONTAINER for a future eager api -- do not spend them there. The
+// terminal names below live on `LazyView`, where they never collide with a
+// container's own surface.
 //
 // A `LazyView[T, R]` holds a cursor FACTORY, not a source: `make () -> R`
 // builds a fresh cursor whenever asked. Two type parameters, and the chain
@@ -26,7 +28,8 @@
 // never spent.
 //
 // A one-shot source (a file's lines, a socket) is a cursor and stays one. It
-// has no `lazy()`. To run a pipeline over it, collect first (`into_list()`).
+// has no `lazy()`. To run a pipeline over it, collect it first (walk it with
+// `for` into a `List`).
 // ============================================================================
 
 /// A one-shot cursor over a sequence of `T`: it only advances, and `next` is the whole protocol.
@@ -604,7 +607,7 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
     };
 
     /// Collect every element into a new `List[T]`.
-    public into_list(self): List[T] = {
+    public to_list(self): List[T] = {
         let mutable result: List[T] = [];
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -612,6 +615,12 @@ given[T: Any, R: Iterator[T]] LazyView[T, R] {
         };
         return result;
     };
+
+    /// Collect every element into an immutable `FrozenList[T]` snapshot that
+    /// can cross threads (the conditional rule: `FrozenList[T]` is sendable
+    /// only when `T` is). The pipeline stays usable; the snapshot owns its own
+    /// buffer of shared element handles.
+    public to_frozen_list(self): FrozenList[T] = self.to_list().into_frozen_list();
 
     /// Run `fn` on every element for its side effects.
     public for_each(self, fn: (T) -> Void): Void = {
@@ -842,7 +851,7 @@ given[T: Ord, R: Iterator[T]] LazyView[T, R] {
 given[T: Hash, R: Iterator[T]] LazyView[T, R] {
 
     /// Collect every element into a new `Set[T]`, collapsing duplicates.
-    public into_set(self): Set[T] = {
+    public to_set(self): Set[T] = {
         let mutable result = Set[T].new();
         let iter = self.iterator();
         while iter.next() is .Some(v) then {
@@ -850,6 +859,11 @@ given[T: Hash, R: Iterator[T]] LazyView[T, R] {
         };
         return result;
     };
+
+    /// Collect every element into an immutable `FrozenSet[T]` snapshot that
+    /// can cross threads (the conditional rule: `FrozenSet[T]` is sendable
+    /// only when `T` is), collapsing duplicates. The pipeline stays usable.
+    public to_frozen_set(self): FrozenSet[T] = self.to_set().into_frozen_set();
 };
 
 // ============================================================================

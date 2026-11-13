@@ -1,0 +1,68 @@
+// EXPECT: PASS
+// Producers that name a walk hand back named `Iterable` views
+// (StringSplitView & friends) instead of cursors, so `for` and `lazy()`
+// pipelines work off the same value and it is never spent
+// (std-api-design.md §Cursors Are Consuming, Pipelines Are Not). One-shot
+// producers (read_dir / walk_dir) keep cursors and are not covered here.
+
+using "std/text" { ... };
+
+let check(label: String, got: String, want: String): Bool = {
+    if got != want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main(): Int = {
+    let mutable passed: Bool = true;
+
+    // String.split: `for` walks it, `lazy()` pipelines off it, and the view
+    // hands out a fresh cursor every time.
+    let parts_view = "a,b,c".split(",");
+    let mutable joined = "";
+    for p in parts_view then {
+        joined = joined + p;
+    };
+    passed = check("split-for", joined, "abc") and passed;
+    passed = check("split-lazy-count", parts_view.lazy().count().to_string(), "3") and passed;
+    passed = check("split-repeat", parts_view.lazy().to_list().count().to_string(), "3") and passed;
+
+    // The other string walks.
+    let widths = "x y z".split_ascii_whitespace().lazy().map((w) => w.count());
+    passed = check("words", widths.to_list().to_string(), "[1, 1, 1]") and passed;
+    passed = check("lines", "l1\nl2\n".lines().lazy().count().to_string(), "2") and passed;
+    passed = check("runes", "héllo".runes().lazy().count().to_string(), "5") and passed;
+    passed = check("bytes", "hé".bytes().lazy().count().to_string(), "3") and passed;
+
+    // Dict keys / values.
+    let mutable d = Dict[String, Int].new();
+    d.insert("a", 1);
+    d.insert("b", 2);
+    d.insert("c", 3);
+    passed = check("keys", d.keys().lazy().count().to_string(), "3") and passed;
+    passed = check("values-sum", d.values().lazy().sum().to_string(), "6") and passed;
+    passed = check("keys-repeat", d.keys().lazy().to_list().count().to_string(), "3") and passed;
+
+    // Regex walks: matches, capture sets, and the pieces between matches.
+    let re = Regex.compile("[0-9]+").expect("compile");
+    passed = check("find-all", re.find_all("a1 b22").lazy().count().to_string(), "2") and passed;
+    passed = check("captures-all", re.captures_all("a1 b22").lazy().count().to_string(), "2") and passed;
+    passed = check(
+        "regex-split",
+        re.split("a1b22c").lazy().join_to_string("|"),
+        "a|b|c",
+    ) and passed;
+
+    // Views plug into adapters that take an `Iterable` (chain / zip).
+    let chained = "a,b".split(",").lazy().chain("c,d".split(","));
+    passed = check("chain", chained.join_to_string(""), "abcd") and passed;
+
+    if passed then {
+        println("PASS");
+    } else {
+        println("FAIL");
+    };
+    return 0;
+};

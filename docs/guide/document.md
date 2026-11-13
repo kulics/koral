@@ -542,8 +542,8 @@ s.trim_ascii();                   // Trim leading/trailing whitespace
 s.substring(0..<5);               // "Hello" - slicing
 s.find("World");                  // Some(7)
 s.replace_all("World", with = "Koral"); // "Hello, Koral!"
-s.split(",");                     // Split by separator
-s.lines();                        // Split by lines
+s.split(",");                     // Iterable view over the separator-split parts
+s.lines();                        // Iterable view over the lines
 
 // Join a list of strings
 list.join_to_string(", ");        // Join List[String] with separator
@@ -2141,7 +2141,7 @@ The `std` primitives that bring their own synchronization — `AtomicCell`, the 
 - **Single-step operations hold their lock for exactly one step.** `AtomicCell.get` / `set` / `swap` / `compare_exchange` and each `Concurrent*` operation are one linearizable step. Inside the lock, the only user code allowed is an element's `hash` / `eq` (a dict key's, or `compare_exchange`'s `Eq`) — and those must be **pure functions**: no side effects, no locks, no calling back into anything. This is a contract, not a checked restriction; violating it breaks the guarantee.
 - **Destructors never run inside these locks.** A displaced or deleted value is released after the unlock — a `Drop` body is user code like any other and may call back into the world.
 - **`update_and_get` runs its callback outside the lock**, on `AtomicCell` and `ConcurrentDict` alike. The callback therefore **may run more than once** — the update is optimistic, committed only when the snapshot still validates — and must not have side effects outside the value it computes. Reading the object from the callback is fine. **Writing the object the callback updates panics** (`AtomicCell.update_and_get: the updater wrote the same cell`, `ConcurrentDict.update_and_get: the updater wrote the same container`) instead of retrying forever. Ordinary contention simply retries: there is **no attempt limit** and no guarantee of finishing in a bounded number of steps. A `ConcurrentDict` update validates per entry, so a write to a *different* entry never invalidates it.
-- **One-time initialization** — `Lazy` and global initializers — runs the initializer **outside any lock**, at most once; other threads wait for the value to be published. An initializer that re-enters its own value on the same thread panics with the cycle spelled out (`global initialization cycle: a -> b -> a`, `Lazy.get: the initializer called get() on the same Lazy`). **Cross-thread cycles are not detected**: two threads initializing two values that need each other simply deadlock — that shape is documented, not diagnosed.
+- **One-time initialization** — `Lazy` and global initializers — runs the initializer **outside any lock**, at most once; other threads wait for the value to be published. A `Lazy[T]` publishes `T` to any thread that calls `get`, so `T` is constrained `sendable`, exactly like `AtomicCell`'s. An initializer that re-enters its own value on the same thread panics with the cycle spelled out (`global initialization cycle: a -> b -> a`, `Lazy.get: the initializer called get() on the same Lazy`). **Cross-thread cycles are not detected**: two threads initializing two values that need each other simply deadlock — that shape is documented, not diagnosed.
 - **The explicit primitives** — `Mutex`, `SharedMutex`, `Semaphore`, `Channel`, `LatchGate` — are your own critical sections. Anything may run inside, including callbacks and destructors, and deadlock freedom is the programmer's responsibility.
 
 #### Frozen Collections
@@ -2158,7 +2158,7 @@ source.push(6);
 let frozen = source.to_frozen_list();    // copies into independent storage
 ```
 
-- Convert with `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()`; the source stays usable afterwards. Copy back out with `to_list()` / `to_dict()` / `to_set()`.
+- Convert with `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()`; the source stays usable afterwards. Copy back out with `to_list()` / `to_dict()` / `to_set()`. A lazy pipeline collects the same way: `view.to_frozen_list()` / `view.to_frozen_set()`.
 - The read halves are `count`, `is_empty`, `get`, `contains` (`contains_key` on dicts), and `iterator`. There are **no mutation methods and no builders** — the snapshot is written once at construction and never touched again.
 - Built-in subscripts read snapshots: `frozen[i]` and `frozen_dict[key]` behave exactly like `List[i]` and `Dict[key]` (same out-of-range / missing-key panics), and assigning to them is a compile error. `FrozenSet` has no subscript.
 - Collection literals target the frozen family through type context, with the mutable rules carried over — set literals dedup, dict literals keep the last duplicate key, `[]` needs context:
@@ -2585,7 +2585,7 @@ let view = list.lazy().filter((x) => x > 0).map((x) => x * 2);
 
 view.count();        // builds a cursor, walks it, drops it
 view.is_empty();     // looks at one element, drops the cursor
-view.into_list();    // [2, 4, 6]
+view.to_list();      // [2, 4, 6]
 view.count();        // 3 -- the pipeline was never spent
 
 list.count();        // the container's own O(1) count
@@ -2605,6 +2605,15 @@ exists. The cursor that comes out is an ordinary monomorphized `Iterator`, so
 A cursor is a different thing: `list.iterator()` names one position, and
 pulling from it advances it. To run a pipeline over a one-shot source (a file's
 lines, a socket), collect it into a list first.
+
+Sources that describe a walk rather than a position hand back an `Iterable`
+**view**, and pipelines chain straight off it through `lazy()`: `string.split(sep)`,
+`string.lines()`, `string.bytes()`, `string.runes()`,
+`string.split_ascii_whitespace()`, `dict.keys()`, `dict.values()`,
+`regex.find_all(text)`, `regex.captures_all(text)` and `regex.split(text)`.
+A view is never spent — `for` and every pipeline start from a fresh cursor —
+while one-shot sources stay cursors: `read_dir` and `walk_dir` advance an OS
+handle and hand out nothing repeatable.
 
 ### Conditions and Loop Bindings
 

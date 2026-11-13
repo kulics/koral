@@ -84,6 +84,63 @@ public type mutable StringLinesIterator(source: String, mutable index: Int);
 /// Iterator over the raw UTF-8 bytes of a string.
 public type mutable StringBytesIterator(source: String, mutable index: Int);
 
+// String iterable views -- the re-iterable sources `split`, `lines`, `bytes`
+// and friends hand back. A view describes a walk, not a position: every
+// `iterator()` starts a fresh cursor, so `for`, repeat terminals and `lazy()`
+// pipelines all work off the same view.
+
+/// Iterable view over the whitespace-separated words of a string.
+public type StringSplitAsciiWhitespaceView(source: String);
+
+/// Iterable view over the parts of a string separated by a fixed separator.
+public type StringSplitView(source: String, sep: String);
+
+/// Iterable view over the lines of a string, split at `\n`.
+public type StringLinesView(source: String);
+
+/// Iterable view over the raw UTF-8 bytes of a string.
+public type StringBytesView(source: String);
+
+/// Iterable view over the runes of a string, decoding UTF-8 as it goes.
+public type StringRunesView(source: String);
+
+/// `Iterable` for `StringSplitAsciiWhitespaceView`: a fresh word cursor per call.
+given StringSplitAsciiWhitespaceView: Iterable[String, StringSplitAsciiWhitespaceIterator] {
+
+    /// Build a fresh cursor over the words; the view itself is untouched.
+    public iterator(self): StringSplitAsciiWhitespaceIterator =
+        StringSplitAsciiWhitespaceIterator(self.source, 0);
+};
+
+/// `Iterable` for `StringSplitView`: a fresh parts cursor per call.
+given StringSplitView: Iterable[String, StringSplitIterator] {
+
+    /// Build a fresh cursor over the parts; the view itself is untouched.
+    public iterator(self): StringSplitIterator =
+        StringSplitIterator(self.source, self.sep, 0);
+};
+
+/// `Iterable` for `StringLinesView`: a fresh lines cursor per call.
+given StringLinesView: Iterable[String, StringLinesIterator] {
+
+    /// Build a fresh cursor over the lines; the view itself is untouched.
+    public iterator(self): StringLinesIterator = StringLinesIterator(self.source, 0);
+};
+
+/// `Iterable` for `StringBytesView`: a fresh bytes cursor per call.
+given StringBytesView: Iterable[UInt8, StringBytesIterator] {
+
+    /// Build a fresh cursor over the UTF-8 bytes; the view itself is untouched.
+    public iterator(self): StringBytesIterator = StringBytesIterator(self.source, 0);
+};
+
+/// `Iterable` for `StringRunesView`: a fresh runes cursor per call.
+given StringRunesView: Iterable[Rune, StringRunesIterator] {
+
+    /// Build a fresh cursor over the decoded runes; the view itself is untouched.
+    public iterator(self): StringRunesIterator = StringRunesIterator(self.source, 0);
+};
+
 // No `Drop` for `String`: user destructors live only on `type mutable` (a
 // value's cleanup is its synthesized field release). The `bytes` field
 // release drives the block's RC to zero and the runtime frees the whole
@@ -901,20 +958,26 @@ given String {
         return result.to_string();
     };
 
-    /// Return an iterator over the words separated by runs of ASCII whitespace;
-    /// leading and trailing whitespace produce no empty words.
-    public split_ascii_whitespace(self): StringSplitAsciiWhitespaceIterator =
-        StringSplitAsciiWhitespaceIterator(self, 0);
+    /// Return a view over the words separated by runs of ASCII whitespace;
+    /// leading and trailing whitespace produce no empty words. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public split_ascii_whitespace(self): StringSplitAsciiWhitespaceView =
+        StringSplitAsciiWhitespaceView(self);
 
-    /// Return an iterator over the parts between occurrences of `sep`.
+    /// Return a view over the parts between occurrences of `sep`.
     /// With no match the whole string is one part; an empty `sep` yields it once.
-    public split(self, sep: String): StringSplitIterator = {
-        return StringSplitIterator(self, sep, 0);
+    /// The view is `Iterable` (`for`, and `lazy()` for pipelines); it hands out
+    /// a fresh cursor per `iterator()` and is never spent.
+    public split(self, sep: String): StringSplitView = {
+        return StringSplitView(self, sep);
     };
 
-    /// Return an iterator over the lines split at `\n`, without the newline.
-    /// A trailing newline does not produce an extra empty line.
-    public lines(self): StringLinesIterator = StringLinesIterator(self, 0);
+    /// Return a view over the lines split at `\n`, without the newline.
+    /// A trailing newline does not produce an extra empty line. The view is
+    /// `Iterable` (`for`, and `lazy()` for pipelines); it hands out a fresh
+    /// cursor per `iterator()` and is never spent.
+    public lines(self): StringLinesView = StringLinesView(self);
 
     /// Return the string without `prefix`, or unchanged when there is no such prefix.
     public trim_prefix(self, prefix: String): String = if self.starts_with(prefix) then self.make_substring(
@@ -951,11 +1014,15 @@ given String {
         return Option[String].None();
     };
 
-    /// Return an iterator over the raw UTF-8 bytes.
-    public bytes(self): StringBytesIterator = StringBytesIterator(self, 0);
+    /// Return a view over the raw UTF-8 bytes. The view is `Iterable` (`for`,
+    /// and `lazy()` for pipelines); it hands out a fresh cursor per
+    /// `iterator()` and is never spent.
+    public bytes(self): StringBytesView = StringBytesView(self);
 
-    /// Return an iterator over the runes (Unicode code points) decoded from UTF-8.
-    public runes(self): StringRunesIterator = StringRunesIterator(self, 0);
+    /// Return a view over the runes (Unicode code points) decoded from UTF-8.
+    /// The view is `Iterable` (`for`, and `lazy()` for pipelines); it hands out
+    /// a fresh cursor per `iterator()` and is never spent.
+    public runes(self): StringRunesView = StringRunesView(self);
 
     /// Convert the string to a `List` of runes for random access.
     public to_runes(self): List[Rune] = {

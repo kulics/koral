@@ -16,6 +16,12 @@ using "std" { ... };
 // initializer runs. CROSS-THREAD CYCLES ARE NOT DETECTED: two Lazies whose
 // initializers call each other from two threads simply deadlock; only the
 // same-thread re-entry is diagnosed.
+//
+// `T` is `sendable` like `AtomicCell`'s: a `Lazy` exists to PUBLISH a value
+// across threads (the lazy-global shape), the initializer is already
+// `sendable () -> T`, and the value it publishes is read from any thread that
+// calls `get`. A thread-local memo of a non-sendable value is not this type's
+// job -- that is a plain `Option` next to the code that computes it.
 // ============================================================================
 
 let foreign __koral_thread_current_id(): UInt64;
@@ -27,8 +33,10 @@ private let lazy_state_done: Int = 2;
 
 /// Thread-safe lazy value whose initializer runs at most once.
 /// Sendable contract: self-synchronized -- the state machine runs the
-/// initializer at most once; `get` from any thread is safe.
-public type unsafe sendable mutable Lazy[T: Any](
+/// initializer at most once; `get` from any thread is safe. `T` is `sendable`
+/// (like `AtomicCell[T]`): the cached value is published to every thread that
+/// calls `get`.
+public type unsafe sendable mutable Lazy[T: sendable](
     private state: AtomicInt,
     private mutex: Mutex,
     private condvar: MutexCondvar,
@@ -38,7 +46,7 @@ public type unsafe sendable mutable Lazy[T: Any](
 );
 
 /// Creates the lazy value and reads it once initialized.
-given[T: Any] Lazy[T] {
+given[T: sendable] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`. The initializer
     /// runs with no lock held (it may call other lazy values, globals and
     /// locks) and runs at most once -- the `Lazy` name carries that shape.

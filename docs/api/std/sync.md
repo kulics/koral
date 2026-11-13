@@ -69,8 +69,10 @@ public type unsafe sendable mutable LatchGate;
 
 /// Thread-safe lazy value whose initializer runs at most once.
 /// Sendable contract: self-synchronized -- the state machine runs the
-/// initializer at most once; `get` from any thread is safe.
-public type unsafe sendable mutable Lazy[T: Any];
+/// initializer at most once; `get` from any thread is safe. `T` is `sendable`
+/// (like `AtomicCell[T]`): the cached value is published to every thread that
+/// calls `get`.
+public type unsafe sendable mutable Lazy[T: sendable];
 
 /// A bare mutex lock that protects whatever shared data the caller guards between `lock` and `unlock`.
 /// Sendable contract: self-synchronized -- `lock`/`unlock` are the
@@ -194,6 +196,13 @@ given[T: sendable] AtomicCell[T] {
     /// retrying forever. Normal contention retries with no attempt limit and
     /// no guarantee of finishing in a bounded number of steps. The old value
     /// is released after the unlock.
+    ///
+    /// `f` carries no `sendable` requirement on purpose: it is a transient
+    /// combiner that runs and dies on the CALLER's thread (every retry too),
+    /// is never stored in shared state, and its result is `T`, already
+    /// sendable-constrained. Cross-thread sharing of the closure itself is
+    /// caught at the four crossing points (spawn capture, shared field,
+    /// global, channel), never here (concurrency-design.md §跨界检查).
     public update_and_get(self, f: (T) -> T): T;
 };
 
@@ -321,6 +330,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// retries with no attempt limit and no guarantee of finishing in a
     /// bounded number of steps. Displaced values and keys are released after
     /// the unlock.
+    ///
+    /// `f` carries no `sendable` requirement on purpose: it is a transient
+    /// combiner that runs and dies on the CALLER's thread (every retry too),
+    /// is never stored in shared state, and its result is `Option[V]`, already
+    /// sendable-constrained (`V: sendable`). Cross-thread sharing of the
+    /// closure itself is caught at the four crossing points (spawn capture,
+    /// shared field, global, channel), never here (concurrency-design.md
+    /// §跨界检查).
     public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V];
     /// Copy the entries into an immutable `FrozenDict[K, V]` snapshot that
     /// can cross threads. The entries are gathered under the shared lock; the
@@ -383,7 +400,7 @@ given LatchGate {
 };
 
 /// Creates the lazy value and reads it once initialized.
-given[T: Any] Lazy[T] {
+given[T: sendable] Lazy[T] {
     /// Wrap `f` so it runs at most once, on the first `get`. The initializer
     /// runs with no lock held (it may call other lazy values, globals and
     /// locks) and runs at most once -- the `Lazy` name carries that shape.

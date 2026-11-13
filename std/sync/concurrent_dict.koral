@@ -395,6 +395,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// retries with no attempt limit and no guarantee of finishing in a
     /// bounded number of steps. Displaced values and keys are released after
     /// the unlock.
+    ///
+    /// `f` carries no `sendable` requirement on purpose: it is a transient
+    /// combiner that runs and dies on the CALLER's thread (every retry too),
+    /// is never stored in shared state, and its result is `Option[V]`, already
+    /// sendable-constrained (`V: sendable`). Cross-thread sharing of the
+    /// closure itself is caught at the four crossing points (spawn capture,
+    /// shared field, global, channel), never here (concurrency-design.md
+    /// §跨界检查).
     public update_and_get(self, key: K, f: (Option[V]) -> Option[V]): Option[V] = {
         while true then {
             self.rw_lock.lock_shared();

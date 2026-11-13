@@ -1,0 +1,48 @@
+// EXPECT: PASS
+// LazyView collects through the `to_*` family: a pipeline is observational and
+// never spent, so its terminals are `to_list` / `to_set` / `to_frozen_list` /
+// `to_frozen_set` -- never `into_*`, which would promise a consumption that
+// does not happen (std-api-design.md §Naming Guidance). The frozen forms build
+// the same snapshots `List.to_frozen_list` / `Set.to_frozen_set` do, and the
+// pipeline stays usable afterwards.
+
+let check(label: String, got: String, want: String): Bool = {
+    if got != want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main(): Int = {
+    let mutable passed: Bool = true;
+    let xs = [3, 1, 2, 1];
+
+    // to_frozen_list: order preserved, elements readable, pipeline reusable.
+    // [3, 1, 2, 1] filtered by > 1 keeps [3, 2].
+    let frozen = xs.lazy().filter((x) => x > 1).to_frozen_list();
+    passed = check("frozen-count", frozen.count().to_string(), "2") and passed;
+    passed = check("frozen-0", frozen.get(0).unwrap().to_string(), "3") and passed;
+    passed = check("frozen-1", frozen.get(1).unwrap().to_string(), "2") and passed;
+    passed = check("frozen-2", frozen.get(2).is_none().to_string(), "true") and passed;
+    passed = check("reuse-after-freeze", xs.lazy().count().to_string(), "4") and passed;
+
+    // The mutable collects stay alongside; the frozen set collapses duplicates.
+    passed = check("to-list", xs.lazy().to_list().count().to_string(), "4") and passed;
+    passed = check("to-set", xs.lazy().to_set().count().to_string(), "3") and passed;
+    let fset = xs.lazy().to_frozen_set();
+    passed = check("frozen-set-count", fset.count().to_string(), "3") and passed;
+    passed = check("frozen-set-has-2", fset.contains(2).to_string(), "true") and passed;
+    passed = check("frozen-set-has-9", fset.contains(9).to_string(), "false") and passed;
+
+    // Two collects off one view agree with each other.
+    let again = xs.lazy().to_frozen_list();
+    passed = check("second-freeze", again.count().to_string(), "4") and passed;
+
+    if passed then {
+        println("PASS");
+    } else {
+        println("FAIL");
+    };
+    return 0;
+};

@@ -1,0 +1,45 @@
+// EXPECT: PASS
+// Family rule for collection literals (std-api design ruling): a sequence
+// literal's target family is the List and Set series, a dict literal's is the
+// Dict series. At a target outside the family -- a generic parameter slot, an
+// unknown, a user type -- the literal DEFAULTS (sequence -> `List`, dict ->
+// `Dict`), and `List` is `Iterable`, so literals flow straight into the
+// Iterable-constrained slots of `zip` / `chain` (`S2`). These inline forms
+// used to be rejected ("Collection literals only support built-in ...").
+
+let check(label: String, got: String, want: String): Bool = {
+    if got != want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main(): Int = {
+    let mutable passed: Bool = true;
+
+    // 1. Sequence literal at an Iterable-constrained slot: `zip`'s `S2`.
+    let zipped = ["x", "y"].lazy().zip([1, 2]);
+    passed = check("zip-literal", zipped.count().to_string(), "2") and passed;
+
+    // 2. Sequence literal at `chain`'s `S2`.
+    let chained = ["x", "y"].lazy().chain(["z"]);
+    passed = check("chain-literal", chained.join_to_string(""), "xyz") and passed;
+
+    // 3. Dict literal defaults symmetrically: a `Pair` pipeline chained with
+    //    an inline dict literal (Dict is Iterable of Pairs).
+    let pairs = ["k": 2].lazy().chain(["a": 1]);
+    passed = check("dict-literal", pairs.count().to_string(), "2") and passed;
+
+    // 4. Defaulted literals keep the family's own semantics where the target
+    //    IS in the family: dedup for Set, last-wins for Dict.
+    let s: Set[Int] = [1, 2, 2];
+    passed = check("set-family", s.count().to_string(), "2") and passed;
+
+    if passed then {
+        println("PASS");
+    } else {
+        println("FAIL");
+    };
+    return 0;
+};

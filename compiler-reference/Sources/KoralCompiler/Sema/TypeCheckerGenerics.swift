@@ -53,22 +53,38 @@ extension TypeChecker {
         for constraint in param.constraints {
           guard case .trait(_, _, let traitArgs) = constraint, !traitArgs.isEmpty else { continue }
           let requiredDefId = resolveBound(constraint).defId ?? .invalid
-          let required: [Type] = try withNewScope {
+          let required: [Type?] = try withNewScope {
             for genericParam in typeParameters {
               currentScope.defineGenericParameter(
                 genericParam.name, type: .genericParameter(name: genericParam.name))
             }
-            return try traitArgs.map { try resolveTypeNode($0) }
+            return traitArgs.map { arg -> Type? in
+              // A trait argument naming a parameter this scope cannot see --
+              // an ENCLOSING template's parameter, like `chain`'s
+              // `R2: Iterator[T]` where `T` belongs to the receiver's given
+              // block -- is not a binding source here. Read it as a PARAM NAME
+              // (the koralc scan does the same) instead of resolving it as a
+              // type: that would report `Undefined type` for a parameter the
+              // call has simply not bound.
+              try? resolveTypeNode(arg)
+            }
           }
           for conf in recordedConformances where conf.traitDefId == requiredDefId {
             var owner: [String: Type] = [:]
             _ = unifyTypes(conf.selfType, conforming, bindings: &owner)
+            // A template may contribute its trait arguments only when its
+            // TARGET is the conforming type: without this gate a fully
+            // concrete template leaks its arguments into unrelated bindings --
+            // a concrete `XView: Iterable[A, B]` conformance hijacking `zip`'s
+            // inference for `List[Rune]`.
+            let instantiatedSelf = SemaUtils.substituteType(conf.selfType, substitution: owner, context: context)
+            guard instantiatedSelf == conforming else { continue }
             let instArgs = conf.traitTypeArgs.map {
               SemaUtils.substituteType($0, substitution: owner, context: context)
             }
             guard instArgs.count == required.count else { continue }
             for (expected, actual) in zip(required, instArgs) {
-              guard !context.containsGenericParameter(actual) else { continue }
+              guard let expected, !context.containsGenericParameter(actual) else { continue }
               let before = substitution
               _ = unifyTypes(expected, actual, bindings: &substitution)
               if before != substitution { changed = true }
@@ -143,15 +159,25 @@ extension TypeChecker {
               continue
             }
 
-            let unresolvedTraitArgs: [Type] = try withNewScope {
+            let unresolvedTraitArgs: [Type?] = try withNewScope {
               for genericParam in template.typeParameters {
                 currentScope.defineGenericParameter(
                   genericParam.name, type: .genericParameter(name: genericParam.name))
               }
-              return try traitArgs.map { try resolveTypeNode($0) }
+              return traitArgs.map { arg -> Type? in
+                // Mirror of bindTypeParamsFromConstraints: a constraint
+                // argument naming a parameter this scope cannot see -- an
+                // ENCLOSING template's parameter, like `chain`'s
+                // `R2: Iterator[T]` where `T` belongs to the receiver's given
+                // block -- is not a binding source here. Read it as a PARAM
+                // NAME instead of resolving it as a type: that would report
+                // `Undefined type` for a parameter the call has not bound.
+                try? resolveTypeNode(arg)
+              }
             }
 
             for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              guard let expectedTraitArg else { continue }
               let before = inferred
               _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
               if before != inferred {
@@ -351,15 +377,25 @@ extension TypeChecker {
               continue
             }
 
-            let unresolvedTraitArgs: [Type] = try withNewScope {
+            let unresolvedTraitArgs: [Type?] = try withNewScope {
               for genericParam in template.typeParameters {
                 currentScope.defineGenericParameter(
                   genericParam.name, type: .genericParameter(name: genericParam.name))
               }
-              return try traitArgs.map { try resolveTypeNode($0) }
+              return traitArgs.map { arg -> Type? in
+                // Mirror of bindTypeParamsFromConstraints: a constraint
+                // argument naming a parameter this scope cannot see -- an
+                // ENCLOSING template's parameter, like `chain`'s
+                // `R2: Iterator[T]` where `T` belongs to the receiver's given
+                // block -- is not a binding source here. Read it as a PARAM
+                // NAME instead of resolving it as a type: that would report
+                // `Undefined type` for a parameter the call has not bound.
+                try? resolveTypeNode(arg)
+              }
             }
 
             for (expectedTraitArg, actualTraitArg) in zip(unresolvedTraitArgs, concreteTraitArgs) {
+              guard let expectedTraitArg else { continue }
               let before = inferred
               _ = unifyTypes(expectedTraitArg, actualTraitArg, bindings: &inferred)
               if before != inferred {

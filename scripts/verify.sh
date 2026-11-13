@@ -30,9 +30,15 @@ if [ "$WINDOWS" = "1" ]; then
   # koral_runtime.c pulls in Winsock/BCrypt/PSAPI; the drivers add these
   # themselves, but the hand-rolled clang lines below must too.
   WIN_LIBS="-lws2_32 -lbcrypt -lpsapi"
+  # Windows defaults the main thread's stack to 1MB (PE header) while
+  # macOS/Linux give 8MB: deep-but-legal nesting overflows the compilers this
+  # script links by hand (deep_else_if_chain was exactly this). The drivers
+  # pass the same flag on every link they perform.
+  WIN_STACK="-Wl,/STACK:8388608"
 else
   EXE=""
   WIN_LIBS=""
+  WIN_STACK=""
 fi
 
 SEED="compiler-reference/.build/release/koralc$EXE"
@@ -98,12 +104,12 @@ say "4. self-host + fixed point"
 "$BOOTSTRAP" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s2"
 clang "$WORK/s2/koralc.c" std/koral_runtime.c -I std -o "$WORK/s2/koralc$EXE" \
-  -Wno-everything -O1 $WIN_LIBS
+  -Wno-everything -O1 $WIN_LIBS $WIN_STACK
 
 "$WORK/s2/koralc$EXE" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s3"
 clang "$WORK/s3/koralc.c" std/koral_runtime.c -I std -o "$WORK/s3/koralc$EXE" \
-  -Wno-everything -O1 $WIN_LIBS
+  -Wno-everything -O1 $WIN_LIBS $WIN_STACK
 
 "$WORK/s3/koralc$EXE" emit-c \
   --package-config compiler/koral.json --target-module koralc -o "$WORK/s4"
@@ -179,7 +185,7 @@ if [ "$WINDOWS" = "1" ]; then RT_LIBS="$WIN_LIBS"; else RT_LIBS="-lm -lpthread";
 clang -c -Dfree=koral_test_free -I std std/koral_runtime.c \
   -o "$WORK/rt_track.o" -Wno-everything -O1
 clang -I std tests/runtime-cases/refcount_release_race.c "$WORK/rt_track.o" \
-  -o "$WORK/refcount_release_race$EXE" -Wno-everything -O1 $RT_LIBS
+  -o "$WORK/refcount_release_race$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 "$WORK/refcount_release_race$EXE"
 echo "refcount protocol OK"
 
@@ -189,7 +195,7 @@ echo "refcount protocol OK"
 # inside drop must not resurrect), immortal sentinels -- pinned through the
 # same tracked free.
 clang -I std tests/runtime-cases/nonatomic_refcount_stress.c "$WORK/rt_track.o" \
-  -o "$WORK/nonatomic_refcount_stress$EXE" -Wno-everything -O1 $RT_LIBS
+  -o "$WORK/nonatomic_refcount_stress$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 "$WORK/nonatomic_refcount_stress$EXE"
 echo "nonatomic refcount protocol OK"
 
@@ -199,7 +205,7 @@ echo "nonatomic refcount protocol OK"
 # two locks, so there is no owner reentry to exercise.
 clang -c -I std std/koral_runtime.c -o "$WORK/rt_plain.o" -Wno-everything -O1
 clang -I std tests/runtime-cases/object_lock_stress.c "$WORK/rt_plain.o" \
-  -o "$WORK/object_lock_stress$EXE" -Wno-everything -O1 $RT_LIBS
+  -o "$WORK/object_lock_stress$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 "$WORK/object_lock_stress$EXE"
 echo "object lock protocol OK"
 
@@ -214,12 +220,12 @@ echo "object lock protocol OK"
 # is the pin. Windows clang has no TSan -- run the plain build there.
 if [ "$WINDOWS" = "1" ]; then
   clang -I std tests/runtime-cases/str_region_race.c "$WORK/rt_plain.o" \
-    -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS
+    -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 else
   clang -c -I std -fsanitize=thread std/koral_runtime.c -o "$WORK/rt_tsan.o" \
     -Wno-everything -O1
   clang -I std -fsanitize=thread tests/runtime-cases/str_region_race.c \
-    "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS
+    "$WORK/rt_tsan.o" -o "$WORK/str_region_race$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 fi
 "$WORK/str_region_race$EXE"
 echo "str region publication OK"
@@ -248,7 +254,7 @@ if grep -a -q '__koral_rc_stats' "$WORK/rt_release_check.o"; then
 fi
 echo "release surface OK"
 "$BOOTSTRAP" emit-c tests/runtime-cases/rc_counter_pin.koral -o "$WORK/rc_counter_pin"
-clang -I std -DKORAL_RC_STATS "$WORK/rc_counter_pin/rc_counter_pin.c" std/koral_runtime.c   -o "$WORK/rc_counter_pin/rc_counter_pin$EXE" -Wno-everything -O1 $RT_LIBS
+clang -I std -DKORAL_RC_STATS "$WORK/rc_counter_pin/rc_counter_pin.c" std/koral_runtime.c   -o "$WORK/rc_counter_pin/rc_counter_pin$EXE" -Wno-everything -O1 $RT_LIBS $WIN_STACK
 "$WORK/rc_counter_pin/rc_counter_pin$EXE" > "$WORK/rc_counter_pin.out"
 grep -q 'w1_alias_retains=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: alias pair elimination" >&2; exit 1; }

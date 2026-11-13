@@ -704,9 +704,21 @@ extension TypeChecker {
           // A real trait bound (e.g. `T Equatable`, `R [T]Iterator`).
           // Identity is the trait's declaration; `traitName` is display-only.
 
-          // Substitute type parameters in the trait arguments.
-          let resolvedTraitArgs = try traitArgs.map { arg -> Type in
-            try resolveTypeNodeWithSubstitution(arg, substitution: substitution)
+          // Substitute type parameters in the trait arguments. An argument
+          // naming a parameter this substitution cannot see -- an ENCLOSING
+          // template's parameter, like `chain`'s `R2: Iterator[T]` where `T`
+          // belongs to the receiver's given block -- is uncheckable at the
+          // call site: read it as "might hold" (mono re-checks at
+          // instantiation), the same verdict the koralc mirror gives it, and
+          // skip the check. Do not resolve it as a type name -- that reports
+          // `Undefined type` for a parameter the call has simply not bound.
+          let resolvedTraitArgs: [Type]
+          do {
+            resolvedTraitArgs = try traitArgs.map { arg -> Type in
+              try resolveTypeNodeWithSubstitution(arg, substitution: substitution)
+            }
+          } catch {
+            continue
           }
 
           // If the argument is a generic parameter, the requirement is that its

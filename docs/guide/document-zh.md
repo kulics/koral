@@ -518,8 +518,8 @@ s.trim_ascii();                   // 去掉首尾空白
 s.substring(0..<5);               // "Hello" - 切片
 s.find("World");                  // Some(7)
 s.replace_all("World", with = "Koral"); // "Hello, Koral!"
-s.split(",");                     // 按分隔符切分
-s.lines();                        // 按行切分
+s.split(",");                     // 按分隔符切分的 Iterable 视图
+s.lines();                        // 按行切分的 Iterable 视图
 
 // 连接字符串列表
 list.join_to_string(", ");        // 用分隔符连接 List[String]
@@ -2078,7 +2078,7 @@ type unsafe sendable mutable Mutex(private handle: *UInt8);
 - **单步操作恰好持锁一步。** `AtomicCell.get` / `set` / `swap` / `compare_exchange` 与 `Concurrent*` 的每次操作都是一个可线性化步骤。锁内允许的用户代码**只有元素的 `hash` / `eq`**（字典键的，或 `compare_exchange` 的 `Eq`）——且它们必须是**纯函数**：无副作用、不上锁、不回调任何东西。这是契约，不做运行时检查；破坏契约即破坏保证。
 - **析构永不在这些锁内运行。** 被挤出或删除的值一律解锁后释放——`Drop` 体就是用户代码，它可能回调任何地方。
 - **`update_and_get` 的回调在锁外运行**——`AtomicCell` 与 `ConcurrentDict` 一视同仁。所以回调**可能执行多次**（乐观执行，快照仍成立才提交），不得在计算之外产生副作用。回调里**读**对象没问题；**写**它所更新的对象直接 panic（`AtomicCell.update_and_get: the updater wrote the same cell`、`ConcurrentDict.update_and_get: the updater wrote the same container`），而不是无限重试。正常竞争就继续重试：**没有次数上限**，也不保证有限步完成。`ConcurrentDict` 的更新按**条目**验证，写别的条目不会作废它。
-- **一次性初始化**——`Lazy` 与全局量——初始化器**在无锁状态下**运行、至多一次；别的线程等值发布。初始化器在**同线程**上重入自己的值会 panic 并报出环（`global initialization cycle: a -> b -> a`、`Lazy.get: the initializer called get() on the same Lazy`）。**跨线程环不检测**：两个线程各初始化一个互相依赖的值会死锁——这个形状只记文档，不做诊断。
+- **一次性初始化**——`Lazy` 与全局量——初始化器**在无锁状态下**运行、至多一次；别的线程等值发布。`Lazy[T]` 会把 `T` 发布给每个调用 `get` 的线程，所以 `T` 约束为 `sendable`，与 `AtomicCell` 一致。初始化器在**同线程**上重入自己的值会 panic 并报出环（`global initialization cycle: a -> b -> a`、`Lazy.get: the initializer called get() on the same Lazy`）。**跨线程环不检测**：两个线程各初始化一个互相依赖的值会死锁——这个形状只记文档，不做诊断。
 - **显式原语**——`Mutex`、`SharedMutex`、`Semaphore`、`Channel`、`LatchGate`——是你自己的临界区。里面可以跑任何东西（回调、析构都行），死锁自由由程序员负责。
 
 #### 冻结集合
@@ -2095,7 +2095,7 @@ source.push(6);
 let frozen = source.to_frozen_list();    // 拷贝进独立存储
 ```
 
-- 用 `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()` 转换，源容器之后照常可用。用 `to_list()` / `to_dict()` / `to_set()` 拷贝回可变侧。
+- 用 `List.to_frozen_list()` / `Dict.to_frozen_dict()` / `Set.to_frozen_set()` 转换，源容器之后照常可用。用 `to_list()` / `to_dict()` / `to_set()` 拷贝回可变侧。惰性管线同样收集：`view.to_frozen_list()` / `view.to_frozen_set()`。
 - 读取半边是 `count`、`is_empty`、`get`、`contains`（字典上是 `contains_key`）与 `iterator`。**没有修改方法，没有 builder**——快照在构造时写一次，此后不再动它。
 - 内建下标读快照：`frozen[i]` 与 `frozen_dict[key]` 的行为与 `List[i]` / `Dict[key]` 完全一致（越界 / 缺键的 panic 相同），对它们赋值是编译错。`FrozenSet` 没有下标。
 - 集合字面量经类型上下文生成冻结族成员，规则沿用可变侧——集合字面量去重、字典字面量重复键后者取胜、`[]` 需要上下文：
@@ -2499,7 +2499,7 @@ let view = list.lazy().filter((x) => x > 0).map((x) => x * 2);
 
 view.count();        // 造游标、走完、丢弃
 view.is_empty();     // 看一个元素，丢掉游标
-view.into_list();    // [2, 4, 6]
+view.to_list();      // [2, 4, 6]
 view.count();        // 3 —— 管线从未被花掉
 
 list.count();        // 容器自己的 O(1) count
@@ -2515,6 +2515,13 @@ list.count();        // 容器自己的 O(1) count
 
 游标是另一回事：`list.iterator()` 指着一个位置，拉取会推进它。要对一次性源
 （文件行、网络流）跑管线，先收集成 List。
+
+描述"一次行走"而不是"一个位置"的源，返回的是 `Iterable` **视图**，管线经
+`lazy()` 直接从它接入：`string.split(sep)`、`string.lines()`、`string.bytes()`、
+`string.runes()`、`string.split_ascii_whitespace()`、`dict.keys()`、`dict.values()`、
+`regex.find_all(text)`、`regex.captures_all(text)`、`regex.split(text)`。
+视图永不被花掉——`for` 与每条管线都从新游标开始——而一次性源仍是游标：
+`read_dir` 与 `walk_dir` 推进的是 OS 句柄，给不出任何可重复的东西。
 
 ### 条件与循环绑定
 

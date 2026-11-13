@@ -1,0 +1,20 @@
+// EXPECT-ERROR: does not satisfy the 'sendable' constraint
+// `Lazy[T]` publishes `T` to every thread that calls `get`, so `T` is
+// constrained `sendable` -- the same shape as `AtomicCell[T]`. A lazy value of
+// a non-sendable type is refused at the `Lazy[...]` instantiation itself (the
+// global sendable check would refuse it downstream anyway), so the diagnostic
+// names the real cause: the element type cannot cross threads.
+
+using "std/sync" { ... };
+
+let make_list(): List[Int] = {
+    let mutable xs = List[Int].new();
+    xs.push(1);
+    return xs;
+};
+
+let main(): Int = {
+    let slow = Lazy[List[Int]].new(() => make_list());
+    let _ = slow;
+    return 0;
+};

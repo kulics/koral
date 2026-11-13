@@ -1,0 +1,55 @@
+// EXPECT: PASS
+// Pin for `LazyView.chain`, which never worked in either compiler: its bounds
+// name the RECEIVER's element type -- `R2: Iterator[T], S2: Iterable[T, R2]`
+// where `T` is the given block's parameter, not one of the method's own -- and
+// the call-site machinery resolved that `T` as a TYPE NAME
+// (`Undefined type: T`) instead of reading it as a parameter the receiver
+// already binds. The concrete-argument conformance templates of the named
+// Iterable views (StringSplitView & friends) additionally hijacked the
+// `U`/`R2` inference of these constraints, so chain both shapes here: plain
+// containers as the second half and named views.
+
+let check(label: String, got: String, want: String): Bool = {
+    if got != want then {
+        eprintln("FAIL: \(label): got `\(got)` want `\(want)`");
+        return false;
+    };
+    return true;
+};
+
+let main(): Int = {
+    let mutable passed: Bool = true;
+
+    // 1. Two plain lists: the minimal shape that used to fail to compile.
+    //    (The second half is a named local: a bare collection LITERAL in this
+    //    argument position is pinned separately in collection_literal_default_test.)
+    let tail = ["z"];
+    let chained = ["x", "y"].lazy().chain(tail);
+    passed = check("chain-count", chained.count().to_string(), "3") and passed;
+    passed = check("chain-order", chained.join_to_string(""), "xyz") and passed;
+
+    // 1b. The inline literal form (defaults to `List`, the family rule).
+    let inline = ["x", "y"].lazy().chain(["z"]);
+    passed = check("chain-inline", inline.join_to_string(""), "xyz") and passed;
+
+    // 2. Named Iterable views on both sides: the second half's conformance
+    //    template is fully concrete and must bind R2 only through its own
+    //    match, never by leaking into unrelated slots.
+    let view_chain = "1,2".split(",").lazy().chain("3,4".split(","));
+    passed = check("view-chain", view_chain.join_to_string("-"), "1-2-3-4") and passed;
+
+    // 3. Mapped pipelines on both sides: R2 comes from a generic template's
+    //    instantiated arguments (MapIterator over MapIterator).
+    let mapped = ["a"].lazy().map((s) => s + "1").chain(["b"].lazy().map((s) => s + "2"));
+    passed = check("map-chain", mapped.join_to_string(","), "a1,b2") and passed;
+
+    // 4. The pipeline stays observational across a chain terminal.
+    passed = check("chain-repeat", chained.count().to_string(), "3") and passed;
+
+    if passed then {
+        println("PASS");
+    } else {
+        println("FAIL");
+    };
+    return 0;
+};

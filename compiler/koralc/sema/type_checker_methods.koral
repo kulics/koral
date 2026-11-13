@@ -3988,6 +3988,23 @@ given TypeChecker {
                                         if tpl.trait_def_id != trait_def_id then {
                                             continue;
                                         };
+                                        // A template may contribute its trait
+                                        // arguments only when its TARGET is the
+                                        // conforming type. The concrete-ness
+                                        // guard below only rejects
+                                        // still-generic instantiations, so a
+                                        // fully concrete template would leak
+                                        // its arguments into unrelated
+                                        // bindings -- a concrete
+                                        // `XView: Iterable[A, B]` conformance
+                                        // hijacking `zip`'s inference for
+                                        // `List[Rune]`. Require the match.
+                                        if not self.type_matches_expected_pattern(
+                                            tpl.target_type,
+                                            conforming,
+                                        ) then {
+                                            continue;
+                                        };
                                         let mutable owner = Dict[String, Type].new();
                                         self.infer_type_bindings(
                                             tpl.target_type,
@@ -4341,7 +4358,7 @@ given TypeChecker {
         ].new();
         let names = if declared.is_empty() then ordered else declared.lazy().map(
             (d) => d.name,
-        ).into_list();
+        ).to_list();
         let mutable resolved = List[Type].new();
         for name in names then {
             when bindings.get(name) in {
@@ -4470,7 +4487,7 @@ given TypeChecker {
         ].new();
         let names = if declared.is_empty() then ordered else declared.lazy().map(
             (d) => d.name,
-        ).into_list();
+        ).to_list();
         let mutable resolved = List[Type].new();
         for name in names then {
             when bindings.get(name) in {
@@ -4613,7 +4630,7 @@ given TypeChecker {
         ].new();
         let names = if declared.is_empty() then ordered else declared.lazy().map(
             (d) => d.name,
-        ).into_list();
+        ).to_list();
         let mutable resolved = List[Type].new();
         for name in names then {
             when bindings.get(name) in {
