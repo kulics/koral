@@ -130,7 +130,7 @@ given Command {
     /// Remove a specific environment variable (chainable).
     public remove_env(self, name: String): Command;
     /// Set the child process working directory (chainable).
-    public set_current_dir[T: IntoPath](self, path: T): Command;
+    public set_current_dir[T: ToPath](self, path: T): Command;
     /// Configure stdin redirection (chainable).
     public set_stdin(self, cfg: IoRedirect): Command;
     /// Configure stdout redirection (chainable).

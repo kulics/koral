@@ -12,16 +12,16 @@ Import the module with `using "std/os" { ... };`.
 ## Free Functions
 ```koral
 /// Create single directory (parent must exist)
-public let create_dir[T: IntoPath](path: T): Result[Void];
+public let create_dir[T: ToPath](path: T): Result[Void];
 
 /// Create directory recursively (creates all missing parent directories)
 ///
 /// The final path counts as created only when it is a directory: an existing
 /// regular file (or other non-directory) at `path` is an error, not success.
-public let create_dir_all[T: IntoPath](path: T): Result[Void];
+public let create_dir_all[T: ToPath](path: T): Result[Void];
 
 /// Remove empty directory
-public let remove_dir[T: IntoPath](path: T): Result[Void];
+public let remove_dir[T: ToPath](path: T): Result[Void];
 
 /// Remove directory recursively (removes all contents first).
 ///
@@ -40,21 +40,21 @@ public let remove_dir[T: IntoPath](path: T): Result[Void];
 /// - Trailing separators are not significant: `x/` is `x`. Unlike `rm`, a
 ///   trailing slash is not "the link's target" -- there is no such special
 ///   case.
-public let remove_dir_all[T: IntoPath](path: T): Result[Void];
+public let remove_dir_all[T: ToPath](path: T): Result[Void];
 
 /// Open a directory iterator.
 /// Handle is released in iterator drop logic.
-public let read_dir[T: IntoPath](path: T): Result[DirIterator];
+public let read_dir[T: ToPath](path: T): Result[DirIterator];
 
 /// Recursively walk a directory tree (depth-first).
 /// Returned entries include both files and directories under `path`.
 /// The root path itself is not yielded.
-public let walk_dir[T: IntoPath](path: T): Result[WalkDirIterator];
+public let walk_dir[T: ToPath](path: T): Result[WalkDirIterator];
 
 /// Create a temporary directory.
 /// When dir is empty path, uses the system temp directory.
 /// Returns the full path of the created temporary directory.
-public let create_temp_dir[T: IntoPath](dir: T, prefix: String =): Result[Path];
+public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path];
 
 /// Get environment variable by name (renamed from get_env)
 public let env(name: String): Option[String];
@@ -84,7 +84,7 @@ public let temp_dir(): Path;
 public let current_dir(): Result[Path];
 
 /// Change current working directory
-public let set_current_dir[T: IntoPath](path: T): Result[Void];
+public let set_current_dir[T: ToPath](path: T): Result[Void];
 
 /// Get the system hostname
 public let hostname(): Result[String];
@@ -95,92 +95,92 @@ public let hostname(): Result[String];
 public let current_exe(): Result[Path];
 
 /// Read file content as a byte list (binary)
-public let read_file[T: IntoPath](path: T): Result[List[UInt8]];
+public let read_file[T: ToPath](path: T): Result[List[UInt8]];
 
 /// Write a byte list to file (binary, overwrite)
-public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void];
+public let write_file[T: ToPath](path: T, content: List[UInt8] =): Result[Void];
 
 /// Append a byte list to file (binary)
-public let append_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void];
+public let append_file[T: ToPath](path: T, content: List[UInt8] =): Result[Void];
 
 /// Read file content as a string (UTF-8 text)
-public let read_text_file[T: IntoPath](path: T): Result[String];
+public let read_text_file[T: ToPath](path: T): Result[String];
 
 /// Write a string to file (UTF-8 text, overwrite)
-public let write_text_file[T: IntoPath](path: T, content: String =): Result[Void];
+public let write_text_file[T: ToPath](path: T, content: String =): Result[Void];
 
 /// Append a string to file (UTF-8 text)
-public let append_text_file[T: IntoPath](path: T, content: String =): Result[Void];
+public let append_text_file[T: ToPath](path: T, content: String =): Result[Void];
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void];
+public let copy_file[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void];
 
 /// Remove (delete) a file
-public let remove_file[T: IntoPath](path: T): Result[Void];
+public let remove_file[T: ToPath](path: T): Result[Void];
 
 /// Rename or move a file/directory
-public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void];
+public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void];
 
 /// Check if path exists on disk.
-public let path_exist[T: IntoPath](path: T): Bool;
+public let path_exist[T: ToPath](path: T): Bool;
 
 /// Convert to absolute path (does not resolve symlinks)
 ///
 /// Always returns the canonical `/`-separated form: an already-absolute path is
 /// normalized too, so callers can compare or print the result without first
 /// asking which spelling it came in.
-public let absolute_path[T: IntoPath](path: T): Result[Path];
+public let absolute_path[T: ToPath](path: T): Result[Path];
 
 /// Canonicalize path (resolves symlinks and relative components)
 ///
 /// The result is normalized to the canonical `/` form even though the OS call
 /// underneath returns the platform spelling.
-public let canonicalize_path[T: IntoPath](path: T): Result[Path];
+public let canonicalize_path[T: ToPath](path: T): Result[Path];
 
 /// Open a file and return a File handle (unbuffered, directly wraps fd).
 ///
 /// The path is passed to the OS unchanged: userland normalization would make
 /// ".." resolve lexically instead of through symlinks the way POSIX does.
-public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File];
+public let open_file[T: ToPath](path: T, mode: OpenMode): Result[File];
 
 /// Create a new file (fails if file already exists).
-public let create_file[T: IntoPath](path: T): Result[File];
+public let create_file[T: ToPath](path: T): Result[File];
 
 /// Query file/directory metadata information (follows symlinks).
-public let file_info[T: IntoPath](path: T): Result[FileInfo];
+public let file_info[T: ToPath](path: T): Result[FileInfo];
 
 /// Query symlink metadata (does NOT follow symlinks).
-public let symlink_info[T: IntoPath](path: T): Result[FileInfo];
+public let symlink_info[T: ToPath](path: T): Result[FileInfo];
 
 /// Set file permissions
-public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void];
+public let set_permissions[T: ToPath](path: T, perm: Permission): Result[Void];
 
 /// Create a hard link at `link` pointing to `to`
 ///
 /// Both paths reach the OS unchanged; userland normalization would resolve
 /// ".." lexically instead of through symlinks the way POSIX does.
-public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
+public let create_hard_link[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void];
 
 /// Create a symbolic link at `link` pointing to `to`
 ///
 /// The target is stored verbatim (a relative target stays relative) and both
 /// paths reach the OS unchanged.
-public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void];
+public let create_symlink[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void];
 
 /// Read the target path of a symbolic link
 ///
 /// The target is returned verbatim. A readlink result equal to the buffer size
 /// means the target did not fit; the read is retried with a bigger buffer
 /// instead of returning a silently truncated path.
-public let read_symlink[T: IntoPath](path: T): Result[Path];
+public let read_symlink[T: ToPath](path: T): Result[Path];
 
 /// Truncate a file to the specified size
-public let truncate_file[T: IntoPath](path: T, size: Int): Result[Void];
+public let truncate_file[T: ToPath](path: T, size: Int): Result[Void];
 
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file[T: IntoPath](dir: T, prefix: String =): Result[File];
+public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File];
 
 /// Get platform path separator ("/" on Unix, "\" on Windows)
 public let path_separator(): String;
@@ -212,9 +212,9 @@ public let path_list_separator(): String;
 ## Traits
 ```koral
 /// Types accepted wherever a filesystem path is wanted, so functions can take strings or paths.
-public trait IntoPath {
+public trait ToPath {
     /// Convert self into a Path value.
-    into_path(self): Path;
+    to_path(self): Path;
 };
 ```
 
@@ -443,16 +443,16 @@ given Permission: Eq {
     public equals(self, other: Permission): Bool;
 };
 
-/// IntoPath conformance wrapping a string as a Path.
-given String: IntoPath {
+/// ToPath conformance wrapping a string as a Path.
+given String: ToPath {
     /// Wrap this string as a Path without normalization.
-    public into_path(self): Path;
+    public to_path(self): Path;
 };
 
-/// IntoPath conformance returning the path unchanged.
-given Path: IntoPath {
+/// ToPath conformance returning the path unchanged.
+given Path: ToPath {
     /// Return this path unchanged.
-    public into_path(self): Path;
+    public to_path(self): Path;
 };
 
 /// Path inspection and manipulation: components, extensions, joining, and normalization.
@@ -465,7 +465,7 @@ given Path {
     ///
     /// 永远用 `/` 拼接——这是用户态的规范形，与平台无关。传给操作系统之前由
     /// 运行时的各 syscall 边界负责翻译成平台分隔符。
-    public join[T: IntoPath](self, path: T): Path;
+    public join[T: ToPath](self, path: T): Path;
     /// 返回父目录路径
     public dir_name(self): Path;
     /// 返回最后一个路径组件名称
@@ -497,7 +497,7 @@ given Path {
     ///
     /// 双方必须同为绝对或同为相对；绝对路径还必须共享同一个根
     /// （POSIX 根、`C:/` 盘符根或 UNC 根），否则报错而不是给出错误的相对路径。
-    public relative_to[T: IntoPath](self, base: T): Result[Path];
+    public relative_to[T: ToPath](self, base: T): Result[Path];
 };
 
 /// Eq conformance comparing the underlying path text.

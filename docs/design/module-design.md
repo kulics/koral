@@ -271,7 +271,7 @@ lexer 里删掉——**「已词法化、无产生式」的中间态是纯负债
    仍允许 `f.read()`）；
 3. 从 `T` 所在模块批导入且未被 `!` 排除（`{ ... }`、`{ !a, ... }`）；
 4. prelude（`std` 主模块的 trait）；
-5. 出现在**当前声明的泛型界**里（`[T: IntoPath]`、`[T: Ord and Hash]`）——**含该界的超 trait**。
+5. 出现在**当前声明的泛型界**里（`[T: ToPath]`、`[T: Ord and Hash]`）——**含该界的超 trait**。
 
 **不算的**：`{ }` · 导入了模块里别的名字（`{ env }`）· **导入了类型（`{ Path }`）** · 什么都没写。
 
@@ -285,8 +285,8 @@ Rust 一样（`use a::Sub;` 之后 `x.b()` 仍是 E0599）。界是「我声明�
 - **合并 = 方法面全开**。`using "./x.koral";` 之后 x 的 trait 都是同模块，名字与方法一起到。
   合并/导入的对比因此更硬：一个是全开，一个按清单；
 - **impl 全局注册、门在 trait**。只要模块进了构建图，它的 `given` 就是候选；能不能调只看
-  trait 在不在作用域。所以 `std/os` 的 `given String: IntoPath` 被别的文件加载了，
-  也漏不到没点名 `IntoPath` 的文件里——prelude 泄漏不存在；
+  trait 在不在作用域。所以 `std/os` 的 `given String: ToPath` 被别的文件加载了，
+  也漏不到没点名 `ToPath` 的文件里——prelude 泄漏不存在；
 - **诊断必须给补丁**。非 inherent 方法找不到时，报错要写出
   `Trait 'T' provides it but is not in scope; import it with using "…" { T };`。
   对齐 Rust 的 E0599 help——不给的话读者看见一个明明存在的方法被说成不存在。
@@ -900,9 +900,9 @@ Rust 里 `impl Read for File` 就写在 `File` 自己的文件里，`f.read()` �
 
 | | 「同模块白送」 | **Rust 规则（现行）** |
 | --- | --- | --- |
-| 同一 trait 方法在不同接收者上 | **准入不同**（`given Path: IntoPath` 在 `std/os`，`Path` 也在；`String` 不在） | 一致 |
+| 同一 trait 方法在不同接收者上 | **准入不同**（`given Path: ToPath` 在 `std/os`，`Path` 也在；`String` 不在） | 一致 |
 | impl 挪个文件 | **下游静默断** | 无影响 |
-| 读 `using "std/os" { Path };` | 判不出 `into_path` 能不能用 | 判得出 |
+| 读 `using "std/os" { Path };` | 判不出 `to_path` 能不能用 | 判得出 |
 | `given T { … }` 工具块 | 与 `given T` 必然同模块 → 工具方法白送、required 方法不送，**同一 trait 内分裂** | 一致 |
 | 规则条数 | 三条准入 | 两条准入 |
 
@@ -1040,7 +1040,7 @@ Koral 里**类型是命名空间**（`String.new` 可以），**模块不是**�
 | --- | --- |
 | **§5.3.1 模块身份 =（`source`，入口位置）** | **有期限。** 今天 C 符号本来就不稳定（两端 DefId 编号不同），咬不到人；但它在为一个还不存在的消费者（稳定 ABI）定契约。**触发条件：`koral.lock` / 分开编译 / 预编译产物 / FFI 插件面中任一落地之前必须先做它**，之后改就是破坏性变更。届时还要定两件：`source` 怎么编码成符号前缀、`path:` 依赖（按设计不是稳定身份）算不算稳定 |
 | §5.2 `modules` 降为对外命名表 | 行为已成立（本地模块不登记就能用，`--target-module` 只收名字正好就是导出表的定义）。只剩措辞。**触发条件：下次动 manifest 时顺手改**，不单独立项 |
-| 方法面诊断的提示缺口 | `given String: IntoPath` 这类走**泛型模板**注册的，两端都只报 `Member 'into_path' not found`、不带「trait 提供但不在作用域」那句（方法表路径的 `Robot.say` / `File.read` 有）。**触发条件：下次动方法查找时补** |
+| 方法面诊断的提示缺口 | `given String: ToPath` 这类走**泛型模板**注册的，两端都只报 `Member 'to_path' not found`、不带「trait 提供但不在作用域」那句（方法表路径的 `Robot.say` / `File.read` 有）。**触发条件：下次动方法查找时补** |
 | 撞名机制是约定不是机制 | 生产代码里 `as` 别名 0 处、`!` 排除 0 处（唯一真用法在 koralfmt 往返夹具）。今天拦住撞名的是命名约定（`IoError` 不叫 `Error`）。**触发条件：二选一**——补用例让消歧路径跑起来，或承认是约定并把文档里「机制拦住」改口 |
 | 撞名矩阵「不报」那条零测试 | 「同一声明经两条路径到达不算撞名」是整张矩阵唯一一条放行规则，无看护。**触发条件：下次补撞名用例时一起** |
 

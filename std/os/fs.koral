@@ -54,8 +54,8 @@ let foreign __koral_mkstemp(template: *UInt8): Int32;
 // ============================================================================
 
 /// Read file content as a byte list (binary)
-public let read_file[T: IntoPath](path: T): Result[List[UInt8]] = {
-    return when open_file(path.into_path(), OpenMode.Read()) in {
+public let read_file[T: ToPath](path: T): Result[List[UInt8]] = {
+    return when open_file(path.to_path(), OpenMode.Read()) in {
         .Ok(f) then {
             let mutable out: List[UInt8] = [];
             let mutable chunk = make_bytes(4096);
@@ -79,8 +79,8 @@ public let read_file[T: IntoPath](path: T): Result[List[UInt8]] = {
 };
 
 /// Write a byte list to file (binary, overwrite)
-public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void] = {
-    return when open_file(path.into_path(), OpenMode.Write()) in {
+public let write_file[T: ToPath](path: T, content: List[UInt8] =): Result[Void] = {
+    return when open_file(path.to_path(), OpenMode.Write()) in {
         .Ok(f) then {
             let mutable start = 0;
             let end = content.count();
@@ -106,8 +106,8 @@ public let write_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void
 };
 
 /// Append a byte list to file (binary)
-public let append_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Void] = {
-    return when open_file(path.into_path(), OpenMode.Append()) in {
+public let append_file[T: ToPath](path: T, content: List[UInt8] =): Result[Void] = {
+    return when open_file(path.to_path(), OpenMode.Append()) in {
         .Ok(f) then {
             let mutable start = 0;
             let end = content.count();
@@ -137,7 +137,7 @@ public let append_file[T: IntoPath](path: T, content: List[UInt8] =): Result[Voi
 // ============================================================================
 
 /// Read file content as a string (UTF-8 text)
-public let read_text_file[T: IntoPath](path: T): Result[String] = {
+public let read_text_file[T: ToPath](path: T): Result[String] = {
     return when read_file(path) in {
         .Ok(bytes) then String.from_bytes(bytes),
         .Error(e) then Result[String].Error(e),
@@ -145,12 +145,12 @@ public let read_text_file[T: IntoPath](path: T): Result[String] = {
 };
 
 /// Write a string to file (UTF-8 text, overwrite)
-public let write_text_file[T: IntoPath](path: T, content: String =): Result[Void] = {
+public let write_text_file[T: ToPath](path: T, content: String =): Result[Void] = {
     return write_file(path, content = content.to_bytes());
 };
 
 /// Append a string to file (UTF-8 text)
-public let append_text_file[T: IntoPath](path: T, content: String =): Result[Void] = {
+public let append_text_file[T: ToPath](path: T, content: String =): Result[Void] = {
     return append_file(path, content = content.to_bytes());
 };
 
@@ -159,7 +159,7 @@ public let append_text_file[T: IntoPath](path: T, content: String =): Result[Voi
 // ============================================================================
 
 /// Copy file (reads source as bytes, writes to destination)
-public let copy_file[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void] = when read_file(
+public let copy_file[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] = when read_file(
     src,
 ) in {
     .Ok(bytes) then write_file(to, content = bytes),
@@ -167,16 +167,16 @@ public let copy_file[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void
 };
 
 /// Remove (delete) a file
-public let remove_file[T: IntoPath](path: T): Result[Void] = {
-    let s = path.into_path().to_string();
+public let remove_file[T: ToPath](path: T): Result[Void] = {
+    let s = path.to_path().to_string();
     return if __koral_remove(s.bytes.data) == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
 
 /// Rename or move a file/directory
-public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Void] = {
-    let src_s = src.into_path().to_string();
-    let to_s = to.into_path().to_string();
+public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] = {
+    let src_s = src.to_path().to_string();
+    let to_s = to.to_path().to_string();
     return if __koral_rename(src_s.bytes.data, to_s.bytes.data) == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
@@ -186,8 +186,8 @@ public let rename_path[T1: IntoPath, T2: IntoPath](src: T1, to: T2 =): Result[Vo
 // ============================================================================
 
 /// Check if path exists on disk.
-public let path_exist[T: IntoPath](path: T): Bool = {
-    let s = path.into_path().to_string();
+public let path_exist[T: ToPath](path: T): Bool = {
+    let s = path.to_path().to_string();
     return __koral_path_exists(s.bytes.data) != 0;
 };
 
@@ -196,8 +196,8 @@ public let path_exist[T: IntoPath](path: T): Bool = {
 /// Always returns the canonical `/`-separated form: an already-absolute path is
 /// normalized too, so callers can compare or print the result without first
 /// asking which spelling it came in.
-public let absolute_path[T: IntoPath](path: T): Result[Path] = {
-    let p = path.into_path().normalize();
+public let absolute_path[T: ToPath](path: T): Result[Path] = {
+    let p = path.to_path().normalize();
     if p.is_absolute() then {
         return Result[Path].Ok(p);
     };
@@ -215,8 +215,8 @@ public let absolute_path[T: IntoPath](path: T): Result[Path] = {
 ///
 /// The result is normalized to the canonical `/` form even though the OS call
 /// underneath returns the platform spelling.
-public let canonicalize_path[T: IntoPath](path: T): Result[Path] = {
-    let s = path.into_path().to_string();
+public let canonicalize_path[T: ToPath](path: T): Result[Path] = {
+    let s = path.to_path().to_string();
     let buf = alloc_memory[UInt8](4096);
     defer dealloc_memory(buf);
     let result = __koral_realpath(s.bytes.data, buf, 4096);
@@ -224,7 +224,7 @@ public let canonicalize_path[T: IntoPath](path: T): Result[Path] = {
         return Result[Path].Error(last_error_message());
     };
     return when String.from_cstring(buf) in {
-        .Ok(resolved) then Result[Path].Ok(resolved.into_path().normalize()),
+        .Ok(resolved) then Result[Path].Ok(resolved.to_path().normalize()),
         .Error(e) then Result[Path].Error(e),
     };
 };
@@ -237,8 +237,8 @@ public let canonicalize_path[T: IntoPath](path: T): Result[Path] = {
 ///
 /// The path is passed to the OS unchanged: userland normalization would make
 /// ".." resolve lexically instead of through symlinks the way POSIX does.
-public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File] = {
-    let opened = path.into_path();
+public let open_file[T: ToPath](path: T, mode: OpenMode): Result[File] = {
+    let opened = path.to_path();
     let s = opened.to_string();
     let mutable open_mode: Int32 = 0;
     let mutable perm: UInt32 = 0;
@@ -272,15 +272,15 @@ public let open_file[T: IntoPath](path: T, mode: OpenMode): Result[File] = {
 };
 
 /// Create a new file (fails if file already exists).
-public let create_file[T: IntoPath](path: T): Result[File] = open_file(path, .Create());
+public let create_file[T: ToPath](path: T): Result[File] = open_file(path, .Create());
 
 // ============================================================================
 // File Metadata Queries
 // ============================================================================
 
 /// Query file/directory metadata information (follows symlinks).
-public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
-    let s = path.into_path().to_string();
+public let file_info[T: ToPath](path: T): Result[FileInfo] = {
+    let s = path.to_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
     let result = __koral_stat(s.bytes.data, &stat_buf);
     if result != 0 then {
@@ -305,8 +305,8 @@ public let file_info[T: IntoPath](path: T): Result[FileInfo] = {
 };
 
 /// Query symlink metadata (does NOT follow symlinks).
-public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
-    let s = path.into_path().to_string();
+public let symlink_info[T: ToPath](path: T): Result[FileInfo] = {
+    let s = path.to_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
     let result = __koral_lstat(s.bytes.data, &stat_buf);
     if result != 0 then {
@@ -335,8 +335,8 @@ public let symlink_info[T: IntoPath](path: T): Result[FileInfo] = {
 // ============================================================================
 
 /// Set file permissions
-public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void] = {
-    let s = path.into_path().to_string();
+public let set_permissions[T: ToPath](path: T, perm: Permission): Result[Void] = {
+    let s = path.to_path().to_string();
     let result = __koral_chmod(s.bytes.data, perm.mode());
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -348,9 +348,9 @@ public let set_permissions[T: IntoPath](path: T, perm: Permission): Result[Void]
 ///
 /// Both paths reach the OS unchanged; userland normalization would resolve
 /// ".." lexically instead of through symlinks the way POSIX does.
-public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
-    let target_s = to.into_path().to_string();
-    let link_s = link.into_path().to_string();
+public let create_hard_link[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void] = {
+    let target_s = to.to_path().to_string();
+    let link_s = link.to_path().to_string();
     let result = __koral_link(target_s.bytes.data, link_s.bytes.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -362,9 +362,9 @@ public let create_hard_link[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Res
 ///
 /// The target is stored verbatim (a relative target stays relative) and both
 /// paths reach the OS unchanged.
-public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Result[Void] = {
-    let target_s = to.into_path().to_string();
-    let link_s = link.into_path().to_string();
+public let create_symlink[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void] = {
+    let target_s = to.to_path().to_string();
+    let link_s = link.to_path().to_string();
     let result = __koral_symlink(target_s.bytes.data, link_s.bytes.data);
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -377,8 +377,8 @@ public let create_symlink[T1: IntoPath, T2: IntoPath](link: T1, to: T2 =): Resul
 /// The target is returned verbatim. A readlink result equal to the buffer size
 /// means the target did not fit; the read is retried with a bigger buffer
 /// instead of returning a silently truncated path.
-public let read_symlink[T: IntoPath](path: T): Result[Path] = {
-    let s = path.into_path().to_string();
+public let read_symlink[T: ToPath](path: T): Result[Path] = {
+    let s = path.to_path().to_string();
     let mutable buf_size = 4096;
     while buf_size <= 1048576 then {
         let buf = alloc_memory[UInt8](UInt(buf_size));
@@ -390,7 +390,7 @@ public let read_symlink[T: IntoPath](path: T): Result[Path] = {
         if Int(result) < buf_size then {
             let target = String.from_utf8_ptr_unchecked(buf, Int(result));
             dealloc_memory(buf);
-            return Result[Path].Ok(target.into_path());
+            return Result[Path].Ok(target.to_path());
         };
         // result == buf_size: the target was cut off; retry with more room.
         dealloc_memory(buf);
@@ -400,8 +400,8 @@ public let read_symlink[T: IntoPath](path: T): Result[Path] = {
 };
 
 /// Truncate a file to the specified size
-public let truncate_file[T: IntoPath](path: T, size: Int): Result[Void] = {
-    let s = path.into_path().to_string();
+public let truncate_file[T: ToPath](path: T, size: Int): Result[Void] = {
+    let s = path.to_path().to_string();
     let result = __koral_truncate(s.bytes.data, Int64(size));
     if result != 0 then {
         return Result[Void].Error(last_error_message());
@@ -416,8 +416,8 @@ public let truncate_file[T: IntoPath](path: T, size: Int): Result[Void] = {
 /// Create a temporary file.
 /// When dir is empty, uses the system temp directory.
 /// Returns an open File handle (use file.path() to get the path).
-public let create_temp_file[T: IntoPath](dir: T, prefix: String =): Result[File] = {
-    let dir_path = dir.into_path();
+public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File] = {
+    let dir_path = dir.to_path();
     let base = if dir_path.is_empty() then temp_dir() else dir_path;
     let base_str = base.to_string();
     let mutable template = StringBuilder.new();
@@ -433,5 +433,5 @@ public let create_temp_file[T: IntoPath](dir: T, prefix: String =): Result[File]
         return Result[File].Error(last_error_message());
     };
     let file_path = String.from_cstring_unchecked(template_text.bytes.data);
-    return Result[File].Ok(File(FileStorage(fd, file_path.into_path())));
+    return Result[File].Ok(File(FileStorage(fd, file_path.to_path())));
 };

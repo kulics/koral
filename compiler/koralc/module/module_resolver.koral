@@ -210,7 +210,7 @@ given ModuleResolver {
         module: ModuleInfo,
         unit: CompilationUnit,
     ): Result[Void] = {
-        let normalized_file = when absolute_path(file.into_path()) in {
+        let normalized_file = when absolute_path(file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then file,
         };
@@ -323,7 +323,7 @@ given ModuleResolver {
     ): Result[List[PendingUsing]] = {
         module_debug("[module] read: begin");
 
-        let source = read_text_file(normalized_file.into_path()) or else {
+        let source = read_text_file(normalized_file.to_path()) or else {
             return Result[List[PendingUsing]].Error(
                 "Error: Failed to read file: \(normalized_file)",
             );
@@ -610,8 +610,8 @@ given ModuleResolver {
         current_file: String,
         imported_this_file: Set[String],
     ): Result[Void] = {
-        let current_dir = current_file.into_path().dir_name().to_string();
-        let mutable target = current_dir.into_path();
+        let current_dir = current_file.to_path().dir_name().to_string();
+        let mutable target = current_dir.to_path();
         for segment in specifier.split("/") then {
             if segment == "." or segment.is_empty() then {
                 continue;
@@ -626,7 +626,7 @@ given ModuleResolver {
             .Ok(p) then p.to_string(),
             .Error(_) then target.to_string(),
         };
-        if not path_exist(entry_abs.into_path()) then {
+        if not path_exist(entry_abs.to_path()) then {
             return Result[Void].Error(
                 ModuleError.FileNotFound(specifier, current_dir).render(
                     module.entry_file(),
@@ -729,9 +729,9 @@ given ModuleResolver {
     /// `file_path` -- longest match wins, since a path dependency may sit inside
     /// the root package's tree. `None` when no package claims the file.
     private package_root_containing(self, file_path: String): Option[String] = {
-        let entry_path = (when absolute_path(file_path.into_path()) in {
+        let entry_path = (when absolute_path(file_path.to_path()) in {
             .Ok(p) then p,
-            .Error(_) then file_path.into_path(),
+            .Error(_) then file_path.to_path(),
         }).normalize();
         let mutable candidates = List[LoadedPackage].new();
         when self.storage.root_package in {
@@ -750,7 +750,7 @@ given ModuleResolver {
         let mutable best_len = 0;
         let entry_str = entry_path.to_string();
         for pkg in candidates then {
-            let root_str = pkg.manifest.package_root.into_path().normalize().to_string();
+            let root_str = pkg.manifest.package_root.to_path().normalize().to_string();
             // Segment boundary, not raw prefix: `root/src` must not claim
             // `root/src2/file.koral`.
             if entry_str == root_str or entry_str.starts_with(root_str + "/") then {
@@ -791,7 +791,7 @@ given ModuleResolver {
                 ),
             );
         };
-        let target = when absolute_path(spec.entry_file.into_path()) in {
+        let target = when absolute_path(spec.entry_file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then spec.entry_file,
         };
@@ -819,7 +819,7 @@ given ModuleResolver {
         unit: CompilationUnit,
         current_file: String,
     ): Result[Void] = {
-        let current_dir = current_file.into_path().dir_name().to_string();
+        let current_dir = current_file.to_path().dir_name().to_string();
         if not file_name.ends_with(".koral") then {
             return Result[Void].Error(
                 "File merge path must end in '.koral'; write '\(file_name).koral'",
@@ -829,7 +829,7 @@ given ModuleResolver {
         // Resolve `.` / `..` ourselves. `join` keeps them, so `./a.koral` and
         // `a.koral` would be two names for one file -- and then neither the
         // cycle check nor the duplicate check would see the other.
-        let mutable target = current_dir.into_path();
+        let mutable target = current_dir.to_path();
         for segment in file_name.split("/") then {
             if segment == "." or segment.is_empty() then {
                 continue;
@@ -842,7 +842,7 @@ given ModuleResolver {
         };
         let file_path = target.to_string();
 
-        if not path_exist(file_path.into_path()) then {
+        if not path_exist(file_path.to_path()) then {
             return Result[Void].Error(
                 ModuleError.FileNotFound(file_name, current_dir).render(
                     module.entry_file(),
@@ -879,9 +879,9 @@ given ModuleResolver {
         // §3.1「路径指向已登记入口时报错并给名字」（2026-11-12 落地）：路径
         // 形态的合并不得吞掉已登记模块的入口——那要写名字形态。目标是已登记
         // 入口时在**解析期**拒绝，与哪个模块先解析无关。
-        let target_norm = (when absolute_path(file_path.into_path()) in {
+        let target_norm = (when absolute_path(file_path.to_path()) in {
             .Ok(p) then p,
-            .Error(_) then file_path.into_path(),
+            .Error(_) then file_path.to_path(),
         }).normalize().to_string();
         let mutable pkg_candidates = List[LoadedPackage].new();
         when self.storage.root_package in {
@@ -897,11 +897,11 @@ given ModuleResolver {
             .None() then {},
         };
         for pkg in pkg_candidates then {
-            let root_norm = pkg.manifest.package_root.into_path().normalize().to_string();
+            let root_norm = pkg.manifest.package_root.to_path().normalize().to_string();
             for kv in pkg.manifest.modules then {
-                let entry_norm = (when absolute_path(kv.second.entry_path.into_path()) in {
+                let entry_norm = (when absolute_path(kv.second.entry_path.to_path()) in {
                     .Ok(p) then p,
-                    .Error(_) then kv.second.entry_path.into_path(),
+                    .Error(_) then kv.second.entry_path.to_path(),
                 }).normalize().to_string();
                 if entry_norm == target_norm then {
                     let name_form = if kv.first == "." then pkg.self_name
@@ -962,7 +962,7 @@ given ModuleResolver {
         entry_file: String,
         root_module_path: Option[List[String]],
     ): Result[CompilationUnit] = {
-        let abs_path = when absolute_path(entry_file.into_path()) in {
+        let abs_path = when absolute_path(entry_file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(e) then {
                 return Result[CompilationUnit].Error(
@@ -973,7 +973,7 @@ given ModuleResolver {
 
         module_debug("[module] resolve_module: \(abs_path)");
 
-        let filename = abs_path.into_path().with_ext_name("").base_name();
+        let filename = abs_path.to_path().with_ext_name("").base_name();
 
         if validate_module_name(filename) is .Some(reason) then {
             return Result[CompilationUnit].Error(
@@ -998,7 +998,7 @@ given ModuleResolver {
             module_symbol_key(
                 "single",
                 abs_path,
-                abs_path.into_path().dir_name().to_string(),
+                abs_path.to_path().dir_name().to_string(),
             ),
         );
         let unit = CompilationUnit.new(root);
@@ -1030,11 +1030,11 @@ given ModuleResolver {
         entry_file: String,
         no_std: Bool,
     ): Result[ResolvedModuleGraph] = {
-        let abs_path = when absolute_path(entry_file.into_path()) in {
+        let abs_path = when absolute_path(entry_file.to_path()) in {
             .Ok(p) then p.to_string(),
             .Error(_) then entry_file,
         };
-        let filename = abs_path.into_path().with_ext_name("").base_name();
+        let filename = abs_path.to_path().with_ext_name("").base_name();
         let root_path = List[String].new();
         root_path.push(module_file_name_to_identifier(filename));
         let root = ModuleInfo.named(
@@ -1046,7 +1046,7 @@ given ModuleResolver {
             module_symbol_key(
                 "single",
                 abs_path,
-                abs_path.into_path().dir_name().to_string(),
+                abs_path.to_path().dir_name().to_string(),
             ),
         );
 

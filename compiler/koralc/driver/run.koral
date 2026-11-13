@@ -235,7 +235,7 @@ private let print_usage(): Void = {
 
 // Shared: read file from disk.
 private let read_source(file_path: String): Option[String] = {
-    let source = read_text_file(file_path.into_path()) or else {
+    let source = read_text_file(file_path.to_path()) or else {
         eprintln("Error: Failed to read file: \(file_path)");
         return Option[String].None();
     };
@@ -243,7 +243,7 @@ private let read_source(file_path: String): Option[String] = {
 };
 
 private let normalize_path_for_match(path: String): String =
-    path.into_path().normalize().to_string().replace_all("\\", with = "/").to_ascii_lowercase(
+    path.to_path().normalize().to_string().replace_all("\\", with = "/").to_ascii_lowercase(
     );
 
 private let path_matches_user_file(diag_path: String, user_file_path: String): Bool = {
@@ -259,7 +259,7 @@ private let path_matches_user_file(diag_path: String, user_file_path: String): B
         return true;
     };
 
-    let user_base = user_file_path.into_path().base_name().to_ascii_lowercase();
+    let user_base = user_file_path.to_path().base_name().to_ascii_lowercase();
     if not user_base.is_empty() and (diag_norm == user_base or diag_norm.ends_with(
         "/" + user_base,
     )) then {
@@ -659,7 +659,7 @@ private let prepare_package_compilation(
     let os_atom = host_os_name();
     let linked_libraries = linked_libraries_of(resolver, os_atom);
     let c_sources = c_sources_of(resolver, os_atom);
-    let default_output_dir = package_config_path.into_path().dir_name();
+    let default_output_dir = package_config_path.to_path().dir_name();
 
     return Result[PreparedCompilation].Ok(
         make_prepared_compilation(
@@ -685,7 +685,7 @@ private let prepare_single_file_compilation(
             "Error: Missing input file or --package-config",
         );
     };
-    let absolute_entry = when absolute_path(entry_file_path.into_path()) in {
+    let absolute_entry = when absolute_path(entry_file_path.to_path()) in {
         .Ok(p) then p.to_string(),
         .Error(_) then entry_file_path,
     };
@@ -720,7 +720,7 @@ private let prepare_single_file_compilation(
         .None() then {},
     };
 
-    let stem = absolute_entry.into_path().with_ext_name("").base_name();
+    let stem = absolute_entry.to_path().with_ext_name("").base_name();
     let root_module = ModuleInfo.named(
         [module_file_name_to_identifier(stem)],
         absolute_entry,
@@ -730,7 +730,7 @@ private let prepare_single_file_compilation(
         module_symbol_key(
             "single",
             absolute_entry,
-            absolute_entry.into_path().dir_name().to_string(),
+            absolute_entry.to_path().dir_name().to_string(),
         ),
     );
     unit.add_module(root_module);
@@ -738,7 +738,7 @@ private let prepare_single_file_compilation(
 
     let pair_split = split_pairs_by_package(unit.collect_all_nodes_with_path());
     let os_atom = host_os_name();
-    let default_output_dir = absolute_entry.into_path().dir_name();
+    let default_output_dir = absolute_entry.to_path().dir_name();
     return Result[PreparedCompilation].Ok(
         make_prepared_compilation(
             pair_split.first,
@@ -840,8 +840,8 @@ private let find_clang(): String = {
     let exts = if is_windows then [".exe", ""] else [""];
     for dir in path_env.split(sep) then {
         for ext in exts then {
-            let candidate = dir.into_path().join("clang" + ext).to_string();
-            if path_exist(candidate.into_path()) then {
+            let candidate = dir.to_path().join("clang" + ext).to_string();
+            if path_exist(candidate.to_path()) then {
                 return candidate;
             };
         };
@@ -855,7 +855,7 @@ private let find_clang(): String = {
 // the runtime links even under `--no-std` -- it is the ABI base, not a package
 // feature.
 private let runtime_link_libraries(std_path: String, os_atom: String): Result[List[String]] = {
-    let manifest_path = std_path.into_path().join("koral.json").to_string();
+    let manifest_path = std_path.to_path().join("koral.json").to_string();
     let manifest = load_package_manifest(manifest_path) or else as e in {
         return Result[List[String]].Error(e);
     };
@@ -923,8 +923,8 @@ private let run_clang(
         eprintln("Set KORAL_HOME to the koral repository root, or run from inside it.");
         return false;
     };
-    let runtime_c = std_path.into_path().join("koral_runtime.c").to_string();
-    if not path_exist(runtime_c.into_path()) then {
+    let runtime_c = std_path.to_path().join("koral_runtime.c").to_string();
+    if not path_exist(runtime_c.to_path()) then {
         eprintln("Error: standard library runtime not found: \(runtime_c)");
         return false;
     };
@@ -936,7 +936,7 @@ private let run_clang(
     };
 
     // Units: the generated C first, then the runtime, then the c_sources.
-    let out_dir = c_file.into_path().dir_name().to_string();
+    let out_dir = c_file.to_path().dir_name().to_string();
     let mutable units = List[String].new();
     units.push(c_file);
     units.push(runtime_c);
@@ -951,7 +951,7 @@ private let run_clang(
     let mutable obj_files = List[String].new();
     let mutable obj_stems = Dict[String, Int].new();
     for source in units then {
-        let source_path = source.into_path();
+        let source_path = source.to_path();
         let base = source_path.base_name();
         let ext = source_path.ext_name();
         let stem = if ext.is_empty() then base
@@ -959,7 +959,7 @@ private let run_clang(
         let count = obj_stems.get(stem) or else 0;
         obj_stems.insert(stem, count + 1);
         let unique_stem = if count == 0 then stem else "\(stem)_\(count)";
-        let obj_file = out_dir.into_path().join(unique_stem + ".o").to_string();
+        let obj_file = out_dir.to_path().join(unique_stem + ".o").to_string();
         if not compile_c_unit(
             clang,
             source,
@@ -1028,7 +1028,7 @@ private let build_c_output_path(
     out_dir: Option[String],
 ): Path = {
     return if out_dir is .Some(dir) then {
-        dir.into_path().join(artifact_base_name + ".c").normalize()
+        dir.to_path().join(artifact_base_name + ".c").normalize()
     } else {
         default_output_dir.join(artifact_base_name + ".c").normalize()
     };

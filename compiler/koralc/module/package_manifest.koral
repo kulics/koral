@@ -289,7 +289,7 @@ public let module_identity_hash(text: String): String = {
 };
 
 private let normalized_abs_for_key(path: String): String = {
-    let normalized = when absolute_path(path.into_path()) in {
+    let normalized = when absolute_path(path.to_path()) in {
         .Ok(p) then p.to_string(),
         .Error(_) then path,
     };
@@ -639,7 +639,7 @@ private let resolve_manifest_c_source(
     relative: String,
     field_path: String,
 ): Result[String] = {
-    let mutable target = package_root.into_path();
+    let mutable target = package_root.to_path();
     for segment in relative.split("/") then {
         if segment == "." or segment.is_empty() then {
             continue;
@@ -651,7 +651,7 @@ private let resolve_manifest_c_source(
         };
     };
     let resolved = target.normalize();
-    let root_path = package_root.into_path().normalize();
+    let root_path = package_root.to_path().normalize();
     if not (resolved == root_path or resolved.starts_with(root_path)) then {
         return Result[String].Error(
             manifest_error_text(
@@ -781,17 +781,17 @@ private let load_manifest_string_array(
 };
 
 public let load_package_manifest(manifest_path: String): Result[PackageManifest] = {
-    let absolute_manifest_path = when absolute_path(manifest_path.into_path()) in {
+    let absolute_manifest_path = when absolute_path(manifest_path.to_path()) in {
         .Ok(path) then path.to_string(),
         .Error(_) then manifest_path,
     };
-    if not path_exist(absolute_manifest_path.into_path()) then {
+    if not path_exist(absolute_manifest_path.to_path()) then {
         return Result[PackageManifest].Error(
             manifest_error_text(.FileNotFound(absolute_manifest_path)),
         );
     };
 
-    let text = read_text_file(absolute_manifest_path.into_path()) or return;
+    let text = read_text_file(absolute_manifest_path.to_path()) or return;
     let json = JsonValue.parse(text) or else {
         return Result[PackageManifest].Error(
             manifest_error_text(
@@ -817,7 +817,7 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
     top_fields.push("platform");
     reject_obsolete_fields(json, "", top_fields) or return;
 
-    let package_root = absolute_manifest_path.into_path().dir_name().to_string();
+    let package_root = absolute_manifest_path.to_path().dir_name().to_string();
 
     let package_name = expect_manifest_string(json, "package") or return;
     if not is_valid_package_or_segment_name(package_name) then {
@@ -997,7 +997,7 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
         // Resolve `.` / `..` ourselves: `join` keeps them, so `../x` would still
         // start with the package root as a string and the containment check
         // below could not see that it climbs out.
-        let mutable entry_target = package_root.into_path();
+        let mutable entry_target = package_root.to_path();
         for segment in entry_rel.split("/") then {
             if segment == "." or segment.is_empty() then {
                 continue;
@@ -1025,7 +1025,7 @@ public let load_package_manifest(manifest_path: String): Result[PackageManifest]
         // here through different joins, and a literal prefix test on "root + '/'"
         // breaks the moment the spellings disagree (drive-letter case, an
         // un-normalized segment). Path.starts_with splits on both separators.
-        let root_path = package_root.into_path().normalize();
+        let root_path = package_root.to_path().normalize();
         if not (entry_path == root_path or entry_path.starts_with(root_path)) then {
             return Result[PackageManifest].Error(
                 manifest_error_text(
@@ -1138,7 +1138,7 @@ public let locate_dependency(
             );
         };
         return Result[String].Ok(
-            declaring_manifest.package_root.into_path().join(relative).join(
+            declaring_manifest.package_root.to_path().join(relative).join(
                 "koral.json",
             ).normalize().to_string(),
         );
@@ -1147,7 +1147,7 @@ public let locate_dependency(
     when fetch_root in {
         .Some(root) then {
             return Result[String].Ok(
-                root.into_path().join(dependency.key).join("koral.json").normalize().to_string(
+                root.to_path().join(dependency.key).join("koral.json").normalize().to_string(
                 ),
             );
         },
@@ -1170,13 +1170,13 @@ public let load_package_registry(
 
     // Building the standard library itself makes the root package BE std: one
     // package, one identity, and it is the prelude for everyone else.
-    let absolute_root = absolute_path(root_manifest_path.into_path()) or else {
-        root_manifest_path.into_path()
+    let absolute_root = absolute_path(root_manifest_path.to_path()) or else {
+        root_manifest_path.to_path()
     };
     let root_is_std = when std_manifest_path in {
         .Some(path) then {
-            let absolute_std = absolute_path(path.into_path()) or else {
-                path.into_path()
+            let absolute_std = absolute_path(path.to_path()) or else {
+                path.to_path()
             };
             absolute_std.normalize().to_string() == absolute_root.normalize().to_string()
         },

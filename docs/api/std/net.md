@@ -15,9 +15,9 @@ Import the module with `using "std/net" { ... };`.
 ## Traits
 ```koral
 /// Types that resolve to a SocketAddr, so socket APIs accept both parsed addresses and address strings.
-public trait IntoSocketAddr {
+public trait ToSocketAddr {
     /// Resolve this value to a socket address, failing with an Error message when it is not a valid address.
-    into_socket_addr(self): Result[SocketAddr];
+    to_socket_addr(self): Result[SocketAddr];
 };
 ```
 
@@ -185,16 +185,16 @@ given IpAddr: Parseable {
     public parse(s: String): Result[Self];
 };
 
-/// IntoSocketAddr conformance: parses the string as a socket address.
-given String: IntoSocketAddr {
+/// ToSocketAddr conformance: parses the string as a socket address.
+given String: ToSocketAddr {
     /// Parse this string as "ip:port" (IPv4) or "[ip]:port" (IPv6).
-    public into_socket_addr(self): Result[SocketAddr];
+    public to_socket_addr(self): Result[SocketAddr];
 };
 
-/// IntoSocketAddr conformance: a SocketAddr resolves to itself.
-given SocketAddr: IntoSocketAddr {
+/// ToSocketAddr conformance: a SocketAddr resolves to itself.
+given SocketAddr: ToSocketAddr {
     /// Return this address unchanged.
-    public into_socket_addr(self): Result[SocketAddr];
+    public to_socket_addr(self): Result[SocketAddr];
 };
 
 /// Build socket addresses, read their parts, and convert to and from raw sockaddr bytes.
@@ -267,7 +267,7 @@ given TcpListener {
     /// Bind to a socket address and start listening.
     /// Flow: create socket → set SO_REUSEADDR → bind → listen(128)
     /// On any failure, closes the fd and returns Error.
-    public bind[T: IntoSocketAddr](addr: T): Result[TcpListener];
+    public bind[T: ToSocketAddr](addr: T): Result[TcpListener];
     /// Accept a connection. Blocks until a client connects.
     /// Returns a Pair of (TcpSocket, SocketAddr) on success.
     public accept(self): Result[Pair[TcpSocket, SocketAddr]];
@@ -285,7 +285,7 @@ given TcpSocket {
     /// Connect to a socket address.
     /// Flow: create socket → connect
     /// On any failure, closes the fd and returns Error.
-    public connect[T: IntoSocketAddr](addr: T): Result[TcpSocket];
+    public connect[T: ToSocketAddr](addr: T): Result[TcpSocket];
     /// Get the local address of this socket.
     public local_addr(self): Result[SocketAddr];
     /// Get the peer address of this socket.
@@ -344,17 +344,17 @@ given UdpSocket {
     /// Bind to a socket address.
     /// Flow: create socket (SOCK_DGRAM) → bind
     /// On any failure, closes the fd and returns Error.
-    public bind[T: IntoSocketAddr](addr: T): Result[UdpSocket];
+    public bind[T: ToSocketAddr](addr: T): Result[UdpSocket];
     /// Send a datagram to the specified address.
     /// Returns the number of bytes sent.
-    public send_to[T: IntoSocketAddr](self, addr: T, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
+    public send_to[T: ToSocketAddr](self, addr: T, from: List[UInt8] =, span: Range[Int] = ...): Result[Int];
     /// Receive a datagram and return the number of bytes read and the sender's address.
     /// Returns Error when the target span is empty: no datagram is received and
     /// reporting a fabricated sender would be wrong.
     public recv_from(self, into: List[UInt8] =, span: Range[Int] = ...): Result[Pair[Int, SocketAddr]];
     /// Associate this socket with a remote socket address (connected mode).
     /// After calling connect, use send/recv instead of send_to/recv_from.
-    public connect[T: IntoSocketAddr](self, addr: T): Result[Void];
+    public connect[T: ToSocketAddr](self, addr: T): Result[Void];
     /// Send data in connected mode.
     /// Returns the number of bytes sent.
     /// Returns Error if the socket is not connected.
