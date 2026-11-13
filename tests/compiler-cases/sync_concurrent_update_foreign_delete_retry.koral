@@ -1,0 +1,44 @@
+// EXPECT: foreign delete retry ok
+// EXPECT: done
+// Pin the vanished-entry attribution (2026-11-13 batch). While the updater's
+// callback ran, a FOREIGN thread deleted the target entry and the callback
+// wrote a DIFFERENT key. That must not panic: the vanished entry is attributed
+// by the tombstone its delete left behind (the foreign thread), so the attempt
+// retries and re-inserts. The old container-wide `last_writer` attribution
+// blamed the updater's other-key write for the foreign delete and panicked
+// with "the updater wrote the same container".
+using "std/async" { ... };
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    d.insert("target", 1);
+    let f_entered = ConcurrentDict[String, Int].new();
+    let deleted = ConcurrentDict[String, Int].new();
+
+    let h = run_task(() => {
+        while f_entered.get("go") is .None() then {
+            yield_thread_now();
+        };
+        let _ = d.take("target");
+        deleted.insert("done", 1);
+    });
+
+    let r = d.update_and_get("target", (v: Option[Int]): Option[Int] => {
+        f_entered.insert("go", 1);
+        while deleted.get("done") is .None() then {
+            yield_thread_now();
+        };
+        d.insert("other", 99);
+        return Option[Int].Some(7);
+    });
+    h.wait().unwrap();
+    when r in {
+        .Some(x) then assert(x == 7, "update must commit after the retry"),
+        .None() then panic("update must commit after the retry"),
+    };
+    assert(d.get("other").unwrap() == 99, "callback's other-key write lands");
+    assert(d.get("target").unwrap() == 7, "target re-inserted after retry");
+    println("foreign delete retry ok");
+    println("done");
+};

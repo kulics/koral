@@ -163,6 +163,28 @@ public type LoadedPackage(
     kind: ResolvedPackageKind,
 );
 
+/// The anonymous package a bare-file build runs under. A bare file has no
+/// manifest, but the entry and every local `using "./…"` module it pulls in
+/// are one package: they share this identity -- `protected` reads work among
+/// them -- and belong to no real package, so std's `protected` stays closed to
+/// them. Before this existed, bare builds installed the std package as the
+/// root owner, which stamped local modules into the std package (std's
+/// `protected` opened to them) while the entry stayed outside it.
+/// The name "user" is the root kind's fixed token (`root:user`), not a
+/// guessable package brand.
+public let anonymous_root_package(entry_file: String): LoadedPackage = {
+    let package_root = entry_file.to_path().dir_name().to_string();
+    let manifest = PackageManifest(
+        entry_file,
+        package_root,
+        "user",
+        "",
+        Dict[String, PackageModuleConfig].new(),
+        Dict[String, PackageDependencyConfig].new(),
+    );
+    return LoadedPackage("user", "user", manifest, .Root());
+};
+
 public type mutable PackageRegistry(
     mutable by_identity: Dict[String, LoadedPackage],
     mutable all: List[LoadedPackage],

@@ -107,9 +107,11 @@ public let append_file[T: ToPath](path: T, content: List[UInt8] =): Result[Void]
 public let read_text_file[T: ToPath](path: T): Result[String];
 
 /// Write a string to file (UTF-8 text, overwrite)
+/// Writes the string's UTF-8 bytes directly from its buffer by pointer.
 public let write_text_file[T: ToPath](path: T, content: String =): Result[Void];
 
 /// Append a string to file (UTF-8 text)
+/// Writes the string's UTF-8 bytes directly from its buffer by pointer.
 public let append_text_file[T: ToPath](path: T, content: String =): Result[Void];
 
 /// Copy file (reads source as bytes, writes to destination)

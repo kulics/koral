@@ -147,6 +147,8 @@ given[W: Writer] BufWriter[W] {
     /// Buffer one byte, flushing to the inner writer first when the buffer is full.
     public write_byte(self, b: UInt8): Result[Void];
     /// Buffer the UTF-8 bytes of `s`.
+    /// Copies the string's bytes straight into the internal buffer (one memcpy
+    /// per buffered chunk) -- no intermediate `List[UInt8]`, no per-byte loop.
     public write_string(self, s: String): Result[Void];
     /// Buffer the UTF-8 bytes of `s` followed by a newline.
     public write_line(self, s: String): Result[Void];
@@ -184,6 +186,8 @@ given ByteBuffer {
     /// Panics when `cap` is negative.
     public with_capacity(cap: Int): ByteBuffer;
     /// Create a byte buffer holding the UTF-8 bytes of `s`.
+    /// Copies the string's bytes straight into the backing store -- one copy,
+    /// no intermediate `List[UInt8]`.
     public from_string(s: String): ByteBuffer;
     /// Create a byte buffer holding a copy of `bytes`.
     public from_bytes(bytes: List[UInt8]): ByteBuffer;

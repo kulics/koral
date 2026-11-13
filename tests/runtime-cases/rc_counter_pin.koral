@@ -55,10 +55,13 @@ let freeze_window(): String = {
     return "w7_into_frozen_retains=\(r1 - r0)";
 };
 
-// init_memory 的实参算消费性使用（2026-11-12 细化，code­gen_borrowed_self
-// 的 move_walk_value_as_consumed）：value 源局部整体禁移。init_memory 接管
-// value 的 +1，之后对同一局部的读必须是复制——若末次移动在后面的读上开火，
-// 就与 init_memory 的消费抢同一个 +1（双认领 → 双释放，运行直接崩）。
+// init_memory 的实参是消费性使用（契约即「接管 value 的所有权」）。源局部的
+// 末次使用就是该实参时，直接移动（清 init flag、store 走 move）——push 形参、
+// push_list 中转量走的就是这条；源局部后处仍存活时，实参照旧复制（store
+// retain），后续读的 P5/别名对消照常开火。消费只发生在移动指定点这一个位置
+// （Copy 标签值的消费必须在 consume_last_use_source 就地记账），不存在双认领。
+// 2026-11-14：走查不再对 init_memory 的 Copy 读整局部禁移后，本窗口的
+// `let y = x` 绑定可消一对 retain/release，计数 2→1（ASan 全净、时序钉全绿）。
 let init_memory_window(): String = {
     let slot = alloc_memory[Box](UInt(1));
     let x = Box(4);

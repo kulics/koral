@@ -2130,30 +2130,42 @@ given MIRFunctionCodeEmitter {
     /// 不清 flag 就会在作用域尾二次释放。指定点是判 G 放行的末次使用，
     /// 清掉的 flag 又是运行时判据，路径敏感天然成立。
     consume_last_use_source(self, value: MIRValue): Bool = {
+        // 命中判据：值源是裸局部（`PlaceRead(Local, Copy)` 或
+        // `Operand(Local)`）且当前 (块,语句) 是该局部的移动指定点。两种形态
+        // 都是「把局部的 +1 递出去」的候选——材料化的临时多半走 Operand 形
+        // 态，漏掉它就每次多付一对 retain/release。
         return when value in {
             .PlaceRead(place, ownership) then {
                 if not (ownership is .Copy()) then {
                     return false;
                 };
                 when place in {
-                    .Local(local_id) then {
-                        when self.move_designations.get(local_id.raw_value) in {
-                            .Some(site) then {
-                                if site.block_index == self.current_block_index
-                                    and site.statement_index == self.current_statement_index then {
-                                    self.set_init_flag(local_id, false);
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                            .None() then false,
-                        }
-                    },
+                    .Local(local_id) then self.consume_designated_local(local_id),
                     _ then false,
                 }
             },
+            .Operand(.Local(local_id)) then self.consume_designated_local(local_id),
             _ then false,
+        };
+    };
+
+    /// The designation check behind `consume_last_use_source`: is this
+    /// (block, statement) the precomputed move point of `local_id`? Consuming
+    /// must happen HERE -- a value's Copy label does not make
+    /// `consume_moved_source` account for it, and an unconsumed flag would
+    /// release at scope end and double-free.
+    private consume_designated_local(self, local_id: MIRLocalID): Bool = {
+        return when self.move_designations.get(local_id.raw_value) in {
+            .Some(site) then {
+                if site.block_index == self.current_block_index
+                    and site.statement_index == self.current_statement_index then {
+                    self.set_init_flag(local_id, false);
+                    true
+                } else {
+                    false
+                }
+            },
+            .None() then false,
         };
     };
 
@@ -3809,7 +3821,14 @@ given MIRFunctionCodeEmitter {
                     .Some(cleanup) then cleanup.name == v.expression,
                     .None() then false,
                 };
-                let transferred = self.source_is_consumed(value) or is_owned_temp;
+                // init_memory 的实参是消费性使用（契约即「接管 value 的所有权」）。
+                // 末次使用指定点（P5）命中的裸局部/形参复制读直接转移所有权
+                // （清 init flag、store 走 move），省掉一对 retain/release：
+                // push 的 value 形参、push_list 的元素中转量都在这里省下。
+                let liveness_moved = self.consume_last_use_source(value);
+                let transferred = liveness_moved
+                    or self.source_is_consumed(value)
+                    or is_owned_temp;
                 let dest = "*(\(self.codegen.c_type_name(element_type))*)\(p.expression)";
                 if transferred then {
                     self.codegen.append_copy_or_move_assignment(

@@ -670,6 +670,18 @@ given TypeChecker {
         self,
         method: Symbol,
     ): Option[AccessModifier] = {
+        // An explicitly written modifier on the impl wins over the trait
+        // requirement's level (see conformance_member_registration_access):
+        // the registration stamp already carries it, and only the implicit
+        // internal default falls through to the requirement's level below.
+        when self.context().get_access(method.def_id) in {
+            .Some(stamped) then {
+                if not (stamped is .Internal()) then {
+                    return Option[AccessModifier].Some(stamped);
+                };
+            },
+            .None() then {},
+        };
         when self.storage.generic_templates.receiver_method_dispatch.get(method.def_id) in {
             .Some(info) then {
                 if info.conformance_trait_name is .Some(_) then {
@@ -697,10 +709,12 @@ given TypeChecker {
     /// The access to STAMP on a conformance member when it is registered.
     ///
     /// Mirrors Swift `registeredMethodDeclaration(..., access: requirementAccess)`:
-    /// a trait REQUIREMENT implementation is registered at the requirement's
-    /// level -- the level of the trait that declares it -- so the access
-    /// spelling written on the impl is not a symbol-visibility input and can
-    /// never make the emitted symbol narrower than the requirement. A
+    /// a trait REQUIREMENT implementation with no modifier of its own is
+    /// registered at the requirement's level -- the level of the trait that
+    /// declares it, because a requirement has no modifier slot. But an
+    /// EXPLICITLY written modifier (anything but the implicit internal
+    /// default) marks a deviation and WINS: `given X: T { private fn ... }`
+    /// stays private however the trait spells the requirement. A
     /// non-requirement helper keeps its own annotation.
     conformance_member_registration_access(
         self,
@@ -708,6 +722,9 @@ given TypeChecker {
         method_name: String,
         own_access: AccessModifier,
     ): AccessModifier = {
+        if not (own_access is .Internal()) then {
+            return own_access;
+        };
         when trait_def_id in {
             .Some(def_id) then {
                 when self.trait_requirement_access(def_id, method_name) in {

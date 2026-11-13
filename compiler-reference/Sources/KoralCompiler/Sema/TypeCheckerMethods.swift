@@ -39,12 +39,11 @@ extension TypeChecker {
     guard let modulePath = context.getModulePath(traitDefId) else { return true }
     guard let graph = importGraph else { return true }
     let traitName = context.getName(traitDefId) ?? ""
-    let r = graph.traitDeclarationInScope(
+    return graph.traitDeclarationInScope(
       traitModulePath: modulePath,
       traitName: traitName,
       currentModulePath: currentModulePath,
       currentSourceFile: currentSourceFile.isEmpty ? nil : currentSourceFile)
-    return r
   }
 
   /// Who owns a method name on a type's extension table.
@@ -111,8 +110,11 @@ extension TypeChecker {
   /// no gate. Mirrors koralc `resolve_extension_template_signature`'s
   /// `face_allows_trait(template.conformance_trait_def_id)`.
   func extensionTemplateFaceAllows(_ ext: GenericExtensionMethodTemplate) -> Bool {
-    guard let traitDefId = ext.conformanceTraitDefId else { return true }
-    return traitInScope(traitDefId)
+    guard let traitDefId = ext.conformanceTraitDefId else {
+      return true
+    }
+    let r = traitInScope(traitDefId)
+    return r
   }
 
   /// Why `owner.name` is not callable here, as a sentence to append to

@@ -144,14 +144,49 @@ public let read_text_file[T: ToPath](path: T): Result[String] = {
     };
 };
 
+/// Loop `write_some` over the string's own UTF-8 buffer until everything is
+/// out. No intermediate `List[UInt8]`: the bytes go to the fd straight from
+/// the string's storage.
+private let write_all_text(f: File, content: String): Result[Void] = {
+    let data = content.borrow_ptr();
+    let end = content.count();
+    let mutable start = 0;
+    while start < end then {
+        when f.write_some(data + start, end - start) in {
+            .Ok(n) then {
+                if n == 0 then {
+                    return Result[Void].Error(IoError.WriteZero());
+                };
+                start += n;
+            },
+            .Error(e) then {
+                return Result[Void].Error(e);
+            },
+        };
+    };
+    return Result[Void].Ok({});
+};
+
 /// Write a string to file (UTF-8 text, overwrite)
+/// Writes the string's UTF-8 bytes directly from its buffer by pointer.
 public let write_text_file[T: ToPath](path: T, content: String =): Result[Void] = {
-    return write_file(path, content = content.to_bytes());
+    return when open_file(path.to_path(), OpenMode.Write()) in {
+        .Ok(f) then write_all_text(f, content),
+        .Error(e) then {
+            return Result[Void].Error(e);
+        },
+    };
 };
 
 /// Append a string to file (UTF-8 text)
+/// Writes the string's UTF-8 bytes directly from its buffer by pointer.
 public let append_text_file[T: ToPath](path: T, content: String =): Result[Void] = {
-    return append_file(path, content = content.to_bytes());
+    return when open_file(path.to_path(), OpenMode.Append()) in {
+        .Ok(f) then write_all_text(f, content),
+        .Error(e) then {
+            return Result[Void].Error(e);
+        },
+    };
 };
 
 // ============================================================================

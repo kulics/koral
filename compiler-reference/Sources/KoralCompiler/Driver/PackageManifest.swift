@@ -179,6 +179,28 @@ public final class LoadedPackage {
   }
 }
 
+/// The anonymous package a bare-file build runs under. A bare file has no
+/// manifest, but the entry and every local `using "./…"` module it pulls in
+/// are one package: they share this identity -- `protected` reads work among
+/// them -- and belong to no real package, so std's `protected` stays closed to
+/// them. Before this existed, bare builds installed the std package as the
+/// root owner, which stamped local modules into the std package (std's
+/// `protected` opened to them) while the entry stayed outside it.
+/// The name "user" is the root kind's fixed token (`root:user`), not a
+/// guessable package brand.
+public func anonymousRootPackage(entryFile: String) -> LoadedPackage {
+  let packageRoot = URL(fileURLWithPath: entryFile).deletingLastPathComponent().path
+  let manifest = PackageManifest(
+    manifestPath: entryFile,
+    packageRoot: packageRoot,
+    packageName: "user",
+    version: "",
+    modules: [:],
+    dependencies: [:]
+  )
+  return LoadedPackage(identity: "user", selfName: "user", manifest: manifest, kind: .root)
+}
+
 /// The set of packages in a compile, plus the rule for turning a name written
 /// in some package's source into a package.
 public final class PackageRegistry {

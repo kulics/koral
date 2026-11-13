@@ -24,16 +24,20 @@ using "std" { ... };
 
 /// A concurrent-dict slot: tag word + inline key + value + update
 /// bookkeeping. struct+tag layout (not an enum) so fields are addressable by
-/// pointer; only Occupied slots carry initialized key/value, and the tag is
-/// the only word valid on Empty/Deleted slots. `version` is bumped by every
-/// write to the entry (the optimistic-commit stamp), `writer` names the
-/// thread of that write (the L3 attribution record).
+/// pointer; only Occupied slots carry initialized key/value. Empty slots keep
+/// only the tag; Deleted slots keep `key_hash`/`version`/`writer` as the
+/// delete's attribution record (the value/key are gone). `version` is bumped
+/// by every write to the entry (the optimistic-commit stamp), `writer` names
+/// the thread of that write (the L3 attribution record), and `key_hash` is
+/// the mixed key hash -- the identity a later probe uses to recognize the
+/// vanished entry's own tombstone among the chain's tombstones.
 type ConcurrentDictSlot[K: Any, V: Any](
     tag: UInt,
     key: K,
     value: V,
     version: UInt64,
     writer: UInt64,
+    key_hash: UInt,
 );
 
 private let dict_tag_ptr[K: Any, V: Any](
@@ -46,6 +50,22 @@ private let dict_set_tag[K: Any, V: Any](
 ): Void = {
     let tag_ptr = dict_tag_ptr(slot_ptr);
     *tag_ptr = tag;
+};
+
+/// Stamp a just-tombstoned slot with the delete's attribution record: the
+/// key's hash (the identity later probes recognize) and the deleting thread.
+/// `update_and_get` reads these to tell "the updater deleted the entry it was
+/// updating" (panic) from "another thread deleted it" (retry). A rebuild or
+/// `clear` drops tombstones entirely; a vanish with no tombstone must retry,
+/// never panic.
+private let dict_stamp_tombstone[K: Hash, V: Any](
+    slot_ptr: *mutable ConcurrentDictSlot[K, V],
+    key: K,
+    version: UInt64,
+): Void = {
+    init_memory((&slot_ptr.version) as *mutable UInt64, version);
+    init_memory((&slot_ptr.writer) as *mutable UInt64, __koral_thread_current_id());
+    init_memory((&slot_ptr.key_hash) as *mutable UInt, concurrent_hash_mix(key.hash()));
 };
 
 /// The tombstone-aware linear probe over this family's own slots: return the
@@ -95,6 +115,37 @@ private let dict_find_slot[K: Hash, V: Any](
     return first_deleted;
 };
 
+/// Attribute a vanished entry: walk `key`'s probe chain for the tombstone its
+/// delete left behind (recognized by the stored key hash) and report that
+/// delete's thread. The walk stops at the first Empty slot, where every probe
+/// chain ends. A rebuild or `clear` erases tombstones, so "no tombstone found"
+/// is a normal answer -- the caller must retry, never panic.
+private let dict_tombstone_writer[K: Hash, V: Any](
+    slots: *mutable ConcurrentDictSlot[K, V],
+    capacity: Int,
+    key: K,
+): Option[UInt64] = {
+    if capacity == 0 then {
+        return Option[UInt64].None();
+    };
+    let mask = capacity - 1;
+    let h = concurrent_hash_mix(key.hash());
+    let mutable idx = Int(h & UInt(mask));
+    let mutable probes = 0;
+    while probes < capacity then {
+        let slot_tag = (slots + idx).tag;
+        if slot_tag == UInt(0) then {
+            return Option[UInt64].None();
+        };
+        if slot_tag == UInt(2) and (slots + idx).key_hash == h then {
+            return Option[UInt64].Some((slots + idx).writer);
+        };
+        idx = (idx + 1) & mask;
+        probes += 1;
+    };
+    return Option[UInt64].None();
+};
+
 /// A shared `sendable` key/value map with atomic per-operation access.
 /// Sendable contract: self-synchronized.
 public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: sendable](
@@ -104,7 +155,6 @@ public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: send
     private mutable size: Int,
     private mutable deleted: Int,
     private mutable version_counter: UInt64,
-    private mutable last_writer: UInt64,
 );
 
 /// `Drop` for `ConcurrentDict[K, V]`: the last handle is gone, so the
@@ -127,7 +177,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
 
     /// Create an empty concurrent dict.
     public new(): ConcurrentDict[K, V] =
-        ConcurrentDict[K, V](SharedMutex.new(), null, 0, 0, 0, UInt64(0), UInt64(0));
+        ConcurrentDict[K, V](SharedMutex.new(), null, 0, 0, 0, UInt64(0));
 
     /// Create an empty concurrent dict sized for about `capacity` entries.
     /// Panics when `capacity` is negative.
@@ -144,14 +194,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         for i in 0..<cap then {
             dict_set_tag(slots + i, UInt(0));
         };
-        return ConcurrentDict[K, V](SharedMutex.new(), slots, cap, 0, 0, UInt64(0), UInt64(0));
+        return ConcurrentDict[K, V](SharedMutex.new(), slots, cap, 0, 0, UInt64(0));
     };
 
     // Bookkeeping for one write to the container: bump the entry-version
-    // counter and record the writing thread (the L3 attribution record).
+    // counter. The writing thread is recorded per entry (`writer`), or on the
+    // tombstone when the write is a delete.
     private stamp_write(self): UInt64 = {
         self.version_counter = self.version_counter + 1;
-        self.last_writer = __koral_thread_current_id();
         return self.version_counter;
     };
 
@@ -266,7 +316,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         let record_version = self.stamp_write();
         init_memory(
             slot_ptr,
-            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+            ConcurrentDictSlot[K, V](
+                UInt(1),
+                key,
+                value,
+                record_version,
+                __koral_thread_current_id(),
+                concurrent_hash_mix(key.hash()),
+            ),
         );
         self.rw_lock.unlock();
         return displaced;
@@ -294,7 +351,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         let record_version = self.stamp_write();
         init_memory(
             slot_ptr,
-            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+            ConcurrentDictSlot[K, V](
+                UInt(1),
+                key,
+                value,
+                record_version,
+                __koral_thread_current_id(),
+                concurrent_hash_mix(key.hash()),
+            ),
         );
         self.rw_lock.unlock();
         return true;
@@ -315,7 +379,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                     dict_set_tag(slot_ptr, UInt(2));
                     self.size = self.size - 1;
                     self.deleted = self.deleted + 1;
-                    let _ = self.stamp_write();
+                    dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
                 };
             },
             .None() then {},
@@ -339,7 +403,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                     dict_set_tag(slot_ptr, UInt(2));
                     self.size = self.size - 1;
                     self.deleted = self.deleted + 1;
-                    let _ = self.stamp_write();
+                    dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
                 };
             },
             .None() then {},
@@ -371,7 +435,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         let record_version = self.stamp_write();
         init_memory(
             slot_ptr,
-            ConcurrentDictSlot[K, V](UInt(1), key, value, record_version, __koral_thread_current_id()),
+            ConcurrentDictSlot[K, V](
+                UInt(1),
+                key,
+                value,
+                record_version,
+                __koral_thread_current_id(),
+                concurrent_hash_mix(key.hash()),
+            ),
         );
         self.rw_lock.unlock();
         return value;
@@ -390,11 +461,12 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// every attempt fail, and when the entry's last writer is `f`'s own
     /// thread the loop panics with
     /// `ConcurrentDict.update_and_get: the updater wrote the same container`
-    /// instead of retrying forever (an entry that vanished since the snapshot
-    /// is attributed by the container's last writer). Normal contention
-    /// retries with no attempt limit and no guarantee of finishing in a
-    /// bounded number of steps. Displaced values and keys are released after
-    /// the unlock.
+    /// instead of retrying forever. A vanished entry is attributed by the
+    /// tombstone its delete left behind (the deleting thread); when a rebuild
+    /// or `clear` erased the tombstones, or a foreign thread deleted the
+    /// entry, the attempt simply retries. Normal contention retries with no
+    /// attempt limit and no guarantee of finishing in a bounded number of
+    /// steps. Displaced values and keys are released after the unlock.
     ///
     /// `f` carries no `sendable` requirement on purpose: it is a transient
     /// combiner that runs and dies on the CALLER's thread (every retry too),
@@ -426,9 +498,21 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             if next is .Some(_) then {
                 self.ensure_room();
             };
-            let final_idx = when dict_find_slot(self.slots, self.capacity, key) in {
-                .Some(i) then i,
-                .None() then { panic("ConcurrentDict update_and_get failed"); },
+            let mutable final_idx = -1;
+            when dict_find_slot(self.slots, self.capacity, key) in {
+                .Some(i) then { final_idx = i; },
+                .None() then {},
+            };
+            if final_idx < 0 then {
+                // No slot at all: a `Some` commit must have made room above,
+                // so that one is the real invariant failure. A `None` commit
+                // is a delete of an entry that is already gone (including a
+                // table `clear`ed under the updater) -- nothing to do.
+                self.rw_lock.unlock();
+                if next is .Some(_) then {
+                    panic("ConcurrentDict update_and_get failed");
+                };
+                return next;
             };
             let slot_ptr = self.slots + final_idx;
             let exists = slot_ptr.tag == UInt(1);
@@ -437,11 +521,16 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             if current_version != seen then {
                 // The attempt was invalidated: attribute the interfering
                 // write. An existing entry names its own writer; a vanished
-                // one falls back to the container's last writer.
+                // one is attributed by the tombstone its delete left behind
+                // (the deleting thread). No surviving tombstone = unknown
+                // writer (a rebuild or clear ran) = retry, never panic.
                 let updater_wrote = if exists then {
                     slot_ptr.writer == __koral_thread_current_id()
                 } else {
-                    self.last_writer == __koral_thread_current_id()
+                    when dict_tombstone_writer(self.slots, self.capacity, key) in {
+                        .Some(w) then w == __koral_thread_current_id(),
+                        .None() then false,
+                    }
                 };
                 self.rw_lock.unlock();
                 if updater_wrote then {
@@ -461,7 +550,14 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                         };
                         init_memory(
                             slot_ptr,
-                            ConcurrentDictSlot[K, V](UInt(1), key, v, record_version, __koral_thread_current_id()),
+                            ConcurrentDictSlot[K, V](
+                                UInt(1),
+                                key,
+                                v,
+                                record_version,
+                                __koral_thread_current_id(),
+                                concurrent_hash_mix(key.hash()),
+                            ),
                         );
                     },
                     .None() then {
@@ -470,7 +566,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                             dict_set_tag(slot_ptr, UInt(2));
                             self.size = self.size - 1;
                             self.deleted = self.deleted + 1;
-                            let _ = self.stamp_write();
+                            dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
                         };
                     },
                 };

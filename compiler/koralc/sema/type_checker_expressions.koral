@@ -1469,48 +1469,104 @@ given TypeChecker {
             ),
             .GenericParameter(name) then {
                 if self.storage.generic_param_constraints.get(name) is .Some(constraints) then {
+                    // Identity is the METHOD's DefId, never its name: two
+                    // DISTINCT declarations behind one name (two bounds each
+                    // declaring `foo`) are an ambiguity -- the same thing the
+                    // type-side reports at registration -- while repeated
+                    // views of ONE declaration (parent chains, duplicate
+                    // bounds) are not. First-match-wins used to pick silently
+                    // by constraint order.
+                    let mutable matched_name = Option[String].None();
+                    let mutable matched_method = Option[DefId].None();
+                    let mutable ambiguous = false;
                     for constraint in constraints then {
                         let cn = constraint.trait_name;
                         // The bound carries the DECLARATION's identity; `cn` is
                         // only what diagnostics print.
                         let cn_def_id = constraint.trait_def_id;
-                        if self.lookup_trait_method_signature(cn_def_id, method_name) is .Some(_) then {
-                            return Option[String].Some(cn);
+                        // Marker constraints (`sendable` and friends) are not
+                        // traits and provide no methods: they resolve to no
+                        // declaration. The old first-match walk rarely reached
+                        // them (it returned at the first hit); the ambiguity
+                        // scan visits every constraint, so filter them up
+                        // front instead of flattening them into an error.
+                        if not cn_def_id.is_valid()
+                            or self.trait_def_id_of(cn) is .None() then {
+                            continue;
                         };
-                        when self.storage.trait_registry.flatten_methods_for_def(
-                            cn_def_id,
-                        ) in {
-                            .Ok(methods) then {
-                                if methods.get(method_name) is .Some(_) then {
-                                    return Option[String].Some(cn);
-                                };
+                        let mutable hit_method = Option[DefId].None();
+                        when self.lookup_trait_method_signature(cn_def_id, method_name) in {
+                            .Some(sig) then {
+                                hit_method = Option[DefId].Some(sig.def_id);
                             },
-                            .Error(e) then self.report_trait_flatten_failure(
-                                cn,
-                                method_name,
-                                e,
-                            ),
-                        };
-                        when self.flattened_trait_tool_methods(cn) in {
-                            .Ok(tool_methods) then {
-                                when tool_methods.get(method_name) in {
-                                    .Some(entry) then {
-                                        if self.trait_tool_method_is_receiver_style(
-                                            entry.method,
-                                        ) then {
-                                            return Option[String].Some(cn);
+                            .None() then {
+                                when self.storage.trait_registry.flatten_methods_for_def(
+                                    cn_def_id,
+                                ) in {
+                                    .Ok(methods) then {
+                                        when methods.get(method_name) in {
+                                            .Some(member) then {
+                                                hit_method = Option[DefId].Some(member.def_id);
+                                            },
+                                            .None() then {},
                                         };
                                     },
-                                    .None() then {},
+                                    .Error(e) then self.report_trait_flatten_failure(
+                                        cn,
+                                        method_name,
+                                        e,
+                                    ),
+                                };
+                                if hit_method is .None() then {
+                                    when self.flattened_trait_tool_methods(cn) in {
+                                        .Ok(tool_methods) then {
+                                            when tool_methods.get(method_name) in {
+                                                .Some(entry) then {
+                                                    if self.trait_tool_method_is_receiver_style(
+                                                        entry.method,
+                                                    ) then {
+                                                        hit_method = Option[DefId].Some(
+                                                            (entry.method).def_id,
+                                                        );
+                                                    };
+                                                },
+                                                .None() then {},
+                                            };
+                                        },
+                                        .Error(error) then self.report_trait_flatten_failure(
+                                            cn,
+                                            method_name,
+                                            error,
+                                        ),
+                                    };
                                 };
                             },
-                            .Error(error) then self.report_trait_flatten_failure(
-                                cn,
-                                method_name,
-                                error,
-                            ),
+                        };
+                        when hit_method in {
+                            .Some(mid) then {
+                                when matched_method in {
+                                    .Some(prev) then {
+                                        if prev != mid then {
+                                            ambiguous = true;
+                                        };
+                                    },
+                                    .None() then {
+                                        matched_method = Option[DefId].Some(mid);
+                                        matched_name = Option[String].Some(cn);
+                                    },
+                                };
+                            },
+                            .None() then {},
                         };
                     };
+                    if ambiguous then {
+                        self.push_ambiguous_trait_extension_method_diagnostic(
+                            normalized,
+                            method_name,
+                            self.storage.current_span,
+                        );
+                    };
+                    return matched_name;
                 };
                 Option[String].None()
             },

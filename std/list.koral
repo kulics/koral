@@ -29,6 +29,37 @@ given[T: Any] List[T]: Drop {
 /// A one-shot cursor that walks a `List[T]` from index 0 to the end.
 public type mutable ListIterator[T: Any](source: List[T], mutable index: Int);
 
+
+// ============================================================================
+// Cold panic helpers
+// ============================================================================
+// Bounds panics carry the failing values (the message is only built on the
+// failing path), and the message-building lives HERE, out of line: an
+// interpolated message inline in a hot accessor pulls the string machinery
+// into the accessor's body, and functions containing allocation can neither
+// stay small nor inline (see KORAL_NOINLINE in koral_runtime.h). The accessors
+// below call these helpers from their failure branches only.
+
+private let panic_list_index(key: Int, len: Int): Never = {
+    panic("List index out of bounds: index \(key), length \(len)");
+};
+
+private let panic_list_at_index(op: String, index: Int, len: Int): Never = {
+    panic("List \(op) index out of bounds: index \(index), length \(len)");
+};
+
+private let panic_list_slice(start: Int, count: Int, len: Int): Never = {
+    panic("List slice out of bounds: start \(start), count \(count), list length \(len)");
+};
+
+private let panic_list_slice_spec_bounds(len: Int): Never = {
+    panic("List.slice_spec out of bounds: length \(len)");
+};
+
+private let panic_list_slice_spec_range(s: Int, e: Int): Never = {
+    panic("List.slice_spec invalid range: start \(s) > end \(e)");
+};
+
 // ============================================================================
 // List Methods
 // ============================================================================
@@ -145,7 +176,7 @@ given[T: Any] List[T] {
     /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
     public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void = {
         if index < 0 or index > self.len then {
-            panic("List insert_list_at index out of bounds: index \(index), length \(self.len)");
+            panic_list_at_index("insert_list_at", index, self.len);
         };
         let spec = other.slice_spec(span);
         let start = spec.start();
@@ -185,7 +216,7 @@ given[T: Any] List[T] {
     /// Panics when `index > count`; `index == count` appends.
     public insert_at(self, index: Int, value: T): Void = {
         if index < 0 or index > self.len then {
-            panic("List insert_at index out of bounds: index \(index), length \(self.len)");
+            panic_list_at_index("insert_at", index, self.len);
         };
         self.ensure_capacity(self.len + 1);
         // Shift elements to the right
@@ -204,7 +235,7 @@ given[T: Any] List[T] {
     /// Remove and discard the element at `index`, shifting later elements left. O(n). Panics when out of range.
     public remove_at(self, index: Int): Void = {
         if index < 0 or index >= self.len then {
-            panic("List remove_at index out of bounds: index \(index), length \(self.len)");
+            panic_list_at_index("remove_at", index, self.len);
         };
         let _ = self.take_at(index);
     };
@@ -212,7 +243,7 @@ given[T: Any] List[T] {
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
     public take_at(self, index: Int): T = {
         if index < 0 or index >= self.len then {
-            panic("List take_at index out of bounds: index \(index), length \(self.len)");
+            panic_list_at_index("take_at", index, self.len);
         };
         let value = take_memory(self.source + index);
         // Shift elements to the left
@@ -239,14 +270,14 @@ given[T: Any] List[T] {
 
     private __index_get(self, key: Int): T = {
         if key < 0 or key >= self.len then {
-            panic("List index out of bounds: index \(key), length \(self.len)");
+            panic_list_index(key, self.len);
         };
         return self.source[key];
     };
 
     private __index_set(self, key: Int, value: T): Void = {
         if key < 0 or key >= self.len then {
-            panic("List index out of bounds: index \(key), length \(self.len)");
+            panic_list_index(key, self.len);
         };
         self.source[key] = value;
     };
@@ -256,7 +287,7 @@ given[T: Any] List[T] {
     /// 读写按既有规则处理。越界 panic 与 `__index_get` 一致。
     private __index_slot(self, key: Int): *mutable T = {
         if key < 0 or key >= self.len then {
-            panic("List index out of bounds: index \(key), length \(self.len)");
+            panic_list_index(key, self.len);
         };
         return self.source + key;
     };
@@ -323,7 +354,7 @@ given[T: Any] List[T] {
 
     private make_slice(self, start: Int, len: Int): List[T] = {
         if start < 0 or len < 0 or start + len > self.len then {
-            panic("List slice out of bounds: start \(start), count \(len), list length \(self.len)");
+            panic_list_slice(start, len, self.len);
         };
         let mutable result = List[T].with_capacity(len);
         for i in 0..<len then {
@@ -342,52 +373,52 @@ given[T: Any] List[T] {
         when range in {
             .Closed(s, e) then {
                 if s < 0 or e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s > e then {
-                    panic("List.slice_spec invalid range: start \(s) > end \(e)");
+                    panic_list_slice_spec_range(s, e);
                 };
                 if e >= len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = s;
                 end = e + 1;
             },
             .ClosedOpen(s, e) then {
                 if s < 0 or e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s > e then {
-                    panic("List.slice_spec invalid range: start \(s) > end \(e)");
+                    panic_list_slice_spec_range(s, e);
                 };
                 if e > len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = s;
                 end = e;
             },
             .OpenClosed(s, e) then {
                 if s < 0 or e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s > e then {
-                    panic("List.slice_spec invalid range: start \(s) > end \(e)");
+                    panic_list_slice_spec_range(s, e);
                 };
                 if s == Int.max_value() or e >= len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = s + 1;
                 end = e + 1;
             },
             .Open(s, e) then {
                 if s < 0 or e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s > e then {
-                    panic("List.slice_spec invalid range: start \(s) > end \(e)");
+                    panic_list_slice_spec_range(s, e);
                 };
                 if s == Int.max_value() or e > len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 // Open(s, s) names no elements: the empty slice at s, exactly
                 // like ClosedOpen(s, s). (start = s + 1 would push an empty
@@ -401,40 +432,40 @@ given[T: Any] List[T] {
             },
             .From(s) then {
                 if s < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s > len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = s;
                 end = len;
             },
             .After(s) then {
                 if s < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if s >= len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = s + 1;
                 end = len;
             },
             .To(e) then {
                 if e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if e >= len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = 0;
                 end = e + 1;
             },
             .Until(e) then {
                 if e < 0 then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 if e > len then {
-                    panic("List.slice_spec out of bounds: length \(len)");
+                    panic_list_slice_spec_bounds(len);
                 };
                 start = 0;
                 end = e;
@@ -680,6 +711,19 @@ public let make_uninitialized_bytes(count: Int): List[UInt8] = {
     let mutable bytes = List[UInt8].with_capacity(count);
     bytes.len = count;
     return bytes;
+};
+
+/// Append `count` bytes copied from raw `ptr` to `target` in one memcpy.
+/// Byte-buffer fast path (BufWriter and friends): `push_list` copies UInt8
+/// elements one at a time, which turns every buffered string write into a
+/// per-byte loop on top of an intermediate `List[UInt8]`.
+protected let push_byte_slice(target: List[UInt8], ptr: *UInt8, count: Int): Void = {
+    if count <= 0 then {
+        return;
+    };
+    target.reserve(count);
+    copy_memory(target.source + target.len, ptr, UInt(count));
+    target.len = target.len + count;
 };
 
 // ============================================================================
@@ -1292,7 +1336,7 @@ given[T: Any] FrozenList[T] {
     // Out-of-range panic matches the mutable `List` subscript exactly.
     private __index_get(self, key: Int): T = {
         if key < 0 or key >= self.len then {
-            panic("List index out of bounds: index \(key), length \(self.len)");
+            panic_list_index(key, self.len);
         };
         return self.data[key];
     };

@@ -2356,7 +2356,7 @@ when e in {
 
 ### `when` Expressions
 
-The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is always an expression. A single-branch `when` produces `Void`; with more than one branch it returns the value of the matching branch.
+The `when` expression allows you to compare a value against a series of patterns and execute corresponding code based on the matching pattern. It is similar to `switch` statements in other languages, but more powerful. `when` is always an expression. It returns the value of the matching branch; a single-branch `when` has its branch's type (the patterns must still cover every value). Used as a statement, it produces `Void`.
 
 ```koral
 let x = 5;

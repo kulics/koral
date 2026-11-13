@@ -325,11 +325,12 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     /// every attempt fail, and when the entry's last writer is `f`'s own
     /// thread the loop panics with
     /// `ConcurrentDict.update_and_get: the updater wrote the same container`
-    /// instead of retrying forever (an entry that vanished since the snapshot
-    /// is attributed by the container's last writer). Normal contention
-    /// retries with no attempt limit and no guarantee of finishing in a
-    /// bounded number of steps. Displaced values and keys are released after
-    /// the unlock.
+    /// instead of retrying forever. A vanished entry is attributed by the
+    /// tombstone its delete left behind (the deleting thread); when a rebuild
+    /// or `clear` erased the tombstones, or a foreign thread deleted the
+    /// entry, the attempt simply retries. Normal contention retries with no
+    /// attempt limit and no guarantee of finishing in a bounded number of
+    /// steps. Displaced values and keys are released after the unlock.
     ///
     /// `f` carries no `sendable` requirement on purpose: it is a transient
     /// combiner that runs and dies on the CALLER's thread (every retry too),

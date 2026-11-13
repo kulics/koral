@@ -36,7 +36,7 @@ values; `while` and `for` always produce `Void`.
 
 文法里两处注记：
 
-- Single-branch `if`/`when`/`while`/`for` semantically produce Void.
+- Single-branch `if`/`while`/`for` semantically produce Void; `when` returns the matching branch's value regardless of branch count.
 - `while` / `for` evaluate to `Void` unless they terminate early with `Never` control flow.
 
 > **设计动机**（项目目标：生成友好 / 审阅友好，2026-10 补记）：四个结构的分支/循环体

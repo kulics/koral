@@ -152,6 +152,31 @@ else
   echo "memory pin skipped (Windows or no /usr/bin/time)"
 fi
 
+# ── 4c. cold panic pin ────────────────────────────────────────────────────────
+# Bounds panics carry the failing values, but the message machinery must live
+# in a cold helper, never in the hot accessor's body (2026-11-13 batch). An
+# interpolated message inline in __index_slot drags the string machinery into
+# every subscript; with the helper out of line the accessor body is small
+# enough to inline again. This pins the shape of the generated C: the slot
+# accessor has no interp temporaries and calls the helper from its failure
+# branch only.
+say "4c. cold panic pin"
+"$WORK/s3/koralc$EXE" emit-c \
+  tests/compiler-cases/panic_index_value_context.koral -o "$WORK/cold-panic"
+SLOT_C="$WORK/cold-panic/panic_index_value_context.c"
+test -s "$SLOT_C"
+awk '/__index_slot.*self.*\{/{f=1} f{print} f&&/^}/{exit}' "$SLOT_C" \
+  > "$WORK/cold-panic/slot-body.txt"
+test -s "$WORK/cold-panic/slot-body.txt"
+if grep -q "interp" "$WORK/cold-panic/slot-body.txt"; then
+  echo "cold panic pin failed: message machinery leaked into __index_slot" >&2
+  exit 1
+fi
+grep -q "panic_list_index" "$WORK/cold-panic/slot-body.txt" || {
+  echo "cold panic pin failed: __index_slot does not call its cold helper" >&2
+  exit 1; }
+echo "cold panic pin OK"
+
 # ── 5) stage2 suite ───────────────────────────────────────────────────────────
 say "5. stage2 suite"
 "$RUNNER" \
@@ -268,7 +293,7 @@ grep -q 'w6_probe_alias_releases=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: alias release side" >&2; exit 1; }
 grep -q 'w7_into_frozen_retains=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: into_frozen is a hand-off, not a copy" >&2; exit 1; }
-grep -q 'w8_init_memory_retains=2' "$WORK/rc_counter_pin.out" || {
+grep -q 'w8_init_memory_retains=1' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: init_memory argument is a consuming use" >&2; exit 1; }
 echo "rc counter pins OK"
 

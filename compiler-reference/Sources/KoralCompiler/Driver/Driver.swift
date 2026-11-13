@@ -516,9 +516,11 @@ public class Driver {
       }
       // Not named `packageID`: a local of that name shadows the
       // `packageID(for:packageName:)` method and the call below stops resolving.
+      // A spec-less module is the bare-file entry point; it belongs to the
+      // anonymous root package, same id as its local modules.
       let resolvedPackageID = module.spec.map {
         self.packageID(for: $0.packageKind, packageName: $0.packageIdentity)
-      } ?? "single:unspecified"
+      } ?? "root:user"
       for (node, sourceFile) in module.globalNodes {
         let sourceInfo = GlobalNodeSourceInfo(
           sourceFile: sourceFile,
@@ -653,9 +655,14 @@ public class Driver {
         stdManifestPath: resolvedStdConfigPath,
         fetchRoot: nil
       )
-      if let stdPackage = stdRegistry.stdPackage {
+      if stdRegistry.stdPackage != nil {
+        // The bare entry gets an anonymous package identity of its own: the
+        // entry and its local modules all belong to it (the std package is
+        // only the importable library, never the owner).
+        let anonymousRoot = anonymousRootPackage(entryFile: entryURL.path)
+        stdRegistry.register(anonymousRoot)
         resolver.registry = stdRegistry
-        resolver.rootPackage = stdPackage
+        resolver.rootPackage = anonymousRoot
       }
     }
 

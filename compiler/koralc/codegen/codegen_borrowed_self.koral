@@ -1289,7 +1289,11 @@ private let move_walk_value_as_consumed(value: MIRValue, table: MoveUseTable): V
 
 private let move_walk_operand(operand: MIROperand, table: MoveUseTable): Void = {
     when operand in {
-        .Local(local_id) then move_table_note_use(table, local_id),
+        // 裸局部的值读与 `PlaceRead(Local, Copy)` 同义：+1 的复制读、移动
+        // 候选形态。材料化临时多半走 Operand 形态（eager-load 的元素槽读、
+        // 调用链中转量），只记普通使用点就永远排不上移动指定点——每次多付
+        // 一对 retain/release。
+        .Local(local_id) then move_table_note_copy_read(table, local_id),
         .Constant(_) or .Function(_) then {},
     };
 };
@@ -1322,11 +1326,22 @@ private let move_walk_intrinsic(node: MIRIntrinsic, table: MoveUseTable): Void =
         },
         .InitMemory(pointer, value) then {
             move_walk_value(pointer, table);
-            // init_memory 的实参是**消费性使用**（契约即「接管 value 的所有权」；
-            // 发射侧 consume_moved_source 对可转移形态真会清 init flag）。按 MIR
-            // 自带消费点计——与 .Move()/.Take() 读同级，值源局部整局部禁移：
-            // 否则末次移动会与这里的消费抢同一个 +1（双认领 → 双释放）。
-            move_walk_value_as_consumed(value, table);
+            // init_memory 的实参是**消费性使用**（契约即「接管 value 的所有权」）。
+            // MIR 自带消费标签的读（Move/Take、Operand(Local)）按消费点计——
+            // 值源局部整局部禁移，与发射侧的转移一一对应。Copy 标签的读只是
+            // 普通使用点：它可能还有后续使用（MIR 允许），是否转移由移动指定
+            // 点（P5）决定——指定命中时发射侧就地清 flag放行移动（消费只发生
+            // 在那一个点上，不存在双认领），未命中时照常 retain。
+            when value in {
+                .PlaceRead(_, ownership) then {
+                    if ownership is .Copy() then {
+                        move_walk_value(value, table);
+                    } else {
+                        move_walk_value_as_consumed(value, table);
+                    }
+                },
+                _ then move_walk_value_as_consumed(value, table),
+            };
         },
         .NullPtr(_) then {},
         .FixedArrayLiteral(_, elements) then {

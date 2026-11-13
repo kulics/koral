@@ -241,6 +241,13 @@ public class TypeChecker {
   // DefId.id set for methods declared with receiver syntax: first parameter must be `self`.
   var receiverStyleMethodDefIds: Set<UInt64> = []
   var receiverMethodDispatchByDefId: [DefId: ReceiverMethodDispatchInfo] = [:]
+  /// An explicitly written access modifier on a method DEFINITION (a given
+  /// member). The impl's DefId is the trait requirement's by design (both come
+  /// from `methodSymbolDefId(traitName, methodName)`), so the defId metadata
+  /// carries the REQUIREMENT's access and cannot represent the impl's own
+  /// spelling -- this table can. `makeMethodSymbol` records definitions only;
+  /// requirement symbols never pass through it.
+  var writtenMethodAccessByDefId: [DefId: AccessModifier] = [:]
   var methodTraitConformanceByDefId: [DefId: TypedTraitConformance] = [:]
   // A method's OWN type parameters (`get[T mutable]` inside a `given`) keyed by
   // the method symbol's declaration identity. The call site holds a `Symbol`;
@@ -1889,6 +1896,11 @@ public class TypeChecker {
     if !typeParameters.isEmpty {
       methodTypeParamsByDefId[defId] = typeParameters
       context.methodTypeParameterNames[defId] = typeParameters.map { $0.name }
+    }
+    if case .internal = access {
+      // implicit default: no explicit spelling to record
+    } else {
+      writtenMethodAccessByDefId[defId] = access
     }
     return context.createSymbol(
       name: name,

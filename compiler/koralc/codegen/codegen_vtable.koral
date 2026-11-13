@@ -485,12 +485,22 @@ given CodeGen {
         trait_def_id: DefId,
         trait_type_args: List[Type],
         method_name: String,
+        trait_method_def_id: DefId,
     ): Option[DefId] = {
         let trait_ref = CanonicalTraitRef(trait_name, trait_def_id, trait_type_args);
         when self.program.conformance_witnesses.get(trait_ref.key(concrete_type)) in {
             .Some(witness) then {
+                // Identity is the requirement's DefId, never the name: two
+                // same-named requirements (merged constraints, parent chains)
+                // must each reach their own implementation. The name match is
+                // only the degenerate path for slots minted without identity.
                 for slot in witness.requirement_slots then {
-                    if slot.method_name == method_name then {
+                    let slot_matches = if trait_method_def_id.is_valid() then {
+                        slot.trait_method_def_id == trait_method_def_id
+                    } else {
+                        slot.method_name == method_name
+                    };
+                    if slot_matches then {
                         when witness.local_implementation_def_ids_by_trait_method_def_id.get(
                             slot.trait_method_def_id,
                         ) in {
@@ -501,13 +511,19 @@ given CodeGen {
                         };
                     };
                 };
-                when witness.local_implementation_def_ids_by_method_name.get(
-                    method_name,
-                ) in {
-                    .Some(def_id) then {
-                        return Option[DefId].Some(def_id);
-                    },
-                    .None() then {},
+                // Degenerate recovery only: the name-keyed twin cannot tell
+                // two same-named implementations apart and silently answers
+                // the first -- never consult it while the identity records
+                // are present.
+                if not trait_method_def_id.is_valid() then {
+                    when witness.local_implementation_def_ids_by_method_name.get(
+                        method_name,
+                    ) in {
+                        .Some(def_id) then {
+                            return Option[DefId].Some(def_id);
+                        },
+                        .None() then {},
+                    };
                 };
                 for parent_trait_ref in witness.direct_parent_trait_refs then {
                     when self.resolve_method_def_id_from_witness(
@@ -516,6 +532,7 @@ given CodeGen {
                         parent_trait_ref.trait_def_id,
                         parent_trait_ref.trait_type_args,
                         method_name,
+                        trait_method_def_id,
                     ) in {
                         .Some(def_id) then {
                             return Option[DefId].Some(def_id);
@@ -536,6 +553,7 @@ given CodeGen {
         trait_def_id: DefId,
         method_name: String,
         trait_type_args: List[Type],
+        trait_method_def_id: DefId,
     ): Option[DefId] = {
         let mutable debug_hits = List[String].new();
         when self.resolve_method_def_id_from_witness(
@@ -544,6 +562,7 @@ given CodeGen {
             trait_def_id,
             trait_type_args,
             method_name,
+            trait_method_def_id,
         ) in {
             .Some(def_id) then {
                 if vtable_debug_enabled() then {
@@ -623,6 +642,7 @@ given CodeGen {
                         parent_def_id,
                         method_name,
                         trait_type_args,
+                        trait_method_def_id,
                     ) in {
                         .Some(def_id) then {
                             if vtable_debug_enabled() then {
@@ -715,10 +735,45 @@ given CodeGen {
         );
     };
 
+    /// Whether `trait_id` is `vtable_trait_id` or one of its ancestors -- the
+    /// inherited-requirement case (`Tag : Parent` puts `Parent.values` in
+    /// `Tag`'s vtable while the implementation registers under `Parent`).
+    trait_is_self_or_ancestor(self, trait_id: DefId, vtable_trait_id: DefId): Bool = {
+        if not trait_id.is_valid() or not vtable_trait_id.is_valid() then {
+            return false;
+        };
+        if trait_id == vtable_trait_id then {
+            return true;
+        };
+        let mutable visited = Set[UInt].new();
+        let mutable pending = List[DefId].new();
+        pending.push(vtable_trait_id);
+        while not pending.is_empty() then {
+            let current = pending.pop() or else { break; };
+            if visited.contains(current.id) then {
+                continue;
+            };
+            visited.insert(current.id);
+            when self.program.trait_by_def_id(current) in {
+                .Some(trait_info) then {
+                    for parent in trait_info.parent_traits then {
+                        if parent.def_id == trait_id then {
+                            return true;
+                        };
+                        pending.push(parent.def_id);
+                    };
+                },
+                .None() then {},
+            };
+        };
+        return false;
+    };
+
     lookup_exact_concrete_vtable_method_symbol(
         self,
         concrete_type: Type,
         trait_name: String,
+        trait_def_id: DefId,
         member: MIRTraitVTableMethod,
     ): Option[Symbol] = {
         let mutable normalized_concrete_type = self.normalize_vtable_receiver_type(
@@ -733,6 +788,10 @@ given CodeGen {
         //   3. name unique -- the receiver was re-instantiated and the owner keys
         //      disagree.
         // Uniqueness is the discriminator at every tier. Never a candidate sweep.
+        // The candidate set is anchored on IDENTITY: the conformance trait must
+        // be the vtable's trait or one of its ancestors (DefId). The name is
+        // display-only and only decides a candidate whose registration carries
+        // no identity record.
         let mutable exact_match = Option[Symbol].None();
         let mutable owner_name_match = Option[Symbol].None();
         let mutable owner_name_count = 0;
@@ -747,6 +806,16 @@ given CodeGen {
             let owner_type = concrete.owner_type or else {
                 continue;
             };
+            let trait_identity_matches = when concrete.trait_conformance_def_id in {
+                .Some(candidate_trait_id) then self.trait_is_self_or_ancestor(
+                    candidate_trait_id,
+                    trait_def_id,
+                ),
+                .None() then candidate_trait_name == trait_name,
+            };
+            if not trait_identity_matches then {
+                continue;
+            };
             let is_owner_match = self.receiver_owner(owner_type) == receiver_key;
             when self.bound_concrete_method_symbol(
                 candidate_def_id,
@@ -754,7 +823,7 @@ given CodeGen {
                 self.vtable_method_return_type(member),
             ) in {
                 .Some(symbol) then {
-                    if is_owner_match and candidate_trait_name == trait_name then {
+                    if is_owner_match and trait_identity_matches then {
                         exact_match = Option[Symbol].Some(symbol);
                     } else if is_owner_match then {
                         owner_name_count += 1;
@@ -783,6 +852,7 @@ given CodeGen {
         trait_name: String,
         member: MIRTraitVTableMethod,
         def_id: DefId,
+        trait_def_id: DefId,
     ): Symbol = {
         // The CONCRETE impl's DefId first. `def_id` may be the trait
         // requirement's (rustc's `trait_item_def_id`); binding that directly
@@ -791,6 +861,7 @@ given CodeGen {
         when self.lookup_exact_concrete_vtable_method_symbol(
             concrete_type,
             trait_name,
+            trait_def_id,
             member,
         ) in {
             .Some(symbol) then {
@@ -909,6 +980,7 @@ given CodeGen {
         concrete_type: Type,
         concrete_type_c_name: String,
         trait_name: String,
+        trait_def_id: DefId,
         member: MIRTraitVTableMethod,
         actual_method_def_id: DefId,
     ): Void = {
@@ -925,6 +997,7 @@ given CodeGen {
             trait_name,
             member,
             actual_method_def_id,
+            trait_def_id,
         );
         let actual_method_c_name = self.callable_c_name(actual_method_symbol);
         let mutable actual_self_type = self.context.get_function_param_type(
@@ -1131,7 +1204,7 @@ given CodeGen {
         trait_def_id: DefId,
         trait_type_args: List[Type],
         members: List[MIRTraitVTableMethod],
-        actual_method_def_ids: Dict[String, DefId],
+        actual_method_def_ids: Dict[UInt, DefId],
     ): Void = {
         let instance_name = self.vtable_instance_name_with_args(
             trait_name,
@@ -1166,13 +1239,14 @@ given CodeGen {
         for member in members then {
             let method_c_name = self.sanitize_codegen_identifier(member.name);
 
-            let function_ref = when actual_method_def_ids.get(member.name) in {
+            let function_ref = when actual_method_def_ids.get(member.trait_method_def_id.id) in {
                 .Some(def_id) then {
                     let actual_symbol = self.resolve_vtable_method_symbol(
                         concrete_type,
                         trait_name,
                         member,
                         def_id,
+                        trait_def_id,
                     );
                     let actual_name = self.callable_c_name(actual_symbol);
                     if self.vtable_method_needs_wrapper(concrete_type, member, def_id) then self.vtable_wrapper_name(
@@ -1226,6 +1300,7 @@ given CodeGen {
                 trait_def_id,
                 member.name,
                 List[Type].new(),
+                member.trait_method_def_id,
             ) in {
                 .Some(actual_method_def_id) then {
                     when self.context.get_function_type(actual_method_def_id) in {
@@ -2279,7 +2354,7 @@ given CodeGen {
             };
 
             // 步骤2：解析实际方法 C 名称，生成 wrapper 函数
-            let mutable actual_method_def_ids = Dict[String, DefId].new();
+            let mutable actual_method_def_ids = Dict[UInt, DefId].new();
 
             for member in ordered_members then {
                 let actual_method_def_id_opt = self.resolve_method_def_id(
@@ -2288,16 +2363,21 @@ given CodeGen {
                     req.trait_def_id,
                     member.name,
                     self.deref_type_list(req.trait_type_args),
+                    member.trait_method_def_id,
                 );
                 when actual_method_def_id_opt in {
                     .Some(actual_method_def_id) then {
-                        actual_method_def_ids.insert(member.name, actual_method_def_id);
+                        actual_method_def_ids.insert(
+                            member.trait_method_def_id.id,
+                            actual_method_def_id,
+                        );
 
                         // 生成 wrapper 函数（仅对 self by value 方法）
                         self.generate_wrapper_function(
                             concrete_type,
                             concrete_c_name,
                             trait_name,
+                            req.trait_def_id,
                             member,
                             actual_method_def_id,
                         );
@@ -2310,7 +2390,7 @@ given CodeGen {
             if actual_method_def_ids.count() != ordered_members.count() then {
                 let mutable missing_methods = StringBuilder.new();
                 for member in ordered_members then {
-                    if actual_method_def_ids.get(member.name) is .None() then {
+                    if actual_method_def_ids.get(member.trait_method_def_id.id) is .None() then {
                         if not missing_methods.is_empty() then {
                             missing_methods.push_string(", ");
                         };

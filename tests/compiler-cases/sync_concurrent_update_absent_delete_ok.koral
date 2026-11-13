@@ -1,0 +1,22 @@
+// EXPECT: absent update ok
+// EXPECT: done
+// Pin the no-slot commit path of update_and_get: a delete intent (`None`)
+// against an absent entry of a table with no slots (fresh new(), or after
+// clear()) is a no-op, not "ConcurrentDict update_and_get failed". The old
+// code only made room for `Some` commits, so a `None` commit on the empty
+// table panicked in dict_find_slot's None arm.
+using "std/sync" { ... };
+
+let main(): Void = {
+    let d = ConcurrentDict[String, Int].new();
+    let r = d.update_and_get("k", (v: Option[Int]): Option[Int] => Option[Int].None());
+    assert(r is .None(), "delete of an absent entry is a no-op");
+    let r2 = d.update_and_get("k", (v: Option[Int]): Option[Int] => Option[Int].Some(5));
+    when r2 in {
+        .Some(x) then assert(x == 5, "insert through the empty table"),
+        .None() then panic("insert through the empty table"),
+    };
+    assert(d.get("k").unwrap() == 5, "entry present");
+    println("absent update ok");
+    println("done");
+};

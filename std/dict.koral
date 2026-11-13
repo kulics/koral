@@ -307,7 +307,7 @@ given[K: Hash, V: Any] Dict[K, V] {
                 return v;
             },
             .None() then {
-                panic("Dict key not found: subscript get, \(self.count()) entries");
+                panic_dict_key_not_found("subscript get", self.count());
             },
         };
     };
@@ -315,13 +315,13 @@ given[K: Hash, V: Any] Dict[K, V] {
     private __index_set(self, key: K, value: V): Void = {
         when self.get(key) in {
             .None() then {
-                panic("Dict key not found: subscript set, \(self.count()) entries");
+                panic_dict_key_not_found("subscript set", self.count());
             },
             .Some(_) then {},
         };
         let final_idx = when self.find_slot(key) in {
             .None() then {
-                panic("Dict key not found: subscript set, \(self.count()) entries");
+                panic_dict_key_not_found("subscript set", self.count());
             },
             .Some(i) then i,
         };
@@ -335,7 +335,7 @@ given[K: Hash, V: Any] Dict[K, V] {
     private __index_slot(self, key: K): *mutable V = {
         let final_idx = when self.find_slot(key) in {
             .None() then {
-                panic("Dict key not found: subscript, \(self.count()) entries");
+                panic_dict_key_not_found("subscript", self.count());
             },
             .Some(i) then i,
         };
@@ -601,7 +601,7 @@ given[K: Hash, V: Any] FrozenDict[K, V] {
                 return v;
             },
             .None() then {
-                panic("Dict key not found: subscript get, \(self.count()) entries");
+                panic_dict_key_not_found("subscript get", self.count());
             },
         };
     };
@@ -742,4 +742,12 @@ protected let build_frozen_dict[K: Hash, V: Any](
     dealloc_memory(keys);
     dealloc_memory(values);
     return FrozenDict[K, V](buckets, len, capacity);
+};
+// ============================================================================
+// Cold panic helpers (see list.koral: message-building stays out of the hot
+// accessors so their bodies keep fitting the C inliner).
+// ============================================================================
+
+private let panic_dict_key_not_found(what: String, entries: Int): Never = {
+    panic("Dict key not found: \(what), \(entries) entries");
 };

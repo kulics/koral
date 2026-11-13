@@ -52,17 +52,32 @@ given[W: Writer] BufWriter[W] {
     };
 
     /// Buffer the UTF-8 bytes of `s`.
+    /// Copies the string's bytes straight into the internal buffer (one memcpy
+    /// per buffered chunk) -- no intermediate `List[UInt8]`, no per-byte loop.
     public write_string(self, s: String): Result[Void] = {
-        let bytes = s.to_bytes();
-        let result = self.write(from = bytes, span = ...);
-        when result in {
-            .Ok(_) then {
-                return Result[Void].Ok({});
-            },
-            .Error(e) then {
-                return Result[Void].Error(e);
-            },
+        let total = s.count();
+        if total == 0 then {
+            return Result[Void].Ok({});
         };
+        let ptr = s.borrow_ptr();
+        let mutable start = 0;
+        while start < total then {
+            let remaining_cap = self.cap - self.buf.count();
+            if remaining_cap <= 0 then {
+                when self.flush() in {
+                    .Ok(_) then {},
+                    .Error(e) then {
+                        return Result[Void].Error(e);
+                    },
+                };
+            } else {
+                let left = total - start;
+                let chunk = if left < remaining_cap then left else remaining_cap;
+                push_byte_slice(self.buf, ptr + start, chunk);
+                start += chunk;
+            };
+        };
+        return Result[Void].Ok({});
     };
 
     /// Buffer the UTF-8 bytes of `s` followed by a newline.
@@ -187,7 +202,7 @@ given[W: Writer] BufWriter[W]: Writer {
 
         let remaining_cap = self.cap - self.buf.count();
         if available <= remaining_cap then {
-            self.buf.push_list(from, span = start..<end);
+            push_byte_slice(self.buf, from.borrow_ptr() + start, available);
             return Result[Int].Ok(available);
         };
 
@@ -202,7 +217,7 @@ given[W: Writer] BufWriter[W]: Writer {
 
         let new_remaining = self.cap - self.buf.count();
         if available <= new_remaining then {
-            self.buf.push_list(from, span = start..<end);
+            push_byte_slice(self.buf, from.borrow_ptr() + start, available);
             return Result[Int].Ok(available);
         };
 

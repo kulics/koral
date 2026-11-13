@@ -4839,6 +4839,28 @@ extension TypeChecker {
     {
       let methodName = path[0]
       if let bounds = genericTraitBounds[paramName] {
+        // Two DISTINCT declarations behind one name (two bounds each declaring
+        // it) are an ambiguity -- the same thing the type-side reports at
+        // registration. Identity is the method's DefId, never its name;
+        // parent chains and duplicate bounds share one declaration and stay
+        // fine. First-match-wins used to pick silently by bound order.
+        var matchedMethodDefIds: [DefId] = []
+        for traitConstraint in bounds {
+          let traitName = traitConstraint.baseName
+          guard let probeMethods = try? flattenedTraitMethods(traitName),
+            let probeSig = probeMethods[methodName], probeSig.parameters.first?.name != "self"
+          else { continue }
+          let probeTraitDefId = resolveBound(traitConstraint).defId ?? .invalid
+          let probeMethodDefId = traitMethodDefId(traitDefId: probeTraitDefId, methodName: methodName) ?? probeTraitDefId
+          if !matchedMethodDefIds.contains(probeMethodDefId) {
+            matchedMethodDefIds.append(probeMethodDefId)
+          }
+        }
+        if matchedMethodDefIds.count > 1 {
+          try handleError(SemanticError(.generic(
+            "Ambiguous method '\(methodName)' for type '\(baseType.description)' via trait extensions"
+          ), span: currentSpan))
+        }
         for traitConstraint in bounds {
           let traitName = traitConstraint.baseName
           let methods = try flattenedTraitMethods(traitName)
@@ -7286,6 +7308,21 @@ extension TypeChecker {
   }
 
   private func effectiveMethodAccessForMemberAccess(_ method: Symbol, memberName: String) -> AccessModifier? {
+    // An explicitly written modifier on the impl wins over the trait
+    // requirement's level (see the registration stamp): only the implicit
+    // internal default falls through to the requirement's level below. The
+    // impl's own spelling lives in `writtenMethodAccessByDefId` -- the defId
+    // metadata carries the REQUIREMENT's access (the impl shares its DefId).
+    if let written = writtenMethodAccessByDefId[method.defId] {
+      return written
+    }
+    if let stamped = context.getAccess(method.defId) {
+      if case .internal = stamped {
+        // implicit default: follow the requirement's level
+      } else {
+        return stamped
+      }
+    }
     if let conformance = methodTraitConformanceByDefId[method.defId],
        let traitMethod = try? flattenedTraitMethods(conformance.traitName)[memberName] {
       return traitMethod.access
@@ -7612,6 +7649,28 @@ extension TypeChecker {
     if case .genericParameter(let paramName) = typeToLookup,
       let bounds = genericTraitBounds[paramName]
     {
+      // Two DISTINCT declarations behind one name (two bounds each declaring
+      // it) are an ambiguity -- the same thing the type-side reports at
+      // registration. Identity is the method's DefId, never its name; parent
+      // chains and duplicate bounds share one declaration and stay fine.
+      // First-match-wins used to pick silently by bound order.
+      var matchedMethodDefIds: [DefId] = []
+      for probeConstraint in bounds {
+        let probeTraitName = probeConstraint.baseName
+        guard let probeMethods = try? flattenedTraitMethods(probeTraitName),
+          let probeSig = probeMethods[memberName], probeSig.parameters.first?.name == "self"
+        else { continue }
+        let probeTraitDefId = resolveBound(probeConstraint).defId ?? .invalid
+        let probeMethodDefId = traitMethodDefId(traitDefId: probeTraitDefId, methodName: memberName) ?? probeTraitDefId
+        if !matchedMethodDefIds.contains(probeMethodDefId) {
+          matchedMethodDefIds.append(probeMethodDefId)
+        }
+      }
+      if matchedMethodDefIds.count > 1 {
+        try handleError(SemanticError(.generic(
+          "Ambiguous method '\(memberName)' for type '\(typeToLookup.description)' via trait extensions"
+        ), span: currentSpan))
+      }
       for traitConstraint in bounds {
         let traitName = traitConstraint.baseName
         // Identity from the bound that supplied the method. A second lookup of

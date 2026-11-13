@@ -1859,7 +1859,8 @@ extension TypeChecker {
           genericExtensionMethods[toolOwnerKey]!.append(GenericExtensionMethodTemplate(
             typeParams: [],
             method: registeredMethod,
-            conformanceTraitName: nil,
+            conformanceTraitName: traitName,
+            conformanceTraitDefId: traitInfo.defId,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath,
             packageID: currentPackageID,
@@ -2002,10 +2003,16 @@ extension TypeChecker {
           // same-named templates are two methods, and a template whose
           // `method.defId` is invalid cannot tell them apart at instantiation.
           let registeredMethod = registeredMethodDeclaration(method, ownerKey: genericOwnerKey.display)
+          // A conformance `given[T] X: Trait` template IS the trait's method:
+          // record the trait so the method face can refuse it where the trait
+          // is out of scope. The per-conformance materialization records the
+          // same identity later; a template left trait-less here was callable
+          // with the trait never imported.
           genericExtensionMethods[genericOwnerKey]!.append(GenericExtensionMethodTemplate(
             typeParams: typeParams,
             method: registeredMethod,
-            conformanceTraitName: nil,
+            conformanceTraitName: providingTrait.flatMap { context.getName($0) },
+            conformanceTraitDefId: providingTrait,
             sourceFile: currentSourceFile,
             modulePath: currentModulePath,
             packageID: currentPackageID,
@@ -2129,7 +2136,8 @@ extension TypeChecker {
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
               typeParams: [],
               method: registeredMethod,
-              conformanceTraitName: nil,
+              conformanceTraitName: providingTrait.flatMap { context.getName($0) },
+              conformanceTraitDefId: providingTrait,
               sourceFile: currentSourceFile,
               modulePath: currentModulePath,
               packageID: currentPackageID,
@@ -2304,7 +2312,17 @@ extension TypeChecker {
         if let traitInfo = visibleTraitInfo(traitName) {
           let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
           preRegisteredMethods = methods.map { method in
-            let requirementAccess = requirementByName[method.name]?.access ?? method.access
+            // An explicitly written modifier (anything but the implicit
+            // internal default) marks a deviation and WINS: `given X: T {
+            // private fn ... }` stays private however the trait spells the
+            // requirement. Only the implicit default follows the
+            // requirement's level (a requirement has no modifier slot).
+            let requirementAccess: AccessModifier
+            if case .internal = method.access {
+              requirementAccess = requirementByName[method.name]?.access ?? method.access
+            } else {
+              requirementAccess = method.access
+            }
             return registeredMethodDeclaration(method, access: requirementAccess, ownerKey: traitName)
           }
         } else {
@@ -4481,7 +4499,11 @@ extension TypeChecker {
         let registeredVisibleDefId = methodSymbolDefId(
           ownerKey: methodOwnerKey(nil, traitName: traitName),
           name: method.name,
-          access: requirement.access
+          access: {
+            var a: AccessModifier = method.access
+            if case .internal = a { a = requirement.access }
+            return a
+          }()
         )
         let visibleMethod = MethodDeclaration(
           name: method.name,
@@ -4489,7 +4511,13 @@ extension TypeChecker {
           parameters: method.parameters,
           returnType: method.returnType,
           body: method.body,
-          access: requirement.access,
+          access: {
+            // An explicitly written modifier on the impl (anything but the
+            // implicit internal default) marks a deviation and WINS over the
+            // requirement's level; the default follows the requirement.
+            if case .internal = method.access { return requirement.access }
+            return method.access
+          }(),
           defId: registeredVisibleDefId
         )
 
@@ -4569,7 +4597,13 @@ extension TypeChecker {
         let methodSymbol = makeMethodSymbol(
           name: method.name,
           type: functionType,
-          access: requirement.access,
+          access: {
+            // An explicitly written modifier on the impl (anything but the
+            // implicit internal default) marks a deviation and WINS over the
+            // requirement's level; the default follows the requirement.
+            if case .internal = method.access { return requirement.access }
+            return method.access
+          }(),
           ownerKey: methodOwnerKey(nil, traitName: traitName),
           typeParameters: method.typeParameters
         )
