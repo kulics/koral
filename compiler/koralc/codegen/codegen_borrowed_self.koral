@@ -107,6 +107,12 @@ type mutable BorrowedSelfWalk(
     // -- so the borrowed convention may pass it +0 without a protective copy.
     address_taken: Set[Int],
     mutable escaped: Bool,
+    // 当前被走查函数的局部 id → 类型。消费时序门（borrowed_self_walk_call）
+    // 用它判断实参的析构是否可观察；lambda 体的局部查不到时按可观察保守
+    // 处理。
+    mutable local_types: Dict[Int, Type],
+    // 析构跑用户码的名义类型闭包（compute_observable_drop_defs 的缓存）。
+    observable_drops: Dict[UInt, Bool],
 );
 
 /// Fixpoint node for one candidate parameter.
@@ -193,6 +199,26 @@ let borrowed_self_arg0_consumable(value: MIRValue): Bool = {
         .PlaceRead(_, ownership) then ownership is .Move() or is .Take(),
         .Ref(_, _, allocation) then allocation is .HeapOwnedMove(),
         _ then false,
+    };
+};
+
+/// 消费实参的释放时序是否对用户 `Drop` 可见：值类型能跑到用户析构代码时，
+/// 「被调方尾声 vs 调用点语句末」的差才可观察；标量与纯 ARC 类型（String/
+/// List 等）只动引用计数，时机不可见。常量的释放是空操作；未知形状保守
+/// 按可观察处理。
+let borrowed_self_move_timing_observable(
+    w: BorrowedSelfWalk,
+    value: MIRValue,
+): Bool = {
+    return when value in {
+        .Operand(.Constant(_)) then false,
+        .Operand(.Local(local)) then {
+            when w.local_types.get(local.raw_value) in {
+                .Some(t) then move_type_drop_observable(w.observable_drops, t),
+                .None() then true,
+            }
+        },
+        _ then true,
     };
 };
 
@@ -287,28 +313,33 @@ let borrowed_self_walk_call(w: BorrowedSelfWalk, call: MIRCall): Void = {
                     w.unsafe_callees.insert(symbol.def_id.id, true);
                 } else {
                     for pair in call.arguments.lazy().enumerate() then {
-                        if call.argument_ownerships[pair.first] is .Move() or is .Take() then {
-                            // The slot carries a CONSUMED value -- a chain
-                            // temporary like `create(1).transform().get_value()`'s
-                            // intermediates. The owned convention transfers the
-                            // temporary's +1 into the call and drops it at the
-                            // callee epilogue, and that timing is observable
-                            // through a user `Drop`
-                            // (tests/compiler-cases/chain_call_drop.koral pins
-                            // it). Borrowing is only invisible when the slot
-                            // receives a place that still owns a count after
-                            // the call, so a slot with even one consumed call
-                            // site keeps the owned convention at EVERY call
-                            // site (the ABI is uniform per slot).
+                        if borrowed_self_arg0_consumable(pair.second) then {
+                            // 消费位实参（内部 Move/Take 标签的 place 读、
+                            // HeapOwnedMove 引用）在借用约定下会漏 +1：发射
+                            // 会消费源而被调方不释放——与类型无关，一律钉住。
                             w.unsafe_slots.insert(
                                 borrowed_slot_key(symbol.def_id.id, pair.first),
                                 true,
                             );
-                        } else if borrowed_self_arg0_consumable(pair.second) then {
-                            w.unsafe_slots.insert(
-                                borrowed_slot_key(symbol.def_id.id, pair.first),
-                                true,
-                            );
+                        } else if call.argument_ownerships[pair.first] is .Move() or is .Take() then {
+                            // 消费实参的临时值在 owned 约定下于被调方尾声
+                            // 释放、在 borrowed 约定下于调用点语句末释放，
+                            // 这个时序差只有析构跑用户码的类型可见
+                            // （tests/compiler-cases/chain_call_drop.koral 钉
+                            // 它）。析构不可观察的类型（标量/纯 ARC，如
+                            // String）只动引用计数，不再钉住——否则一个字面
+                            // 量比较就能把 `String.equals` 的实参槽永久留在
+                            // owned 约定。槽的 ABI 全局统一，所以任何一个
+                            // 可观察的消费调用点就把整槽钉死。
+                            if borrowed_self_move_timing_observable(
+                                w,
+                                pair.second,
+                            ) then {
+                                w.unsafe_slots.insert(
+                                    borrowed_slot_key(symbol.def_id.id, pair.first),
+                                    true,
+                                );
+                            };
                         };
                     };
                 };
@@ -589,9 +620,20 @@ let mir_address_taken_locals(function: MIRFunction): Set[Int] = {
         Dict[String, Bool].new(),
         Set[Int].new(),
         false,
+        mir_local_type_map(function),
+        Dict[UInt, Bool].new(),
     );
     borrowed_self_walk_function(walk, function);
     return walk.address_taken;
+};
+
+/// 局部 id → 类型快照（消费时序门按类型判断析构可观察性）。
+let mir_local_type_map(function: MIRFunction): Dict[Int, Type] = {
+    let mutable result = Dict[Int, Type].new();
+    for local in function.locals then {
+        result.insert(local.id.raw_value, local.local_type);
+    };
+    return result;
 };
 
 /// Compute the set of (function instance, parameter) slots that run the
@@ -604,7 +646,10 @@ let mir_address_taken_locals(function: MIRFunction): Set[Int] = {
 /// This is a fixpoint over the instantiated (monomorphized) call graph:
 /// edges are the bare-root passes of rule 1a, and the greatest fixed point
 /// keeps self-recursive and mutually recursive readers eligible.
-let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
+let compute_borrowed_param_slots(
+    program: MIRProgram,
+    observable_drops: Dict[UInt, Bool],
+): Dict[String, Bool] = {
     // ── Phase 0: global usage scan ─────────────────────────────────────────
     // One walk over every function (and nested lambda body) collecting
     // address-taken symbols and unsafe call shapes.
@@ -618,8 +663,11 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
         Dict[String, Bool].new(),
         Set[Int].new(),
         false,
+        Dict[Int, Type].new(),
+        observable_drops,
     );
     for function in program.functions then {
+        global_walk.local_types = mir_local_type_map(function);
         borrowed_self_walk_function(global_walk, function);
     };
 
@@ -639,21 +687,14 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
             if not borrowed_self_type_is_candidate(param.param_type) then {
                 continue;
             };
-            if index > 0 then {
-                let is_trait_impl = when function.kind in {
-                    .Given(_, _, _, trait_def_id) then trait_def_id is .Some(_),
-                    _ then false,
-                };
-                if is_trait_impl then {
-                    // Trait-impl methods keep the owned convention on
-                    // non-receiver parameters: the vtable wrapper forwards
-                    // extra arguments ownership-first (the method releases
-                    // them), so a borrowed slot would need a per-slot release
-                    // net in the wrapper. The receiver slot keeps its existing
-                    // net (see codegen_vtable.koral).
-                    continue;
-                };
-            };
+            // Trait-impl non-receiver slots join the fixpoint like any other
+            // parameter (2026-11-14): the vtable wrapper's per-slot release
+            // net (see codegen_vtable.koral) owns the ownership-first ABI for
+            // borrowed body slots, and `vtable_method_needs_wrapper` keeps a
+            // borrowed-slot body out of a raw vtable slot. Direct and
+            // de-virtualized call sites pass such slots +0 like any borrowed
+            // parameter -- which is what makes reader shapes (`eq`/`compare`/
+            // `contains`) stop paying a copy+drop pair per call.
             let slot_key = borrowed_slot_key(def_id, index);
             if global_walk.unsafe_slots.get(slot_key) is .Some(_) then {
                 continue;
@@ -695,6 +736,8 @@ let compute_borrowed_param_slots(program: MIRProgram): Dict[String, Bool] = {
                         Dict[String, Bool].new(),
                         Set[Int].new(),
                         false,
+                        mir_local_type_map(function),
+                        observable_drops,
                     );
                     borrowed_self_walk_function(walk, function);
                     // AND across bodies: emission keys the convention on the
@@ -810,10 +853,18 @@ let purity_walk_intrinsic(w: PurityWalk, node: MIRIntrinsic): Void = {
                 purity_walk_value(w, element);
             };
         },
+        .CompareMemory(a, b, count) then {
+            // 只读比较（memcmp 族）：不写任何可达状态，是纯读——曾被
+            // lumped 进写内存一族，把 String.equals 整族读者误判为不纯
+            // （2026-11-14：槽装载消去的纯度闸因此永不放行）。
+            purity_walk_value(w, a);
+            purity_walk_value(w, b);
+            purity_walk_value(w, count);
+        },
         .DeallocMemory(_) or .DeinitMemory(_) or .TakeMemory(_, _)
         or .DowngradeRef(_, _) or .UpgradeRef(_, _)
         or .TraitObjectMatches(_, _, _, _, _) or .TraitObjectDowncast(_, _)
-        or .CopyMemory(_, _, _) or .MoveMemory(_, _, _) or .CompareMemory(_, _, _)
+        or .CopyMemory(_, _, _) or .MoveMemory(_, _, _)
         or .InitMemory(_, _) or .SpawnThread(_, _, _, _) then {
             // Memory-writing or pointer-taking: conservative.
             w.impure = true;
@@ -1861,4 +1912,523 @@ let compute_alias_locals(
         };
     };
     return aliases;
+};
+
+// ── 槽装载消去（issue 8 余部 · 2026-11-14）────────────────────────────────────
+//
+// `xs[i]` 这类下标读在 lowering 侧被提前物化成 retain 副本
+// （place_needs_eager_load：兄弟实参的副作用不能跑在装载之前）。当这份副本
+// 全函数只有一个使用点、且使用点是借用槽上的一次直接调用实参、定义与使用
+// 之间没有副作用语句时，这对 retain/release 可以整对消掉：绑定改走 +0 别名
+// 装载（consume_alias_binding 的既有改写），使用点按 +0 裸传，被调方只读
+// 不放。消去的局部并入别名集（init flag 摘除、非持有）。
+//
+// 放行四闸（少一条就退回保留副本）：
+//   1. 形状：`t = PlaceRead(槽解引用, Copy)`，槽指针是调用产出的指针局部；
+//   2. t 全函数恰好一个使用点，是某次顶层直接调用的第 k 个实参（Copy 标签，
+//      非 trait 调用）；
+//   3. 同块、定义先于使用，中间只允许纯赋值语句（无调用/内在/取址/内存写）；
+//   4. 该槽跑借用约定（borrowed_param_slots）且被调方是纯读体（不在
+//      impure_function_ids）——+0 只进纯被调，容器别名再广也改不坏槽位；
+//      trait 调用的 vtable ABI 是 ownership-first 转移（callee 侧必放一份
+//      +1），没有 +0 形态，一律不消。
+
+/// 槽装载消去台账：一次可放行的使用点。
+type SlotElisionUse(
+    block_index: Int,
+    statement_index: Int,
+    arg_index: Int,
+    callee_def_id: UInt,
+    ownership: MIROwnershipUse,
+);
+
+/// place 里所有局部读的出现计数。
+private let slot_elision_count_place(
+    place: MIRPlace,
+    counts: Dict[Int, Int],
+): Void = {
+    when place in {
+        .Local(local) then counts.insert(
+            local.raw_value,
+            (counts.get(local.raw_value) or else 0) + 1,
+        ),
+        .Global(_) then {},
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then slot_elision_count_place(
+            base,
+            counts,
+        ),
+        .Deref(base, _) or .PointerElement(base, _) then slot_elision_count_value(
+            base,
+            counts,
+        ),
+    };
+};
+
+/// 裸局部操作数的出现计数。
+private let slot_elision_count_operand(
+    operand: MIROperand,
+    counts: Dict[Int, Int],
+): Void = {
+    when operand in {
+        .Local(local) then counts.insert(
+            local.raw_value,
+            (counts.get(local.raw_value) or else 0) + 1,
+        ),
+        _ then {},
+    };
+};
+
+/// 值树里所有局部读的出现计数（单使用点闸的台账）。
+private let slot_elision_count_value(
+    value: MIRValue,
+    counts: Dict[Int, Int],
+): Void = {
+    when value in {
+        .Operand(operand) then slot_elision_count_operand(operand, counts),
+        .PlaceRead(place, _) then slot_elision_count_place(place, counts),
+        .Binary(operation) then {
+            slot_elision_count_operand(operation.left, counts);
+            slot_elision_count_operand(operation.right, counts);
+        },
+        .Unary(operation) then slot_elision_count_operand(operation.operand, counts),
+        .EnumTag(tag) then slot_elision_count_value(tag.subject, counts),
+        .Call(call) then {
+            slot_elision_count_operand(call.callee, counts);
+            for arg in call.arguments then {
+                slot_elision_count_value(arg, counts);
+            };
+        },
+        .TraitMethodCall(call) then {
+            slot_elision_count_value(call.receiver, counts);
+            for arg in call.arguments then {
+                slot_elision_count_value(arg, counts);
+            };
+        },
+        .Aggregate(aggregate) then {
+            for field_value in aggregate.fields then {
+                slot_elision_count_value(field_value, counts);
+            };
+        },
+        .EnumCase(construction) then {
+            for arg in construction.arguments then {
+                slot_elision_count_value(arg, counts);
+            };
+        },
+        .TraitObjectConversion(conversion) then slot_elision_count_value(
+            conversion.inner,
+            counts,
+        ),
+        .Ref(place, _, _) or .Pointer(place) then slot_elision_count_place(
+            place,
+            counts,
+        ),
+        .Cast(operand, _, _) then slot_elision_count_operand(operand, counts),
+        .Intrinsic(node) then slot_elision_count_intrinsic(node, counts),
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                slot_elision_count_place(source, counts);
+            };
+        },
+    };
+};
+
+/// 内在节点的操作数计数（逐变体走全，漏数会把真实使用点当不存在）。
+private let slot_elision_count_intrinsic(
+    node: MIRIntrinsic,
+    counts: Dict[Int, Int],
+): Void = {
+    when node in {
+        .AllocMemory(count, _) or .AllocString(count, _) then slot_elision_count_value(
+            count,
+            counts,
+        ),
+        .DeallocMemory(pointer) or .DeinitMemory(pointer)
+        or .TakeMemory(pointer, _) then slot_elision_count_value(pointer, counts),
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)
+        or .CompareMemory(dest, source, count) then {
+            slot_elision_count_value(dest, counts);
+            slot_elision_count_value(source, counts);
+            slot_elision_count_value(count, counts);
+        },
+        .DowngradeRef(value, _) or .UpgradeRef(value, _)
+        or .TraitObjectMatches(value, _, _, _, _)
+        or .TraitObjectDowncast(value, _) then slot_elision_count_value(value, counts),
+        .InitMemory(pointer, value) then {
+            slot_elision_count_value(pointer, counts);
+            slot_elision_count_value(value, counts);
+        },
+        .NullPtr(_) then {},
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                slot_elision_count_value(element, counts);
+            };
+        },
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            slot_elision_count_value(out_handle, counts);
+            slot_elision_count_value(out_tid, counts);
+            slot_elision_count_value(closure, counts);
+            slot_elision_count_value(stack_size, counts);
+        },
+    };
+};
+
+/// 值树里有没有副作用形态（调用/内在/取址/装箱转换/lambda）。
+private let slot_elision_value_is_pure(value: MIRValue): Bool = {
+    return when value in {
+        .Operand(_) or .Binary(_) or .Unary(_) or .Cast(_, _, _) then true,
+        .EnumTag(tag) then slot_elision_value_is_pure(tag.subject),
+        .PlaceRead(place, _) then slot_elision_place_is_pure(place),
+        .Aggregate(aggregate) then {
+            for field_value in aggregate.fields then {
+                if not slot_elision_value_is_pure(field_value) then {
+                    return false;
+                };
+            };
+            true
+        },
+        .EnumCase(construction) then {
+            for arg in construction.arguments then {
+                if not slot_elision_value_is_pure(arg) then {
+                    return false;
+                };
+            };
+            true
+        },
+        .Call(_) or .TraitMethodCall(_) or .TraitObjectConversion(_)
+        or .Ref(_, _, _) or .Pointer(_) or .Intrinsic(_) or .Lambda(_) then false,
+    };
+};
+
+private let slot_elision_place_is_pure(place: MIRPlace): Bool = {
+    return when place in {
+        .Local(_) or .Global(_) then true,
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then slot_elision_place_is_pure(
+            base,
+        ),
+        .Deref(base, _) or .PointerElement(base, _) then slot_elision_value_is_pure(
+            base,
+        ),
+    };
+};
+
+/// 形状闸：place 自顶向下剥 Field/EnumPayload 后必须是槽解引用
+/// （Deref/PointerElement），且基值是裸局部读——返回槽指针局部 id。
+private let slot_elision_slot_pointer_local(place: MIRPlace): Option[Int] = {
+    let mutable current = place;
+    while true then {
+        when current in {
+            .Field(base, _) or .EnumPayload(base, _, _, _, _) then {
+                current = base;
+            },
+            .Deref(base, _) or .PointerElement(base, _) then {
+                return when base in {
+                    .Operand(.Local(local)) then Option[Int].Some(local.raw_value),
+                    .PlaceRead(.Local(local), _) then Option[Int].Some(local.raw_value),
+                    _ then Option[Int].None(),
+                };
+            },
+            _ then {
+                return Option[Int].None();
+            },
+        };
+    };
+    return Option[Int].None();
+};
+
+let compute_slot_load_elisions(
+    codegen: CodeGen,
+    function: MIRFunction,
+): Dict[Int, Bool] = {
+    let mutable result = Dict[Int, Bool].new();
+    // ── Pass 1: 定义与使用台账 ────────────────────────────────────────────
+    let mutable def_block = Dict[Int, Int].new();
+    let mutable def_index = Dict[Int, Int].new();
+    let mutable def_value = Dict[Int, MIRValue].new();
+    let mutable use_counts = Dict[Int, Int].new();
+    let mutable arg_uses = Dict[Int, List[SlotElisionUse]].new();
+    // 消去候选（赋值目标）不算使用；其余出现一律计数。
+    let mutable block_index = 0;
+    for block in function.blocks then {
+        let mutable statement_index = 0;
+        for statement in block.statements then {
+            when statement in {
+                .Assign(place, value) then {
+                    when place in {
+                        .Local(target) then {
+                            let target_id = target.raw_value;
+                            if def_value.get(target_id) is .None() then {
+                                def_block.insert(target_id, block_index);
+                                def_index.insert(target_id, statement_index);
+                                def_value.insert(target_id, value);
+                            } else {
+                                use_counts.insert(
+                                    target_id,
+                                    (use_counts.get(target_id) or else 0) + 1,
+                                );
+                            };
+                            slot_elision_count_value(value, use_counts);
+                            when value in {
+                                .Call(call) then {
+                                    when call.callee in {
+                                        .Function(symbol) then slot_elision_note_call_args(
+                                            call,
+                                            block_index,
+                                            statement_index,
+                                            symbol.def_id.id,
+                                            arg_uses,
+                                        ),
+                                        _ then {},
+                                    };
+                                },
+                                _ then {},
+                            };
+                        },
+                        _ then {
+                            slot_elision_count_place(place, use_counts);
+                            slot_elision_count_value(value, use_counts);
+                        },
+                    };
+                },
+                .Evaluate(value) then {
+                    slot_elision_count_value(value, use_counts);
+                    when value in {
+                        .Call(call) then {
+                            when call.callee in {
+                                .Function(symbol) then slot_elision_note_call_args(
+                                    call,
+                                    block_index,
+                                    statement_index,
+                                    symbol.def_id.id,
+                                    arg_uses,
+                                ),
+                                _ then {},
+                            };
+                        },
+                        _ then {},
+                    };
+                },
+                .AtomicLoad(target, place) then {
+                    use_counts.insert(
+                        target.raw_value,
+                        (use_counts.get(target.raw_value) or else 0) + 1,
+                    );
+                    slot_elision_count_place(place, use_counts);
+                },
+                .AtomicStore(place, value) then {
+                    slot_elision_count_place(place, use_counts);
+                    slot_elision_count_value(value, use_counts);
+                },
+                .Exchange(place, old_target, value) then {
+                    use_counts.insert(
+                        old_target.raw_value,
+                        (use_counts.get(old_target.raw_value) or else 0) + 1,
+                    );
+                    slot_elision_count_place(place, use_counts);
+                    slot_elision_count_value(value, use_counts);
+                },
+                .Drop(place) then slot_elision_count_place(place, use_counts),
+                .Retain(value) or .Release(value) then slot_elision_count_value(
+                    value,
+                    use_counts,
+                ),
+                .Lock(lock) or .Unlock(lock) then {
+                    when lock in {
+                        .ObjectLock(handle) then use_counts.insert(
+                            handle.raw_value,
+                            (use_counts.get(handle.raw_value) or else 0) + 1,
+                        ),
+                        .GlobalLock(_) then {},
+                    };
+                },
+                _ then {},
+            };
+            statement_index += 1;
+        };
+        when block.terminator in {
+            .ReturnValue(some_op) then {
+                when some_op in {
+                    .Some(op) then {
+                        when op in {
+                            .Local(local) then use_counts.insert(
+                                local.raw_value,
+                                (use_counts.get(local.raw_value) or else 0) + 1,
+                            ),
+                            _ then {},
+                        };
+                    },
+                    .None() then {},
+                };
+            },
+            .Branch(condition, _, _) then {
+                when condition in {
+                    .Local(local) then use_counts.insert(
+                        local.raw_value,
+                        (use_counts.get(local.raw_value) or else 0) + 1,
+                    ),
+                    _ then {},
+                };
+            },
+            .SwitchValue(operand, _, _) then {
+                when operand in {
+                    .Local(local) then use_counts.insert(
+                        local.raw_value,
+                        (use_counts.get(local.raw_value) or else 0) + 1,
+                    ),
+                    _ then {},
+                };
+            },
+            _ then {},
+        };
+        block_index += 1;
+    };
+
+    // ── Pass 2: 逐候选放行 ────────────────────────────────────────────────
+    for pair in def_value.iterator() then {
+        let target_id = pair.first;
+        if (use_counts.get(target_id) or else 0) != 1 then {
+            continue;
+        };
+        when arg_uses.get(target_id) in {
+            .Some(uses) then {
+                if uses.count() != 1 then {
+                    continue;
+                };
+                let use = uses[0];
+                if not (use.ownership is .Copy() or is .Borrow()) then {
+                    continue;
+                };
+                // 闸 4：借用槽 + 纯被调；trait 调用不进台账（上方只记直接调用）。
+                if codegen.borrowed_param_slots.get(
+                    borrowed_slot_key(use.callee_def_id, use.arg_index),
+                ) is .None() then {
+                    continue;
+                };
+                if codegen.impure_function_ids.get(
+                    use.callee_def_id,
+                ) is .Some(_) then {
+                    continue;
+                };
+                // 闸 1：形状 = 槽解引用的 Copy 读，槽指针是调用产出的局部。
+                let value = pair.second;
+                let mutable ok = false;
+                when value in {
+                    .PlaceRead(place, ownership) then {
+                        if ownership is .Copy() then {
+                            when slot_elision_slot_pointer_local(place) in {
+                                .Some(pointer_id) then {
+                                    ok = slot_elision_pointer_def_is_call(
+                                        pointer_id,
+                                        function,
+                                    );
+                                },
+                                .None() then {},
+                            };
+                        };
+                    },
+                    _ then {},
+                };
+                if not ok then {
+                    continue;
+                };
+                // 闸 3：同块、定义先于使用、中间只允许纯赋值语句。
+                let mutable clean = false;
+                when def_block.get(target_id) in {
+                    .Some(def_b) then {
+                        if def_b == use.block_index then {
+                            when def_index.get(target_id) in {
+                                .Some(def_i) then {
+                                    if def_i < use.statement_index then {
+                                        clean = true;
+                                        let block = function.blocks[def_b];
+                                        let mutable cursor = def_i + 1;
+                                        while cursor < use.statement_index then {
+                                            if not slot_elision_statement_is_pure(
+                                                block.statements[cursor],
+                                            ) then {
+                                                clean = false;
+                                                break;
+                                            };
+                                            cursor += 1;
+                                        };
+                                    };
+                                },
+                                .None() then {},
+                            };
+                        };
+                    },
+                    .None() then {},
+                };
+                if clean then {
+                    result.insert(target_id, true);
+                };
+            },
+            .None() then {},
+        };
+    };
+    return result;
+};
+
+/// 顶层直接调用实参的台账记录（trait 调用不记：vtable ABI 是 ownership-first
+/// 转移，没有 +0 形态）。
+private let slot_elision_note_call_args(
+    call: MIRCall,
+    block_index: Int,
+    statement_index: Int,
+    callee_def_id: UInt,
+    arg_uses: Dict[Int, List[SlotElisionUse]],
+): Void = {
+    if call.argument_ownerships.count() != call.arguments.count() then {
+        return;
+    };
+    for pair in call.arguments.lazy().enumerate() then {
+        when pair.second in {
+            .Operand(.Local(local)) then {
+                let id = local.raw_value;
+                let mutable entries = arg_uses.get(id) or else List[SlotElisionUse].new(
+                );
+                entries.push(
+                    SlotElisionUse(
+                        block_index,
+                        statement_index,
+                        pair.first,
+                        callee_def_id,
+                        call.argument_ownerships[pair.first],
+                    ),
+                );
+                arg_uses.insert(id, entries);
+            },
+            _ then {},
+        };
+    };
+};
+
+/// 槽指针局部的定义是不是一次调用（走查无法回看定义语句时的兜底扫描）。
+private let slot_elision_pointer_def_is_call(
+    pointer_id: Int,
+    function: MIRFunction,
+): Bool = {
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(.Local(target), value) then {
+                    if target.raw_value == pointer_id then {
+                        return value is .Call(_);
+                    };
+                },
+                _ then {},
+            };
+        };
+    };
+    return false;
+};
+
+/// 间隔语句白名单：纯赋值（目标是裸局部、值树无副作用形态）与无副作用的
+/// 簿记语句（Declare/DebugSource/作用域边界）。materialize 会给每个物化临
+/// 时发一条 Declare——落在定义与使用之间，不算副作用。
+private let slot_elision_statement_is_pure(statement: MIRStatement): Bool = {
+    return when statement in {
+        .Assign(.Local(_), value) then slot_elision_value_is_pure(value),
+        .Declare(_) or .DebugSource(_) or .ScopeEnter(_) or .ScopeExit(_) then true,
+        _ then false,
+    };
 };

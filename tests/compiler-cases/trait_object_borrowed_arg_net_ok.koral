@@ -1,0 +1,31 @@
+// EXPECT: false
+// EXPECT: !?
+// The vtable wrapper's per-slot release net (2026-11-14): a trait-impl method
+// whose extra argument only reads the value runs the borrowed convention, so
+// the body releases nothing -- but the ownership-first vtable ABI still
+// transfers one reference per argument, and the wrapper releases it on the
+// body's behalf. The caller handle that outlives the call must stay valid and
+// the heap string must not be freed twice (differential + ASan see both).
+//
+// Heap strings on both sides: an immortal literal hides the accounting.
+
+trait Ask {
+    ask(self, other: String): Bool;
+};
+
+type Dog(name: String);
+given Dog: Ask {
+    public ask(self, other: String): Bool = self.name == other;
+};
+
+let via_object(a: Ask, other: String): Bool = a.ask(other);
+
+let main(): Int = {
+    let d = Dog("rex" + "-dog");
+    let o: Ask = d;
+    let w = "!" + "?";
+    let r = via_object(o, w);
+    println(r.to_string());
+    println(w);
+    return 0;
+};

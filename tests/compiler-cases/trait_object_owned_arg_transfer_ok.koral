@@ -1,0 +1,32 @@
+// EXPECT: rex-dog!?
+// EXPECT: !?
+// Owned vtable arguments are an ownership-first transfer: the callee side
+// (the method body, or the wrapper's release net) releases exactly one
+// reference, so a caller handle that outlives the call must stay valid.
+//
+// Pins a real divergence (2026-11-14): koralc's trait-call emission passed
+// the raw handle with no +1 while the callee chain still released one, so
+// the post-call read of `w` went through freed memory (printed garbage under
+// koralc, correct output under the seed). Heap strings on both sides of the
+// call -- an immortal literal hides the accounting.
+
+trait Speak {
+    say(self, other: String): String;
+};
+
+type Dog(name: String);
+given Dog: Speak {
+    public say(self, other: String): String = self.name + other;
+};
+
+let call_say(s: Speak, other: String): String = s.say(other);
+
+let main(): Int = {
+    let d = Dog("rex" + "-dog");
+    let o: Speak = d;
+    let w = "!" + "?";
+    let r = call_say(o, w);
+    println(r);
+    println(w);
+    return 0;
+};

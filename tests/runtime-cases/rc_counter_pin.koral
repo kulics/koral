@@ -74,6 +74,84 @@ let init_memory_window(): String = {
     return "w8_init_memory_retains=\(r1 - r0)";
 };
 
+// 比较位借用化（2026-11-14）：`eq` 的实参槽进借用不动点后，循环里的活值
+// 比较不再每轮付 copy+drop——直接派发与单态化泛型派发都按 +0 传参。窗口内
+// retain/release 都必须是 0（旧账：每轮一对）。实参在窗口后仍使用，排除
+// 末次使用移动的干扰。
+let compare_eq[T: Eq](a: T, b: T): Bool = a == b;
+
+let compare_window(): String = {
+    let x = "hello" + " world";
+    let y = "hello" + " world";
+    let r0 = __koral_rc_stats_retains();
+    let d0 = __koral_rc_stats_releases();
+    let mutable i = 0;
+    let mutable c = 0;
+    while i < 4 then {
+        if x == y then {
+            c += 1;
+        };
+        if compare_eq(x, y) then {
+            c += 1;
+        };
+        i += 1;
+    };
+    let r1 = __koral_rc_stats_retains();
+    let d1 = __koral_rc_stats_releases();
+    let _ = x.count();
+    let _ = y.count();
+    let _ = c;
+    return "w9_compare_retains=\(r1 - r0) w9_compare_releases=\(d1 - d0)";
+};
+
+// vtable 按槽释放网（2026-11-14）：ownership-first 的实参转移（调用点
+// retain 副本）由 wrapper 代放（借用体不放）。窗口的净流量必须是 0：转移
+// 而没人放 → 泄漏（净 +1）；放两次 → 净 -1。
+trait Ask {
+    ask(self, other: String): Bool;
+};
+
+type Asker(name: String);
+given Asker: Ask {
+    public ask(self, other: String): Bool = self.name == other;
+};
+
+let vtable_window(a: Ask, other: String): String = {
+    let r0 = __koral_rc_stats_retains();
+    let d0 = __koral_rc_stats_releases();
+    let r = a.ask(other);
+    let r1 = __koral_rc_stats_retains();
+    let d1 = __koral_rc_stats_releases();
+    let _ = other.count();
+    return "w10_vtable_net=\((r1 - r0) - (d1 - d0)) \(r.to_string())";
+};
+
+// 下标投影借用位（issue 8 余部 · 2026-11-14）：`xs[0] == y` 的接收者读是
+// 下标槽装载，旧账每比较付一对 retain/release（提前物化副本）。槽装载消去
+// （compute_slot_load_elisions 四闸）后整对归零：纯被调 + 借用槽 + 单使用
+// 点 + 无副作用间隔。实参在窗口后仍使用，排除末次使用移动的干扰。
+let subscript_window(): String = {
+    let mutable xs = List[String].new();
+    xs.push("hello" + " world");
+    let y = "hello" + " world";
+    let r0 = __koral_rc_stats_retains();
+    let d0 = __koral_rc_stats_releases();
+    let mutable i = 0;
+    let mutable c = 0;
+    while i < 4 then {
+        if xs[0] == y then {
+            c += 1;
+        };
+        i += 1;
+    };
+    let r1 = __koral_rc_stats_retains();
+    let d1 = __koral_rc_stats_releases();
+    let _ = y.count();
+    let _ = xs.count();
+    let _ = c;
+    return "w11_subscript_retains=\(r1 - r0) w11_subscript_releases=\(d1 - d0)";
+};
+
 let main(): Void = {
     __koral_rc_stats_enable();
 
@@ -111,4 +189,12 @@ let main(): Void = {
     println(freeze_window());
 
     println(init_memory_window());
+
+    println(compare_window());
+
+    println(subscript_window());
+
+    let asker = Asker("rex" + "-dog");
+    let ao: Ask = asker;
+    println(vtable_window(ao, "!" + "?"));
 };

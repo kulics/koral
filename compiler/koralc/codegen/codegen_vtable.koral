@@ -205,6 +205,21 @@ given CodeGen {
         if self.actual_method_needs_wrapper(member) then {
             return true;
         };
+        // 借用约定的实参槽必须有 wrapper 的按槽释放网（2026-11-14）：
+        // vtable 槽的实参是 ownership-first 转移（callee 侧释放一份 +1），
+        // 方法体跑借用约定时不释放——直入槽位就没人放了。wrapper 代管。
+        let mutable extra_index = 1;
+        while self.context.get_function_param_type(
+            actual_method_def_id,
+            extra_index,
+        ) is .Some(_) then {
+            if self.borrowed_param_slots.get(
+                borrowed_slot_key(actual_method_def_id.id, extra_index),
+            ) is .Some(_) then {
+                return true;
+            };
+            extra_index += 1;
+        };
         let mutable actual_self_type = self.context.get_function_param_type(
             actual_method_def_id,
             0,
@@ -1082,10 +1097,24 @@ given CodeGen {
 
         let mutable call_args = List[String].new();
         call_args.push("self_val");
+        // 按槽释放网（2026-11-14）：vtable 槽的实参是 ownership-first 转移
+        // （callee 侧释放恰好一份 +1，见 codegen_borrowed_self.koral）。方法
+        // 体跑借用约定的实参槽不释放，wrapper 代管——把收到的 +1 在调用后
+        // 放掉（append_drop_statement 按类型自带配平语义：借用引用是空操
+        // 作、受管值/句柄放一份）。ref 拷出适配给借用体改走裸解引用转发：
+        // 不另造 +1，就地借用。
+        let mutable extra_release_types = List[Type].new();
+        let mutable extra_release_names = List[String].new();
         let mutable extra_index = 0;
         for extra in extra_param_names then {
             let actual_call_arg = when extra_param_types.get(extra_index) in {
                 .Some(wrapper_param_type) then {
+                    let body_borrowed = self.borrowed_param_slots.get(
+                        borrowed_slot_key(
+                            actual_method_def_id.id,
+                            extra_index + 1,
+                        ),
+                    ) is .Some(_);
                     let mutable actual_param_type = self.context.get_function_param_type(
                         actual_method_def_id,
                         extra_index + 1,
@@ -1099,9 +1128,18 @@ given CodeGen {
                         actual_param_type,
                     ) then {
                         actual_arg = when actual_param_type in {
-                            .StructureType(def_id) or .EnumType(def_id) then "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)",
+                            .StructureType(def_id) or .EnumType(def_id) then {
+                                if body_borrowed then {
+                                    "*(\(actual_c_type)*)\(extra).ptr"
+                                } else {
+                                    "__koral_\(self.c_name_for_def_id(def_id))_copy((\(actual_c_type)*)\(extra).ptr)"
+                                }
+                            },
                             _ then "*(\(actual_c_type)*)\(extra).ptr",
                         };
+                    } else if body_borrowed then {
+                        extra_release_types.push(wrapper_param_type);
+                        extra_release_names.push(extra);
                     };
                     actual_arg
                 },
@@ -1171,6 +1209,12 @@ given CodeGen {
 
         if is_void_return then {
             self.buffer.push_string("    \(actual_method_c_name)(\(call_args_str));\n");
+            for pair in extra_release_names.lazy().enumerate() then {
+                self.append_drop_statement(
+                    extra_release_types[pair.first],
+                    pair.second,
+                );
+            };
             self.buffer.push_string(
                 "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
             );
@@ -1178,6 +1222,12 @@ given CodeGen {
             self.buffer.push_string(
                 "    \(return_c_type) __koral_ret = \(actual_method_c_name)(\(call_args_str));\n",
             );
+            for pair in extra_release_names.lazy().enumerate() then {
+                self.append_drop_statement(
+                    extra_release_types[pair.first],
+                    pair.second,
+                );
+            };
             self.buffer.push_string(
                 "    \(self.rc_release_fn(concrete_type))(self_ref.ptr, \(self.drop_function_pointer(concrete_type)));\n",
             );

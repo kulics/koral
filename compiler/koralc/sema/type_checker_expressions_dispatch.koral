@@ -38,6 +38,7 @@ given TypeChecker {
     constrained_trait_object_type_for_dispatch(
         self,
         receiver_type: Type,
+        trait_def_id: DefId,
         trait_name: String,
     ): Type = {
         let normalized = when receiver_type in {
@@ -47,16 +48,25 @@ given TypeChecker {
             ) or else inner,
             _ then receiver_type,
         };
-        let requested_trait_id = self.trait_def_id_by_name(trait_name);
+        // 身份比较用调用方携带的 DefId（2026-11-14）：名字回查在同名 trait
+        // 下会比错声明。名字只作显示。
+        let requested_trait_id = if trait_def_id.is_valid() then trait_def_id
+            else self.trait_def_id_by_name(trait_name);
         return when normalized in {
             .TraitObject(existing_trait_def_id, existing_args, _) then {
                 if existing_trait_def_id == requested_trait_id then Type.TraitObject(
                     existing_trait_def_id,
                     existing_args,
                     self.context().is_sendable_type(normalized),
-                ) else self.canonical_trait_object_type(trait_name)
+                ) else self.canonical_trait_object_type_for_id(
+                    requested_trait_id,
+                    trait_name,
+                )
             },
-            _ then self.canonical_trait_object_type(trait_name),
+            _ then self.canonical_trait_object_type_for_id(
+                requested_trait_id,
+                trait_name,
+            ),
         };
     };
 
@@ -2674,7 +2684,7 @@ given TypeChecker {
                     )
                 } else {
                     let callee = when trait_constraint_opt in {
-                        .Some(trait_name) then {
+                        .Some(hit) then {
                             self.maybe_record_trait_method_instantiation(
                                 typed_base.expr_type,
                                 method_name,
@@ -2682,7 +2692,8 @@ given TypeChecker {
                             );
                             let trait_type = self.constrained_trait_object_type_for_dispatch(
                                 typed_base.expr_type,
-                                trait_name,
+                                hit.trait_def_id,
+                                hit.trait_name,
                             );
                             if trait_dispatch_requires_object then {
                                 make_typed_expr(
@@ -2919,6 +2930,7 @@ given TypeChecker {
                 );
                 let trait_type = self.constrained_trait_object_type_for_dispatch(
                     typed_base.expr_type,
+                    self.trait_def_id_by_name(trait_name),
                     trait_name,
                 );
                 let qmc_ret_type = self.resolve_qualified_method_return_type(
@@ -3112,6 +3124,7 @@ given TypeChecker {
                 );
                 let trait_type = self.constrained_trait_object_type_for_dispatch(
                     typed_base.expr_type,
+                    self.trait_def_id_by_name(trait_name),
                     trait_name,
                 );
                 let qgmc_ret_type = self.resolve_qualified_method_return_type(

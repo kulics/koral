@@ -1,0 +1,25 @@
+// EXPECT: false
+// EXPECT: 2
+// Slot-load elision guard (2026-11-14, issue 8): the eager-load copy of
+// `xs[0]` may only become a +0 alias when no side-effecting statement sits
+// between the load and its single use. Here the sibling argument pushes into
+// the same container -- the push can grow the buffer and invalidate the slot
+// pointer -- so the copy must stay and the read must survive the push. A
+// loosened gate turns this into a use-after-free (ASan and the differential
+// both see it).
+
+let push_and_count(xs: List[String], s: String): Int = {
+    xs.push(s);
+    return xs.count();
+};
+
+let longer_than(s: String, n: Int): Bool = s.count() > n;
+
+let main(): Int = {
+    let mutable xs = List[String].new();
+    xs.push("a" + "b");
+    let r = longer_than(xs[0], push_and_count(xs, "c" + "d"));
+    println(r.to_string());
+    println(xs.count().to_string());
+    return 0;
+};

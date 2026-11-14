@@ -733,6 +733,13 @@ private let build_mir_function_emit_plan(
         non_owning_local_ids,
         move_designations,
     );
+    // 槽装载消去（issue 8 余部 · 2026-11-14）：下标读的提前物化副本在单使
+    // 用点 + 借用槽 + 纯被调 + 无副作用间隔时整对消掉，并入别名集走 +0 别名
+    // 装载改写（见 compute_slot_load_elisions 的四闸）。
+    let slot_elisions = compute_slot_load_elisions(codegen, function);
+    for pair in slot_elisions.iterator() then {
+        alias_locals.insert(pair.first, true);
+    };
     for pair in alias_locals.iterator() then {
         tracked_init_locals.try_remove(pair.first);
         non_owning_local_ids.insert(pair.first, true);
@@ -3082,16 +3089,27 @@ given MIRFunctionCodeEmitter {
         let mutable arg_types = List[Type].new();
         for pair in call.arguments.lazy().enumerate() then {
             let idx = pair.first;
-            let emission = self.emit_value_source(pair.second);
+            let ownership = call.argument_ownerships[idx];
+            // vtable 槽的实参约定是 ownership-first 转移：callee 侧（方法体，
+            // 或 wrapper 的按槽释放网）释放恰好一份 +1（见 codegen_vtable.koral
+            // 的 wrapper 注释）。Copy 读要物化 retain 副本转移（P5 末次使用
+            // 命中则直接移动源），Move 转移源的 +1。裸传 +0 会让 callee 把
+            // 调用方手上的引用放掉——trait object 托管实参调用后读到已释放
+            // 内存（2026-11-14 与种子对照破案；Borrow 标签按 Copy 转移，
+            // 语义上没有 +0 的 vtable 实参槽）。
+            let transfer = if ownership is .Borrow() then MIROwnershipUse.Copy()
+                else ownership;
+            let emission = self.emit_direct_call_argument(
+                pair.second,
+                transfer,
+                true,
+            );
             arg_values.push(emission.expression);
             arg_types.push(self.type_of_value(pair.second));
-            if call.argument_ownerships[idx] is .Move() then {
+            if ownership is .Move() then {
                 self.consume_moved_source(pair.second);
             };
-            self.emit_residual_cleanups(
-                emission,
-                call.argument_ownerships[idx] is .Move(),
-            );
+            self.emit_residual_cleanups(emission, true);
         };
         let expression = self.emit_trait_method_call_abi(
             receiver.expression,

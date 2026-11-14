@@ -295,6 +295,16 @@ grep -q 'w7_into_frozen_retains=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: into_frozen is a hand-off, not a copy" >&2; exit 1; }
 grep -q 'w8_init_memory_retains=1' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: init_memory argument is a consuming use" >&2; exit 1; }
+grep -q 'w9_compare_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: borrowed compare arguments (retains)" >&2; exit 1; }
+grep -q 'w9_compare_releases=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: borrowed compare arguments (releases)" >&2; exit 1; }
+grep -q 'w10_vtable_net=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: vtable per-slot release net" >&2; exit 1; }
+grep -q 'w11_subscript_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: subscript borrow reads (retains)" >&2; exit 1; }
+grep -q 'w11_subscript_releases=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: subscript borrow reads (releases)" >&2; exit 1; }
 echo "rc counter pins OK"
 
 # ── stack contract pins ───────────────────────────────────────────────────────

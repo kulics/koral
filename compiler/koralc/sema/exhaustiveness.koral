@@ -818,7 +818,7 @@ given ExhaustivenessChecker {
     };
 
     private check_unreachable_patterns(self): Result[Void] = {
-        let mutable covered_trait_object_types = Set[String].new();
+        let mutable covered_trait_object_types = Dict[String, String].new();
         let mutable has_catchall = false;
         let mutable catchall_index = 0;
         let mutable catchall_pattern_desc = StringBuilder.new();
@@ -898,19 +898,19 @@ given ExhaustivenessChecker {
 
             let pattern_trait_types = collect_trait_object_types(p, self.context);
             if not pattern_trait_types.is_empty() then {
-                for type_name in pattern_trait_types.iterator() then {
-                    if covered_trait_object_types.contains(type_name) then {
+                for entry in pattern_trait_types.iterator() then {
+                    if covered_trait_object_types.contains_key(entry.first) then {
                         let mutable msg = StringBuilder.new();
                         msg.push_string("Unreachable pattern '");
                         msg.push_string(pattern_description(p, self.context));
                         msg.push_string("': implementation type pattern '");
-                        msg.push_string(type_name);
+                        msg.push_string(entry.second);
                         msg.push_string("' is already covered");
                         return Result[Void].Error(msg.to_string());
                     };
                 };
-                for type_name in pattern_trait_types.iterator() then {
-                    covered_trait_object_types.insert(type_name);
+                for entry in pattern_trait_types.iterator() then {
+                    covered_trait_object_types.insert(entry.first, entry.second);
                 };
             };
         };
@@ -2276,23 +2276,29 @@ private let unreachable_after_pattern_message(
     return "Unreachable pattern '\(offending)': already covered by '\(catchall_desc)' at position \(catchall_index + 1)";
 };
 
+/// 模式里的 trait object 覆盖集合。键是类型身份（`stable_type_key`——两个
+/// 同名类型在不同模块是不同身份，display 名会把两者并成一个），值是显示名
+/// （诊断文本用）。与种子侧 `Set<Type>` 身份键同一原则（2026-11-14 对齐）。
 public let collect_trait_object_types(
     pattern: TypedPattern,
     context: CompilerContext,
-): Set[String] = {
-    let mutable covered = Set[String].new();
+): Dict[String, String] = {
+    let mutable covered = Dict[String, String].new();
     when pattern in {
         .TraitObjectType(target_type) or .TraitObjectTypeBinding(_, target_type) then {
-            covered.insert(context.type_display_name(target_type));
+            covered.insert(
+                stable_type_key(target_type),
+                context.type_display_name(target_type),
+            );
         },
         .OrPattern(left, right) then {
             let left_types = collect_trait_object_types(left, context);
-            for type_name in left_types.iterator() then {
-                covered.insert(type_name);
+            for entry in left_types.iterator() then {
+                covered.insert(entry.first, entry.second);
             };
             let right_types = collect_trait_object_types(right, context);
-            for type_name in right_types.iterator() then {
-                covered.insert(type_name);
+            for entry in right_types.iterator() then {
+                covered.insert(entry.first, entry.second);
             };
         },
         _ then {},
