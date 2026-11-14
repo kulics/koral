@@ -67,12 +67,15 @@ for case_dir in "$ROOT"/cases/*/; do
   uniq="$(echo "$koral_cs $go_cs $swift_cs $rust_cs" | tr ' ' '\n' | grep -v '^-$' | grep -v '^$' | sort -u | wc -l | tr -d ' ')"
   warn=""
   [ "$uniq" != "1" ] && warn=" ⚠️checksum"
+  # The bar is the mainstream pair (Go, Swift) -- rust is a reference
+  # ceiling and koral cannot be its own baseline. Matches the README's
+  # ratio column.
   best=-1
-  for ns in $koral_ns $go_ns $swift_ns $rust_ns; do
+  for ns in $go_ns $swift_ns; do
     [ "$ns" = "-" ] && continue
     if [ "$best" -lt 0 ] || [ "$ns" -lt "$best" ]; then best="$ns"; fi
   done
   echo "| $name$warn | $(fmt_ms "$koral_ns") | $(fmt_ms "$go_ns") | $(fmt_ms "$swift_ns") | $(fmt_ms "$rust_ns") | $(ratio_vs "$koral_ns" "$best") |"
 done
 echo
-echo "(best of $RUNS runs; lower is better; 'koral vs best' = koral-time / fastest-time)"
+echo "(best of $RUNS runs; lower is better; 'koral vs best' = koral-time / fastest(Go, Swift) time)"
