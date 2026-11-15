@@ -646,6 +646,13 @@ given Printer {
             tail_comments,
             rb,
         ),
+        // `unsafe { … }` -- the keyword, one space, then the block as written
+        // (docs/design/unsafe-design.md §A).
+        .UnsafeBlock(unsafe_kw, block) then {
+            self.write_token(unsafe_kw);
+            self.write_space();
+            self.print_expr(block);
+        },
         .If(kw, cond, then_kw, then_body, else_kw, else_body) then self.print_if(
             kw,
             cond,
@@ -1134,7 +1141,7 @@ given Printer {
         self.write_token(then_kw);
 
         let then_is_block = when then_body in {
-            .Block(_, _, _, _, _) then true,
+            .Block(_, _, _, _, _) or .UnsafeBlock(_, _) then true,
             _ then false,
         };
 
@@ -1156,7 +1163,7 @@ given Printer {
             if else_kw is .Some(ek) then {
                 if else_body is .Some(eb) then {
                     let else_is_block_like = when eb in {
-                        .Block(_, _, _, _, _) or .When(_, _, _, _, _, _) then true,
+                        .Block(_, _, _, _, _) or .When(_, _, _, _, _, _) or .UnsafeBlock(_, _) then true,
                         _ then false,
                     };
                     let eb_expr = eb;
@@ -1463,11 +1470,12 @@ given Printer {
         .Using(tokens) then {
             self.print_token_sequence(tokens);
         },
-        .Func(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then self.print_func_decl(
+        .Func(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret, eq, body) then self.print_func_decl(
             vis,
             mods,
             cname,
             let_kw,
+            unsafe_kw,
             mut_kw,
             gp,
             name,
@@ -1478,11 +1486,12 @@ given Printer {
             eq,
             body,
         ),
-        .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret) then self.print_foreign_decl(
+        .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret) then self.print_foreign_decl(
             vis,
             mods,
             cname,
             let_kw,
+            unsafe_kw,
             mut_kw,
             gp,
             name,
@@ -1544,9 +1553,15 @@ given Printer {
                 self.print_type(vt);
             };
         },
-        .TraitMethod(vis, gp, name, lp, params, rp, ret) then {
+        .TraitMethod(vis, unsafe_kw, gp, name, lp, params, rp, ret) then {
             if vis is .Some(v) then {
                 self.write_token(v);
+                self.write_space();
+            };
+            // `unsafe` is the requirement's member-level marker: before the
+            // name (docs/design/unsafe-design.md §B).
+            if unsafe_kw is .Some(u) then {
+                self.write_token(u);
                 self.write_space();
             };
             self.write_token(name);
@@ -1644,6 +1659,7 @@ given Printer {
         mods: List[Token],
         cname: Option[Token],
         let_kw: Option[Token],
+        unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
         name: Option[Token],
@@ -1661,6 +1677,7 @@ given Printer {
                     mods,
                     cname,
                     let_kw,
+                    unsafe_kw,
                     mut_kw,
                     gp,
                     name,
@@ -1679,6 +1696,12 @@ given Printer {
         };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `unsafe` sits right after the keyword and before the qualifiers:
+        // `let unsafe foreign` (docs/design/unsafe-design.md §B).
+        if unsafe_kw is .Some(u) then {
+            self.write_token(u);
             self.write_space();
         };
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
@@ -1727,7 +1750,7 @@ given Printer {
                 self.print_block_multiline(lb, items, tail_expr, tail_comments, rb);
                 return;
             },
-            .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) then {
+            .When(_, _, _, _, _, _) or .If(_, _, _, _, _, _) or .UnsafeBlock(_, _) then {
                 self.write_space();
                 self.print_expr(body);
                 return;
@@ -1741,6 +1764,7 @@ given Printer {
             mods,
             cname,
             let_kw,
+            unsafe_kw,
             mut_kw,
             gp,
             name,
@@ -1773,6 +1797,7 @@ given Printer {
         mods: List[Token],
         cname: Option[Token],
         let_kw: Option[Token],
+        unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
         name: Option[Token],
@@ -1788,6 +1813,7 @@ given Printer {
                     mods,
                     cname,
                     let_kw,
+                    unsafe_kw,
                     mut_kw,
                     gp,
                     name,
@@ -1806,6 +1832,12 @@ given Printer {
         };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `unsafe` sits right after the keyword and before the qualifiers:
+        // `let unsafe foreign` (docs/design/unsafe-design.md §B).
+        if unsafe_kw is .Some(u) then {
+            self.write_token(u);
             self.write_space();
         };
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
@@ -2499,6 +2531,7 @@ given Printer {
         },
         .Paren(_, inner, _) then 2 + self.estimate_expr_length(inner),
         .Block(_, _, _, _, _) then 10,
+        .UnsafeBlock(kw, _) then kw.to_string().count() + 1 + 10,
         .FieldAccess(base, _, field) then self.estimate_expr_length(base) + 1 + field.to_string(
         ).count(),
         .Call(callee, _, args, _) then {
@@ -2607,6 +2640,7 @@ given Printer {
         mods: List[Token],
         cname: Option[Token],
         let_kw: Option[Token],
+        unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
         name: Option[Token],
@@ -2627,6 +2661,9 @@ given Printer {
         };
         if let_kw is .Some(k) then {
             len += k.to_string().count() + 1;
+        };
+        if unsafe_kw is .Some(u) then {
+            len += u.to_string().count() + 1;
         };
         if mut_kw is .Some(k) then {
             len += k.to_string().count() + 1;
@@ -2814,12 +2851,12 @@ given Printer {
     /// Spelled by this same printer, so a signature in generated docs is the
     /// syntax the formatter would write for it.
     public print_signature(self, d: CstDecl): Void = when d in {
-        .Func(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret, _, _) then {
+        .Func(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret, _, _) then {
             if not Printer.is_public(vis) then {};
-            self.print_decl_head(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret);
+            self.print_decl_head(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret);
         },
-        .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret) then {
-            self.print_decl_head(vis, mods, cname, let_kw, mut_kw, gp, name, lp, params, rp, ret);
+        .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret) then {
+            self.print_decl_head(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, name, lp, params, rp, ret);
         },
         .Var(vis, let_kw, mut_kw, name, var_type) then {
             if vis is .Some(v) then {
@@ -2926,9 +2963,15 @@ given Printer {
             self.write_space();
             self.print_member_signatures(lb, members, rb, true);
         },
-        .TraitMethod(vis, gp, name, lp, params, rp, ret) then {
+        .TraitMethod(vis, unsafe_kw, gp, name, lp, params, rp, ret) then {
             if vis is .Some(v) then {
                 self.write_token(v);
+                self.write_space();
+            };
+            // `unsafe` is the requirement's member-level marker: before the
+            // name (docs/design/unsafe-design.md §B).
+            if unsafe_kw is .Some(u) then {
+                self.write_token(u);
                 self.write_space();
             };
             self.write_token(name);
@@ -2971,6 +3014,7 @@ given Printer {
         mods: List[Token],
         cname: Option[Token],
         let_kw: Option[Token],
+        unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         gp: Option[CstGenericParams],
         name: Option[Token],
@@ -2985,6 +3029,12 @@ given Printer {
         };
         if let_kw is .Some(k) then {
             self.write_token(k);
+            self.write_space();
+        };
+        // `unsafe` sits right after the keyword and before the qualifiers:
+        // `let unsafe foreign` (docs/design/unsafe-design.md §B).
+        if unsafe_kw is .Some(u) then {
+            self.write_token(u);
             self.write_space();
         };
         // `foreign` / `intrinsic` sit right after the keyword: `let foreign`.
@@ -3153,9 +3203,9 @@ given Printer {
     /// the `foreign` / `intrinsic` qualifiers sit after the declaration keyword
     /// and never carry visibility.
     public decl_visibility(d: CstDecl): Option[Token] = when d in {
-        .Func(v, _, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _, _)
+        .Func(v, _, _, _, _, _, _, _, _, _, _, _, _, _) or .ForeignDecl(v, _, _, _, _, _, _, _, _, _, _, _)
         or .Type(v, _, _, _, _, _, _, _, _, _) or .Given(v, _, _, _, _, _, _, _, _, _) or .Var(v, _, _, _, _)
-        or .Trait(v, _, _, _, _, _, _, _, _) or .TraitMethod(v, _, _, _, _, _, _) then v,
+        or .Trait(v, _, _, _, _, _, _, _, _) or .TraitMethod(v, _, _, _, _, _, _, _) then v,
         .Using(_) then Option[Token].None(),
     };
 
@@ -3230,10 +3280,10 @@ private let validate_type_body(body: CstTypeBody): Result[Void] = when body in {
 };
 
 private let validate_decl(decl: CstDecl): Result[Void] = when decl in {
-    .Func(_, _, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
+    .Func(_, _, _, _, _, _, _, _, _, _, _, _, _, body) then validate_expr_usage(body, false),
     .Type(_, _, _, _, _, _, _, _, _, body) then validate_type_body(body),
     .Trait(_, _, _, _, _, _, _, members, _) or .Given(_, _, _, _, _, _, _, _, members, _) then validate_item_list(members),
-    .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _) then .Ok(
+    .Using(_) or .ForeignDecl(_, _, _, _, _, _, _, _, _, _, _, _) or .Var(_, _, _, _, _) or .TraitMethod(_, _, _, _, _, _, _, _) then .Ok(
         {},
     ),
 };
@@ -3297,6 +3347,7 @@ private let validate_expr_usage(expr: CstExpr, statement_context: Bool): Result[
         validate_item_list(items) or return;
         return validate_optional_expr_usage(tail_expr, false);
     },
+    .UnsafeBlock(_, block) then validate_expr_usage(block, statement_context),
     .If(_, cond, _, then_body, _, else_body) then {
         validate_expr_usage(cond, false) or return;
         validate_expr_usage(then_body, statement_context) or return;

@@ -358,6 +358,9 @@ given Parser {
             .KwWhen() then {
                 return self.parse_when_expression();
             },
+            .KwUnsafe() then {
+                return self.parse_unsafe_expression();
+            },
             .Dot() then {
                 // Implicit member expression: .SomeName or .SomeName(args)
                 let span = self.span_from_start(t);
@@ -546,6 +549,18 @@ given Parser {
             .Generic(base, args, _) then Expr.GenericInstantiation(base, args, span),
             _ then Expr.TypeRef(type_node, span),
         };
+    };
+
+    /// `unsafe { … }`（`docs/design/unsafe-design.md` §A）：块的词法范围是
+    /// unsafe 上下文。形态只有块形；`unsafe` 后不是块即报错。
+    parse_unsafe_expression(self): Result[Expr] = {
+        let start = self.current();
+        self.advance();
+        if self.current().kind is not .LBrace() then {
+            return .Error(self.parser_error_at_current("Expected '{' after 'unsafe'"));
+        };
+        let block = self.parse_block_expression() or return;
+        return .Ok(Expr.UnsafeExpr(block, self.span_from_start(start)));
     };
 
     parse_block_expression(self): Result[Expr] = {

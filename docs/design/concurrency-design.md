@@ -232,7 +232,7 @@ L4 的两个成员只诊断**同线程**环：全局量的初始化链是线程�
 
 - **语义**：开发者承诺该类型**及其可达状态**跨线程共享无数据竞争。编译器不做字段推导、不给锁。
 - 原子 RC 保住计数器本身（RC 全程原子，见「RC 分流」）；字段竞争在承诺范围内。**撒谎 = UB**（C 后端无兜底）。
-- **可认领 vs `foreign` 不可认领**：`foreign` 的谎言在每个使用点炸（布局），所以不让用户认领；`sendable` 的谎言集中在一个声明点、审阅可见、命名带警戒色——与 Rust `unsafe impl Send` 同形，可认领。`unsafe` 只出现在类型修饰符位，**不是** unsafe 块/函数体系，不引入第二个概念。
+- **可认领 vs `foreign` 不可认领**：`foreign` 的谎言在每个使用点炸（布局），所以不让用户认领；`sendable` 的谎言集中在一个声明点、审阅可见、命名带警戒色——与 Rust `unsafe impl Send` 同形，可认领。`unsafe` 一词两处同源（2026-11-15 起）：类型修饰符位担保**线程安全**，操作位（`unsafe { }` 块、`let unsafe` 标记）担保**内存安全**（[`unsafe-design.md`](unsafe-design.md)）——同一个概念「此处安全责任由作者承担」的两个位，不是一个词两个含义。
 - **守信审计规则（2026-11-12）**：`unsafe sendable` 的承诺一旦写成「**跨线程共用**」（"wait/kill/cancel from another thread is idiomatic" 一类），实现就**必须自同步**——对普通字段的 check-then-act 是数据竞争，不因声明在 `unsafe` 上而免责。承诺写成「**交接不共用**」（File 的 "TRANSFER, not SHARE" 形态）才允许无锁。首轮全量审计（38 个声明）：30 个自同步守信；4 个违约已修——`Thread`（wait/detach 的 waited/detached 普通标志 → 原子状态认领）、`Timer`/`Ticker`（cancel 与 reset 竞争 ctx 释放的 C 级 UAF → 内部互斥）、`Process`（wait/管道句柄的 check-then-act → 内部互斥）；`Task` 补交接契约行。析构侧：全部 Drop 只在 RC 0 发生、不碰共享静态。
 
 ### RC 分流

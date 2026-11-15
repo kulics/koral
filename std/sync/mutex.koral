@@ -13,16 +13,16 @@ using "std" { ... };
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-let foreign __koral_mutex_create(): *UInt8;
-let foreign __koral_mutex_destroy(mutex: *UInt8): Void;
-let foreign __koral_mutex_lock(mutex: *UInt8): Void;
-let foreign __koral_mutex_try_lock(mutex: *UInt8): Int32;
-let foreign __koral_mutex_unlock(mutex: *UInt8): Void;
-let foreign __koral_condvar_create(): *UInt8;
-let foreign __koral_condvar_destroy(cv: *UInt8): Void;
-let foreign __koral_condvar_wait(cv: *UInt8, mutex: *UInt8): Void;
-let foreign __koral_condvar_signal(cv: *UInt8): Void;
-let foreign __koral_condvar_broadcast(cv: *UInt8): Void;
+let unsafe foreign __koral_mutex_create(): *UInt8;
+let unsafe foreign __koral_mutex_destroy(mutex: *UInt8): Void;
+let unsafe foreign __koral_mutex_lock(mutex: *UInt8): Void;
+let unsafe foreign __koral_mutex_try_lock(mutex: *UInt8): Int32;
+let unsafe foreign __koral_mutex_unlock(mutex: *UInt8): Void;
+let unsafe foreign __koral_condvar_create(): *UInt8;
+let unsafe foreign __koral_condvar_destroy(cv: *UInt8): Void;
+let unsafe foreign __koral_condvar_wait(cv: *UInt8, mutex: *UInt8): Void;
+let unsafe foreign __koral_condvar_signal(cv: *UInt8): Void;
+let unsafe foreign __koral_condvar_broadcast(cv: *UInt8): Void;
 
 /// A bare mutex lock that protects whatever shared data the caller guards between `lock` and `unlock`.
 /// Sendable contract: self-synchronized -- `lock`/`unlock` are the
@@ -32,33 +32,27 @@ public type unsafe sendable mutable Mutex(private handle: *UInt8);
 /// Implements `Drop`, destroying the underlying lock.
 given Mutex: Drop {
 
-    drop(self): Void = {
-        __koral_mutex_destroy(self.handle);
-    };
+    drop(self): Void = unsafe { __koral_mutex_destroy(self.handle) };
 };
 
 /// Locks and unlocks the mutex and creates its condition variables.
 given Mutex {
 
     /// 创建互斥锁
-    public new(): Mutex = Mutex(__koral_mutex_create());
+    public new(): Mutex = Mutex(unsafe { __koral_mutex_create() });
 
     /// 获取锁（阻塞直到成功）
     /// 锁不可重入：已持有锁的线程再次调用 lock() 会死锁（底层是非递归锁）
-    public lock(self): Void = {
-        __koral_mutex_lock(self.handle);
-    };
+    public lock(self): Void = unsafe { __koral_mutex_lock(self.handle) };
 
     /// 尝试获取锁（非阻塞），成功返回 true，锁被占用返回 false
-    public try_lock(self): Bool = __koral_mutex_try_lock(self.handle) == 1;
+    public try_lock(self): Bool = unsafe { __koral_mutex_try_lock(self.handle) == 1 };
 
     /// 释放锁
-    public unlock(self): Void = {
-        __koral_mutex_unlock(self.handle);
-    };
+    public unlock(self): Void = unsafe { __koral_mutex_unlock(self.handle) };
 
     /// 创建绑定到此互斥锁的条件变量
-    public condvar(self): MutexCondvar = MutexCondvar(__koral_condvar_create(), self);
+    public condvar(self): MutexCondvar = MutexCondvar(unsafe { __koral_condvar_create() }, self);
 };
 
 // ============================================================================
@@ -71,9 +65,7 @@ public type unsafe sendable mutable MutexCondvar(private handle: *UInt8, private
 /// Implements `Drop`, destroying the underlying condition variable.
 given MutexCondvar: Drop {
 
-    drop(self): Void = {
-        __koral_condvar_destroy(self.handle);
-    };
+    drop(self): Void = unsafe { __koral_condvar_destroy(self.handle) };
 };
 
 /// Waits for and sends notifications while holding the bound mutex.
@@ -83,17 +75,12 @@ given MutexCondvar {
     /// 调用前必须持有绑定的 Mutex，否则行为未定义
     /// 返回前重新获取的仍是同一把非递归锁：等待期间不要再以其它途径持有它
     /// 注意：必须在 while 循环中检查条件谓词（防止虚假唤醒）
-    public wait(self): Void = {
-        __koral_condvar_wait(self.handle, self.mutex.handle);
-    };
+    public wait(self): Void =
+        unsafe { __koral_condvar_wait(self.handle, self.mutex.handle) };
 
     /// 唤醒一个等待中的线程
-    public notify(self): Void = {
-        __koral_condvar_signal(self.handle);
-    };
+    public notify(self): Void = unsafe { __koral_condvar_signal(self.handle) };
 
     /// 唤醒所有等待中的线程
-    public notify_all(self): Void = {
-        __koral_condvar_broadcast(self.handle);
-    };
+    public notify_all(self): Void = unsafe { __koral_condvar_broadcast(self.handle) };
 };

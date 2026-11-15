@@ -55,7 +55,8 @@ extension TypeChecker {
          .orReturnExpression,
          .flowReceiver,
          .flowChainExpression,
-         .flowBindExpression:
+         .flowBindExpression,
+         .unsafeExpression:
       return false
     case .castExpression(_, let inner, _),
          .upgradeExpr(let inner, _),
@@ -589,6 +590,8 @@ extension TypeChecker {
             let offsetExpr: TypedExpressionNode = .arithmeticExpression(
               left: ptrExpr, op: .plus, right: index, type: baseStructType, span: span)
               let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
+            // §C A2: pointer indexing does not check bounds (unlike `[N]T`).
+            try requireUnsafeOperation(at: span, UnsafeMessages.pointerSubscript)
 
             var typedRhs = try inferTypedExpression(value)
             typedRhs = try coerceLiteral(typedRhs, to: element)
@@ -818,6 +821,8 @@ extension TypeChecker {
           let offsetExpr: TypedExpressionNode = .arithmeticExpression(
             left: ptrExpr, op: .plus, right: index, type: baseStructType, span: span)
           let derefTarget: TypedExpressionNode = .unsafeDerefExpression(expression: offsetExpr, type: element)
+          // §C A2: pointer indexing does not check bounds (unlike `[N]T`).
+          try requireUnsafeOperation(at: span, UnsafeMessages.pointerSubscript)
 
           var typedValue = try inferTypedExpression(value)
           typedValue = try coerceLiteral(typedValue, to: element)

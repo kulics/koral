@@ -202,9 +202,9 @@ let main(): Void = println("Hello, world!");
 
 ```koral
 #if os("windows") then {
-    let foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
+    let unsafe foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
 } else {
-    let foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
+    let unsafe foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
 };
 ```
 
@@ -3038,10 +3038,10 @@ list[1] = 99;
 let text = "abc";
 let b: UInt8 = text[1];
 
-let p: *mutable Int = alloc_memory[Int](2);
-p[0] = list[0];
-let first = p[0];
-dealloc_memory(p);
+let p: *mutable Int = unsafe { alloc_memory[Int](2) };
+unsafe { p[0] = list[0] };
+let first = unsafe { p[0] };
+unsafe { dealloc_memory(p) };
 ```
 
 ### 扩展方法
@@ -3385,7 +3385,7 @@ raw pointer 是面向 FFI 与系统编程的低层内存访问：
 let p: *Int = null;
 let m: *mutable Int = null;
 if p == null then { ... };
-if m != null then { *m = 42; };
+if m != null then { unsafe { *m = 42; } };
 ```
 
 `null` 也可以作为字面量模式匹配——`p is null`、`p is not null`，或 `when` 分支
@@ -3413,7 +3413,7 @@ type annotation`；期望类型不是指针时报 `Type mismatch: expected <T>, 
 `MyPtr(u)` 报 `Pointer and weak casts are written 'expr as Type', not 'Type(expr)'`，
 `UInt(p)` 报 `Pointer and integer casts are written 'expr as Type', not 'Type(expr)'`。
 
-### 不安全取址与解引用
+### 取址与解引用
 
 `&` / `&mutable` 是 raw 取址操作符。它们要求可取地址的存储；字面量和临时值会被拒绝。
 
@@ -3421,8 +3421,8 @@ type annotation`；期望类型不是指针时报 `Type mismatch: expected <T>, 
 let p: *Int = &value;
 let mp: *mutable UInt8 = &mutable bytes[0];
 
-let x = *p;       // raw 解引用读取
-*mp = 42;         // raw 解引用写入
+let x = unsafe { *p };       // raw 解引用读取
+unsafe { *mp = 42 };         // raw 解引用写入
 let q = &value as *Int;   // (&value) as *Int：as 覆盖整个前缀表达式
 
 // let bad = & 42  // error: raw 取址需要可取地址的存储
@@ -3430,10 +3430,85 @@ let q = &value as *Int;   // (&value) as *Int：as 覆盖整个前缀表达式
 
 规则：
 
-- `&` 产生 `*T`；`&mutable` 产生 `*mutable T`。
-- `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态。
+- `&` 产生 `*T`；`&mutable` 产生 `*mutable T`。制造指针是安全的——指针是惰性值，
+  直到某个操作透过它触碰内存。
+- `*expr` 读取与 `*expr = value` 写入是 raw 解引用形态，属于**不安全操作**
+  （见「`unsafe` 操作」一节）。
 - `as` 松于前缀算子：`&x as *T` 是 `(&x) as *T`，`*p as *Int` 是 `(*p) as *Int`。
 - raw pointer 不是「任意类型到 `*T`」的通用桥：标准库中交出 raw pointer 的辅助接口要求元素类型满足 `foreign` 形状约束（见「泛型约束」一节）。
+
+### `unsafe` 操作
+
+危险性由**操作**承担，不由类型拼写承担：`*T` 只是载体类型。触碰未检查内存、
+或调用不可查证契约的操作，需要 **`unsafe` 上下文**——`unsafe { … }` 块的词法范围：
+
+```koral
+let n = unsafe { base[3] };              // 单个操作
+let sum = unsafe {                        // 一个边界 = 一处安全推理
+    let mutable p = data + offset;
+    p[0] = p[0] + 1;
+    p[0]
+};
+```
+
+- 形态只有块形。块表达式的一切规则照旧：尾表达式是值、`;` 收尾、
+  `return` / `break` 穿透。
+- 上下文是**词法的**——写在块内的嵌套块、`when` 臂、lambda 体都在上下文里。
+  它不跨函数边界：定义在块外的函数体重新开始。
+
+需要上下文的操作：
+
+| 操作 | 拼写 |
+|---|---|
+| 裸指针解引用（读或写） | `*p`、`*p = v` |
+| 无边界检查的裸指针下标 | `p[i]`、`p[i] = v`（`[N]T` 不在其列——那有越界检查） |
+| 经裸指针的字段投影 | `p.f` |
+| 指针算术 | `p + n`、`p - n` |
+| 调用带 `unsafe` 标记的声明 | 见「`unsafe` 声明」 |
+| 调用 C 函数指针 | `(p)(args)` |
+| 访问带 `unsafe` 标记的外部全局量 | 见「`unsafe` 声明」 |
+
+制造与搬运指针值是安全的：`&x`、`null`、指针比较（`p == null`、`p is null`）
+与重解释强转（`as`）都不需要上下文——危险住在触碰内存的操作里。
+
+#### `unsafe` 声明
+
+声明用 `unsafe` 标记携带安全契约：
+
+```koral
+let unsafe first_byte(p: *UInt8): UInt8 = unsafe { *p };   // 自由函数
+let unsafe foreign strlen(p: *UInt8): UInt;                // 外部引用
+
+given Buffer {
+    unsafe slot_at(self, i: UInt): *mutable UInt8 = unsafe { self.data + i };  // 方法
+};
+
+trait Blob {
+    unsafe raw_bytes(self): *UInt8;                        // trait 需求
+};
+```
+
+- 标记紧跟 `let`（在 `foreign` / `intrinsic` 之前）；方法与 trait 需求的标记在
+  可见性之后、名字之前。变量不能带标记——只有函数与 foreign 声明携带契约。
+- 调用（或对全局量的访问）带标记的声明需要 `unsafe` 上下文。
+- **被标记函数的函数体不隐含上下文**——它自己的不安全操作照样要 `unsafe { … }`。
+  标记是调用方的契约；体内的块是作者自己的检查点。
+- trait 需求与实现方法必须带**相同**的标记。
+- 本版本中被标记的函数不能作值使用；先包一层安全函数。
+- 标记是契约声明，不是验证。把前置条件写进声明上方的文档注释——那份注释就是契约。
+
+#### 外部声明与安全位
+
+对无体 `let foreign`（C 引用），标记是绑定作者的显式判断——C 契约无法写进签名：
+
+- `let unsafe foreign f(…)` —— 不安全可调；调用方需要上下文。
+- `let foreign f(…)` —— 断言对这些类型的任意取值都可安全调用。
+- 签名携带裸指针或 C 函数指针的 foreign 声明**必须**标 `unsafe`；安全断言只对
+  编译器看得见「无指针」的签名开放。
+- 带体（C ABI 导出）或带值（宏常量、C 变量定义）的声明是 Koral 实体：导出像
+  普通函数一样按标记走，宏常量不带标记。
+
+经 `foreign (A) -> R` 的函数指针调用一律需要上下文：裸 C 指针带不了可查证的契约。
 
 ### 外部函数接口
 
@@ -3457,7 +3532,8 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 > `type foreign`、`type intrinsic`、`given intrinsic`——也就是 `type mutable` 与
 > `let mutable` 已经占住的那个位置。访问修饰符是唯一的**前缀**修饰符：它们说的是
 > 「谁看得见这个声明」，不是「声明的是个什么东西」。两者互斥，且排在 `mutable` 之前
-> （`mutable` 描述绑定）：`let foreign mutable errno: Int32;`。
+> （`mutable` 描述绑定）：`let foreign mutable errno: Int32;`。`unsafe` 标记在
+> 关键字与限定词之间——`let unsafe foreign f(…)`（见「`unsafe` 声明」一节）。
 
 #### Foreign 函数
 
@@ -3466,7 +3542,7 @@ Koral 通过 `foreign` 关键字支持与 C 互操作。
 
 ```koral
 let foreign sin(x: Float64): Float64;                    // 引用：链接 C 的 sin
-let foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // 引用 + C 名
+let unsafe foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // 引用 + C 名
 let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
     return x + Int32(1);
 };
@@ -3487,7 +3563,7 @@ let foreign add_one(x: Int32): Int32 = {                 // 定义：导出给 C
 
 ```koral
 let foreign mutable errno: Int32;            // 引用：extern 可变量
-let foreign stdin: *CFile;                   // 引用：裸 `extern`（Koral 侧可变性是语言层检查，不写 `const`）
+let unsafe foreign stdin: *CFile;                   // 引用：裸 `extern`（Koral 侧可变性是语言层检查，不写 `const`）
 let foreign mutable counter: Int32 = 0;      // 定义：C 变量（静态初始化器）
 let foreign "AF_INET6" af_inet6: Int32 = 10; // 宏常量：值绑定，无存储、无符号
 ```
@@ -3606,7 +3682,10 @@ let main(): Int = {
 type intrinsic Int;
 ```
 
-intrinsic 保留给标准库使用。
+intrinsic 保留给标准库使用。raw 内存内在族（`alloc_memory`、`dealloc_memory`、
+`copy_memory`、`move_memory`、`compare_memory`、`init_memory`、`deinit_memory`、
+`take_memory`）声明为 `let unsafe intrinsic`——调用它们与其它不安全操作一样需要
+`unsafe` 上下文（见「`unsafe` 操作」一节）。
 
 ## 附录：标准库最小常用示例
 

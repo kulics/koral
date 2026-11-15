@@ -296,24 +296,26 @@ public class NameCollector: CompilerPass {
                 sendability: sendability
             )
             
-        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span, let nameSpan):
+        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let isUnsafe, let span, let nameSpan):
             try collectFunctionDeclaration(
                 name: name,
                 typeParameters: typeParameters,
                 parameters: parameters,
                 returnType: returnType,
                 access: access,
+                isUnsafe: isUnsafe,
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, let cname, let access, let span, let nameSpan):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, let cname, let access, let isUnsafe, let span, let nameSpan):
             try collectFunctionDeclaration(
                 name: name,
                 typeParameters: [],
                 parameters: parameters,
                 returnType: returnType,
                 access: access,
+                isUnsafe: isUnsafe,
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib,
@@ -366,21 +368,23 @@ public class NameCollector: CompilerPass {
                 sendability: sendability
             )
 
-        case .foreignLetDeclaration(let name, _, _, _, let cname, let access, let span, let nameSpan):
+        case .foreignLetDeclaration(let name, _, _, _, let cname, let access, let isUnsafe, let span, let nameSpan):
             try collectVariableDeclaration(
                 name: name,
                 access: access,
+                isUnsafe: isUnsafe,
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib,
                 cname: cname
             )
-            
-        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, let access, let span, let nameSpan):
+
+        case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, let access, let isUnsafe, let span, let nameSpan):
             try collectIntrinsicFunctionDeclaration(
                 name: name,
                 typeParameters: typeParameters,
                 access: access,
+                isUnsafe: isUnsafe,
                 span: span,
                 nameSpan: nameSpan,
                 isStdLib: isStdLib
@@ -627,6 +631,7 @@ public class NameCollector: CompilerPass {
         parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
         returnType: TypeNode,
         access: AccessModifier,
+        isUnsafe: Bool = false,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool,
         cname: String? = nil
@@ -651,6 +656,9 @@ public class NameCollector: CompilerPass {
         )
         if let cname {
             defIdMap.setDeclaredCname(defId, cname)
+        }
+        if isUnsafe {
+            defIdMap.recordUnsafeDef(defId)
         }
 
         // 收集函数信息
@@ -678,6 +686,7 @@ public class NameCollector: CompilerPass {
     private func collectVariableDeclaration(
         name: String,
         access: AccessModifier,
+        isUnsafe: Bool = false,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool,
         cname: String? = nil
@@ -694,6 +703,9 @@ public class NameCollector: CompilerPass {
         )
         if let cname {
             defIdMap.setDeclaredCname(defId, cname)
+        }
+        if isUnsafe {
+            defIdMap.recordUnsafeDef(defId)
         }
     }
     
@@ -911,6 +923,7 @@ public class NameCollector: CompilerPass {
         name: String,
         typeParameters: [TypeParameterDecl],
         access: AccessModifier,
+        isUnsafe: Bool = false,
         span: SourceSpan, nameSpan: SourceSpan,
         isStdLib: Bool
     ) throws {
@@ -937,6 +950,10 @@ public class NameCollector: CompilerPass {
             packageID: currentPackageID,
             span: span
         )
+        if isUnsafe {
+            defIdMap.recordUnsafeDef(defId)
+            defIdMap.recordUnsafeIntrinsicName(name)
+        }
 
         // 收集函数信息
         let qualifiedName = currentModulePath.isEmpty ? name : "\(currentModulePath.joined(separator: ".")).\(name)"

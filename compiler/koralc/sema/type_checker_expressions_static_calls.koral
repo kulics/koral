@@ -1374,6 +1374,9 @@ given TypeChecker {
                 },
                 .DerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                    if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                        self.require_unsafe_operation(a, unsafe_deref_message);
+                    };
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
                         or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
@@ -1384,6 +1387,9 @@ given TypeChecker {
                 },
                 .UnsafeDerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                    if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                        self.require_unsafe_operation(a, unsafe_deref_message);
+                    };
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
                         or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
@@ -1597,6 +1603,13 @@ given TypeChecker {
                         method_name,
                         ret_type,
                     );
+                // 调用家族准入（unsafe-design.md §B1/B2）：静态调用的被调身份
+                // 即 method_symbol 的 DefId（直查命中与顺延物化同一把尺）。
+                self.require_unsafe_for_call_at(
+                    method_symbol.def_id,
+                    method_name,
+                    type_name_span,
+                );
                 return make_typed_expr(
                     TypedExprKind.StaticMethodCall(
                         receiver_type,
@@ -1667,6 +1680,8 @@ given TypeChecker {
         };
         when static_sig_opt in {
             .Some(sig) then {
+                // 调用家族准入（unsafe-design.md §B1/B2）。
+                self.require_unsafe_for_call_at(sig.def_id, method_name, call_span);
                 let param_specs = self.context().get_param_specs(sig.def_id) or else self.positional_param_specs_for_count(
                     self.method_param_count(sig),
                 );
@@ -1748,6 +1763,15 @@ given TypeChecker {
 
         if intrinsic_name.is_empty() then {
             return Option[TypedExpr].None();
+        };
+
+        // unsafe 契约准入（unsafe-design.md §C1）：`let unsafe intrinsic` 的调用
+        // 需要 unsafe 上下文；派发按名，标记登记同键。
+        if self.context().is_unsafe_intrinsic_name(intrinsic_name) then {
+            self.require_unsafe_operation(
+                callee,
+                "Cannot call unsafe function '\(intrinsic_name)' outside an 'unsafe' block: the declaration is marked 'unsafe'.",
+            );
         };
 
         // Visibility gate: a non-public intrinsic's declaration does not
@@ -2695,7 +2719,18 @@ given TypeChecker {
                 };
                 lowered
             },
-            _ then self.check_expr_scoped_ref(arg, .Some(target_type), scope),
+            _ then when arg in {
+                // 转换的目标类型对实参是「提示」不是「要求」：块尾对期望型做
+                // 严格适配（`let x: Int = { b };` 报错是共有语义），把提示推进
+                // 块尾就变成要求——`Int({ b })` / `Int(unsafe { b })` 误报。
+                // 块形实参按自然类型检查，转换随后照常进行（与种子一致）。
+                .Block(_, _, _) or .UnsafeExpr(_, _) then self.check_expr_scoped_ref(
+                    arg,
+                    .None(),
+                    scope,
+                ),
+                _ then self.check_expr_scoped_ref(arg, .Some(target_type), scope),
+            },
         };
         // A managed-reference source is its pointee here, the same
         // auto-dereference the `as` rows do. The rows see the dereferenced
@@ -3382,6 +3417,13 @@ given TypeChecker {
                                                     when method_sym_opt in {
                                                         .Some(method_sym) then {
                                                             let sym_type = method_sym.symbol_type;
+                                                            // 调用家族准入（unsafe-design.md §B1）：元素槽方法调用走此
+                                                            // 提前返回，不经主闸，就地把关。
+                                                            self.require_unsafe_for_call_at(
+                                                                method_sym.def_id,
+                                                                member_name,
+                                                                expr_span(callee),
+                                                            );
                                                             let typed_method_ref = make_typed_expr(
                                                                 TypedExprKind.MethodReference(
                                                                     ref_result,
@@ -3470,6 +3512,13 @@ given TypeChecker {
                                                     when method_sym_opt in {
                                                         .Some(method_sym) then {
                                                             let sym_type = method_sym.symbol_type;
+                                                            // 调用家族准入（unsafe-design.md §B1）：元素槽方法调用走此
+                                                            // 提前返回，不经主闸，就地把关。
+                                                            self.require_unsafe_for_call_at(
+                                                                method_sym.def_id,
+                                                                member_name,
+                                                                expr_span(callee),
+                                                            );
                                                             let typed_method_ref = make_typed_expr(
                                                                 TypedExprKind.MethodReference(
                                                                     ref_result,
@@ -3537,6 +3586,9 @@ given TypeChecker {
         };
 
         let typed_callee = self.typed_generic_function_callee_for_call(callee) or else self.check_call_callee_expr_ref(callee, scope);
+        // 调用家族准入（unsafe-design.md §B1/B2/B3）：直接调用 / 泛型调用 /
+        // 方法调用 / trait 派发 / C 函数指针调用的被调身份都在 typed_callee 上。
+        self.gate_unsafe_call_callee(callee, typed_callee);
         when callee in {
             .MemberPath(_, path, _) then {
                 if not path.is_empty() and path[path.count() - 1] == "drop" then {
@@ -3893,6 +3945,9 @@ given TypeChecker {
                 ),
                 .DerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                    if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                        self.require_unsafe_operation(a, unsafe_deref_message);
+                    };
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
                         or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
@@ -3903,6 +3958,9 @@ given TypeChecker {
                 },
                 .UnsafeDerefExpr(inner, _) then {
                     let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                    if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                        self.require_unsafe_operation(a, unsafe_deref_message);
+                    };
                     let inner_t = when typed_inner.expr_type in {
                         .ReferenceType(inner_ref) or .MutableReferenceType(inner_ref)
                         or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)

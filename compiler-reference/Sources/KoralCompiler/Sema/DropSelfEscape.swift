@@ -147,6 +147,9 @@ private func dropSelfEscapeSpanIn(_ expr: ExpressionNode, inLambda: Bool) -> Sou
     }
     return nil
 
+  case .unsafeExpression(let block, _):
+    return dropSelfEscapeSpanIn(block, inLambda: inLambda)
+
   case .subscriptExpression(let base, let arguments, _):
     if let span = dropSelfEscapeSpanIn(base, inLambda: inLambda) {
       return span

@@ -26,7 +26,7 @@ private let set_tag_ptr[T: Any](
 private let set_set_tag[T: Any](
     slot_ptr: *mutable ConcurrentSetSlot[T],
     tag: UInt,
-): Void = {
+): Void = unsafe {
     let tag_ptr = set_tag_ptr(slot_ptr);
     *tag_ptr = tag;
 };
@@ -49,31 +49,33 @@ private let set_find_slot[T: Hash](
     let mutable idx = Int(h & UInt(mask));
     let mutable first_deleted = Option[Int].None();
     let mutable probes = 0;
-    while probes < capacity then {
-        let slot_tag = (slots + idx).tag;
-        if slot_tag == UInt(0) then {
-            when first_deleted in {
-                .Some(_) then {
-                    return first_deleted;
-                },
-                .None() then {
+    unsafe {
+        while probes < capacity then {
+            let slot_tag = (slots + idx).tag;
+            if slot_tag == UInt(0) then {
+                when first_deleted in {
+                    .Some(_) then {
+                        return first_deleted;
+                    },
+                    .None() then {
+                        return Option[Int].Some(idx);
+                    },
+                };
+            } else if slot_tag == UInt(2) then {
+                when first_deleted in {
+                    .None() then {
+                        first_deleted = Option[Int].Some(idx);
+                    },
+                    _ then {},
+                };
+            } else {
+                if (slots + idx).key == key then {
                     return Option[Int].Some(idx);
-                },
+                };
             };
-        } else if slot_tag == UInt(2) then {
-            when first_deleted in {
-                .None() then {
-                    first_deleted = Option[Int].Some(idx);
-                },
-                _ then {},
-            };
-        } else {
-            if (slots + idx).key == key then {
-                return Option[Int].Some(idx);
-            };
+            idx = (idx + 1) & mask;
+            probes += 1;
         };
-        idx = (idx + 1) & mask;
-        probes += 1;
     };
     return first_deleted;
 };
@@ -92,7 +94,7 @@ public type unsafe sendable mutable ConcurrentSet[T: Hash and sendable](
 /// members die here -- outside every lock.
 given[T: Hash and sendable] ConcurrentSet[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.capacity then {
             if (self.slots + i).tag == UInt(1) then {
                 deinit_memory(self.slots + i);
@@ -121,26 +123,28 @@ given[T: Hash and sendable] ConcurrentSet[T] {
         while self.size * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
-        let new_slots = alloc_memory[ConcurrentSetSlot[T]](UInt(new_cap));
+        let new_slots = unsafe { alloc_memory[ConcurrentSetSlot[T]](UInt(new_cap)) };
         for i in 0..<new_cap then {
-            set_set_tag(new_slots + i, UInt(0));
+            unsafe { set_set_tag(new_slots + i, UInt(0)) };
         };
         self.slots = new_slots;
         self.capacity = new_cap;
         self.size = 0;
         self.deleted = 0;
-        for i in 0..<old_capacity then {
-            if (old_slots + i).tag == UInt(1) then {
-                let moved = take_memory(old_slots + i);
-                let idx = when set_find_slot(new_slots, new_cap, moved.key) in {
-                    .Some(j) then j,
-                    .None() then { panic("ConcurrentSet rehash failed"); },
+        unsafe {
+            for i in 0..<old_capacity then {
+                if (old_slots + i).tag == UInt(1) then {
+                    let moved = take_memory(old_slots + i);
+                    let idx = when set_find_slot(new_slots, new_cap, moved.key) in {
+                        .Some(j) then j,
+                        .None() then { panic("ConcurrentSet rehash failed"); },
+                    };
+                    init_memory(new_slots + idx, moved);
+                    self.size = self.size + 1;
                 };
-                init_memory(new_slots + idx, moved);
-                self.size = self.size + 1;
             };
+            dealloc_memory(old_slots);
         };
-        dealloc_memory(old_slots);
     };
 
     // The growth trigger shared by the insert paths.
@@ -170,7 +174,7 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     public contains(self, value: T): Bool = {
         self.rw_lock.lock_shared();
         let out = when set_find_slot(self.slots, self.capacity, value) in {
-            .Some(idx) then (self.slots + idx).tag == UInt(1),
+            .Some(idx) then unsafe { (self.slots + idx).tag == UInt(1) },
             .None() then false,
         };
         self.rw_lock.unlock_shared();
@@ -186,13 +190,15 @@ given[T: Hash and sendable] ConcurrentSet[T] {
             .Some(i) then i,
             .None() then { panic("ConcurrentSet insert failed"); },
         };
-        let slot_ptr = self.slots + final_idx;
-        if slot_ptr.tag != UInt(1) then {
-            if slot_ptr.tag == UInt(2) then {
-                self.deleted = self.deleted - 1;
+        unsafe {
+            let slot_ptr = self.slots + final_idx;
+            if slot_ptr.tag != UInt(1) then {
+                if slot_ptr.tag == UInt(2) then {
+                    self.deleted = self.deleted - 1;
+                };
+                self.size = self.size + 1;
+                init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
             };
-            self.size = self.size + 1;
-            init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
         };
         self.rw_lock.unlock();
     };
@@ -207,16 +213,18 @@ given[T: Hash and sendable] ConcurrentSet[T] {
             .Some(i) then i,
             .None() then { panic("ConcurrentSet try_insert failed"); },
         };
-        let slot_ptr = self.slots + final_idx;
-        if slot_ptr.tag == UInt(1) then {
-            self.rw_lock.unlock();
-            return false;
+        unsafe {
+            let slot_ptr = self.slots + final_idx;
+            if slot_ptr.tag == UInt(1) then {
+                self.rw_lock.unlock();
+                return false;
+            };
+            if slot_ptr.tag == UInt(2) then {
+                self.deleted = self.deleted - 1;
+            };
+            self.size = self.size + 1;
+            init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
         };
-        if slot_ptr.tag == UInt(2) then {
-            self.deleted = self.deleted - 1;
-        };
-        self.size = self.size + 1;
-        init_memory(slot_ptr, ConcurrentSetSlot[T](UInt(1), value));
         self.rw_lock.unlock();
         return true;
     };
@@ -228,12 +236,14 @@ given[T: Hash and sendable] ConcurrentSet[T] {
         let mutable dead_member = Option[ConcurrentSetSlot[T]].None();
         when set_find_slot(self.slots, self.capacity, value) in {
             .Some(idx) then {
-                let slot_ptr = self.slots + idx;
-                if slot_ptr.tag == UInt(1) then {
-                    dead_member = Option[ConcurrentSetSlot[T]].Some(take_memory(slot_ptr));
-                    set_set_tag(slot_ptr, UInt(2));
-                    self.size = self.size - 1;
-                    self.deleted = self.deleted + 1;
+                unsafe {
+                    let slot_ptr = self.slots + idx;
+                    if slot_ptr.tag == UInt(1) then {
+                        dead_member = Option[ConcurrentSetSlot[T]].Some(take_memory(slot_ptr));
+                        set_set_tag(slot_ptr, UInt(2));
+                        self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
+                    };
                 };
             },
             .None() then {},
@@ -250,13 +260,15 @@ given[T: Hash and sendable] ConcurrentSet[T] {
         let mutable dead_member = Option[ConcurrentSetSlot[T]].None();
         when set_find_slot(self.slots, self.capacity, value) in {
             .Some(idx) then {
-                let slot_ptr = self.slots + idx;
-                if slot_ptr.tag == UInt(1) then {
-                    existed = true;
-                    dead_member = Option[ConcurrentSetSlot[T]].Some(take_memory(slot_ptr));
-                    set_set_tag(slot_ptr, UInt(2));
-                    self.size = self.size - 1;
-                    self.deleted = self.deleted + 1;
+                unsafe {
+                    let slot_ptr = self.slots + idx;
+                    if slot_ptr.tag == UInt(1) then {
+                        existed = true;
+                        dead_member = Option[ConcurrentSetSlot[T]].Some(take_memory(slot_ptr));
+                        set_set_tag(slot_ptr, UInt(2));
+                        self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
+                    };
                 };
             },
             .None() then {},
@@ -271,13 +283,15 @@ given[T: Hash and sendable] ConcurrentSet[T] {
     public to_frozen_set(self): FrozenSet[T] = {
         self.rw_lock.lock_shared();
         let len = self.size;
-        let keys = alloc_memory[T](UInt(len));
+        let keys = unsafe { alloc_memory[T](UInt(len)) };
         let mutable j = 0;
-        for i in 0..<self.capacity then {
-            let slot_ptr = self.slots + i;
-            if slot_ptr.tag == UInt(1) then {
-                init_memory(keys + j, slot_ptr.key);
-                j = j + 1;
+        unsafe {
+            for i in 0..<self.capacity then {
+                let slot_ptr = self.slots + i;
+                if slot_ptr.tag == UInt(1) then {
+                    init_memory(keys + j, slot_ptr.key);
+                    j = j + 1;
+                };
             };
         };
         self.rw_lock.unlock_shared();
@@ -295,11 +309,13 @@ given[T: Hash and sendable] ConcurrentSet[T] {
         self.size = 0;
         self.deleted = 0;
         self.rw_lock.unlock();
-        for i in 0..<old_capacity then {
-            if (old_slots + i).tag == UInt(1) then {
-                deinit_memory(old_slots + i);
+        unsafe {
+            for i in 0..<old_capacity then {
+                if (old_slots + i).tag == UInt(1) then {
+                    deinit_memory(old_slots + i);
+                };
             };
+            dealloc_memory(old_slots);
         };
-        dealloc_memory(old_slots);
     };
 };

@@ -506,7 +506,7 @@ given NameCollector {
                     Type.TraitObject(def_id, trait_type_args, false),
                 );
             },
-            .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
+            .FunctionDecl(access, is_unsafe, name, type_params, params, return_type, body, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -526,10 +526,13 @@ given NameCollector {
                     access,
                     span,
                 );
+                if is_unsafe then {
+                    context.record_unsafe_def(def_id);
+                };
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
-            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
+            .IntrinsicFunctionDecl(access, is_unsafe, name, type_params, params, return_type, span, name_span) then {
                 if self.reject_intrinsic_outside_std(span) then {
                     return;
                 };
@@ -550,10 +553,14 @@ given NameCollector {
                     access,
                     span,
                 );
+                if is_unsafe then {
+                    context.record_unsafe_def(def_id);
+                    context.record_unsafe_intrinsic_name(name);
+                };
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
-            .ForeignFunctionDecl(access, name, params, return_type, body, cname, span, name_span) then {
+            .ForeignFunctionDecl(access, is_unsafe, name, params, return_type, body, cname, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -575,6 +582,9 @@ given NameCollector {
                 if cname is .Some(c) then {
                     context.set_declared_cname(def_id, c);
                 };
+                if is_unsafe then {
+                    context.record_unsafe_def(def_id);
+                };
                 let sym = Symbol(def_id, Type.Unknown(), SymbolKind.Function());
                 self.global_scope.define(self.context, sym);
             },
@@ -589,7 +599,7 @@ given NameCollector {
                 let sym = self.make_var_symbol(name, is_mutable, access, span);
                 self.global_scope.define(self.context, sym);
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, initializer, cname, span, name_span) then {
+            .ForeignLetDecl(access, is_unsafe, name, is_mutable, type_name, initializer, cname, span, name_span) then {
                 if self.has_conflicting_top_level_name(name, access, name_span) then {
                     self.push_name_diagnostic(
                         self.duplicate_definition_message(name),
@@ -603,6 +613,9 @@ given NameCollector {
                 if cname is .Some(c) then {
                     let mutable context = self.context;
                     context.set_declared_cname(sym.def_id, c);
+                };
+                if is_unsafe then {
+                    self.context.record_unsafe_def(sym.def_id);
                 };
                 self.global_scope.define(self.context, sym);
             },

@@ -35,6 +35,13 @@ public type mutable CompilerContext(
     mutable nominal_deps_memo: Dict[UInt, List[DefId]],
     mutable nominal_deps_in_type_memo: Dict[Type, List[DefId]],
     mutable nominal_reach_memo: Dict[UInt, Set[UInt]],
+
+    // `unsafe` 标记登记（docs/design/unsafe-design.md §B）：声明处登记，调用 /
+    // 访问点按 DefId 判。缺席 = 无标记（安全）。
+    mutable unsafe_defs: Set[UInt],
+    // intrinsic 的派发按名（check_intrinsic_call_ref 的既有形状），标记登记同
+    // 键一份——派发只对 std 声明生效，名字即那个声明的裁决。
+    mutable unsafe_intrinsic_names: Set[String],
 );
 
 public type ConcreteExprSource(
@@ -58,6 +65,8 @@ given CompilerContext {
             Dict[UInt, List[DefId]].new(),
             Dict[Type, List[DefId]].new(),
             Dict[UInt, Set[UInt]].new(),
+            Set[UInt].new(),
+            Set[String].new(),
         );
     };
 
@@ -74,7 +83,38 @@ given CompilerContext {
             Dict[UInt, List[DefId]].new(),
             Dict[Type, List[DefId]].new(),
             Dict[UInt, Set[UInt]].new(),
+            Set[UInt].new(),
+            Set[String].new(),
         );
+    };
+
+    /// `unsafe` 标记登记（docs/design/unsafe-design.md §B）。
+    public record_unsafe_def(self, def_id: DefId): Void = {
+        self.unsafe_defs.insert(def_id.id);
+    };
+
+    /// intrinsic 名字的 `unsafe` 标记登记（派发按名，见字段注释）。
+    public record_unsafe_intrinsic_name(self, name: String): Void = {
+        self.unsafe_intrinsic_names.insert(name);
+    };
+
+    public is_unsafe_intrinsic_name(self, name: String): Bool = {
+        return self.unsafe_intrinsic_names.contains(name);
+    };
+
+    /// 这个声明身份带 `unsafe` 标记吗？缺席 = 无标记。物化别名沿
+    /// `record_original_def_id` 链回溯到源声明再判。
+    public def_is_unsafe(self, def_id: DefId): Bool = {
+        if self.unsafe_defs.contains(def_id.id) then {
+            return true;
+        };
+        return when self.get_original_def_id(def_id) in {
+            .Some(original) then {
+                if original == def_id then false
+                else self.def_is_unsafe(original)
+            },
+            .None() then false,
+        };
     };
 
     public register_method_param_specs(

@@ -19,7 +19,7 @@ given TcpListener: Drop {
     /// Automatically close the socket when TcpListener is dropped.
     drop(self): Void = {
         if self.fd_raw >= 0 then {
-            __koral_socket_close(self.fd_raw);
+            unsafe { __koral_socket_close(self.fd_raw) };
         };
     };
 };
@@ -57,37 +57,42 @@ given TcpListener {
 
         // Set SO_REUSEADDR: level=SOL_SOCKET(1 ), optname=SO_REUSEADDR(2 )
         // Value is a 4-byte integer with value 1
-        let opt_buf = alloc_memory[UInt8](4);
-        defer dealloc_memory(opt_buf);
-        init_memory(opt_buf + 0, UInt8(1));
-        init_memory(opt_buf + 1, UInt8(0));
-        init_memory(opt_buf + 2, UInt8(0));
-        init_memory(opt_buf + 3, UInt8(0));
-        let setsock_result = __koral_socket_setsockopt(
-            fd,
-            sol_socket,
-            so_reuseaddr,
-            opt_buf,
-            UInt32(4),
-        );
+        let opt_buf = unsafe { alloc_memory[UInt8](4) };
+        defer unsafe { dealloc_memory(opt_buf) };
+        unsafe {
+            init_memory(opt_buf + 0, UInt8(1));
+            init_memory(opt_buf + 1, UInt8(0));
+            init_memory(opt_buf + 2, UInt8(0));
+            init_memory(opt_buf + 3, UInt8(0));
+        };
+        let setsock_result = unsafe {
+            __koral_socket_setsockopt(
+                fd,
+                sol_socket,
+                so_reuseaddr,
+                opt_buf,
+                UInt32(4),
+            )
+        };
         if setsock_result != 0 then {
-            __koral_socket_close(fd);
+            unsafe { __koral_socket_close(fd) };
             return Result[TcpListener].Error(last_error_message());
         };
 
         // Bind to address
         let addr_bytes = addr.to_sockaddr_bytes();
         let addr_len = UInt32(addr_bytes.count());
-        let bind_result = __koral_socket_bind(fd, addr_bytes.borrow_ptr(), addr_len);
+        let bind_result =
+            unsafe { __koral_socket_bind(fd, addr_bytes.borrow_ptr(), addr_len) };
         if bind_result != 0 then {
-            __koral_socket_close(fd);
+            unsafe { __koral_socket_close(fd) };
             return Result[TcpListener].Error(last_error_message());
         };
 
         // Listen with backlog=128
-        let listen_result = __koral_socket_listen(fd, Int32(128));
+        let listen_result = unsafe { __koral_socket_listen(fd, Int32(128)) };
         if listen_result != 0 then {
-            __koral_socket_close(fd);
+            unsafe { __koral_socket_close(fd) };
             return Result[TcpListener].Error(last_error_message());
         };
 
@@ -98,14 +103,16 @@ given TcpListener {
     /// Returns a Pair of (TcpSocket, SocketAddr) on success.
     public accept(self): Result[Pair[TcpSocket, SocketAddr]] = {
         // Allocate a 128-byte buffer for the peer address
-        let addr_buf = alloc_memory[UInt8](128);
-        defer dealloc_memory(addr_buf);
-        for i in 0..<128 then {
-            init_memory(addr_buf + i, UInt8(0));
+        let addr_buf = unsafe { alloc_memory[UInt8](128) };
+        defer unsafe { dealloc_memory(addr_buf) };
+        unsafe {
+            for i in 0..<128 then {
+                init_memory(addr_buf + i, UInt8(0));
+            };
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let new_fd = __koral_socket_accept(self.fd_raw, addr_buf, &addr_len);
+        let new_fd = unsafe { __koral_socket_accept(self.fd_raw, addr_buf, &addr_len) };
         if new_fd < 0 then {
             return Result[Pair[TcpSocket, SocketAddr]].Error(last_error_message());
         };
@@ -114,13 +121,13 @@ given TcpListener {
         let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
-            addr_list.push(addr_buf[j]);
+            addr_list.push(unsafe { addr_buf[j] });
         };
 
         let sa_result = SocketAddr.from_sockaddr_bytes(addr_list);
         when sa_result in {
             .Error(e) then {
-                __koral_socket_close(new_fd);
+                unsafe { __koral_socket_close(new_fd) };
                 return Result[Pair[TcpSocket, SocketAddr]].Error(e);
             },
             .Ok(peer_addr) then {
@@ -134,14 +141,17 @@ given TcpListener {
 
     /// Get the local address this listener is bound to.
     public local_addr(self): Result[SocketAddr] = {
-        let addr_buf = alloc_memory[UInt8](128);
-        defer dealloc_memory(addr_buf);
-        for i in 0..<128 then {
-            init_memory(addr_buf + i, UInt8(0));
+        let addr_buf = unsafe { alloc_memory[UInt8](128) };
+        defer unsafe { dealloc_memory(addr_buf) };
+        unsafe {
+            for i in 0..<128 then {
+                init_memory(addr_buf + i, UInt8(0));
+            };
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let result = __koral_socket_getsockname(self.fd_raw, addr_buf, &addr_len);
+        let result =
+            unsafe { __koral_socket_getsockname(self.fd_raw, addr_buf, &addr_len) };
         if result != 0 then {
             return Result[SocketAddr].Error(last_error_message());
         };
@@ -150,7 +160,7 @@ given TcpListener {
         let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
-            addr_list.push(addr_buf[j]);
+            addr_list.push(unsafe { addr_buf[j] });
         };
 
         return SocketAddr.from_sockaddr_bytes(addr_list);

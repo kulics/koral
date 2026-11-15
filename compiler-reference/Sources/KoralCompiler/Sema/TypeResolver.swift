@@ -220,7 +220,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, let span, _):
+        case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let access, _, let span, _):
             try resolveFunctionSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -231,7 +231,7 @@ public class TypeResolver: CompilerPass {
                 defIdMap: defIdMap
             )
             
-        case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, let span, _):
+        case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, let span, _):
             try resolveIntrinsicFunctionSignature(
                 name: name,
                 typeParameters: typeParameters,
@@ -240,7 +240,7 @@ public class TypeResolver: CompilerPass {
                 span: span,
                 defIdMap: defIdMap
             )
-        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, let span, _):
+        case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, _, let span, _):
             try resolveFunctionSignature(
                 name: name,
                 typeParameters: [],
@@ -626,7 +626,7 @@ public class TypeResolver: CompilerPass {
         defIdMap: DefIdMap
     ) -> ResolvedModuleSymbol? {
         switch node {
-        case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, let access, _, _):
+        case .globalFunctionDeclaration(let name, let typeParameters, _, _, _, let access, _, _, _):
             // 跳过泛型函数
             if !typeParameters.isEmpty { return nil }
             
@@ -637,7 +637,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignFunctionDeclaration(let name, _, _, _, _, let access, _, _):
+        case .foreignFunctionDeclaration(let name, _, _, _, _, let access, _, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .function,
@@ -677,7 +677,7 @@ public class TypeResolver: CompilerPass {
                 modulePath: sourceInfo.modulePath,
                 sourceFile: sourceInfo.sourceFile
             )
-        case .foreignLetDeclaration(let name, _, _, _, _, let access, _, _):
+        case .foreignLetDeclaration(let name, _, _, _, _, let access, _, _, _):
             return ResolvedModuleSymbol(
                 name: name,
                 kind: .variable,

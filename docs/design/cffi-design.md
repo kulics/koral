@@ -319,8 +319,10 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
 - **注解 / 属性系统**——不为条件编译开 `@` 类别。
 - **C 宏的链接**——宏无符号实体，不存在「绑定宏」；只有宏常量的值绑定（B 节）。
 - **managed 类型跨界**（Koral `type`、闭包、托管引用）——按值或隔着指针都不行（A.1）。
-- **unsafe 块模型**——Koral 不设 `unsafe` 区块；危险性由类型拼写承担（`*T` 就是显式标记，
-  见 A.2），不另立第二种「不安全」表达。
+- **unsafe 块模型**（**2026-11-15 替换**）——旧规则「不设 `unsafe` 区块，危险性由类型拼写
+  承担」已按公理 7 替换：危险性由**操作**承担，`unsafe { }` 块与 `let unsafe` 标记把关
+  （[`unsafe-design.md`](unsafe-design.md)）；类型拼写（`*T`）只标载体。本条不再是非目标，
+  留在原位只为让找旧规则的人找到出口。
 
 ## 替代方案
 
@@ -331,7 +333,7 @@ let foreign "AF_INET6" af_inet6: Int32 = 10;
 |---|---|---|---|
 | 导入 / 导出 | `foreign func` 只导入 + `@C func` 导出（两个形态） | `extern "C" { }` 块 + `#[no_mangle]`（两处） | **一个 `let foreign`，体定方向**（B 节） |
 | 函数指针 | 泛型类型 `CFunc<(A) -> B>`，foreign / `@C` / 不捕获 lambda 三类可居 | `fn` 指针，非捕获闭包可强转 | `foreign (A) -> R`，居者见 A.5（不捕获 lambda 未定案，「风险与未决」2） |
-| 不安全表达 | `unsafe { }` 块包 foreign 调用 | `unsafe` 块 | 类型拼写（`*T`），无块 |
+| 不安全表达 | `unsafe { }` 块包 foreign 调用 | `unsafe` 块 | **同形**（2026-11-15）：`unsafe { }` 块 + `let unsafe` 标记（[`unsafe-design.md`](unsafe-design.md)） |
 | varargs | 支持（`...`） | 不支持 | 不支持，C shim 兜 |
 | 条件编译 | `@When[os == "Linux"]` 逐项标注 | `#[cfg(…)]` 逐项标注 | `#if` 块 + 分区（D 节） |
 

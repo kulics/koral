@@ -110,13 +110,21 @@
 // Let Declarations (Variables and Functions)
 // ============================================================================
 
-<let-decl> ::= "let" <identifier> <generic-params>? <function-signature> "=" <expression> ";"
+<let-decl> ::= "let" "unsafe"? <identifier> <generic-params>? <function-signature> "=" <expression> ";"
              | "let" "mutable"? <identifier> ":" <type-annotation> "=" <expression> ";"
 // 全局绑定的类型标注是必选（只有局部 <let-statement> 可推断）：
 // 缺标注报 `Missing type: global variable declarations must explicitly declare a type`。
-             | "let" "intrinsic" <identifier> <generic-params>? <function-signature> ";"        // body-less intrinsic function
-             | "let" "foreign" <c-name>? <identifier> <positional-signature> ("=" <expression>)? ";"   // foreign function
-             | "let" "foreign" <c-name>? "mutable"? <identifier> ":" <type-annotation> ("=" <foreign-constant-init>)? ";"  // foreign variable
+             | "let" "unsafe"? "intrinsic" <identifier> <generic-params>? <function-signature> ";"        // body-less intrinsic function
+             | "let" "unsafe"? "foreign" <c-name>? <identifier> <positional-signature> ("=" <expression>)? ";"   // foreign function
+             | "let" "unsafe"? "foreign" <c-name>? "mutable"? <identifier> ":" <type-annotation> ("=" <foreign-constant-init>)? ";"  // foreign variable
+// `unsafe` 标记（docs/design/unsafe-design.md §B）紧跟 `let`、限定词之前：
+// `let unsafe f(...)`、`let unsafe intrinsic ...`、`let unsafe foreign ...`。
+// 只有函数与 foreign 声明收它；变量位写 `unsafe` 报
+// `Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.`，
+// foreign 宏常量（有值 + 无 `mutable`）同样拒绝（`unsafe` 只属携带契约的声明）。
+// 无体/无值 foreign 声明的签名含裸指针 / C 函数指针时**必须**标 `unsafe`
+// （加固判据，纯签名形状即判）；调用 / 访问带 `unsafe` 标记的声明需要
+// `unsafe` 上下文。
 <c-name> ::= <string-literal>
 // C 名槽位（docs/design/cffi-design.md §C）：这条声明在 C 世界的名字，紧跟
 // `foreign`、Koral 名之前。`let foreign`：函数/全局量 = 链接名；宏常量（有值 +
@@ -238,9 +246,11 @@
 // sendable、实现类型必须 sendable。没有 `trait unsafe sendable` 形态——trait
 // 只收"是否 sendable"一个轴。
 // 父 trait 列表由 `:` 引入：`trait Numeric: Add[Self] and Sub[Self] and Ord {`。
-<trait-member> ::= <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"
+<trait-member> ::= "unsafe"? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"
 // Trait 需求不接受访问修饰符（`Access modifier on trait method is not supported`）；
 // 需求的有效可见性就是 trait 声明的级别（接口件随容器）。
+// `unsafe` 是成员级唯一的标记（docs/design/unsafe-design.md §B）：需求与实现
+// 方法必须同标（双向），调用该需求需要 `unsafe` 上下文。
 // Trait method params follow the same positional/named rules as func-param.
 // Named params in trait declarations must be matched by implementations.
 // Default values declared in trait are the only source; implementations must not re-declare defaults.
@@ -257,8 +267,10 @@
 // `given` 不接受访问修饰符（`public given ...` 报
 // "Access modifier on given declaration is not supported"）。
 // trait conformance 由 `:` 引入：`given List[T]: Iterator[T] { ... };`
-<given-member> ::= <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> "=" <expression> ";"
-                 | <access-modifier>? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"  // body-less, `given intrinsic` only
+<given-member> ::= <access-modifier>? "unsafe"? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> "=" <expression> ";"
+                 | <access-modifier>? "unsafe"? <identifier> <generic-params>? "(" <method-param-list>? ")" ":" <type-annotation> ";"  // body-less, `given intrinsic` only
+// `unsafe` 在可见性之后、名字之前（docs/design/unsafe-design.md §B）：调用该
+// 方法需要 `unsafe` 上下文；与 trait 需求同标（双向）。
 // Given implementations must match the trait's named/positional parameter classification.
 // If the trait declares defaults, the given implementation must NOT redeclare them
 // (it keeps the `=` marker but drops the default literal: `name: Type =`).
@@ -826,6 +838,7 @@
                        | <implicit-member-expression>
                        | <collection-literal>
                        | <block-expression>
+                       | <unsafe-expression>
                        | <lambda-expression>
                        | "(" <expression> ")"
 // 括号类型头：表达式起首的 `(` <type> `)` 是类型头，类型位的括号则是透明分组
@@ -901,6 +914,12 @@
 
 <block-expression> ::= "{" <statement>* <tail-expression>? "}"
 <tail-expression> ::= <expression>
+
+<unsafe-expression> ::= "unsafe" <block-expression>
+// unsafe 块表达式（docs/design/unsafe-design.md §A）：块的词法范围（含嵌套
+// 块、`when` 臂、lambda 体）是 unsafe 上下文，不安全操作在其中合法；函数
+// 边界切断——上下文不跨函数继承。形态只有块形，没有单表达式糖。
+// 块表达式的一切规则照旧（尾表达式求值、`;` 收尾、控制转移穿透）。
 
 <lambda-expression> ::= "(" <lambda-param-list>? ")" (":" <type-annotation>)? "=>" <expression>
 <lambda-param-list> ::= <lambda-param> ("," <lambda-param>)* ","?

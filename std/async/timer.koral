@@ -10,10 +10,10 @@ using "std/sync" { Mutex };
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-let foreign __koral_timer_context_create(): *UInt8;
-let foreign __koral_timer_context_cancel(ctx: *UInt8): Void;
-let foreign __koral_timer_context_destroy(ctx: *UInt8): Void;
-let foreign __koral_timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32;
+let unsafe foreign __koral_timer_context_create(): *UInt8;
+let unsafe foreign __koral_timer_context_cancel(ctx: *UInt8): Void;
+let unsafe foreign __koral_timer_context_destroy(ctx: *UInt8): Void;
+let unsafe foreign __koral_timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32;
 
 /// Sleep for (secs, nanos) on a timer context, in bounded chunks.
 /// The runtime's Windows path keeps the timeout in a 32-bit DWORD of
@@ -24,13 +24,13 @@ private let timer_sleep(ctx: *UInt8, secs: Int64, nanos: Int64): Int32 = {
     let chunk_secs: Int64 = 86400;
     let mutable rest = secs;
     while rest > chunk_secs then {
-        let rc = __koral_timer_sleep(ctx, chunk_secs, Int64(0));
+        let rc = unsafe { __koral_timer_sleep(ctx, chunk_secs, Int64(0)) };
         if rc != 0 then {
             return rc;
         };
         rest = rest - chunk_secs;
     };
-    return __koral_timer_sleep(ctx, rest, nanos);
+    return unsafe { __koral_timer_sleep(ctx, rest, nanos) };
 };
 
 /// One-shot countdown timer that blocks in wait() until its duration elapses.
@@ -52,10 +52,12 @@ given Timer: Drop {
 
     drop(self): Void = {
         self.mutex.lock();
-        if not self.cancelled then {
-            __koral_timer_context_cancel(self.ctx);
+        unsafe {
+            if not self.cancelled then {
+                __koral_timer_context_cancel(self.ctx);
+            };
+            __koral_timer_context_destroy(self.ctx);
         };
-        __koral_timer_context_destroy(self.ctx);
         self.mutex.unlock();
     };
 };
@@ -69,7 +71,7 @@ given Timer {
             panic("Timer.new: duration must not be negative");
         };
         return Timer(
-            __koral_timer_context_create(),
+            unsafe { __koral_timer_context_create() },
             d.secs,
             d.nanos,
             false,
@@ -114,8 +116,10 @@ given Timer {
         self.d_nanos = d.nanos;
         self.fired = false;
         if self.cancelled then {
-            __koral_timer_context_destroy(self.ctx);
-            self.ctx = __koral_timer_context_create();
+            unsafe {
+                __koral_timer_context_destroy(self.ctx);
+                self.ctx = __koral_timer_context_create();
+            };
             self.cancelled = false;
         };
         self.mutex.unlock();
@@ -127,7 +131,7 @@ given Timer {
     public cancel(self): Void = {
         self.mutex.lock();
         if not self.cancelled then {
-            __koral_timer_context_cancel(self.ctx);
+            unsafe { __koral_timer_context_cancel(self.ctx) };
             self.cancelled = true;
         };
         self.mutex.unlock();
@@ -153,10 +157,12 @@ given Ticker: Drop {
 
     drop(self): Void = {
         self.mutex.lock();
-        if not self.cancelled then {
-            __koral_timer_context_cancel(self.ctx);
+        unsafe {
+            if not self.cancelled then {
+                __koral_timer_context_cancel(self.ctx);
+            };
+            __koral_timer_context_destroy(self.ctx);
         };
-        __koral_timer_context_destroy(self.ctx);
         self.mutex.unlock();
     };
 };
@@ -170,7 +176,7 @@ given Ticker {
             panic("Ticker.new: interval must be positive");
         };
         return Ticker(
-            __koral_timer_context_create(),
+            unsafe { __koral_timer_context_create() },
             interval.secs,
             interval.nanos,
             false,
@@ -205,8 +211,10 @@ given Ticker {
         self.i_secs = interval.secs;
         self.i_nanos = interval.nanos;
         if self.cancelled then {
-            __koral_timer_context_destroy(self.ctx);
-            self.ctx = __koral_timer_context_create();
+            unsafe {
+                __koral_timer_context_destroy(self.ctx);
+                self.ctx = __koral_timer_context_create();
+            };
             self.cancelled = false;
         };
         self.mutex.unlock();
@@ -218,7 +226,7 @@ given Ticker {
     public cancel(self): Void = {
         self.mutex.lock();
         if not self.cancelled then {
-            __koral_timer_context_cancel(self.ctx);
+            unsafe { __koral_timer_context_cancel(self.ctx) };
             self.cancelled = true;
         };
         self.mutex.unlock();

@@ -21,17 +21,17 @@ public let make_bytes(count: Int): List[UInt8];
 public let make_uninitialized_bytes(count: Int): List[UInt8];
 
 /// Allocates uninitialized memory for `capacity` number of elements.
-public let intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
+public let unsafe intrinsic alloc_memory[T: Any](capacity: UInt): *mutable T;
 
 /// Deallocates the memory pointed to by `p`.
 /// PRECONDITION: The memory must be deinitialized.
-public let intrinsic dealloc_memory[T: Any](p: *T): Void;
+public let unsafe intrinsic dealloc_memory[T: Any](p: *T): Void;
 
 /// Copies `count` elements from `source` to `dest`. Regions must NOT overlap.
-public let intrinsic copy_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
+public let unsafe intrinsic copy_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
 /// Moves `count` elements from `source` to `dest`. Regions may overlap.
-public let intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
+public let unsafe intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UInt): Void;
 
 /// Compares `count` elements byte-wise at `a` and `b` in unsigned byte order --
 /// the read-side counterpart of `copy_memory` / `move_memory`. The result is
@@ -39,16 +39,16 @@ public let intrinsic move_memory[T: Any](dest: *mutable T, source: *T, count: UI
 /// equal to, or after `b`; the magnitude is unspecified. For element types
 /// holding managed handles the comparison sees handle bits, not pointed-to
 /// data.
-public let intrinsic compare_memory[T: Any](a: *T, b: *T, count: UInt): Int;
+public let unsafe intrinsic compare_memory[T: Any](a: *T, b: *T, count: UInt): Int;
 
 /// Initializes the memory at `p` with `value`, taking ownership of the value.
-public let intrinsic init_memory[T: Any](p: *mutable T, value: T): Void;
+public let unsafe intrinsic init_memory[T: Any](p: *mutable T, value: T): Void;
 
 /// Drops the value at `p` and leaves the memory uninitialized.
-public let intrinsic deinit_memory[T: Any](p: *mutable T): Void;
+public let unsafe intrinsic deinit_memory[T: Any](p: *mutable T): Void;
 
 /// Moves the value out of `p` and leaves the memory uninitialized.
-public let intrinsic take_memory[T: Any](p: *mutable T): T;
+public let unsafe intrinsic take_memory[T: Any](p: *mutable T): T;
 
 /// Return the larger of `a` and `b`.
 public let max[T: Ord](a: T, b: T): T;

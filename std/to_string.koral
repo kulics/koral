@@ -7,7 +7,7 @@
 // snprintf-based correctly-rounded float rendering from the C runtime
 // ('f'/'e'/'g', precision unbounded). Returns a thread-local NUL-terminated
 // buffer that the caller must copy out before the next call.
-let foreign __koral_format_float64(
+let unsafe foreign __koral_format_float64(
     value: Float64,
     type_char: UInt8,
     precision: Int,
@@ -16,7 +16,7 @@ let foreign __koral_format_float64(
 
 // Correctly-rounded decimal -> double (strtod); the argument must be a
 // NUL-terminated String's bytes. Used to verify round-trips below.
-let foreign __koral_parse_float64(cstr: *UInt8): Float64;
+let unsafe foreign __koral_parse_float64(cstr: *UInt8): Float64;
 
 // Shortest round-trip decimal via trial precision: for each significant digit
 // count p, `%g` emits a compact form ("2.3", "1e+20", "0") whose re-parse is
@@ -33,9 +33,9 @@ private let format_float_shortest(f: Float64, is_float32: Bool): String = {
     let mutable p = 1;
     while p <= limit then {
         let text = String.from_cstring_unchecked(
-            __koral_format_float64(f, 'g', p, false),
+            unsafe { __koral_format_float64(f, 'g', p, false) },
         );
-        let parsed = __koral_parse_float64(text.bytes.data);
+        let parsed = unsafe { __koral_parse_float64(text.bytes.data) };
         // Float32 round-trips through Float64-parse-then-narrow, exactly like
         // Float32.parse (float narrowing is unchecked -- numeric-families).
         let round_trips = if is_float32 then {
@@ -55,7 +55,7 @@ private let format_float_shortest(f: Float64, is_float32: Bool): String = {
     if not found then {
         // Unreachable for finite values; keep a safe rendering anyway.
         best = String.from_cstring_unchecked(
-            __koral_format_float64(f, 'g', limit, false),
+            unsafe { __koral_format_float64(f, 'g', limit, false) },
         );
     };
     return best;
@@ -111,13 +111,15 @@ given Int: ToString {
         let len = digits + (if is_negative then 1 else 0);
         let s = alloc_bytes(UInt(len));
         let mutable pos = len;
-        while n > 0 then {
-            pos -= 1;
-            init_memory(s.data + pos, UInt8(n % 10) + '0');
-            n = n / 10;
-        };
-        if is_negative then {
-            init_memory(s.data, '-');
+        unsafe {
+            while n > 0 then {
+                pos -= 1;
+                init_memory(s.data + pos, UInt8(n % 10) + '0');
+                n = n / 10;
+            };
+            if is_negative then {
+                init_memory(s.data, '-');
+            };
         };
         return String(s, len);
     };
@@ -172,10 +174,12 @@ given UInt: ToString {
         };
         let s = alloc_bytes(UInt(digits));
         let mutable pos = digits;
-        while n > 0 then {
-            pos -= 1;
-            init_memory(s.data + pos, UInt8((n % 10)) + '0');
-            n = n / 10;
+        unsafe {
+            while n > 0 then {
+                pos -= 1;
+                init_memory(s.data + pos, UInt8((n % 10)) + '0');
+                n = n / 10;
+            };
         };
         return String(s, digits);
     };

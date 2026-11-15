@@ -17,7 +17,7 @@ public type mutable Deque[T: Any](
 /// `Drop` for `Deque[T]`: frees every element and the ring buffer when the last handle dies.
 given[T: Any] Deque[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.len then {
             let index = (self.head + i) % self.cap;
             deinit_memory(self.source + index);
@@ -35,7 +35,7 @@ given[T: Any] Deque[T] {
     /// Create an empty deque, with a small ring buffer allocated up front.
     public new(): Self = {
         let cap = 10;
-        let source = alloc_memory[T](UInt(cap));
+        let source = unsafe { alloc_memory[T](UInt(cap)) };
         return Deque[T](source, 0, cap, 0);
     };
 
@@ -45,7 +45,7 @@ given[T: Any] Deque[T] {
             panic("Deque with_capacity negative capacity");
         };
         let cap = if capacity < 1 then 1 else capacity;
-        let source = alloc_memory[T](UInt(cap));
+        let source = unsafe { alloc_memory[T](UInt(cap)) };
         return Deque[T](source, 0, cap, 0);
     };
 
@@ -74,7 +74,7 @@ given[T: Any] Deque[T] {
 
     /// The growth body behind `ensure_capacity`, kept out of line on purpose --
     /// same shape and reason as `List.grow_to` (see std/list.koral).
-    private grow_to(self, min_capacity: Int): Void = {
+    private grow_to(self, min_capacity: Int): Void = unsafe {
         let mutable new_cap = self.cap * 2;
         if new_cap < min_capacity then {
             new_cap = min_capacity;
@@ -103,7 +103,7 @@ given[T: Any] Deque[T] {
             self.grow_to(next);
         };
         let index = self.physical_index(len);
-        init_memory(self.source + index, value);
+        unsafe { init_memory(self.source + index, value) };
         self.len = next;
     };
 
@@ -115,7 +115,7 @@ given[T: Any] Deque[T] {
             self.grow_to(next);
         };
         self.head = (self.head + self.cap - 1) % self.cap;
-        init_memory(self.source + self.head, value);
+        unsafe { init_memory(self.source + self.head, value) };
         self.len = next;
     };
 
@@ -124,7 +124,7 @@ given[T: Any] Deque[T] {
         if self.len == 0 then {
             return Option[T].None();
         };
-        let value = take_memory(self.source + self.head);
+        let value = unsafe { take_memory(self.source + self.head) };
         self.head = (self.head + 1) % self.cap;
         self.len = self.len - 1;
         if self.len == 0 then {
@@ -139,7 +139,7 @@ given[T: Any] Deque[T] {
             return Option[T].None();
         };
         let index = self.physical_index(self.len - 1);
-        let value = take_memory(self.source + index);
+        let value = unsafe { take_memory(self.source + index) };
         self.len = self.len - 1;
         if self.len == 0 then {
             self.head = 0;
@@ -164,7 +164,7 @@ given[T: Any] Deque[T] {
             return Option[T].None();
         };
         let physical = self.physical_index(index);
-        return Option[T].Some(self.source[physical]);
+        return Option[T].Some(unsafe { self.source[physical] });
     };
 
     private __index_get(self, key: Int): T = {
@@ -172,7 +172,7 @@ given[T: Any] Deque[T] {
             panic_deque_index(key, self.len);
         };
         let physical = self.physical_index(key);
-        return self.source[physical];
+        return unsafe { self.source[physical] };
     };
 
     private __index_set(self, key: Int, value: T): Void = {
@@ -180,7 +180,7 @@ given[T: Any] Deque[T] {
             panic_deque_index(key, self.len);
         };
         let physical = self.physical_index(key);
-        self.source[physical] = value;
+        unsafe { self.source[physical] = value; };
     };
 
     /// 内置下标 `dq[i]` 的内部操作：返回元素槽位指针。见 `List.__index_slot`。
@@ -189,11 +189,11 @@ given[T: Any] Deque[T] {
             panic_deque_index(key, self.len);
         };
         let physical = self.physical_index(key);
-        return self.source + physical;
+        return unsafe { self.source + physical };
     };
 
     /// Remove every element, keeping the allocated ring buffer.
-    public clear(self): Void = {
+    public clear(self): Void = unsafe {
         for i in 0..<self.len then {
             let index = self.physical_index(i);
             deinit_memory(self.source + index);
@@ -203,7 +203,7 @@ given[T: Any] Deque[T] {
     };
 
     /// Reverses the order of elements in place. O(n).
-    public reverse(self): Void = {
+    public reverse(self): Void = unsafe {
         if self.len <= 1 then {
             return;
         };
@@ -221,7 +221,7 @@ given[T: Any] Deque[T] {
     };
 
     /// Retains only elements satisfying the predicate, preserving order. O(n).
-    public retain(self, predicate: (T) -> Bool): Void = {
+    public retain(self, predicate: (T) -> Bool): Void = unsafe {
         if self.len == 0 then {
             return;
         };
@@ -253,7 +253,7 @@ given[T: Any] Deque[T]: Clone {
     public clone(self): Self = {
         let mutable result = Deque[T].with_capacity(self.len);
         for i in 0..<self.len then {
-            result.push_back(self.source[self.physical_index(i)]);
+            result.push_back(unsafe { self.source[self.physical_index(i)] });
         };
         return result;
     };
@@ -270,7 +270,7 @@ given[T: Any] Deque[T]: Default {
 given[T: Eq] Deque[T] {
 
     /// Whether any element equals `value`. O(n).
-    public contains(self, value: T): Bool = {
+    public contains(self, value: T): Bool = unsafe {
         for i in 0..<self.len then {
             let physical = self.physical_index(i);
             if self.source[physical] == value then {
@@ -297,7 +297,7 @@ given[T: Any] DequeIterator[T]: Iterator[T] {
             return Option[T].None();
         };
         let index = (self.source.head + self.index) % self.source.cap;
-        let value = self.source.source[index];
+        let value = unsafe { self.source.source[index] };
         self.index += 1;
         return Option[T].Some(value);
     };

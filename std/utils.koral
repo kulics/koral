@@ -78,33 +78,33 @@ given Ord {
 
 type foreign CFile {};
 
-let foreign fwrite(buf: *UInt8, size: UInt, count: UInt, file: *CFile): UInt;
-let foreign fflush(file: *CFile): Void;
+let unsafe foreign fwrite(buf: *UInt8, size: UInt, count: UInt, file: *CFile): UInt;
+let unsafe foreign fflush(file: *CFile): Void;
 // libc's fgetc returns a 32-bit `int` (0..255, or EOF = -1); declaring the
 // result `Int32` keeps the sign when the call crosses the FFI boundary.
-let foreign fgetc(file: *CFile): Int32;
-let foreign __koral_stdin(): *CFile;
-let foreign __koral_stdout(): *CFile;
-let foreign __koral_stderr(): *CFile;
+let unsafe foreign fgetc(file: *CFile): Int32;
+let unsafe foreign __koral_stdin(): *CFile;
+let unsafe foreign __koral_stdout(): *CFile;
+let unsafe foreign __koral_stderr(): *CFile;
 
 /// Terminate the process with the given exit code.
 public let foreign exit(code: Int): Never;
 /// Terminate the process immediately.
 public let foreign abort(): Never;
 
-private let foreign __koral_set_args(argc: Int32, argv: **UInt8): Void;
+private let unsafe foreign __koral_set_args(argc: Int32, argv: **UInt8): Void;
 private let foreign __koral_argc(): Int32;
-private let foreign __koral_argv(): **UInt8;
+private let unsafe foreign __koral_argv(): **UInt8;
 
-let foreign __koral_errno_ptr(): *Int32;
-let foreign __koral_strerror(errnum: Int32): *UInt8;
-let foreign __koral_last_error_text(): *UInt8;
+let unsafe foreign __koral_errno_ptr(): *Int32;
+let unsafe foreign __koral_strerror(errnum: Int32): *UInt8;
+let unsafe foreign __koral_last_error_text(): *UInt8;
 
 /// Get the last OS error as a human-readable String. Windows failure paths
 /// record the Win32 error at the failing call and this renders it
 /// (FormatMessage text); otherwise the text is `strerror(errno)`.
 public let last_error_message(): String = {
-    return String.from_cstring_unchecked(__koral_last_error_text());
+    return String.from_cstring_unchecked(unsafe { __koral_last_error_text() });
 };
 
 // ============================================================================
@@ -117,9 +117,9 @@ public let last_error_message(): String = {
 // per stream -- std.io can import root, but root cannot import std.io. It
 // wraps the same OS mutex as `std.sync.Mutex`.
 
-let foreign __koral_mutex_create(): *UInt8;
-let foreign __koral_mutex_lock(mutex: *UInt8): Void;
-let foreign __koral_mutex_unlock(mutex: *UInt8): Void;
+let unsafe foreign __koral_mutex_create(): *UInt8;
+let unsafe foreign __koral_mutex_lock(mutex: *UInt8): Void;
+let unsafe foreign __koral_mutex_unlock(mutex: *UInt8): Void;
 
 /// A process-stream write lock. Construction-then-immutable: the handle is
 /// created once per stream and never changes or is destroyed.
@@ -129,26 +129,26 @@ protected type unsafe sendable mutable StdioWriteLock(private handle: *UInt8);
 given StdioWriteLock {
 
     /// Take the lock (blocking).
-    protected lock(self): Void = __koral_mutex_lock(self.handle);
+    protected lock(self): Void = unsafe { __koral_mutex_lock(self.handle) };
 
     /// Release the lock.
-    protected unlock(self): Void = __koral_mutex_unlock(self.handle);
+    protected unlock(self): Void = unsafe { __koral_mutex_unlock(self.handle) };
 };
 
 /// The write-serialization lock for standard output (shared by the `print`
 /// family and every `Stdout` handle).
-protected let stdout_write_lock: StdioWriteLock = StdioWriteLock(__koral_mutex_create());
+protected let stdout_write_lock: StdioWriteLock = StdioWriteLock(unsafe { __koral_mutex_create() });
 
 /// The write-serialization lock for standard error (shared by `panic`, the
 /// `eprint` family, and every `Stderr` handle).
-protected let stderr_write_lock: StdioWriteLock = StdioWriteLock(__koral_mutex_create());
+protected let stderr_write_lock: StdioWriteLock = StdioWriteLock(unsafe { __koral_mutex_create() });
 
 /// Return the command-line arguments, starting with the program name.
 public let args(): List[String] = {
     let mutable result: List[String] = [];
     let count = Int(__koral_argc());
     for i in 0..<count then {
-        let arg_ptr = __koral_argv()[i];
+        let arg_ptr = unsafe { __koral_argv()[i] };
         result.push(String.from_cstring_unchecked(arg_ptr));
     };
     return result;
@@ -163,8 +163,10 @@ public let args(): List[String] = {
 public let panic(message: String): Never = {
     let line = "Panic: " + message + "\n";
     stderr_write_lock.lock();
-    fwrite(line.bytes.data, 1, UInt(line.len), __koral_stderr());
-    fflush(__koral_stderr());
+    unsafe {
+        fwrite(line.bytes.data, 1, UInt(line.len), __koral_stderr());
+        fflush(__koral_stderr());
+    };
     abort();
 };
 
@@ -185,8 +187,10 @@ public let print[T: ToString](value: T): Void = {
     let s = value.to_string();
     stdout_write_lock.lock();
     defer stdout_write_lock.unlock();
-    fwrite(s.bytes.data, 1, UInt(s.len), __koral_stdout());
-    fflush(__koral_stdout());
+    unsafe {
+        fwrite(s.bytes.data, 1, UInt(s.len), __koral_stdout());
+        fflush(__koral_stdout());
+    };
 };
 
 /// Write `value`'s text and a newline to standard output as ONE locked write
@@ -196,8 +200,10 @@ public let println[T: ToString](value: T): Void = {
     let line = value.to_string() + "\n";
     stdout_write_lock.lock();
     defer stdout_write_lock.unlock();
-    fwrite(line.bytes.data, 1, UInt(line.len), __koral_stdout());
-    fflush(__koral_stdout());
+    unsafe {
+        fwrite(line.bytes.data, 1, UInt(line.len), __koral_stdout());
+        fflush(__koral_stdout());
+    };
 };
 
 /// Write `value`'s text to standard error without a newline in one locked
@@ -206,8 +212,10 @@ public let eprint[T: ToString](value: T): Void = {
     let s = value.to_string();
     stderr_write_lock.lock();
     defer stderr_write_lock.unlock();
-    fwrite(s.bytes.data, 1, UInt(s.len), __koral_stderr());
-    fflush(__koral_stderr());
+    unsafe {
+        fwrite(s.bytes.data, 1, UInt(s.len), __koral_stderr());
+        fflush(__koral_stderr());
+    };
 };
 
 /// Write `value`'s text and a newline to standard error as ONE locked write
@@ -217,8 +225,10 @@ public let eprintln[T: ToString](value: T): Void = {
     let line = value.to_string() + "\n";
     stderr_write_lock.lock();
     defer stderr_write_lock.unlock();
-    fwrite(line.bytes.data, 1, UInt(line.len), __koral_stderr());
-    fflush(__koral_stderr());
+    unsafe {
+        fwrite(line.bytes.data, 1, UInt(line.len), __koral_stderr());
+        fflush(__koral_stderr());
+    };
 };
 
 /// Read one line from standard input without its line ending, returning `None`
@@ -229,7 +239,7 @@ public let scanln(): Option[String] = {
     let mutable result = StringBuilder.new();
 
     while true then {
-        let ch = fgetc(__koral_stdin());
+        let ch = unsafe { fgetc(__koral_stdin()) };
 
         // End of file: fgetc returns -1, which depending on how the FFI
         // boundary widens the 32-bit result can also surface as 0xFFFFFFFF.

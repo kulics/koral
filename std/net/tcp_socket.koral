@@ -25,7 +25,7 @@ given TcpSocket: Drop {
     /// Automatically close the socket when TcpSocket is dropped.
     drop(self): Void = {
         if self.sock_fd >= 0 then {
-            __koral_socket_close(self.sock_fd);
+            unsafe { __koral_socket_close(self.sock_fd) };
         };
     };
 };
@@ -64,9 +64,10 @@ given TcpSocket {
         // Connect to address
         let addr_bytes = addr.to_sockaddr_bytes();
         let addr_len = UInt32(addr_bytes.count());
-        let connect_result = __koral_socket_connect(fd, addr_bytes.borrow_ptr(), addr_len);
+        let connect_result =
+            unsafe { __koral_socket_connect(fd, addr_bytes.borrow_ptr(), addr_len) };
         if connect_result != 0 then {
-            __koral_socket_close(fd);
+            unsafe { __koral_socket_close(fd) };
             return Result[TcpSocket].Error(last_error_message());
         };
 
@@ -79,14 +80,17 @@ given TcpSocket {
 
     /// Get the local address of this socket.
     public local_addr(self): Result[SocketAddr] = {
-        let addr_buf = alloc_memory[UInt8](128);
-        defer dealloc_memory(addr_buf);
-        for i in 0..<128 then {
-            init_memory(addr_buf + i, UInt8(0));
+        let addr_buf = unsafe { alloc_memory[UInt8](128) };
+        defer unsafe { dealloc_memory(addr_buf) };
+        unsafe {
+            for i in 0..<128 then {
+                init_memory(addr_buf + i, UInt8(0));
+            };
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let result = __koral_socket_getsockname(self.sock_fd, addr_buf, &addr_len);
+        let result =
+            unsafe { __koral_socket_getsockname(self.sock_fd, addr_buf, &addr_len) };
         if result != 0 then {
             return Result[SocketAddr].Error(last_error_message());
         };
@@ -94,7 +98,7 @@ given TcpSocket {
         let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
-            addr_list.push(addr_buf[j]);
+            addr_list.push(unsafe { addr_buf[j] });
         };
 
         return SocketAddr.from_sockaddr_bytes(addr_list);
@@ -102,14 +106,17 @@ given TcpSocket {
 
     /// Get the peer address of this socket.
     public peer_addr(self): Result[SocketAddr] = {
-        let addr_buf = alloc_memory[UInt8](128);
-        defer dealloc_memory(addr_buf);
-        for i in 0..<128 then {
-            init_memory(addr_buf + i, UInt8(0));
+        let addr_buf = unsafe { alloc_memory[UInt8](128) };
+        defer unsafe { dealloc_memory(addr_buf) };
+        unsafe {
+            for i in 0..<128 then {
+                init_memory(addr_buf + i, UInt8(0));
+            };
         };
         let mutable addr_len: UInt32 = UInt32(128);
 
-        let result = __koral_socket_getpeername(self.sock_fd, addr_buf, &addr_len);
+        let result =
+            unsafe { __koral_socket_getpeername(self.sock_fd, addr_buf, &addr_len) };
         if result != 0 then {
             return Result[SocketAddr].Error(last_error_message());
         };
@@ -117,7 +124,7 @@ given TcpSocket {
         let actual_len = Int(addr_len);
         let mutable addr_list = List[UInt8].with_capacity(actual_len);
         for j in 0..<actual_len then {
-            addr_list.push(addr_buf[j]);
+            addr_list.push(unsafe { addr_buf[j] });
         };
 
         return SocketAddr.from_sockaddr_bytes(addr_list);
@@ -137,7 +144,7 @@ given TcpSocket {
             .Write() then Int32(1),
             .Both() then Int32(2),
         };
-        let result = __koral_socket_shutdown(self.sock_fd, how_int);
+        let result = unsafe { __koral_socket_shutdown(self.sock_fd, how_int) };
         if result != 0 then {
             if is_not_connected_error(socket_error_code()) then {
                 return Result[Void].Ok({});
@@ -154,20 +161,24 @@ given TcpSocket {
     /// Set TCP_NODELAY option (disable Nagle's algorithm).
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
     public set_nodelay(self, nodelay: Bool): Result[Void] = {
-        let opt_buf = alloc_memory[UInt8](4);
-        defer dealloc_memory(opt_buf);
+        let opt_buf = unsafe { alloc_memory[UInt8](4) };
+        defer unsafe { dealloc_memory(opt_buf) };
         let value: UInt8 = if nodelay then UInt8(1) else UInt8(0);
-        init_memory(opt_buf + 0, value);
-        init_memory(opt_buf + 1, UInt8(0));
-        init_memory(opt_buf + 2, UInt8(0));
-        init_memory(opt_buf + 3, UInt8(0));
-        let result = __koral_socket_setsockopt(
-            self.sock_fd,
-            ipproto_tcp,
-            tcp_nodelay,
-            opt_buf,
-            UInt32(4),
-        );
+        unsafe {
+            init_memory(opt_buf + 0, value);
+            init_memory(opt_buf + 1, UInt8(0));
+            init_memory(opt_buf + 2, UInt8(0));
+            init_memory(opt_buf + 3, UInt8(0));
+        };
+        let result = unsafe {
+            __koral_socket_setsockopt(
+                self.sock_fd,
+                ipproto_tcp,
+                tcp_nodelay,
+                opt_buf,
+                UInt32(4),
+            )
+        };
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -177,24 +188,28 @@ given TcpSocket {
     /// Get TCP_NODELAY option.
     /// level=6 (IPPROTO_TCP), optname=1 (TCP_NODELAY)
     public nodelay(self): Result[Bool] = {
-        let opt_buf = alloc_memory[UInt8](4);
-        defer dealloc_memory(opt_buf);
-        init_memory(opt_buf + 0, UInt8(0));
-        init_memory(opt_buf + 1, UInt8(0));
-        init_memory(opt_buf + 2, UInt8(0));
-        init_memory(opt_buf + 3, UInt8(0));
+        let opt_buf = unsafe { alloc_memory[UInt8](4) };
+        defer unsafe { dealloc_memory(opt_buf) };
+        unsafe {
+            init_memory(opt_buf + 0, UInt8(0));
+            init_memory(opt_buf + 1, UInt8(0));
+            init_memory(opt_buf + 2, UInt8(0));
+            init_memory(opt_buf + 3, UInt8(0));
+        };
         let mutable opt_len: UInt32 = UInt32(4);
-        let result = __koral_socket_getsockopt(
-            self.sock_fd,
-            ipproto_tcp,
-            tcp_nodelay,
-            opt_buf,
-            &opt_len,
-        );
+        let result = unsafe {
+            __koral_socket_getsockopt(
+                self.sock_fd,
+                ipproto_tcp,
+                tcp_nodelay,
+                opt_buf,
+                &opt_len,
+            )
+        };
         if result != 0 then {
             return Result[Bool].Error(last_error_message());
         };
-        let value = *opt_buf;
+        let value = unsafe { *opt_buf };
         return Result[Bool].Ok(value != UInt8(0));
     };
 
@@ -208,16 +223,18 @@ given TcpSocket {
     /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_read_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let opt_len = timeout_option_len(self.sock_fd);
-        let tv_buf = alloc_memory[UInt8](16);
-        defer dealloc_memory(tv_buf);
+        let tv_buf = unsafe { alloc_memory[UInt8](16) };
+        defer unsafe { dealloc_memory(tv_buf) };
         encode_timeout_option(timeout, tv_buf, opt_len);
-        let result = __koral_socket_setsockopt(
-            self.sock_fd,
-            sol_socket,
-            so_rcvtimeo,
-            tv_buf,
-            opt_len,
-        );
+        let result = unsafe {
+            __koral_socket_setsockopt(
+                self.sock_fd,
+                sol_socket,
+                so_rcvtimeo,
+                tv_buf,
+                opt_len,
+            )
+        };
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -230,16 +247,18 @@ given TcpSocket {
     /// Windows, a struct timeval (8 bytes on 32-bit, 16 bytes on 64-bit) elsewhere.
     public set_write_timeout(self, timeout: Option[Duration]): Result[Void] = {
         let opt_len = timeout_option_len(self.sock_fd);
-        let tv_buf = alloc_memory[UInt8](16);
-        defer dealloc_memory(tv_buf);
+        let tv_buf = unsafe { alloc_memory[UInt8](16) };
+        defer unsafe { dealloc_memory(tv_buf) };
         encode_timeout_option(timeout, tv_buf, opt_len);
-        let result = __koral_socket_setsockopt(
-            self.sock_fd,
-            sol_socket,
-            so_sndtimeo,
-            tv_buf,
-            opt_len,
-        );
+        let result = unsafe {
+            __koral_socket_setsockopt(
+                self.sock_fd,
+                sol_socket,
+                so_sndtimeo,
+                tv_buf,
+                opt_len,
+            )
+        };
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -250,19 +269,23 @@ given TcpSocket {
     /// SO_RCVTIMEO: level=1 (SOL_SOCKET), optname=20.
     public read_timeout(self): Result[Option[Duration]] = {
         let opt_len = timeout_option_len(self.sock_fd);
-        let tv_buf = alloc_memory[UInt8](16);
-        defer dealloc_memory(tv_buf);
-        for i in 0..<16 then {
-            init_memory(tv_buf + i, UInt8(0));
+        let tv_buf = unsafe { alloc_memory[UInt8](16) };
+        defer unsafe { dealloc_memory(tv_buf) };
+        unsafe {
+            for i in 0..<16 then {
+                init_memory(tv_buf + i, UInt8(0));
+            };
         };
         let mutable len = opt_len;
-        let result = __koral_socket_getsockopt(
-            self.sock_fd,
-            sol_socket,
-            so_rcvtimeo,
-            tv_buf,
-            &len,
-        );
+        let result = unsafe {
+            __koral_socket_getsockopt(
+                self.sock_fd,
+                sol_socket,
+                so_rcvtimeo,
+                tv_buf,
+                &len,
+            )
+        };
         if result != 0 then {
             return Result[Option[Duration]].Error(last_error_message());
         };
@@ -273,19 +296,23 @@ given TcpSocket {
     /// SO_SNDTIMEO: level=1 (SOL_SOCKET), optname=21.
     public write_timeout(self): Result[Option[Duration]] = {
         let opt_len = timeout_option_len(self.sock_fd);
-        let tv_buf = alloc_memory[UInt8](16);
-        defer dealloc_memory(tv_buf);
-        for i in 0..<16 then {
-            init_memory(tv_buf + i, UInt8(0));
+        let tv_buf = unsafe { alloc_memory[UInt8](16) };
+        defer unsafe { dealloc_memory(tv_buf) };
+        unsafe {
+            for i in 0..<16 then {
+                init_memory(tv_buf + i, UInt8(0));
+            };
         };
         let mutable len = opt_len;
-        let result = __koral_socket_getsockopt(
-            self.sock_fd,
-            sol_socket,
-            so_sndtimeo,
-            tv_buf,
-            &len,
-        );
+        let result = unsafe {
+            __koral_socket_getsockopt(
+                self.sock_fd,
+                sol_socket,
+                so_sndtimeo,
+                tv_buf,
+                &len,
+            )
+        };
         if result != 0 then {
             return Result[Option[Duration]].Error(last_error_message());
         };
@@ -305,8 +332,10 @@ given TcpSocket: Reader {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = into.borrow_mut_ptr() + start;
-        let n = __koral_socket_recv(self.sock_fd, data_ptr, UInt64(span.len()), Int32(0));
+        let n = unsafe {
+            let data_ptr = into.borrow_mut_ptr() + start;
+            __koral_socket_recv(self.sock_fd, data_ptr, UInt64(span.len()), Int32(0))
+        };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -325,8 +354,10 @@ given TcpSocket: Writer {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = from.borrow_ptr() + start;
-        let n = __koral_socket_send(self.sock_fd, data_ptr, UInt64(span.len()), Int32(0));
+        let n = unsafe {
+            let data_ptr = from.borrow_ptr() + start;
+            __koral_socket_send(self.sock_fd, data_ptr, UInt64(span.len()), Int32(0))
+        };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };

@@ -1169,6 +1169,46 @@ public class DefIdMap {
         return importRecords[defId.id]?.originalDefId
     }
 
+    // MARK: - Unsafe Markers (docs/design/unsafe-design.md §B)
+
+    /// Declarations carrying the `unsafe` marker, keyed by DefId. Absent =
+    /// unmarked (safe).
+    private var unsafeDefIds: Set<UInt64> = []
+    /// `unsafe`-marked intrinsic names (intrinsic dispatch is by name).
+    private var unsafeIntrinsicNames: Set<String> = []
+
+    public func recordUnsafeDef(_ defId: DefId) {
+        unsafeDefIds.insert(defId.id)
+    }
+
+    public func recordUnsafeIntrinsicName(_ name: String) {
+        unsafeIntrinsicNames.insert(name)
+    }
+
+    public func isUnsafeIntrinsicName(_ name: String) -> Bool {
+        unsafeIntrinsicNames.contains(name)
+    }
+
+    /// Does this declaration identity carry the `unsafe` marker? Absent =
+    /// unmarked. A materialized alias follows the import-record original-def
+    /// chain back to the source declaration before answering.
+    public func defIsUnsafe(_ defId: DefId) -> Bool {
+        var seen: Set<UInt64> = []
+        var current = defId
+        while true {
+            if unsafeDefIds.contains(current.id) {
+                return true
+            }
+            if !seen.insert(current.id).inserted {
+                return false
+            }
+            guard let original = getOriginalDefId(current), original != current else {
+                return false
+            }
+            current = original
+        }
+    }
+
     public func isImported(_ defId: DefId) -> Bool {
         return importRecords[defId.id] != nil
     }

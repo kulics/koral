@@ -10,8 +10,8 @@ using "std/sync" { AtomicInt };
 // ============================================================================
 // FFI Declarations
 // ============================================================================
-let foreign __koral_thread_join(handle: *UInt8): Int32;
-let foreign __koral_thread_detach(handle: *UInt8): Void;
+let unsafe foreign __koral_thread_join(handle: *UInt8): Int32;
+let unsafe foreign __koral_thread_detach(handle: *UInt8): Void;
 
 // ============================================================================
 // Thread state machine (single atomic state)
@@ -51,7 +51,7 @@ given Thread: Drop {
     drop(self): Void = {
         // Claim the live state; only the winner detaches, exactly once.
         if self.state.compare_exchange(expected = 0, desired = 3) then {
-            __koral_thread_detach(self.handle);
+            unsafe { __koral_thread_detach(self.handle) };
         };
     };
 };
@@ -74,7 +74,7 @@ given Thread {
         while not finished then {
             if self.state.compare_exchange(expected = 0, desired = 1) then {
                 // Claim won: this caller alone performs the join.
-                let result = __koral_thread_join(self.handle);
+                let result = unsafe { __koral_thread_join(self.handle) };
                 if result != 0 then {
                     // Release the claim: the handle stays open and retryable.
                     self.state.store(0);
@@ -111,7 +111,7 @@ given Thread {
     /// once; detaching after wait() or detach() is a no-op.
     public detach(self): Void = {
         if self.state.compare_exchange(expected = 0, desired = 3) then {
-            __koral_thread_detach(self.handle);
+            unsafe { __koral_thread_detach(self.handle) };
         };
     };
 

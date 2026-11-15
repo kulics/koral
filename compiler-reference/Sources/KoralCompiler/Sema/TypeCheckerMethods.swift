@@ -1683,6 +1683,8 @@ extension TypeChecker {
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
         left: ptrExpr, op: .plus, right: index, type: structType, span: span)
+      // §C A2: pointer indexing does not check bounds (unlike `[N]T`).
+      try requireUnsafeOperation(at: span, UnsafeMessages.pointerSubscript)
       return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
     if case .mutablePointer(let element) = structType {
@@ -1703,6 +1705,7 @@ extension TypeChecker {
       }
       let offsetExpr: TypedExpressionNode = .arithmeticExpression(
         left: ptrExpr, op: .plus, right: index, type: structType, span: span)
+      try requireUnsafeOperation(at: span, UnsafeMessages.pointerSubscript)
       return .unsafeDerefExpression(expression: offsetExpr, type: element)
     }
 
@@ -1836,6 +1839,11 @@ extension TypeChecker {
   func checkIntrinsicCall(name: String, arguments: [ExpressionNode]) throws
     -> TypedExpressionNode?
   {
+    // unsafe 契约准入（docs/design/unsafe-design.md §C1）：`let unsafe intrinsic`
+    // 的调用需要 unsafe 上下文；派发按名，标记登记同键。
+    if context.isUnsafeIntrinsicName(name) {
+      try requireUnsafeOperation(at: currentSpan, UnsafeMessages.unsafeCall(name))
+    }
     if !isStdPackageID(currentPackageID), Self.nonpublicIntrinsicNames.contains(name) {
       return nil
     }

@@ -47,7 +47,7 @@ private let dict_tag_ptr[K: Any, V: Any](
 private let dict_set_tag[K: Any, V: Any](
     slot_ptr: *mutable ConcurrentDictSlot[K, V],
     tag: UInt,
-): Void = {
+): Void = unsafe {
     let tag_ptr = dict_tag_ptr(slot_ptr);
     *tag_ptr = tag;
 };
@@ -62,7 +62,7 @@ private let dict_stamp_tombstone[K: Hash, V: Any](
     slot_ptr: *mutable ConcurrentDictSlot[K, V],
     key: K,
     version: UInt64,
-): Void = {
+): Void = unsafe {
     init_memory((&slot_ptr.version) as *mutable UInt64, version);
     init_memory((&slot_ptr.writer) as *mutable UInt64, __koral_thread_current_id());
     init_memory((&slot_ptr.key_hash) as *mutable UInt, concurrent_hash_mix(key.hash()));
@@ -86,31 +86,33 @@ private let dict_find_slot[K: Hash, V: Any](
     let mutable idx = Int(h & UInt(mask));
     let mutable first_deleted = Option[Int].None();
     let mutable probes = 0;
-    while probes < capacity then {
-        let slot_tag = (slots + idx).tag;
-        if slot_tag == UInt(0) then {
-            when first_deleted in {
-                .Some(_) then {
-                    return first_deleted;
-                },
-                .None() then {
+    unsafe {
+        while probes < capacity then {
+            let slot_tag = (slots + idx).tag;
+            if slot_tag == UInt(0) then {
+                when first_deleted in {
+                    .Some(_) then {
+                        return first_deleted;
+                    },
+                    .None() then {
+                        return Option[Int].Some(idx);
+                    },
+                };
+            } else if slot_tag == UInt(2) then {
+                when first_deleted in {
+                    .None() then {
+                        first_deleted = Option[Int].Some(idx);
+                    },
+                    _ then {},
+                };
+            } else {
+                if (slots + idx).key == key then {
                     return Option[Int].Some(idx);
-                },
+                };
             };
-        } else if slot_tag == UInt(2) then {
-            when first_deleted in {
-                .None() then {
-                    first_deleted = Option[Int].Some(idx);
-                },
-                _ then {},
-            };
-        } else {
-            if (slots + idx).key == key then {
-                return Option[Int].Some(idx);
-            };
+            idx = (idx + 1) & mask;
+            probes += 1;
         };
-        idx = (idx + 1) & mask;
-        probes += 1;
     };
     return first_deleted;
 };
@@ -132,16 +134,18 @@ private let dict_tombstone_writer[K: Hash, V: Any](
     let h = concurrent_hash_mix(key.hash());
     let mutable idx = Int(h & UInt(mask));
     let mutable probes = 0;
-    while probes < capacity then {
-        let slot_tag = (slots + idx).tag;
-        if slot_tag == UInt(0) then {
-            return Option[UInt64].None();
+    unsafe {
+        while probes < capacity then {
+            let slot_tag = (slots + idx).tag;
+            if slot_tag == UInt(0) then {
+                return Option[UInt64].None();
+            };
+            if slot_tag == UInt(2) and (slots + idx).key_hash == h then {
+                return Option[UInt64].Some((slots + idx).writer);
+            };
+            idx = (idx + 1) & mask;
+            probes += 1;
         };
-        if slot_tag == UInt(2) and (slots + idx).key_hash == h then {
-            return Option[UInt64].Some((slots + idx).writer);
-        };
-        idx = (idx + 1) & mask;
-        probes += 1;
     };
     return Option[UInt64].None();
 };
@@ -162,7 +166,7 @@ public type unsafe sendable mutable ConcurrentDict[K: Hash and sendable, V: send
 /// destructor in this family.
 given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.capacity then {
             if (self.slots + i).tag == UInt(1) then {
                 deinit_memory(self.slots + i);
@@ -190,9 +194,9 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         while cap < requested then {
             cap = cap * 2;
         };
-        let slots = alloc_memory[ConcurrentDictSlot[K, V]](UInt(cap));
+        let slots = unsafe { alloc_memory[ConcurrentDictSlot[K, V]](UInt(cap)) };
         for i in 0..<cap then {
-            dict_set_tag(slots + i, UInt(0));
+            unsafe { dict_set_tag(slots + i, UInt(0)) };
         };
         return ConcurrentDict[K, V](SharedMutex.new(), slots, cap, 0, 0, UInt64(0));
     };
@@ -217,26 +221,28 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         while self.size * 2 >= new_cap then {
             new_cap = new_cap * 2;
         };
-        let new_slots = alloc_memory[ConcurrentDictSlot[K, V]](UInt(new_cap));
+        let new_slots = unsafe { alloc_memory[ConcurrentDictSlot[K, V]](UInt(new_cap)) };
         for i in 0..<new_cap then {
-            dict_set_tag(new_slots + i, UInt(0));
+            unsafe { dict_set_tag(new_slots + i, UInt(0)) };
         };
         self.slots = new_slots;
         self.capacity = new_cap;
         self.size = 0;
         self.deleted = 0;
-        for i in 0..<old_capacity then {
-            if (old_slots + i).tag == UInt(1) then {
-                let moved = take_memory(old_slots + i);
-                let idx = when dict_find_slot(new_slots, new_cap, moved.key) in {
-                    .Some(j) then j,
-                    .None() then { panic("ConcurrentDict rehash failed"); },
+        unsafe {
+            for i in 0..<old_capacity then {
+                if (old_slots + i).tag == UInt(1) then {
+                    let moved = take_memory(old_slots + i);
+                    let idx = when dict_find_slot(new_slots, new_cap, moved.key) in {
+                        .Some(j) then j,
+                        .None() then { panic("ConcurrentDict rehash failed"); },
+                    };
+                    init_memory(new_slots + idx, moved);
+                    self.size = self.size + 1;
                 };
-                init_memory(new_slots + idx, moved);
-                self.size = self.size + 1;
             };
+            dealloc_memory(old_slots);
         };
-        dealloc_memory(old_slots);
     };
 
     // The growth trigger shared by the insert paths (mirrors the Dict
@@ -267,7 +273,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     public get(self, key: K): Option[V] = {
         self.rw_lock.lock_shared();
         let out = when dict_find_slot(self.slots, self.capacity, key) in {
-            .Some(idx) then {
+            .Some(idx) then unsafe {
                 let slot_ptr = self.slots + idx;
                 if slot_ptr.tag == UInt(1) then {
                     Option[V].Some(slot_ptr.value)
@@ -285,7 +291,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     public contains_key(self, key: K): Bool = {
         self.rw_lock.lock_shared();
         let out = when dict_find_slot(self.slots, self.capacity, key) in {
-            .Some(idx) then (self.slots + idx).tag == UInt(1),
+            .Some(idx) then unsafe { (self.slots + idx).tag == UInt(1) },
             .None() then false,
         };
         self.rw_lock.unlock_shared();
@@ -301,30 +307,34 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             .Some(i) then i,
             .None() then { panic("ConcurrentDict insert failed"); },
         };
-        let slot_ptr = self.slots + final_idx;
+        let slot_ptr = unsafe { self.slots + final_idx };
         let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
         let mutable displaced = Option[V].None();
-        if slot_ptr.tag == UInt(1) then {
-            displaced = Option[V].Some(slot_ptr.value);
-            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-        } else {
-            if slot_ptr.tag == UInt(2) then {
-                self.deleted = self.deleted - 1;
+        unsafe {
+            if slot_ptr.tag == UInt(1) then {
+                displaced = Option[V].Some(slot_ptr.value);
+                dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+            } else {
+                if slot_ptr.tag == UInt(2) then {
+                    self.deleted = self.deleted - 1;
+                };
+                self.size = self.size + 1;
             };
-            self.size = self.size + 1;
         };
         let record_version = self.stamp_write();
-        init_memory(
-            slot_ptr,
-            ConcurrentDictSlot[K, V](
-                UInt(1),
-                key,
-                value,
-                record_version,
-                __koral_thread_current_id(),
-                concurrent_hash_mix(key.hash()),
-            ),
-        );
+        unsafe {
+            init_memory(
+                slot_ptr,
+                ConcurrentDictSlot[K, V](
+                    UInt(1),
+                    key,
+                    value,
+                    record_version,
+                    __koral_thread_current_id(),
+                    concurrent_hash_mix(key.hash()),
+                ),
+            );
+        };
         self.rw_lock.unlock();
         return displaced;
     };
@@ -339,27 +349,31 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             .Some(i) then i,
             .None() then { panic("ConcurrentDict try_insert failed"); },
         };
-        let slot_ptr = self.slots + final_idx;
-        if slot_ptr.tag == UInt(1) then {
-            self.rw_lock.unlock();
-            return false;
+        let slot_ptr = unsafe { self.slots + final_idx };
+        unsafe {
+            if slot_ptr.tag == UInt(1) then {
+                self.rw_lock.unlock();
+                return false;
+            };
+            if slot_ptr.tag == UInt(2) then {
+                self.deleted = self.deleted - 1;
+            };
+            self.size = self.size + 1;
         };
-        if slot_ptr.tag == UInt(2) then {
-            self.deleted = self.deleted - 1;
-        };
-        self.size = self.size + 1;
         let record_version = self.stamp_write();
-        init_memory(
-            slot_ptr,
-            ConcurrentDictSlot[K, V](
-                UInt(1),
-                key,
-                value,
-                record_version,
-                __koral_thread_current_id(),
-                concurrent_hash_mix(key.hash()),
-            ),
-        );
+        unsafe {
+            init_memory(
+                slot_ptr,
+                ConcurrentDictSlot[K, V](
+                    UInt(1),
+                    key,
+                    value,
+                    record_version,
+                    __koral_thread_current_id(),
+                    concurrent_hash_mix(key.hash()),
+                ),
+            );
+        };
         self.rw_lock.unlock();
         return true;
     };
@@ -372,14 +386,16 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
         when dict_find_slot(self.slots, self.capacity, key) in {
             .Some(idx) then {
-                let slot_ptr = self.slots + idx;
-                if slot_ptr.tag == UInt(1) then {
-                    out = Option[V].Some(slot_ptr.value);
-                    dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-                    dict_set_tag(slot_ptr, UInt(2));
-                    self.size = self.size - 1;
-                    self.deleted = self.deleted + 1;
-                    dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                unsafe {
+                    let slot_ptr = self.slots + idx;
+                    if slot_ptr.tag == UInt(1) then {
+                        out = Option[V].Some(slot_ptr.value);
+                        dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                        dict_set_tag(slot_ptr, UInt(2));
+                        self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
+                        dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                    };
                 };
             },
             .None() then {},
@@ -396,14 +412,16 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
         when dict_find_slot(self.slots, self.capacity, key) in {
             .Some(idx) then {
-                let slot_ptr = self.slots + idx;
-                if slot_ptr.tag == UInt(1) then {
-                    existed = true;
-                    dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-                    dict_set_tag(slot_ptr, UInt(2));
-                    self.size = self.size - 1;
-                    self.deleted = self.deleted + 1;
-                    dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                unsafe {
+                    let slot_ptr = self.slots + idx;
+                    if slot_ptr.tag == UInt(1) then {
+                        existed = true;
+                        dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                        dict_set_tag(slot_ptr, UInt(2));
+                        self.size = self.size - 1;
+                        self.deleted = self.deleted + 1;
+                        dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                    };
                 };
             },
             .None() then {},
@@ -422,28 +440,32 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             .Some(i) then i,
             .None() then { panic("ConcurrentDict get_or_insert failed"); },
         };
-        let slot_ptr = self.slots + final_idx;
-        if slot_ptr.tag == UInt(1) then {
-            let existing = slot_ptr.value;
-            self.rw_lock.unlock();
-            return existing;
+        let slot_ptr = unsafe { self.slots + final_idx };
+        unsafe {
+            if slot_ptr.tag == UInt(1) then {
+                let existing = slot_ptr.value;
+                self.rw_lock.unlock();
+                return existing;
+            };
+            if slot_ptr.tag == UInt(2) then {
+                self.deleted = self.deleted - 1;
+            };
+            self.size = self.size + 1;
         };
-        if slot_ptr.tag == UInt(2) then {
-            self.deleted = self.deleted - 1;
-        };
-        self.size = self.size + 1;
         let record_version = self.stamp_write();
-        init_memory(
-            slot_ptr,
-            ConcurrentDictSlot[K, V](
-                UInt(1),
-                key,
-                value,
-                record_version,
-                __koral_thread_current_id(),
-                concurrent_hash_mix(key.hash()),
-            ),
-        );
+        unsafe {
+            init_memory(
+                slot_ptr,
+                ConcurrentDictSlot[K, V](
+                    UInt(1),
+                    key,
+                    value,
+                    record_version,
+                    __koral_thread_current_id(),
+                    concurrent_hash_mix(key.hash()),
+                ),
+            );
+        };
         self.rw_lock.unlock();
         return value;
     };
@@ -482,10 +504,12 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             let mutable old = Option[V].None();
             when dict_find_slot(self.slots, self.capacity, key) in {
                 .Some(idx) then {
-                    let slot_ptr = self.slots + idx;
-                    if slot_ptr.tag == UInt(1) then {
-                        seen = slot_ptr.version;
-                        old = Option[V].Some(slot_ptr.value);
+                    unsafe {
+                        let slot_ptr = self.slots + idx;
+                        if slot_ptr.tag == UInt(1) then {
+                            seen = slot_ptr.version;
+                            old = Option[V].Some(slot_ptr.value);
+                        };
                     };
                 },
                 .None() then {},
@@ -514,9 +538,9 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                 };
                 return next;
             };
-            let slot_ptr = self.slots + final_idx;
-            let exists = slot_ptr.tag == UInt(1);
-            let current_version = if exists then slot_ptr.version else UInt64(0);
+            let slot_ptr = unsafe { self.slots + final_idx };
+            let exists = unsafe { slot_ptr.tag == UInt(1) };
+            let current_version = if exists then unsafe { slot_ptr.version } else UInt64(0);
             let mutable dead_record = Option[ConcurrentDictSlot[K, V]].None();
             if current_version != seen then {
                 // The attempt was invalidated: attribute the interfering
@@ -525,7 +549,7 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
                 // (the deleting thread). No surviving tombstone = unknown
                 // writer (a rebuild or clear ran) = retry, never panic.
                 let updater_wrote = if exists then {
-                    slot_ptr.writer == __koral_thread_current_id()
+                    unsafe { slot_ptr.writer == __koral_thread_current_id() }
                 } else {
                     when dict_tombstone_writer(self.slots, self.capacity, key) in {
                         .Some(w) then w == __koral_thread_current_id(),
@@ -539,34 +563,38 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
             } else {
                 when next in {
                     .Some(v) then {
-                        let record_version = self.stamp_write();
-                        if exists then {
-                            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-                        } else {
-                            if slot_ptr.tag == UInt(2) then {
-                                self.deleted = self.deleted - 1;
+                        unsafe {
+                            let record_version = self.stamp_write();
+                            if exists then {
+                                dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                            } else {
+                                if slot_ptr.tag == UInt(2) then {
+                                    self.deleted = self.deleted - 1;
+                                };
+                                self.size = self.size + 1;
                             };
-                            self.size = self.size + 1;
+                            init_memory(
+                                slot_ptr,
+                                ConcurrentDictSlot[K, V](
+                                    UInt(1),
+                                    key,
+                                    v,
+                                    record_version,
+                                    __koral_thread_current_id(),
+                                    concurrent_hash_mix(key.hash()),
+                                ),
+                            );
                         };
-                        init_memory(
-                            slot_ptr,
-                            ConcurrentDictSlot[K, V](
-                                UInt(1),
-                                key,
-                                v,
-                                record_version,
-                                __koral_thread_current_id(),
-                                concurrent_hash_mix(key.hash()),
-                            ),
-                        );
                     },
                     .None() then {
-                        if exists then {
-                            dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
-                            dict_set_tag(slot_ptr, UInt(2));
-                            self.size = self.size - 1;
-                            self.deleted = self.deleted + 1;
-                            dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                        unsafe {
+                            if exists then {
+                                dead_record = Option[ConcurrentDictSlot[K, V]].Some(take_memory(slot_ptr));
+                                dict_set_tag(slot_ptr, UInt(2));
+                                self.size = self.size - 1;
+                                self.deleted = self.deleted + 1;
+                                dict_stamp_tombstone(slot_ptr, key, self.stamp_write());
+                            };
                         };
                     },
                 };
@@ -583,15 +611,17 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
     public to_frozen_dict(self): FrozenDict[K, V] = {
         self.rw_lock.lock_shared();
         let len = self.size;
-        let keys = alloc_memory[K](UInt(len));
-        let values = alloc_memory[V](UInt(len));
+        let keys = unsafe { alloc_memory[K](UInt(len)) };
+        let values = unsafe { alloc_memory[V](UInt(len)) };
         let mutable j = 0;
-        for i in 0..<self.capacity then {
-            let slot_ptr = self.slots + i;
-            if slot_ptr.tag == UInt(1) then {
-                init_memory(keys + j, slot_ptr.key);
-                init_memory(values + j, slot_ptr.value);
-                j = j + 1;
+        unsafe {
+            for i in 0..<self.capacity then {
+                let slot_ptr = self.slots + i;
+                if slot_ptr.tag == UInt(1) then {
+                    init_memory(keys + j, slot_ptr.key);
+                    init_memory(values + j, slot_ptr.value);
+                    j = j + 1;
+                };
             };
         };
         self.rw_lock.unlock_shared();
@@ -610,11 +640,13 @@ given[K: Hash and sendable, V: sendable] ConcurrentDict[K, V] {
         self.deleted = 0;
         let _ = self.stamp_write();
         self.rw_lock.unlock();
-        for i in 0..<old_capacity then {
-            if (old_slots + i).tag == UInt(1) then {
-                deinit_memory(old_slots + i);
+        unsafe {
+            for i in 0..<old_capacity then {
+                if (old_slots + i).tag == UInt(1) then {
+                    deinit_memory(old_slots + i);
+                };
             };
+            dealloc_memory(old_slots);
         };
-        dealloc_memory(old_slots);
     };
 };

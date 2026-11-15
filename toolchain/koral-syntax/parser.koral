@@ -1990,6 +1990,9 @@ given CstParser {
             .KwWhen() then {
                 return self.parse_when_expr();
             },
+            .KwUnsafe() then {
+                return self.parse_unsafe_expr();
+            },
             _ then {},
         };
 
@@ -2079,6 +2082,18 @@ given CstParser {
         return .Error(
             "Parse error: expected primary expression, got '\(got.to_string())' at token #\(self.pos.to_string())",
         );
+    };
+
+    /// `unsafe { … }` (docs/design/unsafe-design.md §A): the block form only --
+    /// the block's lexical range is the unsafe context. `unsafe` not followed by
+    /// a block is rejected the way the compilers reject it.
+    private parse_unsafe_expr(self): Result[CstExpr] = {
+        let unsafe_kw = self.eat();
+        if not self.check(.LBrace()) then {
+            return .Error("Parse error: Expected '{' after 'unsafe'");
+        };
+        let block = self.parse_block_expr() or return;
+        return .Ok(.UnsafeBlock(unsafe_kw, block));
     };
 
     private parse_collection_literal(self): Result[CstExpr] = {
@@ -3728,9 +3743,22 @@ given CstParser {
     private parse_let_decl(self): Result[CstDecl] = {
         let vis = self.eat_vis();
         let let_kw = self.expect(.KwLet(), "'let'") or return;
+        // `unsafe` sits immediately after `let`, before `foreign` / `intrinsic`
+        // (docs/design/unsafe-design.md §B): `let unsafe foreign strlen(…)`.
+        let mutable unsafe_kw = Option[Token].None();
+        if self.check(.KwUnsafe()) then {
+            unsafe_kw = .Some(self.eat());
+        };
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let mods = self.eat_kind_modifiers();
+        // The marker precedes the qualifiers -- the compilers reject the other
+        // order with this same wording (docs/design/unsafe-design.md §B).
+        if self.check(.KwUnsafe()) then {
+            return .Error(
+                "Parse error: 'unsafe' must be written before 'foreign' / 'intrinsic'",
+            );
+        };
         // C 名槽位：`let foreign "CreateFileA" name(…)`——外来词汇是字符串，紧跟
         // `foreign`（docs/design/cffi-design.md §C）。
         let mutable has_foreign = false;
@@ -3750,7 +3778,15 @@ given CstParser {
         if self.check(.KwMut()) then {
             mut_kw = .Some(self.eat());
         };
-        return self.finish_func_or_var(vis, mods, cname, .Some(let_kw), mut_kw, false);
+        return self.finish_func_or_var(
+            vis,
+            mods,
+            cname,
+            .Some(let_kw),
+            unsafe_kw,
+            mut_kw,
+            false,
+        );
     };
 
     private finish_func_or_var(
@@ -3759,11 +3795,21 @@ given CstParser {
         mods: List[Token],
         cname: Option[Token],
         let_kw: Option[Token],
+        unsafe_kw: Option[Token],
         mut_kw: Option[Token],
         in_member_context: Bool,
     ): Result[CstDecl] = {
         let name = self.expect_ident("declaration name") or return;
         let gp = self.parse_generic_params() or return;
+        let mutable has_foreign = false;
+        for m in mods then {
+            when m in {
+                .KwForeign() then {
+                    has_foreign = true;
+                },
+                _ then {},
+            };
+        };
 
         // Parameters -- unless the `(` opens a function TYPE's parameter list
         // (`let f (Int) -> Int = value`), which is an annotation, not a
@@ -3780,6 +3826,15 @@ given CstParser {
             );
         };
 
+        // A variable carries no safety contract (docs/design/unsafe-design.md
+        // §B) -- the compilers reject the marker here, before the type is read.
+        // A foreign declaration is not a variable: its forms decide below.
+        if unsafe_kw is .Some(_) and lp is .None() and not has_foreign then {
+            return .Error(
+                "Parse error: Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.",
+            );
+        };
+
         // Return type: `): Type`
         let mutable ret = Option[CstType].None();
         if self.check(.Colon()) then {
@@ -3792,8 +3847,16 @@ given CstParser {
         if self.check(.Eq()) then {
             let eq = self.eat();
             let body = self.parse_expr_node() or return;
+            // A foreign declaration with a value and no `mutable` is a C macro
+            // constant: a compile-time value, not C state, so the marker has no
+            // place on it (docs/design/unsafe-design.md §B / §E).
+            if unsafe_kw is .Some(_) and has_foreign and lp is .None() and mut_kw is .None() then {
+                return .Error(
+                    "Parse error: Cannot mark a foreign constant 'unsafe': a macro constant is a compile-time value, not C state.",
+                );
+            };
             return .Ok(
-                .Func(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret, eq, body),
+                .Func(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, .Some(name), lp, params, rp, ret, eq, body),
             );
         };
 
@@ -3802,15 +3865,40 @@ given CstParser {
         // else. `let f(x Int) Int;` is a syntax error, and parsing it as a
         // variable would drop the parameter list on the floor.
         if mods.count() > 0 then {
+            // Hardening rule (docs/design/unsafe-design.md §E): a body-less
+            // `foreign` reference whose signature or type carries a raw
+            // pointer / C function pointer must be marked `unsafe` -- a safe
+            // assertion is only for scalar shapes. The messages are the
+            // compilers' own.
+            if has_foreign and unsafe_kw is .None() then {
+                if lp is .Some(_) then {
+                    if CstParser.signature_carries_raw_pointer(params, ret) then {
+                        return .Error(
+                            "Parse error: Foreign function '\(name.to_string())' must be marked 'unsafe': its signature carries a raw pointer or C function pointer.",
+                        );
+                    };
+                } else {
+                    when ret in {
+                        .Some(var_type) then {
+                            if CstParser.type_carries_raw_pointer(var_type) then {
+                                return .Error(
+                                    "Parse error: Foreign variable '\(name.to_string())' must be marked 'unsafe': its type carries a raw pointer or C function pointer.",
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
+                };
+            };
             return .Ok(
-                .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
+                .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
             );
         };
 
         if in_member_context then {
             if lp is .Some(_) then {
                 return .Ok(
-                    .ForeignDecl(vis, mods, cname, let_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
+                    .ForeignDecl(vis, mods, cname, let_kw, unsafe_kw, mut_kw, gp, .Some(name), lp, params, rp, ret),
                 );
             };
             return .Error(self.expected_error("member signature"));
@@ -3825,6 +3913,47 @@ given CstParser {
         // Variable declaration (top-level)
         let lk = let_kw or else .KwLet();
         return .Ok(.Var(vis, lk, mut_kw, name, ret));
+    };
+
+    /// Hardening criterion (docs/design/unsafe-design.md §E): a body-less
+    /// `foreign` declaration carrying a raw pointer / C function pointer must
+    /// be marked `unsafe`. Only legal FFI shapes are walked (pointer, fixed
+    /// array, `foreign (A) -> R`); managed shapes never cross into the rule.
+    /// Parentheses and `*mutable` are transparent here the way the compilers'
+    /// type walker sees them.
+    private type_carries_raw_pointer(node: CstType): Bool = when node in {
+        .Ptr(_, _) or .ForeignFunction(_, _, _, _, _) then true,
+        .Mutable(inner, _) or .Paren(_, inner, _) or .Sendable(_, inner) then CstParser.type_carries_raw_pointer(inner),
+        .FixedArray(_, _, _, element) then CstParser.type_carries_raw_pointer(element),
+        _ then false,
+    };
+
+    /// Whether any parameter or the return type of a signature carries a raw
+    /// pointer / C function pointer -- the `unsafe` obligation's signature
+    /// shape (docs/design/unsafe-design.md §E).
+    private signature_carries_raw_pointer(
+        params: List[CstParam],
+        return_type: Option[CstType],
+    ): Bool = {
+        when return_type in {
+            .Some(rt) then {
+                if CstParser.type_carries_raw_pointer(rt) then {
+                    return true;
+                };
+            },
+            .None() then {},
+        };
+        for p in params then {
+            when p in {
+                .NamedParam(_, _, _, param_type, _, _) then {
+                    if CstParser.type_carries_raw_pointer(param_type) then {
+                        return true;
+                    };
+                },
+                .SelfParam(_, _, _) then {},
+            };
+        };
+        return false;
     };
 
     // ========================================================================
@@ -4194,6 +4323,12 @@ given CstParser {
 
     private parse_trait_method_sig(self): Result[CstDecl] = {
         let vis = self.eat_vis();
+        // `unsafe` is the requirement's member-level marker
+        // (docs/design/unsafe-design.md §B): it sits before the name.
+        let mutable unsafe_kw = Option[Token].None();
+        if self.check(.KwUnsafe()) then {
+            unsafe_kw = .Some(self.eat());
+        };
         let name = self.expect_ident("method name") or return;
         let gp = self.parse_generic_params() or return;
         let lp = self.expect(.LParen(), "'('") or return;
@@ -4253,7 +4388,7 @@ given CstParser {
             let t = self.parse_type_node() or return;
             ret = .Some(t);
         };
-        return .Ok(.TraitMethod(vis, gp, name, lp, params, rp, ret));
+        return .Ok(.TraitMethod(vis, unsafe_kw, gp, name, lp, params, rp, ret));
     };
 
     // ========================================================================
@@ -4341,8 +4476,22 @@ given CstParser {
 
     private parse_member_no_let(self): Result[CstDecl] = {
         let vis = self.eat_vis();
+        // `unsafe` sits after the access modifier and before the name
+        // (docs/design/unsafe-design.md §B): `unsafe slot_at(self, …)`.
+        let mutable unsafe_kw = Option[Token].None();
+        if self.check(.KwUnsafe()) then {
+            unsafe_kw = .Some(self.eat());
+        };
         // Generic params and name are handled by finish_func_or_var. Members
         // carry no `foreign` / `intrinsic` qualifiers.
-        return self.finish_func_or_var(vis, List[Token].new(), .None(), .None(), .None(), true);
+        return self.finish_func_or_var(
+            vis,
+            List[Token].new(),
+            .None(),
+            .None(),
+            unsafe_kw,
+            .None(),
+            true,
+        );
     };
 };

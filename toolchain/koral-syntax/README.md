@@ -55,6 +55,12 @@ verbatim, so a toolchain error and a compiler error say the same thing:
 | `type mutable` on an alias / enum | `Type alias cannot be marked mutable` / `Enum type cannot be marked mutable` |
 | import alias case mismatch | `Using alias '<a>' is invalid: alias must start with an upper\|lowercase letter because referenced identifier '<n>' starts with upper\|lowercase` |
 | flow operator mixed with logical `and` / `or`, or the reverse | `'<op>' cannot be mixed with the flow operators 'and then' / 'or else' / 'or return' without parentheses` / `'<op>' cannot be mixed with logical 'and' / 'or' without parentheses` |
+| `unsafe` without a block after it | `Expected '{' after 'unsafe'` |
+| `unsafe` after `foreign` / `intrinsic` | `'unsafe' must be written before 'foreign' / 'intrinsic'` |
+| `let unsafe` on a variable | `Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.` |
+| `unsafe` on a foreign macro constant | `Cannot mark a foreign constant 'unsafe': a macro constant is a compile-time value, not C state.` |
+| body-less pointer-carrying `foreign` fn unmarked | `Foreign function '<name>' must be marked 'unsafe': its signature carries a raw pointer or C function pointer.` |
+| body-less pointer-carrying `foreign` var unmarked | `Foreign variable '<name>' must be marked 'unsafe': its type carries a raw pointer or C function pointer.` |
 
 That last one is a *layer* rule, not a token rule: `and then` / `or else` / `or return`
 are one layer and `and` / `or` another, and an expression is a chain in one layer or

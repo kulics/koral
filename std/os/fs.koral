@@ -16,12 +16,12 @@ using "std/io" { IoError, Reader, Writer };
 // ============================================================================
 
 // File system operations
-let foreign __koral_remove(path: *UInt8): Int32;
-let foreign __koral_rename(old: *UInt8, new: *UInt8): Int32;
+let unsafe foreign __koral_remove(path: *UInt8): Int32;
+let unsafe foreign __koral_rename(old: *UInt8, new: *UInt8): Int32;
 
 // Disk query functions
-let foreign __koral_path_exists(path: *UInt8): Int32;
-let foreign __koral_realpath(path: *UInt8, buf: *UInt8, size: UInt): Int32;
+let unsafe foreign __koral_path_exists(path: *UInt8): Int32;
+let unsafe foreign __koral_realpath(path: *UInt8, buf: *UInt8, size: UInt): Int32;
 
 // File metadata (stat)
 type foreign KoralStatResult(
@@ -35,19 +35,19 @@ type foreign KoralStatResult(
     created_secs: Int64,
     created_nanos: Int64,
 );
-let foreign __koral_stat(path: *UInt8, out: *KoralStatResult): Int32;
-let foreign __koral_lstat(path: *UInt8, out: *KoralStatResult): Int32;
+let unsafe foreign __koral_stat(path: *UInt8, out: *KoralStatResult): Int32;
+let unsafe foreign __koral_lstat(path: *UInt8, out: *KoralStatResult): Int32;
 
 // File open (unbuffered I/O)
-let foreign __koral_open(path: *UInt8, open_mode: Int32, perm: UInt32): Int32;
+let unsafe foreign __koral_open(path: *UInt8, open_mode: Int32, perm: UInt32): Int32;
 
 // File system operations
-let foreign __koral_chmod(path: *UInt8, mode: UInt32): Int32;
-let foreign __koral_link(src: *UInt8, dst: *UInt8): Int32;
-let foreign __koral_symlink(src: *UInt8, dst: *UInt8): Int32;
-let foreign __koral_readlink(path: *UInt8, buf: *UInt8, buf_size: UInt): Int32;
-let foreign __koral_truncate(path: *UInt8, size: Int64): Int32;
-let foreign __koral_mkstemp(template: *UInt8): Int32;
+let unsafe foreign __koral_chmod(path: *UInt8, mode: UInt32): Int32;
+let unsafe foreign __koral_link(src: *UInt8, dst: *UInt8): Int32;
+let unsafe foreign __koral_symlink(src: *UInt8, dst: *UInt8): Int32;
+let unsafe foreign __koral_readlink(path: *UInt8, buf: *UInt8, buf_size: UInt): Int32;
+let unsafe foreign __koral_truncate(path: *UInt8, size: Int64): Int32;
+let unsafe foreign __koral_mkstemp(template: *UInt8): Int32;
 
 // ============================================================================
 // Byte-Oriented File Operations
@@ -152,7 +152,7 @@ private let write_all_text(f: File, content: String): Result[Void] = {
     let end = content.count();
     let mutable start = 0;
     while start < end then {
-        when f.write_some(data + start, end - start) in {
+        when f.write_some(unsafe { data + start }, end - start) in {
             .Ok(n) then {
                 if n == 0 then {
                     return Result[Void].Error(IoError.WriteZero());
@@ -204,7 +204,7 @@ public let copy_file[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] = 
 /// Remove (delete) a file
 public let remove_file[T: ToPath](path: T): Result[Void] = {
     let s = path.to_path().to_string();
-    return if __koral_remove(s.bytes.data) == 0 then Result[Void].Ok({})
+    return if unsafe { __koral_remove(s.bytes.data) } == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
 
@@ -212,7 +212,7 @@ public let remove_file[T: ToPath](path: T): Result[Void] = {
 public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] = {
     let src_s = src.to_path().to_string();
     let to_s = to.to_path().to_string();
-    return if __koral_rename(src_s.bytes.data, to_s.bytes.data) == 0 then Result[Void].Ok({})
+    return if unsafe { __koral_rename(src_s.bytes.data, to_s.bytes.data) } == 0 then Result[Void].Ok({})
     else Result[Void].Error(last_error_message());
 };
 
@@ -223,7 +223,7 @@ public let rename_path[T1: ToPath, T2: ToPath](src: T1, to: T2 =): Result[Void] 
 /// Check if path exists on disk.
 public let path_exist[T: ToPath](path: T): Bool = {
     let s = path.to_path().to_string();
-    return __koral_path_exists(s.bytes.data) != 0;
+    return unsafe { __koral_path_exists(s.bytes.data) } != 0;
 };
 
 /// Convert to absolute path (does not resolve symlinks)
@@ -252,9 +252,9 @@ public let absolute_path[T: ToPath](path: T): Result[Path] = {
 /// underneath returns the platform spelling.
 public let canonicalize_path[T: ToPath](path: T): Result[Path] = {
     let s = path.to_path().to_string();
-    let buf = alloc_memory[UInt8](4096);
-    defer dealloc_memory(buf);
-    let result = __koral_realpath(s.bytes.data, buf, 4096);
+    let buf = unsafe { alloc_memory[UInt8](4096) };
+    defer unsafe { dealloc_memory(buf) };
+    let result = unsafe { __koral_realpath(s.bytes.data, buf, 4096) };
     if result != 0 then {
         return Result[Path].Error(last_error_message());
     };
@@ -299,7 +299,7 @@ public let open_file[T: ToPath](path: T, mode: OpenMode): Result[File] = {
             perm = 0;
         },
     };
-    let fd = __koral_open(s.bytes.data, open_mode, perm);
+    let fd = unsafe { __koral_open(s.bytes.data, open_mode, perm) };
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };
@@ -317,7 +317,7 @@ public let create_file[T: ToPath](path: T): Result[File] = open_file(path, .Crea
 public let file_info[T: ToPath](path: T): Result[FileInfo] = {
     let s = path.to_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    let result = __koral_stat(s.bytes.data, &stat_buf);
+    let result = unsafe { __koral_stat(s.bytes.data, &stat_buf) };
     if result != 0 then {
         return Result[FileInfo].Error(last_error_message());
     };
@@ -343,7 +343,7 @@ public let file_info[T: ToPath](path: T): Result[FileInfo] = {
 public let symlink_info[T: ToPath](path: T): Result[FileInfo] = {
     let s = path.to_path().to_string();
     let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
-    let result = __koral_lstat(s.bytes.data, &stat_buf);
+    let result = unsafe { __koral_lstat(s.bytes.data, &stat_buf) };
     if result != 0 then {
         return Result[FileInfo].Error(last_error_message());
     };
@@ -372,7 +372,7 @@ public let symlink_info[T: ToPath](path: T): Result[FileInfo] = {
 /// Set file permissions
 public let set_permissions[T: ToPath](path: T, perm: Permission): Result[Void] = {
     let s = path.to_path().to_string();
-    let result = __koral_chmod(s.bytes.data, perm.mode());
+    let result = unsafe { __koral_chmod(s.bytes.data, perm.mode()) };
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -386,7 +386,7 @@ public let set_permissions[T: ToPath](path: T, perm: Permission): Result[Void] =
 public let create_hard_link[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void] = {
     let target_s = to.to_path().to_string();
     let link_s = link.to_path().to_string();
-    let result = __koral_link(target_s.bytes.data, link_s.bytes.data);
+    let result = unsafe { __koral_link(target_s.bytes.data, link_s.bytes.data) };
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -400,7 +400,7 @@ public let create_hard_link[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[
 public let create_symlink[T1: ToPath, T2: ToPath](link: T1, to: T2 =): Result[Void] = {
     let target_s = to.to_path().to_string();
     let link_s = link.to_path().to_string();
-    let result = __koral_symlink(target_s.bytes.data, link_s.bytes.data);
+    let result = unsafe { __koral_symlink(target_s.bytes.data, link_s.bytes.data) };
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -416,19 +416,19 @@ public let read_symlink[T: ToPath](path: T): Result[Path] = {
     let s = path.to_path().to_string();
     let mutable buf_size = 4096;
     while buf_size <= 1048576 then {
-        let buf = alloc_memory[UInt8](UInt(buf_size));
-        let result = __koral_readlink(s.bytes.data, buf, UInt(buf_size));
+        let buf = unsafe { alloc_memory[UInt8](UInt(buf_size)) };
+        let result = unsafe { __koral_readlink(s.bytes.data, buf, UInt(buf_size)) };
         if result < 0 then {
-            dealloc_memory(buf);
+            unsafe { dealloc_memory(buf) };
             return Result[Path].Error(last_error_message());
         };
         if Int(result) < buf_size then {
             let target = String.from_utf8_ptr_unchecked(buf, Int(result));
-            dealloc_memory(buf);
+            unsafe { dealloc_memory(buf) };
             return Result[Path].Ok(target.to_path());
         };
         // result == buf_size: the target was cut off; retry with more room.
-        dealloc_memory(buf);
+        unsafe { dealloc_memory(buf) };
         buf_size = buf_size * 2;
     };
     return Result[Path].Error("symlink target too long");
@@ -437,7 +437,7 @@ public let read_symlink[T: ToPath](path: T): Result[Path] = {
 /// Truncate a file to the specified size
 public let truncate_file[T: ToPath](path: T, size: Int): Result[Void] = {
     let s = path.to_path().to_string();
-    let result = __koral_truncate(s.bytes.data, Int64(size));
+    let result = unsafe { __koral_truncate(s.bytes.data, Int64(size)) };
     if result != 0 then {
         return Result[Void].Error(last_error_message());
     };
@@ -463,7 +463,7 @@ public let create_temp_file[T: ToPath](dir: T, prefix: String =): Result[File] =
     template.push_string(prefix);
     template.push_string("XXXXXX");
     let mutable template_text = template.to_string();
-    let fd = __koral_mkstemp(template_text.bytes.data);
+    let fd = unsafe { __koral_mkstemp(template_text.bytes.data) };
     if fd < 0 then {
         return Result[File].Error(last_error_message());
     };

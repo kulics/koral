@@ -1427,6 +1427,106 @@ let main(): Void = {
         "let foreign mutable counter: Int32 = 0;\n",
     );
 
+    // unsafe 机制（docs/design/unsafe-design.md §A/§B/§F）：块表达式
+    // `unsafe { … }`，声明标记 `let unsafe`（紧跟 `let`、限定词之前），given
+    // 成员标记（可见性之后、名字之前），trait 需求标记（名字之前）。拒绝文案
+    // 与编译器逐字一致（§F）；`let` 变量与 foreign 宏常量不收标记。
+    t.test_checked(
+        "unsafe block expression round-trips",
+        "let f(): Int = unsafe {\n    let a = 1;\n    a\n};\n",
+        "let f(): Int = unsafe {\n    let a = 1;\n    a\n};\n",
+    );
+    t.test_checked(
+        "unsafe block spacing normalized",
+        "let f(p: *Int) : Int=unsafe{*p};\n",
+        "let f(p: *Int): Int = unsafe {\n    *p\n};\n",
+    );
+    t.test_checked(
+        "unsafe block as statement",
+        "let f() : Void={\nunsafe { g(); };\n};\n",
+        "let f(): Void = {\n    unsafe {\n        g();\n    };\n};\n",
+    );
+    t.test_checked(
+        "unsafe marker on function",
+        "public let unsafe first_byte(p: *UInt8): UInt8 = unsafe { *p };\n",
+        "public let unsafe first_byte(p: *UInt8): UInt8 = unsafe {\n    *p\n};\n",
+    );
+    t.test_checked(
+        "unsafe marker on intrinsic",
+        "let unsafe intrinsic alloc_memory[T: Any](capacity: Int): *mutable T;\n",
+        "let unsafe intrinsic alloc_memory[T: Any](capacity: Int): *mutable T;\n",
+    );
+    t.test_checked(
+        "unsafe marker on foreign function",
+        "let unsafe foreign strlen(p: *UInt8): Int;\n",
+        "let unsafe foreign strlen(p: *UInt8): Int;\n",
+    );
+    t.test_checked(
+        "unsafe marker on foreign function with c-name",
+        "let unsafe foreign \"abort\" my_abort(): Void;\n",
+        "let unsafe foreign \"abort\" my_abort(): Void;\n",
+    );
+    t.test_checked(
+        "unsafe marker on foreign extern reference",
+        "let unsafe foreign buf: *UInt8;\n",
+        "let unsafe foreign buf: *UInt8;\n",
+    );
+    t.test_checked(
+        "unsafe marker on foreign mutable extern reference",
+        "let unsafe foreign mutable state: Int32;\n",
+        "let unsafe foreign mutable state: Int32;\n",
+    );
+    t.test_checked(
+        "unsafe marker on foreign exported global",
+        "let unsafe foreign mutable counter: Int32 = 0;\n",
+        "let unsafe foreign mutable counter: Int32 = 0;\n",
+    );
+    t.test_checked(
+        "unsafe marker on trait requirement",
+        "trait Blob {\nunsafe raw_bytes(self): *UInt8;\n};\n",
+        "trait Blob {\n    unsafe raw_bytes(self): *UInt8;\n};\n",
+    );
+    t.test_checked(
+        "unsafe marker after access modifier in given member",
+        "type Buffer(data: *mutable UInt8);\ngiven Buffer {\npublic unsafe slot_at(self): *mutable UInt8 = unsafe { self.data };\n};\n",
+        "type Buffer(data: *mutable UInt8);\ngiven Buffer {\n    public unsafe slot_at(self): *mutable UInt8 = unsafe {\n        self.data\n    };\n};\n",
+    );
+    t.test_checked(
+        "unsafe marker on body-less given member",
+        "given intrinsic Int {\nunsafe mem_size(self): Int;\n};\n",
+        "given intrinsic Int {\n    unsafe mem_size(self): Int;\n};\n",
+    );
+    t.test_error_contains(
+        "unsafe expression without a block rejected",
+        "let f(): Int = unsafe 3;\n",
+        "Expected '{' after 'unsafe'",
+    );
+    t.test_error_contains(
+        "unsafe marker on a variable rejected",
+        "let unsafe x: Int = 5;\n",
+        "Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.",
+    );
+    t.test_error_contains(
+        "unsafe marker on a foreign constant rejected",
+        "let unsafe foreign answer: Int32 = 42;\n",
+        "Cannot mark a foreign constant 'unsafe': a macro constant is a compile-time value, not C state.",
+    );
+    t.test_error_contains(
+        "unsafe marker after qualifier rejected",
+        "let foreign unsafe f(x: Int): Int = x;\n",
+        "'unsafe' must be written before 'foreign' / 'intrinsic'",
+    );
+    t.test_error_contains(
+        "unmarked pointer foreign function rejected",
+        "let foreign reads(p: *UInt8): UInt8;\n",
+        "Foreign function 'reads' must be marked 'unsafe': its signature carries a raw pointer or C function pointer.",
+    );
+    t.test_error_contains(
+        "unmarked pointer foreign variable rejected",
+        "let foreign slot: *Int32;\n",
+        "Foreign variable 'slot' must be marked 'unsafe': its type carries a raw pointer or C function pointer.",
+    );
+
     // `mutable` on a trait method parameter (grammar.bnf <func-param>). It was
     // accepted for free functions and rejected inside a trait body.
     t.test(

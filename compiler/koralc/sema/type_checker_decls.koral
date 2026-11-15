@@ -38,6 +38,7 @@ let drop_self_receiver_span(base: Expr, in_lambda: Bool): Option[SourceSpan] = {
 
 let drop_self_escape_span_in(e: Expr, in_lambda: Bool): Option[SourceSpan] = {
     return when e in {
+        .UnsafeExpr(block, _) then drop_self_escape_span_in(block, in_lambda),
         .Identifier(name, span) then if name == "self" then {
             Option[SourceSpan].Some(span)
         } else {
@@ -480,7 +481,7 @@ given TypeChecker {
                     ),
                 );
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, _, _, span, _) then {
+            .ForeignLetDecl(access, _, name, is_mutable, type_name, _, _, span, _) then {
                 // Foreign globals are annotated by definition; settle the type
                 // here so a reference never needs the force.
                 let t = self.resolve_type(type_name);
@@ -717,7 +718,7 @@ given TypeChecker {
                 };
                 result
             },
-            .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
+            .FunctionDecl(access, _, name, type_params, params, return_type, body, span, name_span) then {
                 // Enter function context — cleanup via defer (Swift: withNewScope pattern)
                 let prev_function_return_context = self.clone_function_return_context();
                 let prev_in_loop = self.storage.in_loop;
@@ -979,7 +980,7 @@ given TypeChecker {
                 };
                 result
             },
-            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
+            .IntrinsicFunctionDecl(access, _, name, type_params, params, return_type, span, name_span) then {
                 let generic_constraint_snapshot = self.snapshot_generic_constraints(
                     type_params,
                 );
@@ -1036,7 +1037,7 @@ given TypeChecker {
                     ),
                 )
             },
-            .ForeignFunctionDecl(access, name, params, return_type, body, _, span, name_span) then {
+            .ForeignFunctionDecl(access, _, name, params, return_type, body, _, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let typed_params = self.check_params(params);
                 // Seed-parity signature gates: an opaque handle cannot cross
@@ -1162,7 +1163,7 @@ given TypeChecker {
                     ),
                 )
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, initializer, _, span, name_span) then {
+            .ForeignLetDecl(access, _, name, is_mutable, type_name, initializer, _, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
                 if self.opaque_by_value_type(resolved) is .Some(opaque_t) then {
                     self.push_diagnostic(

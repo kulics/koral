@@ -61,6 +61,30 @@ public final class CompilerContext: @unchecked Sendable {
         defIdMap.isSymbolMutable(defId) ?? false
     }
 
+    // MARK: - Unsafe Markers (docs/design/unsafe-design.md §B)
+
+    /// `unsafe` 标记登记：声明处登记，调用 / 访问点按 DefId 判。缺席 = 无标记。
+    /// Storage lives on the DefIdMap so the collection pass's recordings reach
+    /// every later consumer of the same map.
+    public func recordUnsafeDef(_ defId: DefId) {
+        defIdMap.recordUnsafeDef(defId)
+    }
+
+    /// intrinsic 名字的 `unsafe` 标记登记（派发按名）。
+    public func recordUnsafeIntrinsicName(_ name: String) {
+        defIdMap.recordUnsafeIntrinsicName(name)
+    }
+
+    public func isUnsafeIntrinsicName(_ name: String) -> Bool {
+        defIdMap.isUnsafeIntrinsicName(name)
+    }
+
+    /// 这个声明身份带 `unsafe` 标记吗？缺席 = 无标记。物化别名沿
+    /// import-record 原始 DefId 链回溯到源声明再判。
+    public func defIsUnsafe(_ defId: DefId) -> Bool {
+        defIdMap.defIsUnsafe(defId)
+    }
+
     public func lookupDefId(
         modulePath: [String],
         name: String,

@@ -152,6 +152,9 @@ given TypeChecker {
             ),
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
                     or .MutableBorrowedReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
@@ -163,6 +166,9 @@ given TypeChecker {
             },
             .UnsafeDerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
                     or .MutableBorrowedReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
@@ -863,6 +869,7 @@ given TypeChecker {
                     // not.
                     let offset_fits = self.same_expr_type(right_t, Type.IntType()) or typed_right.expr_kind is .IntegerLiteral(_);
                     if offset_fits then {
+                        self.require_unsafe_operation_at(blame_span, unsafe_arith_message);
                         return Option[TypedExpr].None();
                     };
                     self.push_diagnostic(

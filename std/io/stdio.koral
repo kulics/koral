@@ -10,17 +10,17 @@ using "std" { ... };
 // ============================================================================
 
 /// Read from a file descriptor (POSIX read wrapper, unbuffered)
-let foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
+let unsafe foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Write to a file descriptor (POSIX write wrapper, unbuffered)
-let foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
+let unsafe foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Check whether a file descriptor refers to a console/terminal
-let foreign __koral_isatty(fd: Int32): Int32;
+let unsafe foreign __koral_isatty(fd: Int32): Int32;
 
 /// Put a file descriptor in binary mode (no-op on POSIX; required on Windows
 /// so the three standard streams do not translate newlines)
-let foreign __koral_set_binary_mode(fd: Int32): Int32;
+let unsafe foreign __koral_set_binary_mode(fd: Int32): Int32;
 
 // ============================================================================
 // Stdin Type
@@ -42,7 +42,7 @@ given Stdin {
     public fd(self): Int = Int(self.handle);
 
     /// Whether the stream is attached to a console/terminal.
-    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+    public is_terminal(self): Bool = unsafe { __koral_isatty(self.handle) != 0 };
 };
 
 /// Implements `Reader` with unbuffered OS reads.
@@ -57,8 +57,10 @@ given Stdin: Reader {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = into.borrow_mut_ptr() + start;
-        let n = __koral_read(self.handle, data_ptr, UInt(span.len()));
+        let n = unsafe {
+            let data_ptr = into.borrow_mut_ptr() + start;
+            __koral_read(self.handle, data_ptr, UInt(span.len()))
+        };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -87,7 +89,7 @@ given Stdout {
     public fd(self): Int = Int(self.handle);
 
     /// Whether the stream is attached to a console/terminal.
-    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+    public is_terminal(self): Bool = unsafe { __koral_isatty(self.handle) != 0 };
 };
 
 /// Implements `Writer` with unbuffered OS writes.
@@ -103,10 +105,10 @@ given Stdout: Writer {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = from.borrow_ptr() + start;
+        let data_ptr = unsafe { from.borrow_ptr() + start };
         self.write_lock.lock();
         defer self.write_lock.unlock();
-        let n = __koral_write(self.handle, data_ptr, UInt(span.len()));
+        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.len())) };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -143,7 +145,7 @@ given Stderr {
     public fd(self): Int = Int(self.handle);
 
     /// Whether the stream is attached to a console/terminal.
-    public is_terminal(self): Bool = __koral_isatty(self.handle) != 0;
+    public is_terminal(self): Bool = unsafe { __koral_isatty(self.handle) != 0 };
 };
 
 /// Implements `Writer` with unbuffered OS writes.
@@ -159,10 +161,10 @@ given Stderr: Writer {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = from.borrow_ptr() + start;
+        let data_ptr = unsafe { from.borrow_ptr() + start };
         self.write_lock.lock();
         defer self.write_lock.unlock();
-        let n = __koral_write(self.handle, data_ptr, UInt(span.len()));
+        let n = unsafe { __koral_write(self.handle, data_ptr, UInt(span.len())) };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -185,7 +187,7 @@ given Stderr: Writer {
 /// The process standard input stream. Each call returns a fresh handle over
 /// the same stream; the private field makes this the only construction path.
 public let stdin(): Stdin = {
-    let _ = __koral_set_binary_mode(0);
+    let _ = unsafe { __koral_set_binary_mode(0) };
     return Stdin(0);
 };
 
@@ -193,7 +195,7 @@ public let stdin(): Stdin = {
 /// the same stream; the private field makes this the only construction path.
 /// All handles share the stream's write lock, so writes serialize.
 public let stdout(): Stdout = {
-    let _ = __koral_set_binary_mode(1);
+    let _ = unsafe { __koral_set_binary_mode(1) };
     return Stdout(1, stdout_write_lock);
 };
 
@@ -201,6 +203,6 @@ public let stdout(): Stdout = {
 /// the same stream; the private field makes this the only construction path.
 /// All handles share the stream's write lock, so writes serialize.
 public let stderr(): Stderr = {
-    let _ = __koral_set_binary_mode(2);
+    let _ = unsafe { __koral_set_binary_mode(2) };
     return Stderr(2, stderr_write_lock);
 };

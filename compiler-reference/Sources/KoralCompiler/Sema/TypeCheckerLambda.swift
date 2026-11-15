@@ -305,6 +305,10 @@ extension TypeChecker {
         }
       }
       
+    case .unsafeExpression(let block, _):
+      try collectCapturedVariables(expr: block, localNames: localNames, captures: &captures)
+      return
+
     case .blockExpression(let statements, let tailExpression, _):
       var blockLocalNames = localNames
       for stmt in statements {

@@ -439,6 +439,9 @@ public type TraitMember(
     name: String,
     type_params: List[TypeParameter],
     access: AccessModifier,
+    /// `unsafe` 标记（unsafe-design.md §B）：调用该需求需要 unsafe 上下文；
+    /// 实现方法必须同标。
+    is_unsafe: Bool,
     params: List[Param],
     return_type: TypeNode,
 );
@@ -447,6 +450,8 @@ public type GivenMember(
     name: String,
     type_params: List[TypeParameter],
     access: AccessModifier,
+    /// 见 `TraitMember.is_unsafe`。
+    is_unsafe: Bool,
     params: List[Param],
     return_type: TypeNode,
     body: Option[Expr],
@@ -467,10 +472,10 @@ public type GivenMember(
 /// had to be reconstructed -- or, as here, carried.
 public type Decl {
     LetDecl(access: AccessModifier, name: String, is_mutable: Bool, type_name: Option[TypeNode], initializer: Expr, span: SourceSpan, name_span: SourceSpan),
-    FunctionDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], params: List[Param], return_type: TypeNode, body: Expr, span: SourceSpan, name_span: SourceSpan),
-    IntrinsicFunctionDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], params: List[Param], return_type: TypeNode, span: SourceSpan, name_span: SourceSpan),
-    ForeignFunctionDecl(access: AccessModifier, name: String, params: List[Param], return_type: TypeNode, body: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
-    ForeignLetDecl(access: AccessModifier, name: String, is_mutable: Bool, type_name: TypeNode, initializer: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
+    FunctionDecl(access: AccessModifier, is_unsafe: Bool, name: String, type_params: List[TypeParameter], params: List[Param], return_type: TypeNode, body: Expr, span: SourceSpan, name_span: SourceSpan),
+    IntrinsicFunctionDecl(access: AccessModifier, is_unsafe: Bool, name: String, type_params: List[TypeParameter], params: List[Param], return_type: TypeNode, span: SourceSpan, name_span: SourceSpan),
+    ForeignFunctionDecl(access: AccessModifier, is_unsafe: Bool, name: String, params: List[Param], return_type: TypeNode, body: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
+    ForeignLetDecl(access: AccessModifier, is_unsafe: Bool, name: String, is_mutable: Bool, type_name: TypeNode, initializer: Option[Expr], cname: Option[String], span: SourceSpan, name_span: SourceSpan),
     TypeStructDecl(access: AccessModifier, name: String, is_mutable_type: Bool, sendability: Sendability, type_params: List[TypeParameter], fields: List[Field], span: SourceSpan, name_span: SourceSpan),
     TypeEnumDecl(access: AccessModifier, name: String, sendability: Sendability, type_params: List[TypeParameter], cases: List[EnumCase], span: SourceSpan, name_span: SourceSpan),
     TypeAliasDecl(access: AccessModifier, name: String, type_params: List[TypeParameter], target: TypeNode, span: SourceSpan, name_span: SourceSpan),
@@ -487,9 +492,9 @@ public type Decl {
 ///
 /// `given` blocks and `using` bind nothing under their own name.
 public let decl_name(decl: Decl): Option[String] = when decl in {
-    .LetDecl(_, name, _, _, _, _, _) or .FunctionDecl(_, name, _, _, _, _, _, _)
-    or .IntrinsicFunctionDecl(_, name, _, _, _, _, _) or .ForeignFunctionDecl(_, name, _, _, _, _, _, _)
-    or .ForeignLetDecl(_, name, _, _, _, _, _, _) or .TypeStructDecl(_, name, _, _, _, _, _, _)
+    .LetDecl(_, name, _, _, _, _, _) or .FunctionDecl(_, _, name, _, _, _, _, _, _)
+    or .IntrinsicFunctionDecl(_, _, name, _, _, _, _, _) or .ForeignFunctionDecl(_, _, name, _, _, _, _, _, _)
+    or .ForeignLetDecl(_, _, name, _, _, _, _, _, _) or .TypeStructDecl(_, name, _, _, _, _, _, _)
     or .TypeEnumDecl(_, name, _, _, _, _, _) or .TypeAliasDecl(_, name, _, _, _, _)
     or .IntrinsicTypeDecl(_, name, _, _, _) or .ForeignTypeDecl(_, name, _, _, _, _, _)
     or .TraitDecl(_, name, _, _, _, _, _, _) then Option[String].Some(name),
@@ -500,9 +505,9 @@ public let decl_name(decl: Decl): Option[String] = when decl in {
 /// Where a declaration's name is written -- see `Decl`.
 public let decl_name_span(decl: Decl): SourceSpan = {
     return when decl in {
-        .LetDecl(_, _, _, _, _, _, name_span) or .FunctionDecl(_, _, _, _, _, _, _, name_span)
-        or .IntrinsicFunctionDecl(_, _, _, _, _, _, name_span)
-        or .ForeignFunctionDecl(_, _, _, _, _, _, _, name_span) or .ForeignLetDecl(_, _, _, _, _, _, _, name_span)
+        .LetDecl(_, _, _, _, _, _, name_span) or .FunctionDecl(_, _, _, _, _, _, _, _, name_span)
+        or .IntrinsicFunctionDecl(_, _, _, _, _, _, _, name_span)
+        or .ForeignFunctionDecl(_, _, _, _, _, _, _, _, name_span) or .ForeignLetDecl(_, _, _, _, _, _, _, _, name_span)
         or .TypeStructDecl(_, _, _, _, _, _, _, name_span) or .TypeEnumDecl(_, _, _, _, _, _, name_span)
         or .TypeAliasDecl(_, _, _, _, _, name_span) or .IntrinsicTypeDecl(_, _, _, _, name_span)
         or .ForeignTypeDecl(_, _, _, _, _, _, name_span) then name_span,
@@ -518,11 +523,11 @@ public let decl_name_span(decl: Decl): SourceSpan = {
 /// no level. This is what an `import` consults to decide whether a name can be
 /// brought into another file at all (§3.3).
 public let decl_access(decl: Decl): Option[AccessModifier] = when decl in {
-    .LetDecl(access, _, _, _, _, _, _) or .FunctionDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
-    .IntrinsicFunctionDecl(access, _, _, _, _, _, _) then Option[AccessModifier].Some(
+    .LetDecl(access, _, _, _, _, _, _) or .FunctionDecl(access, _, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
+    .IntrinsicFunctionDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(
         access,
     ),
-    .ForeignFunctionDecl(access, _, _, _, _, _, _, _) or .ForeignLetDecl(access, _, _, _, _, _, _, _)
+    .ForeignFunctionDecl(access, _, _, _, _, _, _, _, _) or .ForeignLetDecl(access, _, _, _, _, _, _, _, _)
     or .TypeStructDecl(access, _, _, _, _, _, _, _) or .TypeEnumDecl(access, _, _, _, _, _, _)
     or .TypeAliasDecl(access, _, _, _, _, _) or .IntrinsicTypeDecl(access, _, _, _, _)
     or .ForeignTypeDecl(access, _, _, _, _, _, _) or .TraitDecl(access, _, _, _, _, _, _, _) then Option[AccessModifier].Some(access),
@@ -744,6 +749,10 @@ public type Expr {
     TypeRefStaticMethodCall(type_node: TypeNode, type_args: List[TypeNode], method_name: String, args: List[Expr], span: SourceSpan),
     SubscriptExpr(base: Expr, args: List[Expr], span: SourceSpan),
     Block(statements: List[Statement], tail_expression: Option[Expr], span: SourceSpan),
+    /// `unsafe { … }`（unsafe-design.md §A）：块的词法范围是 unsafe 上下文。
+    /// 只在未类型化 AST 存在——类型检查后透明消失（只包块求值），
+    /// MIR / codegen 不感知。
+    UnsafeExpr(block: Expr, span: SourceSpan),
     IfExpr(condition: Expr, then_branch: Expr, else_branch: Option[Expr], span: SourceSpan),
     WhileExpr(condition: Expr, body: Expr, span: SourceSpan),
     /// `for pattern in iterable [where guard] then body`. The binding is a
@@ -793,6 +802,7 @@ public let expr_span(expr: Expr): SourceSpan = {
         or .QualifiedMethodCall(_, _, _, _, span) or .QualifiedGenericMethodCall(_, _, _, _, _, span)
         or .GenericInstantiation(_, _, span) or .StaticMethodCall(_, _, _, _, span)
         or .TypeRefStaticMethodCall(_, _, _, _, span) or .SubscriptExpr(_, _, span) or .Block(_, _, span)
+        or .UnsafeExpr(_, span)
         or .IfExpr(_, _, _, span) or .WhileExpr(_, _, span) or .ForExpr(_, _, _, _, span)
         or .WhenExpr(_, _, span) or .LambdaExpr(_, _, _, span) or .ImplicitMemberExpr(_, _, span) then span,
     };

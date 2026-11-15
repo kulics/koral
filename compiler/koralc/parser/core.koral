@@ -67,6 +67,30 @@ private let is_foreign_constant_initializer(expr: Expr): Bool = when expr in {
     _ then false,
 };
 
+/// 签名加固判据（`docs/design/unsafe-design.md` §E）：无体/无值 foreign 声明的
+/// 签名带裸指针 / C 函数指针时必须标 `unsafe`。只沿合法 FFI 形状递归（指针、
+/// 定长数组、`foreign (A) -> R`）；托管形状不过界，由封闭集合报它们自己的错。
+private let type_carries_raw_pointer(node: TypeNode): Bool = when node in {
+    .Pointer(_, _, _) or .ForeignFunction(_, _, _) then true,
+    .FixedArray(_, element, _) then type_carries_raw_pointer(element),
+    .SendableQualified(inner) then type_carries_raw_pointer(inner),
+    _ then false,
+};
+
+/// Whether any parameter or the return type of a signature carries a raw
+/// pointer / C function pointer — the `unsafe` obligation's signature shape.
+private let signature_carries_raw_pointer(params: List[Param], return_type: TypeNode): Bool = {
+    if type_carries_raw_pointer(return_type) then {
+        return true;
+    };
+    for p in params then {
+        if type_carries_raw_pointer(p.type_name) then {
+            return true;
+        };
+    };
+    return false;
+};
+
 public type mutable Parser(
     tokens: List[Token],
     file_path: String,
@@ -560,6 +584,11 @@ given Parser {
                 continue;
             };
             when self.tokens[i].kind in {
+                .KwUnsafe() then {
+                    // `unsafe` 标记写在限定词之前（`let unsafe foreign f`）；
+                    // 窥探只读限定词，跳过它继续找 foreign / intrinsic。
+                    i += 1;
+                },
                 .KwForeign() then {
                     if is_foreign then {
                         if invalid_message is .None() then {
@@ -863,9 +892,10 @@ given Parser {
 
         if is_intrinsic then {
             return when base in {
-                .FunctionDecl(_, name, type_params, params, return_type, _, span, name_span) then .Ok(
+                .FunctionDecl(_, is_unsafe, name, type_params, params, return_type, _, span, name_span) then .Ok(
                     Decl.IntrinsicFunctionDecl(
                         access,
+                        is_unsafe,
                         name,
                         type_params,
                         params,
@@ -1955,11 +1985,26 @@ given Parser {
         let start = self.current();
         self.advance();
 
+        // `unsafe` 标记紧跟 `let`、限定词之前（unsafe-design.md §B）：
+        // `let unsafe foreign strlen(…)`。
+        let mutable decl_is_unsafe = false;
+        if self.current().kind is .KwUnsafe() then {
+            decl_is_unsafe = true;
+            self.advance();
+        };
+
         // `foreign` / `intrinsic` sit immediately after `let`, before `mutable`:
         // `let foreign mutable errno Int32;`.
         let decl_qualifiers = self.parse_decl_qualifiers();
         let decl_is_foreign = decl_qualifiers.is_foreign;
         let decl_is_intrinsic = decl_qualifiers.is_intrinsic;
+        if self.current().kind is .KwUnsafe() then {
+            return .Error(
+                self.parser_error_at_current(
+                    "'unsafe' must be written before 'foreign' / 'intrinsic'",
+                ),
+            );
+        };
 
         // C 名槽位：`let foreign "CreateFileA" create_file(…)`。外来词汇是字符串，
         // 紧跟 `foreign`（`docs/design/cffi-design.md` §C）；不写即 Koral 名逐字。
@@ -2076,6 +2121,7 @@ given Parser {
                 let span = self.span_from_start(start);
                 let base = Decl.FunctionDecl(
                     access,
+                    decl_is_unsafe,
                     name,
                     type_params,
                     params,
@@ -2096,11 +2142,24 @@ given Parser {
                     let body = self.parse_expression_checked("foreign function body") or return;
                     foreign_body = .Some(body);
                 };
+                // 加固判据（unsafe-design.md §E）：无体引用的签名带裸指针 /
+                // C 函数指针就必须标 `unsafe`——安全断言只留给纯标量签名。
+                if foreign_body is .None() and not decl_is_unsafe then {
+                    if signature_carries_raw_pointer(params, return_type) then {
+                        return .Error(
+                            self.parser_error_at(
+                                "Foreign function '\(name)' must be marked 'unsafe': its signature carries a raw pointer or C function pointer.",
+                                name_token,
+                            ),
+                        );
+                    };
+                };
                 let _ = self.require_semicolon() or return;
                 let span = self.span_from_start(start);
                 return .Ok(
                     Decl.ForeignFunctionDecl(
                         access,
+                        decl_is_unsafe,
                         name,
                         params,
                         return_type,
@@ -2129,6 +2188,7 @@ given Parser {
             let _ = self.require_semicolon() or return;
             let base = Decl.FunctionDecl(
                 access,
+                decl_is_unsafe,
                 name,
                 type_params,
                 params,
@@ -2141,6 +2201,18 @@ given Parser {
         };
 
         // Variable declaration
+        //
+        // `unsafe` 只属契约载体（unsafe-design.md §B）：普通变量拒绝；foreign
+        // 变量由下方 foreign 分支定形（extern 引用 / C 变量定义收标记，宏常量
+        // 拒绝），这里不能抢报。
+        if decl_is_unsafe and not decl_is_foreign then {
+            return .Error(
+                self.parser_error_at(
+                    "Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.",
+                    name_token,
+                ),
+            );
+        };
         if not type_params.is_empty() then {
             return .Error(
                 self.parser_error_at_current(
@@ -2180,11 +2252,32 @@ given Parser {
                 };
                 foreign_init = .Some(value);
             };
+            // `unsafe` 只属携带状态的声明（unsafe-design.md §B）：宏常量是编译期
+            // 值，拒绝；其余形态（extern 引用、C 变量定义）收标记，访问按标记把关。
+            if foreign_init is .Some(_) and not is_mut and decl_is_unsafe then {
+                return .Error(
+                    self.parser_error_at(
+                        "Cannot mark a foreign constant 'unsafe': a macro constant is a compile-time value, not C state.",
+                        name_token,
+                    ),
+                );
+            };
+            // 加固判据（unsafe-design.md §E）：无值引用的类型带裸指针 / C 函数指针
+            // 就必须标 `unsafe`。
+            if foreign_init is .None() and not decl_is_unsafe and type_carries_raw_pointer(foreign_type) then {
+                return .Error(
+                    self.parser_error_at(
+                        "Foreign variable '\(name)' must be marked 'unsafe': its type carries a raw pointer or C function pointer.",
+                        name_token,
+                    ),
+                );
+            };
             let _ = self.require_semicolon() or return;
             let span = self.span_from_start(start);
             return .Ok(
                 Decl.ForeignLetDecl(
                     access,
+                    decl_is_unsafe,
                     name,
                     is_mut,
                     foreign_type,

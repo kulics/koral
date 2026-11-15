@@ -27,6 +27,29 @@ type mutable GlobalInitEntry(
     mutable checked: Option[TypedDecl],
 );
 
+/// unsafe 操作诊断文案（`docs/design/unsafe-design.md` §F 逐字正本；跨文件共享，
+/// 故不作 `private`）。名字插值的两条在调用点合成。
+let unsafe_deref_message: String = "Cannot dereference a raw pointer outside an 'unsafe' block: raw pointer reads and writes are unchecked memory access.";
+let unsafe_subscript_message: String = "Cannot use unchecked subscript on a raw pointer outside an 'unsafe' block: pointer indexing does not check bounds.";
+let unsafe_member_message: String = "Cannot access a member through a raw pointer outside an 'unsafe' block: the access dereferences the pointer without checks.";
+let unsafe_arith_message: String = "Cannot perform pointer arithmetic outside an 'unsafe' block: an out-of-range pointer is invalid even before it is dereferenced.";
+let unsafe_fnptr_message: String = "Cannot call a C function pointer outside an 'unsafe' block: the pointer's target contract is unknown.";
+
+/// 名字插值的 §F 文案（跨文件共享，trait_checker 的 R3 两条同此）。
+let unsafe_fn_as_value_message(name: String): String = "Unsafe function '\(name)' cannot be used as a value: call it directly or wrap it in a safe function.";
+let unsafe_requirement_safe_impl_message(name: String): String = "Cannot implement unsafe requirement '\(name)' with a safe method: the implementation must also be marked 'unsafe'.";
+let safe_requirement_unsafe_impl_message(name: String): String = "Cannot implement safe requirement '\(name)' with an unsafe method: the requirement is not marked 'unsafe'.";
+
+/// 调用点文案用的被调名：`f` / `f[T]` 取基名，`o.m` 取末段。
+let call_callee_display_name(callee: Expr): String = {
+    return when callee in {
+        .Identifier(name, _) then name,
+        .GenericInstantiation(base, _, _) then base,
+        .MemberPath(_, path, _) then if path.is_empty() then "value" else path[path.count() - 1],
+        _ then "value",
+    };
+};
+
 type mutable TypeCheckerStorage(
     mutable global_scope: Scope,
     mutable context: CompilerContext,
@@ -44,6 +67,9 @@ type mutable TypeCheckerStorage(
     mutable function_return_context: FunctionReturnContext,
     mutable in_loop: Bool,
     mutable in_defer: Bool,
+    /// unsafe 上下文深度（docs/design/unsafe-design.md §A）：`unsafe { … }` 的
+    /// 词法范围内 > 0，不安全操作只在其中合法。函数边界由逐体检查自然复位。
+    mutable unsafe_context_depth: Int,
     mutable constraint_solver: ConstraintSolver,
     mutable trait_registry: TraitRegistry,
     mutable generic_param_constraints: Dict[String, List[GenericConstraintBound]],
@@ -323,6 +349,7 @@ given TypeChecker {
             FunctionReturnContext(Option[Type].None(), Option[Type].None(), false),
             false,
             false,
+            0,
             ConstraintSolver.new(context),
             TraitRegistry.new(),
             Dict[String, List[GenericConstraintBound]].new(),
@@ -702,10 +729,10 @@ given TypeChecker {
         let _ = self;
         return when decl in {
             .LetDecl(_, name, _, _, _, _, _) then "let \(name)",
-            .FunctionDecl(_, name, _, _, _, _, _, _) then "fn \(name)",
-            .IntrinsicFunctionDecl(_, name, _, _, _, _, _) then "fn intrinsic \(name)",
-            .ForeignFunctionDecl(_, name, _, _, _, _, _, _) then "fn foreign \(name)",
-            .ForeignLetDecl(_, name, _, _, _, _, _, _) then "let foreign \(name)",
+            .FunctionDecl(_, _, name, _, _, _, _, _, _) then "fn \(name)",
+            .IntrinsicFunctionDecl(_, _, name, _, _, _, _, _) then "fn intrinsic \(name)",
+            .ForeignFunctionDecl(_, _, name, _, _, _, _, _, _) then "fn foreign \(name)",
+            .ForeignLetDecl(_, _, name, _, _, _, _, _, _) then "let foreign \(name)",
             .TypeStructDecl(_, name, _, _, _, _, _, _) then "struct \(name)",
             .TypeEnumDecl(_, name, _, _, _, _, _) then "enum \(name)",
             .TypeAliasDecl(_, name, _, _, _, _) then "type \(name)",
@@ -903,8 +930,15 @@ given TypeChecker {
             self.storage.module_path,
         );
         let mutable method_def_ids_by_name = Dict[String, DefId].new();
+        let mutable raw_unsafe_by_name = Dict[String, Bool].new();
+        for raw in raw_members then {
+            raw_unsafe_by_name.insert(raw.name, raw.is_unsafe);
+        };
         for member in typed_members then {
             method_def_ids_by_name.insert(member.name, member.def_id);
+            if raw_unsafe_by_name.get(member.name) or else false then {
+                self.context().record_unsafe_def(member.def_id);
+            };
         };
         self.storage.trait_registry.register(info);
         let decl_info = TraitDeclInfo(
@@ -1229,6 +1263,119 @@ given TypeChecker {
         self.push_diagnostic_at_span(message, pattern_span(pattern));
     };
 
+    /// unsafe 上下文里吗？`unsafe { … }` 的词法范围（unsafe-design.md §A/R1）。
+    in_unsafe_context(self): Bool = self.storage.unsafe_context_depth > 0;
+
+    /// unsafe 操作准入（unsafe-design.md §D）：不在 unsafe 上下文即报。
+    require_unsafe_operation_at(self, span: SourceSpan, message: String): Void = {
+        if self.in_unsafe_context() then {
+            return;
+        };
+        self.push_diagnostic_at_span(message, span);
+    };
+
+    require_unsafe_operation(self, expr: Expr, message: String): Void = {
+        self.require_unsafe_operation_at(expr_span(expr), message);
+    };
+
+    /// 契约调用准入（unsafe-design.md §B/D）：目标声明带 `unsafe` 标记时要求
+    /// unsafe 上下文。缺席登记 = 无标记 = 安全。
+    require_unsafe_for_call_at(self, def_id: DefId, name: String, span: SourceSpan): Void = {
+        if not self.context().def_is_unsafe(def_id) then {
+            return;
+        };
+        self.require_unsafe_operation_at(
+            span,
+            "Cannot call unsafe function '\(name)' outside an 'unsafe' block: the declaration is marked 'unsafe'.",
+        );
+    };
+
+    require_unsafe_for_call(self, def_id: DefId, name: String, expr: Expr): Void = {
+        self.require_unsafe_for_call_at(def_id, name, expr_span(expr));
+    };
+
+    /// 外部全局量访问准入（unsafe-design.md §B4）。
+    require_unsafe_for_global_at(self, def_id: DefId, name: String, span: SourceSpan): Void = {
+        if not self.context().def_is_unsafe(def_id) then {
+            return;
+        };
+        self.require_unsafe_operation_at(
+            span,
+            "Cannot access unsafe global '\(name)' outside an 'unsafe' block: the declaration is marked 'unsafe'.",
+        );
+    };
+
+    require_unsafe_for_global(self, def_id: DefId, name: String, expr: Expr): Void = {
+        self.require_unsafe_for_global_at(def_id, name, expr_span(expr));
+    };
+
+    /// 调用家族准入（unsafe-design.md §B1/B2/B3）：被调实体的身份落在
+    /// `typed_callee` 上——函数 / 方法符号按 DefId 标记判（B1/B2，vtable 与
+    /// 单态化零感知，R5）；非声明符号而类型是 `foreign (A) -> R` 的是 C 函数
+    /// 指针调用，恒需上下文（B3）。被调实体的解析已失败（Unknown / 已报错）
+    /// 时不叠第二条。
+    gate_unsafe_call_callee_at(
+        self,
+        typed_callee: TypedExpr,
+        name: String,
+        span: SourceSpan,
+    ): Void = {
+        // 被调实体自己已经出过错（解析失败、B4 的全局量访问闸）——已说的话
+        // 说过一切，不再叠调用闸的第二条。
+        if self.storage.diagnostics.has_error_at(self.storage.file_path, span) then {
+            return;
+        };
+        when typed_callee.expr_kind in {
+            .Variable(sym) then {
+                if sym.kind is .Function() then {
+                    self.require_unsafe_for_call_at(sym.def_id, name, span);
+                    return;
+                };
+            },
+            .MethodReference(_, _, method, _, _, _) then {
+                self.require_unsafe_for_call_at(
+                    method.def_id,
+                    self.semantic_method_name_for_symbol(method),
+                    span,
+                );
+                return;
+            },
+            .TraitMethodPlaceholder(_, _, method, trait_method_def_id, _, _) then {
+                self.require_unsafe_for_call_at(
+                    trait_method_def_id,
+                    self.semantic_method_name_for_symbol(method),
+                    span,
+                );
+                return;
+            },
+            _ then {},
+        };
+        // B3：目标不是声明符号（局部 / 字段 / 表达式）而类型是 C 函数指针。
+        if typed_callee.expr_type is .ForeignFunctionType(_, _) then {
+            self.require_unsafe_operation_at(span, unsafe_fnptr_message);
+        };
+    };
+
+    gate_unsafe_call_callee(self, callee: Expr, typed_callee: TypedExpr): Void = {
+        self.gate_unsafe_call_callee_at(
+            typed_callee,
+            call_callee_display_name(callee),
+            expr_span(callee),
+        );
+    };
+
+    /// 裸指针触内存（解引用 / 投影 / 下标）要把关吗？（unsafe-design.md C 表）
+    /// 指向不透明类型时另有报错，不叠第二条。
+    raw_pointer_needs_unsafe(self, t: Type): Bool = {
+        return when t in {
+            .PointerType(inner) or .MutablePointerType(inner) then when inner in {
+                .OpaqueType(_) then false,
+                _ then true,
+            },
+            _ then false,
+        };
+    };
+
     /// Whether one lowered pattern covers every value of its subject type --
     /// the `for`-binding question, judged by the exhaustiveness checker's own
     /// coverage machinery rather than the syntactic irrefutability shortcut.
@@ -1425,9 +1572,9 @@ given TypeChecker {
     /// is, so `check_decl` can record it as the place a diagnostic belongs to.
     decl_span(self, decl: Decl): SourceSpan = {
         return when decl in {
-            .LetDecl(_, _, _, _, _, span, _) or .FunctionDecl(_, _, _, _, _, _, span, _)
-            or .IntrinsicFunctionDecl(_, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, _, _, span, _)
-            or .ForeignLetDecl(_, _, _, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, _, span, _)
+            .LetDecl(_, _, _, _, _, span, _) or .FunctionDecl(_, _, _, _, _, _, _, span, _)
+            or .IntrinsicFunctionDecl(_, _, _, _, _, _, span, _) or .ForeignFunctionDecl(_, _, _, _, _, _, _, span, _)
+            or .ForeignLetDecl(_, _, _, _, _, _, _, span, _) or .TypeStructDecl(_, _, _, _, _, _, span, _)
             or .TypeEnumDecl(_, _, _, _, _, span, _) or .TypeAliasDecl(_, _, _, _, span, _)
             or .IntrinsicTypeDecl(_, _, _, span, _) or .ForeignTypeDecl(_, _, _, _, _, span, _)
             or .UsingDecl(_, _, _, span) or .TraitDecl(_, _, _, _, _, _, span, _) or .GivenDecl(_, _, _, span)
@@ -2618,7 +2765,7 @@ given TypeChecker {
         let _ = self;
         return when decl in {
             .LetDecl(_, _, _, _, _, _, _) then true,
-            .FunctionDecl(_, _, type_params, _, _, _, _, _) then type_params.is_empty(),
+            .FunctionDecl(_, _, _, type_params, _, _, _, _, _) then type_params.is_empty(),
             .GivenDecl(_, type_params, members, _) or .GivenTraitDecl(_, type_params, _, members, _)
             or .IntrinsicGivenDecl(_, type_params, members, _) then {
                 if not type_params.is_empty() then {
@@ -2804,7 +2951,7 @@ given TypeChecker {
                 _ then {
                     let skip_this_decl = if skip_decl_check then true
                     else when pair.first.decl in {
-                        .FunctionDecl(_, _, _, _, _, _, _, _) then skip_function_decl_check,
+                        .FunctionDecl(_, _, _, _, _, _, _, _, _) then skip_function_decl_check,
                         .LetDecl(_, _, _, _, _, _, _) then skip_let_decl_check,
                         .GivenDecl(_, _, _, _) or .GivenTraitDecl(_, _, _, _, _)
                         or .IntrinsicGivenDecl(_, _, _, _) then skip_given_decl_check,
@@ -3124,11 +3271,15 @@ given TypeChecker {
         for member in members then {
             let member_id = if member.def_id.is_valid() then member.def_id
             else self.allocate_unindexed_def_id(member.name, DefKind.Function());
+            if member.is_unsafe then {
+                self.context().record_unsafe_def(member_id);
+            };
             members_with_ids.push(
                 GivenMember(
                     member.name,
                     member.type_params,
                     member.access,
+                    member.is_unsafe,
                     member.params,
                     member.return_type,
                     member.body,
@@ -3832,7 +3983,7 @@ given TypeChecker {
                     return;
                 };
             },
-            .FunctionDecl(access, name, type_params, params, return_type, body, span, name_span) then {
+            .FunctionDecl(access, _, name, type_params, params, return_type, body, span, name_span) then {
                 if not type_params.is_empty() then {
                     let bindings = self.generic_type_param_bindings(type_params);
                     let mutable checked_param_types = List[Type].new();
@@ -3906,7 +4057,8 @@ given TypeChecker {
                     self.function_param_specs_from_typed_params(typed_params_for_specs),
                 );
             },
-            .IntrinsicFunctionDecl(access, name, type_params, params, return_type, span, name_span) then {
+            .IntrinsicFunctionDecl(access, is_unsafe, name, type_params, params, return_type, span, name_span) then {
+                let _ = is_unsafe;
                 if not type_params.is_empty() then {
                     // Generic intrinsic: only register template, defer type mutable resolution to instantiation (Swift alignment)
                     let bindings = self.generic_type_param_bindings(type_params);
@@ -3975,7 +4127,7 @@ given TypeChecker {
                     );
                 };
             },
-            .ForeignFunctionDecl(access, name, params, return_type, _, _, span, name_span) then {
+            .ForeignFunctionDecl(access, _, name, params, return_type, _, _, span, name_span) then {
                 let resolved_ret = self.resolve_type(return_type);
                 let mutable param_types = List[Type].new();
                 for p in params then {
@@ -4573,7 +4725,7 @@ given TypeChecker {
                     is_mutable,
                 );
             },
-            .ForeignLetDecl(access, name, is_mutable, type_name, _, _, span, name_span) then {
+            .ForeignLetDecl(access, _, name, is_mutable, type_name, _, _, span, name_span) then {
                 let resolved = self.resolve_type(type_name);
                 let variable_kind = if is_mutable then VariableKind.MutableValue()
                 else VariableKind.Value();
@@ -4678,11 +4830,15 @@ given TypeChecker {
                     allocated
                 },
             };
+            if member.is_unsafe then {
+                self.context().record_unsafe_def(member_id);
+            };
             out.push(
                 GivenMember(
                     member.name,
                     member.type_params,
                     member.access,
+                    member.is_unsafe,
                     member.params,
                     member.return_type,
                     member.body,

@@ -2150,6 +2150,7 @@ given TypeChecker {
         self,
         receiver_type: Type,
         member_name: String,
+        blame_span: SourceSpan,
     ): Option[TypedExpr] = {
         let canonical = self.canonicalize_alias_type(receiver_type);
         if self.static_member_is_enum_case(canonical, member_name) then {
@@ -2181,12 +2182,27 @@ given TypeChecker {
                 );
                 let declared_receiver_type = if raw_declared_receiver_type is .Unknown() then canonical
                 else raw_declared_receiver_type;
-                if self.resolve_static_method_signature_for_receiver(
+                let static_member_sig = self.resolve_static_method_signature_for_receiver(
                     type_name,
                     declared_receiver_type,
                     member_name,
-                ) is .None() then {
+                );
+                if static_member_sig is .None() then {
                     return Option[TypedExpr].None();
+                };
+                // R6（unsafe-design.md §D）：`let unsafe` 方法名作值是错误——
+                // 此处包一层 lambda 等于把不安全调用藏进安全函数值，正是禁令
+                // 要堵的形态。禁的是「作值」本身，与 unsafe 上下文无关。
+                when static_member_sig in {
+                    .Some(member_sig) then {
+                        if self.context().def_is_unsafe(member_sig.def_id) then {
+                            self.push_diagnostic_at_span(
+                                unsafe_fn_as_value_message(member_name),
+                                blame_span,
+                            );
+                        };
+                    },
+                    .None() then {},
                 };
                 let param_types = self.resolve_static_method_param_types_for_receiver(
                     type_name,
@@ -2277,6 +2293,7 @@ given TypeChecker {
                             .TypeSymbol() then when self.try_make_type_member_value_lambda(
                                 typed_base.expr_type,
                                 copied_path[0],
+                                expr_span(expr),
                             ) in {
                                 .Some(lambda_value) then {
                                     return self.adapt_expr_to_expected_type_at(
@@ -2292,6 +2309,7 @@ given TypeChecker {
                         .GenericInstantiation(_, _) then when self.try_make_type_member_value_lambda(
                             typed_base.expr_type,
                             copied_path[0],
+                            expr_span(expr),
                         ) in {
                             .Some(lambda_value) then {
                                 return self.adapt_expr_to_expected_type_at(
@@ -2309,6 +2327,9 @@ given TypeChecker {
                     current_type = when current_type in {
                         .PointerType(inner) then {
                             let segment_type = self.resolve_member_type_ref(inner, seg);
+                            if segment_type is not .Unknown() then {
+                                self.require_unsafe_operation(expr, unsafe_member_message);
+                            };
                             if segment_type is .Unknown() then {
                                 let pointee = inner;
                                 let raw_method = self.resolve_method_signature(
@@ -2358,6 +2379,9 @@ given TypeChecker {
                         },
                         .MutablePointerType(inner) then {
                             let segment_type = self.resolve_member_type_ref(inner, seg);
+                            if segment_type is not .Unknown() then {
+                                self.require_unsafe_operation(expr, unsafe_member_message);
+                            };
                             if segment_type is .Unknown() then {
                                 let pointee = inner;
                                 let raw_method = self.resolve_method_signature(
@@ -2472,6 +2496,25 @@ given TypeChecker {
                 };
                 if inaccessible_method_member then {
                     return self.empty_typed_block(Type.Unknown());
+                };
+                // R6（unsafe-design.md §D）：`let unsafe` 方法名站在值位（非被
+                // 调用）是错误。方法投影在字段解析里是缺席（Unknown）而方法表
+                // 有此名；函数类型的字段是值，不在此列。
+                if copied_path.count() == 1 and current_type is .Unknown() then {
+                    when self.resolve_method_signature(
+                        typed_base.expr_type,
+                        copied_path[0],
+                    ) in {
+                        .Some(projected_method) then {
+                            if self.context().def_is_unsafe(projected_method.def_id) then {
+                                self.push_diagnostic_at_span(
+                                    unsafe_fn_as_value_message(copied_path[0]),
+                                    expr_span(expr),
+                                );
+                            };
+                        },
+                        .None() then {},
+                    };
                 };
                 let member_expr = if typed_path.count() == 1 then self.make_typed_member_path_expr(
                     typed_base,
@@ -2628,6 +2671,13 @@ given TypeChecker {
                                     },
                                     _ then typed_base,
                                 };
+                                // 调用家族准入（unsafe-design.md §B1）：vtable
+                                // 派发同规则——判的是需求声明的 DefId（R5）。
+                                self.require_unsafe_for_call_at(
+                                    self.trait_method_def_id_of(trait_type, method_name),
+                                    method_name,
+                                    expr_span(expr),
+                                );
                                 return make_typed_expr(
                                     TypedExprKind.TraitMethodCall(
                                         trait_receiver,
@@ -2671,6 +2721,12 @@ given TypeChecker {
                     for arg in typed_args then {
                         static_args.push(arg);
                     };
+                    // 调用家族准入（unsafe-design.md §B1）：静态派发的被调身份。
+                    self.require_unsafe_for_call_at(
+                        method_symbol.def_id,
+                        method_name,
+                        expr_span(expr),
+                    );
                     make_typed_expr(
                         TypedExprKind.StaticMethodCall(
                             typed_base.expr_type,
@@ -2765,6 +2821,13 @@ given TypeChecker {
                             ),
                         },
                     };
+                    // 调用家族准入（unsafe-design.md §B1/B2）：被调身份在
+                    // callee 上（方法符号 / 需求 DefId）。
+                    self.gate_unsafe_call_callee_at(
+                        callee,
+                        method_name,
+                        expr_span(expr),
+                    );
                     make_typed_expr(
                         TypedExprKind.Call(callee, typed_args),
                         final_ret_type,
@@ -2953,6 +3016,12 @@ given TypeChecker {
                         .None(),
                     ),
                     method_symbol.symbol_type,
+                );
+                // 调用家族准入（unsafe-design.md §B1）：限定调用判需求 DefId。
+                self.gate_unsafe_call_callee_at(
+                    callee,
+                    method_name,
+                    expr_span(expr),
                 );
                 make_typed_expr(TypedExprKind.Call(callee, typed_args), qmc_ret_type)
             },
@@ -3148,6 +3217,12 @@ given TypeChecker {
                     ),
                     method_symbol.symbol_type,
                 );
+                // 调用家族准入（unsafe-design.md §B1）：限定泛型调用判需求 DefId。
+                self.gate_unsafe_call_callee_at(
+                    callee,
+                    method_name,
+                    expr_span(expr),
+                );
                 make_typed_expr(TypedExprKind.Call(callee, typed_args), qgmc_ret_type)
             },
             .GenericInstantiation(base, type_args, inst_span) then {
@@ -3282,6 +3357,7 @@ given TypeChecker {
                                 TypedExprKind.UnsafeDerefExpr(offset_expr),
                                 element_type,
                             );
+                            self.require_unsafe_operation(expr, unsafe_subscript_message);
                             self.adapt_expr_to_expected_type(deref_expr, expected)
                         },
                         .String() then {
@@ -4170,6 +4246,9 @@ given TypeChecker {
         return when expr in {
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
                     or .WeakReferenceType(inner_ref) or .MutableWeakReferenceType(inner_ref)
@@ -4240,6 +4319,9 @@ given TypeChecker {
             },
             .UnsafeDerefExpr(inner, _) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .MutablePointerType(inner_ref) then {
                         when inner_ref in {
@@ -4334,6 +4416,23 @@ given TypeChecker {
         };
     };
 
+    /// `unsafe { … }`（`docs/design/unsafe-design.md` §A）：块的词法范围是
+    /// unsafe 上下文。检查后透明消失——返回内层块的类型化结果，MIR / codegen
+    /// 不感知，ABI 零变化。
+    check_unsafe_expr_ref(
+        self,
+        block: Expr,
+        expected: Option[Type],
+        scope: Scope,
+    ): TypedExpr = {
+        let outer_depth = self.storage.unsafe_context_depth;
+        self.storage.unsafe_context_depth = outer_depth + 1;
+        defer {
+            self.storage.unsafe_context_depth = outer_depth;
+        };
+        return self.check_expr_core_ref(block, expected, scope);
+    };
+
     check_expr_core_ref(
         self,
         expr: Expr,
@@ -4361,6 +4460,7 @@ given TypeChecker {
             .CastExpr(_, _, _) or .Unary(_, _, _) or .IsExpr(...) or .IsNotExpr(_, _, _) or .RefExpr(_, _, _)
             or .WeakrefExpr(_, _) or .PtrExpr(_, _, _) or .DerefExpr(_, _) or .UnsafeDerefExpr(_, _) then self.check_basic_expr_ref(expr, expected, scope),
             .UpgradeExpr(_, _) then self.check_reference_expr_ref(expr, expected, scope),
+            .UnsafeExpr(block, _) then self.check_unsafe_expr_ref(block, expected, scope),
             .ArithmeticExpr(left, op, right, _) then self.check_arithmetic_expr_ref(
                 left,
                 op,

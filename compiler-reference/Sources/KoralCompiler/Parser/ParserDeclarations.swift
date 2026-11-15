@@ -159,9 +159,24 @@ extension Parser {
     if currentToken === .letKeyword {
       let keywordSpan = currentSpan
       try match(.letKeyword)
+
+      // `unsafe` marker sits right after `let`, before the qualifiers
+      // (unsafe-design.md §B): `let unsafe foreign strlen(…)`.
+      var declIsUnsafe = false
+      if currentToken === .unsafeKeyword {
+        declIsUnsafe = true
+        try match(.unsafeKeyword)
+      }
+
       let quals = try parseDeclQualifiers(keywordSpan: keywordSpan)
       let isIntrinsic = quals.isIntrinsic
       let isForeign = quals.isForeign
+      if currentToken === .unsafeKeyword {
+        throw ParserError.rejectedConstruct(
+          span: currentSpan,
+          message: "'unsafe' must be written before 'foreign' / 'intrinsic'"
+        )
+      }
 
       // C 名槽位：`let foreign "CreateFileA" create_file(…)`。外来词汇是字符串，
       // 紧跟 `foreign`（docs/design/cffi-design.md §C）；不写即 Koral 名逐字。
@@ -222,10 +237,17 @@ extension Parser {
           if currentToken === .leftParen && !parenOpensTypeAnnotation() {
             throw ParserError.unexpectedToken(span: currentSpan, got: "foreign let mutable cannot declare a function")
           }
-          return try foreignLetDeclaration(name: name, mutable: true, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignLetDeclaration(name: name, mutable: true, cname: cname, access: access, isUnsafe: declIsUnsafe, span: startSpan, nameSpan: nameSpan)
         }
         if currentToken === .leftParen && !parenOpensTypeAnnotation() {
           throw ParserError.unexpectedToken(span: currentSpan, got: currentToken.description)
+        }
+        // A plain variable carries no safety contract (unsafe-design.md §B):
+        // `let unsafe x: T = v` is rejected here, at the name.
+        if declIsUnsafe {
+          throw ParserError.rejectedConstruct(
+            span: nameSpan,
+            message: "Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.")
         }
         return try globalVariableDeclaration(
           name: name, mutable: true, access: access, span: startSpan, nameSpan: nameSpan)
@@ -237,18 +259,23 @@ extension Parser {
       // a `->` follows the closing `)`.
       if currentToken === .leftParen && !parenOpensTypeAnnotation() {
         if isForeign {
-          return try foreignFunctionDeclaration(name: name, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignFunctionDeclaration(name: name, cname: cname, access: access, isUnsafe: declIsUnsafe, span: startSpan, nameSpan: nameSpan)
         }
         return try globalFunctionDeclaration(
-          name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic,
+          name: name, typeParams: typePrams, access: access, isIntrinsic: isIntrinsic, isUnsafe: declIsUnsafe,
           span: startSpan, nameSpan: nameSpan)
       } else {
         if isForeign {
-          return try foreignLetDeclaration(name: name, mutable: false, cname: cname, access: access, span: startSpan, nameSpan: nameSpan)
+          return try foreignLetDeclaration(name: name, mutable: false, cname: cname, access: access, isUnsafe: declIsUnsafe, span: startSpan, nameSpan: nameSpan)
         }
         if isIntrinsic {
           throw ParserError.unexpectedToken(
             span: currentSpan, got: "intrinsic variable not supported")
+        }
+        if declIsUnsafe {
+          throw ParserError.rejectedConstruct(
+            span: nameSpan,
+            message: "Cannot mark a variable 'unsafe': only function and foreign declarations carry safety contracts.")
         }
         return try globalVariableDeclaration(
           name: name, mutable: false, access: access, span: startSpan, nameSpan: nameSpan)
@@ -501,6 +528,14 @@ extension Parser {
       }
       let methodAccess = access
 
+      // `unsafe` is the only member-level marker on a requirement
+      // (unsafe-design.md §B).
+      var memberIsUnsafe = false
+      if currentToken === .unsafeKeyword {
+        memberIsUnsafe = true
+        try match(.unsafeKeyword)
+      }
+
       guard case .identifier(let methodName) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "trait member")
       }
@@ -590,7 +625,8 @@ extension Parser {
           typeParameters: methodTypeParams,
           parameters: parameters,
           returnType: returnType,
-          access: methodAccess
+          access: methodAccess,
+          isUnsafe: memberIsUnsafe
         )
       )
     }
@@ -621,6 +657,12 @@ extension Parser {
 
     while currentToken !== .rightBrace {
       let methodAccess = try parseAccessModifier(default: .internal)
+      // `unsafe` sits after the visibility, before the name (unsafe-design.md §B).
+      var memberIsUnsafe = false
+      if currentToken === .unsafeKeyword {
+        memberIsUnsafe = true
+        try match(.unsafeKeyword)
+      }
 
       // Intrinsic methods inside intrinsic given are implicitly intrinsic, so no need for keyword check?
       // Or do we disallow nested modifiers?
@@ -718,7 +760,8 @@ extension Parser {
           typeParameters: methodTypeParams,
           parameters: parameters,
           returnType: returnType,
-          access: methodAccess
+          access: methodAccess,
+          isUnsafe: memberIsUnsafe
         ))
     }
 
@@ -743,6 +786,12 @@ extension Parser {
     var methods: [MethodDeclaration] = []
     while currentToken !== .rightBrace {
       let methodAccess = try parseAccessModifier(default: .internal)
+      // `unsafe` sits after the visibility, before the name (unsafe-design.md §B).
+      var memberIsUnsafe = false
+      if currentToken === .unsafeKeyword {
+        memberIsUnsafe = true
+        try match(.unsafeKeyword)
+      }
 
       guard case .identifier(let name) = currentToken else {
         throw ParserError.expectedIdentifier(span: currentSpan, got: currentToken.description, context: "given member")
@@ -831,7 +880,8 @@ extension Parser {
           parameters: parameters,
           returnType: returnType,
           body: body,
-          access: methodAccess
+          access: methodAccess,
+          isUnsafe: memberIsUnsafe
         ))
     }
     try match(.rightBrace)
@@ -1127,7 +1177,7 @@ extension Parser {
   /// Parse global function declaration with optional 'own'/'ref' modifiers for params and return type
   private func globalFunctionDeclaration(
     name: String, typeParams: [TypeParameterDecl], access: AccessModifier,
-    isIntrinsic: Bool, span: SourceSpan, nameSpan: SourceSpan
+    isIntrinsic: Bool, isUnsafe: Bool, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
@@ -1189,6 +1239,7 @@ extension Parser {
         parameters: parameters,
         returnType: returnType,
         access: access,
+        isUnsafe: isUnsafe,
         span: span,
         nameSpan: nameSpan
       )
@@ -1202,6 +1253,7 @@ extension Parser {
         returnType: returnType,
         body: body,
         access: access,
+        isUnsafe: isUnsafe,
         span: span,
         nameSpan: nameSpan
       )
@@ -1211,7 +1263,7 @@ extension Parser {
   // MARK: - Foreign Declarations
 
   private func foreignFunctionDeclaration(
-    name: String, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, cname: String?, access: AccessModifier, isUnsafe: Bool, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     try match(.leftParen)
     var parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)] = []
@@ -1261,6 +1313,13 @@ extension Parser {
       try match(.equal)
       body = try expression()
     }
+    // 加固判据（unsafe-design.md §E）：无体引用的签名带裸指针 /
+    // C 函数指针就必须标 `unsafe`——安全断言只留给纯标量签名。
+    if body == nil && !isUnsafe && signatureCarriesRawPointer(parameters, returnType) {
+      throw ParserError.rejectedConstruct(
+        span: nameSpan,
+        message: "Foreign function '\(name)' must be marked 'unsafe': its signature carries a raw pointer or C function pointer.")
+    }
 
     return .foreignFunctionDeclaration(
       name: name,
@@ -1269,6 +1328,7 @@ extension Parser {
       body: body,
       cname: cname,
       access: access,
+      isUnsafe: isUnsafe,
       span: span,
       nameSpan: nameSpan
     )
@@ -1316,7 +1376,7 @@ extension Parser {
   }
 
   private func foreignLetDeclaration(
-    name: String, mutable: Bool, cname: String?, access: AccessModifier, span: SourceSpan, nameSpan: SourceSpan
+    name: String, mutable: Bool, cname: String?, access: AccessModifier, isUnsafe: Bool, span: SourceSpan, nameSpan: SourceSpan
   ) throws -> GlobalNode {
     guard currentToken === .colon else {
       throw ParserError.rejectedConstruct(span: currentSpan, message: "foreign let declaration requires explicit type")
@@ -1338,6 +1398,20 @@ extension Parser {
       }
       initializer = value
     }
+    // `unsafe` 只属携带状态的声明（unsafe-design.md §B）：宏常量是编译期
+    // 值，拒绝；其余形态（extern 引用、C 变量定义）收标记，访问按标记把关。
+    if initializer != nil && !mutable && isUnsafe {
+      throw ParserError.rejectedConstruct(
+        span: nameSpan,
+        message: "Cannot mark a foreign constant 'unsafe': a macro constant is a compile-time value, not C state.")
+    }
+    // 加固判据（unsafe-design.md §E）：无值引用的类型带裸指针 / C 函数指针
+    // 就必须标 `unsafe`。
+    if initializer == nil && !isUnsafe && typeCarriesRawPointer(type) {
+      throw ParserError.rejectedConstruct(
+        span: nameSpan,
+        message: "Foreign variable '\(name)' must be marked 'unsafe': its type carries a raw pointer or C function pointer.")
+    }
     return .foreignLetDeclaration(
       name: name,
       type: type,
@@ -1345,9 +1419,43 @@ extension Parser {
       initializer: initializer,
       cname: cname,
       access: access,
+      isUnsafe: isUnsafe,
       span: span,
       nameSpan: nameSpan
     )
+  }
+
+  /// 签名加固判据（docs/design/unsafe-design.md §E）：无体/无值 foreign 声明的
+  /// 签名带裸指针 / C 函数指针时必须标 `unsafe`。只沿合法 FFI 形状递归（指针、
+  /// 定长数组、`foreign (A) -> R`）；托管形状不过界，由封闭集合报它们自己的错。
+  private func typeCarriesRawPointer(_ node: TypeNode) -> Bool {
+    switch node {
+    case .pointer, .foreignFunction:
+      return true
+    case .fixedArray(_, let element, _):
+      return typeCarriesRawPointer(element)
+    case .sendableQualified(let inner):
+      return typeCarriesRawPointer(inner)
+    default:
+      return false
+    }
+  }
+
+  /// Whether any parameter or the return type of a signature carries a raw
+  /// pointer / C function pointer -- the `unsafe` obligation's signature shape.
+  private func signatureCarriesRawPointer(
+    _ parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
+    _ returnType: TypeNode
+  ) -> Bool {
+    if typeCarriesRawPointer(returnType) {
+      return true
+    }
+    for p in parameters {
+      if typeCarriesRawPointer(p.type) {
+        return true
+      }
+    }
+    return false
   }
 
   /// foreign 变量的初值只收常量字面量（可带负号 / null）：C 的静态初始化器必须是

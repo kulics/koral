@@ -2401,6 +2401,24 @@ extension TypeChecker {
         symbolKind = .variable(info.mutable ? .MutableValue : .Value)
       }
 
+      // unsafe 契约准入（docs/design/unsafe-design.md §B/D/R6）：带 `unsafe`
+      // 标记的函数名在调用位是契约调用（B1/B2，需 unsafe 上下文），在值位是
+      // v1 禁止的函数作值（R6，无条件）；标记的外部全局量按访问把关（B4）。
+      if context.defIsUnsafe(defId) {
+        switch symbolKind {
+        case .function:
+          if callCalleeResolutionDepth > 0 {
+            try requireUnsafeForCall(defId, name: name, span: nameSpan)
+          } else {
+            try handleError(SemanticError(.generic(UnsafeMessages.functionAsValue(name)), span: nameSpan))
+          }
+        case .variable:
+          try requireUnsafeForGlobal(defId, name: name, span: nameSpan)
+        default:
+          break
+        }
+      }
+
       if defIdMap.getSymbolType(defId) == nil {
         defIdMap.addSymbolInfo(
           defId: defId,
@@ -2417,6 +2435,14 @@ extension TypeChecker {
       )
 
       return .variable(identifier: symbol)
+
+    case .unsafeExpression(let block, _):
+      // `unsafe { … }`（docs/design/unsafe-design.md §A）：块的词法范围是
+      // unsafe 上下文。检查后透明消失——返回内层块的类型化结果，MIR / codegen
+      // 不感知，ABI 零变化。
+      unsafeContextDepth += 1
+      defer { unsafeContextDepth -= 1 }
+      return try inferTypedExpression(block, expectedType: expectedType, usage: usage)
 
     case .blockExpression(let statements, let tailExpression, _):
       currentBlockExpressionDepth += 1
@@ -2705,6 +2731,12 @@ extension TypeChecker {
 
     case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
+      // unsafe 契约准入（docs/design/unsafe-design.md §C A1）：裸指针解引用是
+      // 未检查内存访问；指向不透明类型时另有报错，不叠第二条。调用实参与
+      // 算术操作数子树与参考实现一致，不在此列。
+      if rawPointerNeedsUnsafe(typedInner.type) {
+        try requireUnsafeOperation(expr, UnsafeMessages.deref)
+      }
       // The operand already objected about itself; a dereference of the
       // failure is a consequence, not a second mistake.
       if typedInner.type == .error {
@@ -2741,6 +2773,9 @@ extension TypeChecker {
 
     case .unsafeDerefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
+      if rawPointerNeedsUnsafe(typedInner.type) {
+        try requireUnsafeOperation(expr, UnsafeMessages.deref)
+      }
       guard let info = typedInner.type.indirectionCompatibilityInfo,
             info.family == .rawPointer,
             let targetType = dereferenceTargetType(of: typedInner.type) else {
@@ -5655,6 +5690,8 @@ extension TypeChecker {
       // same name (the same order koralc's `check_call_callee_expr_ref`
       // resolves it in); a callable field stays the fallback. Value position
       // keeps field-first -- see `inferMemberPathExpression(preferMethods:)`.
+      callCalleeResolutionDepth += 1
+      defer { callCalleeResolutionDepth -= 1 }
       if case .memberPath(let calleeBase, let calleePath, _) = callee {
         typedCallee = try inferMemberPathExpression(
           baseExpr: calleeBase, path: calleePath, preferMethods: true)
@@ -5670,6 +5707,29 @@ extension TypeChecker {
       // its result rather than complaining that a failed value is not
       // callable.
       return failedExpression()
+    }
+
+    // 调用家族准入（docs/design/unsafe-design.md §B1/B2/B3）：被调实体的身份在
+    // typedCallee 上——函数 / 方法符号按 DefId 标记判（B1/B2，方法在
+    // `inferMethodCall` 入口把关）；非声明符号而类型是 `foreign (A) -> R` 的是
+    // C 函数指针调用，恒需上下文（B3）。
+    var calleeIsDeclaredFunction = false
+    if case .variable(let calleeSymbol) = typedCallee {
+      if case .function = calleeSymbol.kind {
+        calleeIsDeclaredFunction = true
+        if case .identifier(let calleeName, let calleeNameSpan) = callee {
+          try requireUnsafeForCall(calleeSymbol.defId, name: calleeName, span: calleeNameSpan)
+        } else {
+          try requireUnsafeForCall(calleeSymbol.defId, name: context.getName(calleeSymbol.defId) ?? "", span: callee.span)
+        }
+      }
+    } else if case .methodReference = typedCallee {
+      calleeIsDeclaredFunction = true
+    } else if case .traitMethodPlaceholder = typedCallee {
+      calleeIsDeclaredFunction = true
+    }
+    if !calleeIsDeclaredFunction, case .foreignFunction = typedCallee.type {
+      try requireUnsafeOperation(at: callee.span, UnsafeMessages.functionPointer)
     }
 
     // Secondary guard: if the resolved callee is a special compiler method, block explicit calls.
@@ -5699,6 +5759,9 @@ extension TypeChecker {
 
     // Trait method placeholder call (for trait methods on generic parameters)
     if case .traitMethodPlaceholder(let traitName, let traitDefId, let traitMethodDefId, let methodName, let base, let methodTypeArgs, let methodType) = typedCallee {
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1）：trait 需求调用（含
+      // vtable 派发）同规则，按需求的 DefId 判标记。
+      try requireUnsafeForCall(traitMethodDefId, name: methodName, span: callee.span)
       // For trait method placeholders, we need to handle the call similarly to method calls
       // The base is already included in the placeholder, so we just need to type-check the arguments
       guard case .function(let params, let returns, _) = methodType else {
@@ -5975,6 +6038,14 @@ extension TypeChecker {
               let template = visibleGenericFunctionTemplate(base) {
       if let callArgs {
         try validateCallArgumentOrder(callArgs, functionName: "function call")
+      }
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1/C1）：`let unsafe
+      // intrinsic` 的显式泛型调用（`alloc_memory[T](…)`）与裸名派发同键同规则；
+      // 其余带标记的泛型函数按声明的 DefId 判。
+      if context.isUnsafeIntrinsicName(base) {
+        try requireUnsafeOperation(at: currentSpan, UnsafeMessages.unsafeCall(base))
+      } else {
+        try requireUnsafeForCall(template.defId, name: base, span: currentSpan)
       }
       // Special handling for explicit intrinsic template calls (e.g. [Int]alloc_memory)
       if base == "alloc_memory" {
@@ -6256,6 +6327,9 @@ extension TypeChecker {
     callArgs: [CallArg],
     expectedReturnType: Type? = nil
   ) throws -> TypedExpressionNode {
+    // unsafe 契约准入（docs/design/unsafe-design.md §B1）：泛型函数模板调用按
+    // 声明的 DefId 判标记。
+    try requireUnsafeForCall(template.defId, name: name, span: currentSpan)
     // Plan call arguments through the unified planner (labels + defaults).
     let genericMeta = callParamMeta(
       from: template.parameters.map { (name: $0.name, named: $0.named, defaultValue: $0.defaultValue) },
@@ -6485,6 +6559,9 @@ extension TypeChecker {
     expectedReturnType: Type? = nil
   ) throws -> TypedExpressionNode {
     let methodName = context.getName(method.defId) ?? "<unknown>"
+    // unsafe 契约准入（docs/design/unsafe-design.md §B1）：方法调用按方法的
+    // DefId 判标记。
+    try requireUnsafeForCall(method.defId, name: methodName, span: currentSpan)
     if case .function(let params, let returns, _) = method.type {
       // Plan call arguments through the unified planner so that labels are
       // matched against the declared parameter labels and omitted named
@@ -7024,6 +7101,16 @@ extension TypeChecker {
       }
 
       if let result = try inferTypeMemberPath(type: type, typeName: name, path: path) {
+        // R6（docs/design/unsafe-design.md §D）：`let unsafe` 方法名作值是错误——
+        // 包一层 lambda 等于把不安全调用藏进安全函数值。调用位由 B1 把关。
+        if !preferMethods, case .variable(let sym) = result, case .function = sym.kind,
+           context.defIsUnsafe(sym.defId) {
+          try handleError(SemanticError(
+            .generic(UnsafeMessages.functionAsValue(path.last ?? name)), span: currentSpan))
+          // The reference neutralises the value after the ban -- no follow-on
+          // mismatch rides on it.
+          return failedExpression()
+        }
         return result
       }
     }
@@ -7214,6 +7301,12 @@ extension TypeChecker {
         }
       }
 
+      // §C A3: a field read projected through a raw pointer dereferences it
+      // without checks. A method on the pointer is a call, not a projection.
+      if foundMember && isPointerAccess {
+        try requireUnsafeOperation(at: currentSpan, UnsafeMessages.member)
+      }
+
       if !foundMember {
         if isLast {
          // Raw pointers may use direct field access sugar. They may also use
@@ -7221,11 +7314,17 @@ extension TypeChecker {
          // extensions), but they do not support implicit pointee method lookup.
          if isPointerAccess,
            let pointerMethodResult = try inferMethodOnType(typeToLookup: currentType, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
+          if try reportUnsafeMethodAsValue(pointerMethodResult, name: memberName, preferMethods: preferMethods) {
+            return failedExpression()
+          }
           return pointerMethodResult
          }
 
          if !isPointerAccess,
            let methodResult = try inferMethodOnType(typeToLookup: typeToLookup, memberName: memberName, typedBase: typedBase, typedPath: typedPath) {
+            if try reportUnsafeMethodAsValue(methodResult, name: memberName, preferMethods: preferMethods) {
+              return failedExpression()
+            }
             return methodResult
           }
 
@@ -9053,11 +9152,14 @@ extension TypeChecker {
     }
 
     // Pointer arithmetic: ptr + Int or ptr - Int (a negative offset is raw
-    // C addressing); the offset is a count-domain position.
+    // C addressing); the offset is a count-domain position. The formation of
+    // an out-of-range pointer is already invalid (docs/design/unsafe-design.md
+    // §C A4), so the arithmetic itself needs the unsafe context.
     if case .pointer = left.type, (op == .plus || op == .minus) {
       var offset = right
       offset = try coerceLiteral(offset, to: .int)
       if offset.type == .int {
+        try requireUnsafeOperation(at: span, UnsafeMessages.arithmetic)
         return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
@@ -9069,6 +9171,7 @@ extension TypeChecker {
       var offset = right
       offset = try coerceLiteral(offset, to: .int)
       if offset.type == .int {
+        try requireUnsafeOperation(at: span, UnsafeMessages.arithmetic)
         return .arithmeticExpression(left: left, op: op, right: offset, type: left.type, span: span)
       }
       throw SemanticError.invalidOperation(
@@ -9335,6 +9438,11 @@ extension TypeChecker {
     guard let sig = methods[methodName] else {
       throw SemanticError(.generic("Trait \(traitName) is missing required method \(methodName)"), span: currentSpan)
     }
+    // unsafe 契约准入（docs/design/unsafe-design.md §B1）：trait 需求调用（含
+    // 泛型参数上的静态需求调用）按需求的 DefId 判标记。
+    if let requirementDefId = traitMethodDefId(traitDefId: traitDefId, methodName: methodName) {
+      try requireUnsafeForCall(requirementDefId, name: methodName, span: currentSpan)
+    }
 
     let expectedType = try expectedFunctionTypeForTraitMethod(
       sig,
@@ -9390,6 +9498,9 @@ extension TypeChecker {
     method: Symbol,
     arguments: [TypedExpressionNode]
   ) throws -> TypedExpressionNode {
+    // unsafe 契约准入（docs/design/unsafe-design.md §B1）：方法调用按方法的
+    // DefId 判标记（合成调用指向安全的 std 方法，登记表里查无此 id，天然放行）。
+    try requireUnsafeForCall(method.defId, name: context.getName(method.defId) ?? "", span: currentSpan)
     guard case .function(let params, let returns, _) = method.type else {
       throw SemanticError.invalidOperation(op: "call", type1: method.type.description, type2: "")
     }
@@ -9472,6 +9583,19 @@ extension TypeChecker {
       }
       guard let type = symbolType else {
         throw SemanticError.undefinedVariable(name)
+      }
+      // 写位名字与读位同一准入（参考实现的写目标经由标识符解析器）：
+      // `let unsafe` 函数名作值是 R6，标记的外部全局量写访问是 B4。
+      if context.defIsUnsafe(defId) {
+        let writeKind = defIdMap.getSymbolKind(defId) ?? .variable(.MutableValue)
+        switch writeKind {
+        case .function:
+          try handleError(SemanticError(.generic(UnsafeMessages.functionAsValue(name)), span: nameSpan))
+        case .variable:
+          try requireUnsafeForGlobal(defId, name: name, span: nameSpan)
+        default:
+          break
+        }
       }
       guard defIdMap.isSymbolMutable(defId) ?? resolvedInfo.mutable else { throw SemanticError.assignToImmutable(name) }
       let kind = defIdMap.getSymbolKind(defId) ?? .variable(.MutableValue)
@@ -9610,6 +9734,15 @@ extension TypeChecker {
 
       for (memberIndex, memberName) in path.enumerated() {
         let isLastMember = memberIndex == path.count - 1
+        // A3 write（docs/design/unsafe-design.md §C）：经裸指针的成员写投影逐段
+        // 把关，与读侧同一文案。段 0 的判型看降级前的表面基：`recs[0].v` 的
+        // 写位降级会把内部槽指针剥成 typedBase——那是编译器内部表示，不是用户
+        // 的裸指针。后续段看前一成员的类型：`q.ptrfield.a` 经字段裸指针投影，
+        // 照旧把关。
+        let segGateType = memberIndex == 0 ? inferredBase.type : currentType
+        if rawPointerNeedsUnsafe(segGateType) {
+          try requireUnsafeOperation(at: expr.span, UnsafeMessages.member)
+        }
         let (typeToLookup, isPointerAccess) = {
           if let (inner, _) = referenceTypeComponents(currentType) { return (inner, false) }
           if case .pointer(let inner) = currentType { return (inner, true) }
@@ -9772,6 +9905,11 @@ extension TypeChecker {
 
     case .derefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
+      // A1 write（docs/design/unsafe-design.md §C）：写穿裸指针与读一样是
+      // 未检查内存访问。
+      if rawPointerNeedsUnsafe(typedInner.type) {
+        try requireUnsafeOperation(at: expr.span, UnsafeMessages.deref)
+      }
       switch typedInner.type {
       case .reference:
         throw SemanticError(.generic(
@@ -9803,6 +9941,9 @@ extension TypeChecker {
 
     case .unsafeDerefExpression(let inner, _):
       let typedInner = try inferTypedExpression(inner)
+      if rawPointerNeedsUnsafe(typedInner.type) {
+        try requireUnsafeOperation(at: expr.span, UnsafeMessages.deref)
+      }
       switch typedInner.type {
       case .pointer:
         throw SemanticError(.generic(

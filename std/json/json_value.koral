@@ -10,13 +10,13 @@ using "std/math" { ... };
 // `__koral_format_float64` renders into a thread-local NUL-terminated buffer
 // that the caller must copy out before the next call; `__koral_parse_float64`
 // parses a NUL-terminated decimal literal (strtod).
-let foreign __koral_format_float64(
+let unsafe foreign __koral_format_float64(
     value: Float64,
     type_char: UInt8,
     precision: Int,
     alt_form: Bool,
 ): *UInt8;
-let foreign __koral_parse_float64(cstr: *UInt8): Float64;
+let unsafe foreign __koral_parse_float64(cstr: *UInt8): Float64;
 
 // ============================================================================
 // std.json - JsonValue Type
@@ -124,9 +124,9 @@ let format_json_number(f: Float64): String = {
     let mutable p = 1;
     while p <= 17 then {
         let text = String.from_cstring_unchecked(
-            __koral_format_float64(f, 'g', p, false),
+            unsafe { __koral_format_float64(f, 'g', p, false) },
         );
-        let parsed = __koral_parse_float64(text.bytes.data);
+        let parsed = unsafe { __koral_parse_float64(text.bytes.data) };
         if parsed.to_bits() == f.to_bits() then {
             if not found or text.count() < best_len then {
                 best = text;
@@ -138,7 +138,7 @@ let format_json_number(f: Float64): String = {
     };
     if not found then {
         // Unreachable for finite doubles; keep a safe rendering anyway.
-        best = String.from_cstring_unchecked(__koral_format_float64(f, 'g', 17, false));
+        best = String.from_cstring_unchecked(unsafe { __koral_format_float64(f, 'g', 17, false) });
     };
     if best.contains("inf") or best.contains("nan") then {
         return "null";

@@ -588,7 +588,7 @@ type mutable ReRowPool(
 given ReRowPool {
     /// Address of row `i` -- a raw-pointer table walk, no bounds check: the
     /// step loop's Save/spawn paths hit this per byte.
-    at(self, i: Int): *mutable Int32 = {
+    at(self, i: Int): *mutable Int32 = unsafe {
         let base = self.rows.borrow_ptr();
         return base[i];
     };
@@ -596,7 +596,7 @@ given ReRowPool {
     /// Copy row `src` into row `dst` -- the copy-on-write half of a `Save`
     /// and the copy every spawn takes. This width-sized copy is the ONLY row
     /// copy in the step loop; everything else passes row indices.
-    copy_row(self, src: Int, dst: Int): Void = {
+    copy_row(self, src: Int, dst: Int): Void = unsafe {
         let sp = self.at(src);
         let dp = self.at(dst);
         let mutable i = 0;
@@ -609,7 +609,7 @@ given ReRowPool {
     /// Load a row into the match result: an inline value copy for patterns
     /// that fit the inline slots (zero allocations -- the common case), one
     /// packed heap block beyond.
-    load_row(self, i: Int): ReSlots = {
+    load_row(self, i: Int): ReSlots = unsafe {
         let src = self.at(i);
         if self.width <= 34 then {
             let mutable slots: [34]Int32 = [];
@@ -629,7 +629,7 @@ given ReRowPool {
     /// A row for a thread: recycled from the free stack, or a fresh block on
     /// first touch. The spawn fills it with `copy_row` immediately. The free
     /// stack is a raw array -- this runs per spawn in the step loop.
-    take(self): Int = {
+    take(self): Int = unsafe {
         if self.free_len == 0 then {
             self.rows.push(alloc_memory[Int32](UInt(self.width)));
             return self.rows.count() - 1;
@@ -639,7 +639,7 @@ given ReRowPool {
     };
 
     /// Return a row to the pool -- a thread's death.
-    give(self, i: Int): Void = {
+    give(self, i: Int): Void = unsafe {
         if self.free_len == self.free_cap then {
             let new_cap = self.free_cap * 2 + 8;
             let grown = alloc_memory[Int](UInt(new_cap));
@@ -655,7 +655,7 @@ given ReRowPool {
     /// A row for a `Save`'s copy-on-write. The thread that survives this call
     /// has copied the row out at spawn, so `end_call` returns every temp
     /// unconditionally. The temp stack is a raw bump -- this runs per `Save`.
-    take_temp(self): Int = {
+    take_temp(self): Int = unsafe {
         if self.temp_len >= self.temp_cap then {
             panic("regex: capture row pool exhausted");
         };
@@ -666,7 +666,7 @@ given ReRowPool {
     };
 
     /// Return every temp taken during the closure call to the free stack.
-    end_call(self): Void = {
+    end_call(self): Void = unsafe {
         let mutable k = 0;
         while k < self.temp_len then {
             self.give(self.temp_buf[k]);
@@ -678,7 +678,7 @@ given ReRowPool {
 
 given ReRowPool: Drop {
     /// Release every row block and the two stacks owned by the pool.
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         let mutable k = 0;
         while k < self.rows.count() then {
             dealloc_memory(self.rows[k]);
@@ -720,7 +720,7 @@ type mutable ReScratch(
 
 given ReScratch: Drop {
     /// Release the backward-scan buffers owned by the scratch.
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         dealloc_memory(self.bmarks);
         dealloc_memory(self.bcur);
         dealloc_memory(self.bnext);
@@ -730,7 +730,7 @@ given ReScratch: Drop {
     };
 };
 
-let re_new_scratch(inst_count: Int, width: Int): ReScratch = {
+let re_new_scratch(inst_count: Int, width: Int): ReScratch = unsafe {
     let cm = List[Int32].with_capacity(inst_count);
     let nm = List[Int32].with_capacity(inst_count);
     for _ in 0..<inst_count then cm.push(0);
@@ -809,7 +809,7 @@ type mutable ReReq(
 
 given ReReq: Drop {
     /// Release the scan buffers owned by the scan data.
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         dealloc_memory(self.eps_from);
         dealloc_memory(self.eps_off);
     };
@@ -831,7 +831,7 @@ type mutable ReCode(
 
 given ReCode: Drop {
     /// Release the flat program buffers.
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         dealloc_memory(self.op);
         dealloc_memory(self.aux1);
         dealloc_memory(self.aux2);
@@ -841,7 +841,7 @@ given ReCode: Drop {
 
 /// Mirror the instruction list into flat arrays. Parsing and analysis keep
 /// the variant form; the step loop never touches it again.
-let re_build_code(insts: List[ReInst]): ReCode = {
+let re_build_code(insts: List[ReInst]): ReCode = unsafe {
     let n = insts.count();
     let op = alloc_memory[UInt8](UInt(n));
     let aux1 = alloc_memory[UInt32](UInt(n));
@@ -971,7 +971,7 @@ let re_build_code(insts: List[ReInst]): ReCode = {
 };
 
 /// Does instruction `u`'s byte set (the precomputed bitmap) cover `b`?
-let re_bits_match(match_bits: *mutable UInt8, u: Int, b: UInt8): Bool = {
+let re_bits_match(match_bits: *mutable UInt8, u: Int, b: UInt8): Bool = unsafe {
     let base = u * 32;
     let i = Int(b);
     return ((match_bits[base + (i >> 3)] >> UInt8(i & 7)) & 1) == 1;
@@ -1130,7 +1130,7 @@ let re_build_required(
     insts: List[ReInst],
     req_pc: Int,
     match_bits: *mutable UInt8,
-): Option[ReReq] = {
+): Option[ReReq] = unsafe {
     let n = insts.count();
     let mutable req_byte = UInt8(0);
     let mutable req_ci = false;
@@ -1331,7 +1331,7 @@ given ReSlots {
     slot(self, index: Int): Int32 = {
         if self.spill.count() > 0 then {
             let p = self.spill.borrow_ptr() as *Int32;
-            return p[index];
+            return unsafe { p[index] };
         };
         let s = self.slots;
         return s[index];
@@ -1385,7 +1385,7 @@ let re_run_scan(
     offset: Int,
     track_groups: Bool,
     anchors: Option[List[Int]],
-): Option[ReSlots] = {
+): Option[ReSlots] = unsafe {
     let insts = prog.insts;
     let code = prog.code;
     let text_len = text.count();
@@ -1609,7 +1609,7 @@ let re_backtrack(
     start: Int,
     track_groups: Bool,
     pool: ReRowPool,
-): ReBt = {
+): ReBt = unsafe {
     let code = prog.code;
     let scratch = prog.scratch;
     let alt = scratch.alt_buf;
@@ -1744,7 +1744,7 @@ let re_backward_starts(
     bp: *UInt8,
     q: Int,
     text_len: Int,
-): List[Int] = {
+): List[Int] = unsafe {
     let insts = prog.insts;
     let n = insts.count();
     let scratch = prog.scratch;
@@ -1852,7 +1852,7 @@ let re_backward_starts(
 /// The next position at or after `from` whose byte the required
 /// instruction would consume. Kept as a tight loop so the C compiler can
 /// vectorize the scan -- the per-occurrence work lives in the caller.
-let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = {
+let re_find_occurrence(req: ReReq, bp: *UInt8, text_len: Int, from: Int): Int = unsafe {
     let mutable q = from;
     while q < text_len then {
         let b = bp[q];
@@ -1963,7 +1963,7 @@ let re_add(
     track_groups: Bool,
     pool: ReRowPool,
     work: List[ReSeed],
-): Void = {
+): Void = unsafe {
     work.clear();
     work.push(ReSeed(pc0, row0));
     while not work.is_empty() then {

@@ -27,9 +27,12 @@ public func printAST(_ node: ASTNode) {
       }
 
     case .globalFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnType, let body, let access, _, _):
+      let name, let typeParameters, let parameters, let returnType, let body, let access, let isUnsafe, _, _):
       print("\(indent)GlobalFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
+      if isUnsafe {
+        print("\(indent)  Unsafe: true")
+      }
       print("\(indent)  Name: \(name)")
       print("\(indent)  TypeParameters:")
       for param in typeParameters {
@@ -76,9 +79,12 @@ public func printAST(_ node: ASTNode) {
         }
       }
 
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access, _, _):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, let access, let isUnsafe, _, _):
       print("\(indent)IntrinsicFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
+      if isUnsafe {
+        print("\(indent)  Unsafe: true")
+      }
       print("\(indent)  Name: \(name)")
       print("\(indent)  TypeParameters: \(typeParameters)")
       print("\(indent)  Parameters:")
@@ -88,9 +94,12 @@ public func printAST(_ node: ASTNode) {
       }
       print("\(indent)  ReturnType: \(returnType)")
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, _, _):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnType, _, _, let access, let isUnsafe, _, _):
       print("\(indent)ForeignFunctionDeclaration:")
       print("\(indent)  Access: \(access)")
+      if isUnsafe {
+        print("\(indent)  Unsafe: true")
+      }
       print("\(indent)  Name: \(name)")
       print("\(indent)  Parameters:")
       for param in parameters {
@@ -115,10 +124,13 @@ public func printAST(_ node: ASTNode) {
             print("\(indent)  Field \(field.name): \(field.type)")
           }
         }
-    case .foreignLetDeclaration(let name, let type, let mutable, _, _, let access, _, _):
+    case .foreignLetDeclaration(let name, let type, let mutable, _, _, let access, let isUnsafe, _, _):
         let mutLabel = mutable ? "mutable " : ""
         print("\(indent)ForeignLetDeclaration \(mutLabel)\(name)")
         print("\(indent)  Access: \(access)")
+        if isUnsafe {
+          print("\(indent)  Unsafe: true")
+        }
         print("\(indent)  Type: \(type)")
 
     case .givenDeclaration(let typeParams, let type, let methods, _):
@@ -346,6 +358,12 @@ public func printAST(_ node: ASTNode) {
             printExpression(tailExpression)
           }
         }
+      }
+
+    case .unsafeExpression(let block, _):
+      print("\(indent)UnsafeExpression:")
+      withIndent {
+        printExpression(block)
       }
     case .arithmeticExpression(let left, let op, let right, _):
       print("\(indent)ArithmeticExpression:")

@@ -912,6 +912,12 @@ given Parser {
             },
             _ then {},
         };
+        // `unsafe` 是需求位唯一的成员级标记（unsafe-design.md §B）。
+        let mutable is_unsafe = false;
+        if self.current().kind is .KwUnsafe() then {
+            is_unsafe = true;
+            self.advance();
+        };
         let name_token = self.current();
         let name = self.expect_identifier("trait member") or return;
         if not self.is_valid_value_name(name) then {
@@ -960,7 +966,9 @@ given Parser {
             return .Error(self.parser_error("trait member cannot have a body"));
         };
 
-        return .Ok(TraitMember(name, type_params, trait_access, params, return_type));
+        return .Ok(
+            TraitMember(name, type_params, trait_access, is_unsafe, params, return_type),
+        );
     };
 
     parse_given_member(
@@ -969,6 +977,12 @@ given Parser {
         target_type_name: String,
     ): Result[GivenMember] = {
         let access = self.parse_access_modifier(AccessModifier.Internal()) or return;
+        // `unsafe` 在可见性之后、名字之前（unsafe-design.md §B）。
+        let mutable is_unsafe = false;
+        if self.current().kind is .KwUnsafe() then {
+            is_unsafe = true;
+            self.advance();
+        };
         let name_token = self.current();
         let name = self.expect_identifier("given member") or return;
         if not self.is_valid_value_name(name) then {
@@ -1034,6 +1048,7 @@ given Parser {
                 name,
                 type_params,
                 access,
+                is_unsafe,
                 params,
                 return_type,
                 body,

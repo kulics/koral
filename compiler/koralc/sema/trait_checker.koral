@@ -581,6 +581,21 @@ given TraitChecker {
                     return Result[Void].Error(message.to_string());
                 },
                 .Some(actual) then {
+                    // R3（unsafe-design.md §B）：实现与需求的 `unsafe` 标记必须
+                    // 一致（双向）。身份在 DefId 上判——需求记于
+                    // register_trait_metadata，实现记于 members_with_def_ids。
+                    let required_unsafe = self.context.def_is_unsafe(required.def_id);
+                    let impl_unsafe = self.context.def_is_unsafe(actual.def_id);
+                    if required_unsafe and not impl_unsafe then {
+                        return Result[Void].Error(
+                            unsafe_requirement_safe_impl_message(method_name),
+                        );
+                    };
+                    if impl_unsafe and not required_unsafe then {
+                        return Result[Void].Error(
+                            safe_requirement_unsafe_impl_message(method_name),
+                        );
+                    };
                     // 检查参数数量（跳过 self 参数）
                     let required_count = required.params.count();
                     let actual_count = actual.params.count();

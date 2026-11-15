@@ -11,7 +11,7 @@ type mutable CodegenBufferStorage(
 
 given CodegenBufferStorage: Drop {
     drop(self): Void = {
-        dealloc_memory(self.data);
+        unsafe { dealloc_memory(self.data) };
     };
 };
 
@@ -27,8 +27,11 @@ given CodegenBuffer {
             panic("CodegenBuffer with_capacity negative capacity");
         };
         let actual_cap = if cap < 1 then 1 else cap + 1;
-        let data = alloc_memory[UInt8](UInt(actual_cap));
-        init_memory(data, 0);
+        let data = unsafe {
+            let fresh = alloc_memory[UInt8](UInt(actual_cap));
+            init_memory(fresh, 0);
+            fresh
+        };
         let storage = CodegenBufferStorage(data, 0, actual_cap);
         return CodegenBuffer(storage);
     };
@@ -43,9 +46,12 @@ given CodegenBuffer {
             new_cap = min_cap;
         };
 
-        let new_data = alloc_memory[UInt8](UInt(new_cap));
-        copy_memory(new_data, self.storage.data, UInt(self.storage.len + 1));
-        dealloc_memory(self.storage.data);
+        let new_data = unsafe {
+            let fresh = alloc_memory[UInt8](UInt(new_cap));
+            copy_memory(fresh, self.storage.data, UInt(self.storage.len + 1));
+            dealloc_memory(self.storage.data);
+            fresh
+        };
         self.storage.data = new_data;
         self.storage.cap = new_cap;
     };
@@ -54,9 +60,11 @@ given CodegenBuffer {
 
     public push_byte(self, value: UInt8): Void = {
         self.ensure_capacity(self.storage.len + 2);
-        self.storage.data[self.storage.len] = value;
-        self.storage.len += 1;
-        self.storage.data[self.storage.len] = 0;
+        unsafe {
+            self.storage.data[self.storage.len] = value;
+            self.storage.len += 1;
+            self.storage.data[self.storage.len] = 0;
+        };
     };
 
     public push_string(self, other: String): Void = {
@@ -66,9 +74,11 @@ given CodegenBuffer {
         };
 
         self.ensure_capacity(self.storage.len + other_len + 1);
-        copy_memory(self.storage.data + self.storage.len, other.borrow_ptr(), UInt(other_len));
-        self.storage.len += other_len;
-        self.storage.data[self.storage.len] = 0;
+        unsafe {
+            copy_memory(self.storage.data + self.storage.len, other.borrow_ptr(), UInt(other_len));
+            self.storage.len += other_len;
+            self.storage.data[self.storage.len] = 0;
+        };
     };
 
     public push_buffer(self, other: CodegenBuffer): Void = {
@@ -78,9 +88,11 @@ given CodegenBuffer {
         };
 
         self.ensure_capacity(self.storage.len + other_len + 1);
-        copy_memory(self.storage.data + self.storage.len, other.storage.data, UInt(other_len));
-        self.storage.len += other_len;
-        self.storage.data[self.storage.len] = 0;
+        unsafe {
+            copy_memory(self.storage.data + self.storage.len, other.storage.data, UInt(other_len));
+            self.storage.len += other_len;
+            self.storage.data[self.storage.len] = 0;
+        };
     };
 
     public push_rune(self, rune: Rune): Void = {
@@ -94,13 +106,16 @@ given CodegenBuffer {
     public into_string(self): String = {
         let data = self.storage.data;
         let len = self.storage.len;
-        let empty_data = alloc_memory[UInt8](UInt(1));
-        init_memory(empty_data, 0);
+        let empty_data = unsafe {
+            let fresh = alloc_memory[UInt8](UInt(1));
+            init_memory(fresh, 0);
+            fresh
+        };
         self.storage.data = empty_data;
         self.storage.len = 0;
         self.storage.cap = 1;
         let result = String.from_utf8_ptr_unchecked(data, len);
-        dealloc_memory(data);
+        unsafe { dealloc_memory(data) };
         return result;
     };
 };

@@ -4,32 +4,32 @@ using "std/os" { is_windows_host };
 // std.net - FFI Declarations (shared by tcp_listener, tcp_socket, udp_socket)
 // ============================================================================
 
-let foreign __koral_errno_ptr(): *Int32;
+let unsafe foreign __koral_errno_ptr(): *Int32;
 
 /// Create a socket (returns fd or -1 on error)
 let foreign __koral_socket_create(domain: Int32, sock_type: Int32, protocol: Int32): Int64;
 
 /// Close a socket
-let foreign __koral_socket_close(fd: Int64): Int32;
+let unsafe foreign __koral_socket_close(fd: Int64): Int32;
 
 /// Bind a socket to an address
-let foreign __koral_socket_bind(fd: Int64, addr: *UInt8, addr_len: UInt32): Int32;
+let unsafe foreign __koral_socket_bind(fd: Int64, addr: *UInt8, addr_len: UInt32): Int32;
 
 /// Start listening for connections
-let foreign __koral_socket_listen(fd: Int64, backlog: Int32): Int32;
+let unsafe foreign __koral_socket_listen(fd: Int64, backlog: Int32): Int32;
 
 /// Accept a connection (returns new fd or -1 on error)
-let foreign __koral_socket_accept(
+let unsafe foreign __koral_socket_accept(
     fd: Int64,
     addr_out: *UInt8,
     addr_len_out: *UInt32,
 ): Int64;
 
 /// Connect to a remote address
-let foreign __koral_socket_connect(fd: Int64, addr: *UInt8, addr_len: UInt32): Int32;
+let unsafe foreign __koral_socket_connect(fd: Int64, addr: *UInt8, addr_len: UInt32): Int32;
 
 /// Send data
-let foreign __koral_socket_send(
+let unsafe foreign __koral_socket_send(
     fd: Int64,
     buf: *UInt8,
     len: UInt64,
@@ -37,7 +37,7 @@ let foreign __koral_socket_send(
 ): Int64;
 
 /// Receive data
-let foreign __koral_socket_recv(
+let unsafe foreign __koral_socket_recv(
     fd: Int64,
     buf: *UInt8,
     len: UInt64,
@@ -45,7 +45,7 @@ let foreign __koral_socket_recv(
 ): Int64;
 
 /// Send data to a specific address (UDP)
-let foreign __koral_socket_sendto(
+let unsafe foreign __koral_socket_sendto(
     fd: Int64,
     buf: *UInt8,
     len: UInt64,
@@ -55,7 +55,7 @@ let foreign __koral_socket_sendto(
 ): Int64;
 
 /// Receive data and get sender address (UDP)
-let foreign __koral_socket_recvfrom(
+let unsafe foreign __koral_socket_recvfrom(
     fd: Int64,
     buf: *UInt8,
     len: UInt64,
@@ -65,10 +65,10 @@ let foreign __koral_socket_recvfrom(
 ): Int64;
 
 /// Shutdown a socket
-let foreign __koral_socket_shutdown(fd: Int64, how: Int32): Int32;
+let unsafe foreign __koral_socket_shutdown(fd: Int64, how: Int32): Int32;
 
 /// Set a socket option
-let foreign __koral_socket_setsockopt(
+let unsafe foreign __koral_socket_setsockopt(
     fd: Int64,
     level: Int32,
     optname: Int32,
@@ -77,7 +77,7 @@ let foreign __koral_socket_setsockopt(
 ): Int32;
 
 /// Get a socket option
-let foreign __koral_socket_getsockopt(
+let unsafe foreign __koral_socket_getsockopt(
     fd: Int64,
     level: Int32,
     optname: Int32,
@@ -86,14 +86,14 @@ let foreign __koral_socket_getsockopt(
 ): Int32;
 
 /// Get the local address of a socket
-let foreign __koral_socket_getsockname(
+let unsafe foreign __koral_socket_getsockname(
     fd: Int64,
     addr_out: *UInt8,
     addr_len_out: *UInt32,
 ): Int32;
 
 /// Get the peer address of a socket
-let foreign __koral_socket_getpeername(
+let unsafe foreign __koral_socket_getpeername(
     fd: Int64,
     addr_out: *UInt8,
     addr_len_out: *UInt32,
@@ -165,7 +165,7 @@ let foreign __koral_socket_getpeername(
 
 /// The numeric code of the last OS error (errno; on Windows the runtime copies
 /// the Winsock code there).
-let socket_error_code(): Int32 = *__koral_errno_ptr();
+let socket_error_code(): Int32 = unsafe { *__koral_errno_ptr() };
 
 /// True when `err` is ENOTCONN / WSAENOTCONN ("socket is not connected").
 /// 57 is ENOTCONN on BSD/macOS, 107 on Linux, 10057 is WSAENOTCONN on Windows.
@@ -182,7 +182,7 @@ let is_not_connected_error(err: Int32): Bool =
 // All fields are written little-endian.
 
 /// Write `value` as a little-endian UInt32 at buf[offset..offset+4].
-let write_u32_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = {
+let write_u32_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = unsafe {
     init_memory(buf + offset + 0, UInt8((value & 255)));
     init_memory(buf + offset + 1, UInt8(((value >> 8) & 255)));
     init_memory(buf + offset + 2, UInt8(((value >> 16) & 255)));
@@ -191,12 +191,14 @@ let write_u32_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = {
 
 /// Read a little-endian UInt32 from buf[offset..offset+4] as a non-negative Int64.
 let read_u32_le(buf: *UInt8, offset: Int): Int64 =
-    Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
-        Int64(UInt(buf[offset + 2])) << 16
-    ) + (Int64(UInt(buf[offset + 3])) << 24);
+    unsafe {
+        Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
+            Int64(UInt(buf[offset + 2])) << 16
+        ) + (Int64(UInt(buf[offset + 3])) << 24)
+    };
 
 /// Write `value` as a little-endian Int64 at buf[offset..offset+8].
-let write_i64_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = {
+let write_i64_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = unsafe {
     init_memory(buf + offset + 0, UInt8((value & 255)));
     init_memory(buf + offset + 1, UInt8(((value >> 8) & 255)));
     init_memory(buf + offset + 2, UInt8(((value >> 16) & 255)));
@@ -209,11 +211,13 @@ let write_i64_le(buf: *mutable UInt8, offset: Int, value: Int64): Void = {
 
 /// Read a little-endian Int64 from buf[offset..offset+8].
 let read_i64_le(buf: *UInt8, offset: Int): Int64 =
-    Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
-        Int64(UInt(buf[offset + 2])) << 16
-    ) + (Int64(UInt(buf[offset + 3])) << 24) + (Int64(UInt(buf[offset + 4])) << 32) + (
-        Int64(UInt(buf[offset + 5])) << 40
-    ) + (Int64(UInt(buf[offset + 6])) << 48) + (Int64(UInt(buf[offset + 7])) << 56);
+    unsafe {
+        Int64(UInt(buf[offset + 0])) + (Int64(UInt(buf[offset + 1])) << 8) + (
+            Int64(UInt(buf[offset + 2])) << 16
+        ) + (Int64(UInt(buf[offset + 3])) << 24) + (Int64(UInt(buf[offset + 4])) << 32) + (
+            Int64(UInt(buf[offset + 5])) << 40
+        ) + (Int64(UInt(buf[offset + 6])) << 48) + (Int64(UInt(buf[offset + 7])) << 56)
+    };
 
 /// The size of the platform's SO_RCVTIMEO / SO_SNDTIMEO value encoding.
 /// Windows always stores a 4-byte DWORD of milliseconds; elsewhere the socket
@@ -223,26 +227,30 @@ let timeout_option_len(fd: Int64): UInt32 = {
     if is_windows_host() then {
         return UInt32(4);
     };
-    let probe = alloc_memory[UInt8](16);
-    defer dealloc_memory(probe);
+    let probe = unsafe { alloc_memory[UInt8](16) };
+    defer unsafe { dealloc_memory(probe) };
     let mutable opt_len: UInt32 = UInt32(16);
-    if __koral_socket_getsockopt(
-        fd,
-        sol_socket,
-        so_rcvtimeo,
-        probe,
-        &opt_len,
-    ) == 0 then {
+    if unsafe {
+        __koral_socket_getsockopt(
+            fd,
+            sol_socket,
+            so_rcvtimeo,
+            probe,
+            &opt_len,
+        )
+    } == 0 then {
         return opt_len;
     };
     let mutable opt_len_8: UInt32 = UInt32(8);
-    if __koral_socket_getsockopt(
-        fd,
-        sol_socket,
-        so_rcvtimeo,
-        probe,
-        &opt_len_8,
-    ) == 0 then {
+    if unsafe {
+        __koral_socket_getsockopt(
+            fd,
+            sol_socket,
+            so_rcvtimeo,
+            probe,
+            &opt_len_8,
+        )
+    } == 0 then {
         return UInt32(8);
     };
     return UInt32(16);
@@ -259,9 +267,11 @@ let encode_timeout_option(
 ): Void = {
     let n = Int(len);
     let mutable bi = 0;
-    while bi < n then {
-        init_memory(buf + bi, UInt8(0));
-        bi += 1;
+    unsafe {
+        while bi < n then {
+            init_memory(buf + bi, UInt8(0));
+            bi += 1;
+        };
     };
     let duration = when timeout in {
         .Some(d) then d,

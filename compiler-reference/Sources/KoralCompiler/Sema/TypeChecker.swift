@@ -24,6 +24,32 @@ enum ExpressionUsage: Equatable {
   case statement
 }
 
+/// unsafe 操作诊断文案（docs/design/unsafe-design.md §F 逐字正本）。
+/// 名字插值的三条在调用点合成。
+enum UnsafeMessages {
+  static let deref = "Cannot dereference a raw pointer outside an 'unsafe' block: raw pointer reads and writes are unchecked memory access."
+  static let pointerSubscript = "Cannot use unchecked subscript on a raw pointer outside an 'unsafe' block: pointer indexing does not check bounds."
+  static let member = "Cannot access a member through a raw pointer outside an 'unsafe' block: the access dereferences the pointer without checks."
+  static let arithmetic = "Cannot perform pointer arithmetic outside an 'unsafe' block: an out-of-range pointer is invalid even before it is dereferenced."
+  static let functionPointer = "Cannot call a C function pointer outside an 'unsafe' block: the pointer's target contract is unknown."
+
+  static func unsafeCall(_ name: String) -> String {
+    "Cannot call unsafe function '\(name)' outside an 'unsafe' block: the declaration is marked 'unsafe'."
+  }
+  static func unsafeGlobal(_ name: String) -> String {
+    "Cannot access unsafe global '\(name)' outside an 'unsafe' block: the declaration is marked 'unsafe'."
+  }
+  static func unsafeRequirement(_ name: String) -> String {
+    "Cannot implement unsafe requirement '\(name)' with a safe method: the implementation must also be marked 'unsafe'."
+  }
+  static func safeRequirement(_ name: String) -> String {
+    "Cannot implement safe requirement '\(name)' with an unsafe method: the requirement is not marked 'unsafe'."
+  }
+  static func functionAsValue(_ name: String) -> String {
+    "Unsafe function '\(name)' cannot be used as a value: call it directly or wrap it in a safe function."
+  }
+}
+
 /// Compile-time mirror of the runtime global-accessor state machine: a global
 /// initializer is checked on demand and `Checking` re-entrance is an inference
 /// cycle -- only a type annotation can break one.
@@ -418,6 +444,13 @@ public class TypeChecker {
   var inLoop: Bool = false
   var insideDefer: Bool = false
   var currentBlockExpressionDepth: Int = 0
+  /// unsafe 上下文深度（docs/design/unsafe-design.md §A）：`unsafe { … }` 的
+  /// 词法范围内 > 0，不安全操作只在其中合法。函数边界由逐体检查自然复位。
+  var unsafeContextDepth: Int = 0
+  /// > 0 while a call's CALLEE is being resolved. A `let unsafe` function name
+  /// in this position is a direct call (the B1 gate); anywhere else it is a
+  /// value use (the R6 ban). Call paths set it around callee resolution only.
+  var callCalleeResolutionDepth: Int = 0
 
   var synthesizedTempIndex: Int = 0
   
@@ -588,6 +621,77 @@ public class TypeChecker {
   /// about the consequence of the failure rather than the failure itself.
   func failedExpression() -> TypedExpressionNode {
     .blockExpression(statements: [], tailExpression: nil, type: .error)
+  }
+
+  // MARK: - Unsafe context (docs/design/unsafe-design.md)
+
+  /// unsafe 上下文里吗？`unsafe { … }` 的词法范围（§A/R1）。
+  func inUnsafeContext() -> Bool {
+    unsafeContextDepth > 0
+  }
+
+  /// unsafe 操作准入（§D）：不在 unsafe 上下文即报。
+  func requireUnsafeOperation(at span: SourceSpan, _ message: String) throws {
+    if inUnsafeContext() {
+      return
+    }
+    try handleError(SemanticError(.generic(message), span: span))
+  }
+
+  func requireUnsafeOperation(_ expr: ExpressionNode, _ message: String) throws {
+    try requireUnsafeOperation(at: expr.span, message)
+  }
+
+  /// 契约调用准入（§B/D）：目标声明带 `unsafe` 标记时要求 unsafe 上下文。
+  /// 缺席登记 = 无标记 = 安全。
+  func requireUnsafeForCall(_ defId: DefId, name: String, span: SourceSpan) throws {
+    guard context.defIsUnsafe(defId) else {
+      return
+    }
+    try requireUnsafeOperation(at: span, UnsafeMessages.unsafeCall(name))
+  }
+
+  /// 外部全局量访问准入（§B4）。
+  func requireUnsafeForGlobal(_ defId: DefId, name: String, span: SourceSpan) throws {
+    guard context.defIsUnsafe(defId) else {
+      return
+    }
+    try requireUnsafeOperation(at: span, UnsafeMessages.unsafeGlobal(name))
+  }
+
+  /// R6（docs/design/unsafe-design.md §D）：`let unsafe` 方法名站在值位（非被
+  /// 调用）是错误——包一层 lambda 等于把不安全调用藏进安全函数值。调用位由
+  /// B1 把关，不在这里报。
+  func reportUnsafeMethodAsValue(
+    _ projected: TypedExpressionNode, name: String, preferMethods: Bool
+  ) throws -> Bool {
+    guard !preferMethods else {
+      return false
+    }
+    guard case .methodReference(_, let method, _, _, _) = projected else {
+      return false
+    }
+    guard context.defIsUnsafe(method.defId) else {
+      return false
+    }
+    try handleError(SemanticError(.generic(UnsafeMessages.functionAsValue(name)), span: currentSpan))
+    // The reference neutralises the projection after the ban (an Unknown-typed
+    // stand-in), so no follow-on mismatch rides on the banned value.
+    return true
+  }
+
+  /// 裸指针触内存（解引用 / 投影 / 下标）要把关吗？（§C 表）
+  /// 指向不透明类型时另有报错，不叠第二条。
+  func rawPointerNeedsUnsafe(_ t: Type) -> Bool {
+    switch t {
+    case .pointer(let element), .mutablePointer(let element):
+      if case .opaque = element {
+        return false
+      }
+      return true
+    default:
+      return false
+    }
   }
 
   // MARK: - Object-lock borrow ban (concurrency-design.md)
@@ -1930,6 +2034,9 @@ public class TypeChecker {
     if !method.typeParameters.isEmpty {
       methodTypeParamsByDefId[defId] = method.typeParameters
     }
+    if method.isUnsafe {
+      context.recordUnsafeDef(defId)
+    }
     return MethodDeclaration(
       name: method.name,
       typeParameters: method.typeParameters,
@@ -1937,6 +2044,7 @@ public class TypeChecker {
       returnType: method.returnType,
       body: method.body,
       access: resolvedAccess,
+      isUnsafe: method.isUnsafe,
       defId: defId
     )
   }

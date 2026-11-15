@@ -13,23 +13,23 @@ using "std/io" { Reader, Writer, Seeker, SeekOrigin };
 // ============================================================================
 
 /// Close a file descriptor (POSIX close wrapper)
-let foreign __koral_close(fd: Int32): Int32;
+let unsafe foreign __koral_close(fd: Int32): Int32;
 
 /// Read from a file descriptor (POSIX read wrapper, unbuffered)
-let foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
+let unsafe foreign __koral_read(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Write to a file descriptor (POSIX write wrapper, unbuffered)
-let foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
+let unsafe foreign __koral_write(fd: Int32, buf: *UInt8, count: UInt): Int64;
 
 /// Sync file data to disk (POSIX fsync wrapper)
-let foreign __koral_fsync(fd: Int32): Int32;
+let unsafe foreign __koral_fsync(fd: Int32): Int32;
 
 /// Seek within a file (POSIX lseek wrapper)
-let foreign __koral_lseek(fd: Int32, offset: Int64, whence: Int32): Int64;
+let unsafe foreign __koral_lseek(fd: Int32, offset: Int64, whence: Int32): Int64;
 
 /// File locking (cross-platform flock/LockFileEx wrapper)
 /// operation: 1=LOCK_SH, 2=LOCK_EX, 4=LOCK_NB (combinable), 8=LOCK_UN
-let foreign __koral_flock(fd: Int32, operation: Int32): Int32;
+let unsafe foreign __koral_flock(fd: Int32, operation: Int32): Int32;
 
 /// Check if current errno is EWOULDBLOCK (cross-platform)
 /// Returns non-zero if errno is EWOULDBLOCK
@@ -62,7 +62,7 @@ given FileStorage: Drop {
     /// Only closes when fd >= 0 (valid file descriptor).
     drop(self): Void = {
         if self.fd >= 0 then {
-            __koral_close(self.fd);
+            unsafe { __koral_close(self.fd) };
         };
     };
 };
@@ -72,7 +72,7 @@ given FileStorage: Drop {
 // ============================================================================
 
 /// Query file metadata via file descriptor (fstat wrapper)
-let foreign __koral_fstat(fd: Int32, out: *KoralStatResult): Int32;
+let unsafe foreign __koral_fstat(fd: Int32, out: *KoralStatResult): Int32;
 
 // ============================================================================
 // Helpers
@@ -107,7 +107,7 @@ given File {
         if count <= 0 then {
             return Result[Int].Ok(0);
         };
-        let n = __koral_write(self.storage.fd, data, UInt(count));
+        let n = unsafe { __koral_write(self.storage.fd, data, UInt(count)) };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -121,7 +121,7 @@ given File {
     /// Get file metadata by querying via the file descriptor (no path needed).
     public info(self): Result[FileInfo] = {
         let mutable stat_buf = KoralStatResult(0, 0, 0, 0, 0, 0, 0, 0, 0);
-        let result = __koral_fstat(self.storage.fd, &stat_buf);
+        let result = unsafe { __koral_fstat(self.storage.fd, &stat_buf) };
         if result != 0 then {
             return Result[FileInfo].Error(last_error_message());
         };
@@ -145,7 +145,7 @@ given File {
 
     /// Sync file data to disk (fsync, ensures physical persistence).
     public sync(self): Result[Void] = {
-        let result = __koral_fsync(self.storage.fd);
+        let result = unsafe { __koral_fsync(self.storage.fd) };
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -157,7 +157,7 @@ given File {
 
     /// Acquire an exclusive lock (blocking, waits until acquired)
     public lock(self): Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 2); // LOCK_EX
+        let result = unsafe { __koral_flock(self.storage.fd, 2) }; // LOCK_EX
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -166,7 +166,7 @@ given File {
 
     /// Acquire a shared lock (blocking, waits until acquired)
     public lock_shared(self): Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 1); // LOCK_SH
+        let result = unsafe { __koral_flock(self.storage.fd, 1) }; // LOCK_SH
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -176,7 +176,7 @@ given File {
     /// Try to acquire an exclusive lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock(self): Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 6); // LOCK_EX | LOCK_NB
+        let result = unsafe { __koral_flock(self.storage.fd, 6) }; // LOCK_EX | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
         };
@@ -189,7 +189,7 @@ given File {
     /// Try to acquire a shared lock (non-blocking)
     /// Returns Ok(true) if acquired, Ok(false) if lock is held (EWOULDBLOCK), Error for system errors
     public try_lock_shared(self): Result[Bool] = {
-        let result = __koral_flock(self.storage.fd, 5); // LOCK_SH | LOCK_NB
+        let result = unsafe { __koral_flock(self.storage.fd, 5) }; // LOCK_SH | LOCK_NB
         if result == 0 then {
             return Result[Bool].Ok(true);
         };
@@ -201,7 +201,7 @@ given File {
 
     /// Release the lock
     public unlock(self): Result[Void] = {
-        let result = __koral_flock(self.storage.fd, 8); // LOCK_UN
+        let result = unsafe { __koral_flock(self.storage.fd, 8) }; // LOCK_UN
         if result != 0 then {
             return Result[Void].Error(last_error_message());
         };
@@ -221,8 +221,10 @@ given File: Reader {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = into.borrow_mut_ptr() + start;
-        let n = __koral_read(self.storage.fd, data_ptr, UInt(span.len()));
+        let n = unsafe {
+            let data_ptr = into.borrow_mut_ptr() + start;
+            __koral_read(self.storage.fd, data_ptr, UInt(span.len()))
+        };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -242,8 +244,10 @@ given File: Writer {
         if end <= start then {
             return Result[Int].Ok(0);
         };
-        let data_ptr = from.borrow_ptr() + start;
-        let n = __koral_write(self.storage.fd, data_ptr, UInt(span.len()));
+        let n = unsafe {
+            let data_ptr = from.borrow_ptr() + start;
+            __koral_write(self.storage.fd, data_ptr, UInt(span.len()))
+        };
         if n < 0 then {
             return Result[Int].Error(last_error_message());
         };
@@ -275,7 +279,7 @@ given File: Seeker {
                 whence = 2;
             },
         };
-        let new_pos = __koral_lseek(self.storage.fd, offset, whence);
+        let new_pos = unsafe { __koral_lseek(self.storage.fd, offset, whence) };
         if new_pos < 0 then {
             return Result[Int].Error(last_error_message());
         };

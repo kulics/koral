@@ -104,7 +104,8 @@ given TypeChecker {
             or .StaticMethodCall(_, _, _, _, _) or .TypeRefStaticMethodCall(_, _, _, _, _) or .Block(...)
             or .IfExpr(_, _, _, _) or .WhileExpr(_, _, _) or .ForExpr(_, _, _, _, _) or .WhenExpr(_, _, _)
             or .ImplicitMemberExpr(_, _, _) or .OrElseExpr(_, _, _) or .AndThenExpr(_, _, _)
-            or .OrReturnExpr(_, _) or .FlowReceiver(_) or .FlowChainExpr(_, _) or .FlowBindExpr(_, _, _) then false,
+            or .OrReturnExpr(_, _) or .FlowReceiver(_) or .FlowChainExpr(_, _) or .FlowBindExpr(_, _, _)
+            or .UnsafeExpr(_, _) then false,
             .CastExpr(_, inner, _) then self.source_expr_is_obviously_pure_statement(
                 inner,
             ),
@@ -735,6 +736,10 @@ given TypeChecker {
                             subscript_value
                         },
                         .Pointer(element_type, _) then {
+                            self.require_unsafe_operation_at(
+                                expr_span(base),
+                                unsafe_subscript_message,
+                            );
                             let index_arg = outer_args[0];
                             let typed_index = self.adapt_expr_to_expected_type_at(
                                 self.check_expr_scoped_ref(
@@ -2305,6 +2310,9 @@ given TypeChecker {
         return when target in {
             .DerefExpr(inner, span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation_at(span, unsafe_deref_message);
+                };
                 let result_type = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) or .MutableBorrowedReferenceType(inner_ref) then inner_ref,
                     .ReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref) then {
@@ -2347,6 +2355,9 @@ given TypeChecker {
             },
             .UnsafeDerefExpr(inner, span) then {
                 let typed_inner = self.check_expr_scoped_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation_at(span, unsafe_deref_message);
+                };
                 let result_type = when typed_inner.expr_type in {
                     .MutablePointerType(inner_ref) then inner_ref,
                     .PointerType(inner_ref) then {
@@ -2403,7 +2414,21 @@ given TypeChecker {
                 // `upgrade`d, with no fields of the referent to write to.
                 let mutable current_type = typed_base.expr_type;
                 let mutable typed_path = List[Symbol].new();
+                let mutable seg_index = 0;
                 for member in path then {
+                    // 段 0 的判型看降级前的表面基：`recs[0].v` 的写位降级会把
+                    // 内部槽指针剥成 typed_base——那是编译器内部表示，不是用户的
+                    // 裸指针。后续段看前一成员的类型：`q.ptrfield.a` 经字段裸指针
+                    // 投影，照旧把关。
+                    let seg_gate_type = if seg_index == 0 then inferred_base.expr_type
+                    else current_type;
+                    seg_index += 1;
+                    if self.raw_pointer_needs_unsafe(seg_gate_type) then {
+                        self.require_unsafe_operation_at(
+                            expr_span(target),
+                            unsafe_member_message,
+                        );
+                    };
                     let inner_type = when current_type in {
                         .MutableReferenceType(inner) or .ReferenceType(inner) or .BorrowedReferenceType(inner)
                         or .MutableBorrowedReferenceType(inner) or .PointerType(inner)
@@ -2499,6 +2524,10 @@ given TypeChecker {
                             subscript_value
                         },
                         .Pointer(element_type, _) then {
+                            self.require_unsafe_operation_at(
+                                expr_span(base),
+                                unsafe_subscript_message,
+                            );
                             let index_arg = outer_args[0];
                             let typed_index = self.adapt_expr_to_expected_type_at(
                                 self.check_expr_scoped_ref(

@@ -202,9 +202,9 @@ Identifiers are names given to variables, functions, types, etc. The naming rule
 
 ```koral
 #if os("windows") then {
-    let foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
+    let unsafe foreign "CreateFileA" create_file_a(path: *UInt8, access: UInt32): UInt32;
 } else {
-    let foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
+    let unsafe foreign "open" open_path(path: *UInt8, flags: Int32): Int32;
 };
 ```
 
@@ -3134,10 +3134,10 @@ list[1] = 99;
 let text = "abc";
 let b: UInt8 = text[1];
 
-let p: *mutable Int = alloc_memory[Int](2);
-p[0] = list[0];
-let first = p[0];
-dealloc_memory(p);
+let p: *mutable Int = unsafe { alloc_memory[Int](2) };
+unsafe { p[0] = list[0] };
+let first = unsafe { p[0] };
+unsafe { dealloc_memory(p) };
 ```
 
 ### Extension Methods
@@ -3525,7 +3525,7 @@ The null pointer is the literal `null`. It joins an expected `*T` or
 let p: *Int = null;
 let m: *mutable Int = null;
 if p == null then { ... };
-if m != null then { *m = 42; };
+if m != null then { unsafe { *m = 42; } };
 ```
 
 `null` also matches as a literal pattern — `p is null`, `p is not null`, or a
@@ -3562,7 +3562,7 @@ the natural operator errors; the paren and alias call forms `(*Int)(u)` /
 'expr as Type', not 'Type(expr)'`, and `UInt(p)` reports `Pointer and
 integer casts are written 'expr as Type', not 'Type(expr)'`.
 
-### Unsafe Address-Of and Dereference
+### Address-Of and Dereference
 
 `&` / `&mutable` are raw address-of operators. They require addressable storage; literals and temporaries are rejected.
 
@@ -3570,8 +3570,8 @@ integer casts are written 'expr as Type', not 'Type(expr)'`.
 let p: *Int = &value;
 let mp: *mutable UInt8 = &mutable bytes[0];
 
-let x = *p;       // raw deref read
-*mp = 42;         // raw deref write
+let x = unsafe { *p };       // raw deref read
+unsafe { *mp = 42 };         // raw deref write
 let q = &value as *Int;   // (&value) as *Int: cast groups over the whole prefix
 
 // let bad = & 42  // error: raw address-of needs addressable storage
@@ -3579,11 +3579,103 @@ let q = &value as *Int;   // (&value) as *Int: cast groups over the whole prefix
 
 Rules:
 
-- `&` produces `*T`; `&mutable` produces `*mutable T`.
-- `*expr` reads and `*expr = value` writes are the raw dereference forms.
+- `&` produces `*T`; `&mutable` produces `*mutable T`. Forming a pointer is
+  safe — a pointer is an inert value until an operation touches memory through
+  it.
+- `*expr` reads and `*expr = value` writes are the raw dereference forms, and
+  they are **unsafe operations** (see [`unsafe` Operations](#unsafe-operations)).
 - `as` binds looser than the prefix operators: `&x as *T` is `(&x) as *T`
   and `*p as *Int` is `(*p) as *Int`.
 - Raw pointers are not a general "any type to `*T`" bridge: the std helpers that hand out raw pointers require the `foreign` shape constraint on the element type (see [Generic Constraints](#generic-constraints)).
+
+### `unsafe` Operations
+
+Danger is carried by **operations**, not by type spellings: `*T` is just the
+carrier type. The operations that touch unchecked memory or call an unverified
+contract require an **`unsafe` context** — the lexical range of an
+`unsafe { … }` block:
+
+```koral
+let n = unsafe { base[3] };              // one operation
+let sum = unsafe {                        // one boundary, one safety rationale
+    let mutable p = data + offset;
+    p[0] = p[0] + 1;
+    p[0]
+};
+```
+
+- The block form is the only form. Everything a block expression offers still
+  holds: the trailing expression is the value, `;` terminates statements,
+  `return` / `break` pass through.
+- The context is **lexical** — nested blocks, `when` arms, and lambda bodies
+  written inside the block are inside the context. It never crosses a function
+  boundary: a function defined outside starts fresh.
+
+The operations that require the context:
+
+| Operation | Spelling |
+|---|---|
+| Raw pointer dereference (read or write) | `*p`, `*p = v` |
+| Unchecked raw-pointer subscript | `p[i]`, `p[i] = v` (not `[N]T` — those are bounds-checked) |
+| Field projection through a raw pointer | `p.f` |
+| Pointer arithmetic | `p + n`, `p - n` |
+| Calling a declaration marked `unsafe` | see [`unsafe` Declarations](#unsafe-declarations) |
+| Calling a C function pointer | `(p)(args)` |
+| Accessing a foreign global marked `unsafe` | see [`unsafe` Declarations](#unsafe-declarations) |
+
+Producing and carrying pointer values is safe: `&x`, `null`, pointer
+comparisons (`p == null`, `p is null`) and reinterpretation casts (`as`) need
+no context — the danger lives in the operations that touch memory.
+
+#### `unsafe` Declarations
+
+A declaration carries a safety contract with the `unsafe` marker:
+
+```koral
+let unsafe first_byte(p: *UInt8): UInt8 = unsafe { *p };   // free function
+let unsafe foreign strlen(p: *UInt8): UInt;                // foreign reference
+
+given Buffer {
+    unsafe slot_at(self, i: UInt): *mutable UInt8 = unsafe { self.data + i };  // method
+};
+
+trait Blob {
+    unsafe raw_bytes(self): *UInt8;                        // trait requirement
+};
+```
+
+- The marker sits right after `let` (before `foreign` / `intrinsic`); for
+  methods and trait requirements it sits between the visibility modifier and
+  the name. Variables cannot be marked — only functions and foreign
+  declarations carry contracts.
+- Calling (or, for globals, accessing) a marked declaration requires the
+  `unsafe` context.
+- **The body of a marked function is not an implicit context** — its own
+  unsafe operations still take `unsafe { … }`. The marker is the caller's
+  contract; the body's blocks are the author's own checkpoints.
+- A trait requirement and its implementation must carry the **same** marker.
+- A marked function cannot be used as a value in this version; wrap it in a
+  safe function first.
+- The marker is a contract claim, not a verification. Write the preconditions
+  in a doc comment above the declaration — that comment is the contract.
+
+#### Foreign Declarations and Safety
+
+For a body-less `let foreign` declaration (a C reference), the marker is the
+binding author's explicit judgment — a C contract cannot be spelled in a
+signature:
+
+- `let unsafe foreign f(…)` — unsafe to call; callers need the context.
+- `let foreign f(…)` — asserted safe to call with any values of these types.
+- A foreign declaration whose signature carries a raw pointer or a C function
+  pointer **must** be marked `unsafe`; the assertion is only available to
+  signatures the compiler can see are pointer-free.
+- Declarations with a body (C ABI exports) or a value (macro constants, C
+  variable definitions) are Koral entities: exports follow the marker like any
+  function, macro constants are never marked.
+
+A `foreign (A) -> R` function-pointer call always requires the context: a raw
+C pointer carries no verifiable contract.
 
 ### Foreign Function Interface
 
@@ -3609,7 +3701,9 @@ The compiler adds linker flags from the resolved manifest graph. `libc` is impli
 > already occupy. Access modifiers are the only prefix modifiers: they say who
 > can see a declaration, not what kind of thing it is. The two qualifiers are
 > mutually exclusive, and they come before `mutable`, which describes the
-> binding (`let foreign mutable errno: Int32;`).
+> binding (`let foreign mutable errno: Int32;`). The `unsafe` marker sits
+> between the keyword and those qualifiers — `let unsafe foreign f(…)` (see
+> [`unsafe` Declarations](#unsafe-declarations)).
 
 #### Foreign Functions
 
@@ -3619,7 +3713,7 @@ linkage); a body is a definition — a C ABI export.
 
 ```koral
 let foreign sin(x: Float64): Float64;                    // reference: links C's sin
-let foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // reference + C name
+let unsafe foreign "CreateFileA" create_file(path: *UInt8): UInt32;  // reference + C name
 let foreign add_one(x: Int32): Int32 = {                 // definition: exported to C
     return x + Int32(1);
 };
@@ -3647,7 +3741,7 @@ The value's presence and `mutable` pick the form:
 
 ```koral
 let foreign mutable errno: Int32;            // reference: extern mutable variable
-let foreign stdin: *CFile;                   // reference: bare `extern` (Koral-side mutability is a language check, not `const`)
+let unsafe foreign stdin: *CFile;                   // reference: bare `extern` (Koral-side mutability is a language check, not `const`)
 let foreign mutable counter: Int32 = 0;      // definition: C variable (static init)
 let foreign "AF_INET6" af_inet6: Int32 = 10; // macro constant: value binding
 ```
@@ -3808,7 +3902,11 @@ The `intrinsic` keyword declares types and functions built into the compiler:
 type intrinsic Int;
 ```
 
-Intrinsics are reserved for the standard library.
+Intrinsics are reserved for the standard library. The raw-memory intrinsics
+(`alloc_memory`, `dealloc_memory`, `copy_memory`, `move_memory`,
+`compare_memory`, `init_memory`, `deinit_memory`, `take_memory`) are declared
+`let unsafe intrinsic` — calling them requires an `unsafe` context like any
+other unsafe operation (see [`unsafe` Operations](#unsafe-operations)).
 
 ## Appendix: Standard Library Essentials
 

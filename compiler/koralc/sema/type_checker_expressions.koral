@@ -595,6 +595,23 @@ given TypeChecker {
         if local_sym_opt is .None() and file_sym_opt is .None() and global_sym_opt is .Some(gs) and gs.kind is not .TypeSymbol() then {
             self.check_symbol_visibility(normalized_sym, span);
         };
+        // R6（unsafe-design.md §D）：`let unsafe` 函数名站在值位（非被调用）是
+        // 错误——函数值类型不带安全位，值传出去后调用点无从判断。被调用位由
+        // 调用闸（B1/B2）把关：`call_callee_check_depth` 标记的正是被调名解析
+        // 的当口。禁的是「作值」这个形态本身，与 unsafe 上下文无关。
+        if normalized_sym.kind is .Function() and self.storage.call_callee_check_depth == 0 then {
+            if self.context().def_is_unsafe(normalized_sym.def_id) then {
+                self.push_diagnostic_at_span(
+                    unsafe_fn_as_value_message(name),
+                    span,
+                );
+            };
+        };
+        // B4（unsafe-design.md §C）：`let unsafe foreign` 全局量的读 / 写。
+        // 局部与未登记符号在登记表里查无此 id，天然放行。
+        if normalized_sym.kind is .Variable(_) then {
+            self.require_unsafe_for_global_at(normalized_sym.def_id, name, span);
+        };
         return make_typed_expr_at(
             TypedExprKind.Variable(normalized_sym),
             normalized_sym.symbol_type,
@@ -655,6 +672,9 @@ given TypeChecker {
             ),
             .DerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .MutableReferenceType(inner_ref) or .ReferenceType(inner_ref)
                     or .MutableBorrowedReferenceType(inner_ref) or .BorrowedReferenceType(inner_ref)
@@ -726,6 +746,9 @@ given TypeChecker {
             },
             .UnsafeDerefExpr(inner, _) then {
                 let typed_inner = self.check_child_expr_ref(inner, .None(), scope);
+                if self.raw_pointer_needs_unsafe(typed_inner.expr_type) then {
+                    self.require_unsafe_operation(expr, unsafe_deref_message);
+                };
                 let inner_t = when typed_inner.expr_type in {
                     .PointerType(inner_ref) or .MutablePointerType(inner_ref) then {
                         when inner_ref in {
@@ -889,6 +912,9 @@ given TypeChecker {
             .PointerType(inner) then {
                 let pointee = inner;
                 let resolved = self.resolve_member_type(pointee, member);
+                if resolved is not .Unknown() then {
+                    self.require_unsafe_operation(base, unsafe_member_message);
+                };
                 let has_pointer_method = visible_method is .Some(_);
                 if resolved is .Unknown() and not has_pointer_method then {
                     when pointee in {
@@ -916,6 +942,9 @@ given TypeChecker {
             .MutablePointerType(inner) then {
                 let pointee = inner;
                 let resolved = self.resolve_member_type(pointee, member);
+                if resolved is not .Unknown() then {
+                    self.require_unsafe_operation(base, unsafe_member_message);
+                };
                 let has_pointer_method = visible_method is .Some(_);
                 self.report_pointer_member_access_issue_if_needed(
                     resolved,

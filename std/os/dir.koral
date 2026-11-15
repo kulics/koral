@@ -15,17 +15,17 @@ type foreign CDirHandle {};
 type foreign CDirEntry {};
 
 // Directory I/O
-let foreign __koral_opendir(path: *UInt8): *CDirHandle;
-let foreign __koral_readdir(dir: *CDirHandle): *CDirEntry;
-let foreign __koral_closedir(dir: *CDirHandle): Int32;
-let foreign __koral_dirent_name(entry: *CDirEntry): *UInt8;
-let foreign __koral_dirent_type(entry: *CDirEntry): Int32;
+let unsafe foreign __koral_opendir(path: *UInt8): *CDirHandle;
+let unsafe foreign __koral_readdir(dir: *CDirHandle): *CDirEntry;
+let unsafe foreign __koral_closedir(dir: *CDirHandle): Int32;
+let unsafe foreign __koral_dirent_name(entry: *CDirEntry): *UInt8;
+let unsafe foreign __koral_dirent_type(entry: *CDirEntry): Int32;
 
 // Directory manipulation
-let foreign __koral_mkdir(path: *UInt8, mode: UInt32): Int32;
-let foreign __koral_rmdir(path: *UInt8): Int32;
-let foreign __koral_remove_dir_all(path: *UInt8): Int32;
-let foreign __koral_mkdtemp(template: *UInt8): *UInt8;
+let unsafe foreign __koral_mkdir(path: *UInt8, mode: UInt32): Int32;
+let unsafe foreign __koral_rmdir(path: *UInt8): Int32;
+let unsafe foreign __koral_remove_dir_all(path: *UInt8): Int32;
+let unsafe foreign __koral_mkdtemp(template: *UInt8): *UInt8;
 
 // ============================================================================
 // Helpers
@@ -39,7 +39,7 @@ private let is_ascii_letter(c: UInt8): Bool = (c >= 65 and c <= 90) or (c >= 97 
 /// type (-1) the entry is classified with lstat instead of guessing, so real
 /// subdirectories are still walked on such filesystems.
 private let dir_entry_type(entry: *CDirEntry, path: Path): FileType = {
-    let t = __koral_dirent_type(entry);
+    let t = unsafe { __koral_dirent_type(entry) };
     if t == Int32(0) - 1 then {
         return when symlink_info(path) in {
             .Ok(info) then info.file_type(),
@@ -111,7 +111,7 @@ given DirIteratorStorage: Drop {
 
     drop(self): Void = {
         if self.handle != null then {
-            __koral_closedir(self.handle);
+            unsafe { __koral_closedir(self.handle) };
         };
     };
 };
@@ -129,12 +129,12 @@ given DirIterator: Iterator[DirEntry] {
 
     /// Return the next entry, skipping "." and "..", or None when the directory is exhausted.
     public next(self): Option[DirEntry] = {
-        let entry = __koral_readdir(self.storage.handle);
+        let entry = unsafe { __koral_readdir(self.storage.handle) };
         if entry == null then {
             return Option[DirEntry].None();
         };
 
-        let name = String.from_cstring_unchecked(__koral_dirent_name(entry));
+        let name = String.from_cstring_unchecked(unsafe { __koral_dirent_name(entry) });
         if name == "." or name == ".." then {
             return self.next();
         };
@@ -185,7 +185,7 @@ given WalkDirIterator: Iterator[DirEntry] {
 /// Create single directory (parent must exist)
 public let create_dir[T: ToPath](path: T): Result[Void] = {
     let s = path.to_path().to_string();
-    return if __koral_mkdir(s.bytes.data, 493) == 0 then .Ok({})
+    return if unsafe { __koral_mkdir(s.bytes.data, 493) } == 0 then .Ok({})
     else .Error(last_error_message());
 };
 
@@ -273,7 +273,7 @@ public let create_dir_all[T: ToPath](path: T): Result[Void] = {
 
         let current_path = current_text.to_path();
         if not path_exist(current_path) then {
-            if __koral_mkdir(current_text.bytes.data, 493) != 0 then {
+            if unsafe { __koral_mkdir(current_text.bytes.data, 493) } != 0 then {
                 // Another process/thread may have created the directory concurrently.
                 if not path_exist(current_path) then {
                     return Result[Void].Error(last_error_message());
@@ -300,7 +300,7 @@ private let dir_all_final_check(target: Path): Result[Void] = when file_info(tar
 /// Remove empty directory
 public let remove_dir[T: ToPath](path: T): Result[Void] = {
     let s = path.to_path().to_string();
-    return if __koral_rmdir(s.bytes.data) == 0 then .Ok({}) else .Error(last_error_message());
+    return if unsafe { __koral_rmdir(s.bytes.data) } == 0 then .Ok({}) else .Error(last_error_message());
 };
 
 /// Remove directory recursively (removes all contents first).
@@ -345,7 +345,7 @@ public let remove_dir_all[T: ToPath](path: T): Result[Void] = {
     // The tree walk lives in the runtime: handle-relative, no-follow, and
     // identity-checked per child, so races cannot move deletion out of the
     // tree. `-2` is the root changing shape after the checks above.
-    let rc = __koral_remove_dir_all(s.bytes.data);
+    let rc = unsafe { __koral_remove_dir_all(s.bytes.data) };
     return if rc == 0 then Result[Void].Ok({})
     else if rc == -2 then Result[Void].Error("remove_dir_all: not a directory")
     else Result[Void].Error(last_error_message());
@@ -356,7 +356,7 @@ public let remove_dir_all[T: ToPath](path: T): Result[Void] = {
 public let read_dir[T: ToPath](path: T): Result[DirIterator] = {
     let p = path.to_path();
     let s = p.to_string();
-    let dir = __koral_opendir(s.bytes.data);
+    let dir = unsafe { __koral_opendir(s.bytes.data) };
     if dir == null then {
         return Result[DirIterator].Error(last_error_message());
     };
@@ -394,7 +394,7 @@ public let create_temp_dir[T: ToPath](dir: T, prefix: String =): Result[Path] = 
     template.push_string("XXXXXX");
     // __koral_mkdtemp modifies the template in-place, replacing XXXXXX with random chars
     let mutable template_text = template.to_string();
-    let result = __koral_mkdtemp(template_text.bytes.data);
+    let result = unsafe { __koral_mkdtemp(template_text.bytes.data) };
     if result == null then {
         return .Error(last_error_message());
     };

@@ -18,7 +18,7 @@ public type mutable List[T: Any](
 /// `Drop` for `List[T]`: frees every element and the buffer when the last handle dies.
 given[T: Any] List[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.len then {
             deinit_memory(self.source + i);
         };
@@ -79,7 +79,7 @@ given[T: Any] List[T] {
             panic("List with_capacity negative capacity");
         };
         let cap = if capacity < 1 then 1 else capacity;
-        let source = alloc_memory[T](UInt(cap));
+        let source = unsafe { alloc_memory[T](UInt(cap)) };
         return List[T](source, 0, cap);
     };
 
@@ -100,7 +100,7 @@ given[T: Any] List[T] {
     /// The growth body behind `ensure_capacity`, kept out of line on purpose:
     /// inlined, it fattens `push` past the C inliner's threshold and every
     /// element then pays a call (measured 11ms vs 2ms on 5M pushes).
-    private grow_to(self, min_capacity: Int): Void = {
+    private grow_to(self, min_capacity: Int): Void = unsafe {
         // 从 0 起步时先要一块够用的容量，避免 1,2,3… 逐个翻倍。
         let mutable new_cap = if self.cap == 0 then 8
         else self.cap * 2;
@@ -134,13 +134,13 @@ given[T: Any] List[T] {
             source = self.source;
             cap = self.cap;
         };
-        init_memory(source + len, value);
+        unsafe { init_memory(source + len, value) };
         self.len = next;
     };
 
     /// Append the slice of `other` picked by `span`, defaulting to the whole list
     /// -- the same span shape as `Reader.read` / `Writer.write` in `std/io/traits.koral`.
-    public push_list(self, other: List[T], span: Range[Int] = ...): Void = {
+    public push_list(self, other: List[T], span: Range[Int] = ...): Void = unsafe {
         let spec = other.slice_spec(span);
         let start = spec.start();
         let end = spec.end();
@@ -168,13 +168,13 @@ given[T: Any] List[T] {
         };
         let len = self.len - 1;
         self.len = len;
-        let value = take_memory(self.source + len);
+        let value = unsafe { take_memory(self.source + len) };
         return Option[T].Some(value);
     };
 
     /// Insert the slice of `other` picked by `span` (default: the whole list) at
     /// `index`, shifting later elements right. O(n). Panics when `index > count`; `other` may be `self`.
-    public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void = {
+    public insert_list_at(self, index: Int, other: List[T], span: Range[Int] = ...): Void = unsafe {
         if index < 0 or index > self.len then {
             panic_list_at_index("insert_list_at", index, self.len);
         };
@@ -214,7 +214,7 @@ given[T: Any] List[T] {
 
     /// Insert `value` at `index` and shift later elements right. O(n).
     /// Panics when `index > count`; `index == count` appends.
-    public insert_at(self, index: Int, value: T): Void = {
+    public insert_at(self, index: Int, value: T): Void = unsafe {
         if index < 0 or index > self.len then {
             panic_list_at_index("insert_at", index, self.len);
         };
@@ -241,7 +241,7 @@ given[T: Any] List[T] {
     };
 
     /// Remove the element at `index` and return it, shifting later elements left. O(n). Panics when out of range.
-    public take_at(self, index: Int): T = {
+    public take_at(self, index: Int): T = unsafe {
         if index < 0 or index >= self.len then {
             panic_list_at_index("take_at", index, self.len);
         };
@@ -265,21 +265,21 @@ given[T: Any] List[T] {
         if index < 0 or index >= self.len then {
             return Option[T].None();
         };
-        return Option[T].Some(self.source[index]);
+        return Option[T].Some(unsafe { self.source[index] });
     };
 
     private __index_get(self, key: Int): T = {
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        return self.source[key];
+        return unsafe { self.source[key] };
     };
 
     private __index_set(self, key: Int, value: T): Void = {
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        self.source[key] = value;
+        unsafe { self.source[key] = value; };
     };
 
     /// 内置下标 `xs[i]` 的内部操作：返回元素槽位指针。读写直接作用于槽位
@@ -289,7 +289,7 @@ given[T: Any] List[T] {
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        return self.source + key;
+        return unsafe { self.source + key };
     };
 
     /// The first element without removing it, or `None` when the list is empty.
@@ -307,7 +307,7 @@ given[T: Any] List[T] {
     public is_empty(self): Bool = self.len == 0;
 
     /// Remove every element, keeping the allocated capacity.
-    public clear(self): Void = {
+    public clear(self): Void = unsafe {
         for i in 0..<self.len then {
             deinit_memory(self.source + i);
         };
@@ -321,7 +321,7 @@ given[T: Any] List[T] {
             return;
         };
         for i in 0..<self.len then {
-            self.source[i] = value;
+            unsafe { self.source[i] = value; };
         };
     };
 
@@ -329,13 +329,13 @@ given[T: Any] List[T] {
     public map[U: Any](self, fn: (T) -> U): List[U] = {
         let mutable result = List[U].with_capacity(self.len);
         for i in 0..<self.len then {
-            result.push(fn(self.source[i]));
+            result.push(fn(unsafe { self.source[i] }));
         };
         return result;
     };
 
     /// Reverse the element order in place. O(n).
-    public reverse(self): Void = {
+    public reverse(self): Void = unsafe {
         if self.len <= 1 then {
             return;
         };
@@ -358,7 +358,7 @@ given[T: Any] List[T] {
         };
         let mutable result = List[T].with_capacity(len);
         for i in 0..<len then {
-            result.push(self.source[start + i]);
+            result.push(unsafe { self.source[start + i] });
         };
         return result;
     };
@@ -500,7 +500,7 @@ given[T: Any] List[T] {
     };
 
     /// Retains only elements satisfying the predicate, preserving order. O(n).
-    public retain(self, predicate: (T) -> Bool): Void = {
+    public retain(self, predicate: (T) -> Bool): Void = unsafe {
         if self.len == 0 then {
             return;
         };
@@ -535,9 +535,9 @@ given[T: Any] List[T] {
             return;
         };
         // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = alloc_memory[T](UInt(len));
+        let buf = unsafe { alloc_memory[T](UInt(len)) };
         self.merge_sort_by_key(key, buf, 0, len);
-        dealloc_memory(buf);
+        unsafe { dealloc_memory(buf) };
     };
 
     /// Binary search by the key `key` extracts; the list must already be sorted by that key.
@@ -547,7 +547,7 @@ given[T: Any] List[T] {
         let mutable hi = self.len;
         while lo < hi then {
             let mid = lo + (hi - lo) / 2;
-            let k = key(self.source[mid]);
+            let k = key(unsafe { self.source[mid] });
             if k == target then {
                 return Pair[Int, Bool](mid, true);
             } else if k < target then {
@@ -578,7 +578,7 @@ given[T: foreign] List[T] {
 given[T: Any] List[T]: Clone {
 
     /// Independent shallow copy: new list identity, elements copied one level.
-    public clone(self): Self = {
+    public clone(self): Self = unsafe {
         let mutable result = List[T].with_capacity(self.len);
         for i in 0..<self.len then {
             result.push(self.source[i]);
@@ -598,7 +598,7 @@ given[T: Any] List[T]: Default {
 given[T: Eq] List[T]: Eq {
 
     /// Whether `other` has the same length and pairwise-equal elements.
-    public equals(self, other: List[T]): Bool = {
+    public equals(self, other: List[T]): Bool = unsafe {
         if self.len != other.len then {
             return false;
         };
@@ -615,7 +615,7 @@ given[T: Eq] List[T]: Eq {
 given[T: Hash] List[T]: Hash {
 
     /// A hash of the element sequence: length and elements combined in order.
-    public hash(self): UInt = {
+    public hash(self): UInt = unsafe {
         let mutable h: UInt = self.len.hash();
         for i in 0..<self.len then {
             h = h.combine_hash(self.source[i].hash());
@@ -629,7 +629,7 @@ given[T: Ord] List[T]: Ord {
 
     /// Lexicographic three-way comparison (`-1`, `0`, or `1`); the shorter list
     /// is smaller when one is a prefix of the other.
-    public compare(self, other: List[T]): Int = {
+    public compare(self, other: List[T]): Int = unsafe {
         let self_len = self.len;
         let other_len = other.len;
         let limit = if self_len < other_len then self_len else other_len;
@@ -657,7 +657,7 @@ given[T: Ord] List[T]: Ord {
 given[T: Eq] List[T] {
 
     /// Whether any element equals `value`. O(n).
-    public contains(self, value: T): Bool = {
+    public contains(self, value: T): Bool = unsafe {
         for i in 0..<self.len then {
             if self.source[i] == value then {
                 return true;
@@ -668,7 +668,7 @@ given[T: Eq] List[T] {
 
     /// Removes consecutive duplicate elements. O(n).
     /// For global dedup, sort first then call dedup.
-    public dedup(self): Void = {
+    public dedup(self): Void = unsafe {
         if self.len <= 1 then {
             return;
         };
@@ -700,7 +700,7 @@ public let make_bytes(count: Int): List[UInt8] = {
     };
     let data = bytes.source;
     for i in 0..<count then {
-        init_memory(data + i, UInt8(0));
+        unsafe { init_memory(data + i, UInt8(0)) };
     };
     bytes.len = count;
     return bytes;
@@ -722,7 +722,7 @@ protected let push_byte_slice(target: List[UInt8], ptr: *UInt8, count: Int): Voi
         return;
     };
     target.reserve(count);
-    copy_memory(target.source + target.len, ptr, UInt(count));
+    unsafe { copy_memory(target.source + target.len, ptr, UInt(count)) };
     target.len = target.len + count;
 };
 
@@ -737,7 +737,7 @@ given[T: Any] ListIterator[T]: Iterator[T] {
         if self.index >= self.source.len then {
             return Option[T].None();
         };
-        let value = self.source.source[self.index];
+        let value = unsafe { self.source.source[self.index] };
         self.index = self.index + 1;
         return Option[T].Some(value);
     };
@@ -763,7 +763,7 @@ given[T: Any] List[T] {
     // the run is RC-neutral except for the key reads. The cursor is a raw
     // pointer walk: pointer arithmetic is unchecked, so the hot loop pays no
     // per-step overflow-guard calls.
-    private insertion_sort_by_key[K: Ord](self, key: (T) -> K, start: Int, end: Int): Void = {
+    private insertion_sort_by_key[K: Ord](self, key: (T) -> K, start: Int, end: Int): Void = unsafe {
         if end <= start then {
             return;
         };
@@ -801,7 +801,7 @@ given[T: Any] List[T] {
         // Already in order: the left run's maximum key is <= the right run's
         // minimum key, so the merge would copy every element onto itself.
         let source = self.source;
-        if key(source[mid - 1]) <= key(source[mid]) then {
+        if unsafe { key(source[mid - 1]) <= key(source[mid]) } then {
             return;
         };
         self.merge_by_key(key, buf, start, mid, end);
@@ -826,7 +826,7 @@ given[T: Any] List[T] {
         start: Int,
         mid: Int,
         end: Int,
-    ): Void = {
+    ): Void = unsafe {
         let source = self.source;
         let left_end = buf + (mid - start);
         move_memory(buf, source + start, UInt(mid - start));
@@ -869,7 +869,7 @@ given[T: Ord] List[T] {
         let mutable hi = self.len;
         while lo < hi then {
             let mid = lo + (hi - lo) / 2;
-            let v = self.source[mid];
+            let v = unsafe { self.source[mid] };
             if v == target then {
                 return Pair[Int, Bool](mid, true);
             } else if v < target then {
@@ -894,9 +894,9 @@ given[T: Ord] List[T] {
             return;
         };
         // One scratch buffer for the whole sort, reused by every merge level.
-        let buf = alloc_memory[T](UInt(len));
+        let buf = unsafe { alloc_memory[T](UInt(len)) };
         self.merge_sort_comparable(buf, 0, len);
-        dealloc_memory(buf);
+        unsafe { dealloc_memory(buf) };
     };
 
     // Straight insertion sort over [start, end) for short runs (stable):
@@ -906,7 +906,7 @@ given[T: Ord] List[T] {
     // RC-neutral except for the element reads. The cursor is a raw pointer
     // walk: pointer arithmetic is unchecked, so the hot loop pays no per-step
     // overflow-guard calls.
-    private insertion_sort_comparable(self, start: Int, end: Int): Void = {
+    private insertion_sort_comparable(self, start: Int, end: Int): Void = unsafe {
         if end <= start then {
             return;
         };
@@ -952,7 +952,7 @@ given[T: Ord] List[T] {
 
     /// Exchange two slots; RC-neutral (two takes, two inits). A self-swap is
     /// a no-op -- taking one slot twice would read its own vacancy.
-    private swap_at(self, a: Int, b: Int): Void = {
+    private swap_at(self, a: Int, b: Int): Void = unsafe {
         if a == b then {
             return;
         };
@@ -1038,7 +1038,7 @@ given[T: Ord] List[T] {
     /// Insert-sort the block, giving up once it is clearly not nearly
     /// sorted -- pdqsort's fast path. `true` = the block comes out sorted;
     /// `false` = it needs a real partition (the prefix is still valid).
-    private partial_insertion_sort(self, start: Int, end: Int): Bool = {
+    private partial_insertion_sort(self, start: Int, end: Int): Bool = unsafe {
         let source = self.source;
         let startp = source + start;
         let mutable moves = 0;
@@ -1069,7 +1069,7 @@ given[T: Ord] List[T] {
     /// pivot, [out, e) > it. Hoare with skip runs -- a stretch already in
     /// partition order advances without swapping, so the predictor sees
     /// streaks and only inversions pay a swap.
-    private partition_le(self, s: Int, e: Int, pivot_val: T): Int = {
+    private partition_le(self, s: Int, e: Int, pivot_val: T): Int = unsafe {
         let source = self.source;
         let mutable lo = s;
         let mutable hi = e - 1;
@@ -1093,7 +1093,7 @@ given[T: Ord] List[T] {
     };
 
     /// The median of three slot values, moving nothing.
-    private median3_val(self, a: Int, b: Int, c: Int): T = {
+    private median3_val(self, a: Int, b: Int, c: Int): T = unsafe {
         let source = self.source;
         let va = (source + a)[0];
         let vb = (source + b)[0];
@@ -1182,7 +1182,7 @@ given[T: Ord] List[T] {
     };
 
     /// Sift slot `start + root` down through the first `count` slots.
-    private sift_down_comparable(self, start: Int, root: Int, count: Int): Void = {
+    private sift_down_comparable(self, start: Int, root: Int, count: Int): Void = unsafe {
         let source = self.source;
         let mutable r = root;
         while true then {
@@ -1221,7 +1221,7 @@ given[T: Ord] List[T] {
         // Already in order: the left run's maximum is <= the right run's
         // minimum, so the merge would copy every element onto itself.
         let source = self.source;
-        if source[mid - 1] <= source[mid] then {
+        if unsafe { source[mid - 1] <= source[mid] } then {
             return;
         };
         self.merge_comparable(buf, start, mid, end);
@@ -1239,7 +1239,7 @@ given[T: Ord] List[T] {
     // pair; a right remainder is already in place. The cursors are raw
     // pointer walks: pointer arithmetic is unchecked, so the hot loop pays no
     // per-step overflow-guard calls.
-    private merge_comparable(self, buf: *mutable T, start: Int, mid: Int, end: Int): Void = {
+    private merge_comparable(self, buf: *mutable T, start: Int, mid: Int, end: Int): Void = unsafe {
         let source = self.source;
         let left_end = buf + (mid - start);
         move_memory(buf, source + start, UInt(mid - start));
@@ -1294,7 +1294,7 @@ public type unsafe sendable mutable FrozenList[T: Any](protected data: *mutable 
 /// last handle dies.
 given[T: Any] FrozenList[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.len then {
             deinit_memory(self.data + i);
         };
@@ -1319,7 +1319,7 @@ given[T: Any] FrozenList[T] {
         if index < 0 or index >= self.len then {
             return Option[T].None();
         };
-        return Option[T].Some(self.data[index]);
+        return Option[T].Some(unsafe { self.data[index] });
     };
 
     /// Copy the snapshot back out as a fresh mutable `List[T]`.
@@ -1338,7 +1338,7 @@ given[T: Any] FrozenList[T] {
         if key < 0 or key >= self.len then {
             panic_list_index(key, self.len);
         };
-        return self.data[key];
+        return unsafe { self.data[key] };
     };
 };
 
@@ -1346,7 +1346,7 @@ given[T: Any] FrozenList[T] {
 given[T: Eq] FrozenList[T] {
 
     /// Whether any element equals `value`. O(n).
-    public contains(self, value: T): Bool = {
+    public contains(self, value: T): Bool = unsafe {
         for i in 0..<self.len then {
             if self.data[i] == value then {
                 return true;
@@ -1362,7 +1362,7 @@ given[T: Any] FrozenListIterator[T]: Iterator[T] {
     /// Yield the next element, or `None` after the last one.
     public next(self): Option[T] = {
         if self.index < self.source.len then {
-            let value = self.source.data[self.index];
+            let value = unsafe { self.source.data[self.index] };
             self.index = self.index + 1;
             return Option[T].Some(value);
         };
@@ -1383,7 +1383,7 @@ given[T: Any] List[T] {
     /// Copy the list into an immutable `FrozenList[T]` snapshot that can cross
     /// threads. The receiver stays usable; the snapshot owns its own buffer of
     /// shared element handles.
-    public to_frozen_list(self): FrozenList[T] = {
+    public to_frozen_list(self): FrozenList[T] = unsafe {
         let len = self.len;
         let data = alloc_memory[T](UInt(len));
         for i in 0..<len then {
@@ -1400,7 +1400,7 @@ given[T: Any] List[T] {
     public into_frozen_list(self): FrozenList[T] = {
         let data = self.source;
         let len = self.len;
-        self.source = alloc_memory[T](UInt(1));
+        self.source = unsafe { alloc_memory[T](UInt(1)) };
         self.len = 0;
         self.cap = 1;
         return FrozenList[T](data, len);

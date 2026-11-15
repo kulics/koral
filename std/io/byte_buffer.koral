@@ -17,7 +17,7 @@ public type mutable ByteBuffer(
 /// Implements `Drop`, freeing the buffer's heap allocation.
 given ByteBuffer: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         dealloc_memory(self.data);
     };
 };
@@ -27,7 +27,7 @@ given ByteBuffer {
 
     /// Create an empty byte buffer.
     public new(): ByteBuffer = {
-        let data = alloc_memory[UInt8](1);
+        let data = unsafe { alloc_memory[UInt8](1) };
         return ByteBuffer(data, 0, 1, 0);
     };
 
@@ -38,14 +38,14 @@ given ByteBuffer {
             panic("ByteBuffer with_capacity negative capacity");
         };
         let actual_cap = if cap < 1 then 1 else cap;
-        let data = alloc_memory[UInt8](UInt(actual_cap));
+        let data = unsafe { alloc_memory[UInt8](UInt(actual_cap)) };
         return ByteBuffer(data, 0, actual_cap, 0);
     };
 
     /// Create a byte buffer holding the UTF-8 bytes of `s`.
     /// Copies the string's bytes straight into the backing store -- one copy,
     /// no intermediate `List[UInt8]`.
-    public from_string(s: String): ByteBuffer = {
+    public from_string(s: String): ByteBuffer = unsafe {
         let len = s.count();
         let cap = if len < 1 then 1 else len;
         let data = alloc_memory[UInt8](UInt(cap));
@@ -56,7 +56,7 @@ given ByteBuffer {
     };
 
     /// Create a byte buffer holding a copy of `bytes`.
-    public from_bytes(bytes: List[UInt8]): ByteBuffer = {
+    public from_bytes(bytes: List[UInt8]): ByteBuffer = unsafe {
         let len = bytes.count();
         let cap = if len < 1 then 1 else len;
         let data = alloc_memory[UInt8](UInt(cap));
@@ -66,7 +66,7 @@ given ByteBuffer {
         return ByteBuffer(data, len, cap, 0);
     };
 
-    private ensure_capacity(self, min_capacity: Int): Void = {
+    private ensure_capacity(self, min_capacity: Int): Void = unsafe {
         if min_capacity <= self.cap then {
             return;
         };
@@ -103,9 +103,11 @@ given ByteBuffer: Reader {
 
         let want = span.len();
         let n = if available < want then available else want;
-        let dst_ptr = into.borrow_mut_ptr() + start;
-        let src_ptr = self.data + self.cursor;
-        copy_memory(dst_ptr, src_ptr, UInt(n));
+        unsafe {
+            let dst_ptr = into.borrow_mut_ptr() + start;
+            let src_ptr = self.data + self.cursor;
+            copy_memory(dst_ptr, src_ptr, UInt(n));
+        };
         self.cursor += n;
         return Result[Int].Ok(n);
     };
@@ -128,7 +130,7 @@ given ByteBuffer: Writer {
         let write_end = write_start + n;
         let new_len = if write_end > self.len then write_end else self.len;
         self.ensure_capacity(new_len);
-        copy_memory(self.data + write_start, from.borrow_ptr() + start, UInt(n));
+        unsafe { copy_memory(self.data + write_start, from.borrow_ptr() + start, UInt(n)) };
         self.len = new_len;
         self.cursor = write_end;
         return Result[Int].Ok(n);

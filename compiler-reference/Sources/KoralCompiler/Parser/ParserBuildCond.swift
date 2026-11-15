@@ -111,10 +111,10 @@ func collectBuildCondPlacements(
 func buildCondPlacementName(_ node: GlobalNode) -> (String, SourceSpan)? {
   switch node {
   case .globalVariableDeclaration(let name, _, _, _, _, _, let nameSpan),
-    .globalFunctionDeclaration(let name, _, _, _, _, _, _, let nameSpan),
-    .intrinsicFunctionDeclaration(let name, _, _, _, _, _, let nameSpan),
-    .foreignFunctionDeclaration(let name, _, _, _, _, _, _, let nameSpan),
-    .foreignLetDeclaration(let name, _, _, _, _, _, _, let nameSpan),
+    .globalFunctionDeclaration(let name, _, _, _, _, _, _, _, let nameSpan),
+    .intrinsicFunctionDeclaration(let name, _, _, _, _, _, _, let nameSpan),
+    .foreignFunctionDeclaration(let name, _, _, _, _, _, _, _, let nameSpan),
+    .foreignLetDeclaration(let name, _, _, _, _, _, _, _, let nameSpan),
     .globalStructDeclaration(let name, _, _, _, _, _, _, let nameSpan),
     .globalEnumDeclaration(let name, _, _, _, _, _, let nameSpan),
     .intrinsicTypeDeclaration(let name, _, _, _, let nameSpan),

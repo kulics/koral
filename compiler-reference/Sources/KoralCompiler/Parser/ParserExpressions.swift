@@ -1394,6 +1394,10 @@ extension Parser {
       return .nullLiteral(span: startSpan)
     case .leftBrace:
       return try blockExpression()
+    case .unsafeKeyword:
+      // `unsafe { … }` is a primary (like koralc's dispatch): postfix
+      // suffixes continue on it (`unsafe { p }.x`).
+      return try parseUnsafeExpression()
     case .leftParen:
       // Could be: parenthesized expression (expr) or lambda expression (params) -> body
       return try parseParenOrLambda()
@@ -1818,6 +1822,19 @@ extension Parser {
     }
   }
   
+  /// `unsafe { … }` (docs/design/unsafe-design.md §A): the block's lexical
+  /// scope is the unsafe context. Only the block form exists; anything else
+  /// after `unsafe` is an error.
+  private func parseUnsafeExpression() throws -> ExpressionNode {
+    let startSpan = currentSpan
+    try match(.unsafeKeyword)
+    guard currentToken === .leftBrace else {
+      throw ParserError.rejectedConstruct(span: currentSpan, message: "Expected '{' after 'unsafe'")
+    }
+    let block = try blockExpression()
+    return .unsafeExpression(block: block, span: SourceSpan(start: startSpan.start, end: block.span.end))
+  }
+
   /// Parse block expression
   private func blockExpression() throws -> ExpressionNode {
     let startSpan = currentSpan

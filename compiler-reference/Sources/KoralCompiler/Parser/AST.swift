@@ -194,19 +194,24 @@ public struct TraitMethodSignature {
   /// The trait DECLARATION's access level. A trait requirement has no
   /// visibility of its own -- it is visible exactly where its trait is.
   public let access: AccessModifier
-  
+  /// `unsafe` marker (unsafe-design.md §B): calling the requirement needs an
+  /// unsafe context; the implementation method must carry the same marker.
+  public let isUnsafe: Bool
+
   public init(
     name: String,
     typeParameters: [TypeParameterDecl] = [],
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
-    access: AccessModifier
+    access: AccessModifier,
+    isUnsafe: Bool = false
   ) {
     self.name = name
     self.typeParameters = typeParameters
     self.parameters = parameters
     self.returnType = returnType
     self.access = access
+    self.isUnsafe = isUnsafe
   }
 }
 
@@ -228,6 +233,7 @@ public indirect enum GlobalNode {
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
+    isUnsafe: Bool,
     span: SourceSpan,
     nameSpan: SourceSpan
   )
@@ -237,6 +243,7 @@ public indirect enum GlobalNode {
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
     access: AccessModifier,
+    isUnsafe: Bool,
     span: SourceSpan,
     nameSpan: SourceSpan
   )
@@ -247,6 +254,7 @@ public indirect enum GlobalNode {
     body: ExpressionNode?,
     cname: String?,
     access: AccessModifier,
+    isUnsafe: Bool,
     span: SourceSpan,
     nameSpan: SourceSpan
   )
@@ -293,6 +301,7 @@ public indirect enum GlobalNode {
     initializer: ExpressionNode?,
     cname: String?,
     access: AccessModifier,
+    isUnsafe: Bool,
     span: SourceSpan,
     nameSpan: SourceSpan
   )
@@ -338,11 +347,11 @@ extension GlobalNode {
       return decl.span
     case .globalVariableDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .globalFunctionDeclaration(_, _, _, _, _, _, let span, _):
+    case .globalFunctionDeclaration(_, _, _, _, _, _, _, let span, _):
       return span
-    case .intrinsicFunctionDeclaration(_, _, _, _, _, let span, _):
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, _, let span, _):
       return span
-    case .foreignFunctionDeclaration(_, _, _, _, _, _, let span, _):
+    case .foreignFunctionDeclaration(_, _, _, _, _, _, _, let span, _):
       return span
     case .globalStructDeclaration(_, _, _, _, _, _, let span, _):
       return span
@@ -352,7 +361,7 @@ extension GlobalNode {
       return span
     case .foreignTypeDeclaration(_, _, _, _, _, let span, _):
       return span
-    case .foreignLetDeclaration(_, _, _, _, _, _, let span, _):
+    case .foreignLetDeclaration(_, _, _, _, _, _, _, let span, _):
       return span
     case .traitDeclaration(_, _, _, _, _, _, let span, _):
       return span
@@ -376,11 +385,11 @@ extension GlobalNode {
       return decl.span
     case .globalVariableDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .globalFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
+    case .globalFunctionDeclaration(_, _, _, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .intrinsicFunctionDeclaration(_, _, _, _, _, _, let nameSpan):
+    case .intrinsicFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignFunctionDeclaration(_, _, _, _, _, _, _, let nameSpan):
+    case .foreignFunctionDeclaration(_, _, _, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .globalStructDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
@@ -390,7 +399,7 @@ extension GlobalNode {
       return nameSpan
     case .foreignTypeDeclaration(_, _, _, _, _, _, let nameSpan):
       return nameSpan
-    case .foreignLetDeclaration(_, _, _, _, _, _, _, let nameSpan):
+    case .foreignLetDeclaration(_, _, _, _, _, _, _, _, let nameSpan):
       return nameSpan
     case .traitDeclaration(_, _, _, _, _, _, _, let nameSpan):
       return nameSpan
@@ -412,19 +421,23 @@ public struct IntrinsicMethodDeclaration {
   public let parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)]
   public let returnType: TypeNode
   public let access: AccessModifier
+  /// See `TraitMethodSignature.isUnsafe`.
+  public let isUnsafe: Bool
 
   public init(
     name: String,
     typeParameters: [TypeParameterDecl],
     parameters: [(name: String, mutable: Bool, type: TypeNode, named: Bool, defaultValue: ExpressionNode?)],
     returnType: TypeNode,
-    access: AccessModifier
+    access: AccessModifier,
+    isUnsafe: Bool = false
   ) {
     self.name = name
     self.typeParameters = typeParameters
     self.parameters = parameters
     self.returnType = returnType
     self.access = access
+    self.isUnsafe = isUnsafe
   }
 }
 public struct MethodDeclaration {
@@ -434,6 +447,8 @@ public struct MethodDeclaration {
   public let returnType: TypeNode
   public let body: ExpressionNode
   public let access: AccessModifier
+  /// See `TraitMethodSignature.isUnsafe`.
+  public let isUnsafe: Bool
   public let defId: DefId
 
   public init(
@@ -443,6 +458,7 @@ public struct MethodDeclaration {
     returnType: TypeNode,
     body: ExpressionNode,
     access: AccessModifier,
+    isUnsafe: Bool = false,
     defId: DefId = .invalid
   ) {
     self.name = name
@@ -451,6 +467,7 @@ public struct MethodDeclaration {
     self.returnType = returnType
     self.body = body
     self.access = access
+    self.isUnsafe = isUnsafe
     self.defId = defId
   }
 }
@@ -668,6 +685,11 @@ public indirect enum ExpressionNode {
   case upgradeExpr(ExpressionNode, span: SourceSpan)
   case identifier(String, span: SourceSpan)
   case blockExpression(statements: [StatementNode], tailExpression: ExpressionNode?, span: SourceSpan)
+  /// `unsafe { … }` (unsafe-design.md §A): the block's lexical scope is the
+  /// unsafe context. Exists only in the untyped AST -- it disappears after type
+  /// checking (it just wraps a block and returns the typed block), so MIR /
+  /// codegen never see it and the ABI is unchanged.
+  case unsafeExpression(block: ExpressionNode, span: SourceSpan)
   case ifExpression(
     condition: ExpressionNode, thenBranch: ExpressionNode, elseBranch: ExpressionNode?, span: SourceSpan)
   case call(callee: ExpressionNode, arguments: [CallArg], span: SourceSpan)
@@ -1065,6 +1087,8 @@ extension ExpressionNode {
     case .unsafeDerefExpression(_, let span):
       return span
     case .blockExpression(_, _, let span):
+      return span
+    case .unsafeExpression(_, let span):
       return span
     case .ifExpression(_, _, _, let span):
       return span

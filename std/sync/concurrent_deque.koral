@@ -25,7 +25,7 @@ public type unsafe sendable mutable ConcurrentDeque[T: sendable](
 /// elements die here -- outside every lock.
 given[T: sendable] ConcurrentDeque[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.len then {
             let index = (self.head + i) % self.cap;
             deinit_memory(self.source + index);
@@ -40,7 +40,7 @@ given[T: sendable] ConcurrentDeque[T] {
     /// Create an empty concurrent deque.
     public new(): ConcurrentDeque[T] = {
         let cap = 10;
-        let source = alloc_memory[T](UInt(cap));
+        let source = unsafe { alloc_memory[T](UInt(cap)) };
         return ConcurrentDeque[T](SharedMutex.new(), source, 0, cap, 0);
     };
 
@@ -56,13 +56,15 @@ given[T: sendable] ConcurrentDeque[T] {
         let old_len = self.len;
         let old_cap = self.cap;
         let old_head = self.head;
-        let new_source = alloc_memory[T](UInt(new_cap));
+        let new_source = unsafe { alloc_memory[T](UInt(new_cap)) };
         for i in 0..<old_len then {
             let old_index = (old_head + i) % old_cap;
-            let moved = take_memory(old_source + old_index);
-            init_memory(new_source + i, moved);
+            unsafe {
+                let moved = take_memory(old_source + old_index);
+                init_memory(new_source + i, moved);
+            };
         };
-        dealloc_memory(old_source);
+        unsafe { dealloc_memory(old_source) };
         self.source = new_source;
         self.cap = new_cap;
         self.head = 0;
@@ -96,7 +98,7 @@ given[T: sendable] ConcurrentDeque[T] {
             self.grow_to(next);
         };
         let index = self.physical_index(len);
-        init_memory(self.source + index, value);
+        unsafe { init_memory(self.source + index, value) };
         self.len = next;
         self.rw_lock.unlock();
     };
@@ -110,7 +112,7 @@ given[T: sendable] ConcurrentDeque[T] {
             self.grow_to(next);
         };
         self.head = (self.head + self.cap - 1) % self.cap;
-        init_memory(self.source + self.head, value);
+        unsafe { init_memory(self.source + self.head, value) };
         self.len = next;
         self.rw_lock.unlock();
     };
@@ -123,7 +125,7 @@ given[T: sendable] ConcurrentDeque[T] {
             Option[T].None()
         } else {
             let index = self.physical_index(0);
-            let element = take_memory(self.source + index);
+            let element = unsafe { take_memory(self.source + index) };
             self.head = (self.head + 1) % self.cap;
             self.len = self.len - 1;
             Option[T].Some(element)
@@ -140,7 +142,7 @@ given[T: sendable] ConcurrentDeque[T] {
             Option[T].None()
         } else {
             let index = self.physical_index(self.len - 1);
-            let element = take_memory(self.source + index);
+            let element = unsafe { take_memory(self.source + index) };
             self.len = self.len - 1;
             Option[T].Some(element)
         };
@@ -154,7 +156,7 @@ given[T: sendable] ConcurrentDeque[T] {
         let out = if self.len == 0 then {
             Option[T].None()
         } else {
-            Option[T].Some(self.source[self.physical_index(0)])
+            Option[T].Some(unsafe { self.source[self.physical_index(0)] })
         };
         self.rw_lock.unlock_shared();
         return out;
@@ -166,7 +168,7 @@ given[T: sendable] ConcurrentDeque[T] {
         let out = if self.len == 0 then {
             Option[T].None()
         } else {
-            Option[T].Some(self.source[self.physical_index(self.len - 1)])
+            Option[T].Some(unsafe { self.source[self.physical_index(self.len - 1)] })
         };
         self.rw_lock.unlock_shared();
         return out;
@@ -181,7 +183,7 @@ given[T: sendable] ConcurrentDeque[T] {
         let old_cap = self.cap;
         let old_head = self.head;
         let cap = 10;
-        let source = alloc_memory[T](UInt(cap));
+        let source = unsafe { alloc_memory[T](UInt(cap)) };
         self.source = source;
         self.len = 0;
         self.cap = cap;
@@ -189,8 +191,8 @@ given[T: sendable] ConcurrentDeque[T] {
         self.rw_lock.unlock();
         for i in 0..<old_len then {
             let index = (old_head + i) % old_cap;
-            deinit_memory(old_source + index);
+            unsafe { deinit_memory(old_source + index) };
         };
-        dealloc_memory(old_source);
+        unsafe { dealloc_memory(old_source) };
     };
 };

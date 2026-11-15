@@ -20,11 +20,11 @@ type foreign KoralProcess(
 );
 
 /// Wait for child process to exit (simplified, used in drop to prevent zombies).
-let foreign __koral_waitpid(pid: UInt32): Int32;
+let unsafe foreign __koral_waitpid(pid: UInt32): Int32;
 
 /// Wait for child process with full exit information.
 /// Returns 0 on success, non-zero on failure.
-let foreign __koral_waitpid_full(
+let unsafe foreign __koral_waitpid_full(
     pid: UInt32,
     exit_code: *Int32,
     signal_num: *Int32,
@@ -33,7 +33,7 @@ let foreign __koral_waitpid_full(
 
 /// Non-blocking check if child process has exited.
 /// Returns >0 if exited, 0 if still running, <0 on error.
-let foreign __koral_try_waitpid(
+let unsafe foreign __koral_try_waitpid(
     pid: UInt32,
     exit_code: *Int32,
     signal_num: *Int32,
@@ -42,7 +42,7 @@ let foreign __koral_try_waitpid(
 
 /// Concurrently read all data from stdout and stderr pipes (uses poll/select internally).
 /// Allocates memory for output buffers (caller must free with dealloc_memory).
-let foreign __koral_read_all_pipes(
+let unsafe foreign __koral_read_all_pipes(
     stdout_fd: Int32,
     stderr_fd: Int32,
     out_stdout: *mutable *mutable UInt8,
@@ -103,7 +103,7 @@ let make_process_storage(
 given ProcessStorage: Drop {
 
     /// On drop: close any un-taken pipe fds, then auto-wait to prevent zombie processes.
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         self.mutex.lock();
         if self.stdin_fd >= 0 then {
             __koral_pipe_close(self.stdin_fd);
@@ -174,12 +174,14 @@ given Process {
                     let mutable exit_code: Int32 = 0;
                     let mutable signal_num: Int32 = 0;
                     let mutable maxrss: UInt64 = 0;
-                    let result = __koral_waitpid_full(
-                        self.storage.pid,
-                        &exit_code,
-                        &signal_num,
-                        &maxrss,
-                    );
+                    let result = unsafe {
+                        __koral_waitpid_full(
+                            self.storage.pid,
+                            &exit_code,
+                            &signal_num,
+                            &maxrss,
+                        )
+                    };
                     self.storage.mutex.lock();
                     self.storage.waiting = false;
                     if result != 0 then {
@@ -228,7 +230,7 @@ given Process {
 
         // Close un-taken stdin to send EOF to child
         if stdin_fd >= 0 then {
-            __koral_pipe_close(stdin_fd);
+            unsafe { __koral_pipe_close(stdin_fd) };
         };
 
         // Read both pipes concurrently via C runtime (uses poll/select internally)
@@ -239,29 +241,31 @@ given Process {
 
         defer {
             if stdout_fd >= 0 then {
-                __koral_pipe_close(stdout_fd);
+                unsafe { __koral_pipe_close(stdout_fd) };
             };
             if stderr_fd >= 0 then {
-                __koral_pipe_close(stderr_fd);
+                unsafe { __koral_pipe_close(stderr_fd) };
             };
         };
         defer {
             if out_stdout != null then {
-                dealloc_memory(out_stdout);
+                unsafe { dealloc_memory(out_stdout) };
             };
             if out_stderr != null then {
-                dealloc_memory(out_stderr);
+                unsafe { dealloc_memory(out_stderr) };
             };
         };
 
-        let read_result = __koral_read_all_pipes(
-            stdout_fd,
-            stderr_fd,
-            &mutable out_stdout,
-            (&mutable out_stdout_len) as *mutable UInt64,
-            &mutable out_stderr,
-            (&mutable out_stderr_len) as *mutable UInt64,
-        );
+        let read_result = unsafe {
+            __koral_read_all_pipes(
+                stdout_fd,
+                stderr_fd,
+                &mutable out_stdout,
+                (&mutable out_stdout_len) as *mutable UInt64,
+                &mutable out_stderr,
+                (&mutable out_stderr_len) as *mutable UInt64,
+            )
+        };
 
         if read_result != 0 then {
             return Result[CommandOutput].Error(last_error_message());
@@ -309,12 +313,14 @@ given Process {
         let mutable exit_code: Int32 = 0;
         let mutable signal_num: Int32 = 0;
         let mutable maxrss: UInt64 = 0;
-        let result = __koral_try_waitpid(
-            self.storage.pid,
-            &exit_code,
-            &signal_num,
-            &maxrss,
-        );
+        let result = unsafe {
+            __koral_try_waitpid(
+                self.storage.pid,
+                &exit_code,
+                &signal_num,
+                &maxrss,
+            )
+        };
         if result < 0 then {
             self.storage.mutex.unlock();
             return Result[Option[ExitStatus]].Error(last_error_message());

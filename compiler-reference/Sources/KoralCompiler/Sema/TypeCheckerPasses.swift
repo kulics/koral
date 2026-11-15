@@ -984,7 +984,7 @@ extension TypeChecker {
   /// Extracts symbol information from a global declaration.
   private func extractSymbolInfo(from decl: GlobalNode, sourceInfo: GlobalNodeSourceInfo) -> (name: String, symbol: Symbol, type: Type?)? {
     switch decl {
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, _, _):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnType, _, _, _, _, _):
       // Skip generic functions for now
       if !typeParameters.isEmpty { return nil }
       
@@ -1014,7 +1014,7 @@ extension TypeChecker {
       }
       return nil
 
-    case .foreignFunctionDeclaration(let name, _, _, _, _, _, _, _):
+    case .foreignFunctionDeclaration(let name, _, _, _, _, _, _, _, _):
       if let defId = defIdMap.lookup(
           modulePath: sourceInfo.modulePath, name: name, sourceFile: sourceInfo.sourceFile),
          let funcType = defIdMap.getSymbolType(defId) {
@@ -1137,7 +1137,7 @@ extension TypeChecker {
         return (name, symbol, nil)
       }
       return nil
-    case .foreignLetDeclaration(let name, _, _, _, _, _, _, _):
+    case .foreignLetDeclaration(let name, _, _, _, _, _, _, _, _):
       // Same module-keyed resolution as the variable case above.
       let moduleScoped = defIdMap.lookup(
           modulePath: sourceInfo.modulePath, name: name, sourceFile: nil)
@@ -1326,7 +1326,11 @@ extension TypeChecker {
       // (rustc's `trait_item_def_id`). Without this, the trait method DefId
       // is never allocated and the link is always nil.
       for traitMethod in methods {
-        _ = methodSymbolDefId(ownerKey: name, name: traitMethod.name, access: traitMethod.access)
+        let traitMethodId = methodSymbolDefId(ownerKey: name, name: traitMethod.name, access: traitMethod.access)
+        // `unsafe` 标记登记（docs/design/unsafe-design.md §B）：需求的调用契约。
+        if traitMethod.isUnsafe {
+          context.recordUnsafeDef(traitMethodId)
+        }
       }
       traits[name] = traitInfo
       qualifiedTraits[qualifiedTraitKey(name, modulePath: currentModulePath)] = traitInfo
@@ -1485,7 +1489,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, let span, _):
+    case .globalFunctionDeclaration(_, let typeParameters, _, _, _, _, _, let span, _):
       self.currentSpan = span
       // For generic functions, we just note that they exist
       // The full template will be registered in pass 2
@@ -1606,7 +1610,7 @@ extension TypeChecker {
         stdLibTypes.insert(name)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, let span, _):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, _, _, _, _, let span, _):
       self.currentSpan = span
       
       // Module rule check: intrinsic declarations are only allowed in standard library
@@ -2548,6 +2552,9 @@ extension TypeChecker {
             }
             // An intrinsic method has no body; the placeholder never runs
             // because the call lowers to a scalar op before codegen.
+            if method.isUnsafe {
+              context.recordUnsafeDef(methodSymbol.defId)
+            }
             let tmplMethod = MethodDeclaration(
               name: method.name,
               typeParameters: method.typeParameters,
@@ -2555,6 +2562,7 @@ extension TypeChecker {
               returnType: method.returnType,
               body: .integerLiteral("0", span: .unknown),
               access: method.access,
+              isUnsafe: method.isUnsafe,
               defId: methodSymbol.defId
             )
             genericExtensionMethods[methodOwnerKey]!.append(GenericExtensionMethodTemplate(
@@ -2747,7 +2755,7 @@ extension TypeChecker {
       }
       // Generic enums are handled in pass 3
       
-    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, let span, _):
+    case .globalFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, _, let access, _, let span, _):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       // Register function signature so it can be called from methods defined earlier
@@ -2832,7 +2840,7 @@ extension TypeChecker {
       }
       // Generic functions are fully checked in pass 3
 
-    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, _, _, let access, let span, let nameSpan):
+    case .foreignFunctionDeclaration(let name, let parameters, let returnTypeNode, _, _, let access, _, let span, let nameSpan):
       self.currentSpan = span
       let isPrivate = (access == .private)
       if hasConflictingGlobalDefinition(name: name, access: access, sourceFile: currentSourceFile) {
@@ -2863,7 +2871,7 @@ extension TypeChecker {
         currentScope.defineFunctionWithModulePath(name, functionType, modulePath: currentModulePath, access: access)
       }
       
-    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, let span, _):
+    case .intrinsicFunctionDeclaration(let name, let typeParameters, let parameters, let returnTypeNode, let access, _, let span, _):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       // Register intrinsic function signature so it can be called from methods defined earlier
@@ -3444,7 +3452,7 @@ extension TypeChecker {
       }
       return .foreignType(identifier: foreignTypeSymbol())
 
-    case .foreignLetDeclaration(let name, let typeNode, let mutable, let initializer, _, let access, let span, let nameSpan):
+    case .foreignLetDeclaration(let name, let typeNode, let mutable, let initializer, _, let access, _, let span, let nameSpan):
       self.currentSpan = span
       let type = try resolveTypeNode(typeNode)
       try assertNotOpaqueValueType(type, span: span)
@@ -3497,7 +3505,7 @@ extension TypeChecker {
 
     case .globalFunctionDeclaration(
       let name, let typeParameters, let parameters, let returnTypeNode, let body, let access,
-      let span, let nameSpan):
+      let isUnsafe, let span, let nameSpan):
       self.currentSpan = span
       let genericTypeParameters = typeParameters
       let declaredDefId = declaredDefIdForCurrentGlobal(name: name, access: access)
@@ -3661,7 +3669,7 @@ extension TypeChecker {
       )
 
     case .foreignFunctionDeclaration(
-      let name, let parameters, let returnTypeNode, let bodyNode, _, let access, let span, let nameSpan):
+      let name, let parameters, let returnTypeNode, let bodyNode, _, let access, _, let span, let nameSpan):
       self.currentSpan = span
 
       let returnType = try resolveTypeNode(returnTypeNode)
@@ -3711,7 +3719,7 @@ extension TypeChecker {
       return .foreignFunction(identifier: symbol, parameters: params, body: typedBody)
 
     case .intrinsicFunctionDeclaration(
-      let name, let typeParameters, let parameters, let returnTypeNode, let access, let span, let nameSpan):
+      let name, let typeParameters, let parameters, let returnTypeNode, let access, let isUnsafe, let span, let nameSpan):
       self.currentSpan = span
       
       // Skip duplicate check for non-generic functions (already defined in Pass 2)
@@ -4091,6 +4099,9 @@ extension TypeChecker {
           // Use the SYMBOL's DefId (from `makeMethodSymbol`) as the template's
           // `method.defId` — that's the identity call sites resolve to. The AST
           // `info.method.defId` may be a different (parser-allocated) DefId.
+          if info.method.isUnsafe {
+            context.recordUnsafeDef(info.symbol.defId)
+          }
           let tmplMethod = MethodDeclaration(
             name: info.method.name,
             typeParameters: info.method.typeParameters,
@@ -4098,6 +4109,7 @@ extension TypeChecker {
             returnType: info.method.returnType,
             body: info.method.body,
             access: info.method.access,
+            isUnsafe: info.method.isUnsafe,
             defId: info.symbol.defId
           )
           if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {
@@ -4312,6 +4324,22 @@ extension TypeChecker {
         ), span: span)
       }
 
+      // unsafe 标记一致性（docs/design/unsafe-design.md §B/R3）：需求与实现必须
+      // 同标，双向。身份在 DefId 上判——需求记于 trait 方法登记，实现记于
+      // 方法登记；报点与「missing method」同锚（conformance 声明）。
+      for method in methods {
+        guard let requirement = ownRequirements[method.name] else {
+          continue
+        }
+        if requirement.isUnsafe && !method.isUnsafe {
+          try handleError(SemanticError(
+            .generic(UnsafeMessages.unsafeRequirement(method.name)), span: span))
+        } else if !requirement.isUnsafe && method.isUnsafe {
+          try handleError(SemanticError(
+            .generic(UnsafeMessages.safeRequirement(method.name)), span: span))
+        }
+      }
+
       struct ImplMethodInfo {
         let method: MethodDeclaration
         let symbol: Symbol
@@ -4505,6 +4533,9 @@ extension TypeChecker {
             return a
           }()
         )
+        if method.isUnsafe {
+          context.recordUnsafeDef(registeredVisibleDefId)
+        }
         let visibleMethod = MethodDeclaration(
           name: method.name,
           typeParameters: method.typeParameters,
@@ -4518,6 +4549,7 @@ extension TypeChecker {
             if case .internal = method.access { return requirement.access }
             return method.access
           }(),
+          isUnsafe: method.isUnsafe,
           defId: registeredVisibleDefId
         )
 
@@ -5106,6 +5138,9 @@ extension TypeChecker {
           }
           // An intrinsic method has no body; the placeholder never runs
           // because the call lowers to a scalar op before codegen.
+          if method.isUnsafe {
+            context.recordUnsafeDef(methodSymbol.defId)
+          }
           let tmplMethod = MethodDeclaration(
             name: method.name,
             typeParameters: method.typeParameters,
@@ -5113,6 +5148,7 @@ extension TypeChecker {
             returnType: method.returnType,
             body: .integerLiteral("0", span: .unknown),
             access: method.access,
+            isUnsafe: method.isUnsafe,
             defId: methodSymbol.defId
           )
           if let existingIndex = genericExtensionMethods[methodOwnerKey]!.firstIndex(where: {

@@ -26,7 +26,7 @@ public type mutable Set[T: Hash](
 /// `Drop` for `Set[T]`: releases the bucket array.
 given[T: Hash] Set[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.capacity then {
             if (self.buckets + i).tag == UInt(1) then {
                 deinit_memory(self.buckets + i);
@@ -52,7 +52,7 @@ given[T: Hash] Set[T] {
 
     /// Create an empty set with its buckets allocated up front, sized for about
     /// `capacity` elements.
-    public with_capacity(capacity: Int): Self = {
+    public with_capacity(capacity: Int): Self = unsafe {
         if capacity < 0 then {
             panic("Set with_capacity negative capacity");
         };
@@ -78,7 +78,7 @@ given[T: Hash] Set[T] {
     private find_slot(self, value: T): Option[Int] =
         find_hash_slot(self.buckets, self.capacity, value);
 
-    private rehash(self): Void = {
+    private rehash(self): Void = unsafe {
         let old_cap = self.capacity;
         let old_buckets = self.buckets;
         // 新容量只由存活条目决定（tombstone 不带进新表）：
@@ -117,7 +117,7 @@ given[T: Hash] Set[T] {
     };
 
     /// Add `value` only if it is absent; return whether it was added.
-    public try_insert(self, value: T): Bool = {
+    public try_insert(self, value: T): Bool = unsafe {
         // 两个触发条件：存活负载满了要扩容；tombstone 过半要重建（缩回
         // 合适容量并清掉陈旧槽），否则删插交替会把表填满 Deleted 标签，
         // 每次查找退化成全表探测且永不再 rehash。
@@ -153,7 +153,7 @@ given[T: Hash] Set[T] {
     };
 
     /// Return whether `value` is in the set.
-    public contains(self, value: T): Bool = {
+    public contains(self, value: T): Bool = unsafe {
         when self.find_slot(value) in {
             .None() then {
                 return false;
@@ -170,7 +170,7 @@ given[T: Hash] Set[T] {
     };
 
     /// Remove `value` if present; return whether it was removed.
-    public try_remove(self, value: T): Bool = {
+    public try_remove(self, value: T): Bool = unsafe {
         when self.find_slot(value) in {
             .None() then {
                 return false;
@@ -207,7 +207,7 @@ given[T: Hash] Set[T] {
     public is_superset_of(self, other: Set[T]): Bool = other.is_subset_of(self);
 
     /// Remove every element from the set.
-    public clear(self): Void = {
+    public clear(self): Void = unsafe {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
             if bucket_ptr.tag == UInt(1) then {
@@ -220,7 +220,7 @@ given[T: Hash] Set[T] {
     };
 
     /// Keep only the elements that satisfy `predicate`; O(n) time.
-    public retain(self, predicate: (T) -> Bool): Void = {
+    public retain(self, predicate: (T) -> Bool): Void = unsafe {
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
             if bucket_ptr.tag == UInt(1) then {
@@ -291,7 +291,7 @@ given[T: Hash] Set[T] {
 given[T: Hash] Set[T]: Clone {
 
     /// Copy the set into a fresh identity, copying elements one level.
-    public clone(self): Self = {
+    public clone(self): Self = unsafe {
         let mutable result = Set[T].with_capacity(self.size);
         for i in 0..<self.capacity then {
             let bucket_ptr = self.buckets + i;
@@ -324,7 +324,7 @@ given[T: Hash] Set[T]: Iterable[T, SetIterator[T]] {
 given[T: Hash] SetIterator[T]: Iterator[T] {
 
     /// Yield the next element, or `None` after the last one.
-    public next(self): Option[T] = {
+    public next(self): Option[T] = unsafe {
         while self.index < self.source.capacity then {
             let bucket_ptr = self.source.buckets + self.index;
             self.index = self.index + 1;
@@ -361,7 +361,7 @@ public type unsafe sendable mutable FrozenSet[T: Hash](
 /// `Drop` for `FrozenSet[T]`: releases the live buckets and the table.
 given[T: Hash] FrozenSet[T]: Drop {
 
-    drop(self): Void = {
+    drop(self): Void = unsafe {
         for i in 0..<self.capacity then {
             if (self.buckets + i).tag == UInt(1) then {
                 deinit_memory(self.buckets + i);
@@ -387,7 +387,7 @@ given[T: Hash] FrozenSet[T] {
     public is_empty(self): Bool = self.len == 0;
 
     /// Whether `value` is in the snapshot.
-    public contains(self, value: T): Bool = {
+    public contains(self, value: T): Bool = unsafe {
         when find_hash_slot(self.buckets, self.capacity, value) in {
             .None() then {
                 return false;
@@ -413,7 +413,7 @@ given[T: Hash] FrozenSet[T] {
 given[T: Hash] FrozenSetIterator[T]: Iterator[T] {
 
     /// Yield the next element, or `None` after the last one.
-    public next(self): Option[T] = {
+    public next(self): Option[T] = unsafe {
         let mutable i = self.index;
         while i < self.source.capacity then {
             let bucket_ptr = self.source.buckets + i;
@@ -440,7 +440,7 @@ given[T: Hash] Set[T] {
     /// Copy the set into an immutable `FrozenSet[T]` snapshot that can cross
     /// threads. The receiver stays usable; the snapshot bulk-copies into its
     /// own compacted table + entry array of shared element handles.
-    public to_frozen_set(self): FrozenSet[T] = {
+    public to_frozen_set(self): FrozenSet[T] = unsafe {
         let len = self.size;
         // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
         let mutable capacity = 0;
@@ -503,7 +503,7 @@ given[T: Hash] Set[T] {
 protected let build_frozen_set[T: Hash](
     keys: *mutable T,
     len: Int,
-): FrozenSet[T] = {
+): FrozenSet[T] = unsafe {
     // 负载保持 ≤ 0.5（len * 2 < capacity），空快照不分配桶数组。
     let mutable capacity = 0;
     if len > 0 then {
