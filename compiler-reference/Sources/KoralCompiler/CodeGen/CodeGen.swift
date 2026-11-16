@@ -1264,11 +1264,16 @@ public class CodeGen {
 
   /// 生成 C 的 main 函数入口
   /// 负责初始化全局变量并调用用户定义的 main 函数
+  /// The body (global initializers + the user's main) runs on a policy stack:
+  /// `__koral_run_main` executes it in place when the process stack already
+  /// meets the 8MB policy, and hops it to a fresh policy-stack thread when it
+  /// does not (a tiny `ulimit -s`, the 1MB Windows PE default). Global
+  /// initializers stay inside the body, ahead of the user's main, wherever
+  /// the body runs. Kept textually parallel with koralc's `emit_c_main`.
   private func generateCMainFunction() {
-    buffer += "\nint main(int argc, char** argv) {\n"
+    buffer += "\nstatic int __koral_main_body(void) {\n"
     withIndent {
       addIndent()
-      buffer += "__koral_set_args((int32_t)argc, (uint8_t**)argv);\n"
 
       // Run every initializer before the user's main: declaration order
       // within a module, modules in `using` topological order (dependencies
@@ -1281,7 +1286,7 @@ public class CodeGen {
           buffer += "(void)__koral_gptr_\(name)();\n"
         }
       }
-      
+
       // 调用用户定义的 main 函数
       if let userMain = userMainFunctionName {
         let returnsIntLike: Bool
@@ -1300,14 +1305,22 @@ public class CodeGen {
         addIndent()
         if returnsIntLike {
           buffer += "return (int)\(userMain)();\n"
-          return
         } else {
           buffer += "\(userMain)();\n"
+          addIndent()
+          buffer += "return 0;\n"
         }
+      } else {
+        addIndent()
+        buffer += "return 0;\n"
       }
-      
+    }
+    buffer += "}\n"
+
+    buffer += "\nint main(int argc, char** argv) {\n"
+    withIndent {
       addIndent()
-      buffer += "return 0;\n"
+      buffer += "return (int)__koral_run_main((int32_t)argc, (uint8_t**)argv, __koral_main_body);\n"
     }
     buffer += "}\n"
   }

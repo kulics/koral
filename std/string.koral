@@ -281,7 +281,9 @@ given StringBuilder {
     };
 
     /// Return a stable snapshot that does not alias future builder mutations.
-    public to_string(self): String = String.from_utf8_ptr_unchecked(self.data, self.len);
+    public to_string(self): String = unsafe {
+        String.from_utf8_ptr_unchecked(self.data, self.len)
+    };
 
     /// Hand the accumulated bytes to a `String` without copying them.
     /// Afterwards the builder is empty again, holding a fresh empty buffer.
@@ -308,7 +310,8 @@ given String {
 
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String = unsafe {
+    /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
+    public unsafe from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String = unsafe {
         let s = alloc_bytes(UInt(len));
         copy_memory(s.data, bytes, UInt(len));
         return String(s, len);
@@ -407,25 +410,31 @@ given String {
 
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
-    public from_utf8_ptr(bytes: *UInt8, len: Int): Result[String] = {
+    /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
+    public unsafe from_utf8_ptr(bytes: *UInt8, len: Int): Result[String] = {
         if not String.validate_utf8(bytes, len) then {
             return Result[String].Error("Invalid UTF-8");
         };
-        return Result[String].Ok(String.from_utf8_ptr_unchecked(bytes, len));
+        return Result[String].Ok(unsafe {
+            String.from_utf8_ptr_unchecked(bytes, len)
+        });
     };
 
     /// Copy `bytes` into a string, returning an error when they are not valid UTF-8.
-    public from_bytes(bytes: List[UInt8]): Result[String] =
-        String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count());
+    public from_bytes(bytes: List[UInt8]): Result[String] = unsafe {
+        String.from_utf8_ptr(bytes.borrow_ptr(), bytes.count())
+    };
 
     /// Copy `bytes` into a string without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_bytes_unchecked(bytes: List[UInt8]): String =
-        String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count());
+    public from_bytes_unchecked(bytes: List[UInt8]): String = unsafe {
+        String.from_utf8_ptr_unchecked(bytes.borrow_ptr(), bytes.count())
+    };
 
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
-    public from_cstring(cstr: *UInt8): Result[String] = unsafe {
+    /// The caller guarantees `cstr` points at a readable NUL-terminated string.
+    public unsafe from_cstring(cstr: *UInt8): Result[String] = unsafe {
         let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;
@@ -435,7 +444,8 @@ given String {
 
     /// Build a string from a null-terminated C string without validating UTF-8.
     /// Behavior is undefined when the bytes are not valid UTF-8.
-    public from_cstring_unchecked(cstr: *UInt8): String = unsafe {
+    /// The caller guarantees `cstr` points at a readable NUL-terminated string.
+    public unsafe from_cstring_unchecked(cstr: *UInt8): String = unsafe {
         let mutable len = 0;
         while cstr[len] != UInt8(0) then {
             len += 1;

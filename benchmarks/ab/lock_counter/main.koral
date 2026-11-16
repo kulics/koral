@@ -1,0 +1,47 @@
+using "std/async" { ... };
+using "std/sync" { Mutex };
+using "std/time" { MonoTime };
+
+// 8 threads each add 1 to one shared counter inside a mutex critical section:
+// contended lock hand-off throughput. Identical workload in koral/go/swift/rust.
+// This is the CONTROL row of the atomic/lock A/B pair (see ../../ab/README.md),
+// not a cross-language comparison case: its job is to show the atomic delta
+// lands on the atomic path and not on the timing/thread plumbing. It is also
+// the yardstick the atomic row cannot beat at this contention level -- a
+// single-line seq_cst RMW trails a mutex on a three-instruction critical
+// section even in bare C.
+type unsafe sendable mutable CounterBox(mutable count: Int);
+
+let main(): Int = {
+    let threads_n = 8;
+    let per_thread = 1_000_000;
+    let mu = Mutex.new();
+    let box = CounterBox(0);
+    let start = MonoTime.now();
+    let mutable handles = List[Thread].new();
+    let mutable t = 0;
+    while t < threads_n then {
+        let m = mu;
+        let b = box;
+        handles.push(
+            run_task(() => {
+                let mutable i = 0;
+                while i < per_thread then {
+                    m.lock();
+                    b.count = b.count + 1;
+                    m.unlock();
+                    i = i + 1;
+                };
+            }),
+        );
+        t = t + 1;
+    };
+    let mutable k = 0;
+    while k < handles.count() then {
+        let _ = handles[k].wait();
+        k = k + 1;
+    };
+    let elapsed = start.elapsed().as_nanoseconds();
+    println("RESULT \(box.count) \(elapsed)");
+    return 0;
+};

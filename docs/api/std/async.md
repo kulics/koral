@@ -68,14 +68,21 @@ public type unsafe sendable mutable Ticker;
 given Task {
     /// Create a Task builder, binding the closure to execute.
     public new(f: sendable () -> Void): Task;
-    /// Set the thread name (chainable).
+    /// Set the thread name (chainable). The name is what the stack-overflow
+    /// report names -- `Panic: stack overflow (thread: NAME)` -- so a name is
+    /// the cheapest way to tell which worker died. The runtime keeps at most
+    /// 63 bytes of it (control characters become `.`); a thread with no name
+    /// reports `unnamed`.
     public set_name(self, name: String): Task;
     /// Set the thread stack size in bytes (chainable). Panics when `size` is
     /// negative. Requests below the platform floor (64KB) clamp up to it.
     /// Leaving it unset gives the unified default (8MB) on every platform --
     /// not the platform's own idea of a default (macOS pthreads 512KB, Linux
-    /// 8MB, Windows 1MB). A stack overflow on any thread reports
-    /// `Panic: stack overflow` and aborts.
+    /// 8MB, Windows 1MB). The resolved size rounds up to the system page size
+    /// (macOS rejects non-page-multiple thread stacks outright), and on
+    /// Windows it is a reservation, not commit -- many threads cannot exhaust
+    /// the commit limit. A stack overflow on any thread reports
+    /// `Panic: stack overflow (thread: NAME)` and aborts.
     public set_stack_size(self, size: Int): Task;
     /// Create a thread and return a Thread handle.
     /// Panics on failure.

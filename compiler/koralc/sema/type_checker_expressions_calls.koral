@@ -668,38 +668,19 @@ given TypeChecker {
                             for tp in template.type_parameters then {
                                 if resolved_bindings.get(tp.name) is .Some(bound_type) then {
                                     for constraint in tp.constraints then {
-                                        // Match on the bound's KIND. A trait
-                                        // bound carries the DECLARATION whose
-                                        // visibility is being checked; a shape
-                                        // bound names none.
-                                        when constraint in {
-                                            .Trait(trait_def_id, trait_name, _) then {
-                                                when self.storage.trait_registry.get_by_def_id(
-                                                    trait_def_id,
-                                                ) in {
-                                                    .Some(info) then {
-                                                        if self.make_visibility_checker() is .Some(checker) then {
-                                                            when checker.check_symbol(
-                                                                info.module_path,
-                                                                trait_name,
-                                                                false,
-                                                            ) in {
-                                                                .Ok(_) then {},
-                                                                .Error(message) then {
-                                                                    self.push_typed_expr_diagnostic(
-                                                                        typed_callee,
-                                                                        message.message(),
-                                                                    );
-                                                                    return;
-                                                                },
-                                                            };
-                                                        };
-                                                    },
-                                                    .None() then {},
-                                                };
-                                            },
-                                            .Mutable() or .Foreign() or .Sendable() then {},
-                                        };
+                                        // The bound carries the trait's
+                                        // DECLARATION (resolved where the
+                                        // enclosing generic was declared). The
+                                        // call site checks satisfaction against
+                                        // that identity in the conformance
+                                        // registry and never re-resolves or
+                                        // demands the trait's spelling: a
+                                        // caller need not import a trait it
+                                        // never names. (The old
+                                        // import-reachability gate here made
+                                        // every bounded call require the
+                                        // trait's original spelling in the
+                                        // CALLER's scope.)
                                         if not self.enforce_bound_requirement(
                                             bound_type,
                                             constraint,

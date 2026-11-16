@@ -591,8 +591,12 @@ final class MIRLowerer {
   }
 
   private func vTableRequestSortKey(_ request: VtableRequest) -> String {
+    // Ordering MAY use display text (only identity may not), but two
+    // same-named traits would tie on it and leave their emission order to
+    // hash-table iteration. The declaration id breaks the tie: same input,
+    // same C, every run.
     let args = request.traitTypeArgs.map { context.getDebugName($0) }.joined(separator: ",")
-    return "\(request.traitName)<\(args)>|\(context.getDebugName(request.concreteType))"
+    return "\(request.traitName)_d\(request.traitDefId.id)<\(args)>|\(context.getDebugName(request.concreteType))"
   }
 
   private func shouldLowerFunction(identifier: Symbol) -> Bool {

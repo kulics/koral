@@ -3821,7 +3821,8 @@ given StringBuilder {
 given String {
     /// Unsafe constructor: copy `len` bytes without validating UTF-8.
     /// Behavior is undefined when those bytes are not valid UTF-8.
-    public from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String;
+    /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
+    public unsafe from_utf8_ptr_unchecked(bytes: *UInt8, len: Int): String;
     /// The concatenation of `left` and `right` in ONE allocation: both parts
     /// copy straight into the result's own buffer. `String.add` routes here --
     /// building a temporary raw buffer and copying it again into the result
@@ -3829,7 +3830,8 @@ given String {
     public concat(left: String, right: String): String;
     /// Checked constructor: copy `len` bytes, validating UTF-8.
     /// Return an error when the bytes are not valid UTF-8.
-    public from_utf8_ptr(bytes: *UInt8, len: Int): Result[String];
+    /// The caller guarantees `bytes`/`len` point at `len` readable bytes.
+    public unsafe from_utf8_ptr(bytes: *UInt8, len: Int): Result[String];
     /// Copy `bytes` into a string, returning an error when they are not valid UTF-8.
     public from_bytes(bytes: List[UInt8]): Result[String];
     /// Copy `bytes` into a string without validating UTF-8.
@@ -3837,10 +3839,12 @@ given String {
     public from_bytes_unchecked(bytes: List[UInt8]): String;
     /// Build a string from a null-terminated C string, returning an error when
     /// it is not valid UTF-8.
-    public from_cstring(cstr: *UInt8): Result[String];
+    /// The caller guarantees `cstr` points at a readable NUL-terminated string.
+    public unsafe from_cstring(cstr: *UInt8): Result[String];
     /// Build a string from a null-terminated C string without validating UTF-8.
     /// Behavior is undefined when the bytes are not valid UTF-8.
-    public from_cstring_unchecked(cstr: *UInt8): String;
+    /// The caller guarantees `cstr` points at a readable NUL-terminated string.
+    public unsafe from_cstring_unchecked(cstr: *UInt8): String;
     /// Create an empty string.
     public new(): String;
     /// The length of the string in UTF-8 bytes, not runes.

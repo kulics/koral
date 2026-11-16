@@ -4234,6 +4234,9 @@ extension TypeChecker {
       }
       let isStatic = !isReceiverStyleMethod(methodSym)
       guard isStatic else { return nil }
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1）：隐式静态调用与
+      // 显式静态调用同一条规则，按声明的 DefId 判标记。
+      try requireUnsafeForCall(methodSym.defId, name: memberName, span: span)
       
       // Check if return type matches expected type
       guard typesEquivalentForComparison(returnType, expectedType) else {
@@ -4283,6 +4286,9 @@ extension TypeChecker {
       }
       let isStatic = !isReceiverStyleMethod(methodSym)
       guard isStatic else { return nil }
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1）：隐式静态调用与
+      // 显式静态调用同一条规则，按声明的 DefId 判标记。
+      try requireUnsafeForCall(methodSym.defId, name: memberName, span: span)
       
       // Check if return type matches expected type
       guard typesEquivalentForComparison(returnType, expectedType) else {
@@ -4328,7 +4334,6 @@ extension TypeChecker {
       // Check if it's a static method
       let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
       guard isStatic else { return nil }
-      
       // Resolve the method with type arguments
       let methodSym = try resolveGenericExtensionMethod(
         baseType: expectedType,
@@ -4336,6 +4341,9 @@ extension TypeChecker {
         typeArgs: typeArgs,
         methodInfo: ext
       )
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1）：隐式静态调用与
+      // 显式静态调用同一条规则，按声明的 DefId 判标记。
+      try requireUnsafeForCall(methodSym.defId, name: memberName, span: span)
       
       guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
@@ -4385,7 +4393,6 @@ extension TypeChecker {
       // Check if it's a static method
       let isStatic = ext.method.parameters.isEmpty || ext.method.parameters[0].name != "self"
       guard isStatic else { return nil }
-      
       // Resolve the method with type arguments
       let methodSym = try resolveGenericExtensionMethod(
         baseType: expectedType,
@@ -4393,6 +4400,9 @@ extension TypeChecker {
         typeArgs: typeArgs,
         methodInfo: ext
       )
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1）：隐式静态调用与
+      // 显式静态调用同一条规则，按声明的 DefId 判标记。
+      try requireUnsafeForCall(methodSym.defId, name: memberName, span: span)
       
       guard case .function(let params, let returnType, _) = methodSym.type else {
         return nil
@@ -8102,7 +8112,10 @@ extension TypeChecker {
           let methodSym = try resolveGenericExtensionMethod(
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
-
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1/B2）：静态/关联方法
+          // 与实例方法同一条规则，按声明的 DefId 判标记（koralc 静态调用入口
+          // `require_unsafe_for_call_at` 的镜像）。
+          try requireUnsafeForCall(methodSym.defId, name: methodName, span: currentSpan)
           guard case .function(let params, let returnType, _) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
@@ -8196,7 +8209,10 @@ extension TypeChecker {
           let methodSym = try resolveGenericExtensionMethod(
             baseType: baseType, templateName: typeName, typeArgs: effectiveTypeArgs,
             methodInfo: ext)
-          
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1/B2）：静态/关联方法
+          // 与实例方法同一条规则，按声明的 DefId 判标记（koralc 静态调用入口
+          // `require_unsafe_for_call_at` 的镜像）。
+          try requireUnsafeForCall(methodSym.defId, name: methodName, span: currentSpan)
           guard case .function(let params, let returnType, _) = methodSym.type else {
             throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)
           }
@@ -8432,6 +8448,10 @@ extension TypeChecker {
 
     if let methods = extensionMethods[context.methodOwner(of: type)], let methodSym = methods[methodName] {
       try ensureMethodAccessibleForMemberAccess(methodSym, memberName: methodName)
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1/B2）：静态/关联方法
+      // 与实例方法同一条规则，按声明的 DefId 判标记（koralc 静态调用入口
+      // `require_unsafe_for_call_at` 的镜像）。
+      try requireUnsafeForCall(methodSym.defId, name: methodName, span: currentSpan)
       if context.containsGenericParameter(methodSym.type) {
         return try inferStaticGenericMethodCallOnConcreteType(
           baseType: type,
@@ -8507,6 +8527,13 @@ extension TypeChecker {
             }
             
             let traitInfo = visibleTraitInfo(traitName)
+            // unsafe 契约准入（docs/design/unsafe-design.md §B1）：泛型参数上的
+            // 静态需求调用按需求的 DefId 判标记。
+            if let requirementDefId = traitMethodDefId(
+              traitDefId: traitInfo?.defId ?? .invalid, methodName: methodName)
+            {
+              try requireUnsafeForCall(requirementDefId, name: methodName, span: currentSpan)
+            }
             var traitTypeArgs: [Type] = []
             if case .trait(_, _, let argNodes) = traitConstraint {
               for argNode in argNodes {
@@ -8621,6 +8648,10 @@ extension TypeChecker {
       methodTypeArgs: methodTypeArgs
     )
     try ensureMethodAccessibleForMemberAccess(methodResult.methodSymbol, memberName: methodName)
+      // unsafe 契约准入（docs/design/unsafe-design.md §B1/B2）：静态/关联方法
+      // 与实例方法同一条规则，按声明的 DefId 判标记（koralc 静态调用入口
+      // `require_unsafe_for_call_at` 的镜像）。
+      try requireUnsafeForCall(methodResult.methodSymbol.defId, name: methodName, span: currentSpan)
 
     guard case .function(let params, let returnType, _) = methodResult.methodType else {
       throw SemanticError(.generic("Expected function type for static method"), span: currentSpan)

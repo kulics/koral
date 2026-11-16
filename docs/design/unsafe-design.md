@@ -223,8 +223,10 @@ Unsafe function 'f' cannot be used as a value: call it directly or wrap it in a 
 2. `unsafe trait` / `unsafe impl` —— 出现 `type unsafe sendable` 覆盖不了的
    不变量型 trait 再议。
 3. 多余 `unsafe` 的 warning —— 等 warning 基建。
-4. trait 需求位是否再开可见性槽 —— 现状:需求可见性随 trait(接口件随容器),
-   `unsafe` 是唯一成员级标记。
+4. ~~trait 需求位是否再开可见性槽~~ —— **已定(2026-11-16):不设槽。** 需求(与工具块
+   成员)的可见性 = trait 的档次(接口件随容器),实现写修饰符必须相等,偏窄偏宽都是
+   声明处错误;`unsafe` 仍是唯一成员级标记。正本见
+   [`traits-and-givens.md`](traits-and-givens.md)「conformance 成员的可见性随需求」。
 
 ## 实施
 
@@ -232,8 +234,9 @@ Unsafe function 'f' cannot be used as a value: call it directly or wrap it in a 
    `toolchain/koral-syntax`(CST / 解析 / 打印)+ koralfmt 断言 + `grammar.bnf`
    + 正负钉测试(25 个 `unsafe_*` 用例,含读/写全形态与子树位)。
 2. **P2 迁移**(已落地 2026-11-15):std 声明标记(内存内在 8 + `let unsafe
-   foreign` 138)+ 操作点包块(~535 处);涉指针测试用例机械包块;guide 中英
-   两份;cffi / concurrency 两处旧规则收敛。
+   foreign` 138 + String 裸指针构造 4:`from_utf8_ptr[_unchecked]` /
+   `from_cstring[_unchecked]`,调用方担保指针可读)+ 操作点包块(~535 处);
+   涉指针测试用例机械包块;guide 中英两份;cffi / concurrency 两处旧规则收敛。
 3. **P3 收口**(已落地 2026-11-15):两编译器全量 1447/1447、差分逐字一致、
    koralfmt 语料闸全绿。实施中按 §C 的"读/写"口径补关了初版漏掉的四类洞
    (解引用写位、成员写位、实参子树、算术操作数子树)与裸指针下标的写位成员

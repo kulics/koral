@@ -10,6 +10,7 @@
 
 trait 的身份是**声明**，含类型实参，永远不是名字。conformance 与 witness 都按身份记录。
 `given` 是「把能力接到已有类型上」的机制，与 trait 声明分开。
+需求与工具块成员的**可见性随 trait**（接口件随容器）：省略即继承，写了修饰符必须相等。
 `Any` 在两个位置上是两件不同的东西：约束位是**无约束**，trait 位是**普通 trait 名**。
 
 ## 背景
@@ -198,6 +199,35 @@ weak 能力 = `mutable` 约束 + `?T`，不设 marker trait。**正本**在
 `trait` 声明能力；`given X { ... }` 把方法接到已有类型上；`given X: Trait { ... }` 声明遵循。
 分开的理由：能力的**定义**与能力的**授予**是两件事——一个类型可以被第三方授予能力，
 不必改它的声明。出处：记录 §6 的语法备忘（用法见手册）。
+
+### conformance 成员的可见性随需求（接口件随容器）
+
+需求（requirement）**没有自己的可见性槽**：`trait` 声明的档次就是它每条需求的档次
+（解析器把 trait 的声明修饰符盖到每条需求上）。实现需求的成员（`given X: Trait { ... }`
+里的方法）与工具块成员（`given Trait { ... }` 的实体方法——trait object 同样经它派发）
+是同一接口的接口件，档次**随容器**：
+
+- **省略修饰符**＝继承需求的档次（不是常规的 internal 缺省）。显式写出的
+  `internal` 与省略同义（Koral 惯例：缺省即 `internal` 不写，修饰符只标偏离），
+  同样按省略处理、继承需求档次。
+- **写了修饰符**必须**相等**——偏窄（`private` 实现 `public` 需求）或偏宽
+  （`public` 实现 `internal` 需求）都是**声明处**错误：
+
+```
+Cannot implement requirement '<name>' with a '<actual>' method: the requirement's access level is '<expected>'.
+```
+
+- 需求由**声明它的 trait** 定档：override 用最近声明（子 trait 自己声明的 `m` 用子 trait
+  的档次）；继承需求在父 trait 自己的 `given X: Parent` 块里实现，用父 trait 的档次。
+- `given X { ... }`（无 trait）的固有成员不受影响：照常按自己的注解判。
+
+**否则直调与派发会分家。** 注册面若让手写修饰符偏离需求档次，直接调用 `x.m()` 按
+实现的档次判可见性、trait object 派发却按需求的档次通——同一个方法一条路拒绝一条路
+放行。实现永远只有一档（需求的档），两条路才必然一致。unsafe 的 R3（标记必须同标）
+是同一条原则在另一个轴上的形状（见 [`unsafe-design.md`](unsafe-design.md) §B）。
+
+身份细则不变：`given` 成员的 `DefId` 是成员身份，需求的 `DefId` 是需求身份
+（`trait_method_def_id`），名字只在已识别容器内选成员（rustc `associated_items` 同形）。
 
 ## 替代方案
 

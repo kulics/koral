@@ -1,0 +1,23 @@
+// Codegen shape pin for the borrowed-receiver rule 5a atomic-argument
+// carve-out (codegen_borrowed_self.koral). koralc-only, like rc_counter_pin:
+// the frozen seed deliberately carries none of the ARC optimizations, so this
+// lives in tests/runtime-cases and scripts/verify.sh greps the generated C
+// (the "atomic shape pin" stage). The runtime side of the same contract is
+// the w12_atomic_* window in rc_counter_pin.koral.
+//
+// The contract: `fetch_add`'s receiver is passed +0 (borrowed convention).
+// In the generated C that means (1) the fetch_add body contains exactly one
+// `__koral_atomic_fetch_add_iptr` call and zero retain/release/copy/drop
+// traffic, and (2) no AtomicInt call site pays a copy. Before rule 5a the
+// body opened with a release of a call-site copy (owned convention) and the
+// 8-thread fetch_add benchmark ran 4.32x slower -- wall-time evidence lives
+// in benchmarks/ab/, this pin is the machine-independent gate.
+
+using "std/sync" { AtomicInt };
+
+let main(): Int = {
+    let counter = AtomicInt.new(0);
+    let r = counter.fetch_add(1);
+    let _ = counter.load();
+    return r;
+};

@@ -1246,12 +1246,16 @@ given CodeGen {
             return;
         };
 
-        self.buffer.push_string("\nint main(int argc, char** argv) {\n");
+        // The body (global initializers + the user's main) runs on a policy
+        // stack: `__koral_run_main` executes it in place when the process
+        // stack already meets the 8MB policy, and hops it to a fresh
+        // policy-stack thread when it does not (a tiny `ulimit -s`, the 1MB
+        // Windows PE default). Global initializers stay inside the body,
+        // ahead of the user's main, wherever the body runs. Kept textually
+        // parallel with the seed's `generateCMainFunction`.
+        self.buffer.push_string("\nstatic int __koral_main_body(void) {\n");
         self.indent = StringBuilder.new();
         self.indent.push_string(" ");
-
-        self.add_indent();
-        self.buffer.push_string("__koral_set_args((int32_t)argc, (uint8_t**)argv);\n");
 
         // 生成全局变量初始化
         if has_global_inits then {
@@ -1276,22 +1280,28 @@ given CodeGen {
                     .None() then false,
                 };
 
+                self.add_indent();
                 if returns_int_like then {
-                    self.add_indent();
                     self.buffer.push_string("return (int)\(user_main)();\n");
-                    self.indent = StringBuilder.new();
-                    self.buffer.push_string("}\n");
-                    return;
                 } else {
-                    self.add_indent();
                     self.buffer.push_string("\(user_main)();\n");
+                    self.add_indent();
+                    self.buffer.push_string("return 0;\n");
                 };
             },
-            .None() then {},
+            .None() then {
+                self.add_indent();
+                self.buffer.push_string("return 0;\n");
+            },
         };
+        self.indent = StringBuilder.new();
+        self.buffer.push_string("}\n");
 
+        self.buffer.push_string("\nint main(int argc, char** argv) {\n");
+        self.indent = StringBuilder.new();
+        self.indent.push_string(" ");
         self.add_indent();
-        self.buffer.push_string("return 0;\n");
+        self.buffer.push_string("return (int)__koral_run_main((int32_t)argc, (uint8_t**)argv, __koral_main_body);\n");
         self.indent = StringBuilder.new();
         self.buffer.push_string("}\n");
     };

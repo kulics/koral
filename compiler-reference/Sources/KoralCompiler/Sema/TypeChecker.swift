@@ -128,6 +128,24 @@ struct ConformanceKey: Hashable {
   let traitDefId: DefId
   let traitName: String
   let traitTypeArgs: [ConformanceTypeKey]
+
+  /// Identity is (target type, trait DECLARATION, trait arguments) and nothing
+  /// else. `traitName` must stay out of equality and hashing: it is a display
+  /// handle, and folding it in split one conformance into two slots whenever
+  /// the two sides spelled the trait differently (the `given`'s spelling vs. a
+  /// bound's, an alias vs. the original). Mirrors bootstrap's
+  /// `ExplicitTraitConformanceKey`, whose equals/hash are identity-only.
+  static func == (lhs: ConformanceKey, rhs: ConformanceKey) -> Bool {
+    return lhs.selfType == rhs.selfType
+      && lhs.traitDefId == rhs.traitDefId
+      && lhs.traitTypeArgs == rhs.traitTypeArgs
+  }
+
+  func hash(into hasher: inout Hasher) {
+    hasher.combine(selfType)
+    hasher.combine(traitDefId)
+    hasher.combine(traitTypeArgs)
+  }
 }
 
 /// A trait reference normalised to (declaration identity, type arguments).
@@ -1410,6 +1428,21 @@ public class TypeChecker {
     }
   }
 
+  /// Stamp every trait bound of a generic declaration's type parameters with
+  /// its declaration identity, IN the declaring module's context.
+  ///
+  /// Templates must carry their bounds' identities from the moment they are
+  /// registered (bootstrap's `to_template_type_params` does exactly this): a
+  /// bound left as a bare spelling would have to be re-resolved at every use
+  /// site, and a CALLER that never imports the trait -- or imports it under an
+  /// alias -- cannot resolve it there. Resolution happens ONCE, here; every
+  /// later check compares declarations.
+  func stampedTypeParameters(_ typeParameters: [TypeParameterDecl]) -> [TypeParameterDecl] {
+    return typeParameters.map { param in
+      (name: param.name, constraints: param.constraints.map { resolveBound($0) })
+    }
+  }
+
   /// Identity of a bound, for caching and set membership: the trait
   /// declaration's identity plus the written type arguments. The spelling is
   /// not part of it, so two spellings of one trait share a cache slot and two
@@ -1998,7 +2031,7 @@ public class TypeChecker {
       defId = methodSymbolDefId(ownerKey: ownerKey, name: name, access: access)
     }
     if !typeParameters.isEmpty {
-      methodTypeParamsByDefId[defId] = typeParameters
+      methodTypeParamsByDefId[defId] = stampedTypeParameters(typeParameters)
       context.methodTypeParameterNames[defId] = typeParameters.map { $0.name }
     }
     if case .internal = access {
@@ -2021,6 +2054,54 @@ public class TypeChecker {
     )
   }
 
+  /// The access to STAMP on a `given` member when it is registered (mirror of
+  /// bootstrap's `conformance_member_registration_access`).
+  ///
+  /// A trait REQUIREMENT implementation is registered at the requirement's
+  /// level -- the level of the trait that DECLARES it, because a requirement
+  /// has no modifier slot of its own (接口件随容器). A tool/entity member of
+  /// `given Trait { ... }` is part of the trait's interface the same way and
+  /// takes the trait's level. A written modifier is checked at the declaration
+  /// site to EQUAL that level (or be omitted), so the registration can take
+  /// the level unconditionally. An inherent given member (no trait) keeps its
+  /// own annotation, like any other method.
+  func registeredGivenMemberAccess(
+    traitDefId: DefId?,
+    methodName: String,
+    ownAccess: AccessModifier
+  ) -> AccessModifier {
+    guard let traitDefId else { return ownAccess }
+    if let requirements = try? flattenedTraitMethods(forDefId: traitDefId),
+      let requirement = requirements[methodName]
+    {
+      return requirement.access
+    }
+    if let traitInfo = traitDeclsByDefId[traitDefId] {
+      return traitInfo.access
+    }
+    return ownAccess
+  }
+
+  /// The conformance/tool member visibility rule (traits-and-givens.md): a
+  /// member that implements a trait requirement -- or joins the trait's
+  /// interface from a tool block -- takes the requirement's level. Omitted
+  /// inherits; a written modifier must EQUAL it, narrower or wider alike.
+  /// Mirror of the bootstrap checks in `check_conformance_in_module` and
+  /// `register_trait_tool_block`.
+  func checkRequirementImplAccess(
+    methodName: String,
+    written: AccessModifier,
+    expected: AccessModifier,
+    span: SourceSpan
+  ) throws {
+    if case .internal = written { return }
+    if written != expected {
+      throw SemanticError(.generic(
+        "Cannot implement requirement '\(methodName)' with a '\(written)' method: the requirement's access level is '\(expected)'."
+      ), span: span)
+    }
+  }
+
   func registeredMethodDeclaration(
     _ method: MethodDeclaration,
     access: AccessModifier? = nil,
@@ -2031,15 +2112,20 @@ public class TypeChecker {
       ? method.defId
       : methodSymbolDefId(ownerKey: ownerKey, name: method.name, access: resolvedAccess)
     methodDefIdsByOwner[ownerKey, default: [:]][method.name] = defId
-    if !method.typeParameters.isEmpty {
-      methodTypeParamsByDefId[defId] = method.typeParameters
+    // A method's own type parameters are stamped like the template's: the
+    // bound's spelling becomes a DECLARATION here, in the declaring module's
+    // context, and every later check compares identities (bootstrap's
+    // `to_template_type_params`).
+    let stampedParams = stampedTypeParameters(method.typeParameters)
+    if !stampedParams.isEmpty {
+      methodTypeParamsByDefId[defId] = stampedParams
     }
     if method.isUnsafe {
       context.recordUnsafeDef(defId)
     }
     return MethodDeclaration(
       name: method.name,
-      typeParameters: method.typeParameters,
+      typeParameters: stampedParams,
       parameters: method.parameters,
       returnType: method.returnType,
       body: method.body,

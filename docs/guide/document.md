@@ -2245,6 +2245,35 @@ Shared mutable objects with object locks are the second form of concurrency; syn
 
 **Reference counting follows sendability, but that is not part of the language contract.** `sendable` types use atomic reference counting and non-`sendable` types non-atomic; rely on neither — it is an implementation detail, like layout, and may change.
 
+#### Thread Names and Stack Policy
+
+`Task` configures two per-thread properties before `spawn()`:
+
+```koral
+using "std/async" { ... };
+
+let main(): Void = {
+    let worker = Task
+        .new(() => { println("parsing"); })
+        .set_name("parser")
+        .set_stack_size(2 * 1024 * 1024)
+        .spawn();
+    let _ = worker.wait();
+};
+```
+
+**`set_stack_size(bytes)` follows one policy on every platform.** An unset (or zero) size is the unified default — 8MB — not the platform's own idea of one (macOS pthreads 512KB, Linux 8MB, Windows 1MB); a request below the 64KB floor clamps **up** to it. The resolved size then **rounds up to the system page size** — macOS thread creation fails outright on a non-page-multiple stack, so an unrounded request would die as a spawn failure. On Windows the size is a **reservation, not commit** (`STACK_SIZE_PARAM_IS_A_RESERVATION`): 8MB committed per thread times many threads exhausts the commit limit, while a reservation commits pages only as the thread touches them.
+
+**The program's main body gets the same policy.** The process main thread's stack is whatever the platform hands the process — `ulimit -s` on Linux/macOS, the 1MB PE header on Windows — and that can be far below the policy default. When it is, the runtime runs the global initializers and the user's `main` body on a fresh 8MB thread and propagates the exit code unchanged; when the process stack already meets the policy, the body runs in place. Deep recursion in `main` therefore behaves the same under `ulimit -s 256` as under a default shell.
+
+**A stack overflow on any thread reports one line and aborts:**
+
+```text
+Panic: stack overflow (thread: parser)
+```
+
+The name is the one from `Task.set_name` — so a name is the cheapest way to tell which worker died. A thread with no name reports `unnamed`; the thread running the program's main body reports `main`. At most 63 bytes of a name are kept, and control characters become `.` so the report is always exactly one line. The line is written with a single allocation-free write — the only shape that is safe on an overflowed stack.
+
 ## 4. Pattern Matching
 
 Koral has powerful pattern matching capabilities, mainly used through `when` expressions and the `is` operator. Patterns are also the binding form used in `if` and `while` conditions, and the binding a `for` loop takes (see [for Loop](#for-loop)).
@@ -2799,6 +2828,31 @@ Notes:
 
 - `given Type: Trait` is the explicit conformance entry point.
 - Parent/child traits are implemented level-by-level: implementing `Ord` does not implicitly implement `Eq`.
+
+#### Conformance Member Visibility
+
+A trait requirement has no access modifier of its own: its visibility **is** the trait's access level. A method that implements a requirement follows it — it is an interface piece of the trait, so direct calls and trait-object dispatch always judge it at the same level.
+
+- **Omitting** the modifier inherits the requirement's level (which is the trait's level, or the declaring parent trait's level for an inherited requirement). This is different from ordinary methods, whose default is `internal`. Writing `internal` explicitly counts as omitting it (the Koral idiom never writes `internal` — modifiers only mark deviations).
+- **Writing** a modifier is allowed only when it equals the requirement's level. A narrower or wider level is a compile error at the `given` block:
+
+```koral
+public trait Show {
+    show(self): String;
+};
+
+given Point: Show {
+    // OK: omitted, inherits `public` from the trait
+    show(self): String = "...";
+    // OK: explicit and equal
+    public show(self): String = "...";
+    // ERROR: Cannot implement requirement 'show' with a 'private' method:
+    //        the requirement's access level is 'public'.
+    private show(self): String = "...";
+};
+```
+
+The same rule covers `given Trait { ... }` tool methods: they are callable through trait objects, so their level follows the trait's too. Methods in an inherent `given Type { ... }` block (no trait) keep the normal rules — an unmarked method is `internal`.
 
 #### Named Parameters in Traits and Implementations
 
@@ -3658,6 +3712,17 @@ trait Blob {
   safe function first.
 - The marker is a contract claim, not a verification. Write the preconditions
   in a doc comment above the declaration — that comment is the contract.
+
+The std `String` constructors that read through raw pointers —
+`from_utf8_ptr_unchecked`, `from_utf8_ptr`, `from_cstring`, and
+`from_cstring_unchecked` — are `unsafe` declarations: the caller guarantees the
+pointer (and length) names readable memory. A safe wrapper absorbs the contract
+with an internal block, so its own call sites need no context:
+
+```koral
+let text = unsafe { String.from_utf8_ptr(bytes.borrow_ptr(), n) };
+let checked = String.from_bytes(bytes);   // safe wrapper: absorbs the contract
+```
 
 #### Foreign Declarations and Safety
 

@@ -40,6 +40,11 @@ let unsafe_fn_as_value_message(name: String): String = "Unsafe function '\(name)
 let unsafe_requirement_safe_impl_message(name: String): String = "Cannot implement unsafe requirement '\(name)' with a safe method: the implementation must also be marked 'unsafe'.";
 let safe_requirement_unsafe_impl_message(name: String): String = "Cannot implement safe requirement '\(name)' with an unsafe method: the requirement is not marked 'unsafe'.";
 
+/// conformance 成员可见性错配文案（traits-and-givens.md 正本，双编译器逐字）。
+/// 需求没有自己的可见性槽（接口件随容器）：实现的档次就是声明该需求的 trait 的
+/// 档次。写了修饰符就必须相等，偏窄偏宽都是声明处错误。
+let requirement_access_mismatch_message(name: String, actual: String, expected: String): String = "Cannot implement requirement '\(name)' with a '\(actual)' method: the requirement's access level is '\(expected)'.";
+
 /// 调用点文案用的被调名：`f` / `f[T]` 取基名，`o.m` 取末段。
 let call_callee_display_name(callee: Expr): String = {
     return when callee in {
@@ -916,6 +921,7 @@ given TypeChecker {
         parent_constraints: List[ParentTraitConstraint],
         raw_members: List[TraitMember],
         typed_members: List[TypedTraitMember],
+        access: AccessModifier,
     ): Void = {
         let mutable param_names = List[String].new();
         for tp in type_params then {
@@ -928,6 +934,7 @@ given TypeChecker {
             parent_constraints,
             typed_members,
             self.storage.module_path,
+            access,
         );
         let mutable method_def_ids_by_name = Dict[String, DefId].new();
         let mutable raw_unsafe_by_name = Dict[String, Bool].new();
@@ -3238,6 +3245,24 @@ given TypeChecker {
                 );
                 return false;
             };
+            // 可见性规则（traits-and-givens.md）：工具块成员是 trait 接口的一
+            // 部分（trait object 同样经它派发），档次随容器 = trait 的档次。省略
+            // 修饰符即继承；写了修饰符就必须相等，偏窄偏宽都是声明处错误。
+            if not (member.access is .Internal()) then {
+                let actual_label = access_modifier_label(member.access);
+                let expected_label = access_modifier_label(trait_info.access);
+                if actual_label != expected_label then {
+                    self.push_diagnostic(
+                        requirement_access_mismatch_message(
+                            member.name,
+                            actual_label,
+                            expected_label,
+                        ),
+                        span,
+                    );
+                    return false;
+                };
+            };
         };
 
         let existing_blocks = self.storage.generic_templates.trait_tool_blocks.get(
@@ -3578,6 +3603,7 @@ given TypeChecker {
                     linked,
                     info.methods,
                     info.module_path,
+                    info.access,
                 ),
             );
             // The codegen view carries its own copies under name keys; rewrite
@@ -4778,6 +4804,7 @@ given TypeChecker {
                     parent_constraints,
                     members,
                     typed_members,
+                    access,
                 );
             },
             _ then {},
@@ -5224,20 +5251,28 @@ given TypeChecker {
     /// Resolve a bound into a GenericConstraintBound, preserving type arguments.
     /// Unlike resolve_type, this does NOT emit diagnostics for unresolved names —
     /// forward-referenced generic params (e.g. T in [R Iterator[T], T]) fall back
-    /// to GenericParameter. Shape bounds carry their canonical name here because
-    /// GenericConstraintBound is still name-keyed; that collapses in the identity step.
+    /// to GenericParameter. A bound that already carries its DECLARATION identity
+    /// (stamped at registration by `resolved_bound`) is passed through as-is: the
+    /// spelling is display-only from there on, and re-resolving it here would ask
+    /// whichever module happens to be checking which trait was meant. Only a
+    /// bound with no identity yet is resolved (and validated) by spelling --
+    /// that is the declaration-site boundary, where the declaring module is the
+    /// current one.
     resolve_constraint_bound(
         self,
         b: Bound,
         param_names: List[String],
     ): GenericConstraintBound = {
         return when b in {
-            .Trait(_, name, args) then {
+            .Trait(def_id, name, args) then {
                 let mutable resolved_args = List[Type].new();
                 for arg in args then {
                     resolved_args.push(
                         self.resolve_constraint_type_arg(arg, param_names),
                     );
+                };
+                if def_id.is_valid() then {
+                    return GenericConstraintBound(def_id, name, resolved_args);
                 };
                 self.validate_trait_name(name);
                 GenericConstraintBound(

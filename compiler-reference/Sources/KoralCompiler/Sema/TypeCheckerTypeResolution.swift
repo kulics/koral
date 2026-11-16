@@ -737,12 +737,17 @@ extension TypeChecker {
             continue
           }
 
-          // For concrete types, check trait conformance with the resolved type arguments
+          // For concrete types, check trait conformance with the resolved type
+          // arguments -- against the bound's DECLARATION identity, never a
+          // spelling re-resolved here. A caller does not need the trait (or its
+          // original name) in scope: requiring the spelling was what forced
+          // every bounded call to import a trait it never names.
           let ctx = "checking constraint \(param.name): \(constraint)"
+          let requiredDefId = resolveBound(constraint).defId ?? .invalid
           if traitArgs.isEmpty {
-            try enforceTraitConformance(args[i], traitName: traitName, context: ctx)
+            try enforceTraitConformance(args[i], traitName: traitName, traitDefId: requiredDefId, context: ctx)
           } else {
-            try enforceGenericTraitConformance(args[i], traitName: traitName, traitTypeArgs: resolvedTraitArgs, context: ctx)
+            try enforceGenericTraitConformance(args[i], traitName: traitName, traitTypeArgs: resolvedTraitArgs, traitDefId: requiredDefId, context: ctx)
           }
         }
       }

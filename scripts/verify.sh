@@ -305,15 +305,54 @@ grep -q 'w11_subscript_retains=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: subscript borrow reads (retains)" >&2; exit 1; }
 grep -q 'w11_subscript_releases=0' "$WORK/rc_counter_pin.out" || {
   echo "rc counter pin failed: subscript borrow reads (releases)" >&2; exit 1; }
+grep -q 'w12_atomic_retains=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: atomic-argument borrow receiver (retains)" >&2; exit 1; }
+grep -q 'w12_atomic_releases=0' "$WORK/rc_counter_pin.out" || {
+  echo "rc counter pin failed: atomic-argument borrow receiver (releases)" >&2; exit 1; }
 echo "rc counter pins OK"
+
+# ── atomic shape pin ─────────────────────────────────────────────────────────
+# Codegen side of the borrowed-receiver rule 5a carve-out (2026-11-16): a
+# fetch_add receiver is passed +0. Grep the generated C -- the fetch_add body
+# must be exactly one atomic call with zero refcount traffic, and no AtomicInt
+# call site may pay a copy. This is the machine-independent gate for the
+# benchmark A/B in benchmarks/ab/ (whose wall times are session-bound).
+say "atomic shape pin"
+"$BOOTSTRAP" emit-c tests/runtime-cases/atomic_shape_pin.koral -o "$WORK/atomic_shape_pin"
+SHAPE_C="$WORK/atomic_shape_pin/atomic_shape_pin.c"
+test -s "$SHAPE_C"
+awk '/_AtomicInt_fetch_add\(struct.*self, intptr_t delta\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+  "$SHAPE_C" > "$WORK/atomic_shape_pin/fetch_add_body.txt"
+test -s "$WORK/atomic_shape_pin/fetch_add_body.txt" || {
+  echo "atomic shape pin failed: fetch_add definition not found in generated C" >&2; exit 1; }
+atomic_calls=$(grep -c '__koral_atomic_fetch_add_iptr' "$WORK/atomic_shape_pin/fetch_add_body.txt")
+test "${atomic_calls}" = "1" || {
+  echo "atomic shape pin failed: fetch_add body must contain exactly one atomic call (got ${atomic_calls})" >&2; exit 1; }
+if grep -q '_drop(\|_copy(\|__koral_retain_value\|__koral_release_value' \
+    "$WORK/atomic_shape_pin/fetch_add_body.txt"; then
+  echo "atomic shape pin failed: refcount traffic leaked into the fetch_add body" >&2; exit 1
+fi
+awk '/^intptr_t __koral_user_main\(void\) \{/{f=1} f{print} f&&/^\}/{exit}' \
+  "$SHAPE_C" > "$WORK/atomic_shape_pin/user_main_body.txt"
+test -s "$WORK/atomic_shape_pin/user_main_body.txt" || {
+  echo "atomic shape pin failed: user_main body not found in generated C" >&2; exit 1; }
+grep -q '_fetch_add(' "$WORK/atomic_shape_pin/user_main_body.txt" || {
+  echo "atomic shape pin failed: probe call site missing" >&2; exit 1; }
+if grep -q '_copy(' "$WORK/atomic_shape_pin/user_main_body.txt"; then
+  echo "atomic shape pin failed: an AtomicInt call site pays a copy (owned convention)" >&2; exit 1
+fi
+echo "atomic shape pin OK"
 
 # ── stack contract pins ───────────────────────────────────────────────────────
 # Unified thread stack policy (2026-11-13): one 8MB default on every
 # platform, one 64KB floor (tiny requests clamp up, never fall back to the
 # platform default), explicit sizes honored past the default, and one
-# overflow report -- `Panic: stack overflow` -- instead of a bare
-# SIGSEGV/SIGBUS/0xC00000FD. The byte-level bounds live in the C probes so
-# the pins do not depend on Koral frame sizes.
+# overflow report -- `Panic: stack overflow (thread: NAME)` -- instead of a
+# bare SIGSEGV/SIGBUS/0xC00000FD. The byte-level bounds live in the C probes
+# so the pins do not depend on Koral frame sizes. The 2026-11-16 round adds:
+# page rounding (macOS rejects non-page-multiple setstacksize outright) and
+# Windows STACK_SIZE_PARAM_IS_A_RESERVATION (8MiB must be a reservation, not
+# committed up front).
 say "stack contract pins"
 clang -I std tests/runtime-cases/stack_contract_pin.c std/koral_runtime.c \
   -o "$WORK/stack_contract_pin$EXE" -Wno-everything -O1 $WIN_LIBS
@@ -330,8 +369,25 @@ clang -I std tests/runtime-cases/stack_overflow_pin.c std/koral_runtime.c \
 if "$WORK/stack_overflow_pin$EXE" > "$WORK/stack_overflow_pin.out" 2> "$WORK/stack_overflow_pin.err"; then
   echo "stack pin failed: the 1-byte-stack recursion must overflow" >&2; exit 1
 fi
-grep -q 'Panic: stack overflow' "$WORK/stack_overflow_pin.err" || {
-  echo "stack pin failed: overflow must report 'Panic: stack overflow'" >&2; exit 1; }
+grep -q 'Panic: stack overflow (thread: pin-overflow)' "$WORK/stack_overflow_pin.err" || {
+  echo "stack pin failed: overflow must report 'Panic: stack overflow (thread: <name>)'" >&2; exit 1; }
+
+clang -I std tests/runtime-cases/stack_page_round_pin.c std/koral_runtime.c \
+  -o "$WORK/stack_page_round_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+"$WORK/stack_page_round_pin$EXE" > "$WORK/stack_page_round_pin.out"
+grep -q 'all_ok' "$WORK/stack_page_round_pin.out" || {
+  echo "stack pin failed: non-page-multiple request must round up and spawn" >&2; exit 1; }
+if grep -q 'bounds_fail\|spawn_failed' "$WORK/stack_page_round_pin.out"; then
+  echo "stack pin failed: resolved size must land on the created stack" >&2; exit 1
+fi
+
+clang -I std tests/runtime-cases/stack_reserve_pin.c std/koral_runtime.c \
+  -o "$WORK/stack_reserve_pin$EXE" -Wno-everything -O1 $WIN_LIBS
+"$WORK/stack_reserve_pin$EXE" > "$WORK/stack_reserve_pin.out"
+grep -q 'reserve_ok' "$WORK/stack_reserve_pin.out" || {
+  echo "stack pin failed: 8 held 8MB stacks must spawn (reservation, not commit)" >&2; exit 1; }
+grep -q 'all_ok' "$WORK/stack_reserve_pin.out" || {
+  echo "stack pin failed: stack request must be a reservation on Windows" >&2; exit 1; }
 echo "stack contract pins OK"
 
 # ── samples ───────────────────────────────────────────────────────────────────

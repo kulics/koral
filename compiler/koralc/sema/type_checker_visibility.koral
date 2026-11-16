@@ -661,19 +661,20 @@ given TypeChecker {
     /// A method of a `given ... as Trait` conformance that satisfies a trait
     /// REQUIREMENT is judged by the requirement's level -- the level of the
     /// trait that declares it, because a requirement has no modifier slot of
-    /// its own. A non-requirement helper in the given block is judged by its
-    /// own annotation, like any other method. Mirrors Swift
-    /// `effectiveMethodAccessForMemberAccess` (and the `requirementByName`
-    /// stamp in `collectGivenSignatures`): the requirement is matched by NAME,
-    /// inside the trait the conformance already carries by declaration.
+    /// its own (接口件随容器). A tool/entity member of `given Trait { ... }`
+    /// follows the trait's level the same way. A non-requirement helper in an
+    /// inherent given block is judged by its own annotation, like any other
+    /// method. Mirrors Swift `effectiveMethodAccessForMemberAccess`.
     effective_method_access_for_member_access(
         self,
         method: Symbol,
     ): Option[AccessModifier] = {
-        // An explicitly written modifier on the impl wins over the trait
-        // requirement's level (see conformance_member_registration_access):
-        // the registration stamp already carries it, and only the implicit
-        // internal default falls through to the requirement's level below.
+        // The registration stamp (`conformance_member_registration_access`)
+        // already carries the effective level: a requirement implementation is
+        // stamped at the requirement's level whatever the impl spells (a
+        // written modifier must EQUAL that level or the declaration is
+        // refused), so a non-internal stamp is authoritative. Only the
+        // implicit internal default falls through to the requirement lookup.
         when self.context().get_access(method.def_id) in {
             .Some(stamped) then {
                 if not (stamped is .Internal()) then {
@@ -708,28 +709,34 @@ given TypeChecker {
 
     /// The access to STAMP on a conformance member when it is registered.
     ///
-    /// Mirrors Swift `registeredMethodDeclaration(..., access: requirementAccess)`:
-    /// a trait REQUIREMENT implementation with no modifier of its own is
-    /// registered at the requirement's level -- the level of the trait that
-    /// declares it, because a requirement has no modifier slot. But an
-    /// EXPLICITLY written modifier (anything but the implicit internal
-    /// default) marks a deviation and WINS: `given X: T { private fn ... }`
-    /// stays private however the trait spells the requirement. A
-    /// non-requirement helper keeps its own annotation.
+    /// A trait REQUIREMENT implementation is registered at the requirement's
+    /// level -- the level of the trait that DECLARES it, because a requirement
+    /// has no modifier slot of its own (接口件随容器). A tool/entity member of
+    /// `given Trait { ... }` is part of the trait's interface the same way and
+    /// takes the trait's level. A written modifier is checked at the
+    /// declaration site to EQUAL that level (or be omitted), so what survives
+    /// to registration is never a deviation and the level can be taken
+    /// unconditionally. An inherent given member (no trait) keeps its own
+    /// annotation, like any other method.
     conformance_member_registration_access(
         self,
         trait_def_id: Option[DefId],
         method_name: String,
         own_access: AccessModifier,
     ): AccessModifier = {
-        if not (own_access is .Internal()) then {
-            return own_access;
-        };
         when trait_def_id in {
             .Some(def_id) then {
                 when self.trait_requirement_access(def_id, method_name) in {
                     .Some(requirement_access) then {
                         return requirement_access;
+                    },
+                    .None() then {},
+                };
+                // A tool/entity member: no requirement declares the name, and
+                // the level is the trait's own.
+                when self.storage.trait_registry.get_by_def_id(def_id) in {
+                    .Some(trait_info) then {
+                        return trait_info.access;
                     },
                     .None() then {},
                 };
@@ -1508,12 +1515,19 @@ given TypeChecker {
                 }
             },
             .Trait(trait_def_id, trait_name, _) then {
-                // The bound's spelling still has to name a trait this module can
-                // see. A resolved def_id from another module's declaration does
-                // not make the name importable here -- Swift says `Undefined trait`
-                // and stops, so do the same rather than checking conformance.
-                if not self.validate_trait_name(trait_name) then {
-                    return false;
+                // The bound carries the trait's DECLARATION, resolved once where
+                // the enclosing generic was declared. Satisfaction is checked
+                // against that identity in the conformance registry -- never by
+                // re-resolving the spelling here. A call site does not need the
+                // trait (or its original name) in scope; requiring the spelling
+                // was what forced callers to import a trait they never name.
+                // Only a bound still missing its identity (an unresolvable
+                // spelling at declaration time) falls back to name resolution,
+                // where the `Undefined trait` complaint has already been made.
+                if not trait_def_id.is_valid() then {
+                    if not self.validate_trait_name(trait_name) then {
+                        return false;
+                    };
                 };
                 // A trait argument that names a parameter this bindings map
                 // cannot see -- an ENCLOSING template's parameter, like

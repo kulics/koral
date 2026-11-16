@@ -172,23 +172,24 @@ given MIRLowerer {
             DiagnosticCollector.new(),
         );
 
+    /// Dedup by IDENTITY: (concrete type, trait DECLARATION, trait arguments).
+    ///
+    /// The old key folded in `request.trait_name` -- the display spelling. Two
+    /// same-named traits from different modules are different traits needing
+    /// different vtables; keying on the spelling dropped the second request and
+    /// the conversion failed `trait object conversion has no matching vtable`.
+    /// `witness_key` is already built from the identity alone
+    /// (`CanonicalTraitRef.key`), so it is the dedup key. (Swift's
+    /// `VtableRequest` hashes exactly this identity in its `Set`.)
     unique_vtable_requests(self): List[VtableRequest] = {
         let _ = self;
         let mutable seen = Set[String].new();
         let mutable unique = List[VtableRequest].new();
         for request in self.program.vtable_requests then {
-            let mutable key = StringBuilder.new();
-            key.push_string(stable_type_key(request.concrete_type));
-            key.push_string("|");
-            key.push_string(request.trait_name);
-            for arg in request.trait_type_args then {
-                key.push_string("|");
-                key.push_string(stable_type_key(arg));
-            };
-            if seen.contains(key.to_string()) then {
+            if seen.contains(request.witness_key) then {
                 continue;
             };
-            seen.insert(key.to_string());
+            seen.insert(request.witness_key);
             unique.push(request);
         };
         return unique;

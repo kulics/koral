@@ -2182,6 +2182,35 @@ let main(): Void = {
 
 **引用计数跟随 sendability，但这不属于语言契约。** `sendable` 类型用原子引用计数，非 `sendable` 类型用非原子的；两者都不得依赖——它和布局一样是实现细节，将来可能改变。
 
+#### 线程名与栈策略
+
+`Task` 在 `spawn()` 之前配置两项线程属性：
+
+```koral
+using "std/async" { ... };
+
+let main(): Void = {
+    let worker = Task
+        .new(() => { println("parsing"); })
+        .set_name("parser")
+        .set_stack_size(2 * 1024 * 1024)
+        .spawn();
+    let _ = worker.wait();
+};
+```
+
+**`set_stack_size(bytes)` 在所有平台遵循同一套策略。** 未设（或 0）就是统一默认 8MB——而不是平台各自的默认（macOS pthread 512KB、Linux 8MB、Windows 1MB）；低于 64KB 下限的请求**上钳**到下限。解析出的大小随后**向上取整到系统页大小**——macOS 遇到非页整数倍的栈大小会直接创建失败，不取整的请求会死在 spawn 上。在 Windows 上该大小是**预留（reservation）而非提交（commit）**（`STACK_SIZE_PARAM_IS_A_RESERVATION`）：每线程提交 8MB 乘以大量线程会耗尽提交限额，而预留只在线程触碰页面时才逐页提交。
+
+**程序的 main 体同样享受这套策略。** 进程主线程的栈是平台随手给的——Linux/macOS 是 `ulimit -s`，Windows 是 PE 头的 1MB——可能远低于策略默认值。低于时，运行时把全局初始化与用户的 `main` 体搬到一条全新的 8MB 线程上执行，退出码原样传回；进程栈已达策略时就地执行。于是在 `ulimit -s 256` 下 `main` 里的深递归与默认 shell 下表现一致。
+
+**任意线程的栈溢出都打印一行并 abort：**
+
+```text
+Panic: stack overflow (thread: parser)
+```
+
+名字就是 `Task.set_name` 设的那个——名字是分辨哪个 worker 死掉的最廉价手段。未命名的线程报 `unnamed`；执行程序 main 体的线程报 `main`。名字最多保留 63 字节，控制字符替换为 `.`，保证报告恒为整一行。这一行用单次无分配的 write 写出——这是溢出栈上唯一安全的形态。
+
 ## 4. 模式匹配
 
 Koral 具备强大的模式匹配能力，主要通过 `when` 表达式和 `is` 操作符使用。模式也是 `if` / `while` 条件里的绑定形态，以及 `for` 循环的绑定形态（见 [for 循环](#for-循环)）。
@@ -2707,6 +2736,35 @@ given Point: Ord {
 
 - `given Type: Trait` 是显式实现入口。
 - 父/子 trait 逐级实现：实现 `Ord` 不会隐式实现 `Eq`。
+
+#### conformance 成员的可见性
+
+Trait 需求本身没有可见性槽：需求的可见性**就是** trait 的访问级别。实现需求的方法随它——
+方法是 trait 的接口件，所以直接调用与 trait object 派发永远在同一档上判它。
+
+- **省略**修饰符＝继承需求的档次（即 trait 的档次；继承需求则为声明它的父 trait 的档次）。
+  这与普通方法不同（普通方法缺省是 `internal`）。显式写出的 `internal` 与省略同义
+  （Koral 惯例：`internal` 不写，修饰符只标偏离）。
+- **写了**修饰符就必须与需求的档次**相等**；偏窄或偏宽都是 `given` 块的声明处错误：
+
+```koral
+public trait Show {
+    show(self): String;
+};
+
+given Point: Show {
+    // 正确：省略，继承 trait 的 public
+    show(self): String = "...";
+    // 正确：显式写出且相等
+    public show(self): String = "...";
+    // 错误：Cannot implement requirement 'show' with a 'private' method:
+    //       the requirement's access level is 'public'.
+    private show(self): String = "...";
+};
+```
+
+`given Trait { ... }` 工具方法同规则：它们经 trait object 也可调用，档次同样随 trait。
+固有 `given Type { ... }`（无 trait）里的方法不受影响：未标方法照常缺省 `internal`。
 
 #### Trait 与实现中的命名参数
 
@@ -3496,6 +3554,16 @@ trait Blob {
 - trait 需求与实现方法必须带**相同**的标记。
 - 本版本中被标记的函数不能作值使用；先包一层安全函数。
 - 标记是契约声明，不是验证。把前置条件写进声明上方的文档注释——那份注释就是契约。
+
+std 中经裸指针读取的 `String` 构造器——`from_utf8_ptr_unchecked`、
+`from_utf8_ptr`、`from_cstring`、`from_cstring_unchecked`——都是 `unsafe`
+声明：调用方担保指针（与长度）指向可读内存。安全包装层用内部的块吸收这份
+契约，自己的调用点不需要上下文：
+
+```koral
+let text = unsafe { String.from_utf8_ptr(bytes.borrow_ptr(), n) };
+let checked = String.from_bytes(bytes);   // 安全包装：吸收契约，无需 unsafe
+```
 
 #### 外部声明与安全位
 

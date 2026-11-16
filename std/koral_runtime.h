@@ -241,6 +241,16 @@ void* __koral_string_alloc(uintptr_t len);
 int32_t __koral_memcmp(uint8_t* a, uint8_t* b, uintptr_t n);
 
 void __koral_set_args(int32_t argc, uint8_t** argv);
+// 运行生成 main 的函数体：__koral_set_args 之后，若当前线程的栈已达统一策略
+// 默认（KORAL_DEFAULT_STACK_SIZE，8MB）就地执行 body；不足（ulimit -s 收紧的
+// Linux 主栈、Windows PE 默认 1MB）则跳到一条 8MB 策略栈线程执行并回传退出码。
+// 跳线程只是栈预算问题：body 里的全局初始化与用户 main 语义（含顺序）不变。
+int32_t __koral_run_main(int32_t argc, uint8_t** argv, int (*body)(void));
+// 设置当前线程的名字（线程栈溢出报告用）。名字存进线程本地 64 字节缓冲，
+// 超长截断到 63 字节；控制字符（< 0x20、0x7F）存成 '.'，保证报告恒为单行。
+// 未设过名字的线程在报告里显示 unnamed；__koral_run_main 把执行 body 的线程
+// 命名为 main。签名与 codegen 按 `let unsafe foreign` 生成的原型逐字一致。
+void __koral_thread_set_name(uint8_t* name, uint64_t len);
 KORAL_COLD KORAL_NORETURN void __koral_panic_numeric_conversion_overflow(const char* loc);
 KORAL_COLD KORAL_NORETURN void __koral_panic_division_by_zero(const char* loc);
 KORAL_COLD KORAL_NORETURN void __koral_panic_remainder_by_zero(const char* loc);
@@ -292,8 +302,14 @@ uint64_t __koral_wrapping_bits_from_f64(double v, unsigned width_bits, const cha
 // platform's idea of one (macOS pthreads get 512KB, Linux 8MB, Windows 1MB).
 // Requests below KORAL_MIN_STACK_SIZE clamp up to it (plus any higher
 // PTHREAD_STACK_MIN on POSIX) so a tiny request never silently falls back to
-// the default. A stack overflow aborts with `Panic: stack overflow` on stderr
-// -- the same report shape a panic makes, identically on every platform.
+// the default. The resolved size then rounds UP to the system page size on
+// POSIX -- macOS thread creation fails outright on a non-page-multiple stack.
+// On Windows the size is a RESERVATION (`STACK_SIZE_PARAM_IS_A_RESERVATION`),
+// not commit: 8MB committed per thread times many threads exhausts the commit
+// limit, a reservation does not. A stack overflow aborts with
+// `Panic: stack overflow (thread: NAME)` on stderr -- the same report shape a
+// panic makes, identically on every platform; NAME is the thread's Task name,
+// `main` for the thread running the program's main body, `unnamed` otherwise.
 #define KORAL_DEFAULT_STACK_SIZE ((uint64_t)8 * 1024 * 1024)
 #define KORAL_MIN_STACK_SIZE ((uint64_t)64 * 1024)
 

@@ -461,6 +461,19 @@ CFile* __koral_stderr(void) {
     return (CFile*)stderr;
 }
 
+// abort() on Windows triggers the WER/JIT-debugger fault dialog and can hang
+// or take seconds to die -- a panic must die immediately. _set_abort_behavior
+// turns off both the CRT "abnormal program termination" message and the fault
+// report dialog first, so abort() is just the process death. POSIX abort() is
+// already immediate; the helper keeps every panic/overflow death site on one
+// spelling.
+static KORAL_NORETURN void __koral_abort_quiet(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    _set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
+#endif
+    abort();
+}
+
 // Every panic is terminal (this helper ends in abort): marked noreturn so
 // the C backend stops treating a failed check as a memory clobber on the
 // success path -- a call in the loop otherwise forces per-iteration reloads.
@@ -470,7 +483,7 @@ static KORAL_NORETURN void __koral_panic_print(const char* msg, const char* loc)
     } else {
         fprintf(stderr, "Panic: %s\n", msg);
     }
-    abort();
+    __koral_abort_quiet();
 }
 
 void __koral_panic_numeric_conversion_overflow(const char* loc) {
@@ -4141,20 +4154,60 @@ static uint64_t __koral_resolve_stack_size(uint64_t requested) {
 // The unified overflow report: the same shape a panic prints, identically on
 // Windows/macOS/Linux. One write(2)/WriteFile and nothing else -- it must run
 // on an alternate stack (POSIX) or on Windows' post-overflow page, so no
-// stdio, no allocation.
-#define KORAL_STACK_OVERFLOW_MSG "Panic: stack overflow\n"
+// stdio, no allocation. The line is assembled by hand into a stack buffer:
+//
+//     Panic: stack overflow (thread: NAME)
+//
+// NAME is the thread's Task name (set through __koral_thread_set_name, which
+// the std-side spawn wrapper calls before the user closure runs), `main` for
+// the thread running the program's main body, and `unnamed` for a thread that
+// never set one.
+
+// The calling thread's name, one small buffer per thread: the report path
+// reads it with no allocation and no locking. Set-time rules live in
+// __koral_thread_set_name (truncation, control-byte sanitizing).
+static _Thread_local char __koral_thread_name[64];
+
+void __koral_thread_set_name(uint8_t* name, uint64_t len) {
+    if (name == NULL) {
+        __koral_thread_name[0] = '\0';
+        return;
+    }
+    if (len > sizeof(__koral_thread_name) - 1) {
+        len = sizeof(__koral_thread_name) - 1;
+    }
+    for (uint64_t i = 0; i < len; i++) {
+        // A control byte would break the one-line report; UTF-8 continuation
+        // bytes (>= 0x80) pass through untouched.
+        uint8_t b = name[i];
+        __koral_thread_name[i] = (b < 0x20 || b == 0x7F) ? '.' : (char)b;
+    }
+    __koral_thread_name[len] = '\0';
+}
 
 static void __koral_report_stack_overflow(void) {
+    // Prefix + up-to-63-byte name + ")\n" -- assembled here, written once.
+    char buf[100];
+    static const char prefix[] = "Panic: stack overflow (thread: ";
+    size_t n = sizeof(prefix) - 1;
+    memcpy(buf, prefix, n);
+    const char* name = __koral_thread_name;
+    if (name[0] == '\0') {
+        name = "unnamed";
+    }
+    while (*name != '\0' && n < sizeof(buf) - 3) {
+        buf[n++] = *name++;
+    }
+    buf[n++] = ')';
+    buf[n++] = '\n';
 #if defined(_WIN32) || defined(_WIN64)
     HANDLE err = GetStdHandle(STD_ERROR_HANDLE);
     DWORD written = 0;
     if (err != NULL && err != INVALID_HANDLE_VALUE) {
-        WriteFile(err, KORAL_STACK_OVERFLOW_MSG,
-                  (DWORD)(sizeof(KORAL_STACK_OVERFLOW_MSG) - 1), &written, NULL);
+        WriteFile(err, buf, (DWORD)n, &written, NULL);
     }
 #else
-    (void)!write(STDERR_FILENO, KORAL_STACK_OVERFLOW_MSG,
-                 sizeof(KORAL_STACK_OVERFLOW_MSG) - 1);
+    (void)!write(STDERR_FILENO, buf, n);
 #endif
 }
 
@@ -4168,9 +4221,9 @@ static LONG WINAPI __koral_stack_overflow_filter(EXCEPTION_POINTERS* info) {
         __koral_report_stack_overflow();
         // Windows committed one guard page to run this filter; hand it back
         // before anything else touches the stack, then die the way a panic
-        // dies.
+        // dies -- quietly: WER/JIT-debugger dialogs must not fire here.
         _resetstkoflw();
-        abort();
+        __koral_abort_quiet();
     }
     if (g_old_exception_filter != NULL) {
         return g_old_exception_filter(info);
@@ -4270,7 +4323,7 @@ static void __koral_stack_overflow_handler(int sig, siginfo_t* info, void* ctx) 
     (void)ctx;
     if (info != NULL && __koral_fault_is_stack_overflow(info->si_addr)) {
         __koral_report_stack_overflow();
-        abort();
+        __koral_abort_quiet();
     }
     // Not a stack overflow: reinstall the previous handler and re-raise so
     // whatever was installed before us (sanitizer runtimes, crash reporters)
@@ -4350,15 +4403,19 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
 
     // _beginthreadex, not CreateThread: the trampoline runs CRT code
     // (malloc/free, stdio), and the CRT only cleans up its per-thread state
-    // for threads it created. The size is the stack RESERVE in bytes (rounded
-    // up to the 64KB allocation granularity); the parameter is `unsigned`, so
-    // requests above 4GB clamp -- far beyond anything Koral programs ask for.
+    // for threads it created. The size parameter is `unsigned`, so requests
+    // above 4GB clamp -- far beyond anything Koral programs ask for. Without
+    // STACK_SIZE_PARAM_IS_A_RESERVATION the size is COMMITTED up front (8MB
+    // per thread times many threads exhausts the commit limit); with the flag
+    // it is a RESERVATION (the size also rounds up to the 64KB allocation
+    // granularity either way), and the pages commit only as they are touched.
     uint64_t resolved = __koral_resolve_stack_size(stack_size);
     if (resolved > 0xFFFFFFFFu) {
         resolved = 0xFFFFFFFFu;
     }
     uintptr_t h = _beginthreadex(NULL, (unsigned)resolved,
-                                 __koral_thread_trampoline_win, args, 0, NULL);
+                                 __koral_thread_trampoline_win, args,
+                                 STACK_SIZE_PARAM_IS_A_RESERVATION, NULL);
     if (h == 0) {
         __koral_closure_release(args->closure);
         free(args);
@@ -4416,6 +4473,20 @@ static void* __koral_thread_trampoline_posix(void* arg) {
     return NULL;
 }
 
+// macOS thread creation fails outright when the requested stack size is not a
+// page multiple, so the resolved size rounds UP to the system page size --
+// after clamping, so the floor stays >= 64KB. Windows needs no rounding here:
+// _beginthreadex rounds to the 64KB allocation granularity on its own.
+static uint64_t __koral_round_stack_to_page(uint64_t size) {
+    long page_size = sysconf(_SC_PAGESIZE);
+    uint64_t page = (page_size > 0) ? (uint64_t)page_size : 4096u;
+    uint64_t rem = size % page;
+    if (rem != 0) {
+        size += page - rem;
+    }
+    return size;
+}
+
 int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
                             struct __koral_Closure closure, uint64_t stack_size) {
     KoralThreadArgs* args = (KoralThreadArgs*)malloc(sizeof(KoralThreadArgs));
@@ -4425,16 +4496,18 @@ int32_t __koral_spawn_thread(uint8_t** out_handle, uint64_t* out_tid,
     __koral_stack_guard_install();
 
     // Resolve the size once, here: 0 -> the unified default, tiny requests
-    // clamp up to the floor. A rejected setstacksize must fail the spawn --
-    // silently handing the thread the platform default is what made
-    // set_stack_size a lie on Linux (EINVAL below PTHREAD_STACK_MIN).
+    // clamp up to the floor, then the result rounds up to a page multiple.
+    // A rejected setstacksize must fail the spawn -- silently handing the
+    // thread the platform default is what made set_stack_size a lie on Linux
+    // (EINVAL below PTHREAD_STACK_MIN).
+    uint64_t resolved = __koral_round_stack_to_page(__koral_resolve_stack_size(stack_size));
     pthread_attr_t attr;
     if (pthread_attr_init(&attr) != 0) {
         __koral_closure_release(args->closure);
         free(args);
         return -1;
     }
-    if (pthread_attr_setstacksize(&attr, (size_t)__koral_resolve_stack_size(stack_size)) != 0) {
+    if (pthread_attr_setstacksize(&attr, (size_t)resolved) != 0) {
         pthread_attr_destroy(&attr);
         __koral_closure_release(args->closure);
         free(args);
@@ -4476,6 +4549,75 @@ uint32_t __koral_hardware_concurrency(void) {
 }
 
 #endif
+
+// ============================================================================
+// Generated main entry: run the emitted body on a policy stack
+// ============================================================================
+// The generated `int main` hands its body (global initializers + the user's
+// main) to __koral_run_main. The process main thread's stack is whatever the
+// platform happens to give it -- rlimit -s on Linux/macOS, the PE header on
+// Windows -- and that can be far below the unified policy. When it is, the
+// body hops to a fresh policy-stack thread and its exit code comes back
+// unchanged; when the process stack already meets the policy, the body runs
+// in place with no extra thread.
+
+static uint64_t __koral_current_thread_stack_size(void) {
+#if defined(_WIN32) || defined(_WIN64)
+    ULONG_PTR low = 0;
+    ULONG_PTR high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    return (uint64_t)(high - low);
+#elif defined(__APPLE__)
+    return (uint64_t)pthread_get_stacksize_np(pthread_self());
+#else
+    size_t size = 0;
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) == 0) {
+        (void)pthread_attr_getstack(&attr, NULL, &size);
+        pthread_attr_destroy(&attr);
+    }
+    return (uint64_t)size;
+#endif
+}
+
+// The hop's result box. A program runs one main, so one static slot is
+// enough; the hop closure keeps env NULL -- a non-NULL env is an ARC block
+// the runtime would retain/release.
+static struct {
+    int (*body)(void);
+    int code;
+} __koral_main_hop;
+
+static void __koral_main_hop_body(void) {
+    // Wherever the body runs, that thread IS "main" for reporting purposes.
+    __koral_thread_set_name((uint8_t*)"main", 4);
+    __koral_main_hop.code = __koral_main_hop.body();
+}
+
+int32_t __koral_run_main(int32_t argc, uint8_t** argv, int (*body)(void)) {
+    __koral_set_args(argc, argv);
+    __koral_thread_set_name((uint8_t*)"main", 4);
+    __koral_stack_guard_install();
+
+    if (__koral_current_thread_stack_size() >= KORAL_DEFAULT_STACK_SIZE) {
+        return (int32_t)body();
+    }
+    __koral_main_hop.body = body;
+    __koral_main_hop.code = 0;
+    struct __koral_Closure closure;
+    closure.fn = (void*)__koral_main_hop_body;
+    closure.env = NULL;
+    closure.drop = NULL;
+    uint8_t* handle = NULL;
+    uint64_t tid = 0;
+    if (__koral_spawn_thread(&handle, &tid, closure, KORAL_DEFAULT_STACK_SIZE) != 0) {
+        // No thread to hop to (an 8MB reservation failing is OOM territory):
+        // run in place rather than refuse to start -- the pre-hop behavior.
+        return (int32_t)body();
+    }
+    __koral_thread_join(handle);
+    return (int32_t)__koral_main_hop.code;
+}
 
 // ============================================================================
 // Short object lock (concurrency-design.md §对象锁语义)

@@ -1309,7 +1309,7 @@ extension TypeChecker {
           sourceFile: currentSourceFile
         ),
         name: name,
-        typeParameters: typeParameters,
+        typeParameters: stampedTypeParameters(typeParameters),
         superTraits: resolvedSuperTraits,
         methods: methods,
         access: access,
@@ -1368,7 +1368,7 @@ extension TypeChecker {
           span: currentSpan
         )
         let template = GenericEnumTemplate(
-          defId: defId, typeParameters: typeParameters, cases: cases)
+          defId: defId, typeParameters: stampedTypeParameters(typeParameters), cases: cases)
         currentScope.defineGenericEnumTemplate(name, template: template)
         // The template's DECLARATION identity is what `.genericEnum` carries,
         // so nominal sendability registers on it too (concurrency-design.md).
@@ -1430,7 +1430,7 @@ extension TypeChecker {
           span: currentSpan
         )
         let template = GenericStructTemplate(
-          defId: defId, typeParameters: typeParameters, parameters: parameters, isMutable: isMutable)
+          defId: defId, typeParameters: stampedTypeParameters(typeParameters), parameters: parameters, isMutable: isMutable)
         currentScope.defineGenericStructTemplate(name, template: template)
         // The template's DECLARATION identity is what `.genericStruct` carries,
         // so nominal sendability registers on it too (concurrency-design.md).
@@ -1562,7 +1562,7 @@ extension TypeChecker {
           span: currentSpan
         )
         let template = GenericStructTemplate(
-          defId: defId, typeParameters: typeParameters, parameters: [], isMutable: false)
+          defId: defId, typeParameters: stampedTypeParameters(typeParameters), parameters: [], isMutable: false)
         currentScope.defineGenericStructTemplate(name, template: template)
       } else {
         // Non-generic intrinsic type - register the actual type
@@ -1784,9 +1784,22 @@ extension TypeChecker {
               "Trait entity method '\(method.name)' conflicts with requirement in trait '\(traitName)'"
             ), span: span)
           }
+          // The tool member is part of the trait's interface (trait objects
+          // dispatch through it), so its level follows the container's
+          // (traits-and-givens.md): omitted inherits, a written modifier must
+          // EQUAL the trait's level.
+          try checkRequirementImplAccess(
+            methodName: method.name, written: method.access, expected: traitInfo.access,
+            span: span)
         }
 
-        let storedMethods = methods.map { registeredMethodDeclaration($0, ownerKey: traitName) }
+        let storedMethods = methods.map {
+          registeredMethodDeclaration(
+            $0,
+            access: registeredGivenMemberAccess(
+              traitDefId: traitInfo.defId, methodName: $0.name, ownAccess: $0.access),
+            ownerKey: traitName)
+        }
         var existingBlocks = traitToolBlocks[traitName] ?? []
         for block in existingBlocks {
           for existingMethod in block.methods {
@@ -1941,6 +1954,16 @@ extension TypeChecker {
 
         // Register all method signatures (without checking bodies)
         for method in methods {
+          // A generic trait-tool member (`given[T] Trait[T] { ... }`) joins the
+          // trait's interface -- trait objects dispatch through it -- and its
+          // level follows the container's (traits-and-givens.md): omitted
+          // inherits, a written modifier must EQUAL the trait's level. A
+          // conformance member's rule is checked in the given-trait handler.
+          if isTraitTarget, providingTrait == nil, let toolTrait = visibleTraitInfo(baseName) {
+            try checkRequirementImplAccess(
+              methodName: method.name, written: method.access, expected: toolTrait.access,
+              span: span)
+          }
           let (checkedParams, checkedReturnType) = try withNewScope {
             for typeParam in typeParams {
               currentScope.defineGenericParameter(
@@ -2006,14 +2029,23 @@ extension TypeChecker {
           // The declaration must carry its own DefId: two modules' `stamp` on
           // same-named templates are two methods, and a template whose
           // `method.defId` is invalid cannot tell them apart at instantiation.
-          let registeredMethod = registeredMethodDeclaration(method, ownerKey: genericOwnerKey.display)
+          // A trait-tool member is interface furniture of the trait and takes
+          // its level; a conformance member takes its requirement's; an
+          // inherent extension keeps its own annotation.
+          let memberTraitDefId =
+            providingTrait ?? (isTraitTarget ? visibleTraitInfo(baseName)?.defId : nil)
+          let registeredMethod = registeredMethodDeclaration(
+            method,
+            access: registeredGivenMemberAccess(
+              traitDefId: memberTraitDefId, methodName: method.name, ownAccess: method.access),
+            ownerKey: genericOwnerKey.display)
           // A conformance `given[T] X: Trait` template IS the trait's method:
           // record the trait so the method face can refuse it where the trait
           // is out of scope. The per-conformance materialization records the
           // same identity later; a template left trait-less here was callable
           // with the trait never imported.
           genericExtensionMethods[genericOwnerKey]!.append(GenericExtensionMethodTemplate(
-            typeParams: typeParams,
+            typeParams: stampedTypeParameters(typeParams),
             method: registeredMethod,
             conformanceTraitName: providingTrait.flatMap { context.getName($0) },
             conformanceTraitDefId: providingTrait,
@@ -2060,7 +2092,11 @@ extension TypeChecker {
 
         // Pre-register method signatures (without checking bodies)
         for method in methods {
-          let registeredMethod = registeredMethodDeclaration(method, ownerKey: methodOwnerKey.display)
+          let registeredMethod = registeredMethodDeclaration(
+            method,
+            access: registeredGivenMemberAccess(
+              traitDefId: providingTrait, methodName: method.name, ownAccess: method.access),
+            ownerKey: methodOwnerKey.display)
           let methodType = try withNewScope {
             for typeParam in registeredMethod.typeParameters {
               currentScope.defineGenericParameter(
@@ -2314,20 +2350,17 @@ extension TypeChecker {
       if !methods.isEmpty {
         let preRegisteredMethods: [MethodDeclaration]
         if let traitInfo = visibleTraitInfo(traitName) {
-          let requirementByName = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
           preRegisteredMethods = methods.map { method in
-            // An explicitly written modifier (anything but the implicit
-            // internal default) marks a deviation and WINS: `given X: T {
-            // private fn ... }` stays private however the trait spells the
-            // requirement. Only the implicit default follows the
-            // requirement's level (a requirement has no modifier slot).
-            let requirementAccess: AccessModifier
-            if case .internal = method.access {
-              requirementAccess = requirementByName[method.name]?.access ?? method.access
-            } else {
-              requirementAccess = method.access
-            }
-            return registeredMethodDeclaration(method, access: requirementAccess, ownerKey: traitName)
+            // A requirement implementation is registered at the requirement's
+            // level -- the level of the trait that declares it (接口件随容器).
+            // A written modifier is checked at the declaration site to EQUAL
+            // that level, so the stamp can take the level unconditionally
+            // (mirror of bootstrap's `conformance_member_registration_access`).
+            return registeredMethodDeclaration(
+              method,
+              access: registeredGivenMemberAccess(
+                traitDefId: traitInfo.defId, methodName: method.name, ownAccess: method.access),
+              ownerKey: traitName)
           }
         } else {
           preRegisteredMethods = methods.map { registeredMethodDeclaration($0, ownerKey: traitName) }
@@ -2828,7 +2861,7 @@ extension TypeChecker {
         let dummyBody = ExpressionNode.booleanLiteral(false, span: .unknown)
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: genericTypeParameters,
+          typeParameters: stampedTypeParameters(genericTypeParameters),
           parameters: parameters,
           returnType: returnTypeNode,
           body: dummyBody
@@ -2903,7 +2936,7 @@ extension TypeChecker {
         let dummyBody = ExpressionNode.booleanLiteral(false, span: .unknown)
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: genericTypeParameters,
+          typeParameters: stampedTypeParameters(genericTypeParameters),
           parameters: parameters,
           returnType: returnTypeNode,
           body: dummyBody
@@ -3552,7 +3585,7 @@ extension TypeChecker {
         // Define placeholder template for recursion
         let placeholderTemplate = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: genericTypeParameters,
+          typeParameters: stampedTypeParameters(genericTypeParameters),
           parameters: parameters,
           returnType: returnTypeNode,
           body: ExpressionNode.call(
@@ -3593,7 +3626,7 @@ extension TypeChecker {
         // Create template with checked results
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: genericTypeParameters,
+          typeParameters: stampedTypeParameters(genericTypeParameters),
           parameters: parameters,
           returnType: returnTypeNode,
           body: body,
@@ -3764,7 +3797,7 @@ extension TypeChecker {
           )
         let template = GenericFunctionTemplate(
           defId: defId,
-          typeParameters: typeParameters,
+          typeParameters: stampedTypeParameters(typeParameters),
           parameters: parameters,
           returnType: returnTypeNode,
           body: dummyBody
@@ -4296,7 +4329,16 @@ extension TypeChecker {
           }
         }
 
-        let parentConformanceKey = makeConformanceKey(selfType, parentTraitName, parentTraitArgTypes)
+        // The parent's DECLARATION identity travels on the constraint (stamped
+        // where the child trait was declared); the spelling is display-only and
+        // may not even be writable in THIS module (an aliased import). Look the
+        // conformance up by identity -- never by re-resolving the name here.
+        let parentConformanceKey = self.conformanceKey(
+          selfType: selfType,
+          traitName: parentTraitName,
+          traitDefId: resolveBound(parentConstraint).defId ?? .invalid,
+          traitTypeArgs: parentTraitArgTypes
+        )
         let hasDeclaredParentConformance = declaredConformances.contains(parentConformanceKey)
         if !hasDeclaredParentConformance {
           throw SemanticError(.generic(
@@ -4307,6 +4349,22 @@ extension TypeChecker {
 
       // Requirement completeness on this trait's own methods only.
       let ownRequirements = Dictionary(uniqueKeysWithValues: traitInfo.methods.map { ($0.name, $0) })
+
+      // Visibility rule (traits-and-givens.md): a member implementing a trait
+      // requirement takes the requirement's level -- the level of the trait
+      // that DECLARES it (requirements have no visibility slot of their own).
+      // Omitted inherits; a written modifier must EQUAL that level, narrower
+      // or wider alike. Declaration order decides which mismatch reports
+      // first. A member matching no requirement is left to the completeness
+      // complaint below.
+      let flattenedRequirements = (try? flattenedTraitMethods(forDefId: traitInfo.defId)) ?? [:]
+      for method in methods {
+        guard let requirement = flattenedRequirements[method.name] else { continue }
+        try checkRequirementImplAccess(
+          methodName: method.name, written: method.access, expected: requirement.access,
+          span: span)
+      }
+
       for method in methods where ownRequirements[method.name] == nil {
         throw SemanticError(.generic(
           "Implementation 'given \(selfType) \(traitName)' is invalid: extra method \(method.name) is not a requirement"
@@ -4880,7 +4938,7 @@ extension TypeChecker {
               $0.method.name == info.method.name && $0.typeParams.count == typeParams.count
             }) {
               genericExtensionMethods[genericOwnerKey]![existingIndex] = GenericExtensionMethodTemplate(
-                typeParams: typeParams,
+                typeParams: stampedTypeParameters(typeParams),
                 method: info.method,
                 conformanceTraitName: traitName,
                 conformanceTraitDefId: traitDefId,
@@ -4894,7 +4952,7 @@ extension TypeChecker {
             } else {
               genericExtensionMethods[genericOwnerKey]!.append(
                 GenericExtensionMethodTemplate(
-                  typeParams: typeParams,
+                  typeParams: stampedTypeParameters(typeParams),
                   method: info.method,
                   conformanceTraitName: traitName,
                   conformanceTraitDefId: traitDefId,

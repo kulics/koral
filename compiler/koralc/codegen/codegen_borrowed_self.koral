@@ -44,9 +44,34 @@
 //   4. an assignment TO the `self` slot itself (the borrowed handle is not
 //      ours to replace).
 //   5. a `Ref` / `Pointer` value of a self-rooted place -- "a reference to
-//      self" may outlive the call.
+//      self" may outlive the call -- unless the produced address is consumed
+//      EXCLUSIVELY by atomic builtins (rule 5a below).
 //   6. a closure capture of the bare `self` handle -- the closure outlives the
 //      call (capturing a projected FIELD value is a plain copy and fine).
+//
+// Rule 5a (atomic-argument carve-out): taking the address of a self-rooted
+// place is NOT a borrow risk when the produced address is used ONLY as a
+// direct argument of a call to one of the `__koral_atomic_*` builtins
+// (`std/sync/atomic.koral`'s `let unsafe foreign` family, identified by C
+// name -- a closed name set, deliberately NOT "any foreign call", whose
+// callee could stash the address anywhere): the address is never stored into
+// memory, never returned, never captured by a closure, never passed to any
+// other function, never an operand of anything else. Such an address cannot
+// outlive the call it feeds: the borrowed convention passes self +0 while
+// the caller still owns the object, so a pointer derived into the object is
+// valid for the duration of the call, and the builtins are thin C atomics
+// that use the address only within it. This is what keeps `AtomicInt.fetch_add`
+// and friends on the borrowed convention -- without it every atomic op pays
+// a retain/release pair on the shared handle and a contended fetch_add loses
+// to a mutex counter. Two shapes are covered: a materialized address temp
+// (`t = &self.value; __koral_atomic_*(t, ...)`, the `PtrExpr` lowering's
+// shape -- EVERY use of `t` must be such an argument, tracked by
+// `compute_atomic_address_temps`) and an inline address value sitting at
+// such an argument position. Only `Pointer` and stack-borrow `Ref` values
+// qualify (pure storage addresses); heap-owned reference boxes stay
+// disqualifying (`.HeapOwnedMove` consumes the source place -- rule 2
+// territory -- and a box's lifetime is not "the call"). Conservative
+// default: any other use keeps today's disqualification.
 //
 // Field/projection READS through self (Copy/Borrow) are fine: they retain a
 // copy that the normal machinery owns and releases. The fixpoint is the
@@ -113,6 +138,12 @@ type mutable BorrowedSelfWalk(
     mutable local_types: Dict[Int, Type],
     // 析构跑用户码的名义类型闭包（compute_observable_drop_defs 的缓存）。
     observable_drops: Dict[UInt, Bool],
+    // 原子内建函数的 def id 集（compute_atomic_builtin_def_ids）：规则 5a
+    // 的取址例外只对它们的直接实参位放行。
+    atomic_ids: Dict[UInt, Bool],
+    // 取址只喂原子内建的物化地址临时（compute_atomic_address_temps）：
+    // 定义值是裸取址、每一次使用都是原子内建直接实参的局部。
+    atomic_address_temps: Set[Int],
 );
 
 /// Fixpoint node for one candidate parameter.
@@ -259,6 +290,75 @@ let borrowed_self_is_bare_copy_binding(value: MIRValue, root_local_id: Int): Boo
     };
 };
 
+/// The address shapes rule 5a admits: a raw `Pointer` of a place, or a
+/// stack-borrow `Ref` -- both are just the address of the place's storage, no
+/// box, no ownership transfer. Heap-owned reference boxes are excluded:
+/// `.HeapOwnedMove` consumes the source place (a move-out, rule 2 territory)
+/// and a heap box is an allocation whose lifetime is not "the call". When in
+/// doubt, disqualify.
+let borrowed_is_bare_address_value(value: MIRValue): Bool = {
+    return when value in {
+        .Pointer(_) then true,
+        .Ref(_, _, allocation) then allocation is .StackBorrow(),
+        _ then false,
+    };
+};
+
+/// The atomic builtin family (rule 5a's only allowed consumers), by C NAME:
+/// the `let unsafe foreign __koral_atomic_*` primitives of
+/// `std/sync/atomic.koral` (load/store/swap/cas/fetch_add/fetch_sub over
+/// i32/iptr/uptr). A closed name set on purpose -- the carve-out's safety
+/// rests on the callee being one of THESE thin C atomics (they use the
+/// address only within the call), never on "a foreign call" in general.
+let borrowed_is_atomic_builtin_c_name(name: String): Bool = {
+    return when name in {
+        "__koral_atomic_load_i32" or "__koral_atomic_store_i32"
+        or "__koral_atomic_swap_i32" or "__koral_atomic_cas_i32"
+        or "__koral_atomic_load_iptr" or "__koral_atomic_store_iptr"
+        or "__koral_atomic_swap_iptr" or "__koral_atomic_cas_iptr"
+        or "__koral_atomic_fetch_add_iptr" or "__koral_atomic_fetch_sub_iptr"
+        or "__koral_atomic_load_uptr" or "__koral_atomic_store_uptr"
+        or "__koral_atomic_swap_uptr" or "__koral_atomic_cas_uptr"
+        or "__koral_atomic_fetch_add_uptr" or "__koral_atomic_fetch_sub_uptr" then true,
+        _ then false,
+    };
+};
+
+/// Def ids of the atomic builtins in this program: foreign declarations whose
+/// EMITTED C name (a declared `cname` wins over the Koral name -- the same
+/// rule `compute_callable_c_name_uncached` emits by) is one of the closed set.
+/// A Koral-level function that merely spells the same name is not a match
+/// (its C symbol is module-qualified); a foreign declaration under one of
+/// these names links to the runtime's primitive whatever is written around it.
+let compute_atomic_builtin_def_ids(program: MIRProgram): Dict[UInt, Bool] = {
+    let mutable result = Dict[UInt, Bool].new();
+    for global in program.globals then {
+        when global in {
+            .ForeignFunction(identifier, _, _, _) then {
+                let mutable c_name = "";
+                when program.context.get_cname(identifier.def_id) in {
+                    .Some(name) then {
+                        c_name = name;
+                    },
+                    .None() then {
+                        when program.context.get_name(identifier.def_id) in {
+                            .Some(name) then {
+                                c_name = name;
+                            },
+                            .None() then {},
+                        };
+                    },
+                };
+                if borrowed_is_atomic_builtin_c_name(c_name) then {
+                    result.insert(identifier.def_id.id, true);
+                };
+            },
+            _ then {},
+        };
+    };
+    return result;
+};
+
 let borrowed_self_walk_operand(w: BorrowedSelfWalk, operand: MIROperand): Void = {
     when operand in {
         .Local(local) then {
@@ -293,6 +393,32 @@ let borrowed_self_walk_place(w: BorrowedSelfWalk, place: MIRPlace): Void = {
             base,
             false,
         ),
+    };
+};
+
+/// A direct call of one of the atomic builtins (rule 5a's only allowed
+/// consumer). Indirect callees are never a match -- conservative.
+let borrowed_self_call_is_atomic_builtin(w: BorrowedSelfWalk, call: MIRCall): Bool = {
+    return when call.callee in {
+        .Function(symbol) then w.atomic_ids.get(symbol.def_id.id) is .Some(_),
+        _ then false,
+    };
+};
+
+/// Walk an address value at an ALLOWED position (rule 5a): the address itself
+/// does not escape, but its place's value bases still get the normal walk, and
+/// the address-taking is still recorded (the move optimization's
+/// `address_taken` ledger is deliberately NOT carved out -- the alias into the
+/// local's storage exists whether or not it escapes).
+let borrowed_self_walk_address_value(w: BorrowedSelfWalk, value: MIRValue): Void = {
+    when value in {
+        .Ref(place, _, _) or .Pointer(place) then {
+            if borrowed_self_place_root_local(place) is .Some(root) then {
+                w.address_taken.insert(root);
+            };
+            borrowed_self_walk_place(w, place);
+        },
+        _ then {},
     };
 };
 
@@ -374,7 +500,18 @@ let borrowed_self_walk_call(w: BorrowedSelfWalk, call: MIRCall): Void = {
                 },
             };
         };
-        borrowed_self_walk_value(w, pair.second, bare_root_allowed);
+        // 规则 5a（内联形状）：裸取址值直接坐在原子内建的实参位——地址
+        // 只被该次调用使用，不超出调用，不算借用风险。
+        let mutable atomic_addr_arg = false;
+        if w.mode is .SelfEscape() and borrowed_is_bare_address_value(pair.second)
+            and borrowed_self_call_is_atomic_builtin(w, call) then {
+            atomic_addr_arg = true;
+        };
+        if atomic_addr_arg then {
+            borrowed_self_walk_address_value(w, pair.second);
+        } else {
+            borrowed_self_walk_value(w, pair.second, bare_root_allowed);
+        };
     };
 };
 
@@ -523,6 +660,12 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
                             w.escaped = true;
                         } else if borrowed_self_is_bare_copy_binding(value, w.root_local_id) then {
                             allowed_binding = true;
+                        } else if borrowed_is_bare_address_value(value)
+                            and w.atomic_address_temps.contains(local.raw_value) then {
+                            // 规则 5a（物化形状）：`t = &self.value` 装进地址
+                            // 临时——台账已核 t 的每一次使用都是原子内建的
+                            // 直接实参，地址不超出该次调用。
+                            allowed_binding = true;
                         };
                     };
                 },
@@ -531,6 +674,10 @@ let borrowed_self_walk_statement(w: BorrowedSelfWalk, statement: MIRStatement): 
             borrowed_self_walk_place(w, place);
             if not allowed_binding then {
                 borrowed_self_walk_value(w, value, false);
+            } else if borrowed_is_bare_address_value(value) then {
+                // 允许的取址绑定仍要走地址值的簿记（address_taken 与 place
+                // 基值）；裸 self 复制绑定的值是 PlaceRead，不进这里。
+                borrowed_self_walk_address_value(w, value);
             };
         },
         .AtomicLoad(_, place) then {
@@ -622,6 +769,8 @@ let mir_address_taken_locals(function: MIRFunction): Set[Int] = {
         false,
         mir_local_type_map(function),
         Dict[UInt, Bool].new(),
+        Dict[UInt, Bool].new(),
+        Set[Int].new(),
     );
     borrowed_self_walk_function(walk, function);
     return walk.address_taken;
@@ -632,6 +781,310 @@ let mir_local_type_map(function: MIRFunction): Dict[Int, Type] = {
     let mutable result = Dict[Int, Type].new();
     for local in function.locals then {
         result.insert(local.id.raw_value, local.local_type);
+    };
+    return result;
+};
+
+// ── 规则 5a 的物化地址临时台账 ─────────────────────────────────────────────
+//
+// `PtrExpr` 的 lowering 把取址物化成临时（`t = &self.value; f(t, ...)`，
+// `materialize_raw` 的形状），随后 `t` 只以 `Operand(Local)` 作为调用实参
+// 出现。台账认定「原子地址临时」：定义恰好一次、定义值是裸取址
+// （borrowed_is_bare_address_value）、且每一次使用都是原子内建直接实参位
+// 的裸局部读。其余任何出现（存内存、返回、闭包捕获、别的调用、被当运算
+// 对象……）都把临时摘除——被摘除的临时让定义语句回到规则 5 的默认判定
+// （逃逸）。闭包体是另一个局部 id 空间（每个 MIRFunctionBuilder 从 0 编
+// 号），只看捕获源，不进体。
+
+/// 裸局部操作数的出现：候选出现即摘除（放行位由调用方先行跳过）。
+private let atomic_addr_scan_operand(
+    operand: MIROperand,
+    candidates: Dict[Int, Bool],
+): Void = {
+    when operand in {
+        .Local(local) then {
+            let _ = candidates.remove(local.raw_value);
+        },
+        .Function(_) or .Constant(_) then {},
+    };
+};
+
+/// place 的出现（根局部、Deref/PointerElement 的基值都算使用）。
+private let atomic_addr_scan_place(
+    place: MIRPlace,
+    candidates: Dict[Int, Bool],
+    atomic_ids: Dict[UInt, Bool],
+): Void = {
+    when place in {
+        .Local(local) then {
+            let _ = candidates.remove(local.raw_value);
+        },
+        .Global(_) then {},
+        .Field(base, _) or .EnumPayload(base, _, _, _, _) then atomic_addr_scan_place(
+            base,
+            candidates,
+            atomic_ids,
+        ),
+        .Deref(base, _) or .PointerElement(base, _) then atomic_addr_scan_value(
+            base,
+            candidates,
+            atomic_ids,
+        ),
+    };
+};
+
+/// 值树的出现（调用实参位的放行形态在 scan_call 跳过，这里全是其余形态）。
+private let atomic_addr_scan_value(
+    value: MIRValue,
+    candidates: Dict[Int, Bool],
+    atomic_ids: Dict[UInt, Bool],
+): Void = {
+    when value in {
+        .Operand(operand) then atomic_addr_scan_operand(operand, candidates),
+        .PlaceRead(place, _) then atomic_addr_scan_place(place, candidates, atomic_ids),
+        .Binary(operation) then {
+            atomic_addr_scan_operand(operation.left, candidates);
+            atomic_addr_scan_operand(operation.right, candidates);
+        },
+        .Unary(operation) then atomic_addr_scan_operand(operation.operand, candidates),
+        .Call(call) then atomic_addr_scan_call(call, candidates, atomic_ids),
+        .Aggregate(aggregate) then {
+            for field in aggregate.fields then {
+                atomic_addr_scan_value(field, candidates, atomic_ids);
+            };
+        },
+        .EnumCase(construction) then {
+            for argument in construction.arguments then {
+                atomic_addr_scan_value(argument, candidates, atomic_ids);
+            };
+        },
+        .EnumTag(tag) then atomic_addr_scan_value(tag.subject, candidates, atomic_ids),
+        .TraitObjectConversion(conversion) then atomic_addr_scan_value(
+            conversion.inner,
+            candidates,
+            atomic_ids,
+        ),
+        .TraitMethodCall(call) then {
+            atomic_addr_scan_value(call.receiver, candidates, atomic_ids);
+            for argument in call.arguments then {
+                atomic_addr_scan_value(argument, candidates, atomic_ids);
+            };
+        },
+        .Ref(place, _, _) or .Pointer(place) then atomic_addr_scan_place(
+            place,
+            candidates,
+            atomic_ids,
+        ),
+        .Cast(operand, _, _) then atomic_addr_scan_operand(operand, candidates),
+        .Intrinsic(node) then atomic_addr_scan_intrinsic(node, candidates, atomic_ids),
+        .Lambda(lambda) then {
+            for source in lambda.capture_sources then {
+                atomic_addr_scan_place(source, candidates, atomic_ids);
+            };
+        },
+    };
+};
+
+/// 内在节点的操作数出现（逐变体走全，漏数会把真实使用点当不存在）。
+private let atomic_addr_scan_intrinsic(
+    node: MIRIntrinsic,
+    candidates: Dict[Int, Bool],
+    atomic_ids: Dict[UInt, Bool],
+): Void = {
+    when node in {
+        .AllocMemory(count, _) or .AllocString(count, _) then atomic_addr_scan_value(
+            count,
+            candidates,
+            atomic_ids,
+        ),
+        .DeallocMemory(pointer) or .DeinitMemory(pointer) or .TakeMemory(pointer, _) then atomic_addr_scan_value(
+            pointer,
+            candidates,
+            atomic_ids,
+        ),
+        .CopyMemory(dest, source, count) or .MoveMemory(dest, source, count)
+        or .CompareMemory(dest, source, count) then {
+            atomic_addr_scan_value(dest, candidates, atomic_ids);
+            atomic_addr_scan_value(source, candidates, atomic_ids);
+            atomic_addr_scan_value(count, candidates, atomic_ids);
+        },
+        .DowngradeRef(value, _) or .UpgradeRef(value, _)
+        or .TraitObjectMatches(value, _, _, _, _) or .TraitObjectDowncast(value, _) then atomic_addr_scan_value(
+            value,
+            candidates,
+            atomic_ids,
+        ),
+        .InitMemory(pointer, value) then {
+            atomic_addr_scan_value(pointer, candidates, atomic_ids);
+            atomic_addr_scan_value(value, candidates, atomic_ids);
+        },
+        .NullPtr(_) then {},
+        .FixedArrayLiteral(_, elements) then {
+            for element in elements then {
+                atomic_addr_scan_value(element, candidates, atomic_ids);
+            };
+        },
+        .SpawnThread(out_handle, out_tid, closure, stack_size) then {
+            atomic_addr_scan_value(out_handle, candidates, atomic_ids);
+            atomic_addr_scan_value(out_tid, candidates, atomic_ids);
+            atomic_addr_scan_value(closure, candidates, atomic_ids);
+            atomic_addr_scan_value(stack_size, candidates, atomic_ids);
+        },
+    };
+};
+
+/// 调用的出现：原子内建直接实参位的裸局部读是唯一放行形态（间接被调一律
+/// 不放行）。
+private let atomic_addr_scan_call(
+    call: MIRCall,
+    candidates: Dict[Int, Bool],
+    atomic_ids: Dict[UInt, Bool],
+): Void = {
+    atomic_addr_scan_operand(call.callee, candidates);
+    let mutable atomic = false;
+    when call.callee in {
+        .Function(symbol) then {
+            if atomic_ids.get(symbol.def_id.id) is .Some(_) then {
+                atomic = true;
+            };
+        },
+        _ then {},
+    };
+    for argument in call.arguments then {
+        let mutable allowed = false;
+        if atomic then {
+            when argument in {
+                .Operand(.Local(local)) then {
+                    if candidates.get(local.raw_value) is .Some(_) then {
+                        allowed = true;
+                    };
+                },
+                _ then {},
+            };
+        };
+        if not allowed then {
+            atomic_addr_scan_value(argument, candidates, atomic_ids);
+        };
+    };
+};
+
+private let atomic_addr_scan_statement(
+    statement: MIRStatement,
+    candidates: Dict[Int, Bool],
+    atomic_ids: Dict[UInt, Bool],
+): Void = {
+    when statement in {
+        .Declare(_) or .ScopeEnter(_) or .ScopeExit(_) or .DebugSource(_) then {},
+        .Assign(place, value) then {
+            when place in {
+                .Local(_) then {
+                    // 定义位不是使用；值树照扫（取址 place 的嵌套基值读算）。
+                    atomic_addr_scan_value(value, candidates, atomic_ids);
+                },
+                _ then {
+                    atomic_addr_scan_place(place, candidates, atomic_ids);
+                    atomic_addr_scan_value(value, candidates, atomic_ids);
+                },
+            };
+        },
+        .AtomicLoad(_, place) then atomic_addr_scan_place(place, candidates, atomic_ids),
+        .AtomicStore(place, value) then {
+            atomic_addr_scan_place(place, candidates, atomic_ids);
+            atomic_addr_scan_value(value, candidates, atomic_ids);
+        },
+        .Exchange(place, _, value) then {
+            atomic_addr_scan_place(place, candidates, atomic_ids);
+            atomic_addr_scan_value(value, candidates, atomic_ids);
+        },
+        .Drop(place) then atomic_addr_scan_place(place, candidates, atomic_ids),
+        .Retain(value) or .Release(value) then atomic_addr_scan_value(
+            value,
+            candidates,
+            atomic_ids,
+        ),
+        .Evaluate(value) then atomic_addr_scan_value(value, candidates, atomic_ids),
+        .Lock(lock) or .Unlock(lock) then {
+            when lock in {
+                .ObjectLock(handle) then {
+                    let _ = candidates.remove(handle.raw_value);
+                },
+                .GlobalLock(_) then {},
+            };
+        },
+    };
+};
+
+private let atomic_addr_scan_terminator(
+    terminator: MIRTerminator,
+    candidates: Dict[Int, Bool],
+): Void = {
+    when terminator in {
+        .Goto(_) or .Unreachable() then {},
+        .Branch(condition, _, _) or .SwitchValue(condition, _, _) then atomic_addr_scan_operand(
+            condition,
+            candidates,
+        ),
+        .ReturnValue(operand) then when operand in {
+            .Some(op) then atomic_addr_scan_operand(op, candidates),
+            .None() then {},
+        },
+    };
+};
+
+/// 原子地址临时台账（规则 5a 的物化形状判据）。
+let compute_atomic_address_temps(
+    function: MIRFunction,
+    atomic_ids: Dict[UInt, Bool],
+): Set[Int] = {
+    // ── Pass A: 定义台账 ──────────────────────────────────────────────────
+    // 候选 = 恰好一次定义、且定义值是裸取址形状的局部。再次定义（含
+    // AtomicLoad / Exchange 的换出位）或别的值形状都不是候选。
+    let mutable def_counts = Dict[Int, Int].new();
+    let mutable def_values = Dict[Int, MIRValue].new();
+    for block in function.blocks then {
+        for statement in block.statements then {
+            when statement in {
+                .Assign(.Local(target), value) then {
+                    let key = target.raw_value;
+                    def_counts.insert(key, (def_counts.get(key) or else 0) + 1);
+                    def_values.insert(key, value);
+                },
+                .AtomicLoad(target, _) then {
+                    let key = target.raw_value;
+                    def_counts.insert(key, (def_counts.get(key) or else 0) + 1);
+                },
+                .Exchange(_, old_target, _) then {
+                    let key = old_target.raw_value;
+                    def_counts.insert(key, (def_counts.get(key) or else 0) + 1);
+                },
+                _ then {},
+            };
+        };
+    };
+    let mutable candidates = Dict[Int, Bool].new();
+    for entry in def_counts.iterator() then {
+        let key = entry.first;
+        if entry.second == 1 then {
+            when def_values.get(key) in {
+                .Some(value) then {
+                    if borrowed_is_bare_address_value(value) then {
+                        candidates.insert(key, true);
+                    };
+                },
+                .None() then {},
+            };
+        };
+    };
+    // ── Pass B: 使用台账 ──────────────────────────────────────────────────
+    for block in function.blocks then {
+        for statement in block.statements then {
+            atomic_addr_scan_statement(statement, candidates, atomic_ids);
+        };
+        atomic_addr_scan_terminator(block.terminator, candidates);
+    };
+    let mutable result = Set[Int].new();
+    for entry in candidates.iterator() then {
+        result.insert(entry.first);
     };
     return result;
 };
@@ -653,6 +1106,7 @@ let compute_borrowed_param_slots(
     // ── Phase 0: global usage scan ─────────────────────────────────────────
     // One walk over every function (and nested lambda body) collecting
     // address-taken symbols and unsafe call shapes.
+    let atomic_ids = compute_atomic_builtin_def_ids(program);
     let global_walk = BorrowedSelfWalk(
         BorrowedSelfWalkMode.GlobalUsage(),
         0,
@@ -665,6 +1119,8 @@ let compute_borrowed_param_slots(
         false,
         Dict[Int, Type].new(),
         observable_drops,
+        atomic_ids,
+        Set[Int].new(),
     );
     for function in program.functions then {
         global_walk.local_types = mir_local_type_map(function);
@@ -721,6 +1177,11 @@ let compute_borrowed_param_slots(
 
     for function in program.functions then {
         let def_id = function.identifier.def_id.id;
+        // 规则 5a 的物化地址临时台账：整个函数一次（与逐槽走查同阶）。
+        let atomic_address_temps = compute_atomic_address_temps(
+            function,
+            atomic_ids,
+        );
         for pair in function.params.lazy().enumerate() then {
             let slot_key = borrowed_slot_key(def_id, pair.first);
             when candidate_info.get(slot_key) in {
@@ -738,6 +1199,8 @@ let compute_borrowed_param_slots(
                         false,
                         mir_local_type_map(function),
                         observable_drops,
+                        atomic_ids,
+                        atomic_address_temps,
                     );
                     borrowed_self_walk_function(walk, function);
                     // AND across bodies: emission keys the convention on the

@@ -972,7 +972,9 @@ public class Driver {
     // while passing elsewhere (deep_else_if_chain was exactly this). Smooth
     // the platform difference at the link: reserve the POSIX-sized stack on
     // Windows too. koralc's driver and verify.sh's hand-linked stages pass
-    // the same flag.
+    // the same flag. That fixes the OUTPUT binary's stack; the seed's own
+    // driver stack is covered separately -- koralc/main.swift runs the
+    // driver on a 64MB thread, matching the koralc driver's policy.
     #if os(Windows)
     clangArgs.append("-Wl,/STACK:8388608")
     #endif

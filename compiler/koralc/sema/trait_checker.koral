@@ -32,6 +32,10 @@ public type TraitInfo(
     parent_traits: List[ParentTraitConstraint],
     methods: List[TypedTraitMember],
     module_path: List[String],
+    // The trait DECLARATION's access level. A requirement has no visibility slot
+    // of its own -- it is visible exactly where its trait is ("接口件随容器") --
+    // so this is the level every requirement of this trait carries.
+    access: AccessModifier,
 );
 
 // ── TraitRegistry ─────────────────────────────────────────────────────────────
@@ -509,6 +513,46 @@ given TraitChecker {
         };
     };
 
+    /// The access level of the requirement `method_name` of `trait_info`: the
+    /// level of the trait that DECLARES it. A requirement has no visibility slot
+    /// of its own (接口件随容器); the trait's own declaration wins over a
+    /// same-named parent requirement, and an inherited name is answered by the
+    /// parent that declares it. None = not a requirement of this trait.
+    private requirement_declaring_access(
+        self,
+        trait_info: TraitInfo,
+        method_name: String,
+        visited: Set[UInt],
+    ): Option[AccessModifier] = {
+        if visited.contains(trait_info.def_id.id) then {
+            return Option[AccessModifier].None();
+        };
+        visited.insert(trait_info.def_id.id);
+        for m in trait_info.methods then {
+            if m.name == method_name then {
+                return Option[AccessModifier].Some(trait_info.access);
+            };
+        };
+        for parent in trait_info.parent_traits then {
+            when self.registry.get_by_def_id(parent.def_id) in {
+                .Some(parent_info) then {
+                    when self.requirement_declaring_access(
+                        parent_info,
+                        method_name,
+                        visited,
+                    ) in {
+                        .Some(access) then {
+                            return Option[AccessModifier].Some(access);
+                        },
+                        .None() then {},
+                    };
+                },
+                .None() then {},
+            };
+        };
+        return Option[AccessModifier].None();
+    };
+
     // 检查 given Type as Trait { ... } 声明的一致性
     // 返回 Ok 或 Error(message)
     public check_conformance_in_module(
@@ -517,6 +561,7 @@ given TraitChecker {
         trait_name: String,
         trait_type_args: List[Type],
         members: List[TypedGivenMember],
+        raw_members: List[GivenMember],
         span: SourceSpan,
         module_path: List[String],
     ): Result[Void] = {
@@ -527,6 +572,33 @@ given TraitChecker {
                 return Result[Void].Error("Undefined trait: " + trait_name);
             },
             .Some(info) then info,
+        };
+        // 可见性规则（traits-and-givens.md）：实现需求的成员随需求的档次——
+        // 声明该需求的 trait 的档次。省略修饰符即继承；写了修饰符就必须相等，
+        // 偏窄偏宽都是声明处错误（与 unsafe R3 同锚）。按成员书写序取第一条。
+        for raw in raw_members then {
+            when self.requirement_declaring_access(
+                trait_info,
+                raw.name,
+                Set[UInt].new(),
+            ) in {
+                .Some(expected) then {
+                    if not (raw.access is .Internal()) then {
+                        let actual_label = access_modifier_label(raw.access);
+                        let expected_label = access_modifier_label(expected);
+                        if actual_label != expected_label then {
+                            return Result[Void].Error(
+                                requirement_access_mismatch_message(
+                                    raw.name,
+                                    actual_label,
+                                    expected_label,
+                                ),
+                            );
+                        };
+                    };
+                },
+                .None() then {},
+            };
         };
         let mutable required_methods = Dict[String, TypedTraitMember].new();
         for m in trait_info.methods then {

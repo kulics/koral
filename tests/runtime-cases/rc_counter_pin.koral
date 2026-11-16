@@ -15,8 +15,21 @@
 let foreign __koral_rc_stats_enable(): Void;
 let foreign __koral_rc_stats_retains(): UInt64;
 let foreign __koral_rc_stats_releases(): UInt64;
+let unsafe foreign __koral_atomic_fetch_add_iptr(p: *Int, delta: Int): Int;
 
 type mutable Box(mutable n: Int);
+
+// Mirrors std/sync/atomic.koral's AtomicInt shape: the receiver's field
+// address feeds a `__koral_atomic_*` builtin as a direct argument and never
+// escapes -- rule 5a of codegen_borrowed_self lets fetch_add borrow.
+type unsafe sendable mutable Counter(private mutable value: Int);
+
+given Counter {
+    fetch_add(self, delta: Int): Int =
+        unsafe { __koral_atomic_fetch_add_iptr(&self.value, delta) };
+
+    load(self): Int = self.value;
+};
 
 let read(b: Box): Int = b.n;
 
@@ -113,7 +126,7 @@ trait Ask {
 
 type Asker(name: String);
 given Asker: Ask {
-    public ask(self, other: String): Bool = self.name == other;
+    ask(self, other: String): Bool = self.name == other;
 };
 
 let vtable_window(a: Ask, other: String): String = {
@@ -150,6 +163,26 @@ let subscript_window(): String = {
     let _ = xs.count();
     let _ = c;
     return "w11_subscript_retains=\(r1 - r0) w11_subscript_releases=\(d1 - d0)";
+};
+
+// 原子内建实参取址位（rule 5a · 2026-11-16）：`fetch_add` 的 `&self.value`
+// 只作 `__koral_atomic_*` 直接实参、不外逃。旧规（rule 5 无条件）把方法打成
+// owned 约定，每次调用付一对 retain/release，8 线程下 refcount 税把
+// fetch_add 压到对象锁的 2 倍慢；carve-out 后接收者走 +0 借用，窗口内
+// RC 流量归零。实参在窗口后仍使用，排除末次使用移动的干扰。
+let atomic_window(): String = {
+    let counter = Counter(0);
+    let r0 = __koral_rc_stats_retains();
+    let d0 = __koral_rc_stats_releases();
+    let mutable i = 0;
+    while i < 4 then {
+        let _ = counter.fetch_add(1);
+        i += 1;
+    };
+    let r1 = __koral_rc_stats_retains();
+    let d1 = __koral_rc_stats_releases();
+    let _ = counter.load();
+    return "w12_atomic_retains=\(r1 - r0) w12_atomic_releases=\(d1 - d0)";
 };
 
 let main(): Void = {
@@ -193,6 +226,8 @@ let main(): Void = {
     println(compare_window());
 
     println(subscript_window());
+
+    println(atomic_window());
 
     let asker = Asker("rex" + "-dog");
     let ao: Ask = asker;

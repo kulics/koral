@@ -29,6 +29,10 @@ ceiling — a hand-tuned, SIMD-first standard library is the bound, not the bar.
 | loop_pipeline | integer loop with branch and multiply (3.5M) |
 | fib_recursive | call overhead baseline (fib 27) |
 
+Concurrency A/B instruments live in `ab/`, not in this table -- they are
+same-session delta tools for compiler changes, not cross-language rows (see
+`ab/README.md`).
+
 ## Running
 
     benchmarks/run.sh            # build all four languages, best-of-3 table
@@ -37,6 +41,32 @@ ceiling — a hand-tuned, SIMD-first standard library is the bound, not the bar.
 
 Requirements: `go`, `swiftc`, `rustc`, and `bin/compiler/koralc` (built by
 `scripts/verify.sh` step 2, or any koralc via KORALC=).
+
+## The atomic / lock pair (in `ab/`, not a table row)
+
+`ab/atomic_fetch_add` and `ab/lock_counter` are one A/B cut in two rows: the
+same 8-thread x 1M shared-counter workload, once lock-free
+(`AtomicInt.fetch_add`, `atomic.AddInt64`, `Atomic<Int64>.wrappingAdd`,
+`AtomicI64::fetch_add`) and once behind a mutex. They are **instruments for
+same-session A/B of a compiler change, not cross-language comparison rows**:
+at 8 threads every language sits at the hardware floor, so the ratio column
+carries no language signal (a single-line contended seq_cst RMW trails an
+adaptive mutex on a tiny critical section even in bare C -- the atomic row
+does not race the lock row). The claim the pair instruments:
+**a contended `fetch_add` must cost one atomic RMW per op -- no refcount
+traffic**. It cost three contended atomics while `AtomicInt`'s methods paid a
+retain/release pair on the shared handle per op (the borrowed-receiver
+analysis disqualified them over `&self.value`; rule 5a's atomic-argument
+carve-out in `compiler/koralc/codegen/codegen_borrowed_self.koral` is what
+puts them back on the +0 convention).
+
+**The deterministic gates for that claim live in tests, not here** -- the
+`w12_atomic_*` RC window in `tests/runtime-cases/rc_counter_pin.koral` and
+the atomic shape pin in `scripts/verify.sh` (generated-C grep: exactly one
+atomic call in the `fetch_add` body, zero refcount traffic, no call-site
+copy). The A/B tool quantifies the wall-time effect of changes that already
+pass those gates; see `ab/README.md` for the run recipe
+(`KORALC=... benchmarks/ab/run.sh`).
 
 Notes on fairness: arithmetic in every case fits signed 64-bit so no language
 hits its overflow policy differently (Koral and Swift trap, Go and Rust wrap);
@@ -84,6 +114,32 @@ that is the comparison being asked about. Specifically:
   machine's; treat the ratio column as machine-specific.
 
 ## Results
+
+### The atomic / lock pair A/B (2026-11-16)
+
+The rule 5a carve-out measured as a same-tree A/B: one frozen source snapshot,
+one toggle (the carve-out neutralized = the exact pre-change analysis), both
+compilers built back-to-back, the 8 benchmark binaries run interleaved, best
+of 5, this machine (Apple M4 Pro, 8 worker threads).
+
+| shape | before | after | delta |
+|---|---|---|---|
+| atomic_fetch_add (checksum 8M) | 716.8 ms | 165.8 ms | **4.32x faster** |
+| lock_counter (checksum 8M) | 96.9 ms | 98.5 ms | unchanged (control) |
+
+The retain/release pair the shared `AtomicInt` handle paid per op is gone
+(`fetch_add` call sites pass the handle +0; the callee releases nothing --
+visible in the generated C before/after), and after the fix the Koral row sits
+on the hardware floor: the same 8 x 1M shape as bare C11
+(`atomic_fetch_add_explicit(..., seq_cst)`) runs 158.1 ms on this machine,
+the Koral after row 165.8 ms -- 4.9%, inside run-to-run spread. The residual
+~1.7x against the lock counter is contention physics, not refcount: the bare
+C11 pthread-mutex counter of the same shape runs 77.1 ms, i.e. even in C a
+single-line contended seq_cst RMW at 8 threads trails an adaptive mutex on a
+three-instruction critical section (2.05x). The `lock_counter` control row
+being flat shows the delta is exactly the atomic path.
+
+### Cross-language table
 
 2026-11-15, this machine (Apple arm64), best of 5 runs, ms. The ratio column
 is koral / best(Go, Swift): below 1.0 means Koral is faster than both.
