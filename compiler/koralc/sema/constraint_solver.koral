@@ -258,15 +258,20 @@ given ConstraintSolver {
         self.sort_constraints();
 
         // 2. 依次处理每个约束（支持 re-queue）
+        // 用游标从头部消费，而不是每轮取首元素 + sublist 重建列表——那是 O(n²) 的
+        // 列表分配与句柄拷贝。re-queue 的约束追加到尾部，游标随后到达，FIFO 顺序
+        // 与原实现一致。
         let mutable max_iterations = self.constraints.count() * 3 + 100;
         let mutable iteration = 0;
-        while self.constraints.count() > 0 and iteration < max_iterations then {
-            let c = self.constraints[0];
-            // 移除第一个约束
-            self.constraints = self.constraints.sublist(1..<self.constraints.count());
+        let mutable cursor = 0;
+        while cursor < self.constraints.count() and iteration < max_iterations then {
+            let c = self.constraints[cursor];
+            cursor += 1;
             self.process_constraint(c);
             iteration += 1;
         };
+        // 已处理的约束就此作废；达 max_iterations 提前退出时保留未处理的尾部。
+        self.constraints = self.constraints.sublist(cursor..<self.constraints.count());
 
         // 3. 处理 default_constraints
         for c in self.default_constraints then {
