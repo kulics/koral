@@ -1116,26 +1116,11 @@ given MIRFunctionBuilder {
                 Symbol(method.def_id, method.symbol_type, method.kind),
             );
         };
-        let mutable expected_method_type = method.symbol_type;
-        when callee_type in {
-            .FunctionType(params, _, _) then {
-                expected_method_type = Type.FunctionType(params, result_type, false);
-            },
-            .ForeignFunctionType(params, _) then {
-                expected_method_type = Type.ForeignFunctionType(params, result_type);
-            },
-            _ then {},
-        };
-        when self.resolve_method_symbol_by_dispatch_identity(
-            method,
-            receiver_type,
-            expected_method_type,
-        ) in {
-            .Some(resolved_symbol) then {
-                return Option[Symbol].Some(resolved_symbol);
-            },
-            .None() then {},
-        };
+        // 信任链先行（种子 concreteMethodSymbol 的顺序）：单态化已经把方法替
+        // 换成具体实例、符号自带给出的具体类型时直接采纳，不再走 dispatch
+        // 身份再解析（那是 O(策略×桶) 的重机器，probe 实测签名比对 366 万次、
+        // owner 匹配 147 万次全耗在这里）。再解析降为信任链无法给出具体类型
+        // 时的兜底。
         // 1. method.type already concrete — the monomorphizer substituted it.
         when method.symbol_type in {
             .FunctionType(_, _, _) then {
@@ -1203,6 +1188,27 @@ given MIRFunctionBuilder {
                 );
             },
             _ then {},
+        };
+        // 兜底：dispatch 身份再解析（仅在信任链给不出具体类型时才可能需要）。
+        let mutable expected_method_type = method.symbol_type;
+        when callee_type in {
+            .FunctionType(params, _, _) then {
+                expected_method_type = Type.FunctionType(params, result_type, false);
+            },
+            .ForeignFunctionType(params, _) then {
+                expected_method_type = Type.ForeignFunctionType(params, result_type);
+            },
+            _ then {},
+        };
+        when self.resolve_method_symbol_by_dispatch_identity(
+            method,
+            receiver_type,
+            expected_method_type,
+        ) in {
+            .Some(resolved_symbol) then {
+                return Option[Symbol].Some(resolved_symbol);
+            },
+            .None() then {},
         };
         return Option[Symbol].None();
     };
