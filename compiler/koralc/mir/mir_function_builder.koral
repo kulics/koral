@@ -34,6 +34,11 @@ type mutable MIRFunctionBuilder(
     mutable next_block_id: Int,
     mutable next_scope_id: Int,
     mutable locals: List[MIRLocal],
+    // locals 的类型反查索引：type_of_local 原先每次查询线性扫 locals，而它
+    // 挂在逐操作数的类型解析路径上（lowering_values/core/method_types 7 处），
+    // O(操作数×locals) 是 MIR 降级在大函数上超线性的来源。make_local 单一
+    // 创建点顺手登记，查询 O(1)；查不到再回退扫描兜底。
+    mutable local_type_by_id: Dict[Int, Type],
     mutable blocks: List[MIRBasicBlock],
     mutable current_block_index: Int,
     mutable terminated_blocks: Set[Int],
@@ -87,6 +92,7 @@ given MIRFunctionBuilder {
             0,
             0,
             List[MIRLocal].new(),
+            Dict[Int, Type].new(),
             List[MIRBasicBlock].new(),
             0,
             Set[Int].new(),
@@ -288,6 +294,7 @@ given MIRFunctionBuilder {
         );
         self.next_local_id += 1;
         self.locals.push(local);
+        self.local_type_by_id.insert(local.id.raw_value, local_type);
         return local;
     };
 
@@ -395,6 +402,12 @@ given MIRFunctionBuilder {
     };
 
     type_of_local(self, local_id: MIRLocalID): Type = {
+        when self.local_type_by_id.get(local_id.raw_value) in {
+            .Some(cached) then {
+                return cached;
+            },
+            .None() then {},
+        };
         for local in self.locals then {
             if local.id.raw_value == local_id.raw_value then {
                 return local.local_type;
